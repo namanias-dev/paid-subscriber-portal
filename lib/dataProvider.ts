@@ -46,22 +46,8 @@ function uuid(): string {
 // Generic helpers for live-mode tables (best-effort; demo mode never calls these)
 async function dbSelect<T>(table: string, order = "created_at"): Promise<T[]> {
   const db = getSupabaseAdmin();
-  if (!db) {
-    console.log(`[DIAG dbSelect] table=${table} hasDb=false demo=${demoMode()}`);
-    return [];
-  }
-  let role = "?";
-  try {
-    const k = process.env["SUPABASE_SERVICE_ROLE_KEY"] || "";
-    const payload = JSON.parse(Buffer.from(k.split(".")[1] || "", "base64").toString("utf8"));
-    role = String(payload.role || "?");
-  } catch {
-    role = "decodefail";
-  }
-  const urlref = (process.env["NEXT_PUBLIC_SUPABASE_URL"] || process.env["SUPABASE_URL"] || "x").replace(/^https?:\/\//, "").split(".")[0].slice(-8);
-  const { data, error } = await db.from(table).select("*").order(order, { ascending: false });
-  if (error) console.log(`[DGDB ${role} u=${urlref} ${table} ERR ${error.message}]`);
-  else console.log(`[DGDB ${role} u=${urlref} ${table} n=${(data as T[])?.length ?? 0}]`);
+  if (!db) return [];
+  const { data } = await db.from(table).select("*").order(order, { ascending: false });
   return (data as T[]) ?? [];
 }
 async function dbInsert<T>(table: string, row: Record<string, unknown>): Promise<T> {
@@ -589,12 +575,7 @@ export async function getPublicWebinars(): Promise<Webinar[]> {
 }
 export async function getWebinarBySlug(slug: string): Promise<Webinar | null> {
   const all = await getWebinars();
-  const exact = all.find((w) => w.slug === slug);
-  const trimmed = all.find((w) => (w.slug || "").trim() === slug.trim());
-  if (exact) console.log(`[DIAGRESULT] HIT active=${String(exact.active)}`);
-  else if (trimmed) console.log(`[DIAGRESULT] TRIMMATCH`);
-  else console.log(`[DIAGRESULT] NOROW count=${all.length} hasUpsc=${all.some((w) => (w.slug || "").includes("upsc-cse"))}`);
-  return exact ?? null;
+  return all.find((w) => w.slug === slug) ?? null;
 }
 export async function addWebinar(input: Partial<Webinar>): Promise<Webinar> {
   const row = {
