@@ -21,7 +21,7 @@ export async function sendAccessCodeEmail(
     const { Resend } = await import("resend");
     const resend = new Resend(process.env.RESEND_API_KEY as string);
     await resend.emails.send({
-      from: "Naman IAS Academy <noreply@namaniasacademy.com>",
+      from: "Naman IAS Academy <noreply@namanias.com>",
       to: params.to,
       subject: "Your Naman IAS Academy access code",
       html: `

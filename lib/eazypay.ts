@@ -25,7 +25,7 @@ export function getMerchantId(): string {
 export function getReturnUrl(): string {
   return (
     process.env.ICICI_EAZYPAY_RETURN_URL ||
-    "https://namanias.vercel.app/api/v1/bank/payment"
+    "https://namanias.com/api/v1/bank/payment"
   );
 }
 

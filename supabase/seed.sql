@@ -10,7 +10,7 @@ insert into public.students
    amount_paid, razorpay_payment_id, razorpay_order_id, target_year, optional_subject,
    streak_count, last_active_date, is_active)
 values
-  ('11111111-1111-1111-1111-111111111111','Demo Student','9999999999','demo@namaniasacademy.com',
+  ('11111111-1111-1111-1111-111111111111','Demo Student','9999999999','demo@namanias.com',
    '3m',3,'NS-0000-DEMO', now() - interval '20 days', now() + interval '70 days',
    799,'pay_demo0001','order_demo0001',2026,'Sociology',5, current_date - 1, true),
 
