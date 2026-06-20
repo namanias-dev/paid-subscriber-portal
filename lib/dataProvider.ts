@@ -50,10 +50,17 @@ async function dbSelect<T>(table: string, order = "created_at"): Promise<T[]> {
     console.log(`[DIAG dbSelect] table=${table} hasDb=false demo=${demoMode()}`);
     return [];
   }
-  const ref = (process.env["NEXT_PUBLIC_SUPABASE_URL"] || process.env["SUPABASE_URL"] || "x").replace(/^https?:\/\//, "").split(".")[0];
+  let role = "?";
+  try {
+    const k = process.env["SUPABASE_SERVICE_ROLE_KEY"] || "";
+    const payload = JSON.parse(Buffer.from(k.split(".")[1] || "", "base64").toString("utf8"));
+    role = String(payload.role || "?");
+  } catch {
+    role = "decodefail";
+  }
   const { data, error } = await db.from(table).select("*").order(order, { ascending: false });
-  if (error) console.log(`[DGDB r=${ref.slice(-6)} ${table} ERR ${error.message}]`);
-  else console.log(`[DGDB r=${ref.slice(-6)} ${table} n=${(data as T[])?.length ?? 0}]`);
+  if (error) console.log(`[DGDB role=${role} ${table} ERR ${error.message}]`);
+  else console.log(`[DGDB role=${role} ${table} n=${(data as T[])?.length ?? 0}]`);
   return (data as T[]) ?? [];
 }
 async function dbInsert<T>(table: string, row: Record<string, unknown>): Promise<T> {
