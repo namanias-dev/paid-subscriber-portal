@@ -58,9 +58,10 @@ async function dbSelect<T>(table: string, order = "created_at"): Promise<T[]> {
   } catch {
     role = "decodefail";
   }
+  const urlref = (process.env["NEXT_PUBLIC_SUPABASE_URL"] || process.env["SUPABASE_URL"] || "x").replace(/^https?:\/\//, "").split(".")[0].slice(-8);
   const { data, error } = await db.from(table).select("*").order(order, { ascending: false });
-  if (error) console.log(`[DGDB role=${role} ${table} ERR ${error.message}]`);
-  else console.log(`[DGDB role=${role} ${table} n=${(data as T[])?.length ?? 0}]`);
+  if (error) console.log(`[DGDB ${role} u=${urlref} ${table} ERR ${error.message}]`);
+  else console.log(`[DGDB ${role} u=${urlref} ${table} n=${(data as T[])?.length ?? 0}]`);
   return (data as T[]) ?? [];
 }
 async function dbInsert<T>(table: string, row: Record<string, unknown>): Promise<T> {
