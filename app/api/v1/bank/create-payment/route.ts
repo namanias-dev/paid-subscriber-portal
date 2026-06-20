@@ -1,6 +1,14 @@
 import { NextResponse } from "next/server";
-import { getCourseBySlug, getWebinarBySlug, createPayment, getPaymentByReference } from "@/lib/dataProvider";
+import {
+  getCourseBySlug,
+  getWebinarBySlug,
+  createPayment,
+  getPaymentByReference,
+  incrementCouponUsage,
+} from "@/lib/dataProvider";
 import { getPlan } from "@/lib/config";
+import { validateCoupon } from "@/lib/coupons";
+import type { Coupon } from "@/lib/types";
 import {
   isEazypayConfigured,
   buildPaymentUrl,
@@ -17,6 +25,9 @@ interface ResolvedItem {
   item: string;
   itemSlug: string;
   amount: number;
+  coupons?: Coupon[];
+  entityId?: string;
+  couponEntity?: "course" | "webinar";
 }
 
 async function resolveItem(itemType: ItemType, body: Record<string, unknown>): Promise<ResolvedItem | null> {
@@ -24,7 +35,9 @@ async function resolveItem(itemType: ItemType, body: Record<string, unknown>): P
     const slug = String(body.courseSlug || body.slug || "");
     const course = await getCourseBySlug(slug);
     if (!course) return null;
-    return { item: course.title, itemSlug: course.slug, amount: course.price };
+    // Disabled / unpublished courses are not purchasable.
+    if (course.status !== "published" || course.active === false) return null;
+    return { item: course.title, itemSlug: course.slug, amount: course.price, coupons: course.coupons, entityId: course.id, couponEntity: "course" };
   }
   if (itemType === "plan") {
     const planId = String(body.planId || body.plan || "");
@@ -36,7 +49,8 @@ async function resolveItem(itemType: ItemType, body: Record<string, unknown>): P
     const slug = String(body.webinarSlug || body.slug || body.webinarId || "");
     const webinar = await getWebinarBySlug(slug);
     if (!webinar) return null;
-    return { item: webinar.title, itemSlug: webinar.slug, amount: webinar.price };
+    if (webinar.active === false) return null;
+    return { item: webinar.title, itemSlug: webinar.slug, amount: webinar.price, coupons: webinar.coupons, entityId: webinar.id, couponEntity: "webinar" };
   }
   return null;
 }
@@ -79,7 +93,20 @@ export async function POST(req: Request) {
     }
 
     // Amount is computed server-side; any client-supplied amount is ignored.
-    const amount = Number(resolved.amount) || 0;
+    const baseAmount = Number(resolved.amount) || 0;
+    let amount = baseAmount;
+    let appliedCoupon: string | null = null;
+
+    // Optional coupon — re-validated server-side so a tampered client can't fake a discount.
+    const couponCode = String(body.couponCode || body.coupon || "").trim();
+    if (couponCode && baseAmount > 0 && resolved.couponEntity) {
+      const result = validateCoupon(resolved.coupons, couponCode, baseAmount);
+      if (!result.ok) {
+        return NextResponse.json({ ok: false, error: result.error }, { status: 400 });
+      }
+      amount = result.finalAmount;
+      appliedCoupon = result.coupon.code;
+    }
 
     // Free items short-circuit: no gateway, immediately marked PAID.
     if (amount <= 0) {
@@ -98,6 +125,9 @@ export async function POST(req: Request) {
         razorpay_payment_id: null,
         mode: null,
       });
+      if (appliedCoupon && resolved.entityId && resolved.couponEntity) {
+        await incrementCouponUsage(resolved.couponEntity, resolved.entityId, appliedCoupon);
+      }
       return NextResponse.json({
         ok: true,
         free: true,
@@ -125,6 +155,10 @@ export async function POST(req: Request) {
       razorpay_payment_id: null,
       mode: null,
     });
+
+    if (appliedCoupon && resolved.entityId && resolved.couponEntity) {
+      await incrementCouponUsage(resolved.couponEntity, resolved.entityId, appliedCoupon);
+    }
 
     if (isEazypayConfigured()) {
       const paymentUrl = buildPaymentUrl({

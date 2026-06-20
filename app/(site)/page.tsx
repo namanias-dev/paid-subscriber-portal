@@ -5,8 +5,11 @@ import Testimonials from "@/components/public/Testimonials";
 import Reveal, { Stagger, StaggerItem } from "@/components/ui/Reveal";
 import Accordion from "@/components/ui/Accordion";
 import LeadForm from "@/components/public/LeadForm";
-import { getPublishedCourses, getWebinars } from "@/lib/dataProvider";
+import { getPublishedCourses, getPublicWebinars } from "@/lib/dataProvider";
 import { ACADEMY } from "@/lib/config";
+
+// Render fresh so newly published courses / upcoming webinars surface here too.
+export const dynamic = "force-dynamic";
 
 const TOPPERS = [
   "AIR 84", "AIR 122 · Shivani", "AIR 231 · Vineet", "AIR 245 · Sahil (IFoS)",
@@ -36,7 +39,7 @@ const FAQ = [
 ];
 
 export default async function HomePage() {
-  const [courses, webinars] = await Promise.all([getPublishedCourses(), getWebinars()]);
+  const [courses, webinars] = await Promise.all([getPublishedCourses(), getPublicWebinars()]);
   const upcoming = webinars.filter((w) => w.status === "upcoming").slice(0, 2);
 
   return (

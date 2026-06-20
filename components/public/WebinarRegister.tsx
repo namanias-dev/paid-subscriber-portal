@@ -22,7 +22,30 @@ export default function WebinarRegister({
   const [done, setDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const [coupon, setCoupon] = useState("");
+  const [applied, setApplied] = useState<{ code: string; finalAmount: number; discount: number } | null>(null);
+  const [couponMsg, setCouponMsg] = useState<string | null>(null);
+
   const isPaid = price > 0;
+  const payable = applied ? applied.finalAmount : price;
+
+  async function applyCoupon() {
+    if (!coupon.trim() || !webinarSlug) return;
+    setCouponMsg(null);
+    const res = await fetch("/api/v1/coupons/validate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ itemType: "webinar", slug: webinarSlug, code: coupon.trim() }),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      setApplied({ code: data.code, finalAmount: data.finalAmount, discount: data.discount });
+      setCouponMsg(`Coupon applied — you save ${formatINR(data.discount)}.`);
+    } else {
+      setApplied(null);
+      setCouponMsg(data.error || "Invalid coupon.");
+    }
+  }
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -56,6 +79,7 @@ export default function WebinarRegister({
           name: name.trim(),
           email: email.trim(),
           mobile: phone,
+          couponCode: applied?.code,
         });
         if (!result.ok) {
           setError(result.error || "Could not start payment.");
@@ -98,9 +122,26 @@ export default function WebinarRegister({
       {isPaid && (
         <input className="input" placeholder="Email (required)" value={email} onChange={(e) => setEmail(e.target.value)} />
       )}
+      {isPaid && (
+        <div>
+          <div className="flex gap-2">
+            <input
+              className="input uppercase"
+              placeholder="Coupon code"
+              value={coupon}
+              onChange={(e) => setCoupon(e.target.value.toUpperCase())}
+            />
+            <button type="button" onClick={applyCoupon} className="btn btn-secondary whitespace-nowrap text-sm">Apply</button>
+          </div>
+          {couponMsg && <p className={`mt-1 text-xs ${applied ? "text-success" : "text-danger"}`}>{couponMsg}</p>}
+          {applied && (
+            <p className="mt-1 text-xs text-ink2">New total: <b className="text-ink">{formatINR(payable)}</b></p>
+          )}
+        </div>
+      )}
       {error && <p className="text-sm text-danger">{error}</p>}
       <button type="submit" disabled={loading} className="btn btn-primary w-full">
-        {loading ? "Processing..." : isPaid ? `Register & Pay ${formatINR(price)} →` : "Register Now"}
+        {loading ? "Processing..." : isPaid ? `Register & Pay ${formatINR(payable)} →` : "Register Now"}
       </button>
     </form>
   );

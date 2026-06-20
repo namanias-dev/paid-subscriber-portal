@@ -1,12 +1,16 @@
 import Link from "next/link";
 import Reveal, { Stagger, StaggerItem } from "@/components/ui/Reveal";
-import { getWebinars } from "@/lib/dataProvider";
+import { getPublicWebinars } from "@/lib/dataProvider";
 import { formatINR } from "@/lib/dates";
 
 export const metadata = { title: "Webinars — Naman Sharma IAS Academy" };
 
+// Always render fresh so newly created/edited webinars appear immediately
+// (otherwise this listing is statically prerendered at build time and goes stale).
+export const dynamic = "force-dynamic";
+
 export default async function WebinarsPage() {
-  const webinars = await getWebinars();
+  const webinars = await getPublicWebinars();
   return (
     <div className="container-wide section">
       <Reveal>

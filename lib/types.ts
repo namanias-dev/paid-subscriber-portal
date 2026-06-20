@@ -117,6 +117,37 @@ export interface AdminSessionPayload {
   role: StaffRole;
 }
 
+// ----------------------------- Shared rich content -----------------------------
+export interface FAQItem {
+  q: string;
+  a: string;
+}
+
+export type ContactLinkType = "whatsapp" | "phone" | "email" | "telegram" | "website";
+export interface ContactLink {
+  type: ContactLinkType;
+  /** Raw value: phone digits for whatsapp/phone, email address, or URL. */
+  value: string;
+  label?: string;
+}
+
+export interface PdfResource {
+  label: string;
+  url: string;
+}
+
+export interface Coupon {
+  code: string;
+  type: "percent" | "flat";
+  value: number;
+  /** ISO date; null/undefined = never expires. */
+  expires_at?: string | null;
+  /** null/undefined = unlimited. */
+  max_uses?: number | null;
+  used?: number;
+  active?: boolean;
+}
+
 // ----------------------------- Courses -----------------------------
 export interface Lecture {
   title: string;
@@ -158,6 +189,15 @@ export interface Course {
   schedule: string | null;
   featured: boolean;
   created_at: string;
+  // --- Rich content + media (optional; added for registration pages) ---
+  cover_image_url?: string | null;
+  mobile_image_url?: string | null;
+  faqs?: FAQItem[];
+  contact_links?: ContactLink[];
+  pdf_resources?: PdfResource[];
+  coupons?: Coupon[];
+  /** Visibility toggle — false hides from the public site (Task 7). Defaults to true. */
+  active?: boolean;
 }
 
 export interface Enrollment {
@@ -251,6 +291,18 @@ export interface Webinar {
   recording_link: string | null;
   status: "upcoming" | "live" | "completed";
   created_at: string;
+  /** Optional end time so admins can extend / set a window (Task 8). */
+  end_datetime?: string | null;
+  // --- Rich content + media (optional; added for registration pages) ---
+  long_description?: string | null;
+  cover_image_url?: string | null;
+  mobile_image_url?: string | null;
+  faqs?: FAQItem[];
+  contact_links?: ContactLink[];
+  pdf_resources?: PdfResource[];
+  coupons?: Coupon[];
+  /** Visibility toggle — false hides from the public site (Task 7). Defaults to true. */
+  active?: boolean;
 }
 
 export interface WebinarRegistration {

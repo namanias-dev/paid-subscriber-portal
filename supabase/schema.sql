@@ -112,6 +112,13 @@ create table if not exists public.courses (
   curriculum jsonb default '[]'::jsonb,
   schedule text,
   featured boolean default false,
+  cover_image_url text,
+  mobile_image_url text,
+  faqs jsonb default '[]'::jsonb,
+  contact_links jsonb default '[]'::jsonb,
+  pdf_resources jsonb default '[]'::jsonb,
+  coupons jsonb default '[]'::jsonb,
+  active boolean default true,
   created_at timestamptz default now()
 );
 
@@ -197,6 +204,15 @@ create table if not exists public.webinars (
   registrations int default 0,
   recording_link text,
   status text default 'upcoming',
+  end_datetime timestamptz,
+  long_description text,
+  cover_image_url text,
+  mobile_image_url text,
+  faqs jsonb default '[]'::jsonb,
+  contact_links jsonb default '[]'::jsonb,
+  pdf_resources jsonb default '[]'::jsonb,
+  coupons jsonb default '[]'::jsonb,
+  active boolean default true,
   created_at timestamptz default now()
 );
 

@@ -373,7 +373,8 @@ export async function getAllCourses(): Promise<Course[]> {
 }
 export async function getPublishedCourses(): Promise<Course[]> {
   const all = await getAllCourses();
-  return all.filter((c) => c.status === "published");
+  // Public site: only published AND not disabled (Task 7).
+  return all.filter((c) => c.status === "published" && c.active !== false);
 }
 export async function getCourseBySlug(slug: string): Promise<Course | null> {
   const all = await getAllCourses();
@@ -410,6 +411,13 @@ export async function addCourse(input: Partial<Course>): Promise<Course> {
     curriculum: input.curriculum || [],
     schedule: input.schedule ?? null,
     featured: input.featured ?? false,
+    cover_image_url: input.cover_image_url ?? null,
+    mobile_image_url: input.mobile_image_url ?? null,
+    faqs: input.faqs ?? [],
+    contact_links: input.contact_links ?? [],
+    pdf_resources: input.pdf_resources ?? [],
+    coupons: input.coupons ?? [],
+    active: input.active ?? true,
     created_at: new Date().toISOString(),
   } as Course;
   if (isDemoMode) {
@@ -552,6 +560,11 @@ export async function getWebinars(): Promise<Webinar[]> {
   const rows = await dbSelect<Webinar>("webinars");
   return rows.length ? rows : [...mock.webinars];
 }
+/** Public webinars only — hides disabled items (Task 7). */
+export async function getPublicWebinars(): Promise<Webinar[]> {
+  const all = await getWebinars();
+  return all.filter((w) => w.active !== false);
+}
 export async function getWebinarBySlug(slug: string): Promise<Webinar | null> {
   const all = await getWebinars();
   return all.find((w) => w.slug === slug) ?? null;
@@ -569,6 +582,15 @@ export async function addWebinar(input: Partial<Webinar>): Promise<Webinar> {
     registrations: 0,
     recording_link: input.recording_link ?? null,
     status: input.status || "upcoming",
+    end_datetime: input.end_datetime ?? null,
+    long_description: input.long_description ?? null,
+    cover_image_url: input.cover_image_url ?? null,
+    mobile_image_url: input.mobile_image_url ?? null,
+    faqs: input.faqs ?? [],
+    contact_links: input.contact_links ?? [],
+    pdf_resources: input.pdf_resources ?? [],
+    coupons: input.coupons ?? [],
+    active: input.active ?? true,
     created_at: new Date().toISOString(),
   } as Webinar;
   if (isDemoMode) {
@@ -613,6 +635,40 @@ export async function registerWebinar(webinarId: string, name: string, phone: st
   }
   await addLead({ name, phone, source: "Webinar", webinar_registered: true });
   return { ok: true };
+}
+
+// ============================ COUPONS ============================
+/**
+ * Best-effort increment of a coupon's usage counter on a course/webinar.
+ * Called when a paid checkout that used the coupon is initiated.
+ */
+export async function incrementCouponUsage(
+  itemType: "course" | "webinar",
+  id: string,
+  code: string
+): Promise<void> {
+  try {
+    const normalized = code.trim().toLowerCase();
+    if (itemType === "course") {
+      const all = await getAllCourses();
+      const item = all.find((c) => c.id === id);
+      if (!item?.coupons) return;
+      const coupons = item.coupons.map((c) =>
+        c.code.trim().toLowerCase() === normalized ? { ...c, used: (c.used || 0) + 1 } : c
+      );
+      await updateCourse(id, { coupons });
+    } else {
+      const all = await getWebinars();
+      const item = all.find((w) => w.id === id);
+      if (!item?.coupons) return;
+      const coupons = item.coupons.map((c) =>
+        c.code.trim().toLowerCase() === normalized ? { ...c, used: (c.used || 0) + 1 } : c
+      );
+      await updateWebinar(id, { coupons });
+    }
+  } catch {
+    /* non-fatal */
+  }
 }
 
 // ============================ PAYMENTS ============================

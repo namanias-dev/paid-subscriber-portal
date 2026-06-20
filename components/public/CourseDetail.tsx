@@ -6,6 +6,9 @@ import { formatINR } from "@/lib/dates";
 import { discountPct } from "@/components/public/CourseCard";
 import Accordion from "@/components/ui/Accordion";
 import CourseCard from "@/components/public/CourseCard";
+import CoverImage from "@/components/public/CoverImage";
+import ContactButtons from "@/components/public/ContactButtons";
+import ResourceList from "@/components/public/ResourceList";
 import type { Course } from "@/lib/types";
 
 const TABS = ["Overview", "Curriculum", "Schedule", "Faculty", "What's Included", "Fees & EMI", "FAQs"];
@@ -19,12 +22,15 @@ const COURSE_FAQ = [
 export default function CourseDetail({ course, related, comparison }: { course: Course; related: Course[]; comparison: Course[] }) {
   const [tab, setTab] = useState("Overview");
   const off = discountPct(course.price, course.original_price);
+  const faqs = (course.faqs || []).filter((f) => f.q?.trim());
+  const faqItems = faqs.length ? faqs : COURSE_FAQ;
 
   return (
     <div className="container-wide section">
       <div className="grid gap-8 lg:grid-cols-3">
         {/* Main */}
         <div className="lg:col-span-2">
+          <CoverImage src={course.cover_image_url || course.image} mobileSrc={course.mobile_image_url} alt={course.title} />
           <div className="flex flex-wrap items-center gap-2">
             <span className="pill pill-blue">{course.category}</span>
             {course.modes.map((m) => (
@@ -143,8 +149,25 @@ export default function CourseDetail({ course, related, comparison }: { course: 
               </div>
             )}
 
-            {tab === "FAQs" && <Accordion items={COURSE_FAQ} />}
+            {tab === "FAQs" && <Accordion items={faqItems} />}
           </div>
+
+          {(course.pdf_resources || []).length > 0 && (
+            <div className="mt-10">
+              <h2 className="text-2xl font-extrabold">Downloads & resources</h2>
+              <div className="mt-4">
+                <ResourceList resources={course.pdf_resources} />
+              </div>
+            </div>
+          )}
+
+          {(course.contact_links || []).length > 0 && (
+            <div className="mt-10">
+              <h2 className="text-2xl font-extrabold">Talk to us</h2>
+              <p className="mb-3 text-sm text-ink2">Questions about this program? Reach out directly.</p>
+              <ContactButtons links={course.contact_links} />
+            </div>
+          )}
 
           {related.length > 0 && (
             <div className="mt-12">

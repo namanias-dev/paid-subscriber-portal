@@ -15,6 +15,7 @@ export interface StartPaymentInput {
   courseSlug?: string;
   planId?: string;
   webinarSlug?: string;
+  couponCode?: string;
 }
 
 export interface StartPaymentResult {

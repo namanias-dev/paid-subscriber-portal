@@ -40,6 +40,9 @@ export const SUPPORT = {
   email: process.env.SUPPORT_EMAIL || "support@example.com",
 };
 
+/** Canonical site origin (no trailing slash) — used for SEO/OG absolute URLs. */
+export const SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL || "https://namanias.com").replace(/\/$/, "");
+
 export const ACADEMY = {
   name: "Naman Sharma IAS Academy",
   shortName: "Naman IAS",
