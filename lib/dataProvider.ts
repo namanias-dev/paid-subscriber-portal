@@ -580,7 +580,12 @@ export async function getPublicWebinars(): Promise<Webinar[]> {
 }
 export async function getWebinarBySlug(slug: string): Promise<Webinar | null> {
   const all = await getWebinars();
-  return all.find((w) => w.slug === slug) ?? null;
+  const exact = all.find((w) => w.slug === slug);
+  const trimmed = all.find((w) => (w.slug || "").trim() === slug.trim());
+  if (exact) console.log(`[DIAGRESULT] HIT active=${String(exact.active)}`);
+  else if (trimmed) console.log(`[DIAGRESULT] TRIMMATCH`);
+  else console.log(`[DIAGRESULT] NOROW count=${all.length} hasUpsc=${all.some((w) => (w.slug || "").includes("upsc-cse"))}`);
+  return exact ?? null;
 }
 export async function addWebinar(input: Partial<Webinar>): Promise<Webinar> {
   const row = {
