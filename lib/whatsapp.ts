@@ -1,4 +1,4 @@
-import { ACADEMY, PORTAL_URL } from "./config";
+import { ACADEMY, PORTAL_URL, SUPPORT } from "./config";
 import { formatDate } from "./dates";
 
 interface WhatsAppParams {
@@ -22,7 +22,7 @@ export function buildWelcomeMessage({
     `Your access code is: ${code}. ` +
     `Login at ${PORTAL_URL} using mobile ${phone} and this code. ` +
     `Your ${planName} access is valid till ${expiryText}. ` +
-    `Support: ${ACADEMY.phone}. — Naman Sir's Team`
+    `Support: ${SUPPORT.phone}. — Naman Sir's Team`
   );
 }
 

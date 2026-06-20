@@ -19,13 +19,10 @@ export default function StatusPill({
 }) {
   const status = statusOf(expiry, isActive);
   const map: Record<Status, { cls: string; label: string }> = {
-    active: { cls: "pill-active", label: "Active" },
-    expiring: {
-      cls: "pill-expiring",
-      label: `Expiring (${daysLeft(expiry)}d)`,
-    },
-    expired: { cls: "pill-expired", label: "Expired" },
-    lifetime: { cls: "pill-lifetime", label: "Lifetime ∞" },
+    active: { cls: "pill-green", label: "Active" },
+    expiring: { cls: "pill-amber", label: `Expiring (${daysLeft(expiry)}d)` },
+    expired: { cls: "pill-red", label: "Expired" },
+    lifetime: { cls: "pill-saffron", label: "Lifetime ∞" },
   };
   const { cls, label } = map[status];
   return <span className={`pill ${cls}`}>{label}</span>;

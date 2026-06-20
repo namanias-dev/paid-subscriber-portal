@@ -8,13 +8,15 @@ import {
   useState,
 } from "react";
 import { useRouter } from "next/navigation";
-import type { ContentItem, Student } from "@/lib/types";
+import type { ContentItem, Student, Enrollment, Course } from "@/lib/types";
 import { useToast } from "@/components/ui/Toast";
 
 interface DashboardState {
   loading: boolean;
   student: Student | null;
   content: ContentItem[];
+  enrollments: Enrollment[];
+  courses: Course[];
   bookmarkIds: Set<string>;
   completedIds: Set<string>;
   expired: boolean;
@@ -39,6 +41,8 @@ export function DashboardProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [student, setStudent] = useState<Student | null>(null);
   const [content, setContent] = useState<ContentItem[]>([]);
+  const [enrollments, setEnrollments] = useState<Enrollment[]>([]);
+  const [courses, setCourses] = useState<Course[]>([]);
   const [bookmarkIds, setBookmarkIds] = useState<Set<string>>(new Set());
   const [completedIds, setCompletedIds] = useState<Set<string>>(new Set());
   const [expired, setExpired] = useState(false);
@@ -53,6 +57,8 @@ export function DashboardProvider({ children }: { children: React.ReactNode }) {
         return;
       }
       if (data.student) setStudent(data.student);
+      if (data.enrollments) setEnrollments(data.enrollments);
+      if (data.courses) setCourses(data.courses);
       if (data.expired) {
         setExpired(true);
         setContent([]);
@@ -168,6 +174,8 @@ export function DashboardProvider({ children }: { children: React.ReactNode }) {
         loading,
         student,
         content,
+        enrollments,
+        courses,
         bookmarkIds,
         completedIds,
         expired,

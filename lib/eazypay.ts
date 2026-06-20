@@ -1,0 +1,207 @@
+import crypto from "crypto";
+
+/**
+ * ICICI Eazypay integration — BACKEND ONLY.
+ *
+ * Never import this into a client component: it reads the AES key from the
+ * environment. The key must live only in env/config (e.g. .env.local) and is
+ * never exposed to the browser bundle, logged, or committed.
+ *
+ * Encryption: AES/ECB/PKCS5Padding, Base64 output (per ICICI Eazypay spec).
+ * Cipher size auto-selected from the key length (16 => AES-128, 24 => 192, 32 => 256).
+ * Response verification: SHA-512 over pipe-joined response fields + AES key.
+ *
+ * Mirrors lib/razorpay.ts conventions: lazy env reads, never throws on missing
+ * config — returns null/false so the app keeps building/running in DEMO MODE.
+ */
+
+export const EAZYPAY_BASE_URL = "https://eazypay.icicibank.com/EazyPG";
+export const PAYMENT_GATEWAY = "ICICI_EAZYPAY" as const;
+
+export function getMerchantId(): string {
+  return process.env.ICICI_EAZYPAY_MERCHANT_ID || "343526";
+}
+
+export function getReturnUrl(): string {
+  return (
+    process.env.ICICI_EAZYPAY_RETURN_URL ||
+    "https://namaniasacademy.com/api/v1/bank/payment"
+  );
+}
+
+function getAesKey(): string | null {
+  const key = process.env.ICICI_EAZYPAY_AES_KEY;
+  return key && key.trim() !== "" ? key.trim() : null;
+}
+
+/** Eazypay is "configured" once the backend AES key is present. */
+export function isEazypayConfigured(): boolean {
+  return getAesKey() !== null;
+}
+
+function cipherAlgoForKey(keyBytes: Buffer): string | null {
+  switch (keyBytes.length) {
+    case 16:
+      return "aes-128-ecb";
+    case 24:
+      return "aes-192-ecb";
+    case 32:
+      return "aes-256-ecb";
+    default:
+      return null;
+  }
+}
+
+/**
+ * AES/ECB/PKCS5Padding encrypt -> Base64. Returns null if key missing/invalid.
+ * Each Eazypay request parameter value is encrypted independently.
+ */
+export function encrypt(value: string): string | null {
+  const key = getAesKey();
+  if (key === null) return null;
+  try {
+    const keyBytes = Buffer.from(key, "utf8");
+    const algo = cipherAlgoForKey(keyBytes);
+    if (!algo) return null;
+    const cipher = crypto.createCipheriv(algo, keyBytes, null);
+    cipher.setAutoPadding(true); // PKCS#7/PKCS5 padding
+    const encrypted = Buffer.concat([cipher.update(String(value), "utf8"), cipher.final()]);
+    return encrypted.toString("base64");
+  } catch {
+    return null;
+  }
+}
+
+export interface PaymentUrlParams {
+  referenceNo: string;
+  subMerchantId: string;
+  amount: number | string;
+  name: string;
+  email: string;
+  mobile: string;
+  paymode?: number | string;
+}
+
+/**
+ * Build the final encrypted Eazypay payment URL.
+ * `merchantid` is plaintext; every other parameter value is AES-encrypted and
+ * URL-encoded. Param names (including the ones with spaces) match the ICICI spec.
+ * Returns null when the AES key is not configured.
+ */
+export function buildPaymentUrl(params: PaymentUrlParams): string | null {
+  const { referenceNo, subMerchantId, amount, name, email, mobile } = params;
+  const paymode = String(params.paymode ?? 9);
+  const amountStr = String(amount);
+
+  // ReferenceNo|SubMerchantID|PGAmount|Name|Email|Mobile
+  const mandatory = [referenceNo, subMerchantId, amountStr, name, email, mobile].join("|");
+
+  const parts: Record<string, string> = {
+    "mandatory fields": mandatory,
+    "optional fields": "",
+    returnurl: getReturnUrl(),
+    "Reference No": referenceNo,
+    submerchantid: subMerchantId,
+    "transaction amount": amountStr,
+    paymode,
+  };
+
+  const query: string[] = [`merchantid=${encodeURIComponent(getMerchantId())}`];
+  for (const [name_, value] of Object.entries(parts)) {
+    // Eazypay expects empty optional fields to remain blank (encrypted-or-blank).
+    const enc = value === "" ? "" : encrypt(value);
+    if (enc === null) return null; // key missing => cannot build a real URL
+    query.push(`${encodeURIComponent(name_)}=${encodeURIComponent(enc)}`);
+  }
+
+  return `${EAZYPAY_BASE_URL}?${query.join("&")}`;
+}
+
+/** Fields returned by Eazypay on the callback, in signature order. */
+export interface EazypayResponseFields {
+  ID: string;
+  "Response Code": string;
+  "Unique Ref Number": string;
+  "Service Tax Amount": string;
+  "Processing Fee Amount": string;
+  "Total Amount": string;
+  "Transaction Amount": string;
+  "Transaction Date": string;
+  "Interchange Value": string;
+  TDR: string;
+  "Payment Mode": string;
+  SubMerchantId: string;
+  ReferenceNo: string;
+  TPS: string;
+}
+
+const SIGNATURE_ORDER: (keyof EazypayResponseFields)[] = [
+  "ID",
+  "Response Code",
+  "Unique Ref Number",
+  "Service Tax Amount",
+  "Processing Fee Amount",
+  "Total Amount",
+  "Transaction Amount",
+  "Transaction Date",
+  "Interchange Value",
+  "TDR",
+  "Payment Mode",
+  "SubMerchantId",
+  "ReferenceNo",
+  "TPS",
+];
+
+/**
+ * Recompute the SHA-512 signature from the response fields + AES key and
+ * compare against the bank-provided RS. Returns false if the key is missing
+ * or the signatures do not match.
+ */
+export function verifyResponseSignature(fields: Partial<EazypayResponseFields>, rs: string | null): boolean {
+  const key = getAesKey();
+  if (key === null || !rs) return false;
+  try {
+    const values = SIGNATURE_ORDER.map((k) => fields[k] ?? "");
+    const payload = [...values, key].join("|");
+    const computed = crypto.createHash("sha512").update(payload, "utf8").digest("hex");
+    const a = Buffer.from(computed.toLowerCase());
+    const b = Buffer.from(String(rs).toLowerCase());
+    return a.length === b.length && crypto.timingSafeEqual(a, b);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * SubMerchantID resolution. ICICI expects a (numeric-ish) SubMerchantID; our
+ * courses use string ids, so we map known items and fall back to "11".
+ * Override/extend via ICICI_EAZYPAY_SUBMERCHANT_MAP env (JSON: {"slug":"12"}).
+ */
+function subMerchantMap(): Record<string, string> {
+  const raw = process.env.ICICI_EAZYPAY_SUBMERCHANT_MAP;
+  if (!raw) return {};
+  try {
+    return JSON.parse(raw) as Record<string, string>;
+  } catch {
+    return {};
+  }
+}
+
+export function eazypaySubMerchantId(itemType: string, idOrSlug: string): string {
+  const map = subMerchantMap();
+  return map[idOrSlug] || map[`${itemType}:${idOrSlug}`] || "11";
+}
+
+/**
+ * Unique, Eazypay-safe reference number.
+ * Format: NAMAN-<CODE>-<base36 ts>-<rand4>  (uppercase, <= ~28 chars).
+ */
+export function makeReferenceNo(code: string): string {
+  const safeCode = (code || "ITEM")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "")
+    .slice(0, 8) || "ITEM";
+  const ts = Date.now().toString(36).toUpperCase();
+  const rand = Math.random().toString(36).slice(2, 6).toUpperCase();
+  return `NAMAN-${safeCode}-${ts}-${rand}`;
+}

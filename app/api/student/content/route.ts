@@ -4,6 +4,8 @@ import {
   getBookmarks,
   getProgress,
   getStudentById,
+  getEnrollments,
+  getAllCourses,
 } from "@/lib/dataProvider";
 import { getStudentSession } from "@/lib/session";
 import { isExpired } from "@/lib/dates";
@@ -20,7 +22,8 @@ export async function GET() {
       return NextResponse.json({ ok: false, error: "Not found" }, { status: 404 });
     }
 
-    // Lifetime (null expiry) always allowed
+    const [enrollments, courses] = await Promise.all([getEnrollments(student.id), getAllCourses()]);
+
     if (isExpired(student.expiry_date)) {
       return NextResponse.json(
         {
@@ -28,6 +31,8 @@ export async function GET() {
           expired: true,
           expiry_date: student.expiry_date,
           student,
+          enrollments,
+          courses,
           error: "Your access has expired. Renew to continue.",
         },
         { status: 403 }
@@ -40,11 +45,8 @@ export async function GET() {
       getProgress(student.id),
     ]);
 
-    return NextResponse.json({ ok: true, student, content, bookmarks, progress });
+    return NextResponse.json({ ok: true, student, content, bookmarks, progress, enrollments, courses });
   } catch {
-    return NextResponse.json(
-      { ok: false, error: "Failed to load content." },
-      { status: 500 }
-    );
+    return NextResponse.json({ ok: false, error: "Failed to load content." }, { status: 500 });
   }
 }

@@ -68,16 +68,12 @@ function LibraryInner() {
 
   return (
     <div className="space-y-4">
-      <h1 className="font-heading text-2xl text-text">Library</h1>
+      <h1 className="font-heading text-2xl">Daily Feed &amp; Library</h1>
       <SearchBar value={query} onChange={setQuery} placeholder="Search content..." />
       <FilterTabs options={CONTENT_TABS} active={tab} onChange={setTab} />
 
       <div className="flex gap-2">
-        <select
-          value={subject}
-          onChange={(e) => setSubject(e.target.value)}
-          className="input-field"
-        >
+        <select value={subject} onChange={(e) => setSubject(e.target.value)} className="input">
           <option value="all">All subjects</option>
           {SUBJECTS.map((s) => (
             <option key={s} value={s}>
@@ -85,11 +81,7 @@ function LibraryInner() {
             </option>
           ))}
         </select>
-        <select
-          value={paper}
-          onChange={(e) => setPaper(e.target.value)}
-          className="input-field"
-        >
+        <select value={paper} onChange={(e) => setPaper(e.target.value)} className="input">
           {papers.map((p) => (
             <option key={p} value={p}>
               {p === "all" ? "All papers" : p}

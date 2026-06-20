@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/components/ui/Toast";
-import { isDemoMode, DEMO_STUDENT } from "@/lib/config";
+import { isDemoMode } from "@/lib/config";
 
 export default function LoginForm() {
   const router = useRouter();
@@ -29,7 +29,7 @@ export default function LoginForm() {
       });
       const data = await res.json();
       if (data.ok) {
-        toast(`Welcome back! 🎯`, "success");
+        toast("Welcome back! 🎯", "success");
         router.push("/dashboard");
       } else {
         setError(data.error || "Login failed.");
@@ -43,51 +43,44 @@ export default function LoginForm() {
 
   return (
     <div className="card mx-auto max-w-md p-6">
-      <h3 className="font-heading text-xl text-text">Already a subscriber? Login here</h3>
-      <p className="mt-1 text-sm text-muted">
-        Use your registered mobile number and access code (NS-XXXX-XXXX).
-      </p>
+      <h3 className="text-xl">Student Login</h3>
+      <p className="mt-1 text-sm text-ink2">Use your registered mobile number and access code (NS-XXXX-XXXX).</p>
 
       <form onSubmit={submit} className="mt-5 space-y-3">
         <div>
-          <label className="mb-1 block text-sm text-muted">Mobile Number</label>
+          <label className="label">Mobile Number</label>
           <input
             type="tel"
             inputMode="numeric"
             value={phone}
             onChange={(e) => setPhone(e.target.value.replace(/\D/g, "").slice(0, 10))}
             placeholder="10-digit mobile"
-            className="input-field"
+            className="input"
             autoComplete="tel"
           />
         </div>
         <div>
-          <label className="mb-1 block text-sm text-muted">Access Code</label>
+          <label className="label">Access Code</label>
           <input
             type="text"
             value={code}
             onChange={(e) => setCode(e.target.value.toUpperCase())}
             placeholder="NS-XXXX-XXXX"
-            className="input-field font-mono tracking-wider"
+            className="input font-mono tracking-wider"
             autoComplete="off"
           />
         </div>
 
-        {error && (
-          <p className="rounded-lg bg-[rgba(231,76,60,0.12)] px-3 py-2 text-sm text-[#ff9a8f]">
-            {error}
-          </p>
-        )}
+        {error && <p className="rounded-xl bg-[#fdeaea] px-3 py-2 text-sm text-danger">{error}</p>}
 
-        <button type="submit" disabled={loading} className="btn-gold w-full">
+        <button type="submit" disabled={loading} className="btn btn-primary w-full">
           {loading ? "Logging in..." : "Login to Portal →"}
         </button>
       </form>
 
       {isDemoMode && (
-        <div className="mt-4 rounded-lg border border-dashed px-3 py-2 text-xs text-gold-light" style={{ borderColor: "var(--border)" }}>
-          🔑 Demo login — Phone: <b>{DEMO_STUDENT.phone}</b> · Code:{" "}
-          <b>{DEMO_STUDENT.code}</b>
+        <div className="mt-4 rounded-xl border border-dashed border-line bg-surface2 px-3 py-2 text-xs text-ink2">
+          🔑 Demo mode is on. Demo credentials are listed in the README / .env.example.
         </div>
       )}
     </div>

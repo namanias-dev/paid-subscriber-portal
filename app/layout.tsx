@@ -1,42 +1,38 @@
 import type { Metadata, Viewport } from "next";
-import { Playfair_Display, Inter } from "next/font/google";
+import { Sora, Inter } from "next/font/google";
 import "./globals.css";
 import { ToastProvider } from "@/components/ui/Toast";
 import DemoBanner from "@/components/layout/DemoBanner";
 
-const playfair = Playfair_Display({
+const sora = Sora({
   subsets: ["latin"],
   weight: ["600", "700", "800"],
-  variable: "--font-playfair",
+  variable: "--font-sora",
   display: "swap",
 });
 
 const inter = Inter({
   subsets: ["latin"],
-  weight: ["300", "400", "500", "600", "700"],
+  weight: ["400", "500", "600", "700"],
   variable: "--font-inter",
   display: "swap",
 });
 
 export const metadata: Metadata = {
-  title: "Naman Sharma IAS Academy — Subscriber Portal",
+  title: "Naman Sharma IAS Academy — Crack UPSC the Right Way",
   description:
-    "India's most personal UPSC preparation community. Daily current affairs, MCQs, booklets, PYQs and live sessions curated by Naman Sir.",
+    "Chandigarh's most personal UPSC academy. Foundation, Optionals, Test Series & Mentorship — Online, Offline & Hybrid. Daily current affairs, MCQs, PYQs and live classes by Naman Sir.",
 };
 
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
-  themeColor: "#0a1628",
+  themeColor: "#0057FF",
 };
 
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${playfair.variable} ${inter.variable}`}>
+    <html lang="en" className={`${sora.variable} ${inter.variable}`}>
       <body>
         <ToastProvider>
           <DemoBanner />

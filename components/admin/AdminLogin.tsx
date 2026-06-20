@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Logo from "@/components/ui/Logo";
-import { isDemoMode, DEMO_ADMIN } from "@/lib/config";
+import { isDemoMode } from "@/lib/config";
 
 export default function AdminLogin({ onSuccess }: { onSuccess: () => void }) {
   const [username, setUsername] = useState("");
@@ -21,11 +21,8 @@ export default function AdminLogin({ onSuccess }: { onSuccess: () => void }) {
         body: JSON.stringify({ username: username.trim(), password }),
       });
       const data = await res.json();
-      if (data.ok) {
-        onSuccess();
-      } else {
-        setError(data.error || "Login failed.");
-      }
+      if (data.ok) onSuccess();
+      else setError(data.error || "Invalid credentials.");
     } catch {
       setError("Something went wrong.");
     } finally {
@@ -34,46 +31,33 @@ export default function AdminLogin({ onSuccess }: { onSuccess: () => void }) {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center px-4">
-      <div className="card w-full max-w-sm p-6">
-        <div className="mb-4 flex items-center gap-2">
-          <Logo size={40} variant="red" />
+    <div className="flex min-h-screen items-center justify-center bg-surface px-4">
+      <div className="card w-full max-w-sm p-7">
+        <div className="mb-5 flex items-center gap-3">
+          <Logo size={40} variant="admin" />
           <div>
-            <h1 className="font-heading text-lg text-text">Admin Panel</h1>
+            <p className="font-heading text-lg font-extrabold">Admin Panel</p>
             <p className="text-xs text-muted">Naman IAS Academy</p>
           </div>
         </div>
-
         <form onSubmit={submit} className="space-y-3">
-          <input
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-            placeholder="Username"
-            className="input-field"
-            autoComplete="username"
-          />
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder="Password"
-            className="input-field"
-            autoComplete="current-password"
-          />
-          {error && (
-            <p className="rounded-lg bg-[rgba(231,76,60,0.12)] px-3 py-2 text-sm text-[#ff9a8f]">
-              {error}
-            </p>
-          )}
-          <button type="submit" disabled={loading} className="btn-gold w-full">
-            {loading ? "Signing in..." : "Sign in"}
+          <div>
+            <label className="label">Username</label>
+            <input className="input" value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" />
+          </div>
+          <div>
+            <label className="label">Password</label>
+            <input className="input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" />
+          </div>
+          {error && <p className="rounded-xl bg-[#fdeaea] px-3 py-2 text-sm text-danger">{error}</p>}
+          <button type="submit" disabled={loading} className="btn btn-primary w-full">
+            {loading ? "Signing in..." : "Sign in →"}
           </button>
         </form>
-
         {isDemoMode && (
-          <div className="mt-4 rounded-lg border border-dashed px-3 py-2 text-xs text-gold-light" style={{ borderColor: "var(--border)" }}>
-            🔑 Demo admin — {DEMO_ADMIN.username} / {DEMO_ADMIN.password}
-          </div>
+          <p className="mt-4 rounded-xl border border-dashed border-line bg-surface2 px-3 py-2 text-xs text-ink2">
+            🔑 Demo mode — admin credentials are in the README / .env.example.
+          </p>
         )}
       </div>
     </div>

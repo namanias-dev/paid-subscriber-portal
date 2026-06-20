@@ -2,64 +2,28 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-
-const TABS = [
-  { href: "/dashboard", label: "Home", icon: "🏠", match: (p: string) => p === "/dashboard" },
-  {
-    href: "/dashboard/library",
-    label: "Library",
-    icon: "📚",
-    match: (p: string) => p.startsWith("/dashboard/library"),
-  },
-  {
-    href: "/dashboard#live",
-    label: "Live",
-    icon: "🔴",
-    match: () => false,
-  },
-  {
-    href: "/dashboard/bookmarks",
-    label: "Saved",
-    icon: "⭐",
-    match: (p: string) => p.startsWith("/dashboard/bookmarks"),
-  },
-  {
-    href: "/dashboard/profile",
-    label: "Profile",
-    icon: "👤",
-    match: (p: string) => p.startsWith("/dashboard/profile"),
-  },
-];
+import { STUDENT_BOTTOM_NAV } from "./navItems";
 
 export default function BottomNav() {
   const pathname = usePathname();
   return (
-    <nav
-      className="fixed bottom-0 left-0 right-0 z-50 flex border-t md:hidden"
-      style={{
-        background: "rgba(10,22,40,0.96)",
-        borderColor: "var(--border)",
-        backdropFilter: "blur(12px)",
-        paddingBottom: "env(safe-area-inset-bottom)",
-      }}
-    >
-      {TABS.map((t) => {
-        const active = t.match(pathname);
-        return (
-          <Link
-            key={t.label}
-            href={t.href}
-            className="flex flex-1 flex-col items-center justify-center gap-0.5 py-2"
-            style={{
-              minHeight: 56,
-              color: active ? "var(--gold-light)" : "var(--muted)",
-            }}
-          >
-            <span className="text-lg">{t.icon}</span>
-            <span className="text-[11px] font-medium">{t.label}</span>
-          </Link>
-        );
-      })}
+    <nav className="frost fixed inset-x-0 bottom-0 z-40 border-t border-line lg:hidden">
+      <div className="mx-auto flex max-w-md items-stretch justify-between px-2 py-1.5">
+        {STUDENT_BOTTOM_NAV.map((item) => {
+          const active = pathname === item.href;
+          return (
+            <Link
+              key={item.href}
+              href={item.href}
+              className="flex flex-1 flex-col items-center gap-0.5 rounded-lg py-1.5 text-[10px] font-medium transition"
+              style={{ color: active ? "var(--primary)" : "var(--muted)" }}
+            >
+              <span className="text-lg">{item.icon}</span>
+              {item.label}
+            </Link>
+          );
+        })}
+      </div>
     </nav>
   );
 }

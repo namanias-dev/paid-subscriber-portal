@@ -24,7 +24,7 @@ export async function POST(req: Request) {
       );
     }
 
-    const token = await signAdminToken({ admin_id: admin.id, username: admin.username });
+    const token = await signAdminToken({ admin_id: admin.id, username: admin.username, role: admin.role });
     const res = NextResponse.json({ ok: true, username: admin.username });
     res.cookies.set(ADMIN_COOKIE, token, {
       httpOnly: true,

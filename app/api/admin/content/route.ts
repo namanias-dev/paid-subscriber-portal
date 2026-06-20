@@ -12,6 +12,8 @@ const VALID_TYPES: ContentType[] = [
   "pyq",
   "test_series",
   "answer_writing",
+  "notes",
+  "maps",
 ];
 
 async function requireAdmin() {
@@ -61,6 +63,8 @@ export async function POST(req: Request) {
       date: body.date ? String(body.date) : undefined,
       duration: body.duration ? String(body.duration) : null,
       is_published: Boolean(body.is_published),
+      course_id: body.course_id ? String(body.course_id) : null,
+      drip_date: body.drip_date ? String(body.drip_date) : null,
     });
 
     return NextResponse.json({ ok: true, content: item });

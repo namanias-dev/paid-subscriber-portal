@@ -25,33 +25,22 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   const toast = useCallback((message: string, type: ToastType = "info") => {
     const id = Date.now() + Math.random();
     setToasts((t) => [...t, { id, message, type }]);
-    setTimeout(() => {
-      setToasts((t) => t.filter((x) => x.id !== id));
-    }, 3000);
+    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 3200);
   }, []);
 
   return (
     <ToastContext.Provider value={{ toast }}>
       {children}
-      <div className="fixed bottom-20 left-1/2 z-[100] flex -translate-x-1/2 flex-col items-center gap-2 px-4 sm:bottom-6">
+      <div className="fixed bottom-20 left-1/2 z-[120] flex -translate-x-1/2 flex-col items-center gap-2 px-4 sm:bottom-6">
         {toasts.map((t) => (
           <div
             key={t.id}
-            className="animate-slide-up rounded-xl border px-4 py-3 text-sm font-medium shadow-lg backdrop-blur"
+            className="animate-fade-up rounded-xl border bg-white px-4 py-3 text-sm font-medium shadow-soft"
             style={{
-              background: "rgba(17,34,64,0.95)",
               borderColor:
-                t.type === "error"
-                  ? "rgba(231,76,60,0.6)"
-                  : t.type === "success"
-                  ? "rgba(46,204,113,0.6)"
-                  : "var(--gold)",
+                t.type === "error" ? "#f3c0c0" : t.type === "success" ? "#bfe6cd" : "var(--line)",
               color:
-                t.type === "error"
-                  ? "#ff9a8f"
-                  : t.type === "success"
-                  ? "#7ee2a8"
-                  : "var(--gold-light)",
+                t.type === "error" ? "var(--danger)" : t.type === "success" ? "var(--success)" : "var(--ink)",
             }}
           >
             {t.message}

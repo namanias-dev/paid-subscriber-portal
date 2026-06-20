@@ -5,12 +5,7 @@ export default function Skeleton({
   className?: string;
   height?: number;
 }) {
-  return (
-    <div
-      className={`skeleton animate-shimmer ${className}`}
-      style={{ height }}
-    />
-  );
+  return <div className={`skeleton animate-shimmer ${className}`} style={{ height }} />;
 }
 
 export function CardSkeleton() {

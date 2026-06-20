@@ -38,7 +38,7 @@ export default function BookmarksPage() {
 
   return (
     <div className="space-y-4">
-      <h1 className="font-heading text-2xl text-text">Saved Items</h1>
+      <h1 className="font-heading text-2xl">Saved Items</h1>
       {saved.length ? (
         <div className="grid gap-3 sm:grid-cols-2">
           {saved.map((item) => (

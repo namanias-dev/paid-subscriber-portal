@@ -2,9 +2,7 @@ import type { PlanInfo } from "./types";
 
 /**
  * DEMO MODE is ON whenever Supabase is not configured.
- * In demo mode the whole app runs on mock data and demo logins.
- * The moment NEXT_PUBLIC_SUPABASE_URL is set in Vercel, the app
- * automatically switches to LIVE mode — no code changes needed.
+ * The whole app runs on mock data + demo logins until real env vars are added.
  */
 export const isDemoMode =
   !process.env.NEXT_PUBLIC_SUPABASE_URL ||
@@ -12,32 +10,55 @@ export const isDemoMode =
 
 export const RAZORPAY_ENABLED = !!process.env.RAZORPAY_KEY_ID;
 export const EMAIL_ENABLED = !!process.env.RESEND_API_KEY;
+// ICICI Eazypay is "live" once the backend AES key is configured.
+export const EAZYPAY_ENABLED = !!process.env.ICICI_EAZYPAY_AES_KEY;
 
-// ⚠️ These dev fallbacks are ONLY safe in demo mode.
-// Always set strong, unique secrets in production (Vercel env vars).
-export const JWT_SECRET =
-  process.env.JWT_SECRET || "demo-dev-secret-change-me";
+// ⚠️ Dev fallbacks are only safe in demo mode. Set strong secrets in production.
+export const JWT_SECRET = process.env.JWT_SECRET || "demo-dev-secret-change-me";
 export const ADMIN_JWT_SECRET =
   process.env.ADMIN_JWT_SECRET || "demo-admin-secret-change-me";
 
 export const PORTAL_URL =
-  process.env.NEXT_PUBLIC_PORTAL_URL || "https://portal.namaniasacademy.com";
+  process.env.NEXT_PUBLIC_PORTAL_URL || "https://portal.example.com";
+
+/**
+ * Demo credentials are read from env with NON-SENSITIVE placeholder fallbacks.
+ * These placeholders are intentionally generic test values — never real secrets.
+ * The UI only shows a generic hint; the literal values live in .env.example / README.
+ */
+export const DEMO_STUDENT = {
+  phone: process.env.DEMO_STUDENT_PHONE || "9999999999",
+  code: process.env.DEMO_STUDENT_ACCESS_CODE || "NS-0000-DEMO",
+};
+export const DEMO_ADMIN = {
+  username: process.env.DEMO_ADMIN_USERNAME || "demoadmin",
+  password: process.env.DEMO_ADMIN_PASSWORD || "DemoAdmin2025",
+};
+
+export const SUPPORT = {
+  phone: process.env.SUPPORT_PHONE || "0000000000",
+  email: process.env.SUPPORT_EMAIL || "support@example.com",
+};
 
 export const ACADEMY = {
   name: "Naman Sharma IAS Academy",
   shortName: "Naman IAS",
-  tagline: "India's Most Personal UPSC Preparation Community",
-  phone: "8437686541",
-  address: "Sector 17, Chandigarh",
-  instagram: "https://instagram.com/namansharma_ias",
-  youtube: "https://youtube.com/@namansharma_ias",
+  tagline: "Chandigarh's Most Personal UPSC Preparation Community",
+  address: "Sector 17C, Chandigarh",
+  instagram: "https://instagram.com",
+  youtube: "https://youtube.com",
+  telegram: "https://telegram.org",
+  citiesServed: ["Chandigarh", "Mohali", "Panchkula", "Zirakpur", "Punjab", "Haryana", "Himachal"],
+  stats: {
+    instagram: "388K+",
+    youtube: "220K+",
+    years: "9+",
+    batchSize: "~40",
+  },
 };
 
 export const STUDENT_COOKIE = "naman_student_token";
 export const ADMIN_COOKIE = "naman_admin_token";
-
-export const DEMO_STUDENT = { phone: "9999999999", code: "NS-0000-DEMO" };
-export const DEMO_ADMIN = { username: "namanadmin", password: "NamanAdmin2025" };
 
 export const PLANS: PlanInfo[] = [
   {
@@ -59,12 +80,7 @@ export const PLANS: PlanInfo[] = [
     price: 799,
     badge: "MOST POPULAR",
     highlight: true,
-    bullets: [
-      "Everything in 1 Month",
-      "Answer Writing reviews",
-      "Live + Recordings",
-      "Test Series access",
-    ],
+    bullets: ["Everything in 1 Month", "Answer Writing reviews", "Live + Recordings", "Test Series access"],
     envKey: "NEXT_PUBLIC_RAZORPAY_LINK_3M",
   },
   {
@@ -75,12 +91,7 @@ export const PLANS: PlanInfo[] = [
     days: 180,
     price: 1499,
     badge: "Best Value",
-    bullets: [
-      "Everything in 3 Months",
-      "Full Prelims + Mains coverage",
-      "Priority doubt support",
-      "Optional subject material",
-    ],
+    bullets: ["Everything in 3 Months", "Full Prelims + Mains coverage", "Priority doubt support", "Optional material"],
     envKey: "NEXT_PUBLIC_RAZORPAY_LINK_6M",
   },
   {
@@ -90,12 +101,7 @@ export const PLANS: PlanInfo[] = [
     months: 12,
     days: 365,
     price: 2499,
-    bullets: [
-      "Everything in 6 Months",
-      "Full-year mentorship",
-      "All live cohorts",
-      "Complete archive access",
-    ],
+    bullets: ["Everything in 6 Months", "Full-year mentorship", "All live cohorts", "Complete archive"],
     envKey: "NEXT_PUBLIC_RAZORPAY_LINK_12M",
   },
   {
@@ -106,12 +112,7 @@ export const PLANS: PlanInfo[] = [
     days: null,
     price: 3999,
     badge: "Gold",
-    bullets: [
-      "Everything, forever",
-      "All future content",
-      "Lifetime community access",
-      "Priority everything",
-    ],
+    bullets: ["Everything, forever", "All future content", "Lifetime community", "Priority everything"],
     envKey: "NEXT_PUBLIC_RAZORPAY_LINK_LIFETIME",
   },
 ];
@@ -139,3 +140,16 @@ export const SUBJECTS = [
   "CSAT",
   "Optional",
 ];
+
+export const COURSE_CATEGORIES = [
+  "Foundation",
+  "Optional",
+  "Test Series",
+  "Mains",
+  "Specialist",
+  "Mentorship",
+  "Entry",
+  "PCS",
+];
+
+export const LEARNING_MODES = ["Online", "Offline", "Hybrid", "Recorded"];

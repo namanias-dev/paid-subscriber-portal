@@ -1,137 +1,86 @@
-# Naman Sharma IAS Academy — Subscriber Portal
+# Naman Sharma IAS Academy — UPSC Edtech Platform
 
-A mobile-first, premium UPSC subscriber portal. **Deploys to Vercel with zero
-configuration** and runs in a fully-featured **Demo Mode** until you add real keys.
+A complete, **deploy-on-Vercel** UPSC platform: a world-class public website, a student learning portal, and a full **LMS + CRM admin** — built mobile-first with an Apple-inspired light UI.
 
-- **Frontend:** Next.js 14 (App Router) + TypeScript + Tailwind CSS
-- **Backend:** Next.js API Routes (all secrets server-side)
-- **Database:** Supabase (Postgres + RLS) — with automatic mock fallback
-- **Auth:** custom phone + access-code login (no SMS), bcrypt admin, JWT cookies
-- **Payments:** Razorpay Payment Links + idempotent webhook — with demo fallback
-- **Email:** Resend (optional) · **Delivery:** WhatsApp `wa.me` deep links
-- **Storage:** Google Drive (PDFs) + YouTube unlisted (videos) as URLs — no uploads
+**Zero-config:** with **no environment variables**, it builds and runs in **DEMO MODE** (rich mock data, demo logins, simulated payments). Add keys in Vercel to go LIVE on Supabase + Razorpay + Resend — no code changes.
 
 ---
 
-## 🚀 Deploy in 60 seconds
+## ✨ What's inside
 
-1. Push this repo to GitHub.
-2. Go to [vercel.com/new](https://vercel.com/new) → **Import** the repo.
-3. Click **Deploy**. That's it — **no environment variables needed**.
+### Public website (light, animated)
+`/` Home · `/courses` · `/courses/[slug]` · `/about` · `/results` · `/free-resources` · `/webinars` · `/webinars/[slug]` · `/demo` · `/contact` · `/login` · `/enroll/[slug]`
 
-The site goes live instantly in **Demo Mode**: a working landing page, a
-demo-login-able dashboard, and a demo admin panel — all on mock data.
+- Animated hero (word-by-word headline, floating cards, parallax Ashoka Chakra), counter stats
+- Scroll-reveal sections, course explorer with category filters & 3D-tilt cards, results wall, testimonials carousel, FAQ accordion, map, lead capture
+- Comprehensive course detail pages (overview, curriculum, schedule, faculty, what's included, fees & EMI, FAQ, comparison)
+- Framer Motion animations, `prefers-reduced-motion` respected, smooth page transitions
 
-### Demo credentials
+### Student portal (`/dashboard`)
+Sidebar + bottom-nav, light theme. My Courses · Daily Feed (CA/MCQ) · Live Classes · Test Series · Study Material · Mentorship · Bookmarks · My Fees · Profile. Streak 🔥 + days-to-Prelims 🗓️ widgets, locked/empty states, skeletons, toasts.
 
-| Role    | Login                                   |
-| ------- | --------------------------------------- |
-| Student | Phone `9999999999` · Code `NS-0000-DEMO` |
-| Admin   | `namanadmin` / `NamanAdmin2025` (at `/admin`) |
-
----
-
-## 🌐 Going live (add keys, no code changes)
-
-The moment `NEXT_PUBLIC_SUPABASE_URL` is set, the app **automatically** switches
-from mock data to Supabase/Razorpay/Resend. Each service degrades gracefully on
-its own (e.g. no Razorpay key → demo payment toast; no Resend key → email skipped).
-
-1. **Supabase**
-   - Create a project at [supabase.com](https://supabase.com).
-   - In the SQL editor, run `supabase/schema.sql`, then `supabase/seed.sql`.
-   - Copy `Project URL`, `anon` key, and `service_role` key into Vercel env vars:
-     - `NEXT_PUBLIC_SUPABASE_URL`
-     - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-     - `SUPABASE_SERVICE_ROLE_KEY`
-
-2. **Razorpay**
-   - Create **5 Payment Links** (one per plan) and paste them into:
-     - `NEXT_PUBLIC_RAZORPAY_LINK_1M` … `NEXT_PUBLIC_RAZORPAY_LINK_LIFETIME`
-   - When creating links, add `notes`: `plan` (`1m`/`3m`/`6m`/`12m`/`lifetime`),
-     `name`, `phone`, `email` so the webhook can provision access automatically.
-   - Add `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET`.
-   - Set the webhook URL to `https://YOURDOMAIN/api/webhook/razorpay`
-     (event: `payment.captured`).
-
-3. **Resend (optional)** — add `RESEND_API_KEY` for automatic welcome emails.
-
-4. **Secrets** — set strong random values for:
-   - `JWT_SECRET`, `ADMIN_JWT_SECRET`, `CRON_SECRET`
-
-5. **Redeploy.** The app is now live. 🎉
-
-### Content delivery (frugal, zero storage cost)
-
-- **PDFs** → upload to **Google Drive**, set _Anyone with the link = Viewer_, paste
-  the link in **Admin → Content** (`drive_link`).
-- **Videos** → upload to **YouTube as Unlisted**, paste the link (`youtube_link`).
-
-### Free keep-alive (stop Supabase free tier from pausing)
-
-A Vercel cron is preconfigured in `vercel.json` to hit `/api/cron/ping` daily.
-If the Vercel Hobby plan limits crons, use the free
-[cron-job.org](https://cron-job.org) instead:
-
-```
-GET https://YOURDOMAIN/api/cron/ping?secret=YOUR_CRON_SECRET   (daily)
-```
+### Admin platform (`/admin`) — full LMS + CRM
+Sidebar dashboard with 14 modules:
+Dashboard (KPIs + charts) · Lead CRM (Kanban + table, filters, WhatsApp, notes, CSV export) · Lead Forms Builder · Landing Pages · Marketing/Broadcast · Referrals · Course Manager (full CRUD → auto-generates public pages) · Webinars & Events · Content/LMS · Subscription Plans · Students & Enrollments (fee ledger, access codes) · Payments & Finance · Staff & Roles · Settings.
 
 ---
 
-## 🧑‍💻 Local development
+## 🚀 Quick start
 
 ```bash
 npm install
-npm run dev        # runs in Demo Mode with an empty .env.local
+npm run dev      # http://localhost:3000  (DEMO MODE, no env needed)
 ```
 
-Copy `.env.example` to `.env.local` and fill in keys only when you want live mode.
+### Demo credentials (DEMO MODE)
+- **Student** — phone `9999999999`, access code `NS-0000-DEMO`
+- **Admin** — username `demoadmin`, password `DemoAdmin2025`
 
-```bash
-npm run build      # production build (succeeds with zero env vars)
-npm start
-```
+> These come from `DEMO_STUDENT_PHONE`, `DEMO_STUDENT_ACCESS_CODE`, `DEMO_ADMIN_USERNAME`, `DEMO_ADMIN_PASSWORD` in `.env.example` (non-sensitive placeholders). Change them anytime. They have **no effect in LIVE mode**.
 
 ---
 
-## 📁 Project structure
+## 🌐 Deploy to Vercel (first try)
 
-```
-app/                     Routes (landing, dashboard, admin) + API routes
-components/ui            Buttons, cards, modal, toast, pills, skeletons
-components/layout        Navbars, footer, bottom nav, demo banner
-components/dashboard     Welcome bar, content cards, renew modal, context
-components/admin         Stats, add-student, students table, content manager
-lib/                     config, mockData, dataProvider (mock↔live switch),
-                         supabase, auth, razorpay, codeGenerator, whatsapp,
-                         email, dates, session, types
-supabase/                schema.sql + seed.sql
-middleware.ts            Route protection (allows everything in demo mode)
-```
+1. Push to GitHub and **Import** the repo in Vercel.
+2. Deploy with **no env vars** → live demo immediately.
+3. To go LIVE, add env vars (see `.env.example`) in Vercel → Settings → Environment Variables, then redeploy.
 
-`lib/dataProvider.ts` is the single switchboard every API route uses — it routes
-to mock data in demo mode and to Supabase in live mode, which is what makes the
-demo → live transition automatic.
+The app never crashes on missing env vars — every integration degrades gracefully.
 
 ---
 
-## 💳 Plans
+## 🔌 Going LIVE
 
-| Plan     | Price   | Duration | Note         |
-| -------- | ------- | -------- | ------------ |
-| 1 Month  | ₹299    | 30 days  |              |
-| 3 Months | ₹799    | 90 days  | Most Popular |
-| 6 Months | ₹1,499  | 180 days | Best Value   |
-| 12 Months| ₹2,499  | 365 days |              |
-| Lifetime | ₹3,999  | ∞        | Gold         |
+1. **Database** — create a Supabase project, run `supabase/schema.sql` then `supabase/seed.sql` in the SQL editor.
+2. Set `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` (presence of the URL flips the app to LIVE mode).
+3. Set strong `JWT_SECRET` and `ADMIN_JWT_SECRET`.
+4. **Payments (Razorpay)** — add `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET`, and per-plan `NEXT_PUBLIC_RAZORPAY_LINK_*`.
+5. **Payments (ICICI Eazypay)** — courses, plans and paid webinars route through Eazypay. Set the **backend-only** `ICICI_EAZYPAY_AES_KEY` (never `NEXT_PUBLIC_`, never committed), plus `ICICI_EAZYPAY_MERCHANT_ID` and `ICICI_EAZYPAY_RETURN_URL` (must point to `/api/v1/bank/payment` on your domain). Flow: student form → `POST /api/v1/bank/create-payment` (saves PENDING, returns encrypted Eazypay URL) → pay → Eazypay posts back to the return URL → SHA-512 signature verified → marked PAID/FAILED → `/payment/status`. Without the AES key, payments are **simulated** (demo) so the app still builds/runs with zero env.
+6. **Email** (optional) — add `RESEND_API_KEY`.
+7. In LIVE mode the seeded admin login is `namanadmin` / `NamanAdmin2025` (bcrypt hash in `seed.sql` — change it).
 
 ---
 
-## 🔒 Security notes
+## 🧱 Tech stack
 
-- Service role key, Razorpay secret, and JWT secrets are used **only** inside
-  `/api` routes — never imported into client components.
-- In demo mode, `JWT_SECRET` / `ADMIN_JWT_SECRET` fall back to dev strings.
-  **Always set strong, unique secrets in production.**
--   Supabase RLS keeps the public anon key restricted to published content only.
+Next.js 14 (App Router) · TypeScript · Tailwind CSS · Framer Motion · Recharts · Supabase (Postgres + RLS) · Razorpay · Resend · JWT (`jose`) · bcrypt.
+
+## 📁 Structure
+
+```
+app/
+  (site)/        Public website (nav + footer + page transitions)
+  dashboard/     Student portal (sidebar + bottom nav)
+  admin/         Admin LMS + CRM (sidebar shell, 14 modules)
+  api/           Route handlers (auth, student, admin, public, webhook, cron)
+components/      ui · public · dashboard · admin · layout
+lib/             config · types · dataProvider · mockData · auth · dates ...
+supabase/        schema.sql · seed.sql
+```
+
+`lib/dataProvider.ts` is the single switchboard: it reads/writes **mock data in demo mode** and **Supabase in live mode**, automatically.
+
+## 🎨 Design system
+
+Light theme — white canvas, royal-blue `#0057FF` accent, charcoal text, sparing saffron/green India motifs. Sora (headings) + Inter (body). Soft shadows, rounded-2xl cards, frosted navbars, 150–250ms micro-interactions, AAA contrast, mobile-first.

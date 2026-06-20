@@ -20,7 +20,7 @@ export async function middleware(req: NextRequest) {
       const session = await verifyStudentToken(token);
       if (!session) {
         const url = req.nextUrl.clone();
-        url.pathname = "/";
+        url.pathname = "/login";
         return NextResponse.redirect(url);
       }
     }

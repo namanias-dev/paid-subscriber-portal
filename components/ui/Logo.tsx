@@ -1,28 +1,28 @@
 export default function Logo({
   size = 40,
-  variant = "gold",
+  variant = "primary",
 }: {
   size?: number;
-  variant?: "gold" | "red";
+  variant?: "primary" | "admin";
 }) {
   const bg =
-    variant === "red"
-      ? "linear-gradient(135deg,#e74c3c,#ff7a6b)"
-      : "linear-gradient(135deg,#c9a84c,#e8c96a)";
+    variant === "admin"
+      ? "linear-gradient(135deg,#0057FF,#3D8BFF)"
+      : "linear-gradient(135deg,#0057FF,#3D8BFF)";
   return (
     <span
       className="inline-flex items-center justify-center font-heading font-extrabold"
       style={{
         width: size,
         height: size,
-        borderRadius: 10,
+        borderRadius: 12,
         background: bg,
-        color: "#0a1628",
-        fontSize: size * 0.55,
-        boxShadow: "0 4px 14px rgba(201,168,76,0.3)",
+        color: "#fff",
+        fontSize: size * 0.5,
+        boxShadow: "0 6px 18px rgba(0,87,255,0.30)",
       }}
     >
-      {variant === "red" ? "A" : "N"}
+      N
     </span>
   );
 }
