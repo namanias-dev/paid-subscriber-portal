@@ -49,7 +49,9 @@ Point a Razorpay webhook at `https://<your-domain>/api/webhook/razorpay` and set
 
 ## 4b. ICICI Eazypay return URL
 
-In the Eazypay merchant dashboard set the **return/response URL** to `https://<your-domain>/api/v1/bank/payment`. Configure `ICICI_EAZYPAY_RETURN_URL` to the same value. The backend AES-encrypts each request parameter, and verifies the SHA-512 `RS` signature on the response before marking a payment `PAID`. Keep `ICICI_EAZYPAY_AES_KEY` server-side only.
+In the Eazypay merchant dashboard set the **return/response URL** to `https://<your-domain>/api/v1/bank/payment` (e.g. `https://namanias.vercel.app/api/v1/bank/payment`). Configure `ICICI_EAZYPAY_RETURN_URL` to the same value. The backend AES-encrypts each request parameter and verifies the SHA-512 `RS` signature on the response before marking a payment `PAID`.
+
+Because Vercel functions are stateless (the callback can hit a different instance than the one that created the payment), the verified callback signs the final result with an HMAC and hands it to `/payment/status`, which re-verifies it — so the success/failure outcome is reliable **without a database**. Configure **Supabase** if you also want each payment persisted in the admin Payments ledger. Keep `ICICI_EAZYPAY_AES_KEY` server-side only.
 
 ## 5. Cron / keep-alive
 

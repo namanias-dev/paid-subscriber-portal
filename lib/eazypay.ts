@@ -25,7 +25,7 @@ export function getMerchantId(): string {
 export function getReturnUrl(): string {
   return (
     process.env.ICICI_EAZYPAY_RETURN_URL ||
-    "https://namaniasacademy.com/api/v1/bank/payment"
+    "https://namanias.vercel.app/api/v1/bank/payment"
   );
 }
 
@@ -204,4 +204,50 @@ export function makeReferenceNo(code: string): string {
   const ts = Date.now().toString(36).toUpperCase();
   const rand = Math.random().toString(36).slice(2, 6).toUpperCase();
   return `NAMAN-${safeCode}-${ts}-${rand}`;
+}
+
+/**
+ * Stateless status hand-off.
+ *
+ * On a serverless platform the ICICI callback and the status page may run on
+ * different instances than the one that created the (in-memory) record, so we
+ * can't rely on shared memory. Instead the callback — which has ALREADY
+ * verified ICICI's SHA-512 signature server-side — signs the final result with
+ * an HMAC (keyed by the backend AES key) and passes it to the status page via
+ * the redirect. The status endpoint re-verifies the HMAC, so the result is
+ * authoritative and cannot be spoofed by a user editing the URL. When a real
+ * database is configured the record is also persisted for the admin/ledger.
+ */
+export function signStatusParams(referenceNo: string, status: string, amount: string | number): string {
+  const key = getAesKey();
+  if (key === null) return "";
+  const payload = `${referenceNo}|${status}|${amount}`;
+  return crypto.createHmac("sha256", key).update(payload, "utf8").digest("hex");
+}
+
+export function verifyStatusSignature(
+  referenceNo: string,
+  status: string,
+  amount: string | number,
+  sig: string | null
+): boolean {
+  const key = getAesKey();
+  if (key === null || !sig) return false;
+  try {
+    const expected = signStatusParams(referenceNo, status, amount);
+    const a = Buffer.from(expected);
+    const b = Buffer.from(String(sig));
+    return a.length === b.length && crypto.timingSafeEqual(a, b);
+  } catch {
+    return false;
+  }
+}
+
+/** Human-readable item label derived from the reference prefix (NAMAN-<TYPE>-…). */
+export function itemTypeFromReference(referenceNo: string): "course" | "plan" | "webinar" | "item" {
+  const seg = referenceNo.split("-")[1]?.toUpperCase() || "";
+  if (seg === "COURSE") return "course";
+  if (seg === "PLAN") return "plan";
+  if (seg === "WEBINAR") return "webinar";
+  return "item";
 }

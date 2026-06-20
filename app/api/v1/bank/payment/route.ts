@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { getPaymentByReference, updatePaymentByReference } from "@/lib/dataProvider";
-import { verifyResponseSignature, type EazypayResponseFields } from "@/lib/eazypay";
+import { updatePaymentByReference } from "@/lib/dataProvider";
+import { verifyResponseSignature, signStatusParams, type EazypayResponseFields } from "@/lib/eazypay";
 import type { Payment } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -55,44 +55,55 @@ async function handle(req: Request) {
   const responseCode = get(params, "Response Code");
   const rs = get(params, "RS");
 
-  // Always redirect the user to the status page (it shows the final state).
-  const redirectTo = (ref: string) =>
-    NextResponse.redirect(`${statusBaseUrl(req)}?ref=${encodeURIComponent(ref)}`, { status: 302 });
+  /**
+   * Redirect the user to the status page. We pass a server-SIGNED result so the
+   * status page can show the authoritative outcome even when there is no shared
+   * datastore (serverless instances don't share memory). The HMAC is keyed by
+   * the backend AES key, so the params can't be spoofed.
+   */
+  const redirectTo = (ref: string, status?: string, amount?: string) => {
+    const qs = new URLSearchParams({ ref });
+    if (status) {
+      qs.set("st", status);
+      qs.set("amt", amount ?? "0");
+      qs.set("sig", signStatusParams(ref, status, amount ?? "0"));
+    }
+    return NextResponse.redirect(`${statusBaseUrl(req)}?${qs.toString()}`, { status: 302 });
+  };
 
   if (!referenceNo) {
     return redirectTo("");
   }
 
-  const existing = await getPaymentByReference(referenceNo);
-  if (!existing) {
-    // Unknown reference — log only the reference, never the payload/key.
-    console.warn(`[eazypay] callback for unknown reference ${referenceNo}`);
-    return redirectTo(referenceNo);
-  }
-
   const fields: Partial<EazypayResponseFields> = {};
   for (const k of FIELD_KEYS) fields[k] = get(params, k);
 
+  // Signature verification is fully self-contained (response fields + AES key),
+  // so it works without any stored record — this is the source of truth.
   const signatureValid = verifyResponseSignature(fields, rs);
   const isSuccess = responseCode.toUpperCase() === "E000" && signatureValid;
+  const status = isSuccess ? "PAID" : "FAILED";
+
+  const amountStr = get(params, "Total Amount") || get(params, "Transaction Amount") || "0";
 
   const patch: Partial<Payment> = {
-    status: isSuccess ? "PAID" : "FAILED",
+    status,
     response_code: responseCode || null,
     gateway_ref: get(params, "Unique Ref Number") || null,
     payment_mode: get(params, "Payment Mode") || null,
     transaction_date: get(params, "Transaction Date") || null,
     verified_signature: signatureValid,
   };
-  const totalAmount = Number(get(params, "Total Amount"));
-  if (!Number.isNaN(totalAmount) && get(params, "Total Amount") !== "") {
+  const totalAmount = Number(amountStr);
+  if (!Number.isNaN(totalAmount) && amountStr !== "") {
     patch.total_amount = totalAmount;
   }
 
+  // Persist when a record/DB exists (best-effort; null result is fine).
   await updatePaymentByReference(referenceNo, patch);
-  console.info(`[eazypay] callback ref=${referenceNo} status=${patch.status} signature=${signatureValid}`);
+  console.info(`[eazypay] callback ref=${referenceNo} status=${status} signature=${signatureValid}`);
 
-  return redirectTo(referenceNo);
+  return redirectTo(referenceNo, status, amountStr);
 }
 
 export async function POST(req: Request) {

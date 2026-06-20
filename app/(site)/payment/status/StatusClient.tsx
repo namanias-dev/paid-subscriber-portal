@@ -12,6 +12,7 @@ interface StatusData {
   amount: number;
   gatewayRef: string | null;
   demo: boolean;
+  awaiting?: boolean;
 }
 
 const TERMINAL = new Set(["PAID", "FAILED", "captured", "refunded"]);
@@ -20,6 +21,10 @@ export default function StatusClient() {
   const params = useSearchParams();
   const ref = params.get("ref") || "";
   const demo = params.get("demo") === "1";
+  // Server-signed result handed over by the verified ICICI callback.
+  const st = params.get("st");
+  const amt = params.get("amt");
+  const sig = params.get("sig");
 
   const [data, setData] = useState<StatusData | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -38,7 +43,12 @@ export default function StatusClient() {
     async function poll() {
       attempts += 1;
       try {
-        const qs = demo ? "?demo=1" : "";
+        const q = new URLSearchParams();
+        if (demo) q.set("demo", "1");
+        if (st) q.set("st", st);
+        if (amt) q.set("amt", amt);
+        if (sig) q.set("sig", sig);
+        const qs = q.toString() ? `?${q.toString()}` : "";
         const res = await fetch(`/api/v1/bank/payment-status/${encodeURIComponent(ref)}${qs}`, {
           cache: "no-store",
         });
@@ -69,7 +79,7 @@ export default function StatusClient() {
       active = false;
       clearTimeout(timer);
     };
-  }, [ref, demo]);
+  }, [ref, demo, st, amt, sig]);
 
   const status = data?.status ?? "PENDING";
   const isPaid = status === "PAID" || status === "captured";

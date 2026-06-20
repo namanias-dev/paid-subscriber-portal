@@ -1,8 +1,15 @@
 import { NextResponse } from "next/server";
 import { getPaymentByReference, updatePaymentByReference } from "@/lib/dataProvider";
-import { isEazypayConfigured } from "@/lib/eazypay";
+import { isEazypayConfigured, verifyStatusSignature, itemTypeFromReference } from "@/lib/eazypay";
 
 export const dynamic = "force-dynamic";
+
+const ITEM_LABEL: Record<string, string> = {
+  course: "Course payment",
+  plan: "Subscription",
+  webinar: "Webinar payment",
+  item: "Payment",
+};
 
 export async function GET(req: Request, { params }: { params: { referenceNo: string } }) {
   try {
@@ -11,33 +18,102 @@ export async function GET(req: Request, { params }: { params: { referenceNo: str
       return NextResponse.json({ ok: false, error: "Missing reference." }, { status: 400 });
     }
 
-    let payment = await getPaymentByReference(referenceNo);
-    if (!payment) {
-      return NextResponse.json({ ok: false, error: "Payment not found." }, { status: 404 });
-    }
-
-    // DEMO MODE: with no AES key configured there is no real gateway callback,
-    // so simulate a successful payment when the demo flag is set.
     const url = new URL(req.url);
     const demo = url.searchParams.get("demo") === "1";
-    if (demo && !isEazypayConfigured() && payment.status === "PENDING") {
-      payment = (await updatePaymentByReference(referenceNo, {
-        status: "PAID",
-        verified_signature: false,
-        gateway_ref: `DEMO-${referenceNo}`,
-      })) ?? payment;
+    const signedStatus = url.searchParams.get("st");
+    const signedAmount = url.searchParams.get("amt");
+    const sig = url.searchParams.get("sig");
+
+    // 1) Authoritative, stateless result handed over by the verified callback.
+    //    The HMAC proves the callback (which checked ICICI's signature) produced
+    //    it, so it's trustworthy even with no database.
+    if (signedStatus && verifyStatusSignature(referenceNo, signedStatus, signedAmount ?? "0", sig)) {
+      // Best-effort: also reflect it into any stored record.
+      await updatePaymentByReference(referenceNo, {
+        status: signedStatus as "PAID" | "FAILED",
+      }).catch(() => null);
+
+      const record = await getPaymentByReference(referenceNo).catch(() => null);
+      return NextResponse.json({
+        ok: true,
+        referenceNo,
+        status: signedStatus,
+        item: record?.item || ITEM_LABEL[itemTypeFromReference(referenceNo)],
+        itemType: record?.item_type || itemTypeFromReference(referenceNo),
+        amount: Number(signedAmount ?? record?.amount ?? 0),
+        gatewayRef: record?.gateway_ref ?? null,
+        verifiedSignature: true,
+        demo: false,
+      });
     }
 
+    // 2) Stored record (DB in live mode, or in-memory within the same instance).
+    let payment = await getPaymentByReference(referenceNo);
+
+    // 3) DEMO MODE: no AES key => no real gateway => simulate success.
+    if (demo && !isEazypayConfigured()) {
+      if (!payment) {
+        return NextResponse.json({
+          ok: true,
+          referenceNo,
+          status: "PAID",
+          item: ITEM_LABEL[itemTypeFromReference(referenceNo)],
+          itemType: itemTypeFromReference(referenceNo),
+          amount: 0,
+          gatewayRef: `DEMO-${referenceNo}`,
+          verifiedSignature: false,
+          demo: true,
+        });
+      }
+      if (payment.status === "PENDING") {
+        payment =
+          (await updatePaymentByReference(referenceNo, {
+            status: "PAID",
+            verified_signature: false,
+            gateway_ref: `DEMO-${referenceNo}`,
+          })) ?? payment;
+      }
+      return NextResponse.json({
+        ok: true,
+        referenceNo,
+        status: payment.status,
+        item: payment.item,
+        itemType: payment.item_type,
+        amount: payment.amount,
+        gatewayRef: payment.gateway_ref ?? null,
+        verifiedSignature: payment.verified_signature ?? null,
+        demo: true,
+      });
+    }
+
+    if (payment) {
+      return NextResponse.json({
+        ok: true,
+        referenceNo,
+        status: payment.status,
+        item: payment.item,
+        itemType: payment.item_type,
+        amount: payment.amount,
+        gatewayRef: payment.gateway_ref ?? null,
+        verifiedSignature: payment.verified_signature ?? null,
+        demo: false,
+      });
+    }
+
+    // 4) No record yet (e.g. user opened the status tab before paying, on a
+    //    different instance). Report PENDING instead of a hard error so the
+    //    page keeps polling gracefully.
     return NextResponse.json({
       ok: true,
       referenceNo,
-      status: payment.status,
-      item: payment.item,
-      itemType: payment.item_type,
-      amount: payment.amount,
-      gatewayRef: payment.gateway_ref ?? null,
-      verifiedSignature: payment.verified_signature ?? null,
-      demo: demo && !isEazypayConfigured(),
+      status: "PENDING",
+      item: ITEM_LABEL[itemTypeFromReference(referenceNo)],
+      itemType: itemTypeFromReference(referenceNo),
+      amount: 0,
+      gatewayRef: null,
+      verifiedSignature: null,
+      demo: false,
+      awaiting: true,
     });
   } catch {
     return NextResponse.json({ ok: false, error: "Could not fetch status." }, { status: 500 });

@@ -3,8 +3,9 @@
  * No crypto here — it only calls the backend create-payment endpoint and
  * routes the user to the returned paymentUrl.
  *
- *  - Absolute URL (real Eazypay gateway) => open in a new tab.
- *  - Relative URL (demo / free / status)  => navigate the current tab.
+ * Always navigates the CURRENT tab (full-page redirect). Hosted payment
+ * gateways must redirect back to our return URL, which then lands on the status
+ * page in the same tab — a new tab would strand the user on a blank status tab.
  */
 export interface StartPaymentInput {
   itemType: "course" | "plan" | "webinar";
@@ -37,15 +38,9 @@ export async function startPayment(input: StartPaymentInput): Promise<StartPayme
       return { ok: false, error: json.error || "Could not start payment." };
     }
 
-    if (/^https?:\/\//i.test(json.paymentUrl)) {
-      window.open(json.paymentUrl, "_blank", "noopener,noreferrer");
-      // Also move this tab to the status page so the user can track it.
-      if (json.referenceNo) {
-        window.location.href = `/payment/status?ref=${encodeURIComponent(json.referenceNo)}`;
-      }
-    } else {
-      window.location.href = json.paymentUrl;
-    }
+    // Full-page redirect (same tab) for both the real gateway and demo/relative
+    // URLs, so ICICI's return redirect lands back on our status page cleanly.
+    window.location.href = json.paymentUrl;
     return json;
   } catch {
     return { ok: false, error: "Network error. Please try again." };
