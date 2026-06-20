@@ -50,9 +50,10 @@ async function dbSelect<T>(table: string, order = "created_at"): Promise<T[]> {
     console.log(`[DIAG dbSelect] table=${table} hasDb=false demo=${demoMode()}`);
     return [];
   }
+  const ref = (process.env["NEXT_PUBLIC_SUPABASE_URL"] || process.env["SUPABASE_URL"] || "").replace(/^https?:\/\//, "").split(".")[0];
   const { data, error } = await db.from(table).select("*").order(order, { ascending: false });
-  if (error) console.log(`[DIAG dbSelect] table=${table} error=${error.message}`);
-  else console.log(`[DIAG dbSelect] table=${table} rows=${(data as T[])?.length ?? 0}`);
+  if (error) console.log(`[DIAGDB] table=${table} ref=${ref} error=${error.message}`);
+  else console.log(`[DIAGDB] table=${table} ref=${ref} rows=${(data as T[])?.length ?? 0}`);
   return (data as T[]) ?? [];
 }
 async function dbInsert<T>(table: string, row: Record<string, unknown>): Promise<T> {
