@@ -1,4 +1,3 @@
-import { isDemoMode } from "./config";
 import { getSupabaseAdmin } from "./supabase";
 import * as mock from "./mockData";
 import { computeExpiry, isExpired, isExpiringSoon, yesterdayISODate, todayISODate } from "./dates";
@@ -24,8 +23,17 @@ import type {
 /**
  * The switchboard every API route uses.
  * Demo mode: read/write in-memory mock arrays.
- * Live mode: read/write Supabase. Switching is automatic via isDemoMode.
+ * Live mode: read/write Supabase. Switching is automatic via demoMode().
  */
+
+/**
+ * Demo mode is decided at RUNTIME by whether a Supabase admin client is
+ * available. This is robust to Next.js inlining NEXT_PUBLIC_* at build time —
+ * as soon as the env vars exist in the runtime environment, the app goes live.
+ */
+function demoMode(): boolean {
+  return !getSupabaseAdmin();
+}
 
 function uuid(): string {
   try {
@@ -64,7 +72,7 @@ async function dbDelete(table: string, id: string): Promise<boolean> {
 
 // ============================ STUDENTS ============================
 export async function getStudents(): Promise<Student[]> {
-  if (isDemoMode) return [...mock.students];
+  if (demoMode()) return [...mock.students];
   const db = getSupabaseAdmin();
   if (!db) return [...mock.students];
   const { data } = await db.from("students").select("*").order("created_at", { ascending: false });
@@ -72,7 +80,7 @@ export async function getStudents(): Promise<Student[]> {
 }
 
 export async function getStudentById(id: string): Promise<Student | null> {
-  if (isDemoMode) return mock.students.find((s) => s.id === id) ?? null;
+  if (demoMode()) return mock.students.find((s) => s.id === id) ?? null;
   const db = getSupabaseAdmin();
   if (!db) return null;
   const { data } = await db.from("students").select("*").eq("id", id).maybeSingle();
@@ -81,7 +89,7 @@ export async function getStudentById(id: string): Promise<Student | null> {
 
 export async function findStudentByLogin(phone: string, code: string): Promise<Student | null> {
   const normCode = code.trim().toUpperCase();
-  if (isDemoMode) {
+  if (demoMode()) {
     return mock.students.find((s) => s.phone === phone.trim() && s.access_code === normCode && s.is_active) ?? null;
   }
   const db = getSupabaseAdmin();
@@ -97,7 +105,7 @@ export async function findStudentByLogin(phone: string, code: string): Promise<S
 }
 
 export async function findStudentByPhone(phone: string): Promise<Student | null> {
-  if (isDemoMode) return mock.students.find((s) => s.phone === phone.trim()) ?? null;
+  if (demoMode()) return mock.students.find((s) => s.phone === phone.trim()) ?? null;
   const db = getSupabaseAdmin();
   if (!db) return null;
   const { data } = await db.from("students").select("*").eq("phone", phone.trim()).maybeSingle();
@@ -141,7 +149,7 @@ export async function addStudent(input: NewStudentInput): Promise<Student> {
     is_active: true,
     created_at: new Date().toISOString(),
   };
-  if (isDemoMode) {
+  if (demoMode()) {
     mock.students.unshift(row);
     return row;
   }
@@ -156,7 +164,7 @@ export async function addStudent(input: NewStudentInput): Promise<Student> {
 }
 
 export async function updateStudent(id: string, patch: Partial<Student>): Promise<Student | null> {
-  if (isDemoMode) {
+  if (demoMode()) {
     const idx = mock.students.findIndex((s) => s.id === id);
     if (idx === -1) return null;
     mock.students[idx] = { ...mock.students[idx], ...patch };
@@ -166,7 +174,7 @@ export async function updateStudent(id: string, patch: Partial<Student>): Promis
 }
 
 export async function deleteStudent(id: string): Promise<boolean> {
-  if (isDemoMode) {
+  if (demoMode()) {
     const idx = mock.students.findIndex((s) => s.id === id);
     if (idx === -1) return false;
     mock.students.splice(idx, 1);
@@ -192,7 +200,7 @@ export async function touchStreakOnLogin(student: Student): Promise<Student> {
 
 // ============================ CONTENT ============================
 export async function getAllContent(): Promise<ContentItem[]> {
-  if (isDemoMode) return [...mock.contentItems];
+  if (demoMode()) return [...mock.contentItems];
   const db = getSupabaseAdmin();
   if (!db) return [...mock.contentItems];
   const { data } = await db.from("content_items").select("*").order("date", { ascending: false });
@@ -200,7 +208,7 @@ export async function getAllContent(): Promise<ContentItem[]> {
 }
 
 export async function getPublishedContent(): Promise<ContentItem[]> {
-  if (isDemoMode) return mock.contentItems.filter((c) => c.is_published);
+  if (demoMode()) return mock.contentItems.filter((c) => c.is_published);
   const db = getSupabaseAdmin();
   if (!db) return mock.contentItems.filter((c) => c.is_published);
   const { data } = await db
@@ -243,7 +251,7 @@ export async function addContent(input: NewContentInput): Promise<ContentItem> {
     drip_date: input.drip_date ?? null,
     created_at: new Date().toISOString(),
   };
-  if (isDemoMode) {
+  if (demoMode()) {
     mock.contentItems.unshift(row);
     return row;
   }
@@ -258,7 +266,7 @@ export async function addContent(input: NewContentInput): Promise<ContentItem> {
 }
 
 export async function updateContent(id: string, patch: Partial<ContentItem>): Promise<ContentItem | null> {
-  if (isDemoMode) {
+  if (demoMode()) {
     const idx = mock.contentItems.findIndex((c) => c.id === id);
     if (idx === -1) return null;
     mock.contentItems[idx] = { ...mock.contentItems[idx], ...patch };
@@ -268,7 +276,7 @@ export async function updateContent(id: string, patch: Partial<ContentItem>): Pr
 }
 
 export async function deleteContent(id: string): Promise<boolean> {
-  if (isDemoMode) {
+  if (demoMode()) {
     const idx = mock.contentItems.findIndex((c) => c.id === id);
     if (idx === -1) return false;
     mock.contentItems.splice(idx, 1);
@@ -279,7 +287,7 @@ export async function deleteContent(id: string): Promise<boolean> {
 
 // ============================ BOOKMARKS ============================
 export async function getBookmarks(studentId: string): Promise<Bookmark[]> {
-  if (isDemoMode) return mock.bookmarks.filter((b) => b.student_id === studentId);
+  if (demoMode()) return mock.bookmarks.filter((b) => b.student_id === studentId);
   const db = getSupabaseAdmin();
   if (!db) return [];
   const { data } = await db.from("bookmarks").select("*").eq("student_id", studentId);
@@ -287,7 +295,7 @@ export async function getBookmarks(studentId: string): Promise<Bookmark[]> {
 }
 
 export async function addBookmark(studentId: string, contentId: string): Promise<Bookmark> {
-  if (isDemoMode) {
+  if (demoMode()) {
     const existing = mock.bookmarks.find((b) => b.student_id === studentId && b.content_id === contentId);
     if (existing) return existing;
     const row: Bookmark = { id: uuid(), student_id: studentId, content_id: contentId, created_at: new Date().toISOString() };
@@ -302,7 +310,7 @@ export async function addBookmark(studentId: string, contentId: string): Promise
 }
 
 export async function removeBookmark(studentId: string, contentId: string): Promise<boolean> {
-  if (isDemoMode) {
+  if (demoMode()) {
     const idx = mock.bookmarks.findIndex((b) => b.student_id === studentId && b.content_id === contentId);
     if (idx === -1) return false;
     mock.bookmarks.splice(idx, 1);
@@ -316,7 +324,7 @@ export async function removeBookmark(studentId: string, contentId: string): Prom
 
 // ============================ PROGRESS ============================
 export async function getProgress(studentId: string): Promise<ContentProgress[]> {
-  if (isDemoMode) return mock.contentProgress.filter((p) => p.student_id === studentId);
+  if (demoMode()) return mock.contentProgress.filter((p) => p.student_id === studentId);
   const db = getSupabaseAdmin();
   if (!db) return [];
   const { data } = await db.from("content_progress").select("*").eq("student_id", studentId);
@@ -324,7 +332,7 @@ export async function getProgress(studentId: string): Promise<ContentProgress[]>
 }
 
 export async function markProgress(studentId: string, contentId: string, completed: boolean): Promise<ContentProgress> {
-  if (isDemoMode) {
+  if (demoMode()) {
     const existing = mock.contentProgress.find((p) => p.student_id === studentId && p.content_id === contentId);
     if (existing) {
       existing.completed = completed;
@@ -348,7 +356,7 @@ export async function markProgress(studentId: string, contentId: string, complet
 
 // ============================ ADMIN AUTH ============================
 export async function verifyAdminCredentials(username: string, password: string): Promise<{ id: string; username: string; role: Staff["role"] } | null> {
-  if (isDemoMode) {
+  if (demoMode()) {
     const admin = mock.adminUsers.find((a) => a.username === username);
     if (admin && admin.plaintext_password === password) {
       return { id: admin.id, username: admin.username, role: admin.role };
@@ -367,7 +375,7 @@ export async function verifyAdminCredentials(username: string, password: string)
 
 // ============================ COURSES ============================
 export async function getAllCourses(): Promise<Course[]> {
-  if (isDemoMode) return [...mock.courses];
+  if (demoMode()) return [...mock.courses];
   const rows = await dbSelect<Course>("courses");
   return rows.length ? rows : [...mock.courses];
 }
@@ -420,14 +428,14 @@ export async function addCourse(input: Partial<Course>): Promise<Course> {
     active: input.active ?? true,
     created_at: new Date().toISOString(),
   } as Course;
-  if (isDemoMode) {
+  if (demoMode()) {
     mock.courses.unshift(row);
     return row;
   }
   return dbInsert<Course>("courses", row as unknown as Record<string, unknown>);
 }
 export async function updateCourse(id: string, patch: Partial<Course>): Promise<Course | null> {
-  if (isDemoMode) {
+  if (demoMode()) {
     const idx = mock.courses.findIndex((c) => c.id === id);
     if (idx === -1) return null;
     mock.courses[idx] = { ...mock.courses[idx], ...patch };
@@ -436,7 +444,7 @@ export async function updateCourse(id: string, patch: Partial<Course>): Promise<
   return dbUpdate<Course>("courses", id, patch as Record<string, unknown>);
 }
 export async function deleteCourse(id: string): Promise<boolean> {
-  if (isDemoMode) {
+  if (demoMode()) {
     const idx = mock.courses.findIndex((c) => c.id === id);
     if (idx === -1) return false;
     mock.courses.splice(idx, 1);
@@ -447,14 +455,14 @@ export async function deleteCourse(id: string): Promise<boolean> {
 
 // ============================ ENROLLMENTS ============================
 export async function getEnrollments(studentId?: string): Promise<Enrollment[]> {
-  const all = isDemoMode ? [...mock.enrollments] : await dbSelect<Enrollment>("enrollments", "enrolled_at");
+  const all = demoMode() ? [...mock.enrollments] : await dbSelect<Enrollment>("enrollments", "enrolled_at");
   const list = all.length ? all : [...mock.enrollments];
   return studentId ? list.filter((e) => e.student_id === studentId) : list;
 }
 
 // ============================ LEADS / CRM ============================
 export async function getLeads(): Promise<Lead[]> {
-  if (isDemoMode) return [...mock.leads];
+  if (demoMode()) return [...mock.leads];
   const rows = await dbSelect<Lead>("leads");
   return rows.length ? rows : [...mock.leads];
 }
@@ -486,14 +494,14 @@ export async function addLead(input: Partial<Lead>): Promise<Lead> {
     counsellor: input.counsellor ?? null,
     created_at: new Date().toISOString(),
   } as Lead;
-  if (isDemoMode) {
+  if (demoMode()) {
     mock.leads.unshift(row);
     return row;
   }
   return dbInsert<Lead>("leads", row as unknown as Record<string, unknown>);
 }
 export async function updateLead(id: string, patch: Partial<Lead>): Promise<Lead | null> {
-  if (isDemoMode) {
+  if (demoMode()) {
     const idx = mock.leads.findIndex((l) => l.id === id);
     if (idx === -1) return null;
     mock.leads[idx] = { ...mock.leads[idx], ...patch };
@@ -502,7 +510,7 @@ export async function updateLead(id: string, patch: Partial<Lead>): Promise<Lead
   return dbUpdate<Lead>("leads", id, patch as Record<string, unknown>);
 }
 export async function deleteLead(id: string): Promise<boolean> {
-  if (isDemoMode) {
+  if (demoMode()) {
     const idx = mock.leads.findIndex((l) => l.id === id);
     if (idx === -1) return false;
     mock.leads.splice(idx, 1);
@@ -511,7 +519,7 @@ export async function deleteLead(id: string): Promise<boolean> {
   return dbDelete("leads", id);
 }
 export async function getLeadActivities(leadId: string): Promise<LeadActivity[]> {
-  if (isDemoMode) return mock.leadActivities.filter((a) => a.lead_id === leadId);
+  if (demoMode()) return mock.leadActivities.filter((a) => a.lead_id === leadId);
   const rows = await dbSelect<LeadActivity>("lead_activities", "timestamp");
   return rows.filter((a) => a.lead_id === leadId);
 }
@@ -524,7 +532,7 @@ export async function addLeadActivity(input: Partial<LeadActivity>): Promise<Lea
     counsellor: input.counsellor ?? null,
     timestamp: new Date().toISOString(),
   } as LeadActivity;
-  if (isDemoMode) {
+  if (demoMode()) {
     mock.leadActivities.unshift(row);
     return row;
   }
@@ -533,7 +541,7 @@ export async function addLeadActivity(input: Partial<LeadActivity>): Promise<Lea
 
 // ============================ LEAD FORMS ============================
 export async function getLeadForms(): Promise<LeadFormConfig[]> {
-  if (isDemoMode) return [...mock.leadForms];
+  if (demoMode()) return [...mock.leadForms];
   const rows = await dbSelect<LeadFormConfig>("lead_forms");
   return rows.length ? rows : [...mock.leadForms];
 }
@@ -547,7 +555,7 @@ export async function addLeadForm(input: Partial<LeadFormConfig>): Promise<LeadF
     submissions: 0,
     created_at: new Date().toISOString(),
   } as LeadFormConfig;
-  if (isDemoMode) {
+  if (demoMode()) {
     mock.leadForms.unshift(row);
     return row;
   }
@@ -556,7 +564,7 @@ export async function addLeadForm(input: Partial<LeadFormConfig>): Promise<LeadF
 
 // ============================ WEBINARS ============================
 export async function getWebinars(): Promise<Webinar[]> {
-  if (isDemoMode) return [...mock.webinars];
+  if (demoMode()) return [...mock.webinars];
   const rows = await dbSelect<Webinar>("webinars");
   return rows.length ? rows : [...mock.webinars];
 }
@@ -593,14 +601,14 @@ export async function addWebinar(input: Partial<Webinar>): Promise<Webinar> {
     active: input.active ?? true,
     created_at: new Date().toISOString(),
   } as Webinar;
-  if (isDemoMode) {
+  if (demoMode()) {
     mock.webinars.unshift(row);
     return row;
   }
   return dbInsert<Webinar>("webinars", row as unknown as Record<string, unknown>);
 }
 export async function updateWebinar(id: string, patch: Partial<Webinar>): Promise<Webinar | null> {
-  if (isDemoMode) {
+  if (demoMode()) {
     const idx = mock.webinars.findIndex((w) => w.id === id);
     if (idx === -1) return null;
     mock.webinars[idx] = { ...mock.webinars[idx], ...patch };
@@ -609,7 +617,7 @@ export async function updateWebinar(id: string, patch: Partial<Webinar>): Promis
   return dbUpdate<Webinar>("webinars", id, patch as Record<string, unknown>);
 }
 export async function deleteWebinar(id: string): Promise<boolean> {
-  if (isDemoMode) {
+  if (demoMode()) {
     const idx = mock.webinars.findIndex((w) => w.id === id);
     if (idx === -1) return false;
     mock.webinars.splice(idx, 1);
@@ -618,7 +626,7 @@ export async function deleteWebinar(id: string): Promise<boolean> {
   return dbDelete("webinars", id);
 }
 export async function registerWebinar(webinarId: string, name: string, phone: string): Promise<{ ok: boolean }> {
-  if (isDemoMode) {
+  if (demoMode()) {
     const w = mock.webinars.find((x) => x.id === webinarId);
     if (w) w.registrations += 1;
     // also push into CRM as a lead
@@ -688,7 +696,7 @@ function demoPayments(): Payment[] {
 }
 
 export async function getPayments(): Promise<Payment[]> {
-  if (isDemoMode) return [...demoPayments()];
+  if (demoMode()) return [...demoPayments()];
   const rows = await dbSelect<Payment>("payments");
   return rows.length ? rows : [...demoPayments()];
 }
@@ -704,7 +712,7 @@ export async function createPayment(input: CreatePaymentInput): Promise<Payment>
     id: input.id ?? uuid(),
     created_at: input.created_at ?? new Date().toISOString(),
   } as Payment;
-  if (isDemoMode) {
+  if (demoMode()) {
     demoPayments().unshift(row);
     return row;
   }
@@ -718,7 +726,7 @@ export async function createPayment(input: CreatePaymentInput): Promise<Payment>
 }
 
 export async function getPaymentByReference(referenceNo: string): Promise<Payment | null> {
-  if (isDemoMode) {
+  if (demoMode()) {
     return demoPayments().find((p) => p.reference_no === referenceNo) ?? null;
   }
   const db = getSupabaseAdmin();
@@ -739,7 +747,7 @@ export async function updatePaymentByReference(
     store[idx] = { ...store[idx], ...patch };
     return store[idx];
   };
-  if (isDemoMode) {
+  if (demoMode()) {
     return updateDemo();
   }
   const db = getSupabaseAdmin();
@@ -757,12 +765,12 @@ export async function updatePaymentByReference(
 
 // ============================ REFERRALS ============================
 export async function getReferrals(): Promise<Referral[]> {
-  if (isDemoMode) return [...mock.referrals];
+  if (demoMode()) return [...mock.referrals];
   const rows = await dbSelect<Referral>("referrals");
   return rows.length ? rows : [...mock.referrals];
 }
 export async function updateReferral(id: string, patch: Partial<Referral>): Promise<Referral | null> {
-  if (isDemoMode) {
+  if (demoMode()) {
     const idx = mock.referrals.findIndex((r) => r.id === id);
     if (idx === -1) return null;
     mock.referrals[idx] = { ...mock.referrals[idx], ...patch };
@@ -773,7 +781,7 @@ export async function updateReferral(id: string, patch: Partial<Referral>): Prom
 
 // ============================ STAFF ============================
 export async function getStaff(): Promise<Staff[]> {
-  if (isDemoMode) return [...mock.staff];
+  if (demoMode()) return [...mock.staff];
   const rows = await dbSelect<Staff>("staff");
   return rows.length ? rows : [...mock.staff];
 }
@@ -787,14 +795,14 @@ export async function addStaff(input: Partial<Staff>): Promise<Staff> {
     active: true,
     created_at: new Date().toISOString(),
   } as Staff;
-  if (isDemoMode) {
+  if (demoMode()) {
     mock.staff.unshift(row);
     return row;
   }
   return dbInsert<Staff>("staff", row as unknown as Record<string, unknown>);
 }
 export async function updateStaff(id: string, patch: Partial<Staff>): Promise<Staff | null> {
-  if (isDemoMode) {
+  if (demoMode()) {
     const idx = mock.staff.findIndex((s) => s.id === id);
     if (idx === -1) return null;
     mock.staff[idx] = { ...mock.staff[idx], ...patch };
@@ -917,7 +925,7 @@ export async function getDashboard(): Promise<DashboardData> {
 
 // ============================ ACCESS LOGS ============================
 export async function logAccess(studentId: string | null, action: string): Promise<void> {
-  if (isDemoMode) return;
+  if (demoMode()) return;
   const db = getSupabaseAdmin();
   if (!db) return;
   try {
