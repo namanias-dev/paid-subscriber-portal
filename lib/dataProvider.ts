@@ -46,8 +46,13 @@ function uuid(): string {
 // Generic helpers for live-mode tables (best-effort; demo mode never calls these)
 async function dbSelect<T>(table: string, order = "created_at"): Promise<T[]> {
   const db = getSupabaseAdmin();
-  if (!db) return [];
-  const { data } = await db.from(table).select("*").order(order, { ascending: false });
+  if (!db) {
+    console.log(`[DIAG dbSelect] table=${table} hasDb=false demo=${demoMode()}`);
+    return [];
+  }
+  const { data, error } = await db.from(table).select("*").order(order, { ascending: false });
+  if (error) console.log(`[DIAG dbSelect] table=${table} error=${error.message}`);
+  else console.log(`[DIAG dbSelect] table=${table} rows=${(data as T[])?.length ?? 0}`);
   return (data as T[]) ?? [];
 }
 async function dbInsert<T>(table: string, row: Record<string, unknown>): Promise<T> {
