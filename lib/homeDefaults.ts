@@ -39,6 +39,10 @@ export const DEFAULT_POPUP: Required<PopupConfig> = {
 };
 
 export const DEFAULT_CONTENT: Required<HomeContent> = {
+  logo_height: 48,
+  show_wordmark: true,
+  wordmark: "Naman Sharma",
+  wordmark_sub: "IAS Academy",
   trust_bar: [
     "⭐ 388K+ Instagram",
     "▶ 220K+ YouTube",

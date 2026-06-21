@@ -77,12 +77,29 @@ export default function HomeSettingsForm() {
             id: "branding",
             label: "Branding / Logo",
             content: (
-              <Section title="Site logo" desc="Shown in the header. PNG/SVG with transparency recommended. Falls back to the default wordmark.">
-                <ImageUploadField label="Logo image" folder="branding" value={s.logo_url} onChange={(url) => setLogo({ logo_url: url })} hint="Transparent PNG or SVG. Displayed ~40px tall; width scales automatically." />
-                <Field label="Logo alt text" hint="For SEO & accessibility.">
-                  <input className="input" value={s.logo_alt || ""} onChange={(e) => setLogo({ logo_alt: e.target.value })} placeholder="Naman Sharma IAS Academy" />
-                </Field>
-              </Section>
+              <>
+                <Section title="Site logo" desc="Shown in the header. PNG/SVG with transparency recommended. Falls back to the default mark.">
+                  <ImageUploadField label="Logo image" folder="branding" value={s.logo_url} onChange={(url) => setLogo({ logo_url: url })} hint="Transparent PNG or SVG. Width scales automatically to the height below." />
+                  <Field label="Logo alt text" hint="For SEO & accessibility.">
+                    <input className="input" value={s.logo_alt || ""} onChange={(e) => setLogo({ logo_alt: e.target.value })} placeholder="Naman Sharma IAS Academy" />
+                  </Field>
+                  <Field label="Logo height (px)" hint="28–96. Default 48. Bigger = larger logo in the header.">
+                    <input type="number" min={28} max={96} className="input" value={c.logo_height ?? 48} onChange={(e) => setContent({ logo_height: Number(e.target.value) })} />
+                  </Field>
+                </Section>
+                <Section title="Wordmark text" desc="Text shown next to the logo in the header.">
+                  <label className="flex items-center gap-3 sm:col-span-2">
+                    <input type="checkbox" checked={c.show_wordmark !== false} onChange={(e) => setContent({ show_wordmark: e.target.checked })} />
+                    <span className="text-sm">Show the wordmark text next to the logo.</span>
+                  </label>
+                  <Field label="Main text (bold)">
+                    <input className="input" value={c.wordmark ?? ""} onChange={(e) => setContent({ wordmark: e.target.value })} placeholder="Naman Sharma" />
+                  </Field>
+                  <Field label="Sub text (small, under)">
+                    <input className="input" value={c.wordmark_sub ?? ""} onChange={(e) => setContent({ wordmark_sub: e.target.value })} placeholder="IAS Academy" />
+                  </Field>
+                </Section>
+              </>
             ),
           },
           {

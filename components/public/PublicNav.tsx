@@ -16,10 +16,32 @@ const LINKS = [
   { href: "/contact", label: "Contact" },
 ];
 
-export default function PublicNav({ logoUrl, logoAlt }: { logoUrl?: string | null; logoAlt?: string | null }) {
+export default function PublicNav({
+  logoUrl,
+  logoAlt,
+  logoHeight = 48,
+  showWordmark = true,
+  wordmark = "Naman Sharma",
+  wordmarkSub = "IAS Academy",
+}: {
+  logoUrl?: string | null;
+  logoAlt?: string | null;
+  logoHeight?: number;
+  showWordmark?: boolean;
+  wordmark?: string;
+  wordmarkSub?: string;
+}) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const hasLogo = !!logoUrl?.trim();
+  const h = Math.min(96, Math.max(28, Number(logoHeight) || 48));
+
+  const Wordmark = showWordmark && (wordmark?.trim() || wordmarkSub?.trim()) ? (
+    <div className="leading-tight">
+      {wordmark?.trim() && <div className="font-heading text-[17px] font-extrabold text-ink sm:text-lg">{wordmark}</div>}
+      {wordmarkSub?.trim() && <div className="text-[10px] font-medium uppercase tracking-[0.18em] text-muted">{wordmarkSub}</div>}
+    </div>
+  ) : null;
 
   return (
     <header className="frost sticky top-0 z-50 border-b border-line">
@@ -29,21 +51,16 @@ export default function PublicNav({ logoUrl, logoAlt }: { logoUrl?: string | nul
             <Image
               src={logoUrl!.trim()}
               alt={logoAlt || ACADEMY.name}
-              width={180}
-              height={40}
+              width={Math.round(h * 4)}
+              height={h}
               priority
-              className="h-10 w-auto object-contain"
-              style={{ maxWidth: 200 }}
+              className="w-auto object-contain"
+              style={{ height: h, maxWidth: 260 }}
             />
           ) : (
-            <>
-              <Logo size={38} />
-              <div className="leading-tight">
-                <div className="font-heading text-[17px] font-extrabold text-ink">{ACADEMY.shortName}</div>
-                <div className="text-[10px] font-medium uppercase tracking-[0.18em] text-muted">Academy</div>
-              </div>
-            </>
+            <Logo size={h} />
           )}
+          {Wordmark}
         </Link>
 
         <nav className="hidden items-center gap-1 lg:flex">

@@ -526,6 +526,14 @@ export interface PopupConfig {
 
 /** Editable text for the home page's fixed sections. All optional with defaults. */
 export interface HomeContent {
+  /** Header logo height in px (logo image scales to this). */
+  logo_height?: number;
+  /** Show the wordmark text next to the logo. */
+  show_wordmark?: boolean;
+  /** Main wordmark text (bold). */
+  wordmark?: string;
+  /** Smaller wordmark sub-text / tagline under the main wordmark. */
+  wordmark_sub?: string;
   trust_bar?: string[];
   why_heading?: string;
   why_sub?: string;
