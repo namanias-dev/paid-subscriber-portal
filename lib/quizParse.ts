@@ -132,8 +132,14 @@ function parseBlock(block: string[], index: number): ParsedQuestion {
     }
 
     if (mode === "question") {
-      const q = line.match(QSTART_RE);
-      questionLines.push(q ? q[1] : line);
+      if (questionLines.length === 0) {
+        // Only the first line is the question stem — strip its "Q1."/enumerator prefix.
+        const q = line.match(QSTART_RE);
+        questionLines.push(q ? q[1] : line);
+      } else {
+        // Keep statement lines verbatim so their "1." "2." "3." numbers survive.
+        questionLines.push(line);
+      }
     } else if (mode === "explanation") {
       // Preserve line breaks within multi-line explanations.
       base.explanation_html = `${base.explanation_html ? base.explanation_html + "\n" : ""}${line}`.trim();
