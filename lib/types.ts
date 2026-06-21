@@ -148,6 +148,94 @@ export interface Coupon {
   active?: boolean;
 }
 
+// ----------------------------- Landing page config (shared by Course + Webinar) -----------------------------
+
+/** Admin-controlled seats display. When show=false the seats line is hidden entirely. */
+export interface SeatConfig {
+  show?: boolean;
+  total?: number | null;
+  remaining?: number | null;
+  /** Optional custom text that overrides the auto-generated seats line. */
+  text_override?: string | null;
+  show_filling_fast?: boolean;
+  /** Defaults to "Seats Filling Fast". */
+  filling_fast_text?: string | null;
+}
+
+/** Per-item contact + WhatsApp CTA. Numbers stored as normalized digits (e.g. 919876543210). */
+export interface WhatsAppConfig {
+  /** Display/call number (E.164 or digits). */
+  phone?: string | null;
+  /** WhatsApp number in 91XXXXXXXXXX form. */
+  whatsapp?: string | null;
+  show_cta?: boolean;
+  /** Defaults to "WhatsApp Now". */
+  cta_text?: string | null;
+  prefill_message?: string | null;
+}
+
+export type VideoPlacement = "before_about" | "after_about" | "hero";
+export interface VideoConfig {
+  show?: boolean;
+  title?: string | null;
+  subtitle?: string | null;
+  url?: string | null;
+  /** Defaults to "before_about". */
+  placement?: VideoPlacement;
+}
+
+export interface MentorInfo {
+  name?: string | null;
+  credentials?: string | null;
+  /** Plain text or sanitized HTML. */
+  bio?: string | null;
+  image_url?: string | null;
+}
+
+export interface SeoConfig {
+  title?: string | null;
+  description?: string | null;
+  keywords?: string | null;
+  og_image?: string | null;
+  canonical_slug?: string | null;
+}
+
+export interface Review {
+  id?: string;
+  name: string;
+  photo_url?: string | null;
+  /** 1-5 */
+  rating: number;
+  text: string;
+  /** e.g. "AIR 351", "Selected in UPSC CSE". */
+  result?: string | null;
+  city?: string | null;
+  video_url?: string | null;
+  visible?: boolean;
+  order?: number;
+}
+
+/** Used for "What you will learn" and "What you will get" icon/bullet cards. */
+export interface LearnItem {
+  title: string;
+  desc?: string | null;
+  /** Optional emoji or short icon string. */
+  icon?: string | null;
+}
+
+/** Flexible admin-composed content block rendered after the fixed sections. */
+export interface PageSection {
+  id?: string;
+  title: string;
+  subtitle?: string | null;
+  /** Sanitized HTML. */
+  content?: string | null;
+  image_url?: string | null;
+  video_url?: string | null;
+  order?: number;
+  visible?: boolean;
+}
+
 // ----------------------------- Courses -----------------------------
 export interface Lecture {
   title: string;
@@ -198,6 +286,21 @@ export interface Course {
   coupons?: Coupon[];
   /** Visibility toggle — false hides from the public site (Task 7). Defaults to true. */
   active?: boolean;
+  // --- Premium landing page (optional; all backward compatible) ---
+  /** Rich (sanitized) HTML for "About" — preferred over long_description when present. */
+  about_html?: string | null;
+  /** Hero badge label (e.g. "Foundation Course"). Falls back to category. */
+  badge_label?: string | null;
+  seat_config?: SeatConfig;
+  whatsapp_config?: WhatsAppConfig;
+  video_config?: VideoConfig;
+  mentor?: MentorInfo;
+  seo?: SeoConfig;
+  what_you_learn?: LearnItem[];
+  who_should_attend?: string[];
+  what_you_get?: LearnItem[];
+  reviews?: Review[];
+  sections?: PageSection[];
 }
 
 export interface Enrollment {
@@ -303,6 +406,21 @@ export interface Webinar {
   coupons?: Coupon[];
   /** Visibility toggle — false hides from the public site (Task 7). Defaults to true. */
   active?: boolean;
+  // --- Premium landing page (optional; all backward compatible) ---
+  /** Rich (sanitized) HTML for "About" — preferred over long_description when present. */
+  about_html?: string | null;
+  /** Hero badge label (e.g. "Live Webinar"). Falls back to status/price. */
+  badge_label?: string | null;
+  seat_config?: SeatConfig;
+  whatsapp_config?: WhatsAppConfig;
+  video_config?: VideoConfig;
+  mentor?: MentorInfo;
+  seo?: SeoConfig;
+  what_you_learn?: LearnItem[];
+  who_should_attend?: string[];
+  what_you_get?: LearnItem[];
+  reviews?: Review[];
+  sections?: PageSection[];
 }
 
 export interface WebinarRegistration {

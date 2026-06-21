@@ -1,12 +1,15 @@
 import type { ContactLink } from "@/lib/types";
+import { whatsappLink, telLink } from "@/lib/phone";
 
 function hrefFor(link: ContactLink): string {
   const v = (link.value || "").trim();
   switch (link.type) {
     case "whatsapp":
-      return `https://wa.me/${v.replace(/\D/g, "")}`;
+      // Normalize Indian mobiles to wa.me/91… (fixes the +84 country-code bug);
+      // fall back to a digits-only link for non-Indian / already-full numbers.
+      return whatsappLink(v) || `https://wa.me/${v.replace(/\D/g, "")}`;
     case "phone":
-      return `tel:${v.replace(/[^\d+]/g, "")}`;
+      return telLink(v) || `tel:${v.replace(/[^\d+]/g, "")}`;
     case "email":
       return `mailto:${v}`;
     default:

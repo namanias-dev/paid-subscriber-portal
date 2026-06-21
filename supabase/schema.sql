@@ -119,6 +119,18 @@ create table if not exists public.courses (
   pdf_resources jsonb default '[]'::jsonb,
   coupons jsonb default '[]'::jsonb,
   active boolean default true,
+  about_html text,
+  badge_label text,
+  seat_config jsonb default '{}'::jsonb,
+  whatsapp_config jsonb default '{}'::jsonb,
+  video_config jsonb default '{}'::jsonb,
+  mentor jsonb default '{}'::jsonb,
+  seo jsonb default '{}'::jsonb,
+  what_you_learn jsonb default '[]'::jsonb,
+  who_should_attend jsonb default '[]'::jsonb,
+  what_you_get jsonb default '[]'::jsonb,
+  reviews jsonb default '[]'::jsonb,
+  sections jsonb default '[]'::jsonb,
   created_at timestamptz default now()
 );
 
@@ -213,6 +225,18 @@ create table if not exists public.webinars (
   pdf_resources jsonb default '[]'::jsonb,
   coupons jsonb default '[]'::jsonb,
   active boolean default true,
+  about_html text,
+  badge_label text,
+  seat_config jsonb default '{}'::jsonb,
+  whatsapp_config jsonb default '{}'::jsonb,
+  video_config jsonb default '{}'::jsonb,
+  mentor jsonb default '{}'::jsonb,
+  seo jsonb default '{}'::jsonb,
+  what_you_learn jsonb default '[]'::jsonb,
+  who_should_attend jsonb default '[]'::jsonb,
+  what_you_get jsonb default '[]'::jsonb,
+  reviews jsonb default '[]'::jsonb,
+  sections jsonb default '[]'::jsonb,
   created_at timestamptz default now()
 );
 

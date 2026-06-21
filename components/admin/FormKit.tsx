@@ -1,8 +1,52 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 
 /** Wide, multi-section admin form layout primitives (light theme, royal blue). */
+
+/**
+ * Lightweight tabbed layout. All panels stay mounted (toggled with `hidden`) so
+ * controlled inputs — including the TipTap editor — never lose state or remount
+ * when switching tabs.
+ */
+export function Tabs({
+  items,
+}: {
+  items: { id: string; label: string; content: React.ReactNode }[];
+}) {
+  const [active, setActive] = useState(items[0]?.id);
+  return (
+    <div>
+      <div role="tablist" className="no-scrollbar -mx-1 flex gap-1 overflow-x-auto border-b border-line px-1">
+        {items.map((t) => {
+          const on = active === t.id;
+          return (
+            <button
+              key={t.id}
+              type="button"
+              role="tab"
+              aria-selected={on}
+              onClick={() => setActive(t.id)}
+              className={`whitespace-nowrap border-b-2 px-3.5 py-2.5 text-sm font-semibold transition ${
+                on ? "border-primary text-primary" : "border-transparent text-ink2 hover:text-ink"
+              }`}
+            >
+              {t.label}
+            </button>
+          );
+        })}
+      </div>
+      <div className="mt-6">
+        {items.map((t) => (
+          <div key={t.id} hidden={active !== t.id} className="space-y-6">
+            {t.content}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 export function FormShell({
   title,

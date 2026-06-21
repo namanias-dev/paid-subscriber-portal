@@ -9,7 +9,13 @@ import CourseCard from "@/components/public/CourseCard";
 import CoverImage from "@/components/public/CoverImage";
 import ContactButtons from "@/components/public/ContactButtons";
 import ResourceList from "@/components/public/ResourceList";
+import SeatCounter from "@/components/public/SeatCounter";
+import WhatsAppButton from "@/components/public/WhatsAppButton";
+import TrustStrip from "@/components/public/TrustStrip";
+import StickyMobileCTA from "@/components/public/StickyMobileCTA";
+import LandingSections from "@/components/public/LandingSections";
 import type { Course } from "@/lib/types";
+import type { LandingView } from "@/lib/landingView";
 
 const TABS = ["Overview", "Curriculum", "Schedule", "Faculty", "What's Included", "Fees & EMI", "FAQs"];
 
@@ -19,14 +25,22 @@ const COURSE_FAQ = [
   { q: "Can I pay in installments?", a: "Most programs support EMI. See the Fees & EMI tab for details." },
 ];
 
-export default function CourseDetail({ course, related, comparison }: { course: Course; related: Course[]; comparison: Course[] }) {
+export default function CourseDetail({ course, related, comparison, view }: { course: Course; related: Course[]; comparison: Course[]; view: LandingView }) {
   const [tab, setTab] = useState("Overview");
   const off = discountPct(course.price, course.original_price);
   const faqs = (course.faqs || []).filter((f) => f.q?.trim());
   const faqItems = faqs.length ? faqs : COURSE_FAQ;
+  const priceLabel = course.price === 0 ? "Free" : formatINR(course.price);
+
+  const trust = [
+    { icon: "👨‍🏫", label: `Mentor: ${course.faculty}` },
+    { icon: "🎯", label: `Target ${course.target_years}` },
+    ...(course.duration ? [{ icon: "⏱", label: course.duration }] : []),
+    ...(view.ratingCount ? [{ icon: "⭐", label: `${view.ratingAvg}/5 (${view.ratingCount})` }] : []),
+  ];
 
   return (
-    <div className="container-wide section">
+    <div className="container-wide section pb-28 lg:pb-24">
       <div className="grid gap-8 lg:grid-cols-3">
         {/* Main */}
         <div className="lg:col-span-2">
@@ -43,9 +57,24 @@ export default function CourseDetail({ course, related, comparison }: { course: 
           <div className="mt-3 flex flex-wrap gap-4 text-sm text-ink2">
             <span>🎯 Target: {course.target_years}</span>
             {course.duration && <span>⏱ {course.duration}</span>}
-            {course.seats_left != null && <span>🪑 {course.seats_left} seats left</span>}
             <span>👨‍🏫 {course.faculty}</span>
           </div>
+
+          <div className="mt-4">
+            <SeatCounter seat={view.seat} />
+          </div>
+
+          <div className="mt-5 flex flex-wrap gap-3">
+            <Link href={`/enroll/${course.slug}`} className="btn btn-primary">
+              {course.price === 0 ? "Book Now" : "Enroll Now →"}
+            </Link>
+            <WhatsAppButton config={view.whatsapp} />
+          </div>
+
+          <TrustStrip items={trust} />
+
+          {/* Premium landing sections (rich About, learn, mentor, reviews, video, flexible) */}
+          <LandingSections view={view} aboutTitle="About this course" whoTitle="Who is this for?" />
 
           {/* Tabs */}
           <div className="no-scrollbar mt-8 flex gap-2 overflow-x-auto border-b border-line">
@@ -196,10 +225,15 @@ export default function CourseDetail({ course, related, comparison }: { course: 
               </div>
               {course.emi_amount && <p className="mt-1 text-sm text-ink2">or EMI from {formatINR(course.emi_amount)}/mo</p>}
 
+              <div className="mt-3">
+                <SeatCounter seat={view.seat} compact />
+              </div>
+
               <Link href={`/enroll/${course.slug}`} className="btn btn-primary mt-5 w-full">
                 {course.price === 0 ? "Book Now" : "Enroll Now →"}
               </Link>
               <Link href="/demo" className="btn btn-secondary mt-2 w-full">Book a Free Demo</Link>
+              <WhatsAppButton config={view.whatsapp} className="mt-2 w-full" />
 
               <ul className="mt-5 space-y-2 text-sm text-ink2">
                 {course.included.slice(0, 4).map((x) => <li key={x}>✓ {x}</li>)}
@@ -208,6 +242,13 @@ export default function CourseDetail({ course, related, comparison }: { course: 
           </div>
         </div>
       </div>
+
+      <StickyMobileCTA
+        priceLabel={priceLabel}
+        ctaLabel={course.price === 0 ? "Book Now" : "Enroll Now"}
+        ctaHref={`/enroll/${course.slug}`}
+        whatsapp={view.whatsapp}
+      />
     </div>
   );
 }
