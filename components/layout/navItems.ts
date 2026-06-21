@@ -10,6 +10,7 @@ export const STUDENT_NAV: NavItem[] = [
   { href: "/dashboard/library", label: "Daily Feed", icon: "📰" },
   { href: "/dashboard/live", label: "Live Classes", icon: "🔴" },
   { href: "/dashboard/tests", label: "Test Series", icon: "🧪" },
+  { href: "/dashboard/quizzes", label: "Quizzes & MCQs", icon: "📝" },
   { href: "/dashboard/material", label: "Study Material", icon: "📚" },
   { href: "/dashboard/mentorship", label: "Mentorship", icon: "🤝" },
   { href: "/dashboard/bookmarks", label: "Bookmarks", icon: "⭐" },

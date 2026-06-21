@@ -14,6 +14,12 @@ import type {
   Payment,
   Referral,
   Staff,
+  Question,
+  Quiz,
+  QuizQuestion,
+  QuizAttempt,
+  QuizAnswer,
+  ImportJob,
 } from "./types";
 
 const DAY = 86400000;
@@ -391,3 +397,138 @@ export const adminUsers: (AdminUser & { plaintext_password: string; role: Staff[
     created_at: iso(now - 200 * DAY),
   },
 ];
+
+// =================================================================
+// QUIZ PLATFORM (demo data for local/mock mode)
+// =================================================================
+function q(partial: Partial<Question> & Pick<Question, "id" | "question_html" | "options" | "correct_option">): Question {
+  return {
+    question_image: null,
+    passage_id: null,
+    explanation_html: null,
+    short_explanation: null,
+    subject: "Polity",
+    topic: null,
+    subtopic: null,
+    difficulty: "Moderate",
+    tags: [],
+    source: null,
+    source_url: null,
+    is_pyq: false,
+    pyq_year: null,
+    current_affairs_date: null,
+    language: "English",
+    status: "published",
+    quality_status: "approved",
+    allow_in_public_quiz: true,
+    allow_in_paid_quiz: true,
+    marks_override: null,
+    negative_marks_override: null,
+    duplicate_check_hash: null,
+    created_by: "demo",
+    created_at: iso(now - 5 * DAY),
+    updated_at: iso(now - 5 * DAY),
+    ...partial,
+  };
+}
+
+export const questions: Question[] = [
+  q({
+    id: "qz-q-0001",
+    question_html: "Which Article of the Indian Constitution deals with the Right to Constitutional Remedies?",
+    options: { A: "Article 19", B: "Article 21", C: "Article 32", D: "Article 44" },
+    correct_option: "C",
+    explanation_html: "<p>Article 32 is called the 'heart and soul' of the Constitution by Dr. B. R. Ambedkar. It guarantees the right to move the Supreme Court for enforcement of Fundamental Rights.</p>",
+    short_explanation: "Article 32 — Right to Constitutional Remedies.",
+    subject: "Polity", topic: "Fundamental Rights", difficulty: "Easy",
+    tags: ["constitution", "fundamental-rights"], is_pyq: true, pyq_year: 2019,
+  }),
+  q({
+    id: "qz-q-0002",
+    question_html: "The 'Doctrine of Basic Structure' was propounded by the Supreme Court in which case?",
+    options: { A: "Golaknath case", B: "Kesavananda Bharati case", C: "Minerva Mills case", D: "Maneka Gandhi case" },
+    correct_option: "B",
+    explanation_html: "<p>The Basic Structure doctrine was established in the Kesavananda Bharati v. State of Kerala (1973) case.</p>",
+    short_explanation: "Kesavananda Bharati case (1973).",
+    subject: "Polity", topic: "Judiciary", difficulty: "Moderate", tags: ["judiciary", "amendments"],
+  }),
+  q({
+    id: "qz-q-0003",
+    question_html: "Which one of the following rivers is a tributary of the Brahmaputra?",
+    options: { A: "Chambal", B: "Subansiri", C: "Betwa", D: "Son" },
+    correct_option: "B",
+    explanation_html: "<p>The Subansiri is the largest tributary of the Brahmaputra river.</p>",
+    short_explanation: "Subansiri — largest tributary of the Brahmaputra.",
+    subject: "Geography", topic: "Indian Rivers", difficulty: "Moderate", tags: ["rivers", "geography"],
+  }),
+];
+
+export const quizzes: Quiz[] = [
+  {
+    id: "qz-0001",
+    title: "Daily UPSC Prelims-style Quiz — Polity & Geography",
+    slug: "daily-upsc-prelims-quiz-polity-geography",
+    description: "A quick UPSC CSE-style MCQ practice set covering Polity and Geography fundamentals.",
+    instructions_html: "<p>3 questions · 6 marks · negative marking 1/3. Read each question carefully.</p>",
+    type: "FreePublic",
+    exam_type: "PrelimsGS",
+    subject: "General Studies",
+    topic: null,
+    quiz_date: isoDate(now),
+    quiz_month: null,
+    quiz_year: new Date(now).getFullYear(),
+    difficulty: "Moderate",
+    language: "English",
+    thumbnail: null,
+    status: "published",
+    is_public: true,
+    requires_login: false,
+    requires_payment: false,
+    time_limit_minutes: 10,
+    marks_per_question: 2,
+    negative_marking_enabled: true,
+    negative_fraction: 0.3333,
+    max_attempts: null,
+    scoring_settings: { no_penalty_for_blank: true, negative_marks_type: "fraction" },
+    timing_settings: { time_limit_enabled: true, auto_submit_on_time_end: true, server_time_validation: true, show_timer: true },
+    attempt_settings: { access_without_login: true, randomize_question_order: false },
+    result_settings: { show_result_immediately: true, show_score: true, show_correct_answers: true, show_explanations: true, show_answer_key: true, show_pdf_download: true },
+    access_rules: {},
+    seo: {
+      seo_title: "Daily UPSC Prelims-style Quiz — Polity & Geography | Naman IAS",
+      seo_description: "Free UPSC CSE-style MCQ practice. Attempt today's Prelims-style quiz with instant results and explanations.",
+      indexable: true,
+      include_in_sitemap: true,
+      structured_data_enabled: true,
+    },
+    published_at: iso(now - 1 * DAY),
+    created_by: "demo",
+    created_at: iso(now - 2 * DAY),
+    updated_at: iso(now - 1 * DAY),
+  },
+];
+
+export const quizQuestions: QuizQuestion[] = questions.map((qq, i) => ({
+  id: `qz-qq-${i + 1}`,
+  quiz_id: "qz-0001",
+  question_id: qq.id,
+  order_index: i,
+  section: null,
+  marks: 2,
+  negative_marks: 0.6667,
+  snapshot: {
+    question_html: qq.question_html,
+    options: qq.options,
+    correct_option: qq.correct_option,
+    explanation_html: qq.explanation_html,
+    short_explanation: qq.short_explanation,
+    subject: qq.subject,
+    topic: qq.topic,
+    difficulty: qq.difficulty,
+  },
+  created_at: iso(now - 2 * DAY),
+}));
+
+export const quizAttempts: QuizAttempt[] = [];
+export const quizAnswers: QuizAnswer[] = [];
+export const importJobs: ImportJob[] = [];

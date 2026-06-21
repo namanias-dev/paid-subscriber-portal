@@ -9,6 +9,7 @@ import { ACADEMY } from "@/lib/config";
 
 const LINKS = [
   { href: "/courses", label: "Courses" },
+  { href: "/quizzes", label: "Quizzes" },
   { href: "/results", label: "Results" },
   { href: "/webinars", label: "Webinars" },
   { href: "/free-resources", label: "Free Resources" },

@@ -19,6 +19,12 @@ import type {
   Referral,
   Staff,
   SiteSettings,
+  Question,
+  Quiz,
+  QuizQuestion,
+  QuizAttempt,
+  QuizAnswer,
+  ImportJob,
 } from "./types";
 import { mergeSiteSettings } from "./homeDefaults";
 
@@ -1021,4 +1027,435 @@ export async function updateSiteSettings(patch: Partial<SiteSettings>): Promise<
     .single();
   if (error) throw new Error(error.message);
   return mergeSiteSettings(data as Partial<SiteSettings>);
+}
+
+// ============================ QUIZ PLATFORM ============================
+function slugify(s: string): string {
+  return (s || "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+}
+
+// ---------------------------- Questions ----------------------------
+export async function getQuestions(): Promise<Question[]> {
+  if (demoMode()) return [...mock.questions];
+  const rows = await dbSelect<Question>("questions");
+  return rows.length ? rows : [];
+}
+export async function getQuestionById(id: string): Promise<Question | null> {
+  if (demoMode()) return mock.questions.find((x) => x.id === id) ?? null;
+  const db = getSupabaseAdmin();
+  if (!db) return null;
+  const { data } = await db.from("questions").select("*").eq("id", id).maybeSingle();
+  return (data as Question) ?? null;
+}
+export async function getQuestionsByIds(ids: string[]): Promise<Question[]> {
+  if (!ids.length) return [];
+  if (demoMode()) return mock.questions.filter((x) => ids.includes(x.id));
+  const db = getSupabaseAdmin();
+  if (!db) return [];
+  const { data } = await db.from("questions").select("*").in("id", ids);
+  return (data as Question[]) ?? [];
+}
+export async function addQuestion(input: Partial<Question>): Promise<Question> {
+  const ts = new Date().toISOString();
+  const row: Question = {
+    id: uuid(),
+    question_html: input.question_html || "",
+    question_image: input.question_image ?? null,
+    passage_id: input.passage_id ?? null,
+    options: input.options || { A: "", B: "", C: "", D: "" },
+    correct_option: input.correct_option || "A",
+    explanation_html: input.explanation_html ?? null,
+    short_explanation: input.short_explanation ?? null,
+    subject: input.subject ?? null,
+    topic: input.topic ?? null,
+    subtopic: input.subtopic ?? null,
+    difficulty: input.difficulty || "Moderate",
+    tags: input.tags || [],
+    source: input.source ?? null,
+    source_url: input.source_url ?? null,
+    is_pyq: input.is_pyq ?? false,
+    pyq_year: input.pyq_year ?? null,
+    current_affairs_date: input.current_affairs_date ?? null,
+    language: input.language || "English",
+    status: input.status || "draft",
+    quality_status: input.quality_status || "unreviewed",
+    allow_in_public_quiz: input.allow_in_public_quiz ?? true,
+    allow_in_paid_quiz: input.allow_in_paid_quiz ?? true,
+    marks_override: input.marks_override ?? null,
+    negative_marks_override: input.negative_marks_override ?? null,
+    duplicate_check_hash: input.duplicate_check_hash ?? null,
+    created_by: input.created_by ?? null,
+    created_at: ts,
+    updated_at: ts,
+  };
+  if (demoMode()) {
+    mock.questions.unshift(row);
+    return row;
+  }
+  return dbInsert<Question>("questions", row as unknown as Record<string, unknown>);
+}
+export async function updateQuestion(id: string, patch: Partial<Question>): Promise<Question | null> {
+  const next = { ...patch, updated_at: new Date().toISOString() };
+  if (demoMode()) {
+    const idx = mock.questions.findIndex((x) => x.id === id);
+    if (idx === -1) return null;
+    mock.questions[idx] = { ...mock.questions[idx], ...next };
+    return mock.questions[idx];
+  }
+  return dbUpdate<Question>("questions", id, next as Record<string, unknown>);
+}
+export async function deleteQuestion(id: string): Promise<boolean> {
+  if (demoMode()) {
+    const idx = mock.questions.findIndex((x) => x.id === id);
+    if (idx === -1) return false;
+    mock.questions.splice(idx, 1);
+    return true;
+  }
+  return dbDelete("questions", id);
+}
+
+// ------------------------------ Quizzes ----------------------------
+export async function getAllQuizzes(): Promise<Quiz[]> {
+  if (demoMode()) return [...mock.quizzes];
+  const rows = await dbSelect<Quiz>("quizzes");
+  return rows.length ? rows : [];
+}
+export async function getPublicQuizzes(): Promise<Quiz[]> {
+  const all = await getAllQuizzes();
+  return all.filter((q) => q.status === "published" && q.is_public);
+}
+export async function getQuizById(id: string): Promise<Quiz | null> {
+  if (demoMode()) return mock.quizzes.find((q) => q.id === id) ?? null;
+  const db = getSupabaseAdmin();
+  if (!db) return null;
+  const { data } = await db.from("quizzes").select("*").eq("id", id).maybeSingle();
+  return (data as Quiz) ?? null;
+}
+export async function getQuizBySlug(slug: string): Promise<Quiz | null> {
+  if (demoMode()) return mock.quizzes.find((q) => q.slug === slug) ?? null;
+  const db = getSupabaseAdmin();
+  if (!db) return null;
+  const { data } = await db.from("quizzes").select("*").eq("slug", slug).maybeSingle();
+  return (data as Quiz) ?? null;
+}
+export async function addQuiz(input: Partial<Quiz>): Promise<Quiz> {
+  const ts = new Date().toISOString();
+  const row: Quiz = {
+    id: uuid(),
+    title: input.title || "Untitled Quiz",
+    slug: input.slug || slugify(input.title || "quiz") || `quiz-${Date.now()}`,
+    description: input.description ?? null,
+    instructions_html: input.instructions_html ?? null,
+    type: input.type || "FreePublic",
+    exam_type: input.exam_type || "PrelimsGS",
+    subject: input.subject ?? null,
+    topic: input.topic ?? null,
+    quiz_date: input.quiz_date ?? null,
+    quiz_month: input.quiz_month ?? null,
+    quiz_year: input.quiz_year ?? null,
+    difficulty: input.difficulty || "Moderate",
+    language: input.language || "English",
+    thumbnail: input.thumbnail ?? null,
+    status: input.status || "draft",
+    is_public: input.is_public ?? true,
+    requires_login: input.requires_login ?? false,
+    requires_payment: input.requires_payment ?? false,
+    time_limit_minutes: input.time_limit_minutes ?? null,
+    marks_per_question: input.marks_per_question ?? 2,
+    negative_marking_enabled: input.negative_marking_enabled ?? true,
+    negative_fraction: input.negative_fraction ?? 0.3333,
+    max_attempts: input.max_attempts ?? null,
+    scoring_settings: input.scoring_settings || {},
+    timing_settings: input.timing_settings || {},
+    attempt_settings: input.attempt_settings || {},
+    result_settings: input.result_settings || {},
+    access_rules: input.access_rules || {},
+    seo: input.seo || {},
+    published_at: input.published_at ?? null,
+    created_by: input.created_by ?? null,
+    created_at: ts,
+    updated_at: ts,
+  };
+  if (demoMode()) {
+    mock.quizzes.unshift(row);
+    return row;
+  }
+  return dbInsert<Quiz>("quizzes", row as unknown as Record<string, unknown>);
+}
+export async function updateQuiz(id: string, patch: Partial<Quiz>): Promise<Quiz | null> {
+  const next = { ...patch, updated_at: new Date().toISOString() };
+  if (demoMode()) {
+    const idx = mock.quizzes.findIndex((q) => q.id === id);
+    if (idx === -1) return null;
+    mock.quizzes[idx] = { ...mock.quizzes[idx], ...next };
+    return mock.quizzes[idx];
+  }
+  return dbUpdate<Quiz>("quizzes", id, next as Record<string, unknown>);
+}
+export async function deleteQuiz(id: string): Promise<boolean> {
+  if (demoMode()) {
+    const idx = mock.quizzes.findIndex((q) => q.id === id);
+    if (idx === -1) return false;
+    mock.quizzes.splice(idx, 1);
+    const keep = mock.quizQuestions.filter((qq) => qq.quiz_id !== id);
+    mock.quizQuestions.splice(0, mock.quizQuestions.length, ...keep);
+    return true;
+  }
+  return dbDelete("quizzes", id);
+}
+
+// -------------------------- Quiz ↔ Questions -----------------------
+export async function getQuizQuestions(quizId: string): Promise<QuizQuestion[]> {
+  if (demoMode()) {
+    return mock.quizQuestions.filter((qq) => qq.quiz_id === quizId).sort((a, b) => a.order_index - b.order_index);
+  }
+  const db = getSupabaseAdmin();
+  if (!db) return [];
+  const { data } = await db.from("quiz_questions").select("*").eq("quiz_id", quizId).order("order_index", { ascending: true });
+  return (data as QuizQuestion[]) ?? [];
+}
+export async function addQuizQuestion(input: Partial<QuizQuestion> & { quiz_id: string; question_id: string }): Promise<QuizQuestion> {
+  const row: QuizQuestion = {
+    id: uuid(),
+    quiz_id: input.quiz_id,
+    question_id: input.question_id,
+    order_index: input.order_index ?? 0,
+    section: input.section ?? null,
+    marks: input.marks ?? null,
+    negative_marks: input.negative_marks ?? null,
+    snapshot: input.snapshot || {},
+    created_at: new Date().toISOString(),
+  };
+  if (demoMode()) {
+    mock.quizQuestions.push(row);
+    return row;
+  }
+  return dbInsert<QuizQuestion>("quiz_questions", row as unknown as Record<string, unknown>);
+}
+/** Replace all questions for a quiz (used by the builder save). */
+export async function setQuizQuestions(quizId: string, items: (Partial<QuizQuestion> & { question_id: string })[]): Promise<QuizQuestion[]> {
+  if (demoMode()) {
+    const keep = mock.quizQuestions.filter((qq) => qq.quiz_id !== quizId);
+    const rows = items.map((it, i) => ({
+      id: uuid(),
+      quiz_id: quizId,
+      question_id: it.question_id,
+      order_index: it.order_index ?? i,
+      section: it.section ?? null,
+      marks: it.marks ?? null,
+      negative_marks: it.negative_marks ?? null,
+      snapshot: it.snapshot || {},
+      created_at: new Date().toISOString(),
+    }) as QuizQuestion);
+    mock.quizQuestions.splice(0, mock.quizQuestions.length, ...keep, ...rows);
+    return rows;
+  }
+  const db = getSupabaseAdmin();
+  if (!db) return [];
+  await db.from("quiz_questions").delete().eq("quiz_id", quizId);
+  const rows = items.map((it, i) => ({
+    id: uuid(),
+    quiz_id: quizId,
+    question_id: it.question_id,
+    order_index: it.order_index ?? i,
+    section: it.section ?? null,
+    marks: it.marks ?? null,
+    negative_marks: it.negative_marks ?? null,
+    snapshot: it.snapshot || {},
+    created_at: new Date().toISOString(),
+  }));
+  if (rows.length) {
+    const { error } = await db.from("quiz_questions").insert(rows);
+    if (error) throw new Error(error.message);
+  }
+  return rows as QuizQuestion[];
+}
+
+// ---------------------------- Attempts -----------------------------
+export async function getAttemptById(id: string): Promise<QuizAttempt | null> {
+  if (demoMode()) return mock.quizAttempts.find((a) => a.id === id) ?? null;
+  const db = getSupabaseAdmin();
+  if (!db) return null;
+  const { data } = await db.from("quiz_attempts").select("*").eq("id", id).maybeSingle();
+  return (data as QuizAttempt) ?? null;
+}
+export async function getAttemptsByQuiz(quizId: string): Promise<QuizAttempt[]> {
+  if (demoMode()) return mock.quizAttempts.filter((a) => a.quiz_id === quizId);
+  const db = getSupabaseAdmin();
+  if (!db) return [];
+  const { data } = await db.from("quiz_attempts").select("*").eq("quiz_id", quizId).order("created_at", { ascending: false });
+  return (data as QuizAttempt[]) ?? [];
+}
+export async function getAllAttempts(): Promise<QuizAttempt[]> {
+  if (demoMode()) return [...mock.quizAttempts];
+  const db = getSupabaseAdmin();
+  if (!db) return [];
+  const { data } = await db.from("quiz_attempts").select("*").order("created_at", { ascending: false });
+  return (data as QuizAttempt[]) ?? [];
+}
+export async function getAttemptsByUser(userId: string): Promise<QuizAttempt[]> {
+  if (demoMode()) return mock.quizAttempts.filter((a) => a.user_id === userId);
+  const db = getSupabaseAdmin();
+  if (!db) return [];
+  const { data } = await db.from("quiz_attempts").select("*").eq("user_id", userId).order("created_at", { ascending: false });
+  return (data as QuizAttempt[]) ?? [];
+}
+export async function addAttempt(input: Partial<QuizAttempt> & { quiz_id: string }): Promise<QuizAttempt> {
+  const ts = new Date().toISOString();
+  const row: QuizAttempt = {
+    id: uuid(),
+    quiz_id: input.quiz_id,
+    user_id: input.user_id ?? null,
+    guest_session_id: input.guest_session_id ?? null,
+    guest_name: input.guest_name ?? null,
+    guest_email: input.guest_email ?? null,
+    guest_mobile: input.guest_mobile ?? null,
+    status: input.status || "IN_PROGRESS",
+    started_at: input.started_at || ts,
+    submitted_at: input.submitted_at ?? null,
+    expires_at: input.expires_at ?? null,
+    time_taken_seconds: input.time_taken_seconds ?? null,
+    score: input.score ?? 0,
+    max_score: input.max_score ?? 0,
+    correct_count: input.correct_count ?? 0,
+    incorrect_count: input.incorrect_count ?? 0,
+    unattempted_count: input.unattempted_count ?? 0,
+    accuracy: input.accuracy ?? 0,
+    negative_marks: input.negative_marks ?? 0,
+    percentile: input.percentile ?? null,
+    rank: input.rank ?? null,
+    result_summary: input.result_summary || {},
+    created_at: ts,
+    updated_at: ts,
+  };
+  if (demoMode()) {
+    mock.quizAttempts.unshift(row);
+    return row;
+  }
+  return dbInsert<QuizAttempt>("quiz_attempts", row as unknown as Record<string, unknown>);
+}
+export async function updateAttempt(id: string, patch: Partial<QuizAttempt>): Promise<QuizAttempt | null> {
+  const next = { ...patch, updated_at: new Date().toISOString() };
+  if (demoMode()) {
+    const idx = mock.quizAttempts.findIndex((a) => a.id === id);
+    if (idx === -1) return null;
+    mock.quizAttempts[idx] = { ...mock.quizAttempts[idx], ...next };
+    return mock.quizAttempts[idx];
+  }
+  return dbUpdate<QuizAttempt>("quiz_attempts", id, next as Record<string, unknown>);
+}
+
+// ----------------------------- Answers -----------------------------
+export async function getAnswersByAttempt(attemptId: string): Promise<QuizAnswer[]> {
+  if (demoMode()) return mock.quizAnswers.filter((a) => a.attempt_id === attemptId);
+  const db = getSupabaseAdmin();
+  if (!db) return [];
+  const { data } = await db.from("quiz_answers").select("*").eq("attempt_id", attemptId);
+  return (data as QuizAnswer[]) ?? [];
+}
+export async function getAllAnswers(): Promise<QuizAnswer[]> {
+  if (demoMode()) return [...mock.quizAnswers];
+  const db = getSupabaseAdmin();
+  if (!db) return [];
+  const { data } = await db.from("quiz_answers").select("*");
+  return (data as QuizAnswer[]) ?? [];
+}
+/** Insert or update the answer for a given (attempt, question). */
+export async function saveAnswer(input: Partial<QuizAnswer> & { attempt_id: string; question_id: string }): Promise<QuizAnswer> {
+  const ts = new Date().toISOString();
+  if (demoMode()) {
+    const idx = mock.quizAnswers.findIndex((a) => a.attempt_id === input.attempt_id && a.question_id === input.question_id);
+    if (idx !== -1) {
+      mock.quizAnswers[idx] = { ...mock.quizAnswers[idx], ...input, updated_at: ts };
+      return mock.quizAnswers[idx];
+    }
+    const row: QuizAnswer = {
+      id: uuid(),
+      attempt_id: input.attempt_id,
+      quiz_id: input.quiz_id || "",
+      question_id: input.question_id,
+      selected_option: input.selected_option ?? null,
+      is_correct: input.is_correct ?? false,
+      is_unattempted: input.is_unattempted ?? true,
+      marks_awarded: input.marks_awarded ?? 0,
+      negative_marks_deducted: input.negative_marks_deducted ?? 0,
+      time_spent_seconds: input.time_spent_seconds ?? null,
+      marked_for_review: input.marked_for_review ?? false,
+      answer_snapshot: input.answer_snapshot || {},
+      created_at: ts,
+      updated_at: ts,
+    };
+    mock.quizAnswers.push(row);
+    return row;
+  }
+  const db = getSupabaseAdmin();
+  if (!db) throw new Error("No database");
+  const existing = await db
+    .from("quiz_answers")
+    .select("id")
+    .eq("attempt_id", input.attempt_id)
+    .eq("question_id", input.question_id)
+    .maybeSingle();
+  if (existing.data?.id) {
+    const { data, error } = await db
+      .from("quiz_answers")
+      .update({ ...input, updated_at: ts })
+      .eq("id", existing.data.id)
+      .select()
+      .single();
+    if (error) throw new Error(error.message);
+    return data as QuizAnswer;
+  }
+  const row = {
+    id: uuid(),
+    attempt_id: input.attempt_id,
+    quiz_id: input.quiz_id || "",
+    question_id: input.question_id,
+    selected_option: input.selected_option ?? null,
+    is_correct: input.is_correct ?? false,
+    is_unattempted: input.is_unattempted ?? true,
+    marks_awarded: input.marks_awarded ?? 0,
+    negative_marks_deducted: input.negative_marks_deducted ?? 0,
+    time_spent_seconds: input.time_spent_seconds ?? null,
+    marked_for_review: input.marked_for_review ?? false,
+    answer_snapshot: input.answer_snapshot || {},
+    created_at: ts,
+    updated_at: ts,
+  };
+  return dbInsert<QuizAnswer>("quiz_answers", row as unknown as Record<string, unknown>);
+}
+
+// ---------------------------- Import jobs --------------------------
+export async function getImportJobs(): Promise<ImportJob[]> {
+  if (demoMode()) return [...mock.importJobs];
+  const rows = await dbSelect<ImportJob>("import_jobs");
+  return rows.length ? rows : [];
+}
+export async function addImportJob(input: Partial<ImportJob>): Promise<ImportJob> {
+  const row: ImportJob = {
+    id: uuid(),
+    type: input.type || "BULK_TEXT",
+    source_config: input.source_config || {},
+    status: input.status || "pending",
+    total_rows: input.total_rows ?? 0,
+    success_count: input.success_count ?? 0,
+    error_count: input.error_count ?? 0,
+    errors: input.errors || [],
+    created_by: input.created_by ?? null,
+    created_at: new Date().toISOString(),
+  };
+  if (demoMode()) {
+    mock.importJobs.unshift(row);
+    return row;
+  }
+  return dbInsert<ImportJob>("import_jobs", row as unknown as Record<string, unknown>);
+}
+export async function updateImportJob(id: string, patch: Partial<ImportJob>): Promise<ImportJob | null> {
+  if (demoMode()) {
+    const idx = mock.importJobs.findIndex((j) => j.id === id);
+    if (idx === -1) return null;
+    mock.importJobs[idx] = { ...mock.importJobs[idx], ...patch };
+    return mock.importJobs[idx];
+  }
+  return dbUpdate<ImportJob>("import_jobs", id, patch as Record<string, unknown>);
 }

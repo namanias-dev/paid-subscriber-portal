@@ -586,3 +586,256 @@ export interface SiteSettings {
   brand: BrandConfig;
   updated_at?: string;
 }
+
+// ============================ QUIZ / TEST PLATFORM ============================
+// UPSC Prelims-style MCQ practice. All new tables are additive & backward-compatible.
+
+export type QuizOptionKey = "A" | "B" | "C" | "D" | "E";
+export type QuizDifficulty = "Easy" | "Moderate" | "Difficult" | "UPSC-level";
+export type QuizLanguage = "English" | "Hindi" | "Bilingual";
+export type QuestionStatus = "draft" | "published" | "archived";
+export type QuestionQuality = "unreviewed" | "approved" | "flagged";
+
+export interface QuestionOptions {
+  A: string;
+  B: string;
+  C: string;
+  D: string;
+  E?: string | null;
+}
+
+export interface Question {
+  id: string;
+  question_html: string;
+  question_image: string | null;
+  passage_id: string | null;
+  options: QuestionOptions;
+  correct_option: QuizOptionKey;
+  explanation_html: string | null;
+  short_explanation: string | null;
+  subject: string | null;
+  topic: string | null;
+  subtopic: string | null;
+  difficulty: QuizDifficulty;
+  tags: string[];
+  source: string | null;
+  source_url: string | null;
+  is_pyq: boolean;
+  pyq_year: number | null;
+  current_affairs_date: string | null;
+  language: QuizLanguage;
+  status: QuestionStatus;
+  quality_status: QuestionQuality;
+  allow_in_public_quiz: boolean;
+  allow_in_paid_quiz: boolean;
+  marks_override: number | null;
+  negative_marks_override: number | null;
+  duplicate_check_hash: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type QuizType =
+  | "Daily" | "CurrentAffairs" | "Topic" | "Subject" | "Sectional"
+  | "FullMock" | "Course" | "PaidSubscriber" | "FreePublic";
+export type QuizExamType = "PrelimsGS" | "CSAT" | "General";
+export type QuizStatus = "draft" | "published" | "scheduled" | "archived" | "disabled";
+
+export interface QuizScoringSettings {
+  negative_marks_type?: "fraction" | "fixed";
+  no_penalty_for_blank?: boolean;
+  total_marks?: number;
+  passing_marks?: number | null;
+  show_percentile?: boolean;
+  show_rank?: boolean;
+  expected_cutoff?: number | null;
+}
+export interface QuizTimingSettings {
+  time_limit_enabled?: boolean;
+  start_at?: string | null;
+  end_at?: string | null;
+  scheduled_release?: string | null;
+  scheduled_close?: string | null;
+  auto_submit_on_time_end?: boolean;
+  server_time_validation?: boolean;
+  resume_allowed?: boolean;
+  max_resume_count?: number | null;
+  show_timer?: boolean;
+}
+export interface QuizAttemptSettings {
+  access_without_login?: boolean;
+  login_required?: boolean;
+  retry_allowed?: boolean;
+  score_count?: "best" | "latest";
+  randomize_question_order?: boolean;
+  randomize_option_order?: boolean;
+  one_at_a_time?: boolean;
+  tab_switch_warning?: boolean;
+}
+export interface QuizResultSettings {
+  show_result_immediately?: boolean;
+  show_score?: boolean;
+  show_correct_answers?: boolean;
+  show_explanations?: boolean;
+  show_topic_analysis?: boolean;
+  show_rank_percentile?: boolean;
+  show_answer_key?: boolean;
+  show_pdf_download?: boolean;
+  reveal_explanations_after?: string | null;
+  capture_lead_before_result?: boolean;
+}
+export interface QuizAccessRules {
+  allowed_course_ids?: string[];
+  allowed_batch_ids?: string[];
+  allowed_plan_ids?: string[];
+  allowed_user_ids?: string[];
+  allowed_user_types?: string[];
+  active_from?: string | null;
+  active_to?: string | null;
+  expires_at?: string | null;
+}
+export interface QuizSeo {
+  seo_title?: string;
+  seo_description?: string;
+  seo_keywords?: string;
+  canonical_url?: string;
+  og_title?: string;
+  og_description?: string;
+  og_image?: string;
+  indexable?: boolean;
+  include_in_sitemap?: boolean;
+  structured_data_enabled?: boolean;
+  public_summary?: string;
+  faq?: { q: string; a: string }[];
+}
+
+export interface Quiz {
+  id: string;
+  title: string;
+  slug: string;
+  description: string | null;
+  instructions_html: string | null;
+  type: QuizType;
+  exam_type: QuizExamType;
+  subject: string | null;
+  topic: string | null;
+  quiz_date: string | null;
+  quiz_month: string | null;
+  quiz_year: number | null;
+  difficulty: QuizDifficulty;
+  language: QuizLanguage;
+  thumbnail: string | null;
+  status: QuizStatus;
+  is_public: boolean;
+  requires_login: boolean;
+  requires_payment: boolean;
+  time_limit_minutes: number | null;
+  marks_per_question: number;
+  negative_marking_enabled: boolean;
+  negative_fraction: number;
+  max_attempts: number | null;
+  scoring_settings: QuizScoringSettings;
+  timing_settings: QuizTimingSettings;
+  attempt_settings: QuizAttemptSettings;
+  result_settings: QuizResultSettings;
+  access_rules: QuizAccessRules;
+  seo: QuizSeo;
+  published_at: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Snapshot stored on quiz_questions / quiz_answers so historical results never change. */
+export interface QuestionSnapshot {
+  question_html?: string;
+  question_image?: string | null;
+  options?: QuestionOptions;
+  correct_option?: QuizOptionKey;
+  explanation_html?: string | null;
+  short_explanation?: string | null;
+  subject?: string | null;
+  topic?: string | null;
+  difficulty?: QuizDifficulty;
+}
+
+export interface QuizQuestion {
+  id: string;
+  quiz_id: string;
+  question_id: string;
+  order_index: number;
+  section: string | null;
+  marks: number | null;
+  negative_marks: number | null;
+  snapshot: QuestionSnapshot;
+  created_at: string;
+}
+
+export type QuizAttemptStatus =
+  | "IN_PROGRESS" | "SUBMITTED" | "AUTO_SUBMITTED" | "EXPIRED" | "ABANDONED";
+
+export interface QuizAttempt {
+  id: string;
+  quiz_id: string;
+  user_id: string | null;
+  guest_session_id: string | null;
+  guest_name: string | null;
+  guest_email: string | null;
+  guest_mobile: string | null;
+  status: QuizAttemptStatus;
+  started_at: string;
+  submitted_at: string | null;
+  expires_at: string | null;
+  time_taken_seconds: number | null;
+  score: number;
+  max_score: number;
+  correct_count: number;
+  incorrect_count: number;
+  unattempted_count: number;
+  accuracy: number;
+  negative_marks: number;
+  percentile: number | null;
+  rank: number | null;
+  result_summary: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface QuizAnswer {
+  id: string;
+  attempt_id: string;
+  quiz_id: string;
+  question_id: string;
+  selected_option: QuizOptionKey | null;
+  is_correct: boolean;
+  is_unattempted: boolean;
+  marks_awarded: number;
+  negative_marks_deducted: number;
+  time_spent_seconds: number | null;
+  marked_for_review: boolean;
+  answer_snapshot: QuestionSnapshot;
+  created_at: string;
+  updated_at: string;
+}
+
+export type ImportJobType = "GOOGLE_SHEET" | "CSV" | "BULK_TEXT";
+export type ImportJobStatus = "pending" | "processing" | "completed" | "failed";
+
+export interface ImportJobError {
+  row: number;
+  message: string;
+}
+
+export interface ImportJob {
+  id: string;
+  type: ImportJobType;
+  source_config: Record<string, unknown>;
+  status: ImportJobStatus;
+  total_rows: number;
+  success_count: number;
+  error_count: number;
+  errors: ImportJobError[];
+  created_by: string | null;
+  created_at: string;
+}
