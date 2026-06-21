@@ -9,6 +9,7 @@ import LeadForm from "@/components/public/LeadForm";
 import LeadPopup from "@/components/public/LeadPopup";
 import { getPublishedCourses, getPublicWebinars, getSiteSettings } from "@/lib/dataProvider";
 import { ACADEMY } from "@/lib/config";
+import { directionsUrl, mapEmbedUrl } from "@/lib/maps";
 
 // Render fresh so newly published courses / upcoming webinars surface here too.
 export const dynamic = "force-dynamic";
@@ -215,17 +216,20 @@ export default async function HomePage() {
             <h2 className="text-3xl font-extrabold sm:text-4xl">{c.locations_heading}</h2>
             <p className="mt-2 text-ink2">{c.locations_sub}</p>
             <div className="mt-4 flex flex-wrap gap-2">
-              {ACADEMY.citiesServed.map((c) => (
-                <span key={c} className="pill pill-gray">{c}</span>
+              {ACADEMY.citiesServed.map((city) => (
+                <span key={city} className="pill pill-gray">{city}</span>
               ))}
             </div>
-            <Link href="/contact" className="btn btn-primary mt-6">Get directions & contact →</Link>
+            <div className="mt-6 flex flex-wrap gap-3">
+              <a href={directionsUrl(settings.brand)} target="_blank" rel="noopener noreferrer" className="btn btn-primary">📍 Get Directions</a>
+              <Link href="/contact" className="btn btn-secondary">Contact us →</Link>
+            </div>
           </Reveal>
           <Reveal delay={0.1}>
             <div className="card overflow-hidden p-0">
               <iframe
-                title="Chandigarh Sector 17C"
-                src="https://www.google.com/maps?q=Sector%2017C%20Chandigarh&output=embed"
+                title="Academy location"
+                src={mapEmbedUrl(settings.brand)}
                 className="h-72 w-full border-0"
                 loading="lazy"
               />

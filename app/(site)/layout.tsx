@@ -15,7 +15,7 @@ export default async function SiteLayout({ children }: { children: React.ReactNo
         wordmarkSub={settings.content.wordmark_sub}
       />
       <main className="flex-1">{children}</main>
-      <PublicFooter />
+      <PublicFooter brand={settings.brand} />
     </div>
   );
 }

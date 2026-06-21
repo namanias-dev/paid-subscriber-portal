@@ -194,6 +194,7 @@ create table if not exists public.site_settings (
   hero jsonb not null default '{}'::jsonb,
   popup jsonb not null default '{}'::jsonb,
   content jsonb not null default '{}'::jsonb,
+  brand jsonb not null default '{}'::jsonb,
   updated_at timestamptz default now()
 );
 insert into public.site_settings (id) values ('home') on conflict (id) do nothing;

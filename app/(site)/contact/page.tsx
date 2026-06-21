@@ -1,10 +1,16 @@
 import Reveal from "@/components/ui/Reveal";
 import LeadForm from "@/components/public/LeadForm";
-import { ACADEMY, SUPPORT } from "@/lib/config";
+import { getSiteSettings } from "@/lib/dataProvider";
+import { whatsappLink } from "@/lib/phone";
+import { directionsUrl, mapEmbedUrl } from "@/lib/maps";
 
 export const metadata = { title: "Contact — Naman Sharma IAS Academy" };
+export const dynamic = "force-dynamic";
 
-export default function ContactPage() {
+export default async function ContactPage() {
+  const { brand } = await getSiteSettings();
+  const wa = whatsappLink(brand.whatsapp || brand.support_phone);
+
   return (
     <div className="container-wide section">
       <Reveal>
@@ -17,20 +23,29 @@ export default function ContactPage() {
           <div className="space-y-4">
             <div className="card p-5">
               <p className="text-sm text-muted">Address</p>
-              <p className="font-medium">{ACADEMY.address}</p>
+              <p className="font-medium">{brand.address}</p>
+              <a href={directionsUrl(brand)} target="_blank" rel="noopener noreferrer" className="btn btn-primary mt-3 text-sm">📍 Get Directions</a>
             </div>
-            <div className="card p-5">
-              <p className="text-sm text-muted">Phone</p>
-              <p className="font-medium">{SUPPORT.phone}</p>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="card p-5">
+                <p className="text-sm text-muted">Phone</p>
+                <a href={`tel:${brand.support_phone}`} className="font-medium hover:text-primary">{brand.support_phone}</a>
+              </div>
+              {wa && (
+                <div className="card p-5">
+                  <p className="text-sm text-muted">WhatsApp</p>
+                  <a href={wa} target="_blank" rel="noopener noreferrer" className="font-medium hover:text-primary">{brand.whatsapp || brand.support_phone}</a>
+                </div>
+              )}
             </div>
             <div className="card p-5">
               <p className="text-sm text-muted">Email</p>
-              <p className="font-medium">{SUPPORT.email}</p>
+              <a href={`mailto:${brand.support_email}`} className="font-medium hover:text-primary">{brand.support_email}</a>
             </div>
             <div className="card overflow-hidden p-0">
               <iframe
                 title="Map"
-                src="https://www.google.com/maps?q=Sector%2017C%20Chandigarh&output=embed"
+                src={mapEmbedUrl(brand)}
                 className="h-64 w-full border-0"
                 loading="lazy"
               />

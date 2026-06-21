@@ -558,6 +558,24 @@ export interface HomeContent {
   lead_sub?: string;
 }
 
+/** Editable brand & contact details shown across the site (footer, contact, home). */
+export interface BrandConfig {
+  name?: string;
+  short_name?: string;
+  tagline?: string;
+  address?: string;
+  support_phone?: string;
+  support_email?: string;
+  whatsapp?: string;
+  /** Google Maps link opened by "Get Directions". */
+  maps_url?: string;
+  /** Optional Google Maps embed URL for the iframe; derived from address when empty. */
+  maps_embed_url?: string;
+  instagram?: string;
+  youtube?: string;
+  telegram?: string;
+}
+
 export interface SiteSettings {
   id: string;
   logo_url?: string | null;
@@ -565,5 +583,6 @@ export interface SiteSettings {
   hero: HeroConfig;
   popup: PopupConfig;
   content: HomeContent;
+  brand: BrandConfig;
   updated_at?: string;
 }

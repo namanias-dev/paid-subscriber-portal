@@ -985,26 +985,38 @@ export async function getSiteSettings(): Promise<SiteSettings> {
   }
 }
 
-/** Admin write — upserts the single 'home' settings row. */
+/**
+ * Admin write — partial upsert of the single 'home' settings row.
+ * Only the keys present in `patch` are overwritten; everything else is preserved,
+ * so editing one screen (e.g. Settings/brand) never wipes another (e.g. Home).
+ */
 export async function updateSiteSettings(patch: Partial<SiteSettings>): Promise<SiteSettings> {
-  const next: Partial<SiteSettings> = {
-    id: "home",
-    logo_url: patch.logo_url ?? null,
-    logo_alt: patch.logo_alt ?? null,
-    hero: patch.hero ?? {},
-    popup: patch.popup ?? {},
-    content: patch.content ?? {},
-    updated_at: new Date().toISOString(),
-  };
+  const keys = ["logo_url", "logo_alt", "hero", "popup", "content", "brand"] as const;
+  const provided: Record<string, unknown> = {};
+  for (const k of keys) {
+    if (k in patch && typeof patch[k] !== "undefined") provided[k] = patch[k];
+  }
+
   if (demoMode()) {
-    Object.assign(demoSettings, next);
+    Object.assign(demoSettings, provided, { id: "home", updated_at: new Date().toISOString() });
     return mergeSiteSettings(demoSettings);
   }
   const db = getSupabaseAdmin();
-  if (!db) return mergeSiteSettings(next);
+  if (!db) return mergeSiteSettings({ id: "home", ...provided });
+
+  // Read current row so we can preserve untouched columns on upsert.
+  let current: Record<string, unknown> = {};
+  try {
+    const { data } = await db.from("site_settings").select("*").eq("id", "home").maybeSingle();
+    if (data) current = data as Record<string, unknown>;
+  } catch {
+    /* table may be empty/new — fine */
+  }
+
+  const next = { ...current, ...provided, id: "home", updated_at: new Date().toISOString() };
   const { data, error } = await db
     .from("site_settings")
-    .upsert(next as Record<string, unknown>, { onConflict: "id" })
+    .upsert(next, { onConflict: "id" })
     .select()
     .single();
   if (error) throw new Error(error.message);

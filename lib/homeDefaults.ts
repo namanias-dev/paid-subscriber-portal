@@ -1,4 +1,5 @@
-import type { SiteSettings, HeroConfig, PopupConfig, HomeContent } from "./types";
+import type { SiteSettings, HeroConfig, PopupConfig, HomeContent, BrandConfig } from "./types";
+import { ACADEMY, SUPPORT } from "./config";
 
 /**
  * Default home/site content. The public site renders DB settings merged OVER
@@ -73,6 +74,21 @@ export const DEFAULT_CONTENT: Required<HomeContent> = {
   lead_sub: "Talk to our team and build a personalised UPSC roadmap — completely free.",
 };
 
+export const DEFAULT_BRAND: Required<BrandConfig> = {
+  name: ACADEMY.name,
+  short_name: ACADEMY.shortName,
+  tagline: ACADEMY.tagline,
+  address: ACADEMY.address,
+  support_phone: SUPPORT.phone,
+  support_email: SUPPORT.email,
+  whatsapp: SUPPORT.phone,
+  maps_url: "",
+  maps_embed_url: "",
+  instagram: ACADEMY.instagram,
+  youtube: ACADEMY.youtube,
+  telegram: ACADEMY.telegram,
+};
+
 export const DEFAULT_SITE_SETTINGS: SiteSettings = {
   id: "home",
   logo_url: null,
@@ -80,6 +96,7 @@ export const DEFAULT_SITE_SETTINGS: SiteSettings = {
   hero: DEFAULT_HERO,
   popup: DEFAULT_POPUP,
   content: DEFAULT_CONTENT,
+  brand: DEFAULT_BRAND,
 };
 
 function isObj(v: unknown): v is Record<string, unknown> {
@@ -96,6 +113,7 @@ export function mergeSiteSettings(row: Partial<SiteSettings> | null | undefined)
     hero: { ...DEFAULT_HERO, ...(isObj(r.hero) ? r.hero : {}) },
     popup: { ...DEFAULT_POPUP, ...(isObj(r.popup) ? r.popup : {}) },
     content: { ...DEFAULT_CONTENT, ...(isObj(r.content) ? r.content : {}) },
+    brand: { ...DEFAULT_BRAND, ...(isObj(r.brand) ? r.brand : {}) },
     updated_at: r.updated_at,
   };
 }
