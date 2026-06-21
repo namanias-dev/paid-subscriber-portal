@@ -7,6 +7,7 @@ export interface AdminNavItem {
 
 export const ADMIN_NAV: AdminNavItem[] = [
   { href: "/admin", label: "Dashboard", icon: "📊", group: "Overview" },
+  { href: "/admin/home", label: "Home Page", icon: "🏠", group: "Overview" },
   { href: "/admin/leads", label: "Lead CRM", icon: "🎯", group: "Sales" },
   { href: "/admin/forms", label: "Lead Forms", icon: "📋", group: "Sales" },
   { href: "/admin/registrations", label: "Landing Pages", icon: "🚀", group: "Sales" },

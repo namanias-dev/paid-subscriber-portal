@@ -1,3 +1,4 @@
+import { Fragment } from "react";
 import Link from "next/link";
 import Hero from "@/components/public/home/Hero";
 import CourseExplorer from "@/components/public/home/CourseExplorer";
@@ -5,7 +6,8 @@ import Testimonials from "@/components/public/Testimonials";
 import Reveal, { Stagger, StaggerItem } from "@/components/ui/Reveal";
 import Accordion from "@/components/ui/Accordion";
 import LeadForm from "@/components/public/LeadForm";
-import { getPublishedCourses, getPublicWebinars } from "@/lib/dataProvider";
+import LeadPopup from "@/components/public/LeadPopup";
+import { getPublishedCourses, getPublicWebinars, getSiteSettings } from "@/lib/dataProvider";
 import { ACADEMY } from "@/lib/config";
 
 // Render fresh so newly published courses / upcoming webinars surface here too.
@@ -39,25 +41,29 @@ const FAQ = [
 ];
 
 export default async function HomePage() {
-  const [courses, webinars] = await Promise.all([getPublishedCourses(), getPublicWebinars()]);
+  const [courses, webinars, settings] = await Promise.all([
+    getPublishedCourses(),
+    getPublicWebinars(),
+    getSiteSettings(),
+  ]);
   const upcoming = webinars.filter((w) => w.status === "upcoming").slice(0, 2);
+  const c = settings.content;
+  const trustBar = c.trust_bar?.length ? c.trust_bar : [];
 
   return (
     <>
-      <Hero />
+      <Hero hero={settings.hero} />
+      <LeadPopup config={settings.popup} />
 
       {/* Trust bar */}
       <div className="border-y border-line bg-surface2">
         <div className="container-wide flex flex-wrap items-center justify-center gap-x-8 gap-y-2 py-4 text-sm font-medium text-ink2">
-          <span>⭐ 388K+ Instagram</span>
-          <span className="h-4 w-px bg-line" />
-          <span>▶ 220K+ YouTube</span>
-          <span className="h-4 w-px bg-line" />
-          <span>🏅 9+ Top AIRs</span>
-          <span className="h-4 w-px bg-line" />
-          <span>📚 9+ Years</span>
-          <span className="h-4 w-px bg-line" />
-          <span>📍 Chandigarh Sector 17C</span>
+          {trustBar.map((item, i) => (
+            <Fragment key={i}>
+              {i > 0 && <span className="h-4 w-px bg-line" />}
+              <span>{item}</span>
+            </Fragment>
+          ))}
         </div>
         <div className="h-1 w-full" style={{ background: "linear-gradient(90deg,#FF9933,#fff,#138808)" }} />
       </div>
@@ -65,8 +71,8 @@ export default async function HomePage() {
       {/* Why Naman Sir */}
       <section className="section container-wide">
         <Reveal>
-          <p className="pill pill-blue mb-3">Why Naman Sir</p>
-          <h2 className="max-w-2xl text-3xl font-extrabold sm:text-4xl">A genuinely personal way to prepare for UPSC</h2>
+          <p className="pill pill-blue mb-3">{c.why_sub}</p>
+          <h2 className="max-w-2xl text-3xl font-extrabold sm:text-4xl">{c.why_heading}</h2>
         </Reveal>
         <Stagger className="mt-10 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
           {WHY.map((w) => (
@@ -85,8 +91,8 @@ export default async function HomePage() {
       <section className="section bg-surface">
         <div className="container-wide">
           <Reveal>
-            <h2 className="text-3xl font-extrabold sm:text-4xl">Learn your way</h2>
-            <p className="mt-2 text-ink2">Online, offline, recorded or hybrid — your schedule, your choice.</p>
+            <h2 className="text-3xl font-extrabold sm:text-4xl">{c.modes_heading}</h2>
+            <p className="mt-2 text-ink2">{c.modes_sub}</p>
           </Reveal>
           <Stagger className="mt-10 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
             {MODES.map((m) => (
@@ -107,8 +113,8 @@ export default async function HomePage() {
         <Reveal>
           <div className="flex flex-wrap items-end justify-between gap-3">
             <div>
-              <h2 className="text-3xl font-extrabold sm:text-4xl">Explore our courses</h2>
-              <p className="mt-2 text-ink2">Foundation to optionals, test series to mentorship.</p>
+              <h2 className="text-3xl font-extrabold sm:text-4xl">{c.courses_heading}</h2>
+              <p className="mt-2 text-ink2">{c.courses_sub}</p>
             </div>
             <Link href="/courses" className="btn btn-secondary">View all courses →</Link>
           </div>
@@ -122,8 +128,8 @@ export default async function HomePage() {
       <section className="section bg-surface">
         <div className="container-wide">
           <Reveal>
-            <h2 className="text-3xl font-extrabold sm:text-4xl">Results that speak</h2>
-            <p className="mt-2 text-ink2">Our students, their ranks — across UPSC CSE & IFoS.</p>
+            <h2 className="text-3xl font-extrabold sm:text-4xl">{c.results_heading}</h2>
+            <p className="mt-2 text-ink2">{c.results_sub}</p>
           </Reveal>
           <Stagger className="mt-8 grid grid-cols-2 gap-3 sm:grid-cols-3">
             {TOPPERS.map((t) => (
@@ -141,7 +147,7 @@ export default async function HomePage() {
       {/* Free resources */}
       <section className="section container-wide">
         <Reveal>
-          <h2 className="text-3xl font-extrabold sm:text-4xl">Free resources to get started</h2>
+          <h2 className="text-3xl font-extrabold sm:text-4xl">{c.free_heading}</h2>
         </Reveal>
         <Stagger className="mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
           {[
@@ -166,11 +172,15 @@ export default async function HomePage() {
           <div className="rounded-2xl bg-primary p-8 text-white sm:p-12" style={{ backgroundImage: "linear-gradient(135deg,#0057FF,#3D8BFF)" }}>
             <div className="grid items-center gap-6 lg:grid-cols-2">
               <div>
-                <h2 className="text-3xl font-extrabold text-white sm:text-4xl">Start for just ₹50</h2>
-                <p className="mt-2 max-w-md text-white/90">Join the Beginner Masterclass or book a 1-week demo and experience our teaching before you commit.</p>
+                <h2 className="text-3xl font-extrabold text-white sm:text-4xl">{c.band_heading}</h2>
+                <p className="mt-2 max-w-md text-white/90">{c.band_subtext}</p>
                 <div className="mt-6 flex flex-wrap gap-3">
-                  <Link href="/courses/beginner-upsc-masterclass" className="btn bg-white px-6 text-primary">₹50 Masterclass</Link>
-                  <Link href="/demo" className="btn btn-secondary border-white px-6 text-white hover:bg-white/10">1-Week Demo</Link>
+                  {c.band_primary_label && (
+                    <Link href={c.band_primary_href || "#"} className="btn bg-white px-6 text-primary">{c.band_primary_label}</Link>
+                  )}
+                  {c.band_secondary_label && (
+                    <Link href={c.band_secondary_href || "#"} className="btn btn-secondary border-white px-6 text-white hover:bg-white/10">{c.band_secondary_label}</Link>
+                  )}
                 </div>
               </div>
               <div className="grid gap-3">
@@ -190,7 +200,7 @@ export default async function HomePage() {
       <section className="section bg-surface">
         <div className="container-wide">
           <Reveal>
-            <h2 className="text-3xl font-extrabold sm:text-4xl">What aspirants say</h2>
+            <h2 className="text-3xl font-extrabold sm:text-4xl">{c.testimonials_heading}</h2>
           </Reveal>
         </div>
         <div className="mt-8">
@@ -202,8 +212,8 @@ export default async function HomePage() {
       <section className="section container-wide">
         <div className="grid items-center gap-8 lg:grid-cols-2">
           <Reveal>
-            <h2 className="text-3xl font-extrabold sm:text-4xl">Visit us in Chandigarh</h2>
-            <p className="mt-2 text-ink2">Our flagship offline centre is at {ACADEMY.address}. We serve aspirants across the region.</p>
+            <h2 className="text-3xl font-extrabold sm:text-4xl">{c.locations_heading}</h2>
+            <p className="mt-2 text-ink2">{c.locations_sub}</p>
             <div className="mt-4 flex flex-wrap gap-2">
               {ACADEMY.citiesServed.map((c) => (
                 <span key={c} className="pill pill-gray">{c}</span>
@@ -228,7 +238,7 @@ export default async function HomePage() {
       <section className="section bg-surface">
         <div className="container-x">
           <Reveal>
-            <h2 className="text-center text-3xl font-extrabold sm:text-4xl">Frequently asked questions</h2>
+            <h2 className="text-center text-3xl font-extrabold sm:text-4xl">{c.faq_heading}</h2>
           </Reveal>
           <div className="mx-auto mt-8 max-w-3xl">
             <Accordion items={FAQ} />
@@ -241,8 +251,8 @@ export default async function HomePage() {
         <div className="card p-8 sm:p-10">
           <div className="grid items-center gap-8 lg:grid-cols-2">
             <div>
-              <h2 className="text-3xl font-extrabold">Get free counselling</h2>
-              <p className="mt-2 text-ink2">Talk to our team and build a personalised UPSC roadmap — completely free.</p>
+              <h2 className="text-3xl font-extrabold">{c.lead_heading}</h2>
+              <p className="mt-2 text-ink2">{c.lead_sub}</p>
             </div>
             <LeadForm source="Website" campaign="Home Counselling" compact />
           </div>

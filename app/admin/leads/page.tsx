@@ -9,7 +9,7 @@ import { formatINR } from "@/lib/dates";
 import type { Lead, LeadStatus } from "@/lib/types";
 
 const STAGES: LeadStatus[] = ["New", "Contacted", "Demo Booked", "Demo Attended", "Negotiation", "Admitted", "Lost"];
-const SOURCES = ["Instagram", "Meta Form", "Webinar", "Demo", "Website", "WhatsApp", "Referral"];
+const SOURCES = ["Instagram", "Meta Form", "Webinar", "Demo", "Website", "WhatsApp", "Referral", "home_popup"];
 
 function waLink(phone: string, text: string) {
   const cleaned = phone.replace(/\D/g, "");
@@ -47,8 +47,8 @@ export default function LeadsPage() {
 
   function exportCsv() {
     const rows = [
-      ["Name", "Phone", "City", "State", "Source", "Status", "Course Interest", "Counsellor", "Follow-up"],
-      ...filtered.map((l) => [l.name, l.phone, l.city ?? "", l.state ?? "", l.source, l.status, l.course_interest ?? "", l.counsellor ?? "", l.follow_up_date ?? ""]),
+      ["Name", "Phone", "Email", "City", "State", "Source", "Status", "Course Interest", "Counsellor", "Follow-up", "Created"],
+      ...filtered.map((l) => [l.name, l.phone, l.email ?? "", l.city ?? "", l.state ?? "", l.source, l.status, l.course_interest ?? "", l.counsellor ?? "", l.follow_up_date ?? "", l.created_at ?? ""]),
     ];
     const csv = rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
     const url = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
@@ -116,16 +116,16 @@ export default function LeadsPage() {
           })}
         </div>
       ) : (
-        <TableShell headers={["Name", "Phone", "City", "Source", "Interest", "Status", "Counsellor", ""]}>
+        <TableShell headers={["Name", "Phone", "Email", "Source", "Interest", "Status", "Date", ""]}>
           {filtered.map((l) => (
             <tr key={l.id} className="border-b border-line last:border-0 hover:bg-surface2">
               <td className="px-4 py-3 font-medium">{l.name}</td>
               <td className="px-4 py-3">{l.phone}</td>
-              <td className="px-4 py-3">{l.city}</td>
+              <td className="px-4 py-3">{l.email || "—"}</td>
               <td className="px-4 py-3">{l.source}</td>
               <td className="px-4 py-3">{l.course_interest}</td>
               <td className="px-4 py-3"><span className="pill pill-blue">{l.status}</span></td>
-              <td className="px-4 py-3">{l.counsellor}</td>
+              <td className="px-4 py-3 whitespace-nowrap text-xs text-muted">{l.created_at ? new Date(l.created_at).toLocaleDateString("en-IN") : "—"}</td>
               <td className="px-4 py-3"><button onClick={() => setActive(l)} className="text-primary">Open</button></td>
             </tr>
           ))}
@@ -211,6 +211,7 @@ function LeadDetail({
       <div className="space-y-4">
         <div className="grid grid-cols-2 gap-2 text-sm">
           <Info label="Phone" value={lead.phone} />
+          <Info label="Email" value={lead.email || "—"} />
           <Info label="City" value={lead.city || "—"} />
           <Info label="Source" value={lead.source} />
           <Info label="Counsellor" value={lead.counsellor || "—"} />

@@ -1,17 +1,32 @@
 import { NextResponse } from "next/server";
 import { addLead } from "@/lib/dataProvider";
+import { normalizeIndianMobile } from "@/lib/phone";
+
+export const dynamic = "force-dynamic";
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => ({}));
     const name = String(body.name || "").trim();
-    const phone = String(body.phone || "").replace(/\D/g, "");
-    if (!name || phone.length !== 10) {
-      return NextResponse.json({ ok: false, error: "Valid name and 10-digit mobile required." }, { status: 400 });
+    const phoneNorm = normalizeIndianMobile(String(body.phone || ""));
+    if (!name) {
+      return NextResponse.json({ ok: false, error: "Please enter your name." }, { status: 400 });
     }
+    if (!phoneNorm.ok) {
+      return NextResponse.json({ ok: false, error: phoneNorm.error || "Enter a valid 10-digit mobile." }, { status: 400 });
+    }
+
+    const emailRaw = String(body.email || "").trim();
+    if (emailRaw && !EMAIL_RE.test(emailRaw)) {
+      return NextResponse.json({ ok: false, error: "Enter a valid email address." }, { status: 400 });
+    }
+
     const lead = await addLead({
       name,
-      phone,
+      phone: phoneNorm.digits10,
+      email: emailRaw || null,
       city: body.city ? String(body.city) : null,
       source: body.source ? String(body.source) : "Website",
       campaign: body.campaign ? String(body.campaign) : null,

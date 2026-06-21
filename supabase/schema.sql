@@ -153,6 +153,7 @@ create table if not exists public.leads (
   id text primary key,
   name text not null,
   phone text not null,
+  email text,
   city text,
   state text,
   source text,
@@ -185,6 +186,17 @@ create table if not exists public.lead_activities (
   counsellor text,
   timestamp timestamptz default now()
 );
+
+create table if not exists public.site_settings (
+  id text primary key default 'home',
+  logo_url text,
+  logo_alt text,
+  hero jsonb not null default '{}'::jsonb,
+  popup jsonb not null default '{}'::jsonb,
+  content jsonb not null default '{}'::jsonb,
+  updated_at timestamptz default now()
+);
+insert into public.site_settings (id) values ('home') on conflict (id) do nothing;
 
 create table if not exists public.lead_forms (
   id text primary key,

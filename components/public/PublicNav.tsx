@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
 import Logo from "@/components/ui/Logo";
 import { ACADEMY } from "@/lib/config";
@@ -15,19 +16,34 @@ const LINKS = [
   { href: "/contact", label: "Contact" },
 ];
 
-export default function PublicNav() {
+export default function PublicNav({ logoUrl, logoAlt }: { logoUrl?: string | null; logoAlt?: string | null }) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
+  const hasLogo = !!logoUrl?.trim();
 
   return (
     <header className="frost sticky top-0 z-50 border-b border-line">
       <div className="container-wide flex items-center justify-between py-3">
         <Link href="/" className="flex items-center gap-2.5">
-          <Logo size={38} />
-          <div className="leading-tight">
-            <div className="font-heading text-[17px] font-extrabold text-ink">{ACADEMY.shortName}</div>
-            <div className="text-[10px] font-medium uppercase tracking-[0.18em] text-muted">Academy</div>
-          </div>
+          {hasLogo ? (
+            <Image
+              src={logoUrl!.trim()}
+              alt={logoAlt || ACADEMY.name}
+              width={180}
+              height={40}
+              priority
+              className="h-10 w-auto object-contain"
+              style={{ maxWidth: 200 }}
+            />
+          ) : (
+            <>
+              <Logo size={38} />
+              <div className="leading-tight">
+                <div className="font-heading text-[17px] font-extrabold text-ink">{ACADEMY.shortName}</div>
+                <div className="text-[10px] font-medium uppercase tracking-[0.18em] text-muted">Academy</div>
+              </div>
+            </>
+          )}
         </Link>
 
         <nav className="hidden items-center gap-1 lg:flex">

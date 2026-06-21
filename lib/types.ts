@@ -330,6 +330,7 @@ export interface Lead {
   id: string;
   name: string;
   phone: string;
+  email?: string | null;
   city: string | null;
   state: string | null;
   source: string;
@@ -482,4 +483,79 @@ export interface Staff {
   email: string | null;
   active: boolean;
   created_at: string;
+}
+
+// ----------------------------- Site / Home settings -----------------------------
+export type HeroButtonStyle = "primary" | "saffron" | "secondary" | "gold";
+
+export interface HeroButton {
+  enabled: boolean;
+  label: string;
+  href: string;
+  style?: HeroButtonStyle;
+}
+
+export interface HeroStat {
+  value: number;
+  suffix: string;
+  label: string;
+}
+
+export interface HeroConfig {
+  badge?: string;
+  headline?: string;
+  subheading?: string;
+  /** Transparent PNG portrait of the mentor, shown in the hero. */
+  portrait_url?: string | null;
+  portrait_alt?: string | null;
+  stats?: HeroStat[];
+  buttons?: HeroButton[];
+}
+
+export interface PopupConfig {
+  enabled?: boolean;
+  /** Seconds before the popup auto-opens. */
+  delay_seconds?: number;
+  heading?: string;
+  subtext?: string;
+  button_text?: string;
+  success_message?: string;
+  /** Course-interest dropdown options. */
+  interest_options?: string[];
+}
+
+/** Editable text for the home page's fixed sections. All optional with defaults. */
+export interface HomeContent {
+  trust_bar?: string[];
+  why_heading?: string;
+  why_sub?: string;
+  modes_heading?: string;
+  modes_sub?: string;
+  courses_heading?: string;
+  courses_sub?: string;
+  results_heading?: string;
+  results_sub?: string;
+  free_heading?: string;
+  band_heading?: string;
+  band_subtext?: string;
+  band_primary_label?: string;
+  band_primary_href?: string;
+  band_secondary_label?: string;
+  band_secondary_href?: string;
+  testimonials_heading?: string;
+  locations_heading?: string;
+  locations_sub?: string;
+  faq_heading?: string;
+  lead_heading?: string;
+  lead_sub?: string;
+}
+
+export interface SiteSettings {
+  id: string;
+  logo_url?: string | null;
+  logo_alt?: string | null;
+  hero: HeroConfig;
+  popup: PopupConfig;
+  content: HomeContent;
+  updated_at?: string;
 }

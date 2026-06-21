@@ -18,7 +18,9 @@ import type {
   Payment,
   Referral,
   Staff,
+  SiteSettings,
 } from "./types";
+import { mergeSiteSettings } from "./homeDefaults";
 
 /**
  * The switchboard every API route uses.
@@ -506,6 +508,9 @@ export async function addLead(input: Partial<Lead>): Promise<Lead> {
     counsellor: input.counsellor ?? null,
     created_at: new Date().toISOString(),
   } as Lead;
+  // Only attach email when provided — keeps inserts working even if the
+  // `email` column hasn't been added yet (migration applied separately).
+  if (input.email) row.email = input.email;
   if (demoMode()) {
     mock.leads.unshift(row);
     return row;
@@ -957,4 +962,51 @@ export async function logAccess(studentId: string | null, action: string): Promi
   } catch {
     /* best-effort */
   }
+}
+
+// ============================ SITE / HOME SETTINGS ============================
+// Demo-mode store persists across dev-server hot reloads via globalThis.
+const demoSettings = (() => {
+  const g = globalThis as unknown as { __namanSettings?: Partial<SiteSettings> };
+  if (!g.__namanSettings) g.__namanSettings = { id: "home" };
+  return g.__namanSettings;
+})();
+
+/** Public read — always returns a fully-populated settings object (merged with defaults). */
+export async function getSiteSettings(): Promise<SiteSettings> {
+  if (demoMode()) return mergeSiteSettings(demoSettings);
+  const db = getSupabaseAdmin();
+  if (!db) return mergeSiteSettings(null);
+  try {
+    const { data } = await db.from("site_settings").select("*").eq("id", "home").maybeSingle();
+    return mergeSiteSettings(data as Partial<SiteSettings> | null);
+  } catch {
+    return mergeSiteSettings(null);
+  }
+}
+
+/** Admin write — upserts the single 'home' settings row. */
+export async function updateSiteSettings(patch: Partial<SiteSettings>): Promise<SiteSettings> {
+  const next: Partial<SiteSettings> = {
+    id: "home",
+    logo_url: patch.logo_url ?? null,
+    logo_alt: patch.logo_alt ?? null,
+    hero: patch.hero ?? {},
+    popup: patch.popup ?? {},
+    content: patch.content ?? {},
+    updated_at: new Date().toISOString(),
+  };
+  if (demoMode()) {
+    Object.assign(demoSettings, next);
+    return mergeSiteSettings(demoSettings);
+  }
+  const db = getSupabaseAdmin();
+  if (!db) return mergeSiteSettings(next);
+  const { data, error } = await db
+    .from("site_settings")
+    .upsert(next as Record<string, unknown>, { onConflict: "id" })
+    .select()
+    .single();
+  if (error) throw new Error(error.message);
+  return mergeSiteSettings(data as Partial<SiteSettings>);
 }
