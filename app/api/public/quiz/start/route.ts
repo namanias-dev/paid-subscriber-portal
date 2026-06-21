@@ -65,6 +65,16 @@ export async function POST(req: Request) {
     const guest = (body.guest || {}) as { name?: string; email?: string; mobile?: string; interest?: string };
     const norm = guest.mobile ? normalizeIndianMobile(guest.mobile) : null;
     const guestMobile = norm?.ok ? norm.digits10! : null;
+
+    // When the admin requires lead capture, enforce valid name + mobile server-side.
+    if (isGuest && quiz.result_settings?.capture_lead_before_result === true) {
+      if (!guest.name || guest.name.trim().length < 2 || !guestMobile) {
+        return NextResponse.json(
+          { ok: false, reason: "invalid_lead", error: "Please enter your name and a valid 10-digit mobile number." },
+          { status: 400 },
+        );
+      }
+    }
     if (isGuest && guest.name && guestMobile) {
       try {
         await addLead({

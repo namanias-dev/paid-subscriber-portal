@@ -17,6 +17,11 @@ const LINKS = [
   { href: "/contact", label: "Contact" },
 ];
 
+async function doLogout() {
+  try { await fetch("/api/auth/logout", { method: "POST" }); } catch { /* ignore */ }
+  window.location.href = "/";
+}
+
 export default function PublicNav({
   logoUrl,
   logoAlt,
@@ -24,6 +29,7 @@ export default function PublicNav({
   showWordmark = true,
   wordmark = "Naman Sharma",
   wordmarkSub = "IAS Academy",
+  isLoggedIn = false,
 }: {
   logoUrl?: string | null;
   logoAlt?: string | null;
@@ -31,6 +37,7 @@ export default function PublicNav({
   showWordmark?: boolean;
   wordmark?: string;
   wordmarkSub?: string;
+  isLoggedIn?: boolean;
 }) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
@@ -81,8 +88,17 @@ export default function PublicNav({
         </nav>
 
         <div className="hidden items-center gap-2 lg:flex">
-          <Link href="/login" className="btn btn-ghost px-3">Login</Link>
-          <Link href="/demo" className="btn btn-primary px-4">Book Free Demo</Link>
+          {isLoggedIn ? (
+            <>
+              <Link href="/dashboard" className="btn btn-primary px-4">Dashboard</Link>
+              <button onClick={doLogout} className="btn btn-ghost px-3">Logout</button>
+            </>
+          ) : (
+            <>
+              <Link href="/login" className="btn btn-ghost px-3">Login</Link>
+              <Link href="/demo" className="btn btn-primary px-4">Book Free Demo</Link>
+            </>
+          )}
         </div>
 
         <button
@@ -112,8 +128,17 @@ export default function PublicNav({
               </Link>
             ))}
             <div className="mt-2 flex gap-2">
-              <Link href="/login" onClick={() => setOpen(false)} className="btn btn-secondary flex-1">Login</Link>
-              <Link href="/demo" onClick={() => setOpen(false)} className="btn btn-primary flex-1">Free Demo</Link>
+              {isLoggedIn ? (
+                <>
+                  <Link href="/dashboard" onClick={() => setOpen(false)} className="btn btn-primary flex-1">Dashboard</Link>
+                  <button onClick={() => { setOpen(false); doLogout(); }} className="btn btn-secondary flex-1">Logout</button>
+                </>
+              ) : (
+                <>
+                  <Link href="/login" onClick={() => setOpen(false)} className="btn btn-secondary flex-1">Login</Link>
+                  <Link href="/demo" onClick={() => setOpen(false)} className="btn btn-primary flex-1">Free Demo</Link>
+                </>
+              )}
             </div>
           </div>
         </div>

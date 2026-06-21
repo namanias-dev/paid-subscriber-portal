@@ -84,6 +84,35 @@ a {
     @apply mx-auto w-full max-w-7xl px-4 sm:px-6;
   }
 
+  /*
+   * Quiz rich text: preserve UPSC statement-style formatting end-to-end.
+   * `pre-line` keeps line breaks for plain-text/older records (backward compat)
+   * while sanitized <p>/<ol>/<ul>/<br> from TipTap & imports render normally.
+   */
+  .quiz-rich {
+    white-space: pre-line;
+    line-height: 1.7;
+    word-break: break-word;
+  }
+  .quiz-rich p {
+    margin: 0.5em 0;
+  }
+  .quiz-rich ol,
+  .quiz-rich ul {
+    margin: 0.5em 0;
+    padding-left: 1.4em;
+    white-space: normal;
+  }
+  .quiz-rich ol {
+    list-style: decimal;
+  }
+  .quiz-rich ul {
+    list-style: disc;
+  }
+  .quiz-rich li {
+    margin: 0.25em 0;
+  }
+
   .card {
     background: #fff;
     border: 1px solid var(--line);

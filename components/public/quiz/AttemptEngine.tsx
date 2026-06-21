@@ -241,7 +241,7 @@ export default function AttemptEngine({
                 {q.difficulty && <span>· {q.difficulty}</span>}
               </div>
               {q.question_image && <img src={q.question_image} alt="" className="mb-4 max-h-72 rounded-xl object-contain" />}
-              <div className="prose-quiz text-[15px] leading-relaxed text-ink [&_p]:my-2" dangerouslySetInnerHTML={{ __html: q.question_html }} />
+              <div className="quiz-rich text-[15px] text-ink" dangerouslySetInnerHTML={{ __html: q.question_html }} />
               <div className="mt-5 space-y-2.5">
                 {q.options.map((opt) => {
                   const selected = answers[q.question_id] === opt.key;
@@ -252,7 +252,7 @@ export default function AttemptEngine({
                       className={`flex w-full items-start gap-3 rounded-xl border p-3.5 text-left transition ${selected ? "border-primary bg-primary/5 ring-1 ring-primary" : "border-line hover:border-primary/40 hover:bg-surface"}`}
                     >
                       <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-sm font-bold ${selected ? "bg-primary text-white" : "bg-surface2 text-ink2"}`}>{opt.key}</span>
-                      <span className="flex-1 pt-0.5 text-[15px]" dangerouslySetInnerHTML={{ __html: opt.html }} />
+                      <span className="quiz-rich flex-1 pt-0.5 text-[15px]" dangerouslySetInnerHTML={{ __html: opt.html }} />
                     </button>
                   );
                 })}

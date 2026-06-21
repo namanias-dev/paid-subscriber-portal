@@ -135,11 +135,13 @@ function parseBlock(block: string[], index: number): ParsedQuestion {
       const q = line.match(QSTART_RE);
       questionLines.push(q ? q[1] : line);
     } else if (mode === "explanation") {
-      base.explanation_html = `${base.explanation_html || ""} ${line}`.trim();
+      // Preserve line breaks within multi-line explanations.
+      base.explanation_html = `${base.explanation_html ? base.explanation_html + "\n" : ""}${line}`.trim();
     }
   }
 
-  base.question_html = questionLines.join(" ").trim();
+  // Join with newlines so UPSC statement-style line breaks survive to the student view.
+  base.question_html = questionLines.join("\n").trim();
   if (answer) base.correct_option = answer;
 
   // Validate.

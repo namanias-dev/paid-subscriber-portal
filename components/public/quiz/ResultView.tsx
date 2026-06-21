@@ -144,7 +144,7 @@ export default function ResultView({
                 <div key={i} className="rounded-xl border border-line">
                   <button onClick={() => setOpen(isOpen ? null : i)} className="flex w-full items-center gap-3 p-3.5 text-left">
                     <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold ${badge}`}>{qq.order}</span>
-                    <span className="flex-1 text-sm" dangerouslySetInnerHTML={{ __html: qq.question_html }} />
+                    <span className="quiz-rich flex-1 text-sm" dangerouslySetInnerHTML={{ __html: qq.question_html }} />
                     <span className="text-xs text-muted">{qq.is_unattempted ? "Skipped" : qq.is_correct ? `+${qq.marks_awarded}` : `-${qq.negative_marks_deducted}`}</span>
                   </button>
                   {isOpen && (
@@ -156,7 +156,7 @@ export default function ResultView({
                           return (
                             <div key={o.key} className={`flex gap-2 rounded-lg px-3 py-2 ${isCorrect ? "bg-success/10" : isYours ? "bg-danger/10" : ""}`}>
                               <span className="font-bold">{o.key}.</span>
-                              <span className="flex-1" dangerouslySetInnerHTML={{ __html: o.html }} />
+                              <span className="quiz-rich flex-1" dangerouslySetInnerHTML={{ __html: o.html }} />
                               {isCorrect && <span className="text-xs font-semibold text-success">Correct</span>}
                               {isYours && !isCorrect && <span className="text-xs font-semibold text-danger">Your answer</span>}
                             </div>
@@ -166,7 +166,7 @@ export default function ResultView({
                       {qq.explanation_html && (
                         <div className="mt-3 rounded-lg bg-surface p-3">
                           <p className="mb-1 text-xs font-semibold uppercase text-muted">Explanation</p>
-                          <div className="text-sm leading-relaxed" dangerouslySetInnerHTML={{ __html: qq.explanation_html }} />
+                          <div className="quiz-rich text-sm" dangerouslySetInnerHTML={{ __html: qq.explanation_html }} />
                         </div>
                       )}
                     </div>
@@ -187,7 +187,11 @@ export default function ResultView({
         </div>
       </div>
 
-      <p className="mt-6 text-center text-xs text-muted">{data.disclaimer}</p>
+      <div className="mt-8 border-t border-line pt-5 text-center text-sm text-ink2">
+        <p className="font-heading font-bold text-ink">NAMAN SHARMA IAS ACADEMY</p>
+        <p className="mt-1">Address: SCO 173-174, Sec-17C, Chandigarh</p>
+        <p>Call/WhatsApp: +91-843-768-6541</p>
+      </div>
     </div>
   );
 }
