@@ -14,8 +14,9 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
     const course = await updateCourse(params.id, norm.value!);
     if (!course) return NextResponse.json({ ok: false, error: "Not found." }, { status: 404 });
     return NextResponse.json({ ok: true, course });
-  } catch {
-    return NextResponse.json({ ok: false, error: "Failed to update." }, { status: 500 });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "Failed to update.";
+    return NextResponse.json({ ok: false, error: msg }, { status: 500 });
   }
 }
 

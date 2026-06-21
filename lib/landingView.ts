@@ -29,7 +29,7 @@ export interface LandingMentor extends MentorInfo {
 /**
  * Pre-built, serializable view-model for the premium landing layout. All HTML
  * is re-sanitized here (server) so client components can render it directly via
- * dangerouslySetInnerHTML without pulling DOMPurify into the public bundle.
+ * dangerouslySetInnerHTML without pulling a sanitizer into the public bundle.
  */
 export interface LandingView {
   aboutHtml: string;

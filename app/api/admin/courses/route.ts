@@ -24,7 +24,8 @@ export async function POST(req: Request) {
     if (!norm.ok) return NextResponse.json({ ok: false, error: norm.error }, { status: 400 });
     const course = await addCourse(norm.value!);
     return NextResponse.json({ ok: true, course });
-  } catch {
-    return NextResponse.json({ ok: false, error: "Failed to create course." }, { status: 500 });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "Failed to create course.";
+    return NextResponse.json({ ok: false, error: msg }, { status: 500 });
   }
 }

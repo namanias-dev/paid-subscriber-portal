@@ -1,50 +1,39 @@
-import DOMPurify from "isomorphic-dompurify";
+import sanitize from "sanitize-html";
 
 /**
  * Sanitize rich HTML (from the TipTap editor) before storing/rendering.
+ * Uses `sanitize-html` (pure CommonJS) so it runs cleanly in Next.js serverless
+ * functions — unlike isomorphic-dompurify, which is ESM-only and throws
+ * ERR_REQUIRE_ESM at runtime on Vercel.
+ *
  * Allowlist covers the editor's feature set: headings, formatting, lists,
- * blockquotes, tables, links, images, and dividers. Scripts, styles, iframes
- * and event handlers are always stripped.
+ * blockquotes, tables, links, images and dividers. Scripts, styles, iframes and
+ * event handlers are always stripped.
  */
-const CONFIG = {
-  ALLOWED_TAGS: [
-    "h2",
-    "h3",
-    "h4",
-    "p",
-    "strong",
-    "b",
-    "em",
-    "i",
-    "u",
-    "s",
-    "ul",
-    "ol",
-    "li",
-    "blockquote",
-    "table",
-    "thead",
-    "tbody",
-    "tr",
-    "th",
-    "td",
-    "a",
-    "img",
-    "hr",
-    "br",
-    "span",
-    "code",
-    "pre",
+const OPTIONS: sanitize.IOptions = {
+  allowedTags: [
+    "h2", "h3", "h4", "p", "strong", "b", "em", "i", "u", "s",
+    "ul", "ol", "li", "blockquote",
+    "table", "thead", "tbody", "tr", "th", "td",
+    "a", "img", "hr", "br", "span", "code", "pre",
   ],
-  ALLOWED_ATTR: ["href", "target", "rel", "src", "alt", "title", "class", "colspan", "rowspan"],
-  ALLOW_DATA_ATTR: false,
-  ADD_ATTR: ["target"],
+  allowedAttributes: {
+    a: ["href", "target", "rel"],
+    img: ["src", "alt", "title"],
+    th: ["colspan", "rowspan"],
+    td: ["colspan", "rowspan"],
+    "*": ["class"],
+  },
+  allowedSchemes: ["http", "https", "mailto", "tel"],
+  allowedSchemesByTag: { img: ["http", "https", "data"] },
+  transformTags: {
+    a: sanitize.simpleTransform("a", { rel: "noopener noreferrer", target: "_blank" }),
+  },
 };
 
 export function sanitizeHtml(html: string | null | undefined): string {
   if (!html) return "";
-  // DOMPurify returns a string here (no RETURN_DOM/RETURN_DOM_FRAGMENT set).
-  return DOMPurify.sanitize(html, CONFIG) as unknown as string;
+  return sanitize(html, OPTIONS);
 }
 
 /** True when the sanitized HTML has any meaningful (non-whitespace) text or media. */
