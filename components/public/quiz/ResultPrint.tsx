@@ -52,6 +52,14 @@ export default function ResultPrint({ attemptId }: { attemptId: string }) {
       <style>{`
         @media print { .no-print { display: none } * { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
         @page { margin: 14mm }
+        /* Render statement formatting correctly: keep ordered/unordered list
+           markers visible (overriding the global list-style reset) AND preserve
+           literal numbered lines for plain-text questions. */
+        .pdf-rich { white-space: pre-line; line-height: 1.65; word-break: break-word; }
+        .pdf-rich p { margin: 0.4em 0; white-space: pre-line; }
+        .pdf-rich ol { list-style: decimal outside; padding-left: 1.6em; margin: 0.4em 0; white-space: normal; }
+        .pdf-rich ul { list-style: disc outside; padding-left: 1.6em; margin: 0.4em 0; white-space: normal; }
+        .pdf-rich li { margin: 0.2em 0; }
       `}</style>
 
       {/* Watermark layer — behind content, tiles down every page */}
@@ -96,7 +104,7 @@ export default function ResultPrint({ attemptId }: { attemptId: string }) {
           <div key={i} style={{ borderBottom: "1px solid #e2e8f0", padding: "10px 0", fontSize: 13, breakInside: "avoid" }}>
             <div style={{ display: "flex", gap: 6 }}>
               <b>Q{qq.order}.</b>
-              <span style={preLine} dangerouslySetInnerHTML={{ __html: qq.question_html }} />
+              <span className="pdf-rich" style={{ flex: 1 }} dangerouslySetInnerHTML={{ __html: qq.question_html }} />
             </div>
             <div style={{ margin: "6px 0 0 18px" }}>
               {qq.options.map((o) => {
@@ -109,8 +117,8 @@ export default function ResultPrint({ attemptId }: { attemptId: string }) {
               {qq.is_unattempted ? "Skipped" : qq.is_correct ? `Correct (+${qq.marks_awarded})` : `Incorrect (-${qq.negative_marks_deducted})`}
             </p>
             {qq.explanation_html && (
-              <div style={{ ...preLine, margin: "4px 0 0 18px", fontSize: 12, background: "#f8fafc", padding: 8, borderRadius: 6 }}>
-                <b>Explanation:</b> <span dangerouslySetInnerHTML={{ __html: qq.explanation_html }} />
+              <div style={{ margin: "4px 0 0 18px", fontSize: 12, background: "#f8fafc", padding: 8, borderRadius: 6 }}>
+                <b>Explanation:</b> <span className="pdf-rich" dangerouslySetInnerHTML={{ __html: qq.explanation_html }} />
               </div>
             )}
           </div>
