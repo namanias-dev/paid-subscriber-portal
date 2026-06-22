@@ -88,6 +88,7 @@ export default function WebinarForm({ webinar }: { webinar?: Webinar }) {
   const [sections, setSections] = useState<PageSection[]>(webinar?.sections || []);
   // Portal experience fields
   const [sessionType, setSessionType] = useState<"live" | "recorded">(webinar?.session_type === "recorded" ? "recorded" : "live");
+  const [joinNote, setJoinNote] = useState(webinar?.join_note || "");
   const [materials, setMaterials] = useState<PdfResource[]>(webinar?.materials || []);
   const [crossSell, setCrossSell] = useState<CrossSell>(webinar?.cross_sell || {});
   const [saving, setSaving] = useState(false);
@@ -130,6 +131,7 @@ export default function WebinarForm({ webinar }: { webinar?: Webinar }) {
       reviews: reviews.filter((r) => r.name.trim() && r.text.trim()),
       sections: sections.filter((s) => s.title.trim()),
       session_type: sessionType,
+      join_note: joinNote.trim() || null,
       materials: materials.filter((m) => m.url.trim()),
       cross_sell: crossSell,
     };
@@ -205,6 +207,9 @@ export default function WebinarForm({ webinar }: { webinar?: Webinar }) {
                   </Field>
                   <Field label="Recording link (YouTube / Google Drive)" full hint="Used automatically once the webinar date has passed (or immediately for recorded sessions).">
                     <input className="input" value={recordingLink} onChange={(e) => setRecordingLink(e.target.value)} placeholder="https://youtu.be/… or https://drive.google.com/file/d/…/view" />
+                  </Field>
+                  <Field label="Join note (optional)" full hint='Appears inside the "How to join" steps on the student card. Leave blank to show the default Zoom flow.'>
+                    <input className="input" value={joinNote} onChange={(e) => setJoinNote(e.target.value)} placeholder="e.g. Zoom passcode: 1234" />
                   </Field>
                 </Section>
               </>

@@ -420,6 +420,8 @@ export interface Webinar {
   price: number;
   /** "live" (Zoom join + recording after) or "recorded" (recording only). Defaults to live. */
   session_type?: "live" | "recorded";
+  /** Optional short note shown inside the "How to join" steps (e.g. "Passcode: 1234"). */
+  join_note?: string | null;
   /** Post-registration deliverables (entitlement-gated; shown only in the portal). */
   materials?: PdfResource[];
   /** Course cross-sell / promo block on the user's webinar card. */

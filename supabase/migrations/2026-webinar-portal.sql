@@ -15,6 +15,7 @@
 -- =====================================================================
 
 alter table public.webinars add column if not exists session_type text default 'live';
+alter table public.webinars add column if not exists join_note text;
 alter table public.webinars add column if not exists materials jsonb not null default '[]'::jsonb;
 alter table public.webinars add column if not exists cross_sell jsonb not null default '{}'::jsonb;
 

@@ -6,11 +6,14 @@ import {
   getBuyerPurchases,
   getCourseBySlug,
   getWebinarBySlug,
+  getSiteSettings,
 } from "@/lib/dataProvider";
 import { formatINR } from "@/lib/dates";
 import { parseRecording } from "@/lib/recordingEmbed";
+import { whatsappLink } from "@/lib/phone";
 import type { PdfResource, PageSection, Payment, Review } from "@/lib/types";
 import WebinarAccess from "@/components/portal/WebinarAccess";
+import WebinarJoinSteps from "@/components/portal/WebinarJoinSteps";
 
 export const dynamic = "force-dynamic";
 export const metadata = {
@@ -81,6 +84,13 @@ export default async function PortalItemPage({ params }: { params: { reference: 
       !!cs.title?.trim() &&
       (cs.show_timing !== "after_webinar" || Date.now() >= startMs);
 
+    // WhatsApp help fallback — same admin-editable source as the floating button.
+    const settings = await getSiteSettings();
+    const waLink = whatsappLink(
+      settings.brand.whatsapp || settings.brand.support_phone,
+      `Hi, I'm registered for ${webinar.title} but having trouble joining. Please help.`
+    );
+
     return (
       <div className="container-wide section">
         <Link href="/portal" className="text-sm text-primary">← My portal</Link>
@@ -113,6 +123,16 @@ export default async function PortalItemPage({ params }: { params: { reference: 
                 recording={recording}
               />
             </div>
+
+            {/* Calm, step-by-step join guide for first-time / non-technical users */}
+            <WebinarJoinSteps
+              sessionType={sessionType}
+              startISO={webinar.datetime || null}
+              endISO={webinar.end_datetime || null}
+              hasZoomLink={!!webinar.link}
+              joinNote={webinar.join_note}
+              waLink={waLink}
+            />
 
             {/* About */}
             {aboutHtml && (
