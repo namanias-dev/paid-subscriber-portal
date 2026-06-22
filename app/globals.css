@@ -99,8 +99,13 @@ a {
   }
   .quiz-rich ol,
   .quiz-rich ul {
-    margin: 0.5em 0;
+    margin: 0.85rem 0;
     padding-left: 1.4em;
+    white-space: normal;
+  }
+  /* Two subtle gaps around a plain-text numbered-statement block; items stay tight. */
+  .quiz-rich .q-stmts {
+    margin: 0.85rem 0;
     white-space: normal;
   }
   .quiz-rich ol {

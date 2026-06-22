@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { formatQuestionHtml } from "@/lib/quizFormat";
 
 interface ResultData {
   quiz: { id: string; title: string; slug: string; subject: string | null; marks_per_question: number };
@@ -144,7 +145,7 @@ export default function ResultView({
                 <div key={i} className="rounded-xl border border-line">
                   <button onClick={() => setOpen(isOpen ? null : i)} className="flex w-full items-center gap-3 p-3.5 text-left">
                     <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold ${badge}`}>{qq.order}</span>
-                    <span className="quiz-rich flex-1 text-sm" dangerouslySetInnerHTML={{ __html: qq.question_html }} />
+                    <span className="quiz-rich flex-1 text-sm" dangerouslySetInnerHTML={{ __html: formatQuestionHtml(qq.question_html) }} />
                     <span className="text-xs text-muted">{qq.is_unattempted ? "Skipped" : qq.is_correct ? `+${qq.marks_awarded}` : `-${qq.negative_marks_deducted}`}</span>
                   </button>
                   {isOpen && (

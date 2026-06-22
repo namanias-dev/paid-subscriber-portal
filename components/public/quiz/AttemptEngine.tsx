@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { formatQuestionHtml } from "@/lib/quizFormat";
 
 interface ClientQuestion {
   question_id: string;
@@ -241,7 +242,7 @@ export default function AttemptEngine({
                 {q.difficulty && <span>· {q.difficulty}</span>}
               </div>
               {q.question_image && <img src={q.question_image} alt="" className="mb-4 max-h-72 rounded-xl object-contain" />}
-              <div className="quiz-rich text-[15px] text-ink" dangerouslySetInnerHTML={{ __html: q.question_html }} />
+              <div className="quiz-rich text-[15px] text-ink" dangerouslySetInnerHTML={{ __html: formatQuestionHtml(q.question_html) }} />
               <div className="mt-5 space-y-2.5">
                 {q.options.map((opt) => {
                   const selected = answers[q.question_id] === opt.key;
