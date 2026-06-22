@@ -45,8 +45,8 @@ export default function EnrollClient({ course }: { course: Course }) {
       setError("Enter your name and a valid 10-digit mobile.");
       return;
     }
-    if (isPaid && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
-      setError("A valid email is required for payment.");
+    if (email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+      setError("Enter a valid email address, or leave it blank.");
       return;
     }
     setLoading(true);
@@ -126,14 +126,15 @@ export default function EnrollClient({ course }: { course: Course }) {
               <input className="input" placeholder="Full name" value={name} onChange={(e) => setName(e.target.value)} />
               <input
                 className="input"
-                placeholder="10-digit mobile"
+                placeholder="10-digit mobile *"
                 inputMode="numeric"
                 value={phone}
                 onChange={(e) => setPhone(e.target.value.replace(/\D/g, "").slice(0, 10))}
               />
               <input
                 className="input"
-                placeholder={isPaid ? "Email (required)" : "Email (optional)"}
+                type="email"
+                placeholder="Email (optional)"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
               />

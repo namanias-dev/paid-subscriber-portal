@@ -82,10 +82,13 @@ export async function POST(req: Request) {
     if (mobile.length !== 10) {
       return NextResponse.json({ ok: false, error: "Enter a valid 10-digit mobile number." }, { status: 400 });
     }
-    // Email is mandatory for the Eazypay mandatory-fields payload.
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      return NextResponse.json({ ok: false, error: "Enter a valid email address." }, { status: 400 });
+    // Email is OPTIONAL. If provided it must be well-formed; if blank we still need
+    // a syntactically valid value for Eazypay's mandatory-fields payload, so we
+    // derive a non-deliverable placeholder from the phone (real email stored as null).
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return NextResponse.json({ ok: false, error: "Enter a valid email address, or leave it blank." }, { status: 400 });
     }
+    const gatewayEmail = email || `${mobile}@guest.namanias.com`;
 
     const resolved = await resolveItem(itemType, body);
     if (!resolved) {
@@ -114,7 +117,7 @@ export async function POST(req: Request) {
       await createPayment({
         student_name: name,
         phone: mobile,
-        email,
+        email: email || null,
         item: resolved.item,
         item_type: itemType,
         item_slug: resolved.itemSlug,
@@ -142,7 +145,7 @@ export async function POST(req: Request) {
     await createPayment({
       student_name: name,
       phone: mobile,
-      email,
+      email: email || null,
       item: resolved.item,
       item_type: itemType,
       item_slug: resolved.itemSlug,
@@ -166,7 +169,7 @@ export async function POST(req: Request) {
         subMerchantId,
         amount,
         name,
-        email,
+        email: gatewayEmail,
         mobile,
       });
       if (!paymentUrl) {

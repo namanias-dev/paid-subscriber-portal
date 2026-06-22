@@ -34,7 +34,9 @@ export default function PayModal({
     setError(null);
     if (!name.trim()) return setError("Please enter your full name.");
     if (!/^\d{10}$/.test(mobile)) return setError("Enter a valid 10-digit mobile number.");
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) return setError("Enter a valid email address.");
+    if (email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+      return setError("Enter a valid email address, or leave it blank.");
+    }
 
     setLoading(true);
     const result = await startPayment({
@@ -56,12 +58,12 @@ export default function PayModal({
         <input className="input" placeholder="Full name" value={name} onChange={(e) => setName(e.target.value)} />
         <input
           className="input"
-          placeholder="10-digit mobile"
+          placeholder="10-digit mobile *"
           inputMode="numeric"
           value={mobile}
           onChange={(e) => setMobile(e.target.value.replace(/\D/g, "").slice(0, 10))}
         />
-        <input className="input" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} />
+        <input className="input" type="email" placeholder="Email (optional)" value={email} onChange={(e) => setEmail(e.target.value)} />
         {error && <p className="text-sm text-danger">{error}</p>}
         <button type="submit" disabled={loading} className="btn btn-primary w-full">
           {loading ? "Starting…" : `Pay ${formatINR(amount)} →`}

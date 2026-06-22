@@ -54,8 +54,8 @@ export default function WebinarRegister({
       setError("Enter your name and a valid 10-digit mobile.");
       return;
     }
-    if (isPaid && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
-      setError("A valid email is required for payment.");
+    if (email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+      setError("Enter a valid email address, or leave it blank.");
       return;
     }
     setLoading(true);
@@ -114,13 +114,13 @@ export default function WebinarRegister({
       <input className="input" placeholder="Your name" value={name} onChange={(e) => setName(e.target.value)} />
       <input
         className="input"
-        placeholder="10-digit mobile"
+        placeholder="10-digit mobile *"
         inputMode="numeric"
         value={phone}
         onChange={(e) => setPhone(e.target.value.replace(/\D/g, "").slice(0, 10))}
       />
       {isPaid && (
-        <input className="input" placeholder="Email (required)" value={email} onChange={(e) => setEmail(e.target.value)} />
+        <input className="input" type="email" placeholder="Email (optional)" value={email} onChange={(e) => setEmail(e.target.value)} />
       )}
       {isPaid && (
         <div>

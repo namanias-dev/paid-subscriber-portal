@@ -25,7 +25,7 @@ export default function PaymentsAdmin() {
     isPaid(s) ? "pill-green" : s === "pending" || s === "PENDING" ? "pill-amber" : s === "FAILED" ? "pill-red" : "pill-red";
 
   function exportCsv() {
-    const rows = [["Student", "Phone", "Item", "Amount", "Login Code", "Status", "Date"], ...payments.map((p) => [p.student_name, p.phone, p.item, String(p.amount), buyerCodes[p.phone] || "", p.status, p.created_at.slice(0, 10)])];
+    const rows = [["Student", "Phone", "Item", "Amount", "Login Code", "Status", "Date"], ...payments.map((p) => [p.student_name, p.phone, p.item, String(p.amount), buyerCodes[(p.phone || "").trim()] || "", p.status, p.created_at.slice(0, 10)])];
     const csv = rows.map((r) => r.map((c) => `"${c}"`).join(",")).join("\n");
     const url = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
     const a = document.createElement("a");
@@ -57,8 +57,8 @@ export default function PaymentsAdmin() {
               <div className="text-muted">{p.gateway || (p.mode ? `Razorpay · ${p.mode}` : "")}</div>
             </td>
             <td className="px-4 py-3">
-              {buyerCodes[p.phone] ? (
-                <span className="font-mono text-xs font-semibold text-primary">{buyerCodes[p.phone]}</span>
+              {buyerCodes[(p.phone || "").trim()] ? (
+                <span className="font-mono text-xs font-semibold text-primary">{buyerCodes[(p.phone || "").trim()]}</span>
               ) : (
                 <span className="text-muted">—</span>
               )}
