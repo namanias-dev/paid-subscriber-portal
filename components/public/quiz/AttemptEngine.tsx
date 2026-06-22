@@ -265,6 +265,16 @@ export default function AttemptEngine({
                 <button onClick={() => toggleMark(q.question_id)} className={`btn text-sm ${marked[q.question_id] ? "btn-primary" : "btn-secondary"}`}>{marked[q.question_id] ? "★ Marked" : "☆ Mark for review"}</button>
                 <button onClick={() => setCurrent((c) => Math.min(questions.length - 1, c + 1))} disabled={current === questions.length - 1} className="btn btn-primary ml-auto text-sm">Save & Next →</button>
               </div>
+
+              {current === questions.length - 1 && (
+                <button
+                  onClick={() => setConfirmOpen(true)}
+                  disabled={submitting}
+                  className="btn btn-primary mt-4 w-full py-3 text-base disabled:opacity-50"
+                >
+                  {submitting ? "Submitting…" : "Submit Quiz"}
+                </button>
+              )}
             </div>
           )}
         </div>
