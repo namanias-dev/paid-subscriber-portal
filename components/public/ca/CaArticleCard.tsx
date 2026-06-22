@@ -1,45 +1,52 @@
 import Link from "next/link";
+import { Newspaper, Clock, ArrowUpRight, Star } from "lucide-react";
 import { caArticleTypeLabel, caCategoryName } from "@/lib/caConstants";
 import { caDateLabel } from "@/lib/caView";
 import type { CaArticle } from "@/lib/types";
 
-const TYPE_PILL: Record<string, string> = {
-  daily: "pill-blue",
-  editorial: "pill-amber",
-  prelims_facts: "pill-green",
-  mains_analysis: "pill-gray",
+const TYPE_TONE: Record<string, string> = {
+  daily: "text-[var(--ca-navy-600)] bg-[rgba(30,58,138,0.08)] border-[rgba(30,58,138,0.16)]",
+  editorial: "text-[#8a6d12] bg-[var(--ca-gold-soft)] border-[rgba(212,175,55,0.35)]",
+  prelims_facts: "text-[var(--success)] bg-[#e7f6ec] border-[rgba(22,163,74,0.2)]",
+  mains_analysis: "text-[var(--ca-slate-700)] bg-[var(--ca-slate-50)] border-[var(--ca-slate-200)]",
 };
 
 export default function CaArticleCard({ article, compact = false }: { article: CaArticle; compact?: boolean }) {
   const img = article.thumbnail_image || article.featured_image;
   return (
-    <Link
-      href={`/current-affairs/${article.slug}`}
-      className="card group flex h-full flex-col overflow-hidden p-0 transition hover:-translate-y-0.5 hover:shadow-lg"
-    >
-      <div className="relative aspect-[16/9] w-full overflow-hidden bg-[var(--gold-soft)]">
+    <Link href={`/current-affairs/${article.slug}`} className="ca-card ca-focus group flex h-full flex-col overflow-hidden">
+      <div className="relative aspect-[16/9] w-full overflow-hidden">
         {img ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={img} alt={article.title} loading="lazy" className="h-full w-full object-cover transition group-hover:scale-[1.03]" />
+          <img src={img} alt={article.title} loading="lazy" className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.04]" />
         ) : (
-          <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-[var(--navy)] to-[#13306e] text-3xl text-white/90">
-            📰
+          <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-[var(--ca-navy-900)] to-[var(--ca-navy-600)]">
+            <Newspaper size={36} strokeWidth={1.5} className="text-[var(--ca-gold-bright)] opacity-90" aria-hidden="true" />
           </div>
         )}
         <div className="absolute left-3 top-3 flex flex-wrap gap-1.5">
-          <span className={`pill ${TYPE_PILL[article.article_type] || "pill-gray"} text-[11px]`}>{caArticleTypeLabel(article.article_type)}</span>
-          {article.important && <span className="pill pill-red text-[11px]">Important</span>}
+          <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-[11px] font-bold backdrop-blur-sm ${TYPE_TONE[article.article_type] || TYPE_TONE.mains_analysis}`}>
+            {caArticleTypeLabel(article.article_type)}
+          </span>
+          {article.important && (
+            <span className="inline-flex items-center gap-1 rounded-full border border-[rgba(220,38,38,0.2)] bg-[#fdeaea] px-2 py-0.5 text-[11px] font-bold text-[var(--danger)] backdrop-blur-sm">
+              <Star size={11} fill="currentColor" /> Important
+            </span>
+          )}
         </div>
       </div>
-      <div className="flex flex-1 flex-col p-4">
+      <div className="flex flex-1 flex-col p-4 sm:p-5">
         {article.category_slug && (
-          <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-[var(--gold)]">{caCategoryName(article.category_slug)}</p>
+          <p className="mb-1.5 text-[11px] font-bold uppercase tracking-wider text-[var(--ca-gold)]">{caCategoryName(article.category_slug)}</p>
         )}
-        <h3 className={`font-heading font-bold leading-snug text-ink ${compact ? "text-base" : "text-lg"}`}>{article.title}</h3>
-        {!compact && article.summary && <p className="mt-2 line-clamp-2 text-sm text-ink2">{article.summary}</p>}
-        <div className="mt-auto flex items-center gap-3 pt-3 text-xs text-muted">
+        <h3 className={`font-heading font-bold leading-snug tracking-tight text-[var(--ca-navy-900)] ${compact ? "text-base" : "text-lg"}`}>{article.title}</h3>
+        {!compact && article.summary && <p className="mt-2 line-clamp-2 text-sm leading-relaxed text-[var(--ca-slate-700)]">{article.summary}</p>}
+        <div className="mt-auto flex items-center gap-3 pt-4 text-xs text-[var(--ca-slate-400)]">
           <span>{caDateLabel(article.ca_date || article.publish_at)}</span>
-          {article.reading_time ? <span>· {article.reading_time} min read</span> : null}
+          {article.reading_time ? (
+            <span className="inline-flex items-center gap-1"><Clock size={12} /> {article.reading_time} min</span>
+          ) : null}
+          <ArrowUpRight size={16} className="ml-auto text-[var(--ca-slate-300)] transition-all duration-200 group-hover:translate-x-0.5 group-hover:text-[var(--ca-gold)]" aria-hidden="true" />
         </div>
       </div>
     </Link>

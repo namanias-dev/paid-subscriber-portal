@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { ChevronDown } from "lucide-react";
 
 interface Heading {
   id: string;
@@ -46,8 +47,8 @@ export default function CaToc({ targetId }: { targetId: string }) {
           key={h.id}
           href={`#${h.id}`}
           onClick={() => setOpen(false)}
-          className={`block border-l-2 py-0.5 transition ${h.level === 3 ? "pl-5" : "pl-3"} ${
-            active === h.id ? "border-[var(--gold)] font-semibold text-[var(--navy)]" : "border-line text-ink2 hover:text-ink"
+          className={`ca-focus block border-l-2 py-0.5 transition ${h.level === 3 ? "pl-5" : "pl-3"} ${
+            active === h.id ? "border-[var(--ca-gold)] font-semibold text-[var(--ca-navy-900)]" : "border-[var(--ca-slate-200)] text-[var(--ca-slate-700)] hover:text-[var(--ca-navy-900)]"
           }`}
         >
           {h.text}
@@ -62,17 +63,17 @@ export default function CaToc({ targetId }: { targetId: string }) {
       <div className="lg:hidden">
         <button
           onClick={() => setOpen((o) => !o)}
-          className="flex w-full items-center justify-between rounded-xl border border-line bg-surface px-4 py-3 text-sm font-semibold"
+          className="ca-focus flex w-full items-center justify-between rounded-xl border border-[var(--ca-slate-200)] bg-[var(--ca-slate-50)] px-4 py-3 text-sm font-semibold text-[var(--ca-navy-900)]"
           aria-expanded={open}
         >
           On this page
-          <span className={`transition ${open ? "rotate-180" : ""}`}>▾</span>
+          <ChevronDown size={16} className={`transition ${open ? "rotate-180" : ""}`} />
         </button>
-        {open && <div className="mt-2 rounded-xl border border-line bg-surface p-3">{list}</div>}
+        {open && <div className="mt-2 rounded-xl border border-[var(--ca-slate-200)] bg-[var(--ca-slate-50)] p-3">{list}</div>}
       </div>
       {/* Desktop: sticky */}
       <div className="hidden lg:block">
-        <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">On this page</p>
+        <p className="mb-2 text-xs font-bold uppercase tracking-wider text-[var(--ca-slate-400)]">On this page</p>
         {list}
       </div>
     </>

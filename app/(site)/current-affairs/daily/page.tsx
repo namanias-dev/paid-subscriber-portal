@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { Archive, ArrowRight } from "lucide-react";
 import CaArticleCard from "@/components/public/ca/CaArticleCard";
+import CaPageHeader from "@/components/public/ca/CaPageHeader";
 import { getPublicCaArticles } from "@/lib/dataProvider";
 import { caMetadata, caDateLabel, groupByDate } from "@/lib/caView";
 import { ACADEMY } from "@/lib/config";
@@ -20,28 +22,33 @@ export default async function DailyArchive() {
   const groups = groupByDate(articles);
 
   return (
-    <div className="container-wide py-10">
-      <nav className="mb-4 text-xs text-muted"><Link href="/current-affairs" className="hover:text-ink">Current Affairs</Link> / Daily archive</nav>
-      <h1 className="font-heading text-3xl font-extrabold sm:text-4xl">Daily Current Affairs Archive</h1>
-      <p className="mt-2 text-ink2">Every day&apos;s current affairs, organised by date.</p>
-
-      {groups.length === 0 ? (
-        <p className="mt-10 rounded-xl border border-line bg-surface p-8 text-center text-ink2">No articles published yet.</p>
-      ) : (
-        <div className="mt-8 space-y-12">
-          {groups.map((g) => (
-            <section key={g.date}>
-              <div className="mb-4 flex items-end justify-between">
-                <h2 className="font-heading text-xl font-bold">{caDateLabel(g.date)}</h2>
-                <Link href={`/current-affairs/daily/${g.date}`} className="text-sm text-primary">View day →</Link>
-              </div>
-              <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-                {g.items.slice(0, 6).map((a) => <CaArticleCard key={a.id} article={a} compact />)}
-              </div>
-            </section>
-          ))}
-        </div>
-      )}
+    <div>
+      <CaPageHeader
+        eyebrow="Daily Archive"
+        title="Daily Current Affairs Archive"
+        subtitle="Every day's current affairs, organised by date."
+        icon={Archive}
+        crumbs={[{ label: "Current Affairs", href: "/current-affairs" }, { label: "Daily" }]}
+      />
+      <div className="container-wide py-12">
+        {groups.length === 0 ? (
+          <p className="rounded-2xl border border-[var(--ca-slate-200)] bg-[var(--ca-slate-50)] p-10 text-center text-[var(--ca-slate-700)]">No articles published yet.</p>
+        ) : (
+          <div className="space-y-12">
+            {groups.map((g) => (
+              <section key={g.date}>
+                <div className="mb-4 flex items-end justify-between">
+                  <h2 className="font-heading text-xl font-bold tracking-tight text-[var(--ca-navy-900)]">{caDateLabel(g.date)}</h2>
+                  <Link href={`/current-affairs/daily/${g.date}`} className="inline-flex items-center gap-1 text-sm font-semibold text-[var(--ca-navy-600)]">View day <ArrowRight size={15} /></Link>
+                </div>
+                <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+                  {g.items.slice(0, 6).map((a) => <CaArticleCard key={a.id} article={a} compact />)}
+                </div>
+              </section>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

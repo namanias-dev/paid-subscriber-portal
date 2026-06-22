@@ -142,7 +142,7 @@ export default async function HomePage() {
             </Reveal>
             <Stagger className="mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
               {homeCa.map((a) => (
-                <StaggerItem key={a.id}><CaArticleCard article={a} /></StaggerItem>
+                <StaggerItem key={a.id} className="h-full"><CaArticleCard article={a} /></StaggerItem>
               ))}
             </Stagger>
           </div>

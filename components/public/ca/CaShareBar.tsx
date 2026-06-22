@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { MessageCircle, Send, Share2, Globe, Link2, Check, Bookmark, BookmarkCheck } from "lucide-react";
 
 /** Share + copy-link + bookmark toolbar. Bookmark works for any logged-in user. */
 export default function CaShareBar({ slug, title, path }: { slug: string; title: string; path: string }) {
@@ -48,17 +49,24 @@ export default function CaShareBar({ slug, title, path }: { slug: string; title:
     if (d.ok) setBookmarked(!!d.bookmarked);
   }
 
-  const btn = "inline-flex items-center gap-1.5 rounded-full border border-line bg-surface px-3 py-1.5 text-xs font-medium text-ink2 transition hover:text-ink";
+  const btn =
+    "ca-focus inline-flex items-center gap-1.5 rounded-full border border-[var(--ca-slate-200)] bg-white px-3 py-1.5 text-xs font-semibold text-[var(--ca-slate-700)] transition hover:border-[rgba(212,175,55,0.6)] hover:text-[var(--ca-navy-900)]";
 
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <a className={btn} href={`https://wa.me/?text=${shareText}%20${enc(url)}`} target="_blank" rel="noopener noreferrer">WhatsApp</a>
-      <a className={btn} href={`https://t.me/share/url?url=${enc(url)}&text=${shareText}`} target="_blank" rel="noopener noreferrer">Telegram</a>
-      <a className={btn} href={`https://twitter.com/intent/tweet?text=${shareText}&url=${enc(url)}`} target="_blank" rel="noopener noreferrer">X</a>
-      <a className={btn} href={`https://www.linkedin.com/sharing/share-offsite/?url=${enc(url)}`} target="_blank" rel="noopener noreferrer">LinkedIn</a>
-      <button className={btn} onClick={copy}>{copied ? "Copied ✓" : "Copy link"}</button>
-      <button className={`${btn} ${bookmarked ? "border-[var(--gold)] text-[var(--navy)]" : ""}`} onClick={toggleBookmark} disabled={busy} aria-pressed={bookmarked}>
-        {bookmarked ? "★ Saved" : "☆ Save"}
+      <a className={btn} href={`https://wa.me/?text=${shareText}%20${enc(url)}`} target="_blank" rel="noopener noreferrer" aria-label="Share on WhatsApp"><MessageCircle size={15} /> WhatsApp</a>
+      <a className={btn} href={`https://t.me/share/url?url=${enc(url)}&text=${shareText}`} target="_blank" rel="noopener noreferrer" aria-label="Share on Telegram"><Send size={15} /> Telegram</a>
+      <a className={btn} href={`https://twitter.com/intent/tweet?text=${shareText}&url=${enc(url)}`} target="_blank" rel="noopener noreferrer" aria-label="Share on X"><Share2 size={15} /> X</a>
+      <a className={btn} href={`https://www.linkedin.com/sharing/share-offsite/?url=${enc(url)}`} target="_blank" rel="noopener noreferrer" aria-label="Share on LinkedIn"><Globe size={15} /> LinkedIn</a>
+      <button className={btn} onClick={copy} aria-label="Copy link">{copied ? <><Check size={15} className="text-[var(--success)]" /> Copied</> : <><Link2 size={15} /> Copy</>}</button>
+      <button
+        className={`${btn} ${bookmarked ? "border-[rgba(212,175,55,0.7)] bg-[var(--ca-gold-soft)] text-[var(--ca-navy-900)]" : ""}`}
+        onClick={toggleBookmark}
+        disabled={busy}
+        aria-pressed={bookmarked}
+        aria-label={bookmarked ? "Remove bookmark" : "Save article"}
+      >
+        {bookmarked ? <><BookmarkCheck size={15} className="text-[var(--ca-gold)]" /> Saved</> : <><Bookmark size={15} /> Save</>}
       </button>
     </div>
   );
