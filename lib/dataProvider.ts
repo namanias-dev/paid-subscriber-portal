@@ -636,6 +636,9 @@ export async function addWebinar(input: Partial<Webinar>): Promise<Webinar> {
     what_you_get: input.what_you_get ?? [],
     reviews: input.reviews ?? [],
     sections: input.sections ?? [],
+    session_type: input.session_type ?? "live",
+    materials: input.materials ?? [],
+    cross_sell: input.cross_sell ?? {},
     created_at: new Date().toISOString(),
   } as Webinar;
   if (demoMode()) {

@@ -1,6 +1,14 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { verifyStudentToken, verifyBuyerToken } from "@/lib/auth";
+import { verifyStudentToken, verifyBuyerToken, signBuyerToken } from "@/lib/auth";
 import { isDemoMode, STUDENT_COOKIE, BUYER_COOKIE } from "@/lib/config";
+
+const BUYER_COOKIE_OPTS = {
+  httpOnly: true,
+  secure: process.env.NODE_ENV === "production",
+  sameSite: "lax" as const,
+  path: "/",
+  maxAge: 60 * 60 * 24 * 7,
+};
 
 /**
  * Route protection.
@@ -33,8 +41,18 @@ export async function middleware(req: NextRequest) {
       if (!session) {
         const url = req.nextUrl.clone();
         url.pathname = "/portal/login";
+        // Distinguish an expired/invalid session (cookie present) from a fresh
+        // visit so the login page can show a clear "session expired" message.
+        if (token) url.searchParams.set("expired", "1");
         return NextResponse.redirect(url);
       }
+      // Rolling session: re-issue a fresh 7-day cookie on activity so an active
+      // user is never logged out mid-use. Logout only happens explicitly or
+      // after 7 days of inactivity.
+      const res = NextResponse.next();
+      const fresh = await signBuyerToken({ buyer_id: session.buyer_id, phone: session.phone, name: session.name });
+      res.cookies.set(BUYER_COOKIE, fresh, BUYER_COOKIE_OPTS);
+      return res;
     }
 
     // /admin itself is the login page; protect deeper admin app state via the page+API.

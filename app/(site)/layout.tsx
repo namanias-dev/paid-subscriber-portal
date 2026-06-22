@@ -2,13 +2,13 @@ import PublicNav from "@/components/public/PublicNav";
 import PublicFooter from "@/components/public/PublicFooter";
 import FloatingWhatsApp from "@/components/public/FloatingWhatsApp";
 import { getSiteSettings } from "@/lib/dataProvider";
-import { getStudentSession } from "@/lib/session";
+import { getStudentSession, getBuyerSession } from "@/lib/session";
 import { resolveNavTabs } from "@/lib/navConfig";
 import { whatsappLink } from "@/lib/phone";
 
 export default async function SiteLayout({ children }: { children: React.ReactNode }) {
   const settings = await getSiteSettings();
-  const session = await getStudentSession();
+  const [session, buyerSession] = await Promise.all([getStudentSession(), getBuyerSession()]);
   const waLink = whatsappLink(
     settings.brand.whatsapp || settings.brand.support_phone,
     "Hi, I have a question about your courses / webinars."
@@ -23,6 +23,7 @@ export default async function SiteLayout({ children }: { children: React.ReactNo
         wordmark={settings.content.wordmark}
         wordmarkSub={settings.content.wordmark_sub}
         isLoggedIn={!!session}
+        portalLoggedIn={!!buyerSession}
         links={resolveNavTabs(settings.nav)}
       />
       <main className="flex-1">{children}</main>

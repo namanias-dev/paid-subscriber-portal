@@ -398,6 +398,18 @@ export interface FormSubmission {
 }
 
 // ----------------------------- Webinars -----------------------------
+/** Cross-sell / course promo block shown on the logged-in webinar card. */
+export interface CrossSell {
+  enabled?: boolean;
+  title?: string;
+  description?: string;
+  href?: string;
+  promo_code?: string;
+  cta_label?: string;
+  /** When to show the promo on the user's card. */
+  show_timing?: "always" | "after_webinar";
+}
+
 export interface Webinar {
   id: string;
   slug: string;
@@ -406,6 +418,12 @@ export interface Webinar {
   datetime: string;
   link: string | null;
   price: number;
+  /** "live" (Zoom join + recording after) or "recorded" (recording only). Defaults to live. */
+  session_type?: "live" | "recorded";
+  /** Post-registration deliverables (entitlement-gated; shown only in the portal). */
+  materials?: PdfResource[];
+  /** Course cross-sell / promo block on the user's webinar card. */
+  cross_sell?: CrossSell;
   capacity: number | null;
   registrations: number;
   recording_link: string | null;

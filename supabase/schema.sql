@@ -253,6 +253,9 @@ create table if not exists public.webinars (
   what_you_get jsonb default '[]'::jsonb,
   reviews jsonb default '[]'::jsonb,
   sections jsonb default '[]'::jsonb,
+  session_type text default 'live',
+  materials jsonb default '[]'::jsonb,
+  cross_sell jsonb default '{}'::jsonb,
   created_at timestamptz default now()
 );
 

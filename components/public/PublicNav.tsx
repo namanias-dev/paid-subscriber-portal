@@ -13,6 +13,11 @@ async function doLogout() {
   window.location.href = "/";
 }
 
+async function doPortalLogout() {
+  try { await fetch("/api/portal/logout", { method: "POST" }); } catch { /* ignore */ }
+  window.location.href = "/";
+}
+
 export default function PublicNav({
   logoUrl,
   logoAlt,
@@ -21,6 +26,7 @@ export default function PublicNav({
   wordmark = "Naman Sharma",
   wordmarkSub = "IAS Academy",
   isLoggedIn = false,
+  portalLoggedIn = false,
   links = DEFAULT_NAV_TABS,
 }: {
   logoUrl?: string | null;
@@ -30,6 +36,7 @@ export default function PublicNav({
   wordmark?: string;
   wordmarkSub?: string;
   isLoggedIn?: boolean;
+  portalLoggedIn?: boolean;
   links?: NavTab[];
 }) {
   const pathname = usePathname();
@@ -87,6 +94,11 @@ export default function PublicNav({
               <Link href="/dashboard" className="btn btn-primary px-4">Dashboard</Link>
               <button onClick={doLogout} className="btn btn-ghost px-3">Logout</button>
             </>
+          ) : portalLoggedIn ? (
+            <>
+              <Link href="/portal" className="btn btn-primary px-4">My Portal</Link>
+              <button onClick={doPortalLogout} className="btn btn-ghost px-3">Logout</button>
+            </>
           ) : (
             <>
               <Link href="/login" className="btn btn-ghost px-3">Login</Link>
@@ -126,6 +138,11 @@ export default function PublicNav({
                 <>
                   <Link href="/dashboard" onClick={() => setOpen(false)} className="btn btn-primary flex-1">Dashboard</Link>
                   <button onClick={() => { setOpen(false); doLogout(); }} className="btn btn-secondary flex-1">Logout</button>
+                </>
+              ) : portalLoggedIn ? (
+                <>
+                  <Link href="/portal" onClick={() => setOpen(false)} className="btn btn-primary flex-1">My Portal</Link>
+                  <button onClick={() => { setOpen(false); doPortalLogout(); }} className="btn btn-secondary flex-1">Logout</button>
                 </>
               ) : (
                 <>

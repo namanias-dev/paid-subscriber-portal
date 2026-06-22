@@ -36,6 +36,7 @@ import type {
   Review,
   LearnItem,
   PageSection,
+  CrossSell,
 } from "@/lib/types";
 
 const BACK = "/admin/webinars";
@@ -85,6 +86,10 @@ export default function WebinarForm({ webinar }: { webinar?: Webinar }) {
   const [whatYouGet, setWhatYouGet] = useState<LearnItem[]>(webinar?.what_you_get || []);
   const [reviews, setReviews] = useState<Review[]>(webinar?.reviews || []);
   const [sections, setSections] = useState<PageSection[]>(webinar?.sections || []);
+  // Portal experience fields
+  const [sessionType, setSessionType] = useState<"live" | "recorded">(webinar?.session_type === "recorded" ? "recorded" : "live");
+  const [materials, setMaterials] = useState<PdfResource[]>(webinar?.materials || []);
+  const [crossSell, setCrossSell] = useState<CrossSell>(webinar?.cross_sell || {});
   const [saving, setSaving] = useState(false);
 
   async function save() {
@@ -124,6 +129,9 @@ export default function WebinarForm({ webinar }: { webinar?: Webinar }) {
       what_you_get: whatYouGet.filter((i) => i.title.trim()),
       reviews: reviews.filter((r) => r.name.trim() && r.text.trim()),
       sections: sections.filter((s) => s.title.trim()),
+      session_type: sessionType,
+      materials: materials.filter((m) => m.url.trim()),
+      cross_sell: crossSell,
     };
     const res = await fetch(isNew ? "/api/admin/webinars" : `/api/admin/webinars/${webinar!.id}`, {
       method: isNew ? "POST" : "PATCH",
@@ -185,12 +193,18 @@ export default function WebinarForm({ webinar }: { webinar?: Webinar }) {
                   </Field>
                 </Section>
 
-                <Section title="Links">
-                  <Field label="Join link (Zoom / YouTube)">
-                    <input className="input" value={link} onChange={(e) => setLink(e.target.value)} placeholder="https://…" />
+                <Section title="Session type & links" desc="Drives the smart access button on the student's portal card.">
+                  <Field label="Session type" hint="Live = Zoom join before start, recording after. Recorded = recording only.">
+                    <select className="input" value={sessionType} onChange={(e) => setSessionType(e.target.value as "live" | "recorded")}>
+                      <option value="live">Live webinar</option>
+                      <option value="recorded">Recorded session</option>
+                    </select>
                   </Field>
-                  <Field label="Recording link" hint="Shown for completed webinars.">
-                    <input className="input" value={recordingLink} onChange={(e) => setRecordingLink(e.target.value)} placeholder="https://…" />
+                  <Field label="Zoom / live class link" hint='Shown as "Attend Live Class" until the start time passes (live sessions).'>
+                    <input className="input" value={link} onChange={(e) => setLink(e.target.value)} placeholder="https://zoom.us/j/…" />
+                  </Field>
+                  <Field label="Recording link (YouTube / Google Drive)" full hint="Used automatically once the webinar date has passed (or immediately for recorded sessions).">
+                    <input className="input" value={recordingLink} onChange={(e) => setRecordingLink(e.target.value)} placeholder="https://youtu.be/… or https://drive.google.com/file/d/…/view" />
                   </Field>
                 </Section>
               </>
@@ -276,6 +290,51 @@ export default function WebinarForm({ webinar }: { webinar?: Webinar }) {
             content: (
               <Section title="Reviews & testimonials" desc="Build trust with student results and ratings.">
                 <ReviewsEditor value={reviews} onChange={setReviews} folder="reviews" />
+              </Section>
+            ),
+          },
+          {
+            id: "materials",
+            label: "After Registration",
+            content: (
+              <Section
+                title="Materials & deliverables"
+                desc="Shown ONLY to students who have registered/paid (entitlement-gated) — on their portal card. Upload PDFs or paste a Google Drive link, each with a title."
+              >
+                <PdfResourcesEditor value={materials} onChange={setMaterials} folder="materials" />
+              </Section>
+            ),
+          },
+          {
+            id: "crosssell",
+            label: "Cross-sell",
+            content: (
+              <Section title="Promote a course" desc="A tasteful upsell block on the student's webinar card (e.g. “Join Safalta Batch”).">
+                <label className="flex items-center gap-3 sm:col-span-2">
+                  <input type="checkbox" checked={!!crossSell.enabled} onChange={(e) => setCrossSell({ ...crossSell, enabled: e.target.checked })} />
+                  <span className="text-sm"><b>{crossSell.enabled ? "Enabled" : "Disabled"}</b> — show this promo on the student card.</span>
+                </label>
+                <Field label="Promo title">
+                  <input className="input" value={crossSell.title || ""} onChange={(e) => setCrossSell({ ...crossSell, title: e.target.value })} placeholder="Join the Safalta Batch" />
+                </Field>
+                <Field label="CTA button label">
+                  <input className="input" value={crossSell.cta_label || ""} onChange={(e) => setCrossSell({ ...crossSell, cta_label: e.target.value })} placeholder="Explore the batch →" />
+                </Field>
+                <Field label="Description" full>
+                  <textarea className="input" rows={2} value={crossSell.description || ""} onChange={(e) => setCrossSell({ ...crossSell, description: e.target.value })} placeholder="Limited-time offer for webinar attendees…" />
+                </Field>
+                <Field label="Course link">
+                  <input className="input" value={crossSell.href || ""} onChange={(e) => setCrossSell({ ...crossSell, href: e.target.value })} placeholder="/courses/safalta-batch" />
+                </Field>
+                <Field label="Promo / discount code (optional)">
+                  <input className="input uppercase" value={crossSell.promo_code || ""} onChange={(e) => setCrossSell({ ...crossSell, promo_code: e.target.value.toUpperCase() })} placeholder="WEBINAR20" />
+                </Field>
+                <Field label="Show timing" full hint="Control when the promo appears for best conversion.">
+                  <select className="input" value={crossSell.show_timing || "always"} onChange={(e) => setCrossSell({ ...crossSell, show_timing: e.target.value as "always" | "after_webinar" })}>
+                    <option value="always">Always</option>
+                    <option value="after_webinar">Only on/after the webinar date</option>
+                  </select>
+                </Field>
               </Section>
             ),
           },
