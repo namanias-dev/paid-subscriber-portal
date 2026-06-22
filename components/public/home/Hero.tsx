@@ -1,8 +1,9 @@
 "use client";
 
+import { useRef } from "react";
 import Link from "next/link";
 import Image from "next/image";
-import { motion, useReducedMotion } from "framer-motion";
+import { motion, useReducedMotion, useMotionValue, useSpring, useTransform, useScroll, type MotionValue } from "framer-motion";
 import AshokaChakra from "@/components/public/AshokaChakra";
 import Counter from "@/components/ui/Counter";
 import { DEFAULT_HERO } from "@/lib/homeDefaults";
@@ -106,46 +107,7 @@ export default function Hero({ hero }: { hero?: HeroConfig }) {
 
         {/* Right visual: portrait when uploaded, otherwise the animated card cluster */}
         {portrait ? (
-          <div className="relative mx-auto mt-4 w-full max-w-md lg:mt-0">
-            {/* premium gradient/glow backdrop */}
-            <div
-              aria-hidden
-              className="absolute inset-0 -z-0 mx-auto h-full w-[88%] rounded-[40%] blur-2xl"
-              style={{ background: "radial-gradient(closest-side, rgba(0,87,255,0.22), rgba(201,162,39,0.12), transparent)" }}
-            />
-            <motion.div
-              initial={reduce ? { opacity: 0 } : { opacity: 0, y: 18 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
-              className="relative z-10"
-            >
-              <Image
-                src={portrait}
-                alt={h.portrait_alt || "Naman Sir"}
-                width={520}
-                height={620}
-                priority
-                sizes="(max-width: 1024px) 80vw, 460px"
-                className="mx-auto h-auto w-auto max-h-[300px] object-contain drop-shadow-2xl sm:max-h-[440px] lg:max-h-[520px]"
-              />
-            </motion.div>
-            <motion.div
-              animate={reduce ? {} : { y: [0, -10, 0] }}
-              transition={{ duration: 5, repeat: Infinity, ease: "easeInOut" }}
-              className="absolute left-0 top-8 z-20 hidden rounded-2xl border border-line bg-white px-4 py-3 shadow-soft sm:block"
-            >
-              <div className="text-xl">🎯</div>
-              <div className="text-sm font-semibold">Prelims to Interview</div>
-            </motion.div>
-            <motion.div
-              animate={reduce ? {} : { y: [0, -8, 0] }}
-              transition={{ duration: 6, repeat: Infinity, ease: "easeInOut", delay: 0.6 }}
-              className="absolute bottom-6 right-0 z-20 hidden rounded-2xl border border-line bg-white px-4 py-3 shadow-soft sm:block"
-            >
-              <div className="text-xl">🏅</div>
-              <div className="text-sm font-semibold">9+ Top AIRs</div>
-            </motion.div>
-          </div>
+          <HeroPortrait src={portrait} alt={h.portrait_alt || "Naman Sir"} reduce={!!reduce} />
         ) : (
           <div className="relative mx-auto hidden h-[420px] w-full max-w-md lg:block">
             <motion.div
@@ -181,6 +143,105 @@ export default function Hero({ hero }: { hero?: HeroConfig }) {
         )}
       </div>
     </section>
+  );
+}
+
+/**
+ * Premium hero portrait: large, bottom-feathered so it melts into the dotted /
+ * Ashoka-chakra background (no "pasted cut-out" look), with a brand-blue glow for
+ * depth, a subtle mouse tilt + scroll parallax. All motion respects
+ * prefers-reduced-motion and is desktop-only for the tilt.
+ */
+function HeroPortrait({ src, alt, reduce }: { src: string; alt: string; reduce: boolean }) {
+  const ref = useRef<HTMLDivElement>(null);
+
+  // Mouse tilt (desktop). Values normalised to [-0.5, 0.5].
+  const mx = useMotionValue(0);
+  const my = useMotionValue(0);
+  const rotateX = useSpring(useTransform(my, [-0.5, 0.5], [7, -7]), { stiffness: 150, damping: 18 });
+  const rotateY = useSpring(useTransform(mx, [-0.5, 0.5], [-7, 7]), { stiffness: 150, damping: 18 });
+
+  // Scroll parallax — gentle vertical drift as the section moves through view.
+  const { scrollYProgress } = useScroll({ target: ref, offset: ["start end", "end start"] });
+  const parallaxY = useSpring(useTransform(scrollYProgress, [0, 1], [-26, 26]), { stiffness: 120, damping: 24 });
+
+  function onMove(e: React.MouseEvent) {
+    if (reduce) return;
+    const r = ref.current?.getBoundingClientRect();
+    if (!r) return;
+    mx.set((e.clientX - r.left) / r.width - 0.5);
+    my.set((e.clientY - r.top) / r.height - 0.5);
+  }
+  function onLeave() {
+    mx.set(0);
+    my.set(0);
+  }
+
+  // Bottom-fade mask so the shoulders melt into the scene; transparent-PNG safe.
+  const feather = "linear-gradient(to bottom, #000 72%, rgba(0,0,0,0.55) 88%, transparent 100%)";
+
+  const zero = useMotionValue(0);
+  const tiltX: MotionValue<number> = reduce ? zero : rotateX;
+  const tiltY: MotionValue<number> = reduce ? zero : rotateY;
+  const driftY: MotionValue<number> = reduce ? zero : parallaxY;
+
+  return (
+    <div
+      ref={ref}
+      onMouseMove={onMove}
+      onMouseLeave={onLeave}
+      className="relative mx-auto mt-6 w-full max-w-md lg:mt-0 lg:max-w-lg lg:self-end"
+      style={{ perspective: 1100 }}
+    >
+      {/* Brand-blue glow behind the head/shoulders for depth + separation */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute left-1/2 top-[8%] -z-0 h-[70%] w-[78%] -translate-x-1/2 rounded-full blur-3xl"
+        style={{ background: "radial-gradient(closest-side, rgba(0,87,255,0.30), rgba(0,87,255,0.10) 60%, transparent)" }}
+      />
+      {/* Soft golden floor glow so the base anchors into the background */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute bottom-0 left-1/2 -z-0 h-[28%] w-[88%] -translate-x-1/2 rounded-[50%] blur-2xl"
+        style={{ background: "radial-gradient(closest-side, rgba(201,162,39,0.22), transparent)" }}
+      />
+
+      <motion.div
+        initial={reduce ? { opacity: 0 } : { opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
+        style={{ rotateX: tiltX, rotateY: tiltY, y: driftY, transformStyle: "preserve-3d" }}
+        className="relative z-10 will-change-transform"
+      >
+        <Image
+          src={src}
+          alt={alt}
+          width={620}
+          height={760}
+          priority
+          sizes="(max-width: 1024px) 85vw, 560px"
+          className="mx-auto h-auto w-auto max-h-[360px] object-contain drop-shadow-2xl sm:max-h-[520px] lg:max-h-[640px]"
+          style={{ WebkitMaskImage: feather, maskImage: feather }}
+        />
+      </motion.div>
+
+      <motion.div
+        animate={reduce ? {} : { y: [0, -10, 0] }}
+        transition={{ duration: 5, repeat: Infinity, ease: "easeInOut" }}
+        className="absolute left-0 top-8 z-20 hidden rounded-2xl border border-line bg-white/90 px-4 py-3 shadow-soft backdrop-blur sm:block"
+      >
+        <div className="text-xl">🎯</div>
+        <div className="text-sm font-semibold">Prelims to Interview</div>
+      </motion.div>
+      <motion.div
+        animate={reduce ? {} : { y: [0, -8, 0] }}
+        transition={{ duration: 6, repeat: Infinity, ease: "easeInOut", delay: 0.6 }}
+        className="absolute bottom-10 right-0 z-20 hidden rounded-2xl border border-line bg-white/90 px-4 py-3 shadow-soft backdrop-blur sm:block"
+      >
+        <div className="text-xl">🏅</div>
+        <div className="text-sm font-semibold">9+ Top AIRs</div>
+      </motion.div>
+    </div>
   );
 }
 
