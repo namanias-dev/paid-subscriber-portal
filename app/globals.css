@@ -403,3 +403,24 @@ a {
 .rte-content:focus {
   outline: none;
 }
+
+/* ---- Printable receipt: hidden on screen, the only thing shown when printing ---- */
+.receipt-print {
+  display: none;
+}
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  .receipt-print,
+  .receipt-print * {
+    visibility: visible;
+  }
+  .receipt-print {
+    display: block;
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+  }
+}

@@ -304,6 +304,28 @@ create table if not exists public.payments (
 );
 
 create unique index if not exists payments_reference_no_idx on public.payments (reference_no);
+create index if not exists payments_phone_idx on public.payments (phone);
+
+-- ------------------------------ buyers ------------------------------
+-- Post-payment portal accounts: one phone -> one login code -> access to all
+-- that phone's PAID payments (entitlements). See migrations/2026-buyer-access.sql.
+create table if not exists public.buyers (
+  id uuid primary key default gen_random_uuid(),
+  phone text unique not null,
+  name text,
+  login_code text unique not null,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+create index if not exists buyers_phone_idx on public.buyers (phone);
+
+-- Durable lightweight rate-limiting for login / forgot-code.
+create table if not exists public.auth_attempts (
+  id uuid primary key default gen_random_uuid(),
+  key text not null,
+  created_at timestamptz default now()
+);
+create index if not exists auth_attempts_key_idx on public.auth_attempts (key, created_at);
 
 -- ----------------------------- referrals ----------------------------
 create table if not exists public.referrals (
@@ -520,6 +542,8 @@ alter table public.webinars enable row level security;
 alter table public.webinar_registrations enable row level security;
 alter table public.plans enable row level security;
 alter table public.payments enable row level security;
+alter table public.buyers enable row level security;
+alter table public.auth_attempts enable row level security;
 alter table public.referrals enable row level security;
 alter table public.staff enable row level security;
 alter table public.questions enable row level security;

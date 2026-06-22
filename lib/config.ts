@@ -62,6 +62,8 @@ export const ACADEMY = {
 
 export const STUDENT_COOKIE = "naman_student_token";
 export const ADMIN_COOKIE = "naman_admin_token";
+/** Buyer portal session (phone + login code), separate from the student subscription portal. */
+export const BUYER_COOKIE = "naman_buyer_token";
 
 export const PLANS: PlanInfo[] = [
   {

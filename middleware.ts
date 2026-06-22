@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { verifyStudentToken, verifyAdminToken } from "@/lib/auth";
-import { isDemoMode, STUDENT_COOKIE, ADMIN_COOKIE } from "@/lib/config";
+import { verifyStudentToken, verifyBuyerToken } from "@/lib/auth";
+import { isDemoMode, STUDENT_COOKIE, BUYER_COOKIE } from "@/lib/config";
 
 /**
  * Route protection.
@@ -25,6 +25,18 @@ export async function middleware(req: NextRequest) {
       }
     }
 
+    // Buyer portal: everything under /portal needs a buyer session except the
+    // login/forgot screen itself.
+    if (pathname.startsWith("/portal") && !pathname.startsWith("/portal/login")) {
+      const token = req.cookies.get(BUYER_COOKIE)?.value;
+      const session = await verifyBuyerToken(token);
+      if (!session) {
+        const url = req.nextUrl.clone();
+        url.pathname = "/portal/login";
+        return NextResponse.redirect(url);
+      }
+    }
+
     // /admin itself is the login page; protect deeper admin app state via the page+API.
     // The page client-side checks session; APIs enforce admin token server-side.
     return NextResponse.next();
@@ -34,5 +46,5 @@ export async function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/dashboard/:path*"],
+  matcher: ["/dashboard/:path*", "/portal/:path*"],
 };

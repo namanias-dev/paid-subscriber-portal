@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getPaymentByReference, updatePaymentByReference } from "@/lib/dataProvider";
+import { getPaymentByReference, updatePaymentByReference, ensureBuyer } from "@/lib/dataProvider";
 import { isEazypayConfigured, verifyStatusSignature, itemTypeFromReference } from "@/lib/eazypay";
 
 export const dynamic = "force-dynamic";
@@ -10,6 +10,13 @@ const ITEM_LABEL: Record<string, string> = {
   webinar: "Webinar payment",
   item: "Payment",
 };
+
+/** For a paid payment, ensure the buyer exists and return their login code. */
+async function buyerLogin(phone?: string | null, name?: string | null): Promise<string | null> {
+  if (!phone) return null;
+  const b = await ensureBuyer(phone, name).catch(() => null);
+  return b?.login_code ?? null;
+}
 
 export async function GET(req: Request, { params }: { params: { referenceNo: string } }) {
   try {
@@ -34,6 +41,7 @@ export async function GET(req: Request, { params }: { params: { referenceNo: str
       }).catch(() => null);
 
       const record = await getPaymentByReference(referenceNo).catch(() => null);
+      const loginCode = signedStatus === "PAID" ? await buyerLogin(record?.phone, record?.student_name) : null;
       return NextResponse.json({
         ok: true,
         referenceNo,
@@ -42,6 +50,7 @@ export async function GET(req: Request, { params }: { params: { referenceNo: str
         itemType: record?.item_type || itemTypeFromReference(referenceNo),
         amount: Number(signedAmount ?? record?.amount ?? 0),
         gatewayRef: record?.gateway_ref ?? null,
+        loginCode,
         verifiedSignature: true,
         demo: false,
       });
@@ -81,12 +90,14 @@ export async function GET(req: Request, { params }: { params: { referenceNo: str
         itemType: payment.item_type,
         amount: payment.amount,
         gatewayRef: payment.gateway_ref ?? null,
+        loginCode: await buyerLogin(payment.phone, payment.student_name),
         verifiedSignature: payment.verified_signature ?? null,
         demo: true,
       });
     }
 
     if (payment) {
+      const paid = payment.status === "PAID" || payment.status === "captured";
       return NextResponse.json({
         ok: true,
         referenceNo,
@@ -95,6 +106,7 @@ export async function GET(req: Request, { params }: { params: { referenceNo: str
         itemType: payment.item_type,
         amount: payment.amount,
         gatewayRef: payment.gateway_ref ?? null,
+        loginCode: paid ? await buyerLogin(payment.phone, payment.student_name) : null,
         verifiedSignature: payment.verified_signature ?? null,
         demo: false,
       });

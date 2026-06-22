@@ -2,7 +2,9 @@ import { getSupabaseAdmin } from "./supabase";
 import * as mock from "./mockData";
 import { computeExpiry, isExpired, isExpiringSoon, yesterdayISODate, todayISODate } from "./dates";
 import { generateAccessCode } from "./codeGenerator";
+import { generateLoginCode } from "./buyerCode";
 import type {
+  Buyer,
   Student,
   ContentItem,
   ContentType,
@@ -749,10 +751,13 @@ export async function createPayment(input: CreatePaymentInput): Promise<Payment>
   } as Payment;
   if (demoMode()) {
     demoPayments().unshift(row);
+    if (isPaidStatus(row.status)) await ensureBuyer(row.phone, row.student_name).catch(() => null);
     return row;
   }
   try {
-    return await dbInsert<Payment>("payments", row as unknown as Record<string, unknown>);
+    const saved = await dbInsert<Payment>("payments", row as unknown as Record<string, unknown>);
+    if (isPaidStatus(saved.status)) await ensureBuyer(saved.phone, saved.student_name).catch(() => null);
+    return saved;
   } catch {
     // Best-effort: fall back to in-memory so the flow still works pre-migration.
     demoPayments().unshift(row);
@@ -783,7 +788,9 @@ export async function updatePaymentByReference(
     return store[idx];
   };
   if (demoMode()) {
-    return updateDemo();
+    const row = updateDemo();
+    if (row && isPaidStatus(patch.status)) await ensureBuyer(row.phone, row.student_name).catch(() => null);
+    return row;
   }
   const db = getSupabaseAdmin();
   if (db) {
@@ -793,9 +800,157 @@ export async function updatePaymentByReference(
       .eq("reference_no", referenceNo)
       .select()
       .maybeSingle();
-    if (data) return data as Payment;
+    if (data) {
+      const row = data as Payment;
+      if (isPaidStatus(patch.status)) await ensureBuyer(row.phone, row.student_name).catch(() => null);
+      return row;
+    }
   }
   return updateDemo();
+}
+
+// ============================ BUYERS (post-payment portal) ============================
+/** A payment "counts" (grants access) once it reaches a paid status. */
+export function isPaidStatus(status: string | null | undefined): boolean {
+  return status === "PAID" || status === "captured";
+}
+
+function demoBuyers(): Buyer[] {
+  const g = globalThis as unknown as { __namanDemoBuyers?: Buyer[] };
+  if (!g.__namanDemoBuyers) g.__namanDemoBuyers = [];
+  return g.__namanDemoBuyers;
+}
+
+async function loginCodeExists(code: string): Promise<boolean> {
+  if (demoMode()) return demoBuyers().some((b) => b.login_code === code);
+  const db = getSupabaseAdmin();
+  if (!db) return demoBuyers().some((b) => b.login_code === code);
+  const { data } = await db.from("buyers").select("id").eq("login_code", code).maybeSingle();
+  return !!data;
+}
+
+async function uniqueLoginCode(): Promise<string> {
+  for (let i = 0; i < 6; i++) {
+    const code = generateLoginCode(7);
+    if (!(await loginCodeExists(code))) return code;
+  }
+  // Extremely unlikely fallback: longer code.
+  return generateLoginCode(9);
+}
+
+export async function getBuyers(): Promise<Buyer[]> {
+  if (demoMode()) return [...demoBuyers()];
+  const db = getSupabaseAdmin();
+  if (!db) return [...demoBuyers()];
+  const { data } = await db.from("buyers").select("*").order("created_at", { ascending: false });
+  return (data as Buyer[]) ?? [];
+}
+
+export async function getBuyerByPhone(phone: string): Promise<Buyer | null> {
+  const p = (phone || "").trim();
+  if (!p) return null;
+  if (demoMode()) return demoBuyers().find((b) => b.phone === p) ?? null;
+  const db = getSupabaseAdmin();
+  if (!db) return demoBuyers().find((b) => b.phone === p) ?? null;
+  const { data } = await db.from("buyers").select("*").eq("phone", p).maybeSingle();
+  return (data as Buyer) ?? null;
+}
+
+/**
+ * Create the buyer for this phone if it doesn't exist yet (idempotent), assigning
+ * a unique login code. Called whenever a payment becomes PAID. One phone → one
+ * login code → access to all that phone's purchases.
+ */
+export async function ensureBuyer(phone: string, name?: string | null): Promise<Buyer | null> {
+  const p = (phone || "").trim();
+  if (!p) return null;
+  const existing = await getBuyerByPhone(p);
+  if (existing) return existing;
+
+  const code = await uniqueLoginCode();
+  const now = new Date().toISOString();
+  const row: Buyer = { id: uuid(), phone: p, name: name?.trim() || null, login_code: code, created_at: now, updated_at: now };
+
+  if (demoMode()) {
+    demoBuyers().unshift(row);
+    return row;
+  }
+  const db = getSupabaseAdmin();
+  if (!db) {
+    demoBuyers().unshift(row);
+    return row;
+  }
+  try {
+    // Upsert on phone to be safe against races; ignore conflict and re-read.
+    const { data, error } = await db
+      .from("buyers")
+      .insert({ phone: p, name: row.name, login_code: code })
+      .select()
+      .single();
+    if (error) {
+      // Likely a unique-phone race — return the now-existing row.
+      return (await getBuyerByPhone(p)) ?? null;
+    }
+    return data as Buyer;
+  } catch {
+    return (await getBuyerByPhone(p)) ?? null;
+  }
+}
+
+export async function findBuyerByLogin(phone: string, code: string): Promise<Buyer | null> {
+  const buyer = await getBuyerByPhone(phone);
+  if (!buyer) return null;
+  return buyer.login_code.toUpperCase() === code.toUpperCase() ? buyer : null;
+}
+
+/** All paid purchases for a phone (the buyer's entitlements). */
+export async function getBuyerPurchases(phone: string): Promise<Payment[]> {
+  const p = (phone || "").trim();
+  if (!p) return [];
+  if (demoMode()) {
+    return demoPayments().filter((x) => x.phone === p && isPaidStatus(x.status));
+  }
+  const db = getSupabaseAdmin();
+  if (!db) return demoPayments().filter((x) => x.phone === p && isPaidStatus(x.status));
+  const { data } = await db
+    .from("payments")
+    .select("*")
+    .eq("phone", p)
+    .in("status", ["PAID", "captured"])
+    .order("created_at", { ascending: false });
+  return (data as Payment[]) ?? [];
+}
+
+/** A single paid purchase by reference, scoped to a phone (server-side entitlement check). */
+export async function getPaidPurchaseForPhone(referenceNo: string, phone: string): Promise<Payment | null> {
+  const payment = await getPaymentByReference(referenceNo);
+  if (!payment) return null;
+  if (!isPaidStatus(payment.status)) return null;
+  if ((payment.phone || "").trim() !== (phone || "").trim()) return null;
+  return payment;
+}
+
+/**
+ * Lightweight, durable rate-limit: returns true when `key` has been seen more
+ * than `max` times within `windowSec`. Always records the attempt. In demo mode
+ * (no DB) it never blocks. Structured so OTP/stricter limits can be added later.
+ */
+export async function rateLimited(key: string, max: number, windowSec: number): Promise<boolean> {
+  if (demoMode()) return false;
+  const db = getSupabaseAdmin();
+  if (!db) return false;
+  try {
+    const since = new Date(Date.now() - windowSec * 1000).toISOString();
+    const { count } = await db
+      .from("auth_attempts")
+      .select("id", { count: "exact", head: true })
+      .eq("key", key)
+      .gte("created_at", since);
+    await db.from("auth_attempts").insert({ key });
+    return (count ?? 0) >= max;
+  } catch {
+    return false;
+  }
 }
 
 // ============================ REFERRALS ============================

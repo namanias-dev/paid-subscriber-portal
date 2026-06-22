@@ -1,6 +1,6 @@
 import { SignJWT, jwtVerify } from "jose";
 import { JWT_SECRET, ADMIN_JWT_SECRET } from "./config";
-import type { SessionPayload, AdminSessionPayload } from "./types";
+import type { SessionPayload, AdminSessionPayload, BuyerSessionPayload } from "./types";
 
 const enc = (s: string) => new TextEncoder().encode(s);
 const SEVEN_DAYS = "7d";
@@ -20,6 +20,26 @@ export async function verifyStudentToken(
   try {
     const { payload } = await jwtVerify(token, enc(JWT_SECRET));
     return payload as unknown as SessionPayload;
+  } catch {
+    return null;
+  }
+}
+
+export async function signBuyerToken(payload: BuyerSessionPayload): Promise<string> {
+  return new SignJWT({ ...payload })
+    .setProtectedHeader({ alg: "HS256" })
+    .setIssuedAt()
+    .setExpirationTime(SEVEN_DAYS)
+    .sign(enc(JWT_SECRET));
+}
+
+export async function verifyBuyerToken(
+  token: string | undefined | null
+): Promise<BuyerSessionPayload | null> {
+  if (!token) return null;
+  try {
+    const { payload } = await jwtVerify(token, enc(JWT_SECRET));
+    return payload as unknown as BuyerSessionPayload;
   } catch {
     return null;
   }

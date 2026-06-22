@@ -111,6 +111,22 @@ export interface SessionPayload {
   expiry_date: string | null;
 }
 
+/** A post-payment buyer, keyed by phone, who logs in with phone + login code. */
+export interface Buyer {
+  id: string;
+  phone: string;
+  name: string | null;
+  login_code: string;
+  created_at: string;
+  updated_at?: string;
+}
+
+export interface BuyerSessionPayload {
+  buyer_id: string;
+  phone: string;
+  name: string | null;
+}
+
 export interface AdminSessionPayload {
   admin_id: string;
   username: string;
