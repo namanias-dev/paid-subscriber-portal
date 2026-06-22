@@ -1,12 +1,18 @@
 import type { MetadataRoute } from "next";
 import { SITE_URL } from "@/lib/config";
-import { getPublicQuizzes, getAllCourses, getPublicWebinars } from "@/lib/dataProvider";
+import {
+  getPublicQuizzes,
+  getAllCourses,
+  getPublicWebinars,
+  getPublicCaArticles,
+} from "@/lib/dataProvider";
+import { caEffectiveDate } from "@/lib/caView";
 
 export const dynamic = "force-dynamic";
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const now = new Date();
-  const staticRoutes = ["", "/courses", "/quizzes", "/webinars", "/results", "/free-resources", "/about", "/contact"].map((p) => ({
+  const staticRoutes = ["", "/courses", "/current-affairs", "/current-affairs/daily", "/current-affairs/monthly", "/quizzes", "/webinars", "/results", "/free-resources", "/about", "/contact"].map((p) => ({
     url: `${SITE_URL}${p}`,
     lastModified: now,
     changeFrequency: "weekly" as const,
@@ -33,5 +39,26 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     webinarRoutes = webinars.filter((w) => w.slug).map((w) => ({ url: `${SITE_URL}/webinars/${w.slug}`, lastModified: now, changeFrequency: "weekly" as const, priority: 0.6 }));
   } catch { /* ignore */ }
 
-  return [...staticRoutes, ...quizRoutes, ...courseRoutes, ...webinarRoutes];
+  let caRoutes: MetadataRoute.Sitemap = [];
+  try {
+    const articles = await getPublicCaArticles();
+    const indexable = articles.filter((a) => a.seo?.noindex !== true);
+    const articleUrls = indexable.map((a) => ({
+      url: `${SITE_URL}/current-affairs/${a.seo?.canonical_slug?.trim() || a.slug}`,
+      lastModified: a.updated_at ? new Date(a.updated_at) : now,
+      changeFrequency: "daily" as const,
+      priority: 0.7,
+    }));
+    const dates = Array.from(new Set(indexable.map((a) => caEffectiveDate(a))));
+    const dateUrls = dates.map((d) => ({ url: `${SITE_URL}/current-affairs/daily/${d}`, lastModified: now, changeFrequency: "weekly" as const, priority: 0.4 }));
+    const months = Array.from(new Set(indexable.map((a) => caEffectiveDate(a).slice(0, 7))));
+    const monthUrls = months.map((m) => ({ url: `${SITE_URL}/current-affairs/monthly/${m}`, lastModified: now, changeFrequency: "weekly" as const, priority: 0.4 }));
+    const cats = Array.from(new Set(indexable.map((a) => a.category_slug).filter(Boolean) as string[]));
+    const catUrls = cats.map((c) => ({ url: `${SITE_URL}/current-affairs/category/${c}`, lastModified: now, changeFrequency: "weekly" as const, priority: 0.5 }));
+    const tags = Array.from(new Set(indexable.flatMap((a) => a.tags || [])));
+    const tagUrls = tags.map((t) => ({ url: `${SITE_URL}/current-affairs/tag/${t}`, lastModified: now, changeFrequency: "weekly" as const, priority: 0.3 }));
+    caRoutes = [...articleUrls, ...dateUrls, ...monthUrls, ...catUrls, ...tagUrls];
+  } catch { /* ignore */ }
+
+  return [...staticRoutes, ...quizRoutes, ...courseRoutes, ...webinarRoutes, ...caRoutes];
 }

@@ -13,6 +13,7 @@ export default function PublicFooter({ brand }: { brand?: BrandConfig }) {
       title: "Explore",
       links: [
         { href: "/courses", label: "All Courses" },
+        { href: "/current-affairs", label: "Current Affairs" },
         { href: "/quizzes", label: "Quizzes & Tests" },
         { href: "/results", label: "Results" },
         { href: "/webinars", label: "Webinars" },

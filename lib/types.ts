@@ -915,3 +915,154 @@ export interface ImportJob {
   created_by: string | null;
   created_at: string;
 }
+
+// ========================= CURRENT AFFAIRS =========================
+/** Article-type is a FILTER/badge, never a separate public route. */
+export type CaArticleType = "daily" | "editorial" | "prelims_facts" | "mains_analysis";
+export type CaStatus = "draft" | "scheduled" | "published" | "archived" | "disabled";
+export type CaExamRelevance = "prelims" | "mains" | "interview" | "both";
+export type CaDifficulty = "easy" | "medium" | "hard";
+export type CaGsPaper = "GS1" | "GS2" | "GS3" | "GS4" | "Essay" | "Prelims";
+
+/** SEO block stored on articles, categories and tags. */
+export interface CaSeo {
+  title?: string | null;
+  description?: string | null;
+  keywords?: string | null;
+  canonical_slug?: string | null;
+  canonical_override?: string | null;
+  og_title?: string | null;
+  og_description?: string | null;
+  og_image?: string | null;
+  noindex?: boolean;
+  nofollow?: boolean;
+  structured_data_enabled?: boolean;
+  faq_schema_enabled?: boolean;
+  faq?: { q: string; a: string }[];
+}
+
+/** Top "Quick Revision" box shown above the article body. */
+export interface CaQuickRevision {
+  bullets?: string[];
+  why_in_news?: string | null;
+  upsc_relevance?: string | null;
+  exam_angle?: string | null;
+}
+
+/** UPSC relevance metadata (admin-only + badges). */
+export interface CaUpsc {
+  topic?: string | null;
+  subtopic?: string | null;
+  gs_papers?: CaGsPaper[];
+  syllabus_tags?: string[];
+  exam_relevance?: CaExamRelevance | null;
+  difficulty?: CaDifficulty | null;
+  source_type?: string | null;
+  source_note?: string | null;
+}
+
+/** Flexible ordered section (reuses the PageSection shape). */
+export type CaSection = PageSection;
+
+export interface CaArticle {
+  id: string;
+  slug: string;
+  title: string;
+  summary: string;
+  article_type: CaArticleType;
+  status: CaStatus;
+  /** Effective go-live timestamp; future = scheduled, hidden from public. */
+  publish_at: string | null;
+  /** The current-affairs calendar date this article belongs to (YYYY-MM-DD). */
+  ca_date: string | null;
+  author: string | null;
+  reading_time: number | null;
+  featured_image: string | null;
+  thumbnail_image: string | null;
+  mobile_image: string | null;
+  body_html: string | null;
+  sections: CaSection[];
+  category_slug: string | null;
+  tags: string[];
+  quick_revision: CaQuickRevision;
+  upsc: CaUpsc;
+  important: boolean;
+  trending: boolean;
+  show_on_home: boolean;
+  in_daily: boolean;
+  in_monthly: boolean;
+  related_quiz_slug: string | null;
+  pdf_ids: string[];
+  cross_sell: CrossSell;
+  seo: CaSeo;
+  views: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CaCategory {
+  id: string;
+  slug: string;
+  name: string;
+  description: string | null;
+  seo: CaSeo;
+  order: number;
+  created_at: string;
+}
+
+export interface CaTag {
+  id: string;
+  slug: string;
+  name: string;
+  seo: CaSeo;
+  created_at: string;
+}
+
+export type CaPdfKind = "daily" | "monthly" | "general";
+
+export interface CaPdf {
+  id: string;
+  title: string;
+  kind: CaPdfKind;
+  /** For daily PDFs (YYYY-MM-DD) or monthly PDFs (YYYY-MM). */
+  date_ref: string | null;
+  category_slug: string | null;
+  file_url: string | null;
+  cover_image: string | null;
+  description: string | null;
+  is_free: boolean;
+  requires_login: boolean;
+  requires_lead: boolean;
+  /** Reserved hook for future auto-generation from compiled articles. */
+  generated: boolean;
+  download_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CaLead {
+  id: string;
+  phone: string;
+  name: string | null;
+  source: string | null;
+  city: string | null;
+  target_year: string | null;
+  interested_course: string | null;
+  created_at: string;
+}
+
+export interface CaBookmark {
+  id: string;
+  user_phone: string;
+  article_slug: string;
+  created_at: string;
+}
+
+export type CaEventType = "view" | "pdf_download" | "cta_click" | "quiz_click" | "lead";
+
+export interface CaEvent {
+  id: string;
+  type: CaEventType;
+  ref: string | null;
+  created_at: string;
+}

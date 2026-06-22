@@ -8,6 +8,7 @@ export interface NavTab {
 /** Canonical public navbar tabs — single source of truth (admin can hide/reorder). */
 export const DEFAULT_NAV_TABS: NavTab[] = [
   { href: "/courses", label: "Courses" },
+  { href: "/current-affairs", label: "Current Affairs" },
   { href: "/quizzes", label: "Quizzes" },
   { href: "/results", label: "Results" },
   { href: "/webinars", label: "Webinars" },

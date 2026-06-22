@@ -20,6 +20,10 @@ import type {
   QuizAttempt,
   QuizAnswer,
   ImportJob,
+  CaArticle,
+  CaCategory,
+  CaTag,
+  CaPdf,
 } from "./types";
 
 const DAY = 86400000;
@@ -532,3 +536,82 @@ export const quizQuestions: QuizQuestion[] = questions.map((qq, i) => ({
 export const quizAttempts: QuizAttempt[] = [];
 export const quizAnswers: QuizAnswer[] = [];
 export const importJobs: ImportJob[] = [];
+
+// ====================== Current Affairs (demo) ======================
+export const caCategories: CaCategory[] = [
+  {
+    id: "cacat-polity",
+    slug: "polity-governance",
+    name: "Polity & Governance",
+    description: "Constitution, governance, polity and institutions for UPSC.",
+    seo: {},
+    order: 0,
+    created_at: iso(now - 30 * DAY),
+  },
+];
+
+export const caTags: CaTag[] = [
+  { id: "catag-parliament", slug: "parliament", name: "Parliament", seo: {}, created_at: iso(now - 30 * DAY) },
+];
+
+export const caArticles: CaArticle[] = [
+  {
+    id: "caart-sample-1",
+    slug: "sample-current-affairs-article",
+    title: "Sample Current Affairs: Parliamentary Privileges Explained",
+    summary: "A concise UPSC-focused breakdown of parliamentary privileges — why in news, key facts and exam angle.",
+    article_type: "daily",
+    status: "published",
+    publish_at: iso(now - DAY),
+    ca_date: isoDate(now - DAY),
+    author: "Naman Sir",
+    reading_time: 4,
+    featured_image: null,
+    thumbnail_image: null,
+    mobile_image: null,
+    body_html:
+      "<h2>Why in the News</h2><p>This is sample seed content for the Current Affairs module. Replace it from the admin panel.</p><h2>Key Facts</h2><ul><li>Parliamentary privileges are defined under Article 105.</li><li>They protect free speech within the House.</li></ul>",
+    sections: [],
+    category_slug: "polity-governance",
+    tags: ["parliament"],
+    quick_revision: {
+      bullets: ["Defined under Article 105", "Protect free speech in the House", "No codified law yet"],
+      why_in_news: "Recent debate on privilege motions.",
+      upsc_relevance: "GS Paper 2 - Polity",
+      exam_angle: "Prelims + Mains GS2",
+    },
+    upsc: { gs_papers: ["GS2", "Prelims"], exam_relevance: "both", difficulty: "medium", topic: "Parliament" },
+    important: true,
+    trending: true,
+    show_on_home: true,
+    in_daily: true,
+    in_monthly: true,
+    related_quiz_slug: null,
+    pdf_ids: [],
+    cross_sell: {},
+    seo: { structured_data_enabled: true },
+    views: 0,
+    created_at: iso(now - DAY),
+    updated_at: iso(now - DAY),
+  },
+];
+
+export const caPdfs: CaPdf[] = [
+  {
+    id: "capdf-sample-monthly",
+    title: "Monthly Current Affairs Compilation (Sample)",
+    kind: "monthly",
+    date_ref: new Date(now).toISOString().slice(0, 7),
+    category_slug: null,
+    file_url: null,
+    cover_image: null,
+    description: "Sample monthly compilation record. Upload the real PDF from admin.",
+    is_free: true,
+    requires_login: false,
+    requires_lead: false,
+    generated: false,
+    download_count: 0,
+    created_at: iso(now - 2 * DAY),
+    updated_at: iso(now - 2 * DAY),
+  },
+];

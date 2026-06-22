@@ -8,7 +8,8 @@ import Reveal, { Stagger, StaggerItem } from "@/components/ui/Reveal";
 import Accordion from "@/components/ui/Accordion";
 import LeadForm from "@/components/public/LeadForm";
 import LeadPopup from "@/components/public/LeadPopup";
-import { getPublishedCourses, getPublicWebinars, getSiteSettings } from "@/lib/dataProvider";
+import CaArticleCard from "@/components/public/ca/CaArticleCard";
+import { getPublishedCourses, getPublicWebinars, getSiteSettings, getPublicCaArticles } from "@/lib/dataProvider";
 import { ACADEMY } from "@/lib/config";
 import { directionsUrl, mapEmbedUrl } from "@/lib/maps";
 
@@ -38,11 +39,13 @@ const FAQ = [
 ];
 
 export default async function HomePage() {
-  const [courses, webinars, settings] = await Promise.all([
+  const [courses, webinars, settings, caArticles] = await Promise.all([
     getPublishedCourses(),
     getPublicWebinars(),
     getSiteSettings(),
+    getPublicCaArticles(),
   ]);
+  const homeCa = (caArticles.filter((a) => a.show_on_home).length ? caArticles.filter((a) => a.show_on_home) : caArticles).slice(0, 3);
   const upcoming = webinars.filter((w) => w.status === "upcoming").slice(0, 2);
   const c = settings.content;
   const trustBar = c.trust_bar?.length ? c.trust_bar : [];
@@ -123,6 +126,28 @@ export default async function HomePage() {
           <CourseExplorer courses={courses} limit={6} />
         </div>
       </section>
+
+      {/* Current Affairs */}
+      {homeCa.length > 0 && (
+        <section className="section bg-surface">
+          <div className="container-wide">
+            <Reveal>
+              <div className="flex flex-wrap items-end justify-between gap-3">
+                <div>
+                  <h2 className="text-3xl font-extrabold sm:text-4xl">Today&apos;s Current Affairs</h2>
+                  <p className="mt-2 text-ink2">Daily UPSC current affairs, monthly PDFs and exam-ready analysis.</p>
+                </div>
+                <Link href="/current-affairs" className="btn btn-secondary">Explore Current Affairs →</Link>
+              </div>
+            </Reveal>
+            <Stagger className="mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+              {homeCa.map((a) => (
+                <StaggerItem key={a.id}><CaArticleCard article={a} /></StaggerItem>
+              ))}
+            </Stagger>
+          </div>
+        </section>
+      )}
 
       {/* Free resources */}
       <section className="section container-wide">

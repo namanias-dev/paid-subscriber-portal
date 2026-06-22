@@ -27,6 +27,13 @@ import type {
   QuizAttempt,
   QuizAnswer,
   ImportJob,
+  CaArticle,
+  CaCategory,
+  CaTag,
+  CaPdf,
+  CaLead,
+  CaEvent,
+  CaEventType,
 } from "./types";
 import { mergeSiteSettings } from "./homeDefaults";
 
@@ -1617,4 +1624,345 @@ export async function updateImportJob(id: string, patch: Partial<ImportJob>): Pr
     return mock.importJobs[idx];
   }
   return dbUpdate<ImportJob>("import_jobs", id, patch as Record<string, unknown>);
+}
+
+// ========================= CURRENT AFFAIRS =========================
+
+/** True when an article is publicly visible (published + not future-scheduled). */
+export function isCaPublished(a: CaArticle | null | undefined): boolean {
+  if (!a) return false;
+  if (a.status !== "published") return false;
+  if (a.publish_at && new Date(a.publish_at).getTime() > Date.now()) return false;
+  return true;
+}
+
+// ---- Articles ----
+export async function getCaArticles(): Promise<CaArticle[]> {
+  if (demoMode()) return [...mock.caArticles];
+  const db = getSupabaseAdmin();
+  if (!db) return [...mock.caArticles];
+  const { data } = await db.from("ca_articles").select("*").order("publish_at", { ascending: false, nullsFirst: false });
+  return (data as CaArticle[]) ?? [];
+}
+
+/** Public list: published, not future, newest first. */
+export async function getPublicCaArticles(): Promise<CaArticle[]> {
+  const all = await getCaArticles();
+  return all
+    .filter(isCaPublished)
+    .sort((a, b) => new Date(b.publish_at || b.created_at).getTime() - new Date(a.publish_at || a.created_at).getTime());
+}
+
+/** Returns the row regardless of status (admin/preview); callers gate on isCaPublished. */
+export async function getCaArticleBySlug(slug: string): Promise<CaArticle | null> {
+  const all = await getCaArticles();
+  return all.find((a) => a.slug === slug) ?? null;
+}
+
+export async function getCaArticleById(id: string): Promise<CaArticle | null> {
+  const all = await getCaArticles();
+  return all.find((a) => a.id === id) ?? null;
+}
+
+export async function addCaArticle(input: Partial<CaArticle>): Promise<CaArticle> {
+  const ts = new Date().toISOString();
+  const row = {
+    id: uuid(),
+    slug: input.slug || slugify(input.title || "article"),
+    title: input.title || "Untitled article",
+    summary: input.summary || "",
+    article_type: input.article_type || "daily",
+    status: input.status || "draft",
+    publish_at: input.publish_at ?? null,
+    ca_date: input.ca_date ?? null,
+    author: input.author ?? null,
+    reading_time: input.reading_time ?? null,
+    featured_image: input.featured_image ?? null,
+    thumbnail_image: input.thumbnail_image ?? null,
+    mobile_image: input.mobile_image ?? null,
+    body_html: input.body_html ?? null,
+    sections: input.sections ?? [],
+    category_slug: input.category_slug ?? null,
+    tags: input.tags ?? [],
+    quick_revision: input.quick_revision ?? {},
+    upsc: input.upsc ?? {},
+    important: input.important ?? false,
+    trending: input.trending ?? false,
+    show_on_home: input.show_on_home ?? false,
+    in_daily: input.in_daily ?? true,
+    in_monthly: input.in_monthly ?? true,
+    related_quiz_slug: input.related_quiz_slug ?? null,
+    pdf_ids: input.pdf_ids ?? [],
+    cross_sell: input.cross_sell ?? {},
+    seo: input.seo ?? {},
+    views: 0,
+    created_at: ts,
+    updated_at: ts,
+  } as CaArticle;
+  if (demoMode()) {
+    mock.caArticles.unshift(row);
+    return row;
+  }
+  return dbInsert<CaArticle>("ca_articles", row as unknown as Record<string, unknown>);
+}
+
+export async function updateCaArticle(id: string, patch: Partial<CaArticle>): Promise<CaArticle | null> {
+  if (demoMode()) {
+    const idx = mock.caArticles.findIndex((a) => a.id === id);
+    if (idx === -1) return null;
+    mock.caArticles[idx] = { ...mock.caArticles[idx], ...patch };
+    return mock.caArticles[idx];
+  }
+  return dbUpdate<CaArticle>("ca_articles", id, patch as Record<string, unknown>);
+}
+
+export async function deleteCaArticle(id: string): Promise<boolean> {
+  if (demoMode()) {
+    const idx = mock.caArticles.findIndex((a) => a.id === id);
+    if (idx === -1) return false;
+    mock.caArticles.splice(idx, 1);
+    return true;
+  }
+  return dbDelete("ca_articles", id);
+}
+
+export async function incrementCaView(id: string): Promise<void> {
+  if (demoMode()) {
+    const a = mock.caArticles.find((x) => x.id === id);
+    if (a) a.views += 1;
+    return;
+  }
+  const db = getSupabaseAdmin();
+  if (!db) return;
+  try {
+    const { data } = await db.from("ca_articles").select("views").eq("id", id).maybeSingle();
+    const next = ((data?.views as number) ?? 0) + 1;
+    await db.from("ca_articles").update({ views: next }).eq("id", id);
+  } catch { /* best-effort */ }
+}
+
+// ---- Categories ----
+export async function getCaCategories(): Promise<CaCategory[]> {
+  if (demoMode()) return [...mock.caCategories];
+  const db = getSupabaseAdmin();
+  if (!db) return [...mock.caCategories];
+  const { data } = await db.from("ca_categories").select("*").order("order", { ascending: true });
+  return (data as CaCategory[]) ?? [];
+}
+export async function getCaCategoryBySlug(slug: string): Promise<CaCategory | null> {
+  const all = await getCaCategories();
+  return all.find((c) => c.slug === slug) ?? null;
+}
+export async function addCaCategory(input: Partial<CaCategory>): Promise<CaCategory> {
+  const row = {
+    id: uuid(),
+    slug: input.slug || slugify(input.name || "category"),
+    name: input.name || "Category",
+    description: input.description ?? null,
+    seo: input.seo ?? {},
+    order: input.order ?? 0,
+    created_at: new Date().toISOString(),
+  } as CaCategory;
+  if (demoMode()) {
+    mock.caCategories.push(row);
+    return row;
+  }
+  return dbInsert<CaCategory>("ca_categories", row as unknown as Record<string, unknown>);
+}
+export async function updateCaCategory(id: string, patch: Partial<CaCategory>): Promise<CaCategory | null> {
+  if (demoMode()) {
+    const idx = mock.caCategories.findIndex((c) => c.id === id);
+    if (idx === -1) return null;
+    mock.caCategories[idx] = { ...mock.caCategories[idx], ...patch };
+    return mock.caCategories[idx];
+  }
+  return dbUpdate<CaCategory>("ca_categories", id, patch as Record<string, unknown>);
+}
+export async function deleteCaCategory(id: string): Promise<boolean> {
+  if (demoMode()) {
+    const idx = mock.caCategories.findIndex((c) => c.id === id);
+    if (idx === -1) return false;
+    mock.caCategories.splice(idx, 1);
+    return true;
+  }
+  return dbDelete("ca_categories", id);
+}
+
+// ---- Tags ----
+export async function getCaTags(): Promise<CaTag[]> {
+  if (demoMode()) return [...mock.caTags];
+  const db = getSupabaseAdmin();
+  if (!db) return [...mock.caTags];
+  const { data } = await db.from("ca_tags").select("*").order("name", { ascending: true });
+  return (data as CaTag[]) ?? [];
+}
+export async function getCaTagBySlug(slug: string): Promise<CaTag | null> {
+  const all = await getCaTags();
+  return all.find((t) => t.slug === slug) ?? null;
+}
+export async function addCaTag(input: Partial<CaTag>): Promise<CaTag> {
+  const row = {
+    id: uuid(),
+    slug: input.slug || slugify(input.name || "tag"),
+    name: input.name || "Tag",
+    seo: input.seo ?? {},
+    created_at: new Date().toISOString(),
+  } as CaTag;
+  if (demoMode()) {
+    mock.caTags.push(row);
+    return row;
+  }
+  return dbInsert<CaTag>("ca_tags", row as unknown as Record<string, unknown>);
+}
+export async function updateCaTag(id: string, patch: Partial<CaTag>): Promise<CaTag | null> {
+  if (demoMode()) {
+    const idx = mock.caTags.findIndex((t) => t.id === id);
+    if (idx === -1) return null;
+    mock.caTags[idx] = { ...mock.caTags[idx], ...patch };
+    return mock.caTags[idx];
+  }
+  return dbUpdate<CaTag>("ca_tags", id, patch as Record<string, unknown>);
+}
+export async function deleteCaTag(id: string): Promise<boolean> {
+  if (demoMode()) {
+    const idx = mock.caTags.findIndex((t) => t.id === id);
+    if (idx === -1) return false;
+    mock.caTags.splice(idx, 1);
+    return true;
+  }
+  return dbDelete("ca_tags", id);
+}
+
+// ---- PDF library ----
+export async function getCaPdfs(): Promise<CaPdf[]> {
+  if (demoMode()) return [...mock.caPdfs];
+  const db = getSupabaseAdmin();
+  if (!db) return [...mock.caPdfs];
+  const { data } = await db.from("ca_pdfs").select("*").order("created_at", { ascending: false });
+  return (data as CaPdf[]) ?? [];
+}
+export async function getCaPdfById(id: string): Promise<CaPdf | null> {
+  const all = await getCaPdfs();
+  return all.find((p) => p.id === id) ?? null;
+}
+export async function addCaPdf(input: Partial<CaPdf>): Promise<CaPdf> {
+  const ts = new Date().toISOString();
+  const row = {
+    id: uuid(),
+    title: input.title || "Untitled PDF",
+    kind: input.kind || "general",
+    date_ref: input.date_ref ?? null,
+    category_slug: input.category_slug ?? null,
+    file_url: input.file_url ?? null,
+    cover_image: input.cover_image ?? null,
+    description: input.description ?? null,
+    is_free: input.is_free ?? true,
+    requires_login: input.requires_login ?? false,
+    requires_lead: input.requires_lead ?? false,
+    generated: input.generated ?? false,
+    download_count: 0,
+    created_at: ts,
+    updated_at: ts,
+  } as CaPdf;
+  if (demoMode()) {
+    mock.caPdfs.unshift(row);
+    return row;
+  }
+  return dbInsert<CaPdf>("ca_pdfs", row as unknown as Record<string, unknown>);
+}
+export async function updateCaPdf(id: string, patch: Partial<CaPdf>): Promise<CaPdf | null> {
+  if (demoMode()) {
+    const idx = mock.caPdfs.findIndex((p) => p.id === id);
+    if (idx === -1) return null;
+    mock.caPdfs[idx] = { ...mock.caPdfs[idx], ...patch };
+    return mock.caPdfs[idx];
+  }
+  return dbUpdate<CaPdf>("ca_pdfs", id, { ...patch, updated_at: new Date().toISOString() } as Record<string, unknown>);
+}
+export async function deleteCaPdf(id: string): Promise<boolean> {
+  if (demoMode()) {
+    const idx = mock.caPdfs.findIndex((p) => p.id === id);
+    if (idx === -1) return false;
+    mock.caPdfs.splice(idx, 1);
+    return true;
+  }
+  return dbDelete("ca_pdfs", id);
+}
+export async function incrementCaPdfDownload(id: string): Promise<void> {
+  if (demoMode()) {
+    const p = mock.caPdfs.find((x) => x.id === id);
+    if (p) p.download_count += 1;
+    return;
+  }
+  const db = getSupabaseAdmin();
+  if (!db) return;
+  try {
+    const { data } = await db.from("ca_pdfs").select("download_count").eq("id", id).maybeSingle();
+    const next = ((data?.download_count as number) ?? 0) + 1;
+    await db.from("ca_pdfs").update({ download_count: next }).eq("id", id);
+  } catch { /* best-effort */ }
+}
+
+// ---- Leads ----
+export async function addCaLead(input: Partial<CaLead>): Promise<CaLead> {
+  const row = {
+    id: uuid(),
+    phone: input.phone || "",
+    name: input.name ?? null,
+    source: input.source ?? null,
+    city: input.city ?? null,
+    target_year: input.target_year ?? null,
+    interested_course: input.interested_course ?? null,
+    created_at: new Date().toISOString(),
+  } as CaLead;
+  if (demoMode()) return row;
+  return dbInsert<CaLead>("ca_leads", row as unknown as Record<string, unknown>);
+}
+export async function getCaLeads(): Promise<CaLead[]> {
+  if (demoMode()) return [];
+  const rows = await dbSelect<CaLead>("ca_leads");
+  return rows;
+}
+
+// ---- Bookmarks (any logged-in user, keyed by phone) ----
+export async function getCaBookmarkSlugs(phone: string): Promise<string[]> {
+  const p = (phone || "").trim();
+  if (!p || demoMode()) return [];
+  const db = getSupabaseAdmin();
+  if (!db) return [];
+  const { data } = await db.from("ca_bookmarks").select("article_slug").eq("user_phone", p);
+  return ((data as { article_slug: string }[]) ?? []).map((r) => r.article_slug);
+}
+export async function isCaBookmarked(phone: string, slug: string): Promise<boolean> {
+  const slugs = await getCaBookmarkSlugs(phone);
+  return slugs.includes(slug);
+}
+/** Toggle a bookmark; returns the new state. */
+export async function toggleCaBookmark(phone: string, slug: string): Promise<boolean> {
+  const p = (phone || "").trim();
+  if (!p || !slug || demoMode()) return false;
+  const db = getSupabaseAdmin();
+  if (!db) return false;
+  const { data } = await db.from("ca_bookmarks").select("id").eq("user_phone", p).eq("article_slug", slug).maybeSingle();
+  if (data?.id) {
+    await db.from("ca_bookmarks").delete().eq("id", data.id as string);
+    return false;
+  }
+  await db.from("ca_bookmarks").insert({ id: uuid(), user_phone: p, article_slug: slug });
+  return true;
+}
+
+// ---- Analytics events ----
+export async function logCaEvent(type: CaEventType, ref?: string | null): Promise<void> {
+  if (demoMode()) return;
+  const db = getSupabaseAdmin();
+  if (!db) return;
+  try {
+    await db.from("ca_events").insert({ id: uuid(), type, ref: ref ?? null });
+  } catch { /* best-effort */ }
+}
+export async function getCaEvents(): Promise<CaEvent[]> {
+  if (demoMode()) return [];
+  const rows = await dbSelect<CaEvent>("ca_events");
+  return rows;
 }

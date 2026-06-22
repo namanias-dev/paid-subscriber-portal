@@ -592,3 +592,123 @@ create policy "anon insert webinar regs"
 
 -- No anon policies on students/bookmarks/progress/admin/logs => fully locked.
 -- The service role (server-side) bypasses RLS and handles all writes/reads.
+
+-- ============================================================
+-- Current Affairs module (see migrations/2026-current-affairs.sql)
+-- ============================================================
+create table if not exists public.ca_categories (
+  id text primary key,
+  slug text unique not null,
+  name text not null,
+  description text,
+  seo jsonb not null default '{}'::jsonb,
+  "order" int not null default 0,
+  created_at timestamptz default now()
+);
+create table if not exists public.ca_tags (
+  id text primary key,
+  slug text unique not null,
+  name text not null,
+  seo jsonb not null default '{}'::jsonb,
+  created_at timestamptz default now()
+);
+create table if not exists public.ca_articles (
+  id text primary key,
+  slug text unique not null,
+  title text not null,
+  summary text not null default '',
+  article_type text not null default 'daily',
+  status text not null default 'draft',
+  publish_at timestamptz,
+  ca_date date,
+  author text,
+  reading_time int,
+  featured_image text,
+  thumbnail_image text,
+  mobile_image text,
+  body_html text,
+  sections jsonb not null default '[]'::jsonb,
+  category_slug text,
+  tags text[] not null default '{}',
+  quick_revision jsonb not null default '{}'::jsonb,
+  upsc jsonb not null default '{}'::jsonb,
+  important boolean not null default false,
+  trending boolean not null default false,
+  show_on_home boolean not null default false,
+  in_daily boolean not null default true,
+  in_monthly boolean not null default true,
+  related_quiz_slug text,
+  pdf_ids text[] not null default '{}',
+  cross_sell jsonb not null default '{}'::jsonb,
+  seo jsonb not null default '{}'::jsonb,
+  views int not null default 0,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+create index if not exists ca_articles_status_idx on public.ca_articles (status);
+create index if not exists ca_articles_publish_at_idx on public.ca_articles (publish_at desc);
+create index if not exists ca_articles_ca_date_idx on public.ca_articles (ca_date desc);
+create index if not exists ca_articles_category_idx on public.ca_articles (category_slug);
+create index if not exists ca_articles_tags_idx on public.ca_articles using gin (tags);
+create table if not exists public.ca_pdfs (
+  id text primary key,
+  title text not null,
+  kind text not null default 'general',
+  date_ref text,
+  category_slug text,
+  file_url text,
+  cover_image text,
+  description text,
+  is_free boolean not null default true,
+  requires_login boolean not null default false,
+  requires_lead boolean not null default false,
+  generated boolean not null default false,
+  download_count int not null default 0,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+create table if not exists public.ca_leads (
+  id text primary key,
+  phone text not null,
+  name text,
+  source text,
+  city text,
+  target_year text,
+  interested_course text,
+  created_at timestamptz default now()
+);
+create table if not exists public.ca_bookmarks (
+  id text primary key,
+  user_phone text not null,
+  article_slug text not null,
+  created_at timestamptz default now(),
+  unique (user_phone, article_slug)
+);
+create table if not exists public.ca_events (
+  id text primary key,
+  type text not null,
+  ref text,
+  created_at timestamptz default now()
+);
+create index if not exists ca_events_type_idx on public.ca_events (type);
+
+alter table public.ca_categories enable row level security;
+alter table public.ca_tags enable row level security;
+alter table public.ca_articles enable row level security;
+alter table public.ca_pdfs enable row level security;
+alter table public.ca_leads enable row level security;
+alter table public.ca_bookmarks enable row level security;
+alter table public.ca_events enable row level security;
+
+drop policy if exists "anon read ca_categories" on public.ca_categories;
+create policy "anon read ca_categories" on public.ca_categories for select using (true);
+drop policy if exists "anon read ca_tags" on public.ca_tags;
+create policy "anon read ca_tags" on public.ca_tags for select using (true);
+drop policy if exists "anon read published ca_articles" on public.ca_articles;
+create policy "anon read published ca_articles"
+  on public.ca_articles for select
+  using (status = 'published' and (publish_at is null or publish_at <= now()));
+drop policy if exists "anon read ca_pdfs" on public.ca_pdfs;
+create policy "anon read ca_pdfs" on public.ca_pdfs for select using (true);
+drop policy if exists "anon insert ca_leads" on public.ca_leads;
+create policy "anon insert ca_leads" on public.ca_leads for insert with check (true);
