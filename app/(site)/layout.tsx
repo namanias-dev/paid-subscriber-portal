@@ -2,6 +2,7 @@ import PublicNav from "@/components/public/PublicNav";
 import PublicFooter from "@/components/public/PublicFooter";
 import { getSiteSettings } from "@/lib/dataProvider";
 import { getStudentSession } from "@/lib/session";
+import { resolveNavTabs } from "@/lib/navConfig";
 
 export default async function SiteLayout({ children }: { children: React.ReactNode }) {
   const settings = await getSiteSettings();
@@ -16,6 +17,7 @@ export default async function SiteLayout({ children }: { children: React.ReactNo
         wordmark={settings.content.wordmark}
         wordmarkSub={settings.content.wordmark_sub}
         isLoggedIn={!!session}
+        links={resolveNavTabs(settings.nav)}
       />
       <main className="flex-1">{children}</main>
       <PublicFooter brand={settings.brand} />

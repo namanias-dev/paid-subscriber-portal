@@ -576,6 +576,43 @@ export interface BrandConfig {
   telegram?: string;
 }
 
+export interface Topper {
+  id: string;
+  name: string;
+  /** e.g. "AIR 122" */
+  rank: string;
+  /** e.g. "UPSC CSE 2024" */
+  exam?: string;
+  image_url?: string | null;
+  year?: number | null;
+  order?: number;
+}
+
+export interface NavItemSetting {
+  visible?: boolean;
+  order?: number;
+}
+export interface NavConfig {
+  /** Per-tab overrides keyed by href, e.g. { "/webinars": { visible: false } }. */
+  overrides?: Record<string, NavItemSetting>;
+}
+
+export interface AboutValue {
+  icon?: string;
+  title?: string;
+  desc?: string;
+}
+export interface AboutContent {
+  hero_eyebrow?: string;
+  hero_title?: string;
+  hero_intro?: string;
+  mentor_heading?: string;
+  mentor_body?: string;
+  mentor_quote?: string;
+  values_heading?: string;
+  values?: AboutValue[];
+}
+
 export interface SiteSettings {
   id: string;
   logo_url?: string | null;
@@ -584,6 +621,9 @@ export interface SiteSettings {
   popup: PopupConfig;
   content: HomeContent;
   brand: BrandConfig;
+  toppers: Topper[];
+  nav: NavConfig;
+  about: AboutContent;
   updated_at?: string;
 }
 

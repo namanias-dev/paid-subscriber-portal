@@ -1,26 +1,20 @@
 import Reveal, { Stagger, StaggerItem } from "@/components/ui/Reveal";
 import Link from "next/link";
+import { getSiteSettings } from "@/lib/dataProvider";
+import TopperCard from "@/components/public/TopperCard";
 
 export const metadata = { title: "Results — Naman Sharma IAS Academy" };
-
-const TOPPERS = [
-  { air: "AIR 84", name: "" },
-  { air: "AIR 122", name: "Shivani" },
-  { air: "AIR 231", name: "Vineet" },
-  { air: "AIR 245", name: "Sahil (IFoS)" },
-  { air: "AIR 351", name: "Aditi" },
-  { air: "AIR 434", name: "Manu" },
-  { air: "AIR 617", name: "" },
-  { air: "AIR 914", name: "Gourav" },
-  { air: "AIR 944", name: "Rudraksh" },
-];
+export const dynamic = "force-dynamic";
 
 const STORIES = [
   { name: "Manu Verma", air: "AIR 434", quote: "The small batch meant I could ask anything, anytime. Naman Sir's mentorship was the turning point in my preparation." },
   { name: "Aditi", air: "AIR 351", quote: "Daily content and consistent answer-writing feedback kept me on track. I never felt alone in this journey." },
 ];
 
-export default function ResultsPage() {
+export default async function ResultsPage() {
+  const settings = await getSiteSettings();
+  const toppers = [...(settings.toppers || [])].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+
   return (
     <div className="container-wide section">
       <Reveal>
@@ -29,13 +23,10 @@ export default function ResultsPage() {
         <p className="mt-3 max-w-2xl text-ink2">Across UPSC CSE and IFoS — proof that personal mentorship works.</p>
       </Reveal>
 
-      <Stagger className="mt-10 grid grid-cols-2 gap-4 sm:grid-cols-3">
-        {TOPPERS.map((t) => (
-          <StaggerItem key={t.air}>
-            <div className="card card-hover p-6 text-center">
-              <div className="font-heading text-2xl font-extrabold text-primary">🏅 {t.air}</div>
-              {t.name && <div className="mt-1 text-sm text-ink2">{t.name}</div>}
-            </div>
+      <Stagger className="mt-10 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {toppers.map((t) => (
+          <StaggerItem key={t.id}>
+            <TopperCard topper={t} />
           </StaggerItem>
         ))}
       </Stagger>

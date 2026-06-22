@@ -6,16 +6,7 @@ import Image from "next/image";
 import { usePathname } from "next/navigation";
 import Logo from "@/components/ui/Logo";
 import { ACADEMY } from "@/lib/config";
-
-const LINKS = [
-  { href: "/courses", label: "Courses" },
-  { href: "/quizzes", label: "Quizzes" },
-  { href: "/results", label: "Results" },
-  { href: "/webinars", label: "Webinars" },
-  { href: "/free-resources", label: "Free Resources" },
-  { href: "/about", label: "About" },
-  { href: "/contact", label: "Contact" },
-];
+import { DEFAULT_NAV_TABS, type NavTab } from "@/lib/navConfig";
 
 async function doLogout() {
   try { await fetch("/api/auth/logout", { method: "POST" }); } catch { /* ignore */ }
@@ -30,6 +21,7 @@ export default function PublicNav({
   wordmark = "Naman Sharma",
   wordmarkSub = "IAS Academy",
   isLoggedIn = false,
+  links = DEFAULT_NAV_TABS,
 }: {
   logoUrl?: string | null;
   logoAlt?: string | null;
@@ -38,9 +30,11 @@ export default function PublicNav({
   wordmark?: string;
   wordmarkSub?: string;
   isLoggedIn?: boolean;
+  links?: NavTab[];
 }) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
+  const LINKS = links;
   const hasLogo = !!logoUrl?.trim();
   const h = Math.min(96, Math.max(28, Number(logoHeight) || 48));
 

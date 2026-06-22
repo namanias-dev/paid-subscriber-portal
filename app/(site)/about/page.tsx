@@ -1,24 +1,27 @@
 import Reveal, { Stagger, StaggerItem } from "@/components/ui/Reveal";
 import Counter from "@/components/ui/Counter";
 import Link from "next/link";
-import { ACADEMY } from "@/lib/config";
+import { getSiteSettings } from "@/lib/dataProvider";
+import { DEFAULT_ABOUT } from "@/lib/homeDefaults";
 
 export const metadata = { title: "About — Naman Sharma IAS Academy" };
+export const dynamic = "force-dynamic";
 
-export default function AboutPage() {
+export default async function AboutPage() {
+  const settings = await getSiteSettings();
+  const about = settings.about || DEFAULT_ABOUT;
+  const mentorParas = (about.mentor_body || "").split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean);
+  const values = about.values?.length ? about.values : DEFAULT_ABOUT.values || [];
+
   return (
     <div>
       <section className="section container-wide">
         <Reveal>
-          <p className="pill pill-blue mb-3">About</p>
+          <p className="pill pill-blue mb-3">{about.hero_eyebrow || DEFAULT_ABOUT.hero_eyebrow}</p>
           <h1 className="max-w-3xl text-4xl font-extrabold sm:text-5xl">
-            9+ years of making UPSC personal in <span className="grad-text">Chandigarh</span>
+            {about.hero_title || DEFAULT_ABOUT.hero_title}
           </h1>
-          <p className="mt-4 max-w-2xl text-lg text-ink2">
-            Naman Sharma IAS Academy was built on one belief — that sincere, personal mentorship
-            beats crowded coaching halls. With small batches, direct faculty access and a
-            results-first culture, we&apos;ve helped aspirants secure top ranks across UPSC CSE & IFoS.
-          </p>
+          <p className="mt-4 max-w-2xl text-lg text-ink2">{about.hero_intro || DEFAULT_ABOUT.hero_intro}</p>
         </Reveal>
 
         <Stagger className="mt-10 grid gap-5 sm:grid-cols-4">
@@ -43,13 +46,10 @@ export default function AboutPage() {
       <section className="section bg-surface">
         <div className="container-wide grid gap-8 lg:grid-cols-2">
           <Reveal>
-            <h2 className="text-3xl font-extrabold">Meet Naman Sir</h2>
-            <p className="mt-3 text-ink2">
-              A mentor known for clarity, consistency and a genuinely personal approach. Naman Sir
-              has guided thousands of aspirants with daily current affairs, structured foundation
-              courses, optionals and rigorous test series — online, offline and hybrid.
-            </p>
-            <p className="mt-3 text-ink2">&quot;Chandigarh se bhi UPSC crack hota hai&quot; isn&apos;t a slogan — it&apos;s a promise we keep every year.</p>
+            <h2 className="text-3xl font-extrabold">{about.mentor_heading || DEFAULT_ABOUT.mentor_heading}</h2>
+            {mentorParas.map((p, i) => (
+              <p key={i} className="mt-3 text-ink2">{p}</p>
+            ))}
             <Link href="/demo" className="btn btn-primary mt-6">Book a free demo →</Link>
           </Reveal>
           <Reveal delay={0.1}>
@@ -60,19 +60,15 @@ export default function AboutPage() {
 
       <section className="section container-wide">
         <Reveal>
-          <h2 className="text-3xl font-extrabold">Our values</h2>
+          <h2 className="text-3xl font-extrabold">{about.values_heading || DEFAULT_ABOUT.values_heading}</h2>
         </Reveal>
         <Stagger className="mt-8 grid gap-5 sm:grid-cols-3">
-          {[
-            { i: "🤝", t: "Personal first", d: "Every student matters. Small batches, real attention." },
-            { i: "📈", t: "Results-driven", d: "Proven methods, refined over 9+ years." },
-            { i: "💛", t: "Accessible", d: "Affordable, honest, and student-friendly pricing." },
-          ].map((v) => (
-            <StaggerItem key={v.t}>
+          {values.map((v, i) => (
+            <StaggerItem key={i}>
               <div className="card card-hover h-full p-6">
-                <div className="mb-3 text-3xl">{v.i}</div>
-                <h3 className="text-lg">{v.t}</h3>
-                <p className="mt-1.5 text-sm text-ink2">{v.d}</p>
+                <div className="mb-3 text-3xl">{v.icon}</div>
+                <h3 className="text-lg">{v.title}</h3>
+                <p className="mt-1.5 text-sm text-ink2">{v.desc}</p>
               </div>
             </StaggerItem>
           ))}

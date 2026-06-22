@@ -1,4 +1,4 @@
-import type { SiteSettings, HeroConfig, PopupConfig, HomeContent, BrandConfig } from "./types";
+import type { SiteSettings, HeroConfig, PopupConfig, HomeContent, BrandConfig, Topper, NavConfig, AboutContent } from "./types";
 import { ACADEMY, SUPPORT } from "./config";
 
 /**
@@ -89,6 +89,38 @@ export const DEFAULT_BRAND: Required<BrandConfig> = {
   telegram: ACADEMY.telegram,
 };
 
+/** Seeded from the original hardcoded topper list so existing installs render as before. */
+export const DEFAULT_TOPPERS: Topper[] = [
+  { id: "t1", name: "", rank: "AIR 84", exam: "UPSC CSE", order: 0 },
+  { id: "t2", name: "Shivani", rank: "AIR 122", exam: "UPSC CSE", order: 1 },
+  { id: "t3", name: "Vineet", rank: "AIR 231", exam: "UPSC CSE", order: 2 },
+  { id: "t4", name: "Sahil", rank: "AIR 245", exam: "IFoS", order: 3 },
+  { id: "t5", name: "Aditi", rank: "AIR 351", exam: "UPSC CSE", order: 4 },
+  { id: "t6", name: "Manu", rank: "AIR 434", exam: "UPSC CSE", order: 5 },
+  { id: "t7", name: "", rank: "AIR 617", exam: "UPSC CSE", order: 6 },
+  { id: "t8", name: "Gourav", rank: "AIR 914", exam: "UPSC CSE", order: 7 },
+  { id: "t9", name: "Rudraksh", rank: "AIR 944", exam: "UPSC CSE", order: 8 },
+];
+
+export const DEFAULT_NAV: NavConfig = { overrides: {} };
+
+export const DEFAULT_ABOUT: AboutContent = {
+  hero_eyebrow: "About",
+  hero_title: "9+ years of making UPSC personal in Chandigarh",
+  hero_intro:
+    "Naman Sharma IAS Academy was built on one belief — that sincere, personal mentorship beats crowded coaching halls. With small batches, direct faculty access and a results-first culture, we've helped aspirants secure top ranks across UPSC CSE & IFoS.",
+  mentor_heading: "Meet Naman Sir",
+  mentor_body:
+    "A mentor known for clarity, consistency and a genuinely personal approach. Naman Sir has guided thousands of aspirants with daily current affairs, structured foundation courses, optionals and rigorous test series — online, offline and hybrid.\n\n\"Chandigarh se bhi UPSC crack hota hai\" isn't a slogan — it's a promise we keep every year.",
+  mentor_quote: "",
+  values_heading: "Our values",
+  values: [
+    { icon: "🤝", title: "Personal first", desc: "Every student matters. Small batches, real attention." },
+    { icon: "📈", title: "Results-driven", desc: "Proven methods, refined over 9+ years." },
+    { icon: "💛", title: "Accessible", desc: "Affordable, honest, and student-friendly pricing." },
+  ],
+};
+
 export const DEFAULT_SITE_SETTINGS: SiteSettings = {
   id: "home",
   logo_url: null,
@@ -97,6 +129,9 @@ export const DEFAULT_SITE_SETTINGS: SiteSettings = {
   popup: DEFAULT_POPUP,
   content: DEFAULT_CONTENT,
   brand: DEFAULT_BRAND,
+  toppers: DEFAULT_TOPPERS,
+  nav: DEFAULT_NAV,
+  about: DEFAULT_ABOUT,
 };
 
 function isObj(v: unknown): v is Record<string, unknown> {
@@ -114,6 +149,10 @@ export function mergeSiteSettings(row: Partial<SiteSettings> | null | undefined)
     popup: { ...DEFAULT_POPUP, ...(isObj(r.popup) ? r.popup : {}) },
     content: { ...DEFAULT_CONTENT, ...(isObj(r.content) ? r.content : {}) },
     brand: { ...DEFAULT_BRAND, ...(isObj(r.brand) ? r.brand : {}) },
+    // Toppers: use the stored list when present (admin owns it); else seed defaults.
+    toppers: Array.isArray(r.toppers) ? r.toppers : DEFAULT_TOPPERS,
+    nav: { overrides: { ...(isObj(r.nav) && isObj((r.nav as NavConfig).overrides) ? (r.nav as NavConfig).overrides : {}) } },
+    about: { ...DEFAULT_ABOUT, ...(isObj(r.about) ? r.about : {}) },
     updated_at: r.updated_at,
   };
 }

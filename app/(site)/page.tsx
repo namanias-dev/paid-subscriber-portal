@@ -2,6 +2,7 @@ import { Fragment } from "react";
 import Link from "next/link";
 import Hero from "@/components/public/home/Hero";
 import CourseExplorer from "@/components/public/home/CourseExplorer";
+import TopperShowcase from "@/components/public/home/TopperShowcase";
 import Testimonials from "@/components/public/Testimonials";
 import Reveal, { Stagger, StaggerItem } from "@/components/ui/Reveal";
 import Accordion from "@/components/ui/Accordion";
@@ -13,11 +14,6 @@ import { directionsUrl, mapEmbedUrl } from "@/lib/maps";
 
 // Render fresh so newly published courses / upcoming webinars surface here too.
 export const dynamic = "force-dynamic";
-
-const TOPPERS = [
-  "AIR 84", "AIR 122 · Shivani", "AIR 231 · Vineet", "AIR 245 · Sahil (IFoS)",
-  "AIR 351 · Aditi", "AIR 434 · Manu", "AIR 617", "AIR 914 · Gourav", "AIR 944 · Rudraksh",
-];
 
 const WHY = [
   { icon: "👥", title: "Small batches (~40)", desc: "Personal attention for every aspirant — not a crowded hall." },
@@ -88,6 +84,9 @@ export default async function HomePage() {
         </Stagger>
       </section>
 
+      {/* Our Toppers / Results showcase */}
+      <TopperShowcase toppers={settings.toppers} heading={c.results_heading} subtitle={c.results_sub} />
+
       {/* Learning modes */}
       <section className="section bg-surface">
         <div className="container-wide">
@@ -122,26 +121,6 @@ export default async function HomePage() {
         </Reveal>
         <div className="mt-8">
           <CourseExplorer courses={courses} limit={6} />
-        </div>
-      </section>
-
-      {/* Results wall */}
-      <section className="section bg-surface">
-        <div className="container-wide">
-          <Reveal>
-            <h2 className="text-3xl font-extrabold sm:text-4xl">{c.results_heading}</h2>
-            <p className="mt-2 text-ink2">{c.results_sub}</p>
-          </Reveal>
-          <Stagger className="mt-8 grid grid-cols-2 gap-3 sm:grid-cols-3">
-            {TOPPERS.map((t) => (
-              <StaggerItem key={t}>
-                <div className="card p-4 text-center text-sm font-semibold text-primary">🏅 {t}</div>
-              </StaggerItem>
-            ))}
-          </Stagger>
-          <div className="mt-6 text-center">
-            <Link href="/results" className="btn btn-secondary">See topper stories →</Link>
-          </div>
         </div>
       </section>
 
