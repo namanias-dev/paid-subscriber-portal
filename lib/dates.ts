@@ -41,6 +41,82 @@ export function todayISODate(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
+// ----------------------------- IST (Asia/Kolkata) time -----------------------------
+// India Standard Time is a fixed UTC+5:30 with no daylight saving, so a constant
+// offset is the most reliable way to convert naive admin input to a real instant.
+const IST_OFFSET_MIN = 330;
+
+/**
+ * Convert a naive `<input type="datetime-local">` value ("YYYY-MM-DDTHH:mm"),
+ * which represents an IST wall-clock time, into a timezone-correct UTC ISO string.
+ * This avoids interpreting the input in the admin's *browser* timezone.
+ */
+export function istInputToISO(local: string): string {
+  if (!local) return "";
+  const m = local.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
+  if (!m) {
+    const d = new Date(local);
+    return Number.isNaN(d.getTime()) ? "" : d.toISOString();
+  }
+  const utcMs =
+    Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]), Number(m[4]), Number(m[5])) -
+    IST_OFFSET_MIN * 60000;
+  return new Date(utcMs).toISOString();
+}
+
+/** Convert a stored UTC ISO instant into an IST wall-clock value for a datetime-local input. */
+export function isoToISTInput(iso?: string | null): string {
+  if (!iso) return "";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
+  const ist = new Date(date.getTime() + IST_OFFSET_MIN * 60000);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${ist.getUTCFullYear()}-${pad(ist.getUTCMonth() + 1)}-${pad(ist.getUTCDate())}T${pad(ist.getUTCHours())}:${pad(ist.getUTCMinutes())}`;
+}
+
+const IST_DATE_FULL = new Intl.DateTimeFormat("en-IN", { timeZone: "Asia/Kolkata", weekday: "long", day: "numeric", month: "long", year: "numeric" });
+const IST_DATE_MED = new Intl.DateTimeFormat("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric" });
+const IST_TIME = new Intl.DateTimeFormat("en-IN", { timeZone: "Asia/Kolkata", hour: "numeric", minute: "2-digit", hour12: true });
+
+/** "28 Jun 2026" in IST (timezone-stable across server/browser). */
+export function formatISTDate(iso?: string | null): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? "—" : IST_DATE_MED.format(d);
+}
+
+/** "11:00 AM" in IST. */
+export function formatISTTime(iso?: string | null): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? "—" : IST_TIME.format(d);
+}
+
+/** "28 Jun 2026, 11:00 AM IST" — compact for cards/lists. */
+export function formatISTDateTime(iso?: string | null): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  return `${IST_DATE_MED.format(d)}, ${IST_TIME.format(d)} IST`;
+}
+
+/**
+ * Full range label, e.g. "Sunday, 28 June 2026, 11:00 AM – 1:00 PM IST".
+ * Falls back to a single time when no end is provided.
+ */
+export function formatISTRange(startISO?: string | null, endISO?: string | null): string {
+  if (!startISO) return "—";
+  const start = new Date(startISO);
+  if (Number.isNaN(start.getTime())) return "—";
+  const datePart = IST_DATE_FULL.format(start);
+  const startTime = IST_TIME.format(start);
+  if (endISO) {
+    const end = new Date(endISO);
+    if (!Number.isNaN(end.getTime())) return `${datePart}, ${startTime} – ${IST_TIME.format(end)} IST`;
+  }
+  return `${datePart}, ${startTime} IST`;
+}
+
 /** UPSC Prelims is typically late May / early June. Use June 1 as a reasonable default. */
 export function daysToPrelims(targetYear: number | null): number | null {
   if (!targetYear) return null;

@@ -22,6 +22,7 @@ import {
 } from "./FormFields";
 import RichTextEditor from "./RichTextEditor";
 import { useToast } from "@/components/ui/Toast";
+import { istInputToISO, isoToISTInput } from "@/lib/dates";
 import type {
   Webinar,
   FAQItem,
@@ -41,13 +42,13 @@ import type {
 
 const BACK = "/admin/webinars";
 
-/** ISO -> value for <input type="datetime-local"> (local time, no seconds). */
+/**
+ * ISO -> value for <input type="datetime-local">. Webinar times are always IST,
+ * so we render the stored UTC instant as its IST wall-clock value (not the
+ * admin's browser-local time) to keep the form consistent with what's displayed.
+ */
 function toLocalInput(iso?: string | null): string {
-  if (!iso) return "";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "";
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  return isoToISTInput(iso);
 }
 
 export default function WebinarForm({ webinar }: { webinar?: Webinar }) {
@@ -95,7 +96,7 @@ export default function WebinarForm({ webinar }: { webinar?: Webinar }) {
 
   async function save() {
     if (!title.trim()) return toast("Title is required", "error");
-    if (datetime && endDatetime && new Date(endDatetime) <= new Date(datetime)) {
+    if (datetime && endDatetime && istInputToISO(endDatetime) <= istInputToISO(datetime)) {
       return toast("End time must be after the start time.", "error");
     }
     setSaving(true);
@@ -104,8 +105,8 @@ export default function WebinarForm({ webinar }: { webinar?: Webinar }) {
       slug: slug.trim() || undefined,
       description,
       long_description: longDescription || null,
-      datetime: datetime ? new Date(datetime).toISOString() : new Date().toISOString(),
-      end_datetime: endDatetime ? new Date(endDatetime).toISOString() : null,
+      datetime: datetime ? istInputToISO(datetime) : new Date().toISOString(),
+      end_datetime: endDatetime ? istInputToISO(endDatetime) : null,
       price: Number(price) || 0,
       capacity: capacity === "" ? null : Number(capacity),
       link: link.trim() || null,
@@ -186,11 +187,11 @@ export default function WebinarForm({ webinar }: { webinar?: Webinar }) {
                   <ActiveToggle active={active} onChange={setActive} />
                 </Section>
 
-                <Section title="Schedule" desc="Dates reflect on the public page immediately after saving.">
-                  <Field label="Start date & time">
+                <Section title="Schedule" desc="All times are in IST (Asia/Kolkata) and display in IST to every visitor. Changes reflect on the public page immediately after saving.">
+                  <Field label="Start date & time (IST)">
                     <input type="datetime-local" className="input" value={datetime} onChange={(e) => setDatetime(e.target.value)} />
                   </Field>
-                  <Field label="End date & time (optional)" hint="Leave blank for a single-time session.">
+                  <Field label="End date & time (IST, optional)" hint="Leave blank for a single-time session.">
                     <input type="datetime-local" className="input" value={endDatetime} onChange={(e) => setEndDatetime(e.target.value)} />
                   </Field>
                 </Section>

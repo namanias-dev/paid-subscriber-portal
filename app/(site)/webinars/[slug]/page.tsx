@@ -10,7 +10,7 @@ import StickyMobileCTA from "@/components/public/StickyMobileCTA";
 import LandingSections from "@/components/public/LandingSections";
 import { getWebinarBySlug } from "@/lib/dataProvider";
 import { buildLandingView } from "@/lib/landingView";
-import { formatINR } from "@/lib/dates";
+import { formatINR, formatISTRange } from "@/lib/dates";
 import { SITE_URL, ACADEMY } from "@/lib/config";
 
 export const dynamic = "force-dynamic";
@@ -43,7 +43,7 @@ export default async function WebinarDetail({ params }: { params: { slug: string
   const view = buildLandingView(w);
   const completed = w.status === "completed";
   const priceLabel = w.price === 0 ? "Free" : formatINR(w.price);
-  const startLabel = new Date(w.datetime).toLocaleString("en-IN", { dateStyle: "full", timeStyle: "short" });
+  const startLabel = formatISTRange(w.datetime, w.end_datetime);
 
   const trust = [
     { icon: "🗓", label: completed ? "Recording available" : "Live + recording" },
@@ -94,7 +94,6 @@ export default async function WebinarDetail({ params }: { params: { slug: string
           <p className="mt-3 text-ink2">{w.description}</p>
           <p className="mt-4 text-sm text-muted">
             🗓 {startLabel}
-            {w.end_datetime && ` – ${new Date(w.end_datetime).toLocaleTimeString("en-IN", { timeStyle: "short" })}`}
           </p>
           <p className="mt-1 text-sm text-muted">👥 {w.registrations.toLocaleString("en-IN")} registered</p>
 

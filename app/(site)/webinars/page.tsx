@@ -1,7 +1,7 @@
 import Link from "next/link";
 import Reveal, { Stagger, StaggerItem } from "@/components/ui/Reveal";
 import { getPublicWebinars } from "@/lib/dataProvider";
-import { formatINR } from "@/lib/dates";
+import { formatINR, formatISTDateTime } from "@/lib/dates";
 
 export const metadata = { title: "Webinars — Naman Sharma IAS Academy" };
 
@@ -32,7 +32,7 @@ export default async function WebinarsPage() {
               <h3 className="mt-3 text-lg">{w.title}</h3>
               <p className="mt-1.5 line-clamp-2 flex-1 text-sm text-ink2">{w.description}</p>
               <p className="mt-3 text-sm text-muted">
-                {new Date(w.datetime).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}
+                {formatISTDateTime(w.datetime)}
               </p>
               <p className="text-xs text-muted">{w.registrations.toLocaleString("en-IN")} registered</p>
             </Link>

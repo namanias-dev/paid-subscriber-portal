@@ -8,7 +8,7 @@ import {
   getWebinarBySlug,
   getSiteSettings,
 } from "@/lib/dataProvider";
-import { formatINR } from "@/lib/dates";
+import { formatINR, formatISTDateTime } from "@/lib/dates";
 import { parseRecording } from "@/lib/recordingEmbed";
 import { whatsappLink } from "@/lib/phone";
 import type { PdfResource, PageSection, Payment, Review } from "@/lib/types";
@@ -106,7 +106,7 @@ export default async function PortalItemPage({ params }: { params: { reference: 
               {enrollments.length > 1 && <span className="pill pill-gray text-xs">Registered {enrollments.length}×</span>}
               {webinar.datetime && (
                 <span className="pill pill-gray text-xs">
-                  {new Date(webinar.datetime).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}
+                  {formatISTDateTime(webinar.datetime)}
                 </span>
               )}
             </div>

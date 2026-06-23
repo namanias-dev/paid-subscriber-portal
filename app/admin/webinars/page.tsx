@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { PageHeader, useAdminData, LoadingBlock, TableShell } from "@/components/admin/ui";
 import { useToast } from "@/components/ui/Toast";
-import { formatINR, formatDate } from "@/lib/dates";
+import { formatINR, formatISTDateTime } from "@/lib/dates";
 import type { Webinar } from "@/lib/types";
 
 export default function WebinarsAdmin() {
@@ -47,7 +47,7 @@ export default function WebinarsAdmin() {
         {(webinars || []).map((w) => (
           <tr key={w.id} className="border-b border-line last:border-0 hover:bg-surface2">
             <td className="px-4 py-3 font-medium">{w.title}</td>
-            <td className="px-4 py-3">{formatDate(w.datetime)}</td>
+            <td className="px-4 py-3">{formatISTDateTime(w.datetime)}</td>
             <td className="px-4 py-3">{w.price === 0 ? "Free" : formatINR(w.price)}</td>
             <td className="px-4 py-3">{w.registrations}</td>
             <td className="px-4 py-3">
