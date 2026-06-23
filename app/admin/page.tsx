@@ -24,9 +24,9 @@ export default function AdminDashboard() {
         <KpiCard label="Total Students" value={data.totalStudents} tone="green" />
         <KpiCard label="Active Subs" value={data.activeSubs} tone="green" />
         <KpiCard label="Conversion" value={`${data.conversionRate}%`} tone="amber" />
-        <KpiCard label="Revenue (Month)" value={formatINR(data.revenueMonth)} tone="green" />
-        <KpiCard label="Revenue (Total)" value={formatINR(data.revenueTotal)} tone="green" />
-        <KpiCard label="Pending Collections" value={formatINR(data.pendingCollections)} tone="red" />
+        {data.revenueMonth !== null && <KpiCard label="Revenue (Month)" value={formatINR(data.revenueMonth)} tone="green" />}
+        {data.revenueTotal !== null && <KpiCard label="Revenue (Total)" value={formatINR(data.revenueTotal)} tone="green" />}
+        {data.pendingCollections !== null && <KpiCard label="Pending Collections" value={formatINR(data.pendingCollections)} tone="red" />}
         <KpiCard label="Webinar Regs" value={data.webinarRegs} />
       </div>
 
@@ -35,10 +35,12 @@ export default function AdminDashboard() {
           <h3 className="mb-3 text-base">Enrollments over time</h3>
           <EnrollmentsArea data={data.enrollmentsByMonth} />
         </div>
-        <div className="card p-5">
-          <h3 className="mb-3 text-base">Revenue by course</h3>
-          <RevenueBars data={data.revenueByCourse} />
-        </div>
+        {data.revenueByCourse.length > 0 && (
+          <div className="card p-5">
+            <h3 className="mb-3 text-base">Revenue by course</h3>
+            <RevenueBars data={data.revenueByCourse} />
+          </div>
+        )}
         <div className="card p-5">
           <h3 className="mb-3 text-base">Lead source breakdown</h3>
           <SourcePie data={data.leadSources} />

@@ -5,14 +5,19 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import Logo from "@/components/ui/Logo";
 import AdminLogin from "./AdminLogin";
+import AdminPasswordModal from "./AdminPasswordModal";
 import { ADMIN_NAV } from "./adminNav";
+import { allPermissions, type PermissionSet } from "@/lib/permissions";
+
+interface AdminMe { username: string; role: string; role_name?: string; permissions?: PermissionSet; must_change_password?: boolean }
 
 export default function AdminShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const [authed, setAuthed] = useState<boolean | null>(null);
   const [open, setOpen] = useState(false);
-  const [admin, setAdmin] = useState<{ username: string; role: string } | null>(null);
+  const [admin, setAdmin] = useState<AdminMe | null>(null);
+  const [pwOpen, setPwOpen] = useState(false);
 
   async function check() {
     try {
@@ -44,7 +49,11 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
 
   if (!authed) return <AdminLogin onSuccess={() => check()} />;
 
-  const groups = Array.from(new Set(ADMIN_NAV.map((n) => n.group)));
+  // Legacy tokens (pre-RBAC) carry no permissions field — treat them as full access.
+  const perms = admin?.permissions === undefined ? allPermissions() : admin.permissions;
+  // Super Admin (and any account whose role grants it) sees everything; otherwise gate by permission.
+  const visibleNav = ADMIN_NAV.filter((n) => !n.perm || perms[n.perm] === true);
+  const groups = Array.from(new Set(visibleNav.map((n) => n.group)));
 
   const SidebarContent = (
     <>
@@ -60,7 +69,7 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
           <div key={g}>
             <p className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted">{g}</p>
             <div className="space-y-0.5">
-              {ADMIN_NAV.filter((n) => n.group === g).map((item) => {
+              {visibleNav.filter((n) => n.group === g).map((item) => {
                 const active = pathname === item.href;
                 return (
                   <Link
@@ -105,14 +114,25 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
           <div className="hidden text-sm text-ink2 lg:block">UPSC Edtech Control Center</div>
           <div className="flex items-center gap-3">
             <Link href="/" className="text-sm text-ink2 hover:text-primary">View site ↗</Link>
+            <button onClick={() => setPwOpen(true)} className="text-sm text-ink2 hover:text-primary">Password</button>
             <div className="flex items-center gap-2">
               <span className="hidden text-sm text-ink2 sm:block">{admin?.username}</span>
-              <span className="pill pill-blue">{admin?.role || "Admin"}</span>
+              <span className="pill pill-blue">{admin?.role_name || admin?.role || "Admin"}</span>
             </div>
           </div>
         </header>
-        <main className="mx-auto max-w-6xl px-4 py-6">{children}</main>
+        <main className="mx-auto max-w-6xl px-4 py-6">
+          {admin?.must_change_password && (
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--warning)] bg-[#fef3e2] px-4 py-3 text-sm text-[#8a5a00]">
+              <span>For security, please change your temporary password.</span>
+              <button onClick={() => setPwOpen(true)} className="btn btn-primary text-xs">Change password</button>
+            </div>
+          )}
+          {children}
+        </main>
       </div>
+
+      <AdminPasswordModal open={pwOpen} onClose={() => setPwOpen(false)} onChanged={() => { setPwOpen(false); check(); }} />
     </div>
   );
 }

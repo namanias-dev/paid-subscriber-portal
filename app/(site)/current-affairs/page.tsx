@@ -29,7 +29,7 @@ const PER_PAGE = 12;
 
 const QUICK_LINKS = [
   { href: "#today", icon: CalendarDays, label: "Today's CA", sub: "Fresh, exam-ready briefs" },
-  { href: "/current-affairs/daily", icon: Archive, label: "Daily Archive", sub: "Browse every single day" },
+  { href: "/current-affairs/daily", icon: Archive, label: "Daily Current Affairs PDFs", sub: "PDFs + each day's articles" },
   { href: "/current-affairs/monthly", icon: FileText, label: "Monthly PDFs", sub: "Compiled & downloadable" },
   { href: "#categories", icon: Compass, label: "Browse Topics", sub: "14 GS-aligned subjects" },
 ];

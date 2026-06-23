@@ -68,12 +68,33 @@ create table if not exists public.content_progress (
   unique (student_id, content_id)
 );
 
+-- ------------------------------- roles ------------------------------
+-- RBAC roles for admin/staff accounts. Permissions is a JSON map of boolean flags.
+create table if not exists public.roles (
+  id text primary key,
+  name text not null,
+  description text,
+  permissions jsonb not null default '{}'::jsonb,
+  is_system boolean not null default false,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+
 -- ---------------------------- admin_users ---------------------------
+-- Admin/staff LOGIN accounts. Enriched with RBAC role + status + credential mgmt.
 create table if not exists public.admin_users (
   id uuid primary key default gen_random_uuid(),
   username text unique,
   password_hash text,
   role text default 'Super Admin',
+  name text,
+  email text,
+  role_id text references public.roles(id),
+  status text not null default 'active',
+  must_change_password boolean not null default false,
+  permissions_override jsonb,
+  created_by text,
+  last_login_at timestamptz,
   created_at timestamptz default now()
 );
 
@@ -535,6 +556,7 @@ alter table public.content_items enable row level security;
 alter table public.bookmarks enable row level security;
 alter table public.content_progress enable row level security;
 alter table public.admin_users enable row level security;
+alter table public.roles enable row level security;
 alter table public.access_logs enable row level security;
 alter table public.courses enable row level security;
 alter table public.enrollments enable row level security;

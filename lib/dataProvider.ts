@@ -34,8 +34,11 @@ import type {
   CaLead,
   CaEvent,
   CaEventType,
+  Role,
+  AdminAccount,
 } from "./types";
 import { mergeSiteSettings } from "./homeDefaults";
+import { DEFAULT_ROLES, resolvePermissions, type PermissionSet } from "./permissions";
 
 /**
  * The switchboard every API route uses.
@@ -371,12 +374,48 @@ export async function markProgress(studentId: string, contentId: string, complet
   return data as ContentProgress;
 }
 
-// ============================ ADMIN AUTH ============================
-export async function verifyAdminCredentials(username: string, password: string): Promise<{ id: string; username: string; role: Staff["role"] } | null> {
+// ============================ ADMIN AUTH + RBAC ============================
+
+export interface AdminAuthResult {
+  id: string;
+  username: string;
+  role: string;
+  role_id: string | null;
+  role_name: string;
+  permissions: PermissionSet;
+  must_change_password: boolean;
+}
+
+/** In-memory accounts created during a demo session (login works without a DB). */
+const demoExtraAccounts: (AdminAccount & { password: string })[] = [];
+/** Mutable demo roles store (seeded from the canonical defaults). */
+const demoRoles: Role[] = DEFAULT_ROLES.map((r) => ({
+  id: r.id,
+  name: r.name,
+  description: r.description,
+  permissions: { ...r.permissions },
+  is_system: r.is_system,
+  created_at: new Date().toISOString(),
+  updated_at: new Date().toISOString(),
+}));
+
+function rolePermsById(roleId: string | null | undefined, roles: Role[]): PermissionSet {
+  const r = roleId ? roles.find((x) => x.id === roleId) : undefined;
+  return r ? r.permissions : {};
+}
+
+export async function verifyAdminCredentials(username: string, password: string): Promise<AdminAuthResult | null> {
   if (demoMode()) {
     const admin = mock.adminUsers.find((a) => a.username === username);
     if (admin && admin.plaintext_password === password) {
-      return { id: admin.id, username: admin.username, role: admin.role };
+      const perms = resolvePermissions(rolePermsById("super_admin", demoRoles));
+      return { id: admin.id, username: admin.username, role: admin.role, role_id: "super_admin", role_name: "Super Admin", permissions: perms, must_change_password: false };
+    }
+    const extra = demoExtraAccounts.find((a) => a.username === username && a.password === password);
+    if (extra && extra.status === "active") {
+      const perms = resolvePermissions(rolePermsById(extra.role_id, demoRoles), extra.permissions_override);
+      const roleName = demoRoles.find((r) => r.id === extra.role_id)?.name || extra.role || "Staff";
+      return { id: extra.id, username: extra.username, role: extra.role || roleName, role_id: extra.role_id, role_name: roleName, permissions: perms, must_change_password: extra.must_change_password };
     }
     return null;
   }
@@ -384,10 +423,227 @@ export async function verifyAdminCredentials(username: string, password: string)
   if (!db) return null;
   const { data } = await db.from("admin_users").select("*").eq("username", username).maybeSingle();
   if (!data) return null;
+  const row = data as Record<string, unknown>;
+  if ((row.status as string) === "disabled") return null;
   const bcrypt = await import("bcryptjs");
-  const ok = await bcrypt.compare(password, (data as { password_hash: string }).password_hash);
+  const ok = await bcrypt.compare(password, (row.password_hash as string) || "");
   if (!ok) return null;
-  return { id: (data as { id: string }).id, username, role: ((data as { role?: Staff["role"] }).role) || "Super Admin" };
+  const roles = await getRoles();
+  const roleId = (row.role_id as string) || "super_admin";
+  const role = roles.find((r) => r.id === roleId);
+  const perms = resolvePermissions(role?.permissions, (row.permissions_override as PermissionSet) || null);
+  // best-effort last-login stamp
+  try { await db.from("admin_users").update({ last_login_at: new Date().toISOString() }).eq("id", row.id as string); } catch { /* ignore */ }
+  return {
+    id: row.id as string,
+    username,
+    role: (row.role as string) || role?.name || "Super Admin",
+    role_id: roleId,
+    role_name: role?.name || "Super Admin",
+    permissions: perms,
+    must_change_password: !!row.must_change_password,
+  };
+}
+
+// ---- Roles ----
+export async function getRoles(): Promise<Role[]> {
+  if (demoMode()) return demoRoles.map((r) => ({ ...r }));
+  const db = getSupabaseAdmin();
+  if (!db) return demoRoles.map((r) => ({ ...r }));
+  const { data } = await db.from("roles").select("*").order("is_system", { ascending: false });
+  const rows = (data as Role[]) ?? [];
+  return rows.length ? rows : demoRoles.map((r) => ({ ...r }));
+}
+export async function getRoleById(id: string): Promise<Role | null> {
+  const all = await getRoles();
+  return all.find((r) => r.id === id) ?? null;
+}
+export async function createRole(input: { name: string; description?: string; permissions: PermissionSet }): Promise<Role> {
+  const slug = input.name.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "") || `role_${Date.now()}`;
+  const ts = new Date().toISOString();
+  const row: Role = { id: slug, name: input.name, description: input.description || "", permissions: input.permissions, is_system: false, created_at: ts, updated_at: ts };
+  if (demoMode()) { demoRoles.push({ ...row }); return row; }
+  const db = getSupabaseAdmin();
+  if (!db) { demoRoles.push({ ...row }); return row; }
+  return dbInsert<Role>("roles", row as unknown as Record<string, unknown>);
+}
+export async function updateRole(id: string, patch: Partial<Role>): Promise<Role | null> {
+  if (demoMode()) {
+    const r = demoRoles.find((x) => x.id === id);
+    if (!r) return null;
+    Object.assign(r, patch, { updated_at: new Date().toISOString() });
+    return { ...r };
+  }
+  const db = getSupabaseAdmin();
+  if (!db) return null;
+  const { data } = await db.from("roles").update({ ...patch, updated_at: new Date().toISOString() }).eq("id", id).select().single();
+  return (data as Role) ?? null;
+}
+export async function deleteRole(id: string): Promise<{ ok: boolean; error?: string }> {
+  const role = await getRoleById(id);
+  if (!role) return { ok: false, error: "Role not found." };
+  if (role.is_system) return { ok: false, error: "System roles cannot be deleted." };
+  // Block deletion if any account still uses this role.
+  const accounts = await getAdminAccounts();
+  if (accounts.some((a) => a.role_id === id)) return { ok: false, error: "Role is assigned to staff; reassign them first." };
+  if (demoMode()) {
+    const idx = demoRoles.findIndex((x) => x.id === id);
+    if (idx >= 0) demoRoles.splice(idx, 1);
+    return { ok: true };
+  }
+  const ok = await dbDelete("roles", id);
+  return ok ? { ok: true } : { ok: false, error: "Delete failed." };
+}
+
+// ---- Admin accounts (staff logins) ----
+function mapDbAccount(row: Record<string, unknown>): AdminAccount {
+  return {
+    id: row.id as string,
+    username: (row.username as string) || "",
+    name: (row.name as string) ?? null,
+    email: (row.email as string) ?? null,
+    role_id: (row.role_id as string) ?? null,
+    role: (row.role as string) ?? null,
+    status: ((row.status as string) === "disabled" ? "disabled" : "active"),
+    must_change_password: !!row.must_change_password,
+    permissions_override: (row.permissions_override as PermissionSet) ?? null,
+    created_by: (row.created_by as string) ?? null,
+    last_login_at: (row.last_login_at as string) ?? null,
+    created_at: (row.created_at as string) || new Date().toISOString(),
+  };
+}
+
+export async function getAdminAccounts(): Promise<AdminAccount[]> {
+  if (demoMode()) {
+    const base: AdminAccount[] = mock.adminUsers.map((a) => ({
+      id: a.id, username: a.username, name: "Naman Sir", email: "admin@example.com",
+      role_id: "super_admin", role: a.role, status: "active", must_change_password: false,
+      permissions_override: null, created_by: null, last_login_at: null, created_at: a.created_at,
+    }));
+    return [...base, ...demoExtraAccounts.map(({ password, ...rest }) => rest)];
+  }
+  const db = getSupabaseAdmin();
+  if (!db) return [];
+  const { data } = await db.from("admin_users").select("id,username,name,email,role_id,role,status,must_change_password,permissions_override,created_by,last_login_at,created_at").order("created_at", { ascending: true });
+  return ((data as Record<string, unknown>[]) ?? []).map(mapDbAccount);
+}
+export async function getAdminAccountById(id: string): Promise<AdminAccount | null> {
+  const all = await getAdminAccounts();
+  return all.find((a) => a.id === id) ?? null;
+}
+
+function genPassword(): string {
+  const lower = "abcdefghijkmnpqrstuvwxyz", upper = "ABCDEFGHJKLMNPQRSTUVWXYZ", nums = "23456789", sym = "!@#$%*";
+  const all = lower + upper + nums + sym;
+  const pick = (s: string) => s[Math.floor(Math.random() * s.length)];
+  let out = pick(lower) + pick(upper) + pick(nums) + pick(sym);
+  for (let i = 0; i < 8; i++) out += pick(all);
+  return out.split("").sort(() => Math.random() - 0.5).join("");
+}
+
+export async function createAdminAccount(input: {
+  name: string; username: string; email?: string | null; role_id: string;
+  password?: string; must_change_password?: boolean; permissions_override?: PermissionSet | null; created_by?: string | null;
+}): Promise<{ ok: boolean; account?: AdminAccount; password?: string; error?: string }> {
+  const username = input.username.trim().toLowerCase();
+  if (!username) return { ok: false, error: "Username required." };
+  const password = input.password && input.password.length >= 8 ? input.password : genPassword();
+  const role = await getRoleById(input.role_id);
+  if (!role) return { ok: false, error: "Invalid role." };
+  const ts = new Date().toISOString();
+
+  if (demoMode()) {
+    if (mock.adminUsers.some((a) => a.username === username) || demoExtraAccounts.some((a) => a.username === username)) return { ok: false, error: "Username already exists." };
+    const account: AdminAccount = {
+      id: uuid(), username, name: input.name || username, email: input.email ?? null, role_id: input.role_id, role: role.name,
+      status: "active", must_change_password: input.must_change_password ?? true, permissions_override: input.permissions_override ?? null,
+      created_by: input.created_by ?? null, last_login_at: null, created_at: ts,
+    };
+    demoExtraAccounts.push({ ...account, password });
+    return { ok: true, account, password };
+  }
+  const db = getSupabaseAdmin();
+  if (!db) return { ok: false, error: "No database." };
+  const existing = await db.from("admin_users").select("id").eq("username", username).maybeSingle();
+  if (existing.data) return { ok: false, error: "Username already exists." };
+  const bcrypt = await import("bcryptjs");
+  const password_hash = await bcrypt.hash(password, 10);
+  const row = {
+    id: uuid(), username, password_hash, name: input.name || username, email: input.email ?? null,
+    role_id: input.role_id, role: role.name, status: "active", must_change_password: input.must_change_password ?? true,
+    permissions_override: input.permissions_override ?? null, created_by: input.created_by ?? null, created_at: ts,
+  };
+  const { data, error } = await db.from("admin_users").insert(row).select("id,username,name,email,role_id,role,status,must_change_password,permissions_override,created_by,last_login_at,created_at").single();
+  if (error) return { ok: false, error: error.message };
+  return { ok: true, account: mapDbAccount(data as Record<string, unknown>), password };
+}
+
+export async function updateAdminAccount(id: string, patch: { name?: string; email?: string | null; role_id?: string; status?: "active" | "disabled"; permissions_override?: PermissionSet | null }): Promise<AdminAccount | null> {
+  const clean: Record<string, unknown> = {};
+  if (patch.name !== undefined) clean.name = patch.name;
+  if (patch.email !== undefined) clean.email = patch.email;
+  if (patch.role_id !== undefined) { clean.role_id = patch.role_id; const r = await getRoleById(patch.role_id); if (r) clean.role = r.name; }
+  if (patch.status !== undefined) clean.status = patch.status;
+  if (patch.permissions_override !== undefined) clean.permissions_override = patch.permissions_override;
+  if (demoMode()) {
+    const a = demoExtraAccounts.find((x) => x.id === id);
+    if (!a) return null;
+    Object.assign(a, clean);
+    const { password, ...rest } = a; void password;
+    return rest;
+  }
+  const db = getSupabaseAdmin();
+  if (!db) return null;
+  const { data } = await db.from("admin_users").update(clean).eq("id", id).select("id,username,name,email,role_id,role,status,must_change_password,permissions_override,created_by,last_login_at,created_at").single();
+  return data ? mapDbAccount(data as Record<string, unknown>) : null;
+}
+
+export async function resetAdminPassword(id: string, newPassword?: string): Promise<{ ok: boolean; password?: string; error?: string }> {
+  const password = newPassword && newPassword.length >= 8 ? newPassword : genPassword();
+  if (demoMode()) {
+    const a = demoExtraAccounts.find((x) => x.id === id);
+    if (!a) return { ok: false, error: "Account not found (demo: only newly-created staff can be reset)." };
+    a.password = password; a.must_change_password = true;
+    return { ok: true, password };
+  }
+  const db = getSupabaseAdmin();
+  if (!db) return { ok: false, error: "No database." };
+  const bcrypt = await import("bcryptjs");
+  const password_hash = await bcrypt.hash(password, 10);
+  const { error } = await db.from("admin_users").update({ password_hash, must_change_password: true }).eq("id", id);
+  return error ? { ok: false, error: error.message } : { ok: true, password };
+}
+
+/** Self-service password change (clears the must-change flag). */
+export async function changeOwnPassword(id: string, newPassword: string): Promise<{ ok: boolean; error?: string }> {
+  if (newPassword.length < 8) return { ok: false, error: "Password must be at least 8 characters." };
+  if (demoMode()) {
+    const a = demoExtraAccounts.find((x) => x.id === id);
+    if (a) { a.password = newPassword; a.must_change_password = false; }
+    return { ok: true };
+  }
+  const db = getSupabaseAdmin();
+  if (!db) return { ok: false, error: "No database." };
+  const bcrypt = await import("bcryptjs");
+  const password_hash = await bcrypt.hash(newPassword, 10);
+  const { error } = await db.from("admin_users").update({ password_hash, must_change_password: false }).eq("id", id);
+  return error ? { ok: false, error: error.message } : { ok: true };
+}
+
+export async function deleteAdminAccount(id: string): Promise<{ ok: boolean; error?: string }> {
+  const accounts = await getAdminAccounts();
+  const target = accounts.find((a) => a.id === id);
+  if (!target) return { ok: false, error: "Account not found." };
+  // Never remove the last active Super Admin.
+  const superAdmins = accounts.filter((a) => a.role_id === "super_admin" && a.status === "active");
+  if (target.role_id === "super_admin" && superAdmins.length <= 1) return { ok: false, error: "Cannot remove the last Super Admin." };
+  if (demoMode()) {
+    const idx = demoExtraAccounts.findIndex((x) => x.id === id);
+    if (idx >= 0) { demoExtraAccounts.splice(idx, 1); return { ok: true }; }
+    return { ok: false, error: "Demo: seeded admin cannot be removed." };
+  }
+  const ok = await dbDelete("admin_users", id);
+  return ok ? { ok: true } : { ok: false, error: "Delete failed." };
 }
 
 // ============================ COURSES ============================
@@ -1037,9 +1293,9 @@ export interface DashboardData {
   newLeadsToday: number;
   totalStudents: number;
   activeSubs: number;
-  revenueMonth: number;
-  revenueTotal: number;
-  pendingCollections: number;
+  revenueMonth: number | null;
+  revenueTotal: number | null;
+  pendingCollections: number | null;
   webinarRegs: number;
   demoBookings: number;
   conversionRate: number;
@@ -1844,6 +2100,21 @@ export async function getCaPdfs(): Promise<CaPdf[]> {
 export async function getCaPdfById(id: string): Promise<CaPdf | null> {
   const all = await getCaPdfs();
   return all.find((p) => p.id === id) ?? null;
+}
+/**
+ * Public-facing PDFs of a given kind. A PDF is "published" once it has a file
+ * attached; placeholder records (no file_url) stay hidden from the front end.
+ * Ordered by date_ref desc (newest day/month first), then created_at.
+ */
+export async function getPublicCaPdfsByKind(kind: CaPdf["kind"]): Promise<CaPdf[]> {
+  const all = await getCaPdfs();
+  return all
+    .filter((p) => p.kind === kind && !!p.file_url)
+    .sort((a, b) => {
+      const da = a.date_ref || a.created_at;
+      const db2 = b.date_ref || b.created_at;
+      return da < db2 ? 1 : da > db2 ? -1 : 0;
+    });
 }
 export async function addCaPdf(input: Partial<CaPdf>): Promise<CaPdf> {
   const ts = new Date().toISOString();

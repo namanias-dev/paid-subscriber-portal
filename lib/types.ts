@@ -130,7 +130,13 @@ export interface BuyerSessionPayload {
 export interface AdminSessionPayload {
   admin_id: string;
   username: string;
-  role: StaffRole;
+  role: string;
+  /** Display name of the role (e.g. "Content Admin"). */
+  role_name?: string;
+  /** Effective permissions resolved from role + per-account override. */
+  permissions?: import("./permissions").PermissionSet;
+  /** Forces a password change prompt after login. */
+  must_change_password?: boolean;
 }
 
 // ----------------------------- Shared rich content -----------------------------
@@ -518,6 +524,36 @@ export interface Staff {
   role: StaffRole;
   email: string | null;
   active: boolean;
+  created_at: string;
+}
+
+// ----------------------------- RBAC (roles + admin accounts) -----------------------------
+export interface Role {
+  id: string;
+  name: string;
+  description: string;
+  permissions: import("./permissions").PermissionSet;
+  is_system: boolean;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export type AdminAccountStatus = "active" | "disabled";
+
+/** An admin login account (row in admin_users) — password hash never leaves the server. */
+export interface AdminAccount {
+  id: string;
+  username: string;
+  name: string | null;
+  email: string | null;
+  role_id: string | null;
+  /** Legacy free-text role label (kept for backward compatibility / display). */
+  role: string | null;
+  status: AdminAccountStatus;
+  must_change_password: boolean;
+  permissions_override: import("./permissions").PermissionSet | null;
+  created_by: string | null;
+  last_login_at: string | null;
   created_at: string;
 }
 

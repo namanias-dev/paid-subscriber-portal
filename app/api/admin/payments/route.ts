@@ -1,12 +1,16 @@
 import { NextResponse } from "next/server";
 import { getPayments, getEnrollments, getBuyers } from "@/lib/dataProvider";
-import { requireAdmin } from "@/lib/adminGuard";
+import { requireAdmin, requireAnyPermission } from "@/lib/adminGuard";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
     if (!(await requireAdmin())) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+    // Revenue/payments are financial data — gated behind explicit permission.
+    if (!(await requireAnyPermission(["view_revenue", "manage_payments"]))) {
+      return NextResponse.json({ ok: false, error: "Forbidden — revenue access required." }, { status: 403 });
+    }
     const [payments, enrollments, buyers] = await Promise.all([getPayments(), getEnrollments(), getBuyers()]);
     // phone -> login code, so support can resolve "forgot code" escalations.
     const buyerCodes: Record<string, string> = {};

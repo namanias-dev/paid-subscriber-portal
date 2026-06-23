@@ -24,8 +24,15 @@ export async function POST(req: Request) {
       );
     }
 
-    const token = await signAdminToken({ admin_id: admin.id, username: admin.username, role: admin.role });
-    const res = NextResponse.json({ ok: true, username: admin.username });
+    const token = await signAdminToken({
+      admin_id: admin.id,
+      username: admin.username,
+      role: admin.role,
+      role_name: admin.role_name,
+      permissions: admin.permissions,
+      must_change_password: admin.must_change_password,
+    });
+    const res = NextResponse.json({ ok: true, username: admin.username, must_change_password: admin.must_change_password });
     res.cookies.set(ADMIN_COOKIE, token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
