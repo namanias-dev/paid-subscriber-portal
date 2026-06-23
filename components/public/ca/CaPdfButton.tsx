@@ -37,21 +37,21 @@ export default function CaPdfButton({ pdf }: { pdf: CaPdf }) {
   const gating = pdf.requires_lead ? "Free with mobile number" : pdf.requires_login ? "Login required" : "Free download";
 
   return (
-    <div className="rounded-2xl border border-[var(--ca-slate-200)] bg-white p-4 transition hover:border-[rgba(212,175,55,0.5)]">
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex min-w-0 items-center gap-3">
+    <div className="overflow-hidden rounded-2xl border border-[var(--ca-slate-200)] bg-white p-4 transition hover:border-[rgba(212,175,55,0.5)]">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex min-w-0 items-start gap-3 sm:items-center">
           <span className="ca-icon-chip ca-icon-chip--light shrink-0" style={{ width: 38, height: 38 }}>
             <FileText size={18} strokeWidth={1.75} />
           </span>
           <div className="min-w-0">
-            <p className="truncate font-semibold text-[var(--ca-navy-900)]">{pdf.title}</p>
-            <p className="flex items-center gap-1 text-xs text-[var(--ca-slate-400)]">
-              {gated && <Lock size={11} />}
-              {gating}{pdf.download_count ? ` · ${pdf.download_count} downloads` : ""}
+            <p className="line-clamp-2 font-semibold text-[var(--ca-navy-900)]">{pdf.title}</p>
+            <p className="mt-0.5 flex items-center gap-1 text-xs text-[var(--ca-slate-400)]">
+              {gated && <Lock size={11} className="shrink-0" />}
+              <span className="truncate">{gating}{pdf.download_count ? ` · ${pdf.download_count} downloads` : ""}</span>
             </p>
           </div>
         </div>
-        <button onClick={() => go()} disabled={busy} className="ca-btn ca-btn-gold ca-focus shrink-0 px-3.5 py-2 text-sm" aria-label={`Download ${pdf.title}`}>
+        <button onClick={() => go()} disabled={busy} className="ca-btn ca-btn-gold ca-focus w-full shrink-0 justify-center px-4 py-2.5 text-sm sm:w-auto" aria-label={`Download ${pdf.title}`}>
           <Download size={16} strokeWidth={2} /> {busy ? "…" : "Get"}
         </button>
       </div>
