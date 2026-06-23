@@ -1,7 +1,6 @@
-"use client";
-
-import { useRef, useState } from "react";
 import Link from "next/link";
+import Image from "next/image";
+import { GraduationCap, ArrowRight, Layers, Clock, CalendarDays, User } from "lucide-react";
 import { formatINR } from "@/lib/dates";
 import type { Course } from "@/lib/types";
 
@@ -10,62 +9,85 @@ export function discountPct(price: number, original: number | null): number | nu
   return Math.round(((original - price) / original) * 100);
 }
 
+/** Premium course list card: cover image, glass depth, gold accents, clear price. */
 export default function CourseCard({ course }: { course: Course }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [t, setT] = useState({ rx: 0, ry: 0 });
+  const cover = course.cover_image_url || course.image || course.mobile_image_url || null;
   const off = discountPct(course.price, course.original_price);
-
-  function onMove(e: React.MouseEvent) {
-    const el = ref.current;
-    if (!el) return;
-    const r = el.getBoundingClientRect();
-    const px = (e.clientX - r.left) / r.width - 0.5;
-    const py = (e.clientY - r.top) / r.height - 0.5;
-    setT({ rx: -py * 6, ry: px * 6 });
-  }
+  const category = course.badge_label?.trim() || course.category;
+  const modes = course.modes?.length ? course.modes.join(" · ") : null;
+  const cta = course.price === 0 ? "Start free" : "View course";
 
   return (
-    <div style={{ perspective: 900 }}>
-      <div
-        ref={ref}
-        onMouseMove={onMove}
-        onMouseLeave={() => setT({ rx: 0, ry: 0 })}
-        className="tilt card card-hover flex h-full flex-col p-5"
-        style={{ transform: `rotateX(${t.rx}deg) rotateY(${t.ry}deg)` }}
-      >
-        <div className="mb-3 flex items-start justify-between gap-2">
-          <span className="pill pill-blue">{course.category}</span>
-          {off && <span className="pill pill-green">{off}% OFF</span>}
-        </div>
-
-        <h3 className="text-[17px] leading-snug">{course.title}</h3>
-        <p className="mt-1.5 line-clamp-2 text-sm text-ink2">{course.description}</p>
-
-        <div className="mt-3 flex flex-wrap gap-1.5">
-          {course.modes.map((m) => (
-            <span key={m} className="pill pill-gray">{m}</span>
-          ))}
-        </div>
-
-        <div className="mt-4 flex items-end justify-between">
-          <div>
-            {course.price === 0 ? (
-              <span className="font-heading text-2xl text-india">Free</span>
+    <Link href={`/courses/${course.slug}`} className="ca-focus group block h-full">
+      <article className="relative h-full rounded-2xl bg-gradient-to-b from-white/70 via-[var(--ca-slate-200)] to-[rgba(212,175,55,0.45)] p-px shadow-[0_1px_2px_rgba(10,26,63,0.05),0_18px_40px_-26px_rgba(10,26,63,0.30)] transition-all duration-200 ease-out group-hover:-translate-y-1 group-hover:shadow-[0_1px_2px_rgba(10,26,63,0.06),0_30px_60px_-24px_rgba(212,175,55,0.42)] motion-reduce:transform-none motion-reduce:transition-none">
+        <div className="relative flex h-full flex-col overflow-hidden rounded-[15px] bg-white before:pointer-events-none before:absolute before:inset-x-0 before:top-0 before:z-10 before:h-px before:bg-white/70">
+          {/* Cover image */}
+          <div className="relative aspect-[16/9] w-full overflow-hidden bg-gradient-to-br from-[var(--ca-navy-900)] to-[var(--ca-navy-600)]">
+            {cover ? (
+              <Image
+                src={cover}
+                alt={course.title}
+                fill
+                sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
+                className="object-cover transition-transform duration-300 ease-out group-hover:scale-[1.03] motion-reduce:transform-none"
+              />
             ) : (
-              <div className="flex items-baseline gap-2">
-                <span className="font-heading text-2xl text-ink">{formatINR(course.price)}</span>
-                {course.original_price && (
-                  <span className="text-sm text-muted line-through">{formatINR(course.original_price)}</span>
-                )}
+              <div className="flex h-full w-full flex-col items-center justify-center gap-2 px-5 text-center">
+                <GraduationCap size={30} strokeWidth={1.5} className="text-[var(--ca-gold-bright)] opacity-90" aria-hidden="true" />
+                <p className="line-clamp-2 font-heading text-sm font-bold text-white/90">{course.title}</p>
               </div>
             )}
+
+            <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/55 via-black/0 to-black/10" aria-hidden="true" />
+
+            <div className="absolute inset-x-3 top-3 flex items-start justify-between gap-2">
+              <span className="inline-flex items-center rounded-full bg-white/90 px-2.5 py-1 text-[11px] font-bold text-[var(--ca-navy-900)] shadow-sm backdrop-blur-sm">
+                {category}
+              </span>
+              {off ? (
+                <span className="inline-flex items-center rounded-full bg-[rgba(212,175,55,0.95)] px-2.5 py-1 text-[11px] font-extrabold text-[#1a1304] shadow-sm backdrop-blur-sm">
+                  {off}% OFF
+                </span>
+              ) : course.price === 0 ? (
+                <span className="inline-flex items-center rounded-full bg-[#16a34a] px-2.5 py-1 text-[11px] font-extrabold text-white shadow-sm backdrop-blur-sm">
+                  Free
+                </span>
+              ) : null}
+            </div>
+          </div>
+
+          {/* Content */}
+          <div className="flex flex-1 flex-col p-5">
+            <h3 className="line-clamp-2 font-heading text-lg font-bold leading-snug tracking-tight text-[var(--ca-navy-900)]">{course.title}</h3>
+            {course.description && <p className="mt-1.5 line-clamp-1 text-sm text-[var(--ca-slate-700)]">{course.description}</p>}
+
+            <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-[var(--ca-slate-400)]">
+              {modes && <span className="inline-flex items-center gap-1.5"><Layers size={14} aria-hidden="true" /> {modes}</span>}
+              {course.duration && <span className="inline-flex items-center gap-1.5"><Clock size={14} aria-hidden="true" /> {course.duration}</span>}
+              {!course.duration && course.target_years && <span className="inline-flex items-center gap-1.5"><CalendarDays size={14} aria-hidden="true" /> {course.target_years}</span>}
+              {course.faculty && <span className="inline-flex items-center gap-1.5"><User size={14} aria-hidden="true" /> {course.faculty}</span>}
+            </div>
+
+            <div className="mt-auto flex items-end justify-between gap-3 pt-4">
+              <div className="min-w-0">
+                {course.price === 0 ? (
+                  <span className="font-heading text-2xl font-extrabold text-[#16a34a]">Free</span>
+                ) : (
+                  <div className="flex items-baseline gap-2">
+                    <span className="font-heading text-2xl font-extrabold text-[var(--ca-navy-900)]">{formatINR(course.price)}</span>
+                    {course.original_price && course.original_price > course.price && (
+                      <span className="text-sm text-[var(--ca-slate-400)] line-through">{formatINR(course.original_price)}</span>
+                    )}
+                  </div>
+                )}
+              </div>
+              <span className="ca-btn ca-btn-gold ca-focus shrink-0 px-3.5 py-2 text-sm">
+                {cta} <ArrowRight size={15} className="transition-transform duration-200 group-hover:translate-x-0.5 motion-reduce:transform-none" aria-hidden="true" />
+              </span>
+            </div>
           </div>
         </div>
-
-        <Link href={`/courses/${course.slug}`} className="btn btn-secondary mt-4 w-full">
-          View Details →
-        </Link>
-      </div>
-    </div>
+      </article>
+    </Link>
   );
 }
