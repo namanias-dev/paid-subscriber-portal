@@ -112,6 +112,7 @@ export default function PublicNav({
   );
 
   return (
+    <>
     <header
       className={`sticky top-0 z-50 border-b backdrop-blur-xl transition-all duration-300 motion-reduce:transition-none ${
         scrolled
@@ -178,9 +179,12 @@ export default function PublicNav({
           <X size={22} className={`absolute transition-all duration-200 motion-reduce:transition-none ${open ? "rotate-0 opacity-100" : "-rotate-90 opacity-0"}`} aria-hidden="true" />
         </button>
       </div>
+    </header>
 
-      {/* Mobile drawer — outer is fixed + overflow-hidden so the off-canvas panel is
-          clipped and never adds to page width (prevents horizontal scroll). */}
+      {/* Mobile drawer — rendered OUTSIDE <header> because the header's backdrop-filter
+          would otherwise become the containing block for this fixed element (shrinking
+          inset-0 to the header bar and hiding the menu). Outer is fixed inset-0 +
+          overflow-hidden so the off-canvas panel is clipped and never adds page width. */}
       <div
         id="mobile-drawer"
         role="dialog"
@@ -259,6 +263,6 @@ export default function PublicNav({
           </div>
         </div>
       </div>
-    </header>
+    </>
   );
 }
