@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getAdminAccountById, getRoleById, updateAdminAccount, deleteAdminAccount } from "@/lib/dataProvider";
 import { getAdminSession } from "@/lib/session";
-import { requirePermission } from "@/lib/adminGuard";
+import { requirePermission, effectivePermissions } from "@/lib/adminGuard";
 import { resolvePermissions, canAssign, escalatedKeys } from "@/lib/permissions";
 
 export const dynamic = "force-dynamic";
@@ -20,7 +20,7 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
       const role = roleId ? await getRoleById(roleId) : null;
       const override = body.permissions_override !== undefined ? body.permissions_override : target.permissions_override;
       const resultPerms = resolvePermissions(role?.permissions, override);
-      const actorPerms = session.permissions || {};
+      const actorPerms = effectivePermissions(session);
       if (!canAssign(actorPerms, resultPerms)) {
         return NextResponse.json({ ok: false, error: `You cannot grant permissions you don't have: ${escalatedKeys(actorPerms, resultPerms).join(", ")}` }, { status: 403 });
       }

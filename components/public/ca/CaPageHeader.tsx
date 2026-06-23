@@ -44,7 +44,7 @@ export default function CaPageHeader({
           {icon && <CaIconChip icon={icon} />}
           <div>
             <p className="ca-eyebrow">{eyebrow}</p>
-            <h1 className="mt-2 font-heading text-3xl font-extrabold leading-[1.1] tracking-tight text-white sm:text-4xl">{title}</h1>
+            <h1 className="mt-2 pb-[0.06em] font-heading text-3xl font-extrabold leading-[1.18] tracking-tight text-white sm:text-4xl">{title}</h1>
             {subtitle && <p className="mt-3 max-w-2xl text-[var(--ca-slate-300)]">{subtitle}</p>}
           </div>
         </div>

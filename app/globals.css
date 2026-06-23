@@ -467,6 +467,9 @@ a {
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
+  /* Background-clip:text with tight line-heights can clip ascenders/descenders. */
+  padding-bottom: 0.08em;
+  line-height: 1.12;
 }
 
 /* Glass card (on dark backgrounds) */

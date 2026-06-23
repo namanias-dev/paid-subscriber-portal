@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getAdminAccounts, getRoles, getRoleById, createAdminAccount } from "@/lib/dataProvider";
 import { getAdminSession } from "@/lib/session";
-import { requirePermission } from "@/lib/adminGuard";
+import { requirePermission, effectivePermissions } from "@/lib/adminGuard";
 import { resolvePermissions, canAssign, escalatedKeys } from "@/lib/permissions";
 
 export const dynamic = "force-dynamic";
@@ -30,7 +30,8 @@ export async function POST(req: Request) {
     if (!role) return NextResponse.json({ ok: false, error: "Invalid role." }, { status: 400 });
 
     // Anti-escalation: the creator can only grant permissions they themselves hold.
-    const actorPerms = session.permissions || {};
+    // effectivePermissions() expands legacy/Super-Admin tokens to "all" so Super Admin is never falsely blocked.
+    const actorPerms = effectivePermissions(session);
     const targetPerms = resolvePermissions(role.permissions, body.permissions_override || null);
     if (!canAssign(actorPerms, targetPerms)) {
       return NextResponse.json({ ok: false, error: `You cannot grant permissions you don't have: ${escalatedKeys(actorPerms, targetPerms).join(", ")}` }, { status: 403 });

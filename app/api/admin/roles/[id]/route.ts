@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getRoleById, updateRole, deleteRole } from "@/lib/dataProvider";
 import { getAdminSession } from "@/lib/session";
-import { requirePermission } from "@/lib/adminGuard";
+import { requirePermission, effectivePermissions } from "@/lib/adminGuard";
 import { canAssign, escalatedKeys, type PermissionSet } from "@/lib/permissions";
 
 export const dynamic = "force-dynamic";
@@ -15,8 +15,9 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
     if (role.id === "super_admin") return NextResponse.json({ ok: false, error: "The Super Admin role cannot be modified." }, { status: 400 });
     const body = await req.json().catch(() => ({}));
     const permissions = (body.permissions || role.permissions) as PermissionSet;
-    if (!canAssign(session.permissions || {}, permissions)) {
-      return NextResponse.json({ ok: false, error: `You cannot grant permissions you don't have: ${escalatedKeys(session.permissions || {}, permissions).join(", ")}` }, { status: 403 });
+    const actorPerms = effectivePermissions(session);
+    if (!canAssign(actorPerms, permissions)) {
+      return NextResponse.json({ ok: false, error: `You cannot grant permissions you don't have: ${escalatedKeys(actorPerms, permissions).join(", ")}` }, { status: 403 });
     }
     const updated = await updateRole(params.id, {
       name: body.name ?? role.name,

@@ -62,70 +62,73 @@ export default async function DailyDate({
   const base = `/current-affairs/daily/${params.date}`;
 
   return (
-    <div>
+    <div className="bg-[var(--ca-slate-50)]">
       <CaPageHeader
         eyebrow="Daily Current Affairs"
         title={`Current Affairs — ${caDateLabel(params.date)}`}
         icon={CalendarDays}
         crumbs={[{ label: "Current Affairs", href: "/current-affairs" }, { label: "Daily", href: "/current-affairs/daily" }, { label: caDateLabel(params.date) }]}
       />
-      <div className="container-wide py-12">
-        {/* Day navigation */}
-        <div className="mb-8 flex items-center justify-between gap-3">
-          {olderDate ? (
-            <Link href={`/current-affairs/daily/${olderDate}`} className="ca-btn ca-btn-outline ca-focus text-sm"><ChevronLeft size={16} /> {caDateLabel(olderDate)}</Link>
-          ) : <span />}
-          {newerDate ? (
-            <Link href={`/current-affairs/daily/${newerDate}`} className="ca-btn ca-btn-outline ca-focus text-sm">{caDateLabel(newerDate)} <ChevronRight size={16} /></Link>
-          ) : <span />}
-        </div>
 
-        {/* Daily PDF(s) */}
-        <section className="mb-10">
-          <h2 className="mb-4 flex items-center gap-2 font-heading text-xl font-bold tracking-tight text-[var(--ca-navy-900)]"><FileText size={20} className="text-[var(--ca-gold)]" /> Daily Current Affairs PDF</h2>
-          {dayPdfs.length > 0 ? (
-            <div className="grid gap-3 sm:grid-cols-2">
-              {dayPdfs.map((p) => <CaPdfButton key={p.id} pdf={p} />)}
-            </div>
-          ) : (
-            <div className="flex items-center gap-2 rounded-2xl border border-dashed border-[var(--ca-slate-200)] bg-[var(--ca-slate-50)] px-4 py-4 text-sm text-[var(--ca-slate-400)]">
-              <Clock size={16} /> Daily PDF coming soon for this date.
-            </div>
-          )}
-        </section>
+      {/* Content panel overlaps the hero for a smooth transition */}
+      <div className="relative z-10 -mt-10 rounded-t-[2rem] bg-[var(--ca-slate-50)]">
+        <div className="container-wide py-10 sm:py-12">
+          {/* Day navigation */}
+          <div className="mb-6 flex items-center justify-between gap-3">
+            {olderDate ? (
+              <Link href={`/current-affairs/daily/${olderDate}`} className="ca-btn ca-btn-outline ca-focus text-sm"><ChevronLeft size={16} /> <span className="hidden sm:inline">{caDateLabel(olderDate)}</span><span className="sm:hidden">Prev</span></Link>
+            ) : <span />}
+            {newerDate ? (
+              <Link href={`/current-affairs/daily/${newerDate}`} className="ca-btn ca-btn-outline ca-focus text-sm"><span className="hidden sm:inline">{caDateLabel(newerDate)}</span><span className="sm:hidden">Next</span> <ChevronRight size={16} /></Link>
+            ) : <span />}
+          </div>
 
-        {/* Related daily quiz */}
-        {quiz && (
-          <section className="mb-10">
-            <div className="ca-dark ca-grain relative overflow-hidden rounded-2xl p-6">
-              <div className="ca-orb" style={{ width: 200, height: 200, top: -100, right: -40, background: "rgba(212,175,55,0.18)" }} />
-              <p className="ca-eyebrow flex items-center gap-1.5"><ListChecks size={14} /> Test yourself</p>
-              <h2 className="mt-2 font-heading text-xl font-bold text-white">{quiz.title}</h2>
-              <p className="mt-1 text-sm text-[var(--ca-slate-300)]">Attempt the related current affairs quiz for {caDateLabel(params.date)}.</p>
-              <Link href={`/quizzes/${quiz.slug}`} className="ca-btn ca-btn-gold ca-focus mt-4">Attempt the quiz <ArrowRight size={16} /></Link>
-            </div>
+          {/* One cohesive day group */}
+          <section className="overflow-hidden rounded-3xl border border-[var(--ca-slate-200)] bg-white p-5 shadow-[0_18px_40px_-26px_rgba(10,26,63,0.22)] sm:p-6">
+            {/* Daily PDF(s) */}
+            <h2 className="mb-4 flex items-center gap-2 font-heading text-lg font-bold tracking-tight text-[var(--ca-navy-900)] sm:text-xl"><FileText size={20} className="text-[var(--ca-gold)]" /> Daily Current Affairs PDF</h2>
+            {dayPdfs.length > 0 ? (
+              <div className="grid gap-3 sm:grid-cols-2">
+                {dayPdfs.map((p) => <CaPdfButton key={p.id} pdf={p} />)}
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 rounded-2xl border border-dashed border-[var(--ca-slate-200)] bg-[var(--ca-slate-50)] px-4 py-4 text-sm text-[var(--ca-slate-400)]">
+                <Clock size={16} /> Daily PDF coming soon for this date.
+              </div>
+            )}
+
+            {/* Related daily quiz */}
+            {quiz && (
+              <div className="ca-dark ca-grain relative mt-6 overflow-hidden rounded-2xl p-6">
+                <div className="ca-orb" style={{ width: 200, height: 200, top: -100, right: -40, background: "rgba(212,175,55,0.18)" }} />
+                <p className="ca-eyebrow flex items-center gap-1.5"><ListChecks size={14} /> Test yourself</p>
+                <h3 className="mt-2 font-heading text-lg font-bold text-white">{quiz.title}</h3>
+                <p className="mt-1 text-sm text-[var(--ca-slate-300)]">Attempt the related current affairs quiz for {caDateLabel(params.date)}.</p>
+                <Link href={`/quizzes/${quiz.slug}`} className="ca-btn ca-btn-gold ca-focus mt-4">Attempt the quiz <ArrowRight size={16} /></Link>
+              </div>
+            )}
+
+            <div className="ca-divider my-6" />
+
+            {/* Articles */}
+            <h2 className="mb-4 font-heading text-lg font-bold tracking-tight text-[var(--ca-navy-900)] sm:text-xl">Articles on this date</h2>
+            {cats.length > 1 && (
+              <div className="no-scrollbar mb-5 flex gap-2 overflow-x-auto pb-1">
+                <Link href={base} className={`ca-filter ca-focus ${!activeCat ? "ca-filter--active" : ""}`}>All</Link>
+                {cats.map((c) => (
+                  <Link key={c} href={`${base}?cat=${c}`} className={`ca-filter ca-focus ${activeCat === c ? "ca-filter--active" : ""}`}>{caCategoryName(c)}</Link>
+                ))}
+              </div>
+            )}
+            {shownArticles.length > 0 ? (
+              <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
+                {shownArticles.map((a) => <CaArticleCard key={a.id} article={a} compact />)}
+              </div>
+            ) : (
+              <p className="flex items-center gap-2 rounded-2xl border border-[var(--ca-slate-200)] bg-[var(--ca-slate-50)] p-8 text-center text-[var(--ca-slate-700)]"><FileText size={16} /> No individual articles for this date.</p>
+            )}
           </section>
-        )}
-
-        {/* Articles */}
-        <section>
-          <h2 className="mb-4 font-heading text-xl font-bold tracking-tight text-[var(--ca-navy-900)]">Articles on this date</h2>
-          {cats.length > 1 && (
-            <div className="no-scrollbar mb-5 flex gap-2 overflow-x-auto pb-1">
-              <Link href={base} className={`ca-filter ca-focus ${!activeCat ? "ca-filter--active" : ""}`}>All</Link>
-              {cats.map((c) => (
-                <Link key={c} href={`${base}?cat=${c}`} className={`ca-filter ca-focus ${activeCat === c ? "ca-filter--active" : ""}`}>{caCategoryName(c)}</Link>
-              ))}
-            </div>
-          )}
-          {shownArticles.length > 0 ? (
-            <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-              {shownArticles.map((a) => <CaArticleCard key={a.id} article={a} />)}
-            </div>
-          ) : (
-            <p className="flex items-center gap-2 rounded-2xl border border-[var(--ca-slate-200)] bg-[var(--ca-slate-50)] p-8 text-center text-[var(--ca-slate-700)]"><FileText size={16} /> No individual articles for this date.</p>
-          )}
-        </section>
+        </div>
       </div>
     </div>
   );
