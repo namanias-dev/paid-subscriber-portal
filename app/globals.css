@@ -675,3 +675,20 @@ a {
     width: 100%;
   }
 }
+
+/* ---- On-screen + printable receipt (visible always; only it prints) ---- */
+@media print {
+  .receipt-doc,
+  .receipt-doc * {
+    visibility: visible;
+  }
+  .receipt-doc {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+  }
+  .receipt-controls {
+    display: none !important;
+  }
+}

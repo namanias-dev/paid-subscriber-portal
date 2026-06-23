@@ -1,8 +1,9 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getBuyerSession } from "@/lib/session";
-import { getBuyerByPhone, getBuyerPurchases } from "@/lib/dataProvider";
+import { getBuyerByPhone, getBuyerPurchases, getCourseEnrollmentsByPhone } from "@/lib/dataProvider";
 import { formatINR } from "@/lib/dates";
+import { deriveEnrollment } from "@/lib/installments";
 import type { Payment } from "@/lib/types";
 import PortalLogoutButton from "@/components/portal/PortalLogoutButton";
 
@@ -60,11 +61,23 @@ export default async function PortalDashboardPage() {
   const session = await getBuyerSession();
   if (!session) redirect("/portal/login");
 
-  const [buyer, purchases] = await Promise.all([
+  const [buyer, purchases, courseEnrollments] = await Promise.all([
     getBuyerByPhone(session.phone),
     getBuyerPurchases(session.phone),
+    getCourseEnrollmentsByPhone(session.phone),
   ]);
-  const groups = groupPurchases(purchases);
+  // Confirmed course enrollments (seat or full paid) render as rich payment cards.
+  const enrolledCourses = courseEnrollments.filter((e) => e.amount_paid > 0 && e.status !== "cancelled");
+  const enrolledIds = new Set(enrolledCourses.map((e) => e.id));
+  // Don't double-list payments that belong to a rich course enrollment.
+  const otherPurchases = purchases.filter((p) => !(p.enrollment_id && enrolledIds.has(p.enrollment_id)));
+  const groups = groupPurchases(otherPurchases);
+
+  const STATUS_BADGE: Record<string, { label: string; cls: string }> = {
+    seat_booked: { label: "Seat Booked", cls: "pill-amber" },
+    partially_paid: { label: "Installments in progress", cls: "pill-blue" },
+    fully_paid: { label: "Fully Paid", cls: "pill-green" },
+  };
 
   return (
     <div className="container-wide section">
@@ -86,7 +99,51 @@ export default async function PortalDashboardPage() {
         </div>
       )}
 
-      {groups.length === 0 ? (
+      {/* My Courses & Payments (Book-Your-Seat + EMI) */}
+      {enrolledCourses.length > 0 && (
+        <section className="mt-8">
+          <h2 className="font-heading text-xl font-bold">My Courses & Payments</h2>
+          <div className="mt-4 grid gap-4 sm:grid-cols-2">
+            {enrolledCourses.map((e) => {
+              const d = deriveEnrollment(e);
+              const badge = STATUS_BADGE[e.status] || { label: e.status, cls: "pill-gray" };
+              const nextDue = e.schedule.find((s) => !s.paid && s.due);
+              return (
+                <div key={e.id} className="card flex h-full flex-col p-5">
+                  <div className="flex items-start justify-between gap-2">
+                    <span className="text-2xl">🎓</span>
+                    <span className={`pill text-xs ${badge.cls}`}>{badge.label}</span>
+                  </div>
+                  <h3 className="mt-3 text-base font-semibold leading-snug">{e.course_title}</h3>
+                  {e.batch_label && <p className="mt-1 text-xs text-muted">{e.batch_label}</p>}
+                  <div className="mt-3">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-semibold text-ink">{formatINR(d.paid)} of {formatINR(e.total_fee)}</span>
+                      <span className="text-muted">{d.progressPct}%</span>
+                    </div>
+                    <div className="mt-1 h-2 w-full overflow-hidden rounded-full bg-surface2">
+                      <div className="h-full rounded-full bg-primary" style={{ width: `${Math.min(100, d.progressPct)}%` }} />
+                    </div>
+                    {d.remaining > 0 ? (
+                      <p className="mt-2 text-xs text-ink2">
+                        Remaining {formatINR(d.remaining)}{nextDue ? ` · next ${formatINR(nextDue.amount)}` : ""}
+                        {d.hasOverdue && <span className="ml-1 font-bold text-danger">· Overdue</span>}
+                      </p>
+                    ) : (
+                      <p className="mt-2 text-xs font-semibold text-success">Fully paid ✓</p>
+                    )}
+                  </div>
+                  <Link href={`/portal/course/${e.id}`} className="btn btn-primary mt-4 w-full text-sm">
+                    {d.remaining > 0 ? "View & pay →" : "View payments →"}
+                  </Link>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
+      {groups.length === 0 && enrolledCourses.length === 0 ? (
         <div className="mt-10 card p-8 text-center">
           <p className="text-lg font-semibold">No purchases found yet</p>
           <p className="mt-1 text-sm text-ink2">If you&apos;ve just paid, it can take a moment to appear. Refresh shortly.</p>

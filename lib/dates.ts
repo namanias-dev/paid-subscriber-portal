@@ -84,6 +84,38 @@ export function isoToISTInput(iso?: string | null): string {
   return `${ist.getUTCFullYear()}-${pad(ist.getUTCMonth() + 1)}-${pad(ist.getUTCDate())}T${pad(ist.getUTCHours())}:${pad(ist.getUTCMinutes())}`;
 }
 
+/**
+ * Add days to a UTC ISO instant, anchored to the IST calendar day, and return a
+ * UTC ISO at IST midday (12:00) — safe for date-level due dates (no TZ rollover).
+ */
+export function addDaysISO(iso: string, days: number): string {
+  const base = new Date(iso);
+  if (Number.isNaN(base.getTime())) return iso;
+  const ist = new Date(base.getTime() + IST_OFFSET_MIN * 60000);
+  const utcMidday =
+    Date.UTC(ist.getUTCFullYear(), ist.getUTCMonth(), ist.getUTCDate() + days, 12, 0) -
+    IST_OFFSET_MIN * 60000;
+  return new Date(utcMidday).toISOString();
+}
+
+/** Add calendar months to a UTC ISO instant (IST calendar, clamps day, IST midday). */
+export function addMonthsISO(iso: string, months: number): string {
+  const base = new Date(iso);
+  if (Number.isNaN(base.getTime())) return iso;
+  const ist = new Date(base.getTime() + IST_OFFSET_MIN * 60000);
+  const y = ist.getUTCFullYear();
+  const m = ist.getUTCMonth() + months;
+  const targetY = y + Math.floor(m / 12);
+  const targetM = ((m % 12) + 12) % 12;
+  const day = Math.min(ist.getUTCDate(), daysInMonth(targetY, targetM));
+  const utcMidday = Date.UTC(targetY, targetM, day, 12, 0) - IST_OFFSET_MIN * 60000;
+  return new Date(utcMidday).toISOString();
+}
+
+function daysInMonth(year: number, monthIndex: number): number {
+  return new Date(Date.UTC(year, monthIndex + 1, 0)).getUTCDate();
+}
+
 const IST_DATE_FULL = new Intl.DateTimeFormat("en-IN", { timeZone: "Asia/Kolkata", weekday: "long", day: "numeric", month: "long", year: "numeric" });
 const IST_DATE_MED = new Intl.DateTimeFormat("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric" });
 const IST_TIME = new Intl.DateTimeFormat("en-IN", { timeZone: "Asia/Kolkata", hour: "numeric", minute: "2-digit", hour12: true });

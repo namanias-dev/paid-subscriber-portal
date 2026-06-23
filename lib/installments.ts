@@ -1,0 +1,186 @@
+import { addDaysISO, addMonthsISO } from "./dates";
+import type {
+  Course,
+  CourseEmiConfig,
+  CourseEnrollment,
+  InstallmentItem,
+} from "./types";
+
+/** Defaults for the seat + EMI plan, applied on top of admin config. */
+export const EMI_DEFAULTS = {
+  allow_full: true,
+  allow_custom_seat: false,
+  installment_counts: [3, 6, 10],
+  first_interval_days: 7,
+  interval_months: 1,
+};
+
+export interface ResolvedEmiConfig {
+  enabled: boolean;
+  allowFull: boolean;
+  seatAmount: number | null;
+  allowCustomSeat: boolean;
+  minSeatAmount: number | null;
+  installmentCounts: number[];
+  firstIntervalDays: number;
+  intervalMonths: number;
+  bestValueNote: string | null;
+}
+
+/** Normalize a course's EMI config with safe defaults (pure, no I/O). */
+export function resolveEmiConfig(course: Pick<Course, "emi_config" | "price">): ResolvedEmiConfig {
+  const c: CourseEmiConfig = course.emi_config || {};
+  const counts = (c.installment_counts && c.installment_counts.length ? c.installment_counts : EMI_DEFAULTS.installment_counts)
+    .map((n) => Math.max(1, Math.round(Number(n) || 0)))
+    .filter((n, i, arr) => n >= 1 && arr.indexOf(n) === i)
+    .sort((a, b) => a - b);
+  const seatAmount = c.seat_amount != null && c.seat_amount !== ("" as unknown) ? Math.max(0, Math.round(Number(c.seat_amount))) : null;
+  const minSeat = c.min_seat_amount != null && c.min_seat_amount !== ("" as unknown) ? Math.max(0, Math.round(Number(c.min_seat_amount))) : null;
+  return {
+    enabled: !!c.enabled,
+    allowFull: c.allow_full !== false,
+    seatAmount,
+    allowCustomSeat: !!c.allow_custom_seat,
+    minSeatAmount: minSeat,
+    installmentCounts: counts,
+    firstIntervalDays: c.first_interval_days != null ? Math.max(0, Math.round(Number(c.first_interval_days))) : EMI_DEFAULTS.first_interval_days,
+    intervalMonths: c.interval_months != null ? Math.max(1, Math.round(Number(c.interval_months))) : EMI_DEFAULTS.interval_months,
+    bestValueNote: c.best_value_note?.trim() || null,
+  };
+}
+
+/**
+ * The effective seat amount a student must pay for the seat-booking step:
+ * a custom amount when allowed (clamped to [min, total-1]), else the fixed amount.
+ */
+export function effectiveSeatAmount(cfg: ResolvedEmiConfig, total: number, requested?: number | null): number {
+  const floor = cfg.allowCustomSeat ? (cfg.minSeatAmount ?? cfg.seatAmount ?? 1) : (cfg.seatAmount ?? 1);
+  const ceil = Math.max(1, total - 1);
+  if (cfg.allowCustomSeat && requested != null && Number.isFinite(requested)) {
+    return Math.min(ceil, Math.max(floor, Math.round(requested)));
+  }
+  return Math.min(ceil, Math.max(1, cfg.seatAmount ?? floor));
+}
+
+export interface BuildScheduleOpts {
+  total: number;
+  seatAmount: number;
+  count: number;
+  bookingISO: string;
+  firstIntervalDays: number;
+  intervalMonths: number;
+  seatLabel?: string;
+}
+
+/**
+ * Build the full payment schedule for a seat + EMI plan.
+ * Guarantees: seat + sum(installments) === total exactly (remainder on the LAST
+ * installment). Due dates: installment 1 = booking + firstIntervalDays, then
+ * each subsequent + intervalMonths (IST calendar).
+ */
+export function buildSchedule(opts: BuildScheduleOpts): InstallmentItem[] {
+  const total = Math.max(0, Math.round(opts.total));
+  const seat = Math.min(Math.max(0, Math.round(opts.seatAmount)), Math.max(0, total));
+  const count = Math.max(1, Math.round(opts.count));
+  const remaining = total - seat;
+
+  const base = Math.floor(remaining / count);
+  const remainder = remaining - base * count;
+
+  const items: InstallmentItem[] = [
+    {
+      no: 0,
+      kind: "seat",
+      label: opts.seatLabel || "Book Your Seat",
+      amount: seat,
+      due: null,
+      paid: false,
+    },
+  ];
+
+  const firstDue = addDaysISO(opts.bookingISO, opts.firstIntervalDays);
+  for (let i = 1; i <= count; i++) {
+    const isLast = i === count;
+    items.push({
+      no: i,
+      kind: "installment",
+      label: `Installment ${i} of ${count}`,
+      amount: base + (isLast ? remainder : 0),
+      due: i === 1 ? firstDue : addMonthsISO(firstDue, (i - 1) * opts.intervalMonths),
+      paid: false,
+    });
+  }
+  return items;
+}
+
+/** Single full-payment schedule (Pay Full Today). */
+export function buildFullSchedule(total: number): InstallmentItem[] {
+  return [{ no: 0, kind: "full", label: "Full Payment", amount: Math.max(0, Math.round(total)), due: null, paid: false }];
+}
+
+export interface EnrollmentDerived {
+  paid: number;
+  remaining: number;
+  /** The next unpaid schedule item the student should pay, if any. */
+  nextPayable: InstallmentItem | null;
+  paidCount: number;
+  installmentTotal: number;
+  progressPct: number;
+  isFullyPaid: boolean;
+  /** True if any unpaid installment's due date has passed. */
+  hasOverdue: boolean;
+}
+
+/** Derive payment progress from the schedule (schedule is the source of truth). */
+export function deriveEnrollment(enr: Pick<CourseEnrollment, "total_fee" | "schedule">, now = Date.now()): EnrollmentDerived {
+  const schedule = enr.schedule || [];
+  const paid = schedule.filter((s) => s.paid).reduce((a, s) => a + s.amount, 0);
+  const remaining = Math.max(0, enr.total_fee - paid);
+  const installments = schedule.filter((s) => s.kind === "installment");
+  const paidInstallments = installments.filter((s) => s.paid).length;
+  const nextPayable = schedule.find((s) => !s.paid) || null;
+  const hasOverdue = schedule.some((s) => !s.paid && s.due != null && new Date(s.due).getTime() < now);
+  return {
+    paid,
+    remaining,
+    nextPayable,
+    paidCount: paidInstallments,
+    installmentTotal: installments.length,
+    progressPct: enr.total_fee > 0 ? Math.round((paid / enr.total_fee) * 100) : 0,
+    isFullyPaid: remaining <= 0,
+    hasOverdue,
+  };
+}
+
+/** Display status for a schedule line. */
+export function installmentStatus(item: InstallmentItem, now = Date.now()): "paid" | "overdue" | "due-soon" | "upcoming" {
+  if (item.paid) return "paid";
+  if (item.due == null) return "due-soon";
+  const t = new Date(item.due).getTime();
+  if (t < now) return "overdue";
+  if (t - now < 3 * 86400000) return "due-soon";
+  return "upcoming";
+}
+
+/** Human installment progress summary used on receipts + dashboard. */
+export function installmentsSummary(enr: Pick<CourseEnrollment, "total_fee" | "schedule">, formatMoney: (n: number) => string, formatDate: (iso: string | null) => string): string {
+  const d = deriveEnrollment(enr);
+  if (d.isFullyPaid) return "Fully Paid";
+  if (d.installmentTotal === 0) return "Awaiting payment";
+  const next = d.nextPayable;
+  const nextStr = next ? ` · next ${formatMoney(next.amount)}${next.due ? ` on ${formatDate(next.due)}` : ""}` : "";
+  return `${d.paidCount} of ${d.installmentTotal} paid${nextStr}`;
+}
+
+/** Compute the enrollment status from its schedule. */
+export function enrollmentStatusFromSchedule(
+  enr: Pick<CourseEnrollment, "total_fee" | "schedule" | "plan_type">
+): CourseEnrollment["status"] {
+  const d = deriveEnrollment(enr);
+  if (d.paid <= 0) return "pending";
+  if (d.isFullyPaid) return "fully_paid";
+  // Seat paid but installments outstanding.
+  const seatPaid = (enr.schedule || []).some((s) => (s.kind === "seat") && s.paid);
+  if (seatPaid && d.paidCount === 0) return "seat_booked";
+  return "partially_paid";
+}

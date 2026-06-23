@@ -3,7 +3,8 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { formatINR } from "@/lib/dates";
+import { formatINR, formatISTDate } from "@/lib/dates";
+import type { InstallmentItem } from "@/lib/types";
 
 interface Contact {
   name: string;
@@ -15,6 +16,18 @@ interface Contact {
   logoAlt: string;
 }
 
+interface EnrollmentSummary {
+  id: string;
+  courseTitle: string;
+  courseSlug: string;
+  planType: "full" | "emi";
+  totalFee: number;
+  amountPaid: number;
+  remaining: number;
+  status: string;
+  schedule: InstallmentItem[];
+}
+
 interface StatusData {
   status: string;
   item: string;
@@ -24,6 +37,8 @@ interface StatusData {
   loginCode?: string | null;
   demo: boolean;
   awaiting?: boolean;
+  receiptNo?: string | null;
+  enrollment?: EnrollmentSummary | null;
 }
 
 const TERMINAL = new Set(["PAID", "FAILED", "captured", "refunded"]);
@@ -98,6 +113,16 @@ export default function StatusClient({ contact }: { contact: Contact }) {
   const loginCode = data?.loginCode || null;
   const amountLabel = data && data.amount > 0 ? formatINR(data.amount) : "Free";
   const dateLabel = new Date().toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" });
+  const enr = data?.enrollment || null;
+  const receiptNo = data?.receiptNo || null;
+  const nextDue = enr ? enr.schedule.find((s) => !s.paid && s.due) : null;
+  const successTitle = enr
+    ? enr.status === "seat_booked"
+      ? "Seat booked! Welcome, future officer."
+      : enr.remaining <= 0
+        ? "Payment complete — you're all set!"
+        : "Payment received! Welcome aboard."
+    : "Payment Successful";
 
   return (
     <div className="container-wide section">
@@ -125,9 +150,26 @@ export default function StatusClient({ contact }: { contact: Contact }) {
                 {isPaid ? "✓" : isFailed ? "✕" : "…"}
               </div>
               <h1 className="text-2xl">
-                {isPaid ? "Payment Successful" : isFailed ? "Payment Failed" : "Payment Pending"}
+                {isPaid ? successTitle : isFailed ? "Payment Failed" : "Payment Pending"}
               </h1>
-              {data && (
+
+              {/* Course enrollment summary (Book-Your-Seat + EMI) */}
+              {isPaid && enr && (
+                <div className="mt-5 rounded-xl border border-success/30 bg-success/5 p-4 text-left">
+                  <p className="text-sm font-semibold text-ink">{enr.courseTitle}</p>
+                  <div className="mt-3 space-y-1.5 text-sm">
+                    <Row label="Total course fee" value={formatINR(enr.totalFee)} />
+                    <Row label="Paid so far" value={formatINR(enr.amountPaid)} />
+                    <Row label="Remaining balance" value={enr.remaining <= 0 ? "₹0 — Fully paid ✓" : formatINR(enr.remaining)} />
+                    {nextDue && <Row label="Next installment" value={`${formatINR(nextDue.amount)} · due ${formatISTDate(nextDue.due)}`} />}
+                  </div>
+                  <p className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-primary/10 px-3 py-1.5 text-xs font-semibold text-primary">
+                    🎓 Class Hub access unlocked
+                  </p>
+                </div>
+              )}
+
+              {data && !enr && (
                 <div className="mt-5 space-y-2 rounded-xl bg-surface p-4 text-left text-sm">
                   <Row label="Item" value={data.item} />
                   <Row label="Amount" value={amountLabel} />
@@ -170,10 +212,15 @@ export default function StatusClient({ contact }: { contact: Contact }) {
           <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:justify-center">
             {isPaid && (
               <Link href="/portal/login" className="btn btn-primary">
-                Go to your portal →
+                {enr ? "Go to My Courses →" : "Go to your portal →"}
               </Link>
             )}
-            {isPaid && (
+            {isPaid && receiptNo && (
+              <Link href={`/portal/receipt/${encodeURIComponent(receiptNo)}`} className="btn btn-secondary">
+                Download receipt (PDF)
+              </Link>
+            )}
+            {isPaid && !receiptNo && (
               <button onClick={() => window.print()} className="btn btn-secondary">
                 Download receipt (PDF)
               </button>

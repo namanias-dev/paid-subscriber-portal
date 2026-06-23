@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { updatePaymentByReference } from "@/lib/dataProvider";
+import { updatePaymentByReference, finalizeCoursePaymentByReference } from "@/lib/dataProvider";
 import { verifyResponseSignature, signStatusParams, type EazypayResponseFields } from "@/lib/eazypay";
 import type { Payment } from "@/lib/types";
 
@@ -101,6 +101,10 @@ async function handle(req: Request) {
 
   // Persist when a record/DB exists (best-effort; null result is fine).
   await updatePaymentByReference(referenceNo, patch);
+  // Course EMI/seat payments: idempotently confirm the enrollment + issue receipt.
+  if (status === "PAID") {
+    await finalizeCoursePaymentByReference(referenceNo).catch(() => null);
+  }
   console.info(`[eazypay] callback ref=${referenceNo} status=${status} signature=${signatureValid}`);
 
   return redirectTo(referenceNo, status, amountStr);

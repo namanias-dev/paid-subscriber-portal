@@ -24,8 +24,9 @@ import RichTextEditor from "./RichTextEditor";
 import LibraryPicker from "./LibraryPicker";
 import { useToast } from "@/components/ui/Toast";
 import { COURSE_CATEGORIES, LEARNING_MODES } from "@/lib/config";
-import { istInputToISO, isoToISTInput } from "@/lib/dates";
-import type { Course, CourseCategory, LearningMode, CourseAfterRegistration, OrientationVideo } from "@/lib/types";
+import { istInputToISO, isoToISTInput, formatINR, formatISTDate } from "@/lib/dates";
+import { resolveEmiConfig, buildSchedule, EMI_DEFAULTS } from "@/lib/installments";
+import type { Course, CourseCategory, LearningMode, CourseAfterRegistration, OrientationVideo, CourseEmiConfig } from "@/lib/types";
 
 const BACK = "/admin/courses";
 const BATCH_TIMINGS = ["Morning", "Afternoon", "Evening", "Weekend"];
@@ -178,6 +179,9 @@ export default function CourseForm({ course }: { course?: Course }) {
                 <Section title="Seats remaining" desc="Admin-controlled. When off, no seats line appears on the public page.">
                   <SeatCounterEditor value={c.seat_config} onChange={(v) => set("seat_config", v)} />
                 </Section>
+                <Section title="Book Your Seat + EMI" desc="Let students secure a seat with a small amount and pay the rest in installments. The full fee above is used as the grand total.">
+                  <EmiConfigEditor total={c.price ?? 0} value={c.emi_config || {}} onChange={(v) => set("emi_config", v)} />
+                </Section>
                 <Section title="Coupons" desc="Discount codes students can apply at checkout.">
                   <CouponsEditor value={c.coupons || []} onChange={(v) => set("coupons", v)} />
                 </Section>
@@ -323,6 +327,102 @@ function VideosEditor({ value, onChange }: { value: OrientationVideo[]; onChange
         </div>
       ))}
       <button type="button" onClick={() => onChange([...items, { url: "", title: "", description: "" }])} className="btn btn-secondary text-sm">+ Add video</button>
+    </div>
+  );
+}
+
+function EmiConfigEditor({ total, value, onChange }: { total: number; value: CourseEmiConfig; onChange: (v: CourseEmiConfig) => void }) {
+  const v = value || {};
+  const set = (k: keyof CourseEmiConfig, val: unknown) => onChange({ ...v, [k]: val });
+  const cfg = resolveEmiConfig({ emi_config: v, price: total });
+
+  // Live preview: sample seat + first enabled installment count.
+  const sampleSeat = cfg.seatAmount ?? cfg.minSeatAmount ?? Math.min(2000, Math.max(1, Math.round(total * 0.1)));
+  const sampleCount = cfg.installmentCounts[0] || 6;
+  const preview =
+    total > 1 && sampleSeat < total
+      ? buildSchedule({
+          total,
+          seatAmount: sampleSeat,
+          count: sampleCount,
+          bookingISO: new Date().toISOString(),
+          firstIntervalDays: cfg.firstIntervalDays,
+          intervalMonths: cfg.intervalMonths,
+        })
+      : [];
+  const grand = preview.reduce((a, s) => a + s.amount, 0);
+
+  return (
+    <div className="space-y-3">
+      <label className="flex items-center gap-2 text-sm font-medium">
+        <input type="checkbox" checked={!!v.enabled} onChange={(e) => set("enabled", e.target.checked)} />
+        Enable “Book Your Seat + EMI” for this course
+      </label>
+
+      {v.enabled && (
+        <div className="space-y-3 rounded-xl border border-line p-3">
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={v.allow_full !== false} onChange={(e) => set("allow_full", e.target.checked)} />
+            Also allow one-time “Pay Full” option
+          </label>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field label="Seat amount (₹)" hint="Amount to secure a seat, deducted from total.">
+              <input type="number" className="input" value={v.seat_amount ?? ""} onChange={(e) => set("seat_amount", e.target.value ? Number(e.target.value) : null)} />
+            </Field>
+            <Field label="Best-value note (optional)" hint="Shown on the Pay-Full card.">
+              <input className="input" value={v.best_value_note ?? ""} onChange={(e) => set("best_value_note", e.target.value)} placeholder="e.g. Save more" />
+            </Field>
+          </div>
+
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={!!v.allow_custom_seat} onChange={(e) => set("allow_custom_seat", e.target.checked)} />
+            Let students enter a custom seat amount (with a minimum)
+          </label>
+          {v.allow_custom_seat && (
+            <Field label="Minimum seat amount (₹)">
+              <input type="number" className="input" value={v.min_seat_amount ?? ""} onChange={(e) => set("min_seat_amount", e.target.value ? Number(e.target.value) : null)} />
+            </Field>
+          )}
+
+          <Field label="Installment counts" hint="Comma-separated, e.g. 3, 6, 10">
+            <input
+              className="input"
+              value={(v.installment_counts || EMI_DEFAULTS.installment_counts).join(", ")}
+              onChange={(e) => set("installment_counts", e.target.value.split(",").map((s) => Math.round(Number(s.trim()))).filter((n) => n >= 1))}
+            />
+          </Field>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field label="First installment after (days)" hint="Default 7">
+              <input type="number" className="input" value={v.first_interval_days ?? ""} onChange={(e) => set("first_interval_days", e.target.value ? Number(e.target.value) : null)} placeholder="7" />
+            </Field>
+            <Field label="Then every (months)" hint="Default 1 (monthly)">
+              <input type="number" className="input" value={v.interval_months ?? ""} onChange={(e) => set("interval_months", e.target.value ? Number(e.target.value) : null)} placeholder="1" />
+            </Field>
+          </div>
+
+          {/* Live preview */}
+          {preview.length > 0 && (
+            <div className="rounded-xl border border-line bg-surface2 p-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted">Student preview · seat {formatINR(sampleSeat)} · {sampleCount} months</p>
+              <div className="mt-2 space-y-1 text-sm">
+                {preview.map((s) => (
+                  <div key={s.no} className="flex items-center justify-between">
+                    <span>{s.no === 0 ? "Today — Book Your Seat" : `${s.label} · ${formatISTDate(s.due)}`}</span>
+                    <span className="font-semibold">{formatINR(s.amount)}</span>
+                  </div>
+                ))}
+                <div className="mt-1 flex items-center justify-between border-t border-line pt-1 font-semibold">
+                  <span>Grand total (must equal fee)</span>
+                  <span className={grand === total ? "text-success" : "text-danger"}>{formatINR(grand)}{grand === total ? " ✓" : ` ≠ ${formatINR(total)}`}</span>
+                </div>
+              </div>
+            </div>
+          )}
+          {total <= 1 && <p className="text-xs text-danger">Set a course price above to preview the EMI schedule.</p>}
+        </div>
+      )}
     </div>
   );
 }

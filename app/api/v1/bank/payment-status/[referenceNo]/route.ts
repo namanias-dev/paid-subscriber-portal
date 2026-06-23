@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getPaymentByReference, updatePaymentByReference, ensureBuyer } from "@/lib/dataProvider";
+import { getPaymentByReference, updatePaymentByReference, ensureBuyer, finalizeCoursePaymentByReference } from "@/lib/dataProvider";
 import { isEazypayConfigured, verifyStatusSignature, itemTypeFromReference } from "@/lib/eazypay";
 
 export const dynamic = "force-dynamic";
@@ -16,6 +16,27 @@ async function buyerLogin(phone?: string | null, name?: string | null): Promise<
   if (!phone) return null;
   const b = await ensureBuyer(phone, name).catch(() => null);
   return b?.login_code ?? null;
+}
+
+/** Confirm a course EMI/seat payment (idempotent) and return success-screen extras. */
+async function emiExtras(referenceNo: string) {
+  const res = await finalizeCoursePaymentByReference(referenceNo).catch(() => null);
+  if (!res) return {};
+  const { enrollment, receipt } = res;
+  return {
+    receiptNo: receipt.receipt_no,
+    enrollment: {
+      id: enrollment.id,
+      courseTitle: enrollment.course_title,
+      courseSlug: enrollment.course_slug,
+      planType: enrollment.plan_type,
+      totalFee: enrollment.total_fee,
+      amountPaid: enrollment.amount_paid,
+      remaining: Math.max(0, enrollment.total_fee - enrollment.amount_paid),
+      status: enrollment.status,
+      schedule: enrollment.schedule,
+    },
+  };
 }
 
 export async function GET(req: Request, { params }: { params: { referenceNo: string } }) {
@@ -42,6 +63,7 @@ export async function GET(req: Request, { params }: { params: { referenceNo: str
 
       const record = await getPaymentByReference(referenceNo).catch(() => null);
       const loginCode = signedStatus === "PAID" ? await buyerLogin(record?.phone, record?.student_name) : null;
+      const extras = signedStatus === "PAID" ? await emiExtras(referenceNo) : {};
       return NextResponse.json({
         ok: true,
         referenceNo,
@@ -53,6 +75,7 @@ export async function GET(req: Request, { params }: { params: { referenceNo: str
         loginCode,
         verifiedSignature: true,
         demo: false,
+        ...extras,
       });
     }
 
@@ -93,11 +116,13 @@ export async function GET(req: Request, { params }: { params: { referenceNo: str
         loginCode: await buyerLogin(payment.phone, payment.student_name),
         verifiedSignature: payment.verified_signature ?? null,
         demo: true,
+        ...(await emiExtras(referenceNo)),
       });
     }
 
     if (payment) {
       const paid = payment.status === "PAID" || payment.status === "captured";
+      const extras = paid ? await emiExtras(referenceNo) : {};
       return NextResponse.json({
         ok: true,
         referenceNo,
@@ -109,6 +134,7 @@ export async function GET(req: Request, { params }: { params: { referenceNo: str
         loginCode: paid ? await buyerLogin(payment.phone, payment.student_name) : null,
         verifiedSignature: payment.verified_signature ?? null,
         demo: false,
+        ...extras,
       });
     }
 

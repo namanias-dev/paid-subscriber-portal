@@ -156,6 +156,7 @@ create table if not exists public.courses (
   brochure_ids jsonb default '[]'::jsonb,
   batch_timings jsonb default '[]'::jsonb,
   after_registration jsonb default '{}'::jsonb,
+  emi_config jsonb default '{}'::jsonb,
   created_at timestamptz default now()
 );
 
@@ -342,11 +343,83 @@ create table if not exists public.payments (
   transaction_amount int,
   response_code text,
   transaction_date text,
-  verified_signature boolean
+  verified_signature boolean,
+  -- Phase 2: Book-Your-Seat + EMI ledger links (nullable; one-time payments leave these null)
+  enrollment_id text,
+  payment_kind text,
+  installment_no int,
+  receipt_no text
 );
 
 create unique index if not exists payments_reference_no_idx on public.payments (reference_no);
 create index if not exists payments_phone_idx on public.payments (phone);
+create index if not exists payments_enrollment_idx on public.payments (enrollment_id);
+
+-- ----------------- course_enrollments (Book-Your-Seat + EMI) -----------------
+create table if not exists public.course_enrollments (
+  id text primary key,
+  phone text not null,
+  student_name text,
+  email text,
+  course_id text references public.courses(id) on delete set null,
+  course_slug text,
+  course_title text,
+  batch_label text,
+  plan_type text not null default 'full',
+  total_fee int not null default 0,
+  amount_paid int not null default 0,
+  installment_count int not null default 0,
+  status text not null default 'pending',
+  schedule jsonb not null default '[]'::jsonb,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+create index if not exists course_enrollments_phone_idx on public.course_enrollments (phone);
+create index if not exists course_enrollments_course_idx on public.course_enrollments (course_id);
+
+-- ----------------------- payment_receipts (immutable) -----------------------
+create table if not exists public.payment_receipts (
+  id text primary key,
+  receipt_no text unique not null,
+  enrollment_id text,
+  payment_id text,
+  reference_no text,
+  phone text not null,
+  student_name text,
+  email text,
+  course_title text,
+  batch_label text,
+  payment_kind text,
+  payment_label text,
+  amount int not null default 0,
+  gateway_ref text,
+  total_fee int not null default 0,
+  paid_to_date int not null default 0,
+  remaining int not null default 0,
+  installments_summary text,
+  status text,
+  issued_at timestamptz default now()
+);
+create index if not exists payment_receipts_phone_idx on public.payment_receipts (phone);
+create index if not exists payment_receipts_reference_idx on public.payment_receipts (reference_no);
+
+-- Sequential, traceable receipt numbers (NSA/<FY>/<seq>).
+create sequence if not exists public.receipt_no_seq start 1001;
+create or replace function public.next_receipt_no() returns text
+language plpgsql as $$
+declare
+  n bigint;
+  fy text;
+begin
+  n := nextval('public.receipt_no_seq');
+  if extract(month from now() at time zone 'Asia/Kolkata') >= 4 then
+    fy := to_char(now() at time zone 'Asia/Kolkata', 'YY') || to_char((now() at time zone 'Asia/Kolkata') + interval '1 year', 'YY');
+  else
+    fy := to_char((now() at time zone 'Asia/Kolkata') - interval '1 year', 'YY') || to_char(now() at time zone 'Asia/Kolkata', 'YY');
+  end if;
+  return 'NSA-' || fy || '-' || lpad(n::text, 6, '0');
+end;
+$$;
 
 -- ------------------------------ buyers ------------------------------
 -- Post-payment portal accounts: one phone -> one login code -> access to all

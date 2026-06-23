@@ -27,7 +27,7 @@ export default function CourseDetail({ course, related, comparison, view, brochu
   const faqItems = faqs.length ? faqs : COURSE_FAQ;
   const priceLabel = course.price === 0 ? "Free" : formatINR(course.price);
   const cover = course.cover_image_url || course.image || course.mobile_image_url || null;
-  const enrollHref = `/enroll/${course.slug}`;
+  const enrollHref = course.price === 0 ? `/enroll/${course.slug}` : `/courses/${course.slug}/enroll`;
   const enrollLabel = course.price === 0 ? "Book Now" : "Enroll Now";
   const included = (course.included || []).filter(Boolean);
   const notIncluded = (course.not_included || []).filter(Boolean);

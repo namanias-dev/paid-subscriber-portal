@@ -377,6 +377,8 @@ export interface Course {
   batch_timings?: string[];
   /** After-registration / Class Hub config (enrolled students only). */
   after_registration?: CourseAfterRegistration;
+  /** Book-Your-Seat + EMI plan config (Phase 2). */
+  emi_config?: CourseEmiConfig;
 }
 
 export interface Enrollment {
@@ -390,6 +392,109 @@ export interface Enrollment {
   installments: { label: string; amount: number; due: string; paid: boolean }[];
   progress: number;
   enrolled_at: string;
+}
+
+// ============================ PHASE 2: Book-Your-Seat + EMI ============================
+
+/** Admin per-course config for the "Book Your Seat + EMI" payment plan. */
+export interface CourseEmiConfig {
+  /** Master switch. When false, only one-time "Pay Full" is available. */
+  enabled?: boolean;
+  /** Allow the one-time full payment option (default true). */
+  allow_full?: boolean;
+  /** Fixed seat-booking amount (used when custom seat is off). */
+  seat_amount?: number | null;
+  /** Allow the student to enter a custom seat amount ≥ min_seat_amount. */
+  allow_custom_seat?: boolean;
+  /** Minimum seat amount when custom is allowed. */
+  min_seat_amount?: number | null;
+  /** Enabled installment counts, e.g. [3, 6, 10]. */
+  installment_counts?: number[];
+  /** Days from seat-booking date to the FIRST installment due date (default 7). */
+  first_interval_days?: number;
+  /** Calendar-month gap between subsequent installments (default 1). */
+  interval_months?: number;
+  /** Optional best-value framing shown on the Pay-Full card. */
+  best_value_note?: string | null;
+}
+
+export type InstallmentKind = "seat" | "installment" | "full";
+
+/** One line in a course enrollment's payment schedule (seat + installments). */
+export interface InstallmentItem {
+  /** 0 = seat/full (today); 1..N = installments. */
+  no: number;
+  kind: InstallmentKind;
+  label: string;
+  amount: number;
+  /** Due date (UTC ISO at IST midday). null for the seat/full item (due today). */
+  due: string | null;
+  paid: boolean;
+  paid_at?: string | null;
+  reference_no?: string | null;
+  gateway_ref?: string | null;
+  receipt_no?: string | null;
+}
+
+export type CourseEnrollmentStatus =
+  | "pending"
+  | "seat_booked"
+  | "partially_paid"
+  | "fully_paid"
+  | "cancelled";
+
+export type CoursePlanType = "full" | "emi";
+
+/**
+ * A course purchase keyed by buyer phone (matches the existing buyer/portal
+ * identity). Holds the chosen plan + full installment schedule + paid cache.
+ * The payment ledger is the existing `payments` table (linked via enrollment_id).
+ */
+export interface CourseEnrollment {
+  id: string;
+  phone: string;
+  student_name: string;
+  email: string | null;
+  course_id: string;
+  course_slug: string;
+  course_title: string;
+  /** Snapshot of batch start + timing for receipts/history. */
+  batch_label: string | null;
+  plan_type: CoursePlanType;
+  /** GST-inclusive total course fee snapshot. */
+  total_fee: number;
+  /** Sum of captured payments (denormalized cache; ledger is source of truth). */
+  amount_paid: number;
+  installment_count: number;
+  status: CourseEnrollmentStatus;
+  schedule: InstallmentItem[];
+  created_at: string;
+  updated_at: string;
+}
+
+/** Immutable payment receipt. A correction issues a new receipt, never edits one. */
+export interface PaymentReceipt {
+  id: string;
+  receipt_no: string;
+  enrollment_id: string | null;
+  payment_id: string | null;
+  reference_no: string | null;
+  phone: string;
+  student_name: string;
+  email: string | null;
+  course_title: string;
+  batch_label: string | null;
+  payment_kind: InstallmentKind;
+  /** "Book Your Seat", "Installment 2 of 6", "Full Payment". */
+  payment_label: string;
+  amount: number;
+  gateway_ref: string | null;
+  total_fee: number;
+  paid_to_date: number;
+  remaining: number;
+  installments_summary: string;
+  status: "Seat Booked" | "Partially Paid" | "Fully Paid";
+  issued_at: string;
 }
 
 // ----------------------------- CRM -----------------------------
@@ -558,6 +663,12 @@ export interface Payment {
   response_code?: string | null;
   transaction_date?: string | null;
   verified_signature?: boolean | null;
+  // --- Phase 2: Book-Your-Seat + EMI ledger links (nullable; one-time payments leave these null) ---
+  enrollment_id?: string | null;
+  payment_kind?: "one_time" | "seat" | "installment" | "full" | null;
+  /** Installment number this payment settles (0 = seat/full). */
+  installment_no?: number | null;
+  receipt_no?: string | null;
 }
 
 export interface Referral {

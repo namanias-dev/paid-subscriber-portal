@@ -1,6 +1,6 @@
 import { getSupabaseAdmin } from "./supabase";
 import * as mock from "./mockData";
-import { computeExpiry, isExpired, isExpiringSoon, yesterdayISODate, todayISODate } from "./dates";
+import { computeExpiry, isExpired, isExpiringSoon, yesterdayISODate, todayISODate, formatINR, formatISTDate } from "./dates";
 import { generateAccessCode } from "./codeGenerator";
 import { generateLoginCode } from "./buyerCode";
 import type {
@@ -37,7 +37,10 @@ import type {
   Role,
   AdminAccount,
   LibraryDoc,
+  CourseEnrollment,
+  PaymentReceipt,
 } from "./types";
+import { deriveEnrollment, enrollmentStatusFromSchedule, installmentsSummary } from "./installments";
 import { mergeSiteSettings } from "./homeDefaults";
 import { DEFAULT_ROLES, resolvePermissions, type PermissionSet } from "./permissions";
 
@@ -738,6 +741,7 @@ export async function addCourse(input: Partial<Course>): Promise<Course> {
     brochure_ids: input.brochure_ids ?? [],
     batch_timings: input.batch_timings ?? [],
     after_registration: input.after_registration ?? {},
+    emi_config: input.emi_config ?? {},
     created_at: new Date().toISOString(),
   } as Course;
   if (demoMode()) {
@@ -1316,6 +1320,232 @@ export async function getPaidPurchaseForPhone(referenceNo: string, phone: string
   if (!isPaidStatus(payment.status)) return null;
   if ((payment.phone || "").trim() !== (phone || "").trim()) return null;
   return payment;
+}
+
+// ==================== COURSE ENROLLMENTS + EMI + RECEIPTS (Phase 2) ====================
+
+function demoEnrollments(): CourseEnrollment[] {
+  const g = globalThis as unknown as { __namanCourseEnrollments?: CourseEnrollment[] };
+  if (!g.__namanCourseEnrollments) g.__namanCourseEnrollments = [];
+  return g.__namanCourseEnrollments;
+}
+function demoReceipts(): PaymentReceipt[] {
+  const g = globalThis as unknown as { __namanReceipts?: PaymentReceipt[] };
+  if (!g.__namanReceipts) g.__namanReceipts = [];
+  return g.__namanReceipts;
+}
+
+export async function addCourseEnrollment(input: Omit<CourseEnrollment, "id" | "created_at" | "updated_at"> & { id?: string }): Promise<CourseEnrollment> {
+  const now = new Date().toISOString();
+  const row: CourseEnrollment = { ...input, id: input.id ?? uuid(), created_at: now, updated_at: now } as CourseEnrollment;
+  if (demoMode()) { demoEnrollments().unshift(row); return row; }
+  try {
+    return await dbInsert<CourseEnrollment>("course_enrollments", row as unknown as Record<string, unknown>);
+  } catch {
+    demoEnrollments().unshift(row);
+    return row;
+  }
+}
+
+export async function getCourseEnrollmentById(id: string): Promise<CourseEnrollment | null> {
+  if (demoMode()) return demoEnrollments().find((e) => e.id === id) ?? null;
+  const db = getSupabaseAdmin();
+  if (!db) return demoEnrollments().find((e) => e.id === id) ?? null;
+  const { data } = await db.from("course_enrollments").select("*").eq("id", id).maybeSingle();
+  return (data as CourseEnrollment) ?? demoEnrollments().find((e) => e.id === id) ?? null;
+}
+
+export async function getCourseEnrollmentsByPhone(phone: string): Promise<CourseEnrollment[]> {
+  const p = (phone || "").trim();
+  if (!p) return [];
+  if (demoMode()) return demoEnrollments().filter((e) => e.phone === p);
+  const db = getSupabaseAdmin();
+  if (!db) return demoEnrollments().filter((e) => e.phone === p);
+  const { data } = await db.from("course_enrollments").select("*").eq("phone", p).order("created_at", { ascending: false });
+  return (data as CourseEnrollment[]) ?? [];
+}
+
+export async function getAllCourseEnrollments(): Promise<CourseEnrollment[]> {
+  if (demoMode()) return [...demoEnrollments()];
+  const db = getSupabaseAdmin();
+  if (!db) return [...demoEnrollments()];
+  const { data } = await db.from("course_enrollments").select("*").order("created_at", { ascending: false });
+  return (data as CourseEnrollment[]) ?? [];
+}
+
+export async function updateCourseEnrollment(id: string, patch: Partial<CourseEnrollment>): Promise<CourseEnrollment | null> {
+  const next = { ...patch, updated_at: new Date().toISOString() };
+  if (demoMode()) {
+    const list = demoEnrollments();
+    const idx = list.findIndex((e) => e.id === id);
+    if (idx === -1) return null;
+    list[idx] = { ...list[idx], ...next };
+    return list[idx];
+  }
+  return dbUpdate<CourseEnrollment>("course_enrollments", id, next as Record<string, unknown>);
+}
+
+/** Course ids the phone has actively paid for (seat or full) — drives Class Hub access. */
+export async function paidCourseIdsForPhone(phone: string): Promise<string[]> {
+  const list = await getCourseEnrollmentsByPhone(phone);
+  return list.filter((e) => e.amount_paid > 0 && e.status !== "cancelled").map((e) => e.course_id);
+}
+
+async function nextReceiptNo(): Promise<string> {
+  const db = getSupabaseAdmin();
+  if (db) {
+    try {
+      const { data, error } = await db.rpc("next_receipt_no");
+      if (!error && typeof data === "string" && data) return data;
+    } catch { /* fall through */ }
+  }
+  // Demo / fallback: timestamp-based, still unique & traceable.
+  return `NSA/DEMO/${Date.now().toString(36).toUpperCase()}`;
+}
+
+export async function getReceiptByNo(receiptNo: string): Promise<PaymentReceipt | null> {
+  if (demoMode()) return demoReceipts().find((r) => r.receipt_no === receiptNo) ?? null;
+  const db = getSupabaseAdmin();
+  if (!db) return demoReceipts().find((r) => r.receipt_no === receiptNo) ?? null;
+  const { data } = await db.from("payment_receipts").select("*").eq("receipt_no", receiptNo).maybeSingle();
+  return (data as PaymentReceipt) ?? null;
+}
+
+export async function getReceiptByReference(referenceNo: string): Promise<PaymentReceipt | null> {
+  if (!referenceNo) return null;
+  if (demoMode()) return demoReceipts().find((r) => r.reference_no === referenceNo) ?? null;
+  const db = getSupabaseAdmin();
+  if (!db) return demoReceipts().find((r) => r.reference_no === referenceNo) ?? null;
+  const { data } = await db.from("payment_receipts").select("*").eq("reference_no", referenceNo).maybeSingle();
+  return (data as PaymentReceipt) ?? null;
+}
+
+export async function getReceiptsByPhone(phone: string): Promise<PaymentReceipt[]> {
+  const p = (phone || "").trim();
+  if (!p) return [];
+  if (demoMode()) return demoReceipts().filter((r) => r.phone === p);
+  const db = getSupabaseAdmin();
+  if (!db) return demoReceipts().filter((r) => r.phone === p);
+  const { data } = await db.from("payment_receipts").select("*").eq("phone", p).order("issued_at", { ascending: false });
+  return (data as PaymentReceipt[]) ?? [];
+}
+
+async function insertReceipt(row: PaymentReceipt): Promise<PaymentReceipt> {
+  if (demoMode()) { demoReceipts().unshift(row); return row; }
+  try {
+    return await dbInsert<PaymentReceipt>("payment_receipts", row as unknown as Record<string, unknown>);
+  } catch {
+    demoReceipts().unshift(row);
+    return row;
+  }
+}
+
+/**
+ * Idempotently apply a PAID course EMI/seat payment to its enrollment:
+ * marks the schedule item(s) paid, recomputes status + amount_paid, and issues
+ * an immutable receipt (one per payment reference). Safe to call multiple times
+ * (callback + status poll). Returns null for non-EMI / one-time payments so the
+ * existing one-time flow is untouched.
+ */
+export async function finalizeCoursePaymentByReference(
+  referenceNo: string
+): Promise<{ enrollment: CourseEnrollment; receipt: PaymentReceipt } | null> {
+  const payment = await getPaymentByReference(referenceNo);
+  if (!payment || !isPaidStatus(payment.status)) return null;
+  if (!payment.enrollment_id) return null; // one-time payment — leave untouched
+
+  const enrollment = await getCourseEnrollmentById(payment.enrollment_id);
+  if (!enrollment) return null;
+
+  // Idempotency: a receipt already exists for this reference => already finalized.
+  const existing = await getReceiptByReference(referenceNo);
+  if (existing) {
+    return { enrollment, receipt: existing };
+  }
+
+  const kind = (payment.payment_kind || "full") as "seat" | "installment" | "full";
+  const gatewayRef = payment.gateway_ref || payment.razorpay_payment_id || null;
+  const paidAt = new Date().toISOString();
+  const schedule = [...(enrollment.schedule || [])];
+
+  const markPaid = (i: number) => {
+    schedule[i] = { ...schedule[i], paid: true, paid_at: paidAt, reference_no: referenceNo, gateway_ref: gatewayRef };
+  };
+
+  let paymentLabel = "Payment";
+  if (kind === "full") {
+    // Pay full / pay remaining: settle every outstanding line in one payment.
+    schedule.forEach((s, i) => { if (!s.paid) markPaid(i); });
+    paymentLabel = enrollment.plan_type === "full" ? "Full Payment" : "Full Remaining Payment";
+  } else {
+    const idx = schedule.findIndex((s) => s.no === (payment.installment_no ?? (kind === "seat" ? 0 : -1)) && !s.paid);
+    const fallbackIdx = idx === -1 ? schedule.findIndex((s) => s.kind === kind && !s.paid) : idx;
+    if (fallbackIdx >= 0) {
+      markPaid(fallbackIdx);
+      paymentLabel = schedule[fallbackIdx].label;
+    }
+  }
+
+  const derived = deriveEnrollment({ total_fee: enrollment.total_fee, schedule });
+  const status = enrollmentStatusFromSchedule({ total_fee: enrollment.total_fee, schedule, plan_type: enrollment.plan_type });
+
+  const updated = (await updateCourseEnrollment(enrollment.id, {
+    schedule,
+    amount_paid: derived.paid,
+    status,
+  })) || { ...enrollment, schedule, amount_paid: derived.paid, status };
+
+  // Build the immutable receipt from the ledger-consistent derived values.
+  const summary = installmentsSummary({ total_fee: updated.total_fee, schedule }, formatINR, formatISTDate);
+  const statusLabel: PaymentReceipt["status"] =
+    derived.isFullyPaid ? "Fully Paid" : status === "seat_booked" ? "Seat Booked" : "Partially Paid";
+
+  const receipt: PaymentReceipt = {
+    id: uuid(),
+    receipt_no: await nextReceiptNo(),
+    enrollment_id: enrollment.id,
+    payment_id: payment.id,
+    reference_no: referenceNo,
+    phone: enrollment.phone,
+    student_name: enrollment.student_name,
+    email: enrollment.email,
+    course_title: enrollment.course_title,
+    batch_label: enrollment.batch_label,
+    payment_kind: kind,
+    payment_label: paymentLabel,
+    amount: payment.amount,
+    gateway_ref: gatewayRef,
+    total_fee: updated.total_fee,
+    paid_to_date: derived.paid,
+    remaining: derived.remaining,
+    installments_summary: summary,
+    status: statusLabel,
+    issued_at: paidAt,
+  };
+  const saved = await insertReceipt(receipt);
+  await updatePaymentByReference(referenceNo, { receipt_no: saved.receipt_no }).catch(() => null);
+
+  // Optional, best-effort receipt email (no-op without RESEND_API_KEY).
+  if (saved.email) {
+    import("./email")
+      .then(({ sendReceiptEmail }) =>
+        sendReceiptEmail({
+          to: saved.email!,
+          name: saved.student_name,
+          receiptNo: saved.receipt_no,
+          courseTitle: saved.course_title,
+          paymentLabel: saved.payment_label,
+          amount: formatINR(saved.amount),
+          paidToDate: formatINR(saved.paid_to_date),
+          remaining: saved.remaining <= 0 ? "₹0 — Fully paid" : formatINR(saved.remaining),
+          installmentsSummary: saved.installments_summary,
+          status: saved.status,
+        })
+      )
+      .catch(() => null);
+  }
+
+  return { enrollment: updated, receipt: saved };
 }
 
 /**
