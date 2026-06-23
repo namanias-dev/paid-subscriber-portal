@@ -179,17 +179,24 @@ export default function PublicNav({
         </button>
       </div>
 
-      {/* Mobile drawer */}
-      <div id="mobile-drawer" className={`lg:hidden ${open ? "pointer-events-auto" : "pointer-events-none"}`} role="dialog" aria-modal="true" aria-label="Site menu">
+      {/* Mobile drawer — outer is fixed + overflow-hidden so the off-canvas panel is
+          clipped and never adds to page width (prevents horizontal scroll). */}
+      <div
+        id="mobile-drawer"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Site menu"
+        className={`fixed inset-0 z-[60] overflow-hidden lg:hidden ${open ? "pointer-events-auto" : "pointer-events-none"}`}
+      >
         {/* Backdrop */}
         <div
           onClick={() => setOpen(false)}
-          className={`fixed inset-0 z-40 bg-black/55 backdrop-blur-sm transition-opacity duration-300 motion-reduce:transition-none ${open ? "opacity-100" : "opacity-0"}`}
+          className={`absolute inset-0 bg-black/55 backdrop-blur-sm transition-opacity duration-300 motion-reduce:transition-none ${open ? "opacity-100" : "opacity-0"}`}
           aria-hidden="true"
         />
         {/* Panel */}
         <div
-          className={`ca-grain fixed right-0 top-0 z-50 flex h-[100dvh] w-[86%] max-w-sm flex-col bg-gradient-to-b from-[var(--ca-navy-900)] to-[var(--ca-navy-800)] shadow-2xl transition-transform duration-300 ease-out motion-reduce:transition-none ${open ? "translate-x-0" : "translate-x-full"}`}
+          className={`ca-grain absolute right-0 top-0 flex h-full w-[86%] max-w-sm flex-col bg-gradient-to-b from-[var(--ca-navy-900)] to-[var(--ca-navy-800)] shadow-2xl transition-transform duration-300 ease-out motion-reduce:transition-none ${open ? "translate-x-0" : "translate-x-full"}`}
         >
           <div className="ca-orb" style={{ width: 240, height: 240, top: -120, right: -60, background: "rgba(212,175,55,0.18)" }} />
 

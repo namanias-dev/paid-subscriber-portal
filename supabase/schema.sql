@@ -133,6 +133,7 @@ create table if not exists public.courses (
   curriculum jsonb default '[]'::jsonb,
   schedule text,
   featured boolean default false,
+  display_order int,
   cover_image_url text,
   mobile_image_url text,
   faqs jsonb default '[]'::jsonb,
@@ -389,6 +390,7 @@ create index if not exists idx_students_phone on public.students (phone);
 create index if not exists idx_bookmarks_student on public.bookmarks (student_id);
 create index if not exists idx_progress_student on public.content_progress (student_id);
 create index if not exists idx_courses_status on public.courses (status);
+create index if not exists idx_courses_display_order on public.courses (display_order);
 create index if not exists idx_leads_status on public.leads (status);
 create index if not exists idx_enrollments_student on public.enrollments (student_id);
 create index if not exists idx_webinars_status on public.webinars (status);

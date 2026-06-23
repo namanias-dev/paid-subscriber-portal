@@ -298,6 +298,8 @@ export interface Course {
   curriculum: CourseModule[];
   schedule: string | null;
   featured: boolean;
+  /** Manual sort order for the public listing (ascending). New courses append to the end. */
+  display_order?: number | null;
   created_at: string;
   // --- Rich content + media (optional; added for registration pages) ---
   cover_image_url?: string | null;

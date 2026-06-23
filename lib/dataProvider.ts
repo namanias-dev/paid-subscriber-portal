@@ -647,10 +647,20 @@ export async function deleteAdminAccount(id: string): Promise<{ ok: boolean; err
 }
 
 // ============================ COURSES ============================
+/** Stable sort: explicit display_order ascending (nulls last), then newest first. */
+function sortCoursesByOrder(list: Course[]): Course[] {
+  return [...list].sort((a, b) => {
+    const ao = a.display_order ?? Number.POSITIVE_INFINITY;
+    const bo = b.display_order ?? Number.POSITIVE_INFINITY;
+    if (ao !== bo) return ao - bo;
+    return (b.created_at || "").localeCompare(a.created_at || "");
+  });
+}
+
 export async function getAllCourses(): Promise<Course[]> {
-  if (demoMode()) return [...mock.courses];
+  if (demoMode()) return sortCoursesByOrder(mock.courses);
   const rows = await dbSelect<Course>("courses");
-  return rows.length ? rows : [...mock.courses];
+  return sortCoursesByOrder(rows.length ? rows : [...mock.courses]);
 }
 export async function getPublishedCourses(): Promise<Course[]> {
   const all = await getAllCourses();
@@ -661,9 +671,22 @@ export async function getCourseBySlug(slug: string): Promise<Course | null> {
   const all = await getAllCourses();
   return all.find((c) => c.slug === slug) ?? null;
 }
+/** Next display_order for a brand-new course (append to the end of the list). */
+async function nextCourseOrder(): Promise<number> {
+  if (demoMode()) {
+    return mock.courses.reduce((m, c) => Math.max(m, c.display_order ?? 0), 0) + 1;
+  }
+  const db = getSupabaseAdmin();
+  if (!db) return 1;
+  const { data } = await db.from("courses").select("display_order").order("display_order", { ascending: false, nullsFirst: false }).limit(1).maybeSingle();
+  return ((data?.display_order as number | null) ?? 0) + 1;
+}
+
 export async function addCourse(input: Partial<Course>): Promise<Course> {
+  const display_order = input.display_order ?? (await nextCourseOrder());
   const row = {
     id: uuid(),
+    display_order,
     slug: input.slug || (input.title || "course").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, ""),
     title: input.title || "Untitled Course",
     category: input.category || "Foundation",
@@ -736,6 +759,33 @@ export async function deleteCourse(id: string): Promise<boolean> {
     return true;
   }
   return dbDelete("courses", id);
+}
+
+/**
+ * Persist a new ordering for courses. `orderedIds` is the full list of course ids
+ * in their desired top-to-bottom order. Only rows whose order actually changes are
+ * written (efficient + concurrency-friendly).
+ */
+export async function reorderCourses(orderedIds: string[]): Promise<{ ok: boolean; error?: string }> {
+  const targets = orderedIds.map((id, i) => ({ id, display_order: i + 1 }));
+  if (demoMode()) {
+    for (const t of targets) {
+      const c = mock.courses.find((x) => x.id === t.id);
+      if (c) c.display_order = t.display_order;
+    }
+    return { ok: true };
+  }
+  const db = getSupabaseAdmin();
+  if (!db) return { ok: false, error: "No database" };
+  // Only update rows whose order changed.
+  const current = await dbSelect<Course>("courses");
+  const currentMap = new Map(current.map((c) => [c.id, c.display_order ?? null]));
+  const changed = targets.filter((t) => currentMap.get(t.id) !== t.display_order);
+  for (const t of changed) {
+    const { error } = await db.from("courses").update({ display_order: t.display_order }).eq("id", t.id);
+    if (error) return { ok: false, error: error.message };
+  }
+  return { ok: true };
 }
 
 // ============================ ENROLLMENTS ============================
