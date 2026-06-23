@@ -106,6 +106,42 @@ export function normalizeLandingInput(body: Record<string, unknown>): LandingNor
     } satisfies PageSection));
   }
 
+  // --- After-registration / Class Hub config (sanitize HTML blocks) ---
+  if (isObj(out.after_registration)) {
+    const a = out.after_registration as Record<string, unknown>;
+    const videos = Array.isArray(a.videos)
+      ? (a.videos as Record<string, unknown>[])
+          .map((v) => ({
+            title: (v.title || "").toString().trim() || null,
+            description: (v.description || "").toString().trim() || null,
+            url: (v.url || "").toString().trim(),
+          }))
+          .filter((v) => v.url)
+      : [];
+    const blocks = Array.isArray(a.blocks)
+      ? (a.blocks as PageSection[]).map((sec, i) => ({
+          id: sec.id || `blk-${i}`,
+          title: (sec.title || "").toString(),
+          subtitle: (sec.subtitle || "").toString().trim() || null,
+          content: sec.content ? sanitizeHtml(sec.content) : null,
+          image_url: (sec.image_url || "").toString().trim() || null,
+          video_url: (sec.video_url || "").toString().trim() || null,
+          order: typeof sec.order === "number" ? sec.order : i,
+          visible: sec.visible !== false,
+        } satisfies PageSection))
+      : [];
+    out.after_registration = {
+      welcome_html: a.welcome_html ? sanitizeHtml(a.welcome_html as string) || null : null,
+      zoom_link: (a.zoom_link || "").toString().trim() || null,
+      zoom_note: (a.zoom_note || "").toString().trim() || null,
+      class_timing: (a.class_timing || "").toString().trim() || null,
+      next_class_at: (a.next_class_at || "").toString().trim() || null,
+      videos,
+      doc_ids: Array.isArray(a.doc_ids) ? (a.doc_ids as unknown[]).filter((x): x is string => typeof x === "string") : [],
+      blocks,
+    };
+  }
+
   // --- Reviews (clamp rating; keep text plain) ---
   if (Array.isArray(out.reviews)) {
     out.reviews = (out.reviews as Review[]).map((r, i) => ({

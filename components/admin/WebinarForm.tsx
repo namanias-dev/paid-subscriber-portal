@@ -21,6 +21,7 @@ import {
   PageSectionsEditor,
 } from "./FormFields";
 import RichTextEditor from "./RichTextEditor";
+import LibraryPicker from "./LibraryPicker";
 import { useToast } from "@/components/ui/Toast";
 import { istInputToISO, isoToISTInput } from "@/lib/dates";
 import type {
@@ -72,6 +73,7 @@ export default function WebinarForm({ webinar }: { webinar?: Webinar }) {
   const [faqs, setFaqs] = useState<FAQItem[]>(webinar?.faqs || []);
   const [contactLinks, setContactLinks] = useState<ContactLink[]>(webinar?.contact_links || []);
   const [pdfResources, setPdfResources] = useState<PdfResource[]>(webinar?.pdf_resources || []);
+  const [brochureIds, setBrochureIds] = useState<string[]>(webinar?.brochure_ids || []);
   const [coupons, setCoupons] = useState<Coupon[]>(webinar?.coupons || []);
   const [active, setActive] = useState<boolean>(webinar?.active !== false);
   // Premium landing fields
@@ -117,6 +119,7 @@ export default function WebinarForm({ webinar }: { webinar?: Webinar }) {
       faqs: faqs.filter((f) => f.q.trim()),
       contact_links: contactLinks.filter((c) => c.value.trim()),
       pdf_resources: pdfResources.filter((p) => p.url.trim()),
+      brochure_ids: brochureIds,
       coupons: coupons.filter((c) => c.code.trim()),
       active,
       badge_label: badgeLabel.trim() || null,
@@ -252,6 +255,9 @@ export default function WebinarForm({ webinar }: { webinar?: Webinar }) {
                 </Section>
                 <Section title="Downloadable resources" desc="Bonus PDFs attached to this webinar.">
                   <PdfResourcesEditor value={pdfResources} onChange={setPdfResources} folder="resources" />
+                </Section>
+                <Section title="Brochures (shared library)" desc="Pick from the central library — upload once, reuse everywhere.">
+                  <LibraryPicker value={brochureIds} onChange={setBrochureIds} hint="Shown as premium download cards on the public webinar page." />
                 </Section>
               </>
             ),

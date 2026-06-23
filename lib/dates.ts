@@ -1,5 +1,15 @@
 const DAY_MS = 86400000;
 
+/** Human-readable file size, e.g. 1.4 MB. */
+export function formatBytes(bytes?: number | null): string {
+  if (!bytes || bytes <= 0) return "";
+  const units = ["B", "KB", "MB", "GB"];
+  let n = bytes;
+  let i = 0;
+  while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
+  return `${n.toFixed(n < 10 && i > 0 ? 1 : 0)} ${units[i]}`;
+}
+
 /** Compute expiry from a start date + number of months (30d each). null => lifetime. */
 export function computeExpiry(startDate: string | Date, months: number | null): string | null {
   if (months == null) return null;

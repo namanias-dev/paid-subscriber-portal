@@ -153,7 +153,22 @@ create table if not exists public.courses (
   what_you_get jsonb default '[]'::jsonb,
   reviews jsonb default '[]'::jsonb,
   sections jsonb default '[]'::jsonb,
+  brochure_ids jsonb default '[]'::jsonb,
+  batch_timings jsonb default '[]'::jsonb,
+  after_registration jsonb default '{}'::jsonb,
   created_at timestamptz default now()
+);
+
+-- ------------------- library_docs (central brochure/resources) -------------------
+create table if not exists public.library_docs (
+  id text primary key,
+  title text not null,
+  category text,
+  file_url text not null,
+  file_size bigint,
+  description text,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
 );
 
 -- ---------------------------- enrollments ---------------------------
@@ -279,6 +294,7 @@ create table if not exists public.webinars (
   join_note text,
   materials jsonb default '[]'::jsonb,
   cross_sell jsonb default '{}'::jsonb,
+  brochure_ids jsonb default '[]'::jsonb,
   created_at timestamptz default now()
 );
 

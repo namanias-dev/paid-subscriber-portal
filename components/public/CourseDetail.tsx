@@ -2,7 +2,7 @@ import Link from "next/link";
 import Image from "next/image";
 import {
   GraduationCap, Clock, CalendarDays, Languages, Video, ArrowRight,
-  ShieldCheck, Headphones, CheckCircle2, XCircle, BookOpen, ChevronDown,
+  ShieldCheck, Headphones, CheckCircle2, XCircle, BookOpen, ChevronDown, CalendarClock,
 } from "lucide-react";
 import { formatINR } from "@/lib/dates";
 import { discountPct } from "@/components/public/CourseCard";
@@ -10,7 +10,9 @@ import CourseCard from "@/components/public/CourseCard";
 import SeatCounter from "@/components/public/SeatCounter";
 import WhatsAppButton from "@/components/public/WhatsAppButton";
 import LandingSections from "@/components/public/LandingSections";
-import type { Course } from "@/lib/types";
+import BrochureCards from "@/components/public/BrochureCards";
+import BatchCountdown from "@/components/public/BatchCountdown";
+import type { Course, LibraryDoc } from "@/lib/types";
 import type { LandingView } from "@/lib/landingView";
 
 const COURSE_FAQ = [
@@ -19,7 +21,7 @@ const COURSE_FAQ = [
   { q: "Can I pay in installments?", a: "Most programs support EMI. See the Fees & EMI section for details." },
 ];
 
-export default function CourseDetail({ course, related, comparison, view }: { course: Course; related: Course[]; comparison: Course[]; view: LandingView }) {
+export default function CourseDetail({ course, related, comparison, view, brochures = [] }: { course: Course; related: Course[]; comparison: Course[]; view: LandingView; brochures?: LibraryDoc[] }) {
   const off = discountPct(course.price, course.original_price);
   const faqs = (course.faqs || []).filter((f) => f.q?.trim());
   const faqItems = faqs.length ? faqs : COURSE_FAQ;
@@ -31,10 +33,12 @@ export default function CourseDetail({ course, related, comparison, view }: { co
   const notIncluded = (course.not_included || []).filter(Boolean);
   const curriculum = (course.curriculum || []).filter((m) => m?.title?.trim());
 
+  const timings = (course.batch_timings || []).filter(Boolean);
   const meta: { icon: typeof Clock; label: string }[] = [
     ...(course.duration ? [{ icon: Clock, label: course.duration }] : []),
     { icon: GraduationCap, label: course.faculty },
     { icon: CalendarDays, label: `Target ${course.target_years}` },
+    ...(timings.length ? [{ icon: CalendarClock, label: `${timings.join(" / ")} batch` }] : []),
     ...(course.language ? [{ icon: Languages, label: course.language }] : []),
     ...(course.modes?.length ? [{ icon: Video, label: course.modes.join(" · ") }] : []),
   ];
@@ -73,6 +77,12 @@ export default function CourseDetail({ course, related, comparison, view }: { co
               <span key={i} className="inline-flex items-center gap-1.5"><m.icon size={15} className="text-[var(--ca-gold)]" aria-hidden="true" /> {m.label}</span>
             ))}
           </div>
+
+          {course.batch_start && (
+            <div className="mt-5 max-w-md">
+              <BatchCountdown startISO={course.batch_start} />
+            </div>
+          )}
         </section>
 
         {/* Main + sticky sidebar */}
@@ -101,6 +111,20 @@ export default function CourseDetail({ course, related, comparison, view }: { co
                         ))}
                       </ul>
                     </div>
+                  )}
+                </div>
+              </section>
+            )}
+
+            {/* Brochures from the central library */}
+            {(brochures.length > 0 || course.brochure_link) && (
+              <section className="mt-10">
+                <h2 className="font-heading text-2xl font-extrabold text-[var(--ca-navy-900)]">Brochures &amp; resources</h2>
+                <div className="mt-4">
+                  {brochures.length > 0 ? (
+                    <BrochureCards docs={brochures} />
+                  ) : (
+                    <a href={course.brochure_link!} target="_blank" rel="noopener noreferrer" className="ca-btn ca-btn-outline ca-focus text-sm">Download brochure</a>
                   )}
                 </div>
               </section>

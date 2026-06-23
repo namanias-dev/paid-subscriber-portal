@@ -53,8 +53,11 @@ export default function MyCoursesPage() {
                 </span>
                 <span className={`pill ${e.status === "active" ? "pill-green" : "pill-gray"}`}>{e.status}</span>
               </div>
-              <div className="mt-4 flex gap-2">
-                <Link href="/dashboard/live" className="btn btn-primary flex-1 text-sm">Resume →</Link>
+              <div className="mt-4 flex flex-wrap gap-2">
+                {course && e.status === "active" && (
+                  <Link href={`/dashboard/class/${course.id}`} className="btn btn-primary flex-1 text-sm">Class Hub →</Link>
+                )}
+                <Link href="/dashboard/live" className="btn btn-secondary text-sm">Library</Link>
                 {e.pending > 0 && <Link href="/dashboard/fees" className="btn btn-secondary text-sm">Pay fees</Link>}
               </div>
             </div>

@@ -21,11 +21,14 @@ import {
   PageSectionsEditor,
 } from "./FormFields";
 import RichTextEditor from "./RichTextEditor";
+import LibraryPicker from "./LibraryPicker";
 import { useToast } from "@/components/ui/Toast";
 import { COURSE_CATEGORIES, LEARNING_MODES } from "@/lib/config";
-import type { Course, CourseCategory, LearningMode } from "@/lib/types";
+import { istInputToISO, isoToISTInput } from "@/lib/dates";
+import type { Course, CourseCategory, LearningMode, CourseAfterRegistration, OrientationVideo } from "@/lib/types";
 
 const BACK = "/admin/courses";
+const BATCH_TIMINGS = ["Morning", "Afternoon", "Evening", "Weekend"];
 
 export default function CourseForm({ course }: { course?: Course }) {
   const router = useRouter();
@@ -43,9 +46,17 @@ export default function CourseForm({ course }: { course?: Course }) {
   const [saving, setSaving] = useState(false);
   const set = (k: keyof Course, v: unknown) => setC((p) => ({ ...p, [k]: v }));
 
+  const ar: CourseAfterRegistration = c.after_registration || {};
+  const setAR = (k: keyof CourseAfterRegistration, v: unknown) => set("after_registration", { ...ar, [k]: v });
+
   function toggleMode(m: LearningMode) {
     const cur = c.modes || [];
     set("modes", cur.includes(m) ? cur.filter((x) => x !== m) : [...cur, m]);
+  }
+
+  function toggleTiming(t: string) {
+    const cur = c.batch_timings || [];
+    set("batch_timings", cur.includes(t) ? cur.filter((x) => x !== t) : [...cur, t]);
   }
 
   async function save() {
@@ -122,17 +133,29 @@ export default function CourseForm({ course }: { course?: Course }) {
                   </Field>
                 </Section>
 
-                <Section title="Schedule & dates" desc="Reflects on the public course page immediately after saving.">
-                  <Field label="Batch start date">
-                    <input type="date" className="input" value={c.batch_start ? c.batch_start.slice(0, 10) : ""} onChange={(e) => set("batch_start", e.target.value ? new Date(e.target.value).toISOString() : null)} />
+                <Section title="Schedule & dates" desc="All times are treated and displayed in IST. Reflects on the public course page after saving.">
+                  <Field label="Batch start date (IST)" hint="Drives the public countdown timer.">
+                    <input type="date" className="input" value={c.batch_start ? isoToISTInput(c.batch_start).slice(0, 10) : ""} onChange={(e) => set("batch_start", e.target.value ? istInputToISO(`${e.target.value}T00:00`) : null)} />
                   </Field>
-                  <Field label="Schedule (text)" hint="e.g. Mon–Fri, 7–9 AM IST.">
+                  <Field label="Schedule (text)" hint="e.g. Mon–Sat, 10:00 AM–1:00 PM IST.">
                     <input className="input" value={c.schedule || ""} onChange={(e) => set("schedule", e.target.value)} />
+                  </Field>
+                  <Field label="Batch timing" full hint="Structured tags shown on the course card (select any).">
+                    <div className="flex flex-wrap gap-2">
+                      {BATCH_TIMINGS.map((t) => (
+                        <button key={t} type="button" onClick={() => toggleTiming(t)} className={`chip ${(c.batch_timings || []).includes(t) ? "chip-active" : ""}`}>{t}</button>
+                      ))}
+                    </div>
+                  </Field>
+                </Section>
+
+                <Section title="Brochures" desc="Pick from the shared Brochure Library — upload once, reuse across courses.">
+                  <Field label="Attached brochures" full>
+                    <LibraryPicker value={c.brochure_ids || []} onChange={(ids) => set("brochure_ids", ids)} hint="Shown as premium download cards on the public course page." />
                   </Field>
                 </Section>
 
                 <Section title="Links">
-                  <Field label="Brochure link"><input className="input" value={c.brochure_link || ""} onChange={(e) => set("brochure_link", e.target.value)} placeholder="https://…" /></Field>
                   <Field label="Razorpay link"><input className="input" value={c.razorpay_link || ""} onChange={(e) => set("razorpay_link", e.target.value)} placeholder="https://…" /></Field>
                   <Field label="Options" full>
                     <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={!!c.featured} onChange={(e) => set("featured", e.target.checked)} /> Featured on homepage</label>
@@ -223,6 +246,36 @@ export default function CourseForm({ course }: { course?: Course }) {
             ),
           },
           {
+            id: "after",
+            label: "After Registration",
+            content: (
+              <>
+                <Section title="Welcome message" desc="Shown at the top of the enrolled student's Class Hub.">
+                  <Field label="Welcome (rich text)" full>
+                    <RichTextEditor value={ar.welcome_html} onChange={(html) => setAR("welcome_html", html)} placeholder="Thanks for enrolling — welcome, future officer!" />
+                  </Field>
+                </Section>
+                <Section title="Live class (Zoom)" desc="Same pattern as webinars. Times are IST.">
+                  <Field label="Zoom / live-class link"><input className="input" value={ar.zoom_link || ""} onChange={(e) => setAR("zoom_link", e.target.value)} placeholder="https://zoom.us/j/…" /></Field>
+                  <Field label="Join note (passcode / instructions)"><input className="input" value={ar.zoom_note || ""} onChange={(e) => setAR("zoom_note", e.target.value)} placeholder="e.g. Passcode: 1234" /></Field>
+                  <Field label="Class timing (text, IST)"><input className="input" value={ar.class_timing || ""} onChange={(e) => setAR("class_timing", e.target.value)} placeholder="Mon–Sat, 7–9 AM" /></Field>
+                  <Field label="Next class (IST)" hint="Optional — drives the countdown in the Class Hub.">
+                    <input type="datetime-local" className="input" value={isoToISTInput(ar.next_class_at)} onChange={(e) => setAR("next_class_at", e.target.value ? istInputToISO(e.target.value) : null)} />
+                  </Field>
+                </Section>
+                <Section title="Orientation videos" desc="Paste YouTube URLs — responsive embeds in the Class Hub.">
+                  <VideosEditor value={ar.videos || []} onChange={(v) => setAR("videos", v)} />
+                </Section>
+                <Section title="Study material" desc="Pick PDFs from the shared library (no re-upload).">
+                  <LibraryPicker value={ar.doc_ids || []} onChange={(ids) => setAR("doc_ids", ids)} hint="Downloadable by enrolled students in their Class Hub." />
+                </Section>
+                <Section title="Content blocks" desc="Reorderable blocks (prep checklist, do's & don'ts, contact). Heading + rich text + media.">
+                  <PageSectionsEditor value={ar.blocks} onChange={(v) => setAR("blocks", v)} folder="sections" />
+                </Section>
+              </>
+            ),
+          },
+          {
             id: "seo",
             label: "SEO",
             content: (
@@ -250,5 +303,26 @@ export default function CourseForm({ course }: { course?: Course }) {
 
       <FormActions saving={saving} onSave={save} cancelHref={BACK} saveLabel={isNew ? "Create Course" : "Save Changes"} />
     </FormShell>
+  );
+}
+
+function VideosEditor({ value, onChange }: { value: OrientationVideo[]; onChange: (v: OrientationVideo[]) => void }) {
+  const items = value || [];
+  const update = (i: number, patch: Partial<OrientationVideo>) => onChange(items.map((v, j) => (j === i ? { ...v, ...patch } : v)));
+  const remove = (i: number) => onChange(items.filter((_, j) => j !== i));
+  return (
+    <div className="space-y-3">
+      {items.map((v, i) => (
+        <div key={i} className="rounded-xl border border-line p-3">
+          <div className="grid gap-2 sm:grid-cols-2">
+            <input className="input text-sm" value={v.title || ""} onChange={(e) => update(i, { title: e.target.value })} placeholder="Title (e.g. Orientation)" />
+            <input className="input text-sm" value={v.url} onChange={(e) => update(i, { url: e.target.value })} placeholder="YouTube URL" />
+          </div>
+          <input className="input mt-2 text-sm" value={v.description || ""} onChange={(e) => update(i, { description: e.target.value })} placeholder="Short description (optional)" />
+          <button type="button" onClick={() => remove(i)} className="mt-2 text-xs text-danger">Remove</button>
+        </div>
+      ))}
+      <button type="button" onClick={() => onChange([...items, { url: "", title: "", description: "" }])} className="btn btn-secondary text-sm">+ Add video</button>
+    </div>
   );
 }

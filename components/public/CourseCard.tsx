@@ -1,7 +1,7 @@
 import Link from "next/link";
 import Image from "next/image";
-import { GraduationCap, ArrowRight, Layers, Clock, CalendarDays, User } from "lucide-react";
-import { formatINR } from "@/lib/dates";
+import { GraduationCap, ArrowRight, Layers, Clock, CalendarDays, User, CalendarClock } from "lucide-react";
+import { formatINR, formatISTDate } from "@/lib/dates";
 import type { Course } from "@/lib/types";
 
 export function discountPct(price: number, original: number | null): number | null {
@@ -16,6 +16,10 @@ export default function CourseCard({ course }: { course: Course }) {
   const category = course.badge_label?.trim() || course.category;
   const modes = course.modes?.length ? course.modes.join(" · ") : null;
   const cta = course.price === 0 ? "Start free" : "View course";
+  const timing = (course.batch_timings || []).filter(Boolean)[0];
+  const batchLine = [timing ? `${timing} batch` : null, course.batch_start ? `Starts ${formatISTDate(course.batch_start)}` : null]
+    .filter(Boolean)
+    .join(" · ");
 
   return (
     <Link href={`/courses/${course.slug}`} className="ca-focus group block h-full">
@@ -67,6 +71,12 @@ export default function CourseCard({ course }: { course: Course }) {
               {!course.duration && course.target_years && <span className="inline-flex items-center gap-1.5"><CalendarDays size={14} aria-hidden="true" /> {course.target_years}</span>}
               {course.faculty && <span className="inline-flex items-center gap-1.5"><User size={14} aria-hidden="true" /> {course.faculty}</span>}
             </div>
+
+            {batchLine && (
+              <p className="mt-2.5 inline-flex items-center gap-1.5 self-start rounded-full bg-[rgba(212,175,55,0.12)] px-2.5 py-1 text-xs font-semibold text-[#8a6d12]">
+                <CalendarClock size={13} aria-hidden="true" /> {batchLine}
+              </p>
+            )}
 
             <div className="mt-auto flex items-end justify-between gap-3 pt-4">
               <div className="min-w-0">

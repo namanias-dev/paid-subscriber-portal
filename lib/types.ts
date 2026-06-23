@@ -158,6 +158,51 @@ export interface PdfResource {
   url: string;
 }
 
+/**
+ * A reusable document in the central Brochure / Resources Library. Uploaded once,
+ * referenced (by id) from many courses/webinars so files are never duplicated.
+ */
+export interface LibraryDoc {
+  id: string;
+  title: string;
+  category?: string | null;
+  file_url: string;
+  /** Size in bytes (for the public download card). */
+  file_size?: number | null;
+  description?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** A YouTube orientation/starter video shown in the student Class Hub. */
+export interface OrientationVideo {
+  title?: string | null;
+  description?: string | null;
+  url: string;
+}
+
+/**
+ * Per-course "After Registration" / Class Hub configuration. Shown only to
+ * enrolled students (Phase 1 gating = active enrollment; Phase 2 = payment).
+ */
+export interface CourseAfterRegistration {
+  /** Sanitized rich-text welcome message. */
+  welcome_html?: string | null;
+  /** Zoom / live-class join URL (same pattern as webinars). */
+  zoom_link?: string | null;
+  /** Passcode / join instructions note. */
+  zoom_note?: string | null;
+  /** Free-text class timing (IST), e.g. "Mon–Sat, 7–9 AM". */
+  class_timing?: string | null;
+  /** Optional next live class instant (UTC ISO) for the IST countdown. */
+  next_class_at?: string | null;
+  videos?: OrientationVideo[];
+  /** Library document ids for downloadable study material. */
+  doc_ids?: string[];
+  /** Reorderable flexible content blocks (heading + rich text + media). */
+  blocks?: PageSection[];
+}
+
 export interface Coupon {
   code: string;
   type: "percent" | "flat";
@@ -325,6 +370,13 @@ export interface Course {
   what_you_get?: LearnItem[];
   reviews?: Review[];
   sections?: PageSection[];
+  // --- Phase 1 courses upgrade ---
+  /** Central library document ids (brochures/resources) shown publicly. */
+  brochure_ids?: string[];
+  /** Structured batch timing tags (Morning / Afternoon / Evening / Weekend). */
+  batch_timings?: string[];
+  /** After-registration / Class Hub config (enrolled students only). */
+  after_registration?: CourseAfterRegistration;
 }
 
 export interface Enrollment {
@@ -466,6 +518,8 @@ export interface Webinar {
   what_you_get?: LearnItem[];
   reviews?: Review[];
   sections?: PageSection[];
+  /** Central library document ids (brochures/resources) shown publicly. */
+  brochure_ids?: string[];
 }
 
 export interface WebinarRegistration {

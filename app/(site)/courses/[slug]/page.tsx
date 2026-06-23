@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import CourseDetail from "@/components/public/CourseDetail";
-import { getCourseBySlug, getPublishedCourses } from "@/lib/dataProvider";
+import { getCourseBySlug, getPublishedCourses, getLibraryDocsByIds } from "@/lib/dataProvider";
 import { buildLandingView } from "@/lib/landingView";
 import { SITE_URL, ACADEMY } from "@/lib/config";
 
@@ -38,6 +38,7 @@ export default async function CoursePage({ params }: { params: { slug: string } 
   const comparison =
     course.category === "Foundation" ? all.filter((c) => c.category === "Foundation") : [];
 
+  const brochures = await getLibraryDocsByIds(course.brochure_ids);
   const view = buildLandingView(course);
 
   const jsonLd = {
@@ -64,7 +65,7 @@ export default async function CoursePage({ params }: { params: { slug: string } 
   return (
     <>
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }} />
-      <CourseDetail course={course} related={related} comparison={comparison} view={view} />
+      <CourseDetail course={course} related={related} comparison={comparison} view={view} brochures={brochures} />
     </>
   );
 }

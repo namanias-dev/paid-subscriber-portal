@@ -8,7 +8,8 @@ import WhatsAppButton from "@/components/public/WhatsAppButton";
 import TrustStrip from "@/components/public/TrustStrip";
 import StickyMobileCTA from "@/components/public/StickyMobileCTA";
 import LandingSections from "@/components/public/LandingSections";
-import { getWebinarBySlug } from "@/lib/dataProvider";
+import BrochureCards from "@/components/public/BrochureCards";
+import { getWebinarBySlug, getLibraryDocsByIds } from "@/lib/dataProvider";
 import { buildLandingView } from "@/lib/landingView";
 import { formatINR, formatISTRange } from "@/lib/dates";
 import { SITE_URL, ACADEMY } from "@/lib/config";
@@ -41,6 +42,7 @@ export default async function WebinarDetail({ params }: { params: { slug: string
   if (!w || w.active === false) notFound();
 
   const view = buildLandingView(w);
+  const brochures = await getLibraryDocsByIds(w.brochure_ids);
   const completed = w.status === "completed";
   const priceLabel = w.price === 0 ? "Free" : formatINR(w.price);
   const startLabel = formatISTRange(w.datetime, w.end_datetime);
@@ -132,6 +134,15 @@ export default async function WebinarDetail({ params }: { params: { slug: string
             resourcesTitle="Included resources"
             resourcesSubtitle="Bonus material you get with this session."
           />
+
+          {brochures.length > 0 && (
+            <section className="mt-10">
+              <h2 className="text-2xl font-extrabold">Brochures &amp; resources</h2>
+              <div className="mt-4">
+                <BrochureCards docs={brochures} />
+              </div>
+            </section>
+          )}
         </div>
 
         <div>

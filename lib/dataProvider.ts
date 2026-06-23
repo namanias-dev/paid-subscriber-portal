@@ -36,6 +36,7 @@ import type {
   CaEventType,
   Role,
   AdminAccount,
+  LibraryDoc,
 } from "./types";
 import { mergeSiteSettings } from "./homeDefaults";
 import { DEFAULT_ROLES, resolvePermissions, type PermissionSet } from "./permissions";
@@ -734,6 +735,9 @@ export async function addCourse(input: Partial<Course>): Promise<Course> {
     what_you_get: input.what_you_get ?? [],
     reviews: input.reviews ?? [],
     sections: input.sections ?? [],
+    brochure_ids: input.brochure_ids ?? [],
+    batch_timings: input.batch_timings ?? [],
+    after_registration: input.after_registration ?? {},
     created_at: new Date().toISOString(),
   } as Course;
   if (demoMode()) {
@@ -786,6 +790,72 @@ export async function reorderCourses(orderedIds: string[]): Promise<{ ok: boolea
     if (error) return { ok: false, error: error.message };
   }
   return { ok: true };
+}
+
+// ============================ LIBRARY (brochures / resources) ============================
+const demoLibraryDocs: LibraryDoc[] = [];
+
+export async function getLibraryDocs(): Promise<LibraryDoc[]> {
+  if (demoMode()) return [...demoLibraryDocs];
+  const db = getSupabaseAdmin();
+  if (!db) return [...demoLibraryDocs];
+  const { data } = await db.from("library_docs").select("*").order("created_at", { ascending: false });
+  return (data as LibraryDoc[]) ?? [];
+}
+
+export async function getLibraryDocsByIds(ids?: string[] | null): Promise<LibraryDoc[]> {
+  const wanted = (ids || []).filter(Boolean);
+  if (!wanted.length) return [];
+  const all = await getLibraryDocs();
+  // Preserve the caller's order.
+  const map = new Map(all.map((d) => [d.id, d]));
+  return wanted.map((id) => map.get(id)).filter((d): d is LibraryDoc => !!d);
+}
+
+export async function addLibraryDoc(input: Partial<LibraryDoc>): Promise<LibraryDoc> {
+  const now = new Date().toISOString();
+  const row = {
+    id: uuid(),
+    title: input.title || "Untitled document",
+    category: input.category ?? null,
+    file_url: input.file_url || "",
+    file_size: input.file_size ?? null,
+    description: input.description ?? null,
+    created_at: now,
+    updated_at: now,
+  } as LibraryDoc;
+  if (demoMode()) { demoLibraryDocs.unshift(row); return row; }
+  return dbInsert<LibraryDoc>("library_docs", row as unknown as Record<string, unknown>);
+}
+
+export async function updateLibraryDoc(id: string, patch: Partial<LibraryDoc>): Promise<LibraryDoc | null> {
+  if (demoMode()) {
+    const idx = demoLibraryDocs.findIndex((d) => d.id === id);
+    if (idx === -1) return null;
+    demoLibraryDocs[idx] = { ...demoLibraryDocs[idx], ...patch, updated_at: new Date().toISOString() };
+    return demoLibraryDocs[idx];
+  }
+  return dbUpdate<LibraryDoc>("library_docs", id, { ...patch, updated_at: new Date().toISOString() } as Record<string, unknown>);
+}
+
+/** Where a library document is referenced (so we can warn before deleting). */
+export async function getLibraryDocUsage(id: string): Promise<{ courses: string[]; webinars: string[] }> {
+  const [courses, webinars] = await Promise.all([getAllCourses(), getWebinars()]);
+  const refs = (c: Course) => [...(c.brochure_ids || []), ...(c.after_registration?.doc_ids || [])];
+  return {
+    courses: courses.filter((c) => refs(c).includes(id)).map((c) => c.title),
+    webinars: webinars.filter((w) => (w.brochure_ids || []).includes(id)).map((w) => w.title),
+  };
+}
+
+export async function deleteLibraryDoc(id: string): Promise<boolean> {
+  if (demoMode()) {
+    const idx = demoLibraryDocs.findIndex((d) => d.id === id);
+    if (idx === -1) return false;
+    demoLibraryDocs.splice(idx, 1);
+    return true;
+  }
+  return dbDelete("library_docs", id);
 }
 
 // ============================ ENROLLMENTS ============================
@@ -953,6 +1023,7 @@ export async function addWebinar(input: Partial<Webinar>): Promise<Webinar> {
     join_note: input.join_note ?? null,
     materials: input.materials ?? [],
     cross_sell: input.cross_sell ?? {},
+    brochure_ids: input.brochure_ids ?? [],
     created_at: new Date().toISOString(),
   } as Webinar;
   if (demoMode()) {
