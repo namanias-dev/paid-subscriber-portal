@@ -227,6 +227,28 @@ export default function HomeSettingsForm() {
               </>
             ),
           },
+          {
+            id: "quizzes",
+            label: "Quizzes",
+            content: (
+              <>
+                <Section title="Lead form before quizzes" desc="When ON, guests must enter Name + Mobile before starting any quiz. Submissions appear in Lead CRM (source: quiz_public). Logged-in students are never asked.">
+                  <label className="flex items-center gap-3 sm:col-span-2">
+                    <input type="checkbox" checked={c.quiz_lead_gate !== false} onChange={(e) => setContent({ quiz_lead_gate: e.target.checked })} />
+                    <span className="text-sm"><b>{c.quiz_lead_gate !== false ? "Enabled" : "Disabled"}</b> — require the lead form before a guest can start a quiz.</span>
+                  </label>
+                </Section>
+                <Section title="Quizzes page quote" desc="Inspiring quote shown at the bottom of the public Quizzes page (replaces the old disclaimer).">
+                  <Field label="Quote text" full>
+                    <textarea className="input" rows={3} value={c.quiz_quote || ""} onChange={(e) => setContent({ quiz_quote: e.target.value })} placeholder={DEFAULT_SITE_SETTINGS.content.quiz_quote} />
+                  </Field>
+                  <Field label="Attribution" full>
+                    <input className="input" value={c.quiz_quote_author || ""} onChange={(e) => setContent({ quiz_quote_author: e.target.value })} placeholder={DEFAULT_SITE_SETTINGS.content.quiz_quote_author} />
+                  </Field>
+                </Section>
+              </>
+            ),
+          },
         ]}
       />
 

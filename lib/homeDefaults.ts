@@ -72,6 +72,10 @@ export const DEFAULT_CONTENT: Required<HomeContent> = {
   faq_heading: "Frequently asked questions",
   lead_heading: "Get free counselling",
   lead_sub: "Talk to our team and build a personalised UPSC roadmap — completely free.",
+  quiz_lead_gate: true,
+  quiz_quote:
+    "Every question you attempt today is a decision you'll make as an officer tomorrow. Practice isn't preparation for the exam — it's preparation for the chair you're destined to fill.",
+  quiz_quote_author: "Naman Sharma IAS Academy",
 };
 
 export const DEFAULT_BRAND: Required<BrandConfig> = {

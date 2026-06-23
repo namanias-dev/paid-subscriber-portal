@@ -1,7 +1,9 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { getPublicQuizzes } from "@/lib/dataProvider";
+import { Quote } from "lucide-react";
+import { getPublicQuizzes, getSiteSettings } from "@/lib/dataProvider";
 import { SITE_URL } from "@/lib/config";
+import { DEFAULT_CONTENT } from "@/lib/homeDefaults";
 import QuizBrowser from "@/components/public/quiz/QuizBrowser";
 
 export const dynamic = "force-dynamic";
@@ -20,7 +22,9 @@ export const metadata: Metadata = {
 };
 
 export default async function QuizzesLanding() {
-  const quizzes = await getPublicQuizzes();
+  const [quizzes, settings] = await Promise.all([getPublicQuizzes(), getSiteSettings()]);
+  const quote = settings.content.quiz_quote || DEFAULT_CONTENT.quiz_quote!;
+  const quoteAuthor = settings.content.quiz_quote_author || DEFAULT_CONTENT.quiz_quote_author!;
 
   const jsonLd = {
     "@context": "https://schema.org",
@@ -49,9 +53,15 @@ export default async function QuizzesLanding() {
 
       <QuizBrowser quizzes={quizzes} />
 
-      <p className="mt-10 text-center text-xs text-muted">
-        UPSC Prelims-style practice tests by Naman IAS Academy. Not an official UPSC document.
-      </p>
+      <figure className="relative mx-auto mt-14 max-w-3xl overflow-hidden rounded-3xl border border-[rgba(212,175,55,0.25)] bg-gradient-to-br from-[var(--ca-navy-900,#0a1a3f)] to-[var(--ca-navy-600,#1e3a8a)] px-6 py-10 text-center shadow-soft-lg sm:px-12 sm:py-14">
+        <span className="pointer-events-none absolute -right-10 -top-10 h-44 w-44 rounded-full bg-[rgba(212,175,55,0.18)] blur-2xl" aria-hidden="true" />
+        <Quote size={36} className="mx-auto text-[var(--ca-gold-bright,#e9c75a)]" aria-hidden="true" />
+        <blockquote className="mt-4">
+          <p className="font-heading text-xl font-semibold leading-relaxed text-white sm:text-2xl">&ldquo;{quote}&rdquo;</p>
+        </blockquote>
+        <div className="mx-auto mt-6 h-px w-16 bg-[rgba(212,175,55,0.5)]" aria-hidden="true" />
+        <figcaption className="mt-4 text-sm font-semibold uppercase tracking-wider text-[var(--ca-gold-bright,#e9c75a)]">{quoteAuthor}</figcaption>
+      </figure>
     </div>
   );
 }

@@ -628,6 +628,11 @@ export interface HomeContent {
   faq_heading?: string;
   lead_heading?: string;
   lead_sub?: string;
+  /** Quizzes: require a Name+Phone lead form before a guest starts any quiz. Default ON. */
+  quiz_lead_gate?: boolean;
+  /** Quizzes home page: inspiring quote shown in place of the old disclaimer. */
+  quiz_quote?: string;
+  quiz_quote_author?: string;
 }
 
 /** Editable brand & contact details shown across the site (footer, contact, home). */

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import {
   getQuizBySlug, getQuizQuestions, getAttemptsByQuiz, getAnswersByAttempt,
-  addAttempt, addLead, getEnrollments,
+  addAttempt, addLead, getEnrollments, getSiteSettings,
 } from "@/lib/dataProvider";
 import { getStudentSession } from "@/lib/session";
 import { checkQuizAccess } from "@/lib/quizAccess";
@@ -66,8 +66,14 @@ export async function POST(req: Request) {
     const norm = guest.mobile ? normalizeIndianMobile(guest.mobile) : null;
     const guestMobile = norm?.ok ? norm.digits10! : null;
 
-    // When the admin requires lead capture, enforce valid name + mobile server-side.
-    if (isGuest && quiz.result_settings?.capture_lead_before_result === true) {
+    // The lead gate is required when the global setting is ON (default) OR the per-quiz flag is set.
+    const settings = await getSiteSettings();
+    const requireLead =
+      settings.content.quiz_lead_gate !== false ||
+      quiz.result_settings?.capture_lead_before_result === true;
+
+    // When lead capture is required, enforce valid name + mobile server-side.
+    if (isGuest && requireLead) {
       if (!guest.name || guest.name.trim().length < 2 || !guestMobile) {
         return NextResponse.json(
           { ok: false, reason: "invalid_lead", error: "Please enter your name and a valid 10-digit mobile number." },
@@ -79,7 +85,9 @@ export async function POST(req: Request) {
       try {
         await addLead({
           name: guest.name, phone: guestMobile,
-          source: "quiz_public", course_interest: guest.interest || quiz.subject || "Quiz",
+          source: "quiz_public",
+          course_interest: guest.interest || quiz.title || quiz.subject || "Quiz",
+          campaign: "quiz",
           ...(guest.email ? { email: guest.email } as Record<string, string> : {}),
         });
       } catch { /* non-fatal */ }
