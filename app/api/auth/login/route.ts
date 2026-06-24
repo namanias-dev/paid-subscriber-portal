@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { findStudentByLogin, findBuyerByLogin, touchStreakOnLogin, logAccess, rateLimited } from "@/lib/dataProvider";
+import { findStudentByLogin, findStudentByPhone, findBuyerByLogin, touchStreakOnLogin, logAccess, rateLimited } from "@/lib/dataProvider";
 import { signStudentToken, signBuyerToken } from "@/lib/auth";
 import { STUDENT_COOKIE, BUYER_COOKIE } from "@/lib/config";
 import { isExpired, formatDate } from "@/lib/dates";
@@ -56,6 +56,15 @@ export async function POST(req: Request) {
     // 2) Student (subscription) login — existing behaviour, unchanged.
     const student = (await findStudentByLogin(rawPhone, codeRaw)) || (await findStudentByLogin(phoneDigits, codeRaw));
     if (!student) {
+      // Distinguish a REVOKED account (correct code, but access paused) so we can
+      // show a clear, trustworthy message instead of a generic failure.
+      const byPhone = (await findStudentByPhone(phoneDigits)) || (await findStudentByPhone(rawPhone));
+      if (byPhone && byPhone.access_code.toUpperCase() === codeRaw && byPhone.is_active === false) {
+        return NextResponse.json(
+          { ok: false, revoked: true, error: "Your access has been paused. Please contact us to restore it." },
+          { status: 403 }
+        );
+      }
       return NextResponse.json(
         { ok: false, error: "We couldn't verify those details. Please check your mobile number and login code." },
         { status: 401 }

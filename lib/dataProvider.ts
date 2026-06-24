@@ -1759,6 +1759,29 @@ export async function logAccess(studentId: string | null, action: string): Promi
   }
 }
 
+export interface AccessLogRow {
+  action: string;
+  timestamp: string;
+}
+
+/** Recent access/audit log entries for a student (login + admin access changes). */
+export async function getAccessLogs(studentId: string, limit = 25): Promise<AccessLogRow[]> {
+  if (demoMode()) return [];
+  const db = getSupabaseAdmin();
+  if (!db) return [];
+  try {
+    const { data } = await db
+      .from("access_logs")
+      .select("action,timestamp")
+      .eq("student_id", studentId)
+      .order("timestamp", { ascending: false })
+      .limit(limit);
+    return (data as AccessLogRow[]) ?? [];
+  } catch {
+    return [];
+  }
+}
+
 // ============================ SITE / HOME SETTINGS ============================
 // Demo-mode store persists across dev-server hot reloads via globalThis.
 const demoSettings = (() => {

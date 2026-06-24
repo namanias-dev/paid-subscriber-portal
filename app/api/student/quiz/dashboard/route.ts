@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
-import { getAllQuizzes, getAttemptsByUser, getEnrollments } from "@/lib/dataProvider";
+import { getAllQuizzes, getAttemptsByUser, getEnrollments, getStudentById } from "@/lib/dataProvider";
 import { getStudentSession } from "@/lib/session";
 import { checkQuizAccess } from "@/lib/quizAccess";
+import { studentAccessActive } from "@/lib/studentAccess";
 
 export const dynamic = "force-dynamic";
 
@@ -10,11 +11,13 @@ export async function GET() {
     const session = await getStudentSession();
     if (!session) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
 
-    const [all, attempts, enrollments] = await Promise.all([
+    const [all, attempts, enrollments, liveStudent] = await Promise.all([
       getAllQuizzes(),
       getAttemptsByUser(session.student_id),
       getEnrollments(session.student_id),
+      getStudentById(session.student_id),
     ]);
+    const liveActive = liveStudent ? studentAccessActive(liveStudent) : undefined;
 
     const published = all.filter((q) => q.status === "published");
     const attemptsByQuiz = new Map<string, typeof attempts>();
@@ -26,7 +29,7 @@ export async function GET() {
 
     const quizzes = published
       .map((q) => {
-        const access = checkQuizAccess(q, session, enrollments);
+        const access = checkQuizAccess(q, session, enrollments, liveActive);
         const mine = attemptsByQuiz.get(q.id) || [];
         const finalized = mine.filter((a) => a.status !== "IN_PROGRESS");
         const inProgress = mine.find((a) => a.status === "IN_PROGRESS");

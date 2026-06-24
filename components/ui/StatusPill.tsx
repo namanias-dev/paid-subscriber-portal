@@ -1,9 +1,9 @@
 import { daysLeft, isExpired, isExpiringSoon } from "@/lib/dates";
 
-export type Status = "active" | "expiring" | "expired" | "lifetime";
+export type Status = "active" | "expiring" | "expired" | "lifetime" | "revoked";
 
 export function statusOf(expiry: string | null, isActive = true): Status {
-  if (!isActive) return "expired";
+  if (!isActive) return "revoked";
   if (expiry === null) return "lifetime";
   if (isExpired(expiry)) return "expired";
   if (isExpiringSoon(expiry)) return "expiring";
@@ -23,6 +23,7 @@ export default function StatusPill({
     expiring: { cls: "pill-amber", label: `Expiring (${daysLeft(expiry)}d)` },
     expired: { cls: "pill-red", label: "Expired" },
     lifetime: { cls: "pill-saffron", label: "Lifetime ∞" },
+    revoked: { cls: "pill-red", label: "Revoked" },
   };
   const { cls, label } = map[status];
   return <span className={`pill ${cls}`}>{label}</span>;

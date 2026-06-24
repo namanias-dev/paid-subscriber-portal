@@ -3,37 +3,38 @@ import {
   getPublishedContent,
   getBookmarks,
   getProgress,
-  getStudentById,
   getEnrollments,
   getAllCourses,
 } from "@/lib/dataProvider";
-import { getStudentSession } from "@/lib/session";
-import { isExpired } from "@/lib/dates";
+import { resolveStudentAccess } from "@/lib/studentAccess";
 
 export async function GET() {
   try {
-    const session = await getStudentSession();
+    const { session, student, blocked, reason } = await resolveStudentAccess();
     if (!session) {
       return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
     }
-
-    const student = await getStudentById(session.student_id);
     if (!student) {
       return NextResponse.json({ ok: false, error: "Not found" }, { status: 404 });
     }
 
     const [enrollments, courses] = await Promise.all([getEnrollments(student.id), getAllCourses()]);
 
-    if (isExpired(student.expiry_date)) {
+    // Auto-expire OR admin revoke → graceful block (data is retained, never deleted).
+    if (blocked) {
       return NextResponse.json(
         {
           ok: false,
           expired: true,
+          revoked: reason === "revoked",
           expiry_date: student.expiry_date,
           student,
           enrollments,
           courses,
-          error: "Your access has expired. Renew to continue.",
+          error:
+            reason === "revoked"
+              ? "Your access has been paused. Please contact us to restore it."
+              : "Your access has expired. Renew to continue.",
         },
         { status: 403 }
       );

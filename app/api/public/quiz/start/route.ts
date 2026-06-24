@@ -6,6 +6,8 @@ import {
 } from "@/lib/dataProvider";
 import { getStudentSession } from "@/lib/session";
 import { checkQuizAccess } from "@/lib/quizAccess";
+import { getStudentById } from "@/lib/dataProvider";
+import { studentAccessActive } from "@/lib/studentAccess";
 import { attemptExpiry, buildOrder, clientQuestions, isAttemptExpired } from "@/lib/quizEngine";
 import { normalizeIndianMobile } from "@/lib/phone";
 
@@ -22,7 +24,10 @@ export async function POST(req: Request) {
 
     const session = await getStudentSession();
     const enrollments = session ? await getEnrollments(session.student_id) : [];
-    const access = checkQuizAccess(quiz, session, enrollments);
+    // DB-fresh access (so revoked/expired students can't start gated tests on a still-valid JWT).
+    const liveStudent = session ? await getStudentById(session.student_id) : null;
+    const liveActive = liveStudent ? studentAccessActive(liveStudent) : undefined;
+    const access = checkQuizAccess(quiz, session, enrollments, liveActive);
     if (!access.ok) return NextResponse.json({ ok: false, reason: access.reason, error: access.message || "Access denied" }, { status: 403 });
 
     const quizQuestions = await getQuizQuestions(quiz.id);

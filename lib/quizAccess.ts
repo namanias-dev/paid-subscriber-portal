@@ -20,7 +20,12 @@ export function quizIsLive(quiz: Quiz): boolean {
  * student's enrollments (empty for guests). Safe fallbacks: if no plan/batch
  * system, course enrollment or a non-free plan grants paid access.
  */
-export function checkQuizAccess(quiz: Quiz, session: SessionPayload | null, enrollments: Enrollment[]): AccessResult {
+/**
+ * @param liveActive when provided, overrides the JWT-snapshot plan check with a
+ * DB-fresh signal (false = revoked/expired) so access reflects admin changes
+ * immediately rather than after the 7-day token expires.
+ */
+export function checkQuizAccess(quiz: Quiz, session: SessionPayload | null, enrollments: Enrollment[], liveActive?: boolean): AccessResult {
   if (!quizIsLive(quiz)) return { ok: false, reason: "unavailable", message: "This quiz is not currently available." };
 
   if (quiz.requires_login && !session) return { ok: false, reason: "login" };
@@ -30,7 +35,8 @@ export function checkQuizAccess(quiz: Quiz, session: SessionPayload | null, enro
   const hasAllowedCourse = allowedCourses.length
     ? allowedCourses.some((c) => activeCourseIds.includes(c))
     : activeCourseIds.length > 0;
-  const hasPaidPlan = !!session && (session.expiry_date === null || Date.parse(session.expiry_date) > Date.now());
+  const jwtActive = session ? (session.expiry_date === null || Date.parse(session.expiry_date) > Date.now()) : false;
+  const hasPaidPlan = !!session && (liveActive !== undefined ? liveActive : jwtActive);
 
   if (quiz.requires_payment) {
     if (!session) return { ok: false, reason: "login" };

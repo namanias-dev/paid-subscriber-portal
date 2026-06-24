@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { PageHeader, useAdminData, LoadingBlock, TableShell } from "@/components/admin/ui";
 import Modal from "@/components/ui/Modal";
 import StatusPill from "@/components/ui/StatusPill";
@@ -18,7 +19,9 @@ export default function StudentsAdmin() {
   const [form, setForm] = useState({ name: "", phone: "", email: "", plan: "3m", target_year: "" });
   const [waLink, setWaLink] = useState<string | null>(null);
 
-  const filtered = (students || []).filter((s) => `${s.name} ${s.phone}`.toLowerCase().includes(q.toLowerCase()));
+  const filtered = (students || []).filter((s) =>
+    `${s.name} ${s.phone} ${s.access_code} ${s.email || ""}`.toLowerCase().includes(q.toLowerCase())
+  );
 
   async function add() {
     if (!form.name || !/^\d{10}$/.test(form.phone)) { toast("Name & 10-digit phone required", "error"); return; }
@@ -44,20 +47,23 @@ export default function StudentsAdmin() {
     <div>
       <PageHeader title="Students & Enrollments" subtitle="Manage access, fees and credentials" action={<button onClick={() => { setWaLink(null); setAddOpen(true); }} className="btn btn-primary text-sm">+ Add Student</button>} />
 
-      <div className="mb-4 max-w-sm"><SearchBar value={q} onChange={setQ} placeholder="Search students" /></div>
+      <div className="mb-4 max-w-sm"><SearchBar value={q} onChange={setQ} placeholder="Search by name, phone or code" /></div>
 
       <TableShell headers={["Name", "Phone", "Plan", "Access Code", "Valid Till", "Status", ""]}>
         {filtered.map((s) => (
           <tr key={s.id} className="border-b border-line last:border-0 hover:bg-surface2">
-            <td className="px-4 py-3 font-medium">{s.name}</td>
+            <td className="px-4 py-3 font-medium">
+              <Link href={`/admin/students/${s.id}`} className="text-ink hover:text-primary hover:underline">{s.name}</Link>
+            </td>
             <td className="px-4 py-3">{s.phone}</td>
             <td className="px-4 py-3 uppercase">{s.plan}</td>
             <td className="px-4 py-3 font-mono text-xs text-primary">{s.access_code}</td>
             <td className="px-4 py-3">{s.expiry_date ? formatDate(s.expiry_date) : "∞ Lifetime"}</td>
             <td className="px-4 py-3"><StatusPill expiry={s.expiry_date} isActive={s.is_active} /></td>
             <td className="px-4 py-3">
-              <div className="flex gap-2 text-xs">
-                <button onClick={() => action(s.id, "extend", 30)} className="text-primary">+30d</button>
+              <div className="flex items-center gap-3 text-xs">
+                <Link href={`/admin/students/${s.id}`} className="font-semibold text-primary">View profile</Link>
+                <button onClick={() => action(s.id, "extend", 30)} className="text-ink2 hover:text-primary">+30d</button>
                 <button onClick={() => action(s.id, "revoke")} className="text-danger">Revoke</button>
               </div>
             </td>
