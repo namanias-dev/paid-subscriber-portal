@@ -17,6 +17,7 @@ import type {
   LeadActivity,
   LeadFormConfig,
   Webinar,
+  WebinarRegistration,
   Payment,
   Referral,
   Staff,
@@ -1063,6 +1064,7 @@ export async function registerWebinar(webinarId: string, name: string, phone: st
     if (w) w.registrations += 1;
     // also push into CRM as a lead
     await addLead({ name, phone, source: "Webinar", webinar_registered: true, campaign: w?.title });
+    await ensureBuyer(phone, name).catch(() => null);
     return { ok: true };
   }
   const db = getSupabaseAdmin();
@@ -1074,7 +1076,27 @@ export async function registerWebinar(webinarId: string, name: string, phone: st
     }
   }
   await addLead({ name, phone, source: "Webinar", webinar_registered: true });
+  // UNIFIED IDENTITY: a webinar registrant (free or paid) becomes a first-class
+  // student + buyer so they appear in Students & Enrollments and can open their
+  // portal (webinar materials). Idempotent — one person stays one student.
+  await ensureBuyer(phone, name).catch(() => null);
   return { ok: true };
+}
+
+/** All webinar registrations (admin/reporting). Empty in demo mode. */
+export async function getAllWebinarRegistrations(): Promise<WebinarRegistration[]> {
+  if (demoMode()) return [];
+  const db = getSupabaseAdmin();
+  if (!db) return [];
+  try {
+    const { data } = await db
+      .from("webinar_registrations")
+      .select("*")
+      .order("created_at", { ascending: false });
+    return (data as WebinarRegistration[]) ?? [];
+  } catch {
+    return [];
+  }
 }
 
 /** Set of webinar IDs this phone has registered for (free or paid). Best-effort. */
@@ -1274,6 +1296,15 @@ export async function getBuyerByPhone(phone: string): Promise<Buyer | null> {
 export async function ensureBuyer(phone: string, name?: string | null): Promise<Buyer | null> {
   const p = (phone || "").trim();
   if (!p) return null;
+  const buyer = await ensureBuyerRow(p, name);
+  // UNIFIED IDENTITY: every paying/registered person is also a first-class student
+  // so they ALWAYS surface in Students & Enrollments. Idempotent (keyed by phone),
+  // and the student carries the SAME login code as access code (one code per person).
+  if (buyer) await ensureStudentForCustomer(p, name, buyer.login_code).catch(() => null);
+  return buyer;
+}
+
+async function ensureBuyerRow(p: string, name?: string | null): Promise<Buyer | null> {
   const existing = await getBuyerByPhone(p);
   if (existing) return existing;
 
@@ -1304,6 +1335,88 @@ export async function ensureBuyer(phone: string, name?: string | null): Promise<
     return data as Buyer;
   } catch {
     return (await getBuyerByPhone(p)) ?? null;
+  }
+}
+
+/**
+ * Ensure a master {@link Student} record exists for a paying/registered person.
+ * Idempotent by phone — a person with many purchases stays ONE student row.
+ * Course/webinar customers carry `plan = null` (no LMS subscription) and reuse
+ * their buyer login code as the access code, so there is exactly one credential
+ * per person. Returns the existing or newly-created student.
+ */
+export async function ensureStudentForCustomer(
+  phone: string,
+  name?: string | null,
+  accessCode?: string | null,
+  createdAt?: string | null
+): Promise<Student | null> {
+  const p = (phone || "").trim();
+  if (!p) return null;
+
+  // Existence check (tolerant of legacy duplicate phones — take the first).
+  const findExisting = async (): Promise<Student | null> => {
+    if (demoMode()) return mock.students.find((s) => s.phone === p) ?? null;
+    const db = getSupabaseAdmin();
+    if (!db) return mock.students.find((s) => s.phone === p) ?? null;
+    const { data } = await db.from("students").select("*").eq("phone", p).limit(1);
+    return ((data as Student[]) ?? [])[0] ?? null;
+  };
+
+  const existing = await findExisting();
+  if (existing) return existing;
+
+  let code = (accessCode || "").trim().toUpperCase();
+  if (!code) {
+    const buyer = await getBuyerByPhone(p);
+    code = (buyer?.login_code || generateAccessCode(name || "Student")).toUpperCase();
+  }
+  const now = createdAt || new Date().toISOString();
+  const row: Student = {
+    id: uuid(),
+    name: (name || "").trim() || "Student",
+    phone: p,
+    email: null,
+    plan: null, // course/webinar customer — no LMS subscription
+    months: null,
+    access_code: code,
+    start_date: now,
+    expiry_date: null, // course access is governed by enrollments, not an LMS expiry
+    amount_paid: null, // revenue is tracked in the payments ledger, never double-counted here
+    razorpay_payment_id: null,
+    razorpay_order_id: null,
+    target_year: null,
+    optional_subject: null,
+    notes: null,
+    streak_count: 0,
+    last_active_date: null,
+    is_active: true,
+    created_at: now,
+  };
+
+  if (demoMode()) {
+    mock.students.unshift(row);
+    return row;
+  }
+  const db = getSupabaseAdmin();
+  if (!db) {
+    mock.students.unshift(row);
+    return row;
+  }
+  try {
+    const { data, error } = await db.from("students").insert(row).select().single();
+    if (error) {
+      // Unique-phone race, or an access_code collision: re-read by phone first.
+      const again = await findExisting();
+      if (again) return again;
+      // Access-code collision (extremely unlikely): retry once with a fresh code.
+      const retry = { ...row, id: uuid(), access_code: generateAccessCode(name || "Student").toUpperCase() };
+      const { data: d2 } = await db.from("students").insert(retry).select().single();
+      return (d2 as Student) ?? (await findExisting());
+    }
+    return data as Student;
+  } catch {
+    return (await findExisting()) ?? null;
   }
 }
 
@@ -1800,6 +1913,72 @@ export async function recordOfflineWebinarPayment(
   }
   await registerWebinar(input.webinarId, input.name, phone).catch(() => null);
   return { ok: true };
+}
+
+export interface BackfillResult {
+  scannedPhones: number;
+  alreadyStudents: number;
+  studentsCreated: number;
+  buyersCreated: number;
+}
+
+/**
+ * Idempotent backfill: ensures EVERY existing paying/registered person (by phone)
+ * exists in Students & Enrollments. Scans buyers, paid payments, course
+ * enrollments and webinar registrations, derives one identity per phone, and
+ * creates the missing master student + buyer login. Never deletes or edits any
+ * payment/enrollment — it only links/derives. Running it twice creates nothing
+ * new (dedupe is by phone).
+ */
+export async function backfillPayingStudents(): Promise<BackfillResult> {
+  const [buyers, payments, enrollments, regs, students] = await Promise.all([
+    getBuyers(),
+    getPayments(),
+    getAllCourseEnrollments(),
+    getAllWebinarRegistrations(),
+    getStudents(),
+  ]);
+
+  const existingPhones = new Set(students.map((s) => (s.phone || "").trim()).filter(Boolean));
+  const existingBuyerPhones = new Set(buyers.map((b) => (b.phone || "").trim()).filter(Boolean));
+
+  // Earliest activity + best name per phone (one identity per person).
+  const people = new Map<string, { name: string; createdAt: string }>();
+  const consider = (phoneRaw: string | null | undefined, name: string | null | undefined, createdAt: string | null | undefined) => {
+    const phone = (phoneRaw || "").trim();
+    if (!phone) return;
+    const cur = people.get(phone);
+    const ts = createdAt || new Date().toISOString();
+    if (!cur) {
+      people.set(phone, { name: (name || "").trim(), createdAt: ts });
+    } else {
+      if (!cur.name && name) cur.name = name.trim();
+      if (ts < cur.createdAt) cur.createdAt = ts;
+    }
+  };
+
+  for (const b of buyers) consider(b.phone, b.name, b.created_at);
+  for (const p of payments) if (isPaidStatus(p.status)) consider(p.phone, p.student_name, p.created_at);
+  for (const e of enrollments) if (e.status !== "cancelled") consider(e.phone, e.student_name, e.created_at);
+  for (const r of regs) consider(r.phone, r.name, r.created_at);
+
+  let studentsCreated = 0;
+  let buyersCreated = 0;
+  let alreadyStudents = 0;
+
+  for (const [phone, meta] of people) {
+    if (existingPhones.has(phone)) {
+      alreadyStudents += 1;
+      continue;
+    }
+    const hadBuyer = existingBuyerPhones.has(phone);
+    const buyer = await ensureBuyerRow(phone, meta.name);
+    if (buyer && !hadBuyer) buyersCreated += 1;
+    const created = await ensureStudentForCustomer(phone, meta.name, buyer?.login_code, meta.createdAt);
+    if (created) studentsCreated += 1;
+  }
+
+  return { scannedPhones: people.size, alreadyStudents, studentsCreated, buyersCreated };
 }
 
 /**

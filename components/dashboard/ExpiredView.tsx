@@ -39,7 +39,7 @@ export default function ExpiredView({ student }: { student: Student | null }) {
         ))}
       </div>
 
-      <RenewModal open={open} onClose={() => setOpen(false)} currentPlan={student?.plan} />
+      <RenewModal open={open} onClose={() => setOpen(false)} currentPlan={student?.plan ?? undefined} />
     </div>
   );
 }

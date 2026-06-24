@@ -8,6 +8,12 @@ import {
   recordOfflineCoursePayment,
   recordOfflineWebinarPayment,
   getCourseEnrollmentsByPhone,
+  getAllCourseEnrollments,
+  getPayments,
+  getAllWebinarRegistrations,
+  getWebinars,
+  getAllCourses,
+  isPaidStatus,
   logAccess,
 } from "@/lib/dataProvider";
 import { getAdminSession } from "@/lib/session";
@@ -16,7 +22,43 @@ import { getPlan } from "@/lib/config";
 import { buildWelcomeMessage, buildWhatsAppLink } from "@/lib/whatsapp";
 import { sendAccessCodeEmail } from "@/lib/email";
 import { formatDate, formatINR, istInputToISO } from "@/lib/dates";
-import type { PlanId } from "@/lib/types";
+import { deriveEnrollment } from "@/lib/installments";
+import type { PlanId, Payment, CourseEnrollment, WebinarRegistration } from "@/lib/types";
+
+export interface StudentSummary {
+  courseCount: number;
+  webinarCount: number;
+  /** Human labels for each enrollment, e.g. "Safalta Foundation (EMI 0/3)". */
+  labels: string[];
+  courseSlugs: string[];
+  courseIds: string[];
+  webinarIds: string[];
+  totalPaid: number;
+  totalDue: number;
+  paymentStatus: "fully_paid" | "partial" | "outstanding" | "free";
+  /** ISO of most recent payment/enrollment/registration (for "latest" sort). */
+  lastActivity: string;
+  /** True when the student has no LMS subscription (course/webinar customer). */
+  isCustomer: boolean;
+}
+
+function groupByPhone<T extends { phone: string }>(rows: T[]): Map<string, T[]> {
+  const m = new Map<string, T[]>();
+  for (const r of rows) {
+    const p = (r.phone || "").trim();
+    if (!p) continue;
+    const arr = m.get(p);
+    if (arr) arr.push(r);
+    else m.set(p, [r]);
+  }
+  return m;
+}
+
+function ms(t: string | null | undefined): number {
+  if (!t) return 0;
+  const n = Date.parse(t);
+  return Number.isNaN(n) ? 0 : n;
+}
 
 interface CourseSelection {
   courseSlug: string;
@@ -31,8 +73,100 @@ export async function GET() {
     if (!(await requirePermission("manage_students_leads"))) {
       return NextResponse.json({ ok: false, error: "Forbidden" }, { status: 403 });
     }
-    const [students, stats] = await Promise.all([getStudents(), getStats()]);
-    return NextResponse.json({ ok: true, students, stats });
+    const [students, stats, enrollments, payments, regs, webinars, courses] = await Promise.all([
+      getStudents(),
+      getStats(),
+      getAllCourseEnrollments(),
+      getPayments(),
+      getAllWebinarRegistrations(),
+      getWebinars(),
+      getAllCourses(),
+    ]);
+
+    const paid = payments.filter((p) => isPaidStatus(p.status));
+    const enrByPhone = groupByPhone(enrollments.filter((e) => e.status !== "cancelled"));
+    const paidByPhone = groupByPhone<Payment>(paid);
+    const regsByPhone = groupByPhone<WebinarRegistration>(regs);
+    const webinarById = new Map(webinars.map((w) => [w.id, w]));
+    const webinarBySlug = new Map(webinars.map((w) => [w.slug, w]));
+
+    const summaries: Record<string, StudentSummary> = {};
+    for (const s of students) {
+      const phone = (s.phone || "").trim();
+      const enr: CourseEnrollment[] = enrByPhone.get(phone) ?? [];
+      const phonePaid: Payment[] = paidByPhone.get(phone) ?? [];
+
+      let totalDue = 0;
+      const labels: string[] = [];
+      const courseSlugs: string[] = [];
+      const courseIds: string[] = [];
+      for (const e of enr) {
+        const d = deriveEnrollment(e);
+        totalDue += d.remaining;
+        courseIds.push(e.course_id);
+        if (e.course_slug) courseSlugs.push(e.course_slug);
+        const tag =
+          e.status === "seat_booked"
+            ? " (Seat booked)"
+            : e.plan_type === "emi"
+              ? ` (EMI ${d.paidCount}/${d.installmentTotal})`
+              : d.isFullyPaid
+                ? ""
+                : " (Pay in full)";
+        labels.push(`${e.course_title}${tag}`);
+      }
+
+      const webKeys = new Set<string>();
+      const webinarIds: string[] = [];
+      for (const p of phonePaid.filter((p) => p.item_type === "webinar")) {
+        const w = (p.item_slug && webinarBySlug.get(p.item_slug)) || null;
+        const key = w?.id || p.item_slug || p.item;
+        if (webKeys.has(key)) continue;
+        webKeys.add(key);
+        if (w) webinarIds.push(w.id);
+        labels.push(`${w?.title || p.item} (Webinar)`);
+      }
+      for (const r of regsByPhone.get(phone) ?? []) {
+        if (webKeys.has(r.webinar_id)) continue;
+        webKeys.add(r.webinar_id);
+        webinarIds.push(r.webinar_id);
+        labels.push(`${webinarById.get(r.webinar_id)?.title || "Webinar"} (Webinar)`);
+      }
+
+      const totalPaid = phonePaid.reduce((a, p) => a + (p.amount || 0), 0);
+      const paymentStatus: StudentSummary["paymentStatus"] =
+        totalDue > 0 ? (totalPaid > 0 ? "partial" : "outstanding") : totalPaid > 0 ? "fully_paid" : "free";
+
+      let lastMs = ms(s.created_at);
+      for (const p of phonePaid) lastMs = Math.max(lastMs, ms(p.transaction_date || p.created_at));
+      for (const e of enr) lastMs = Math.max(lastMs, ms(e.updated_at || e.created_at));
+      for (const r of regsByPhone.get(phone) ?? []) lastMs = Math.max(lastMs, ms(r.created_at));
+
+      summaries[s.id] = {
+        courseCount: enr.length,
+        webinarCount: webKeys.size,
+        labels,
+        courseSlugs,
+        courseIds,
+        webinarIds,
+        totalPaid,
+        totalDue,
+        paymentStatus,
+        lastActivity: new Date(lastMs || Date.now()).toISOString(),
+        isCustomer: !s.plan,
+      };
+    }
+
+    const catalog = {
+      courses: courses
+        .map((c) => ({ slug: c.slug, title: c.title }))
+        .sort((a, b) => a.title.localeCompare(b.title)),
+      webinars: webinars
+        .map((w) => ({ id: w.id, title: w.title }))
+        .sort((a, b) => a.title.localeCompare(b.title)),
+    };
+
+    return NextResponse.json({ ok: true, students, stats, summaries, catalog });
   } catch {
     return NextResponse.json({ ok: false, error: "Failed to load students." }, { status: 500 });
   }

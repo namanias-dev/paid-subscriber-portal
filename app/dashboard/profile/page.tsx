@@ -48,7 +48,7 @@ export default function ProfilePage() {
     return <div className="card h-64 animate-pulse" />;
   }
 
-  const plan = getPlan(student.plan);
+  const plan = getPlan(student.plan ?? "");
   const lifetime = student.expiry_date === null;
   const left = daysLeft(student.expiry_date);
   const years = [2025, 2026, 2027, 2028, 2029];
@@ -68,7 +68,7 @@ export default function ProfilePage() {
         </div>
 
         <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
-          <Info label="Plan" value={plan?.name || student.plan} />
+          <Info label="Plan" value={plan?.name || student.plan || "—"} />
           <Info label="Access Code" value={student.access_code} mono />
           <Info label="Start Date" value={formatDate(student.start_date)} />
           <Info
@@ -126,7 +126,7 @@ export default function ProfilePage() {
       <RenewModal
         open={renewOpen}
         onClose={() => setRenewOpen(false)}
-        currentPlan={student.plan}
+        currentPlan={student.plan ?? undefined}
       />
     </div>
   );

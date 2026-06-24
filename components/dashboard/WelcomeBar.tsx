@@ -8,7 +8,7 @@ import type { Student } from "@/lib/types";
 
 export default function WelcomeBar({ student }: { student: Student }) {
   const firstName = student.name.split(" ")[0];
-  const plan = getPlan(student.plan);
+  const plan = getPlan(student.plan ?? "");
   const lifetime = student.expiry_date === null;
   const left = daysLeft(student.expiry_date);
   const pct = planUsedPercent(student.start_date, student.expiry_date);

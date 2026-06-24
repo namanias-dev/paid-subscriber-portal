@@ -71,6 +71,17 @@ export async function POST(req: Request) {
       );
     }
 
+    // A course/webinar customer (no LMS subscription) is a first-class student in the
+    // admin list, but the /dashboard (LMS content) is not theirs — their purchases live
+    // in the portal (reached via their buyer login, which is checked above). Guard here
+    // so a customer access code can never unlock subscription content.
+    if (!student.plan) {
+      return NextResponse.json(
+        { ok: false, error: "This login code is for your course purchases — please use it to open your portal." },
+        { status: 403 }
+      );
+    }
+
     if (isExpired(student.expiry_date)) {
       return NextResponse.json(
         {
@@ -86,10 +97,11 @@ export async function POST(req: Request) {
     const updated = await touchStreakOnLogin(student);
     await logAccess(student.id, "login");
 
+    const plan = updated.plan ?? student.plan; // guaranteed non-null by the guard above
     const token = await signStudentToken({
       student_id: updated.id,
       name: updated.name,
-      plan: updated.plan,
+      plan,
       expiry_date: updated.expiry_date,
     });
 
@@ -97,7 +109,7 @@ export async function POST(req: Request) {
       ok: true,
       kind: "student",
       redirect: "/dashboard",
-      student: { id: updated.id, name: updated.name, plan: updated.plan },
+      student: { id: updated.id, name: updated.name, plan },
     });
     res.cookies.set(STUDENT_COOKIE, token, COOKIE_OPTS);
     return res;

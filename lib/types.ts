@@ -29,7 +29,8 @@ export interface Student {
   name: string;
   phone: string;
   email: string | null;
-  plan: PlanId;
+  /** LMS subscription plan. NULL = a course/webinar customer (no LMS subscription), still a first-class student. */
+  plan: PlanId | null;
   months: number | null;
   access_code: string;
   start_date: string;
