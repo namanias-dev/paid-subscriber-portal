@@ -42,6 +42,8 @@ export interface Student {
   streak_count: number;
   last_active_date: string | null;
   is_active: boolean;
+  /** Optional internal admin notes (never shown to the student). */
+  notes?: string | null;
   created_at: string;
 }
 
@@ -498,6 +500,8 @@ export interface PaymentReceipt {
   remaining: number;
   installments_summary: string;
   status: "Seat Booked" | "Partially Paid" | "Fully Paid";
+  /** Payment method, e.g. "Cash", "Bank Transfer", "Offline UPI", or a gateway name. Null for older/online records. */
+  method?: string | null;
   issued_at: string;
 }
 

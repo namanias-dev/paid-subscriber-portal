@@ -99,6 +99,9 @@ export default function ReceiptView({ receipt, contact }: { receipt: PaymentRece
                 <span style={{ fontWeight: 600 }}>{receipt.payment_label}</span>
                 <span style={{ fontSize: 24, fontWeight: 800, color: NAVY }}>{formatINR(receipt.amount)}</span>
               </div>
+              {receipt.method && (
+                <div style={{ fontSize: 12, color: "#555", marginTop: 4 }}>Payment method: <span style={{ fontWeight: 700 }}>{receipt.method}</span></div>
+              )}
               {receipt.gateway_ref && (
                 <div style={{ fontSize: 12, color: "#555", marginTop: 4 }}>Transaction Ref: <span style={{ fontFamily: "monospace" }}>{receipt.gateway_ref}</span></div>
               )}

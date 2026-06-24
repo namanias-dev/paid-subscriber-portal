@@ -12,17 +12,7 @@ import {
   eazypaySubMerchantId,
   PAYMENT_GATEWAY,
 } from "@/lib/eazypay";
-import {
-  resolveEmiConfig,
-  effectiveSeatAmount,
-  buildSchedule,
-  buildFullSchedule,
-  buildFullWithSeatSchedule,
-  buildInstallmentOnlySchedule,
-  payInFullTotal,
-} from "@/lib/installments";
-import { formatISTDate } from "@/lib/dates";
-import type { InstallmentItem } from "@/lib/types";
+import { planCourseEnrollment } from "@/lib/installments";
 
 export const dynamic = "force-dynamic";
 
@@ -33,13 +23,6 @@ async function uniqueReference(code: string): Promise<string> {
     if (!existing) return ref;
   }
   return makeReferenceNo(code);
-}
-
-function buildBatchLabel(batchStart: string | null, timings?: string[] | null): string | null {
-  const parts: string[] = [];
-  if (batchStart) parts.push(`Starts ${formatISTDate(batchStart)}`);
-  if (timings && timings.length) parts.push(timings.join(" · "));
-  return parts.length ? parts.join(" · ") : null;
 }
 
 export async function POST(req: Request) {
@@ -65,102 +48,15 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: "This course is not open for enrollment." }, { status: 400 });
     }
 
-    const standardTotal = Math.max(0, Math.round(course.price));
-    if (standardTotal <= 0) {
-      return NextResponse.json({ ok: false, error: "This course has no payable fee." }, { status: 400 });
-    }
-
-    const cfg = resolveEmiConfig(course);
-    const payInFull = payInFullTotal(course);
-    const bookingISO = new Date().toISOString();
-    const seatConfigured = cfg.enabled && (cfg.seatAmount != null || cfg.allowCustomSeat);
-    const batchLabel = buildBatchLabel(course.batch_start, course.batch_timings);
-
-    let schedule: InstallmentItem[];
-    let firstAmount: number;
-    let firstKind: "seat" | "full" | "installment";
-    let firstInstallmentNo = 0;
-    let planType: "full" | "emi";
-    let totalFee: number;
-    let installmentCount = 0;
-
-    /** Validate a requested seat amount against config + total; returns the clamped value or throws an error message. */
-    const resolveSeat = (base: number): number | string => {
-      const requestedSeat = body.seatAmount != null ? Math.round(Number(body.seatAmount)) : null;
-      const seat = effectiveSeatAmount(cfg, base, requestedSeat);
-      if (seat < 1 || seat >= base) return "Invalid seat amount.";
-      const floor = cfg.allowCustomSeat ? (cfg.minSeatAmount ?? cfg.seatAmount ?? 1) : (cfg.seatAmount ?? 1);
-      if (seat < floor) return "Seat amount is below the minimum.";
-      return seat;
-    };
-
-    if (plan === "emi") {
-      if (!cfg.enabled) {
-        return NextResponse.json({ ok: false, error: "EMI is not available for this course." }, { status: 400 });
-      }
-      const count = Math.round(Number(body.installmentCount) || 0);
-      if (!cfg.installmentCounts.includes(count)) {
-        return NextResponse.json({ ok: false, error: "Invalid installment plan." }, { status: 400 });
-      }
-      // EMI always uses the STANDARD price as base (no pay-in-full discount).
-      totalFee = standardTotal;
-      planType = "emi";
-      installmentCount = count;
-
-      if (bookSeat && seatConfigured) {
-        const seat = resolveSeat(standardTotal);
-        if (typeof seat === "string") return NextResponse.json({ ok: false, error: seat }, { status: 400 });
-        schedule = buildSchedule({
-          total: standardTotal,
-          seatAmount: seat,
-          count,
-          bookingISO,
-          firstIntervalDays: cfg.firstIntervalDays,
-          intervalMonths: cfg.intervalMonths,
-        });
-        firstAmount = seat;
-        firstKind = "seat";
-        firstInstallmentNo = 0;
-      } else {
-        // No seat: pay installment 1 today, the rest over time.
-        schedule = buildInstallmentOnlySchedule({
-          total: standardTotal,
-          count,
-          bookingISO,
-          intervalMonths: cfg.intervalMonths,
-        });
-        firstAmount = schedule[0].amount;
-        firstKind = "installment";
-        firstInstallmentNo = 1;
-      }
-    } else {
-      if (!cfg.allowFull && cfg.enabled) {
-        return NextResponse.json({ ok: false, error: "Full payment is not available for this course." }, { status: 400 });
-      }
-      // Pay-in-full uses the DISCOUNTED total.
-      totalFee = payInFull;
-      planType = "full";
-
-      if (bookSeat && seatConfigured) {
-        const seat = resolveSeat(payInFull);
-        if (typeof seat === "string") return NextResponse.json({ ok: false, error: seat }, { status: 400 });
-        schedule = buildFullWithSeatSchedule({
-          payInFull,
-          seatAmount: seat,
-          bookingISO,
-          firstIntervalDays: cfg.firstIntervalDays,
-        });
-        firstAmount = seat;
-        firstKind = "seat";
-        firstInstallmentNo = 0;
-        installmentCount = 1;
-      } else {
-        schedule = buildFullSchedule(payInFull);
-        firstAmount = payInFull;
-        firstKind = "full";
-        firstInstallmentNo = 0;
-      }
-    }
+    const planned = planCourseEnrollment({
+      course,
+      plan,
+      bookSeat,
+      seatAmount: body.seatAmount != null ? Number(body.seatAmount) : null,
+      installmentCount: body.installmentCount != null ? Number(body.installmentCount) : null,
+    });
+    if (!planned.ok) return NextResponse.json({ ok: false, error: planned.error }, { status: 400 });
+    const { schedule, totalFee, planType, installmentCount, batchLabel, firstAmount, firstKind, firstInstallmentNo } = planned.plan;
 
     const enrollment = await addCourseEnrollment({
       phone: mobile,

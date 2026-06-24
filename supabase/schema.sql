@@ -25,6 +25,7 @@ create table if not exists public.students (
   streak_count int default 0,
   last_active_date date,
   is_active boolean default true,
+  notes text,
   created_at timestamptz default now()
 );
 
@@ -399,6 +400,7 @@ create table if not exists public.payment_receipts (
   remaining int not null default 0,
   installments_summary text,
   status text,
+  method text,
   issued_at timestamptz default now()
 );
 create index if not exists payment_receipts_phone_idx on public.payment_receipts (phone);

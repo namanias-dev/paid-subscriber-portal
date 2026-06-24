@@ -40,7 +40,7 @@ import type {
   CourseEnrollment,
   PaymentReceipt,
 } from "./types";
-import { deriveEnrollment, enrollmentStatusFromSchedule, installmentsSummary } from "./installments";
+import { deriveEnrollment, enrollmentStatusFromSchedule, installmentsSummary, planCourseEnrollment } from "./installments";
 import { mergeSiteSettings } from "./homeDefaults";
 import { DEFAULT_ROLES, resolvePermissions, type PermissionSet } from "./permissions";
 
@@ -146,6 +146,7 @@ export interface NewStudentInput {
   start_date?: string;
   target_year?: number | null;
   optional_subject?: string | null;
+  notes?: string | null;
   razorpay_payment_id?: string | null;
   razorpay_order_id?: string | null;
 }
@@ -168,6 +169,7 @@ export async function addStudent(input: NewStudentInput): Promise<Student> {
     razorpay_order_id: input.razorpay_order_id ?? null,
     target_year: input.target_year ?? null,
     optional_subject: input.optional_subject ?? null,
+    notes: input.notes ?? null,
     streak_count: 0,
     last_active_date: null,
     is_active: true,
@@ -1404,7 +1406,11 @@ export async function updateCourseEnrollment(id: string, patch: Partial<CourseEn
 /** Course ids the phone has actively paid for (seat or full) — drives Class Hub access. */
 export async function paidCourseIdsForPhone(phone: string): Promise<string[]> {
   const list = await getCourseEnrollmentsByPhone(phone);
-  return list.filter((e) => e.amount_paid > 0 && e.status !== "cancelled").map((e) => e.course_id);
+  // amount_paid > 0 covers paid seats/installments/full; status "fully_paid"
+  // additionally unlocks complimentary (₹0) enrollments granted by an admin.
+  return list
+    .filter((e) => (e.amount_paid > 0 || e.status === "fully_paid") && e.status !== "cancelled")
+    .map((e) => e.course_id);
 }
 
 async function nextReceiptNo(): Promise<string> {
@@ -1536,6 +1542,7 @@ export async function finalizeCoursePaymentByReference(
     remaining: derived.remaining,
     installments_summary: summary,
     status: statusLabel,
+    method: payment.payment_mode || payment.mode || null,
     issued_at: paidAt,
   };
   const saved = await insertReceipt(receipt);
@@ -1562,6 +1569,237 @@ export async function finalizeCoursePaymentByReference(
   }
 
   return { enrollment: updated, receipt: saved };
+}
+
+// ==================== ADMIN: MANUAL ENROLL + OFFLINE/CASH PAYMENTS ====================
+// These reuse the EXACT same enrollment schedule + finalize + receipt logic the
+// online flow uses, so a manually-added student is indistinguishable from a
+// self-registered one (same ledger, EMI math, receipts, Class Hub access).
+
+/** A short, unique, human-traceable reference for offline (cash/bank) payments. */
+async function uniqueOfflineRef(): Promise<string> {
+  for (let i = 0; i < 6; i++) {
+    const ref = `OFF-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
+    if (!(await getPaymentByReference(ref))) return ref;
+  }
+  return `OFF-${Date.now().toString(36).toUpperCase()}-${uuid().slice(0, 4).toUpperCase()}`;
+}
+
+export interface EnrollStudentInCourseInput {
+  phone: string;
+  name: string;
+  email?: string | null;
+  courseSlug: string;
+  /** "full" | "emi" | "complimentary" */
+  plan: "full" | "emi" | "complimentary";
+  bookSeat?: boolean;
+  seatAmount?: number | null;
+  installmentCount?: number | null;
+}
+
+/**
+ * Create a course enrollment for a student exactly like the public checkout does
+ * (same schedule), but WITHOUT a gateway redirect. Complimentary = free, fully
+ * unlocked at ₹0. Always ensures the buyer/login-code exists so the student can
+ * reach the portal + Class Hub immediately.
+ */
+export async function enrollStudentInCourse(
+  input: EnrollStudentInCourseInput
+): Promise<{ ok: true; enrollment: CourseEnrollment } | { ok: false; error: string }> {
+  const phone = (input.phone || "").trim();
+  if (!/^\d{10}$/.test(phone)) return { ok: false, error: "Valid 10-digit phone required." };
+  const course = await getCourseBySlug(input.courseSlug);
+  if (!course) return { ok: false, error: "Course not found." };
+
+  // Don't double-enroll the same phone into the same course.
+  const existing = (await getCourseEnrollmentsByPhone(phone)).find((e) => e.course_id === course.id && e.status !== "cancelled");
+  if (existing) return { ok: false, error: `Already enrolled in ${course.title}.` };
+
+  const now = new Date().toISOString();
+
+  if (input.plan === "complimentary") {
+    const enrollment = await addCourseEnrollment({
+      phone,
+      student_name: input.name,
+      email: input.email || null,
+      course_id: course.id,
+      course_slug: course.slug,
+      course_title: course.title,
+      batch_label: null,
+      plan_type: "full",
+      total_fee: 0,
+      amount_paid: 0,
+      installment_count: 0,
+      status: "fully_paid",
+      schedule: [{ no: 0, kind: "full", label: "Complimentary access", amount: 0, due: null, paid: true, paid_at: now }],
+    });
+    await ensureBuyer(phone, input.name).catch(() => null);
+    return { ok: true, enrollment };
+  }
+
+  const planned = planCourseEnrollment({
+    course,
+    plan: input.plan,
+    bookSeat: !!input.bookSeat,
+    seatAmount: input.seatAmount ?? null,
+    installmentCount: input.installmentCount ?? null,
+  });
+  if (!planned.ok) return { ok: false, error: planned.error };
+
+  const enrollment = await addCourseEnrollment({
+    phone,
+    student_name: input.name,
+    email: input.email || null,
+    course_id: course.id,
+    course_slug: course.slug,
+    course_title: course.title,
+    batch_label: planned.plan.batchLabel,
+    plan_type: planned.plan.planType,
+    total_fee: planned.plan.totalFee,
+    amount_paid: 0,
+    installment_count: planned.plan.installmentCount,
+    status: "pending",
+    schedule: planned.plan.schedule,
+  });
+  await ensureBuyer(phone, input.name).catch(() => null);
+  return { ok: true, enrollment };
+}
+
+export interface OfflineCoursePaymentInput {
+  enrollmentId: string;
+  /** Which schedule line to settle. "full" pays the entire remaining balance. */
+  kind: "seat" | "installment" | "full";
+  /** Required for kind="installment" when a specific installment is targeted. */
+  installmentNo?: number | null;
+  method: string;
+  /** IST-correct ISO instant of the payment (defaults to now). */
+  dateISO?: string;
+  note?: string | null;
+}
+
+/**
+ * Record a cash/offline payment against an enrollment. Creates a PAID payment in
+ * the SAME ledger, then runs the SAME finalize routine (advances the schedule,
+ * recomputes paid/total/status, issues the branded receipt). Amounts are taken
+ * from the schedule (or exact remaining for "full"), so totals always reconcile.
+ */
+export async function recordOfflineCoursePayment(
+  input: OfflineCoursePaymentInput
+): Promise<{ ok: true; enrollment: CourseEnrollment; receipt: PaymentReceipt } | { ok: false; error: string }> {
+  const enrollment = await getCourseEnrollmentById(input.enrollmentId);
+  if (!enrollment) return { ok: false, error: "Enrollment not found." };
+  const schedule = enrollment.schedule || [];
+  const method = (input.method || "Cash").trim();
+
+  let amount: number;
+  let kind = input.kind;
+  let installmentNo = 0;
+  let label = "";
+
+  if (kind === "full") {
+    const remaining = deriveEnrollment(enrollment).remaining;
+    if (remaining <= 0) return { ok: false, error: "This enrollment is already fully paid." };
+    amount = remaining;
+    installmentNo = 0;
+  } else if (kind === "seat") {
+    const item = schedule.find((s) => s.kind === "seat" && !s.paid);
+    if (!item) return { ok: false, error: "No outstanding seat payment." };
+    amount = item.amount;
+    installmentNo = item.no;
+    label = item.label;
+  } else {
+    const item =
+      input.installmentNo != null
+        ? schedule.find((s) => s.kind === "installment" && s.no === input.installmentNo && !s.paid)
+        : schedule.find((s) => s.kind === "installment" && !s.paid);
+    if (!item) return { ok: false, error: "No outstanding installment to record." };
+    amount = item.amount;
+    installmentNo = item.no;
+    label = item.label;
+  }
+
+  const ref = await uniqueOfflineRef();
+  const dateISO = input.dateISO || new Date().toISOString();
+  const itemLabel =
+    kind === "full"
+      ? `${enrollment.course_title} — Remaining balance`
+      : `${enrollment.course_title} — ${label || (kind === "seat" ? "Book Your Seat" : "Installment")}`;
+
+  await createPayment({
+    student_name: enrollment.student_name,
+    phone: enrollment.phone,
+    email: enrollment.email,
+    item: itemLabel,
+    item_type: "course",
+    item_slug: enrollment.course_slug,
+    amount,
+    status: "PAID",
+    gateway: "offline",
+    reference_no: ref,
+    gateway_ref: input.note ? `${method} · ${input.note}` : method,
+    payment_mode: method,
+    mode: method,
+    transaction_amount: amount,
+    transaction_date: dateISO,
+    created_at: dateISO,
+    razorpay_payment_id: null,
+    enrollment_id: enrollment.id,
+    payment_kind: kind,
+    installment_no: installmentNo,
+  });
+
+  const finalized = await finalizeCoursePaymentByReference(ref);
+  if (!finalized) return { ok: false, error: "Could not apply the payment." };
+  return { ok: true, enrollment: finalized.enrollment, receipt: finalized.receipt };
+}
+
+export interface OfflineWebinarPaymentInput {
+  webinarId: string;
+  name: string;
+  phone: string;
+  email?: string | null;
+  amount: number;
+  method: string;
+  dateISO?: string;
+  note?: string | null;
+}
+
+/** Record a cash/offline webinar payment (one-time) + register the attendee. */
+export async function recordOfflineWebinarPayment(
+  input: OfflineWebinarPaymentInput
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const phone = (input.phone || "").trim();
+  if (!/^\d{10}$/.test(phone)) return { ok: false, error: "Valid 10-digit phone required." };
+  const webinar = (await getWebinars()).find((w) => w.id === input.webinarId);
+  if (!webinar) return { ok: false, error: "Webinar not found." };
+  const amount = Math.max(0, Math.round(Number(input.amount) || 0));
+  const method = (input.method || "Cash").trim();
+  const dateISO = input.dateISO || new Date().toISOString();
+  const ref = await uniqueOfflineRef();
+
+  if (amount > 0) {
+    await createPayment({
+      student_name: input.name,
+      phone,
+      email: input.email || null,
+      item: webinar.title,
+      item_type: "webinar",
+      item_slug: webinar.slug,
+      amount,
+      status: "PAID",
+      gateway: "offline",
+      reference_no: ref,
+      gateway_ref: input.note ? `${method} · ${input.note}` : method,
+      payment_mode: method,
+      mode: method,
+      transaction_amount: amount,
+      transaction_date: dateISO,
+      created_at: dateISO,
+      razorpay_payment_id: null,
+    });
+  }
+  await registerWebinar(input.webinarId, input.name, phone).catch(() => null);
+  return { ok: true };
 }
 
 /**

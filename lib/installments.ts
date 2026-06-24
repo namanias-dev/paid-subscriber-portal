@@ -1,4 +1,4 @@
-import { addDaysISO, addMonthsISO } from "./dates";
+import { addDaysISO, addMonthsISO, formatISTDate } from "./dates";
 import type {
   Course,
   CourseEmiConfig,
@@ -178,6 +178,125 @@ export function buildInstallmentOnlySchedule(opts: {
     });
   }
   return items;
+}
+
+function buildBatchLabel(batchStart: string | null, timings?: string[] | null): string | null {
+  const parts: string[] = [];
+  if (batchStart) parts.push(`Starts ${formatISTDate(batchStart)}`);
+  if (timings && timings.length) parts.push(timings.join(" · "));
+  return parts.length ? parts.join(" · ") : null;
+}
+
+export interface PlanCourseInput {
+  course: Course;
+  plan: "full" | "emi";
+  bookSeat: boolean;
+  seatAmount?: number | null;
+  installmentCount?: number | null;
+  bookingISO?: string;
+}
+
+export interface PlannedEnrollment {
+  schedule: InstallmentItem[];
+  totalFee: number;
+  planType: "full" | "emi";
+  installmentCount: number;
+  batchLabel: string | null;
+  /** The amount, kind and number of the FIRST payable line (for the initial payment). */
+  firstAmount: number;
+  firstKind: "seat" | "full" | "installment";
+  firstInstallmentNo: number;
+}
+
+/**
+ * Single source of truth for turning a course + chosen plan into an enrollment
+ * schedule. Used by BOTH the public checkout (create-payment) and the admin
+ * add/enroll flow so a manually-added student is identical to a self-registered
+ * one. Pure (no I/O); returns a discriminated result with friendly errors.
+ */
+export function planCourseEnrollment(
+  input: PlanCourseInput
+): { ok: true; plan: PlannedEnrollment } | { ok: false; error: string } {
+  const { course } = input;
+  const standardTotal = Math.max(0, Math.round(course.price));
+  if (standardTotal <= 0) return { ok: false, error: "This course has no payable fee." };
+
+  const cfg = resolveEmiConfig(course);
+  const payInFull = payInFullTotal(course);
+  const bookingISO = input.bookingISO || new Date().toISOString();
+  const seatConfigured = cfg.enabled && (cfg.seatAmount != null || cfg.allowCustomSeat);
+  const batchLabel = buildBatchLabel(course.batch_start, course.batch_timings);
+
+  const resolveSeat = (base: number): number | string => {
+    const requestedSeat = input.seatAmount != null ? Math.round(Number(input.seatAmount)) : null;
+    const seat = effectiveSeatAmount(cfg, base, requestedSeat);
+    if (seat < 1 || seat >= base) return "Invalid seat amount.";
+    const floor = cfg.allowCustomSeat ? (cfg.minSeatAmount ?? cfg.seatAmount ?? 1) : (cfg.seatAmount ?? 1);
+    if (seat < floor) return "Seat amount is below the minimum.";
+    return seat;
+  };
+
+  let schedule: InstallmentItem[];
+  let firstAmount: number;
+  let firstKind: "seat" | "full" | "installment";
+  let firstInstallmentNo = 0;
+  let planType: "full" | "emi";
+  let totalFee: number;
+  let installmentCount = 0;
+
+  if (input.plan === "emi") {
+    if (!cfg.enabled) return { ok: false, error: "EMI is not available for this course." };
+    const count = Math.round(Number(input.installmentCount) || 0);
+    if (!cfg.installmentCounts.includes(count)) return { ok: false, error: "Invalid installment plan." };
+    totalFee = standardTotal;
+    planType = "emi";
+    installmentCount = count;
+
+    if (input.bookSeat && seatConfigured) {
+      const seat = resolveSeat(standardTotal);
+      if (typeof seat === "string") return { ok: false, error: seat };
+      schedule = buildSchedule({
+        total: standardTotal,
+        seatAmount: seat,
+        count,
+        bookingISO,
+        firstIntervalDays: cfg.firstIntervalDays,
+        intervalMonths: cfg.intervalMonths,
+      });
+      firstAmount = seat;
+      firstKind = "seat";
+      firstInstallmentNo = 0;
+    } else {
+      schedule = buildInstallmentOnlySchedule({ total: standardTotal, count, bookingISO, intervalMonths: cfg.intervalMonths });
+      firstAmount = schedule[0].amount;
+      firstKind = "installment";
+      firstInstallmentNo = 1;
+    }
+  } else {
+    if (!cfg.allowFull && cfg.enabled) return { ok: false, error: "Full payment is not available for this course." };
+    totalFee = payInFull;
+    planType = "full";
+
+    if (input.bookSeat && seatConfigured) {
+      const seat = resolveSeat(payInFull);
+      if (typeof seat === "string") return { ok: false, error: seat };
+      schedule = buildFullWithSeatSchedule({ payInFull, seatAmount: seat, bookingISO, firstIntervalDays: cfg.firstIntervalDays });
+      firstAmount = seat;
+      firstKind = "seat";
+      firstInstallmentNo = 0;
+      installmentCount = 1;
+    } else {
+      schedule = buildFullSchedule(payInFull);
+      firstAmount = payInFull;
+      firstKind = "full";
+      firstInstallmentNo = 0;
+    }
+  }
+
+  return {
+    ok: true,
+    plan: { schedule, totalFee, planType, installmentCount, batchLabel, firstAmount, firstKind, firstInstallmentNo },
+  };
 }
 
 export interface EnrollmentDerived {

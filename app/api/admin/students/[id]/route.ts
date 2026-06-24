@@ -97,6 +97,8 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
       nextDue: { label: string; amount: number; due: string | null } | null;
       createdAt: string;
       source: "course" | "legacy";
+      /** Unpaid schedule lines an admin can settle with a cash/offline payment. */
+      unpaid: { kind: "seat" | "installment" | "full"; no: number; label: string; amount: number; due: string | null }[];
     };
 
     const courses: CourseCard[] = courseEnrollments.map((e) => {
@@ -124,6 +126,9 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
           : null,
         createdAt: e.created_at,
         source: "course",
+        unpaid: (e.schedule || [])
+          .filter((s) => !s.paid)
+          .map((s) => ({ kind: s.kind, no: s.no, label: s.label, amount: s.amount, due: s.due })),
       };
     });
 
@@ -144,6 +149,7 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
         nextDue: nextUnpaid ? { label: nextUnpaid.label, amount: nextUnpaid.amount, due: nextUnpaid.due } : null,
         createdAt: e.enrolled_at,
         source: "legacy",
+        unpaid: [],
       });
     }
 
@@ -335,6 +341,7 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
       if (body.target_year != null) patch.target_year = body.target_year ? Number(body.target_year) : null;
       if (body.optional_subject != null)
         patch.optional_subject = body.optional_subject ? String(body.optional_subject) : null;
+      if (body.notes != null) patch.notes = body.notes ? String(body.notes) : null;
       if (body.amount_paid != null) patch.amount_paid = Number(body.amount_paid);
       if (body.is_active != null) patch.is_active = Boolean(body.is_active);
       if (body.start_date != null) patch.start_date = new Date(body.start_date).toISOString();

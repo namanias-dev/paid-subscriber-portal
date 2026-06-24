@@ -160,7 +160,8 @@ export async function downloadReceiptPdf(receipt: PaymentReceipt, contact: Recei
   y += 12;
 
   // ---- This payment (gold box) ----
-  const boxH = receipt.gateway_ref ? 28 : 24;
+  const extraLines = (receipt.method ? 1 : 0) + (receipt.gateway_ref ? 1 : 0);
+  const boxH = 22 + extraLines * 4.5;
   doc.setDrawColor(...GOLD);
   doc.setLineWidth(0.6);
   doc.roundedRect(M, y, contentW, boxH, 2.5, 2.5, "S");
@@ -179,6 +180,13 @@ export async function downloadReceiptPdf(receipt: PaymentReceipt, contact: Recei
   doc.setFontSize(17);
   doc.text(inr(receipt.amount), pageW - M - 5, by + 1, { align: "right" });
   by += 6;
+  if (receipt.method) {
+    doc.setTextColor(...GREY);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(8.5);
+    doc.text(`Payment method: ${receipt.method}`, M + 5, by);
+    by += 4.5;
+  }
   if (receipt.gateway_ref) {
     doc.setTextColor(...GREY);
     doc.setFont("courier", "normal");
