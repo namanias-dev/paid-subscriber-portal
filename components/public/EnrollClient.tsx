@@ -102,11 +102,6 @@ export default function EnrollClient({ course }: { course: Course }) {
                 <span>GST</span><span>As applicable</span>
               </div>
             )}
-            {course.emi_amount && (
-              <div className="mt-2 flex items-center justify-between text-sm text-muted">
-                <span>EMI option</span><span>{formatINR(course.emi_amount)}/mo × {course.emi_months}</span>
-              </div>
-            )}
             {applied && (
               <div className="mt-2 flex items-center justify-between text-sm text-success">
                 <span>Coupon {applied.code}</span><span>− {formatINR(applied.discount)}</span>

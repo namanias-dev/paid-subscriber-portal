@@ -36,6 +36,15 @@ const NAV_ICONS: Record<string, LucideIcon> = {
 };
 const iconFor = (href: string): LucideIcon => NAV_ICONS[href] || Sparkles;
 
+/** Up to two initials from a display name, for the avatar. */
+function initialsOf(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return "U";
+  const first = parts[0][0] || "";
+  const last = parts.length > 1 ? parts[parts.length - 1][0] || "" : "";
+  return (first + last).toUpperCase() || "U";
+}
+
 export default function PublicNav({
   logoUrl,
   logoAlt,
@@ -45,6 +54,7 @@ export default function PublicNav({
   wordmarkSub = "IAS Academy",
   isLoggedIn = false,
   portalLoggedIn = false,
+  userName = null,
   links = DEFAULT_NAV_TABS,
 }: {
   logoUrl?: string | null;
@@ -55,6 +65,7 @@ export default function PublicNav({
   wordmarkSub?: string;
   isLoggedIn?: boolean;
   portalLoggedIn?: boolean;
+  userName?: string | null;
   links?: NavTab[];
 }) {
   const pathname = usePathname();
@@ -65,6 +76,24 @@ export default function PublicNav({
   const h = Math.min(96, Math.max(28, Number(logoHeight) || 48));
 
   const isActive = (href: string) => pathname === href || pathname.startsWith(href + "/");
+
+  // Logged-in profile (student dashboard OR buyer portal share one premium treatment).
+  const loggedIn = isLoggedIn || portalLoggedIn;
+  const accountHref = isLoggedIn ? "/dashboard" : "/portal";
+  const accountSub = isLoggedIn ? "My Dashboard" : "My Portal";
+  const displayName = (userName?.trim() || (isLoggedIn ? "Student" : "My account")).split(" ").slice(0, 2).join(" ");
+  const initials = initialsOf(userName?.trim() || displayName);
+  const logout = isLoggedIn ? doLogout : doPortalLogout;
+
+  const Avatar = ({ size = 36 }: { size?: number }) => (
+    <span
+      aria-hidden="true"
+      className="grid shrink-0 place-items-center rounded-full bg-gradient-to-br from-[var(--ca-gold-bright)] to-[var(--ca-gold)] font-heading font-extrabold text-[#1a1304] ring-2 ring-[var(--ca-gold-bright)]/40"
+      style={{ height: size, width: size, fontSize: Math.round(size * 0.4) }}
+    >
+      {initials}
+    </span>
+  );
 
   // Condense-on-scroll + subtle shadow.
   useEffect(() => {
@@ -148,15 +177,20 @@ export default function PublicNav({
 
         {/* Desktop CTAs */}
         <div className="hidden items-center gap-2 lg:flex">
-          {isLoggedIn ? (
+          {loggedIn ? (
             <>
-              <Link href="/dashboard" className="ca-btn ca-btn-gold ca-focus px-4 text-sm"><LayoutDashboard size={16} /> Dashboard</Link>
-              <button onClick={doLogout} className="ca-btn ca-btn-glass ca-focus px-4 text-sm"><LogOut size={15} /> Logout</button>
-            </>
-          ) : portalLoggedIn ? (
-            <>
-              <Link href="/portal" className="ca-btn ca-btn-gold ca-focus px-4 text-sm"><UserCircle size={16} /> My Portal</Link>
-              <button onClick={doPortalLogout} className="ca-btn ca-btn-glass ca-focus px-4 text-sm"><LogOut size={15} /> Logout</button>
+              <Link
+                href={accountHref}
+                className="ca-focus group/profile flex items-center gap-2.5 rounded-full border border-white/15 bg-white/5 py-1 pl-1 pr-3 transition hover:border-[var(--ca-gold-bright)]/50 hover:bg-white/10"
+                aria-label={`${displayName} — ${accountSub}`}
+              >
+                <Avatar size={32} />
+                <span className="flex flex-col leading-tight">
+                  <span className="max-w-[140px] truncate text-sm font-bold text-white">{displayName}</span>
+                  <span className="text-[10px] font-medium uppercase tracking-[0.14em] text-[var(--ca-gold-bright)]">{accountSub}</span>
+                </span>
+              </Link>
+              <button onClick={logout} aria-label="Logout" className="ca-focus grid h-9 w-9 place-items-center rounded-full border border-white/15 bg-white/5 text-white/80 transition hover:bg-white/10 hover:text-white"><LogOut size={16} /></button>
             </>
           ) : (
             <>
@@ -244,15 +278,24 @@ export default function PublicNav({
           </nav>
 
           <div className="relative space-y-2.5 border-t border-white/10 px-5 py-4">
-            {isLoggedIn ? (
+            {loggedIn ? (
               <>
-                <Link href="/dashboard" onClick={() => setOpen(false)} className="ca-btn ca-btn-gold ca-focus w-full justify-center"><LayoutDashboard size={17} /> Dashboard</Link>
-                <button onClick={() => { setOpen(false); doLogout(); }} className="ca-btn ca-btn-glass ca-focus w-full justify-center"><LogOut size={16} /> Logout</button>
-              </>
-            ) : portalLoggedIn ? (
-              <>
-                <Link href="/portal" onClick={() => setOpen(false)} className="ca-btn ca-btn-gold ca-focus w-full justify-center"><UserCircle size={17} /> My Portal</Link>
-                <button onClick={() => { setOpen(false); doPortalLogout(); }} className="ca-btn ca-btn-glass ca-focus w-full justify-center"><LogOut size={16} /> Logout</button>
+                {/* Premium profile card */}
+                <Link
+                  href={accountHref}
+                  onClick={() => setOpen(false)}
+                  className="ca-focus flex items-center gap-3 rounded-2xl border border-white/12 bg-white/5 p-3 transition active:scale-[0.99]"
+                >
+                  <Avatar size={44} />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate font-heading text-[15px] font-bold text-white">{displayName}</span>
+                    <span className="mt-0.5 inline-flex items-center gap-1 text-[11px] font-medium uppercase tracking-[0.14em] text-[var(--ca-gold-bright)]">
+                      <UserCircle size={13} /> {accountSub}
+                    </span>
+                  </span>
+                </Link>
+                <Link href={accountHref} onClick={() => setOpen(false)} className="ca-btn ca-btn-gold ca-focus w-full justify-center"><LayoutDashboard size={17} /> {isLoggedIn ? "Dashboard" : "My Portal"}</Link>
+                <button onClick={() => { setOpen(false); logout(); }} className="ca-btn ca-btn-glass ca-focus w-full justify-center"><LogOut size={16} /> Logout</button>
               </>
             ) : (
               <>

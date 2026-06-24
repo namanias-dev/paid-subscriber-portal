@@ -1,6 +1,6 @@
 import Link from "next/link";
 import Image from "next/image";
-import { Calendar, Users, ArrowRight, Video } from "lucide-react";
+import { Calendar, Users, ArrowRight, Video, CheckCircle2 } from "lucide-react";
 import SeatCounter from "./SeatCounter";
 import { formatINR, formatISTDateTime } from "@/lib/dates";
 import type { Webinar } from "@/lib/types";
@@ -18,12 +18,14 @@ function statusBadge(status: Webinar["status"], badgeLabel?: string | null) {
 }
 
 /** Premium webinar list card: cover image, glass depth, gold accents, IST meta. */
-export default function WebinarCard({ webinar: w }: { webinar: Webinar }) {
+export default function WebinarCard({ webinar: w, registered = false }: { webinar: Webinar; registered?: boolean }) {
   const cover = w.cover_image_url || w.mobile_image_url || null;
   const badge = statusBadge(w.status, w.badge_label);
   const priceLabel = w.price === 0 ? "Free" : formatINR(w.price);
   const seat = w.seat_config?.show ? w.seat_config : null;
-  const cta = w.status === "completed" ? "Watch recording" : w.price === 0 ? "Register free" : "View & register";
+  const cta = registered
+    ? (w.status === "completed" ? "Watch recording" : "View details")
+    : w.status === "completed" ? "Watch recording" : w.price === 0 ? "Register free" : "View & register";
 
   return (
     <Link href={`/webinars/${w.slug}`} className="ca-focus group block h-full">
@@ -55,9 +57,15 @@ export default function WebinarCard({ webinar: w }: { webinar: Webinar }) {
                 {badge.live && <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-white" aria-hidden="true" />}
                 {badge.label}
               </span>
-              <span className="inline-flex items-center rounded-full bg-[rgba(212,175,55,0.95)] px-2.5 py-1 text-[11px] font-extrabold text-[#1a1304] shadow-sm backdrop-blur-sm">
-                {priceLabel}
-              </span>
+              {registered ? (
+                <span className="inline-flex items-center gap-1 rounded-full bg-[#16a34a] px-2.5 py-1 text-[11px] font-extrabold text-white shadow-sm backdrop-blur-sm">
+                  <CheckCircle2 size={12} /> Registered
+                </span>
+              ) : (
+                <span className="inline-flex items-center rounded-full bg-[rgba(212,175,55,0.95)] px-2.5 py-1 text-[11px] font-extrabold text-[#1a1304] shadow-sm backdrop-blur-sm">
+                  {priceLabel}
+                </span>
+              )}
             </div>
           </div>
 
@@ -74,6 +82,11 @@ export default function WebinarCard({ webinar: w }: { webinar: Webinar }) {
             {seat && <div className="mt-3"><SeatCounter seat={seat} compact /></div>}
 
             <div className="mt-auto pt-4">
+              {registered && (
+                <p className="mb-2 inline-flex items-center gap-1.5 text-sm font-semibold text-[#16a34a]">
+                  <CheckCircle2 size={15} aria-hidden="true" /> You&apos;re registered
+                </p>
+              )}
               <span className="ca-btn ca-btn-gold ca-focus w-full justify-center text-sm">
                 {cta} <ArrowRight size={16} className="transition-transform duration-200 group-hover:translate-x-0.5 motion-reduce:transform-none" aria-hidden="true" />
               </span>

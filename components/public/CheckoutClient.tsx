@@ -12,6 +12,7 @@ import {
   ChevronDown,
   Sparkles,
   Lock,
+  Tag,
 } from "lucide-react";
 import { formatINR, formatISTDate } from "@/lib/dates";
 import {
@@ -19,19 +20,31 @@ import {
   effectiveSeatAmount,
   buildSchedule,
   buildFullSchedule,
+  buildFullWithSeatSchedule,
+  buildInstallmentOnlySchedule,
+  payInFullTotal,
 } from "@/lib/installments";
 import type { Course, InstallmentItem } from "@/lib/types";
 
+type Plan = "full" | "emi";
+
 export default function CheckoutClient({ course }: { course: Course }) {
   const cfg = useMemo(() => resolveEmiConfig(course), [course]);
-  const total = Math.max(0, Math.round(course.price));
+  const standardTotal = Math.max(0, Math.round(course.price));
+  const payInFull = useMemo(() => payInFullTotal(course), [course]);
+  const fullSavings = Math.max(0, standardTotal - payInFull);
 
-  const emiAvailable = cfg.enabled && total > 1 && cfg.installmentCounts.length > 0;
+  const emiAvailable = cfg.enabled && standardTotal > 1 && cfg.installmentCounts.length > 0;
   const fullAvailable = !cfg.enabled || cfg.allowFull;
+  const seatConfigured = cfg.enabled && (cfg.seatAmount != null || cfg.allowCustomSeat);
 
-  const [mode, setMode] = useState<"full" | "emi">(fullAvailable ? "full" : "emi");
-  const [count, setCount] = useState<number>(cfg.installmentCounts[Math.min(1, cfg.installmentCounts.length - 1)] || cfg.installmentCounts[0] || 6);
+  const [plan, setPlan] = useState<Plan>(fullAvailable ? "full" : "emi");
+  const [bookSeat, setBookSeat] = useState(false);
+  const [count, setCount] = useState<number>(
+    cfg.installmentCounts[Math.min(1, cfg.installmentCounts.length - 1)] || cfg.installmentCounts[0] || 6
+  );
 
+  const base = plan === "full" ? payInFull : standardTotal;
   const seatFloor = cfg.allowCustomSeat ? (cfg.minSeatAmount ?? cfg.seatAmount ?? 1) : (cfg.seatAmount ?? 1);
   const [seatInput, setSeatInput] = useState<number>(cfg.seatAmount ?? seatFloor);
 
@@ -43,29 +56,33 @@ export default function CheckoutClient({ course }: { course: Course }) {
   const [detailsOpen, setDetailsOpen] = useState(false);
 
   const seat = useMemo(
-    () => effectiveSeatAmount(cfg, total, cfg.allowCustomSeat ? seatInput : null),
-    [cfg, total, seatInput]
+    () => effectiveSeatAmount(cfg, base, cfg.allowCustomSeat ? seatInput : null),
+    [cfg, base, seatInput]
   );
 
-  const schedule: InstallmentItem[] = useMemo(() => {
-    if (mode === "full") return buildFullSchedule(total);
-    return buildSchedule({
-      total,
-      seatAmount: seat,
-      count,
-      bookingISO: new Date().toISOString(),
-      firstIntervalDays: cfg.firstIntervalDays,
-      intervalMonths: cfg.intervalMonths,
-    });
-  }, [mode, total, seat, count, cfg]);
+  const bookingISO = useMemo(() => new Date().toISOString(), []);
+  const seatActive = bookSeat && seatConfigured;
 
-  const todayAmount = mode === "full" ? total : seat;
-  const remaining = total - todayAmount;
-  const installmentLines = schedule.filter((s) => s.kind === "installment");
+  const schedule: InstallmentItem[] = useMemo(() => {
+    if (plan === "full") {
+      return seatActive
+        ? buildFullWithSeatSchedule({ payInFull, seatAmount: seat, bookingISO, firstIntervalDays: cfg.firstIntervalDays })
+        : buildFullSchedule(payInFull);
+    }
+    return seatActive
+      ? buildSchedule({ total: standardTotal, seatAmount: seat, count, bookingISO, firstIntervalDays: cfg.firstIntervalDays, intervalMonths: cfg.intervalMonths })
+      : buildInstallmentOnlySchedule({ total: standardTotal, count, bookingISO, intervalMonths: cfg.intervalMonths });
+  }, [plan, seatActive, payInFull, standardTotal, seat, count, cfg, bookingISO]);
+
+  const todayItem = schedule[0];
+  const laterItems = schedule.slice(1);
+  const todayAmount = todayItem?.amount ?? 0;
   const grandTotal = schedule.reduce((a, s) => a + s.amount, 0);
+  const remaining = grandTotal - todayAmount;
 
   const seatTooLow = cfg.allowCustomSeat && seatInput < seatFloor;
-  const seatTooHigh = seatInput >= total;
+  const seatTooHigh = seatInput >= base;
+  const seatInvalid = seatActive && (seatTooLow || seatTooHigh);
 
   async function proceed() {
     setError(null);
@@ -78,7 +95,7 @@ export default function CheckoutClient({ course }: { course: Course }) {
       setError("Enter a valid email address, or leave it blank.");
       return;
     }
-    if (mode === "emi" && (seatTooLow || seatTooHigh)) {
+    if (seatInvalid) {
       setError("Please choose a valid seat-booking amount.");
       return;
     }
@@ -92,9 +109,10 @@ export default function CheckoutClient({ course }: { course: Course }) {
           name: name.trim(),
           email: email.trim(),
           mobile: phone,
-          mode,
-          installmentCount: mode === "emi" ? count : undefined,
-          seatAmount: mode === "emi" && cfg.allowCustomSeat ? seatInput : undefined,
+          plan,
+          bookSeat: seatActive,
+          installmentCount: plan === "emi" ? count : undefined,
+          seatAmount: seatActive && cfg.allowCustomSeat ? seatInput : undefined,
         }),
       });
       const json = await res.json();
@@ -121,14 +139,14 @@ export default function CheckoutClient({ course }: { course: Course }) {
       </div>
 
       <div className="container-wide mt-4 grid gap-6 lg:grid-cols-[1fr_380px]">
-        {/* ---------------- LEFT: plan selector ---------------- */}
+        {/* ---------------- LEFT ---------------- */}
         <div className="space-y-6">
           {/* Course header */}
           <div className="ca-card overflow-hidden p-0">
             <div className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:p-5">
               <div className="relative h-24 w-full shrink-0 overflow-hidden rounded-xl sm:h-20 sm:w-32">
-                {course.image ? (
-                  <Image src={course.image} alt={course.title} fill sizes="160px" className="object-cover" />
+                {(course.cover_image_url || course.image) ? (
+                  <Image src={(course.cover_image_url || course.image)!} alt={course.title} fill sizes="160px" className="object-cover" />
                 ) : (
                   <div className="ca-dark h-full w-full" />
                 )}
@@ -147,109 +165,142 @@ export default function CheckoutClient({ course }: { course: Course }) {
             </div>
           </div>
 
-          {/* Payment mode selector */}
+          {/* STEP A — Book your seat (modifier, works with both plans) */}
+          {seatConfigured && (
+            <div>
+              <h2 className="font-heading text-base font-bold text-[var(--ca-navy-900)]"><span className="text-[var(--ca-gold)]">Step 1.</span> Book your seat (optional)</h2>
+              <button
+                type="button"
+                onClick={() => setBookSeat((v) => !v)}
+                aria-pressed={bookSeat}
+                className={`ca-focus mt-3 flex w-full items-center justify-between gap-3 rounded-2xl border-2 p-4 text-left transition ${bookSeat ? "border-[var(--ca-gold)] bg-white shadow-soft-lg" : "border-[var(--ca-slate-200)] bg-white hover:border-[var(--ca-slate-300)]"}`}
+              >
+                <div className="min-w-0">
+                  <p className="inline-flex items-center gap-2 font-bold text-[var(--ca-navy-900)]"><Tag size={17} /> Book your seat now</p>
+                  <p className="mt-1 text-xs text-[var(--ca-slate-700)]">Pay {formatINR(cfg.seatAmount ?? seatFloor)} today to lock your spot — deducted from your total, pay the rest later.</p>
+                </div>
+                <span className={`grid h-6 w-11 shrink-0 items-center rounded-full px-0.5 transition ${bookSeat ? "bg-[var(--ca-gold)]" : "bg-[var(--ca-slate-300)]"}`}>
+                  <span className={`h-5 w-5 rounded-full bg-white shadow transition-transform ${bookSeat ? "translate-x-5" : "translate-x-0"}`} />
+                </span>
+              </button>
+
+              {/* Custom seat amount */}
+              {bookSeat && cfg.allowCustomSeat && (
+                <div className="mt-3 rounded-xl border border-[var(--ca-slate-200)] bg-white p-4">
+                  <label className="text-sm font-semibold text-[var(--ca-navy-900)]">Seat amount</label>
+                  <div className="mt-2 flex items-center gap-2">
+                    <span className="font-heading text-lg font-bold text-[var(--ca-navy-900)]">₹</span>
+                    <input
+                      type="number"
+                      inputMode="numeric"
+                      className="w-40 rounded-xl border border-[var(--ca-slate-300)] px-3 py-2 font-semibold focus:border-[var(--ca-gold)] focus:outline-none"
+                      value={seatInput}
+                      min={seatFloor}
+                      max={base - 1}
+                      onChange={(e) => setSeatInput(Math.round(Number(e.target.value) || 0))}
+                      onBlur={() => setSeatInput((v) => Math.min(base - 1, Math.max(seatFloor, v)))}
+                    />
+                  </div>
+                  <p className={`mt-1 text-xs ${seatTooLow || seatTooHigh ? "text-red-600" : "text-[var(--ca-slate-700)]"}`}>
+                    {seatTooHigh ? "Seat amount must be less than the total." : `Pay any amount from ${formatINR(seatFloor)}.`}
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* STEP B — payment plan */}
           <div>
-            <h2 className="font-heading text-base font-bold text-[var(--ca-navy-900)]">Choose how you&apos;d like to pay</h2>
+            <h2 className="font-heading text-base font-bold text-[var(--ca-navy-900)]">
+              {seatConfigured ? <span className="text-[var(--ca-gold)]">Step 2. </span> : null}Choose your payment plan
+            </h2>
             <div className="mt-3 grid gap-3 sm:grid-cols-2">
               {fullAvailable && (
                 <button
                   type="button"
-                  onClick={() => setMode("full")}
-                  className={`ca-focus relative rounded-2xl border-2 p-4 text-left transition ${mode === "full" ? "border-[var(--ca-gold)] bg-white shadow-soft-lg" : "border-[var(--ca-slate-200)] bg-white hover:border-[var(--ca-slate-300)]"}`}
+                  onClick={() => setPlan("full")}
+                  className={`ca-focus relative rounded-2xl border-2 p-4 text-left transition ${plan === "full" ? "border-[var(--ca-gold)] bg-white shadow-soft-lg" : "border-[var(--ca-slate-200)] bg-white hover:border-[var(--ca-slate-300)]"}`}
                 >
-                  {cfg.bestValueNote && (
-                    <span className="absolute -top-2.5 right-3 inline-flex items-center gap-1 rounded-full bg-[var(--ca-navy-900)] px-2 py-0.5 text-[10px] font-bold text-[var(--ca-gold-bright)]"><Sparkles size={11} /> {cfg.bestValueNote}</span>
+                  {fullSavings > 0 && (
+                    <span className="absolute -top-2.5 right-3 inline-flex items-center gap-1 rounded-full bg-[#16a34a] px-2 py-0.5 text-[10px] font-bold text-white"><Sparkles size={11} /> Save {formatINR(fullSavings)}</span>
                   )}
                   <div className="flex items-center justify-between">
-                    <span className="inline-flex items-center gap-2 font-bold text-[var(--ca-navy-900)]"><Wallet size={18} /> Pay Full Today</span>
-                    {mode === "full" && <CheckCircle2 size={18} className="text-[var(--ca-gold)]" />}
+                    <span className="inline-flex items-center gap-2 font-bold text-[var(--ca-navy-900)]"><Wallet size={18} /> Pay in Full</span>
+                    {plan === "full" && <CheckCircle2 size={18} className="text-[var(--ca-gold)]" />}
                   </div>
-                  <p className="mt-2 font-heading text-2xl font-extrabold text-[var(--ca-navy-900)]">{formatINR(total)}</p>
-                  <p className="mt-1 text-xs text-[var(--ca-slate-700)]">One payment · full access · GST included</p>
+                  <div className="mt-2 flex items-baseline gap-2">
+                    <span className="font-heading text-2xl font-extrabold text-[var(--ca-navy-900)]">{formatINR(payInFull)}</span>
+                    {fullSavings > 0 && <span className="text-sm text-[var(--ca-slate-400)] line-through">{formatINR(standardTotal)}</span>}
+                  </div>
+                  <p className="mt-1 text-xs text-[var(--ca-slate-700)]">Best price · full access · GST included</p>
                 </button>
               )}
 
               {emiAvailable && (
                 <button
                   type="button"
-                  onClick={() => setMode("emi")}
-                  className={`ca-focus relative rounded-2xl border-2 p-4 text-left transition ${mode === "emi" ? "border-[var(--ca-gold)] bg-white shadow-soft-lg" : "border-[var(--ca-slate-200)] bg-white hover:border-[var(--ca-slate-300)]"}`}
+                  onClick={() => setPlan("emi")}
+                  className={`ca-focus relative rounded-2xl border-2 p-4 text-left transition ${plan === "emi" ? "border-[var(--ca-gold)] bg-white shadow-soft-lg" : "border-[var(--ca-slate-200)] bg-white hover:border-[var(--ca-slate-300)]"}`}
                 >
                   <div className="flex items-center justify-between">
-                    <span className="inline-flex items-center gap-2 font-bold text-[var(--ca-navy-900)]"><CalendarClock size={18} /> Book Your Seat + EMI</span>
-                    {mode === "emi" && <CheckCircle2 size={18} className="text-[var(--ca-gold)]" />}
+                    <span className="inline-flex items-center gap-2 font-bold text-[var(--ca-navy-900)]"><CalendarClock size={18} /> EMI / Installments</span>
+                    {plan === "emi" && <CheckCircle2 size={18} className="text-[var(--ca-gold)]" />}
                   </div>
-                  <p className="mt-2 font-heading text-2xl font-extrabold text-[var(--ca-navy-900)]">{formatINR(cfg.seatAmount ?? seatFloor)}<span className="text-sm font-semibold text-[var(--ca-slate-700)]"> to start</span></p>
-                  <p className="mt-1 text-xs text-[var(--ca-slate-700)]">Secure your seat now · pay the rest in installments</p>
+                  <p className="mt-2 font-heading text-2xl font-extrabold text-[var(--ca-navy-900)]">{formatINR(standardTotal)}</p>
+                  <p className="mt-1 text-xs text-[var(--ca-slate-700)]">Spread the standard fee over easy monthly payments</p>
                 </button>
               )}
             </div>
+
+            {/* Transparent comparison */}
+            {fullAvailable && emiAvailable && fullSavings > 0 && (
+              <p className="mt-3 rounded-xl bg-[rgba(212,175,55,0.10)] px-4 py-2.5 text-sm text-[#8a6d12]">
+                <b>Pay in full and save {formatINR(fullSavings)}</b> ({formatINR(payInFull)}) vs <b>pay over time</b> ({formatINR(standardTotal)} via EMI). All prices GST-inclusive.
+              </p>
+            )}
           </div>
 
-          {/* EMI plan builder */}
-          {mode === "emi" && emiAvailable && (
-            <div className="ca-card space-y-5 p-5">
-              <h3 className="font-heading text-base font-bold text-[var(--ca-navy-900)]">Build your plan</h3>
-
-              {/* Seat amount */}
-              <div>
-                <label className="text-sm font-semibold text-[var(--ca-navy-900)]">Book-your-seat amount</label>
-                {cfg.allowCustomSeat ? (
-                  <>
-                    <div className="mt-2 flex items-center gap-2">
-                      <span className="font-heading text-lg font-bold text-[var(--ca-navy-900)]">₹</span>
-                      <input
-                        type="number"
-                        inputMode="numeric"
-                        className="w-40 rounded-xl border border-[var(--ca-slate-300)] px-3 py-2 font-semibold focus:border-[var(--ca-gold)] focus:outline-none"
-                        value={seatInput}
-                        min={seatFloor}
-                        max={total - 1}
-                        onChange={(e) => setSeatInput(Math.round(Number(e.target.value) || 0))}
-                        onBlur={() => setSeatInput((v) => Math.min(total - 1, Math.max(seatFloor, v)))}
-                      />
-                    </div>
-                    <p className={`mt-1 text-xs ${seatTooLow || seatTooHigh ? "text-red-600" : "text-[var(--ca-slate-700)]"}`}>
-                      {seatTooHigh ? "Seat amount must be less than the full fee." : `Pay any amount from ${formatINR(seatFloor)}. This is deducted from your total.`}
-                    </p>
-                  </>
-                ) : (
-                  <p className="mt-2 font-heading text-lg font-bold text-[var(--ca-navy-900)]">{formatINR(seat)} <span className="text-xs font-medium text-[var(--ca-slate-700)]">(deducted from your total)</span></p>
-                )}
+          {/* EMI installment count */}
+          {plan === "emi" && emiAvailable && (
+            <div className="ca-card space-y-3 p-5">
+              <label className="text-sm font-semibold text-[var(--ca-navy-900)]">Number of installments</label>
+              <div className="flex flex-wrap gap-2">
+                {cfg.installmentCounts.map((n) => (
+                  <button
+                    key={n}
+                    type="button"
+                    onClick={() => setCount(n)}
+                    className={`ca-focus rounded-full border px-4 py-1.5 text-sm font-semibold transition ${count === n ? "border-[var(--ca-gold)] bg-[var(--ca-navy-900)] text-[var(--ca-gold-bright)]" : "border-[var(--ca-slate-300)] bg-white text-[var(--ca-slate-700)] hover:border-[var(--ca-slate-400)]"}`}
+                  >
+                    {n} months
+                  </button>
+                ))}
               </div>
-
-              {/* Installment count */}
-              <div>
-                <label className="text-sm font-semibold text-[var(--ca-navy-900)]">Number of installments</label>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {cfg.installmentCounts.map((n) => (
-                    <button
-                      key={n}
-                      type="button"
-                      onClick={() => setCount(n)}
-                      className={`ca-focus rounded-full border px-4 py-1.5 text-sm font-semibold transition ${count === n ? "border-[var(--ca-gold)] bg-[var(--ca-navy-900)] text-[var(--ca-gold-bright)]" : "border-[var(--ca-slate-300)] bg-white text-[var(--ca-slate-700)] hover:border-[var(--ca-slate-400)]"}`}
-                    >
-                      {n} months
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Schedule preview */}
-              <div className="overflow-hidden rounded-xl border border-[var(--ca-slate-200)]">
-                <div className="flex items-center justify-between bg-[var(--ca-slate-50)] px-4 py-2.5 text-xs font-bold uppercase tracking-wide text-[var(--ca-slate-700)]">
-                  <span>Payment schedule</span><span>{formatISTDate(new Date().toISOString())} onward · IST</span>
-                </div>
-                <div className="divide-y divide-[var(--ca-slate-200)]">
-                  <ScheduleRow label="Today — Book Your Seat" amount={seat} due="Pay now" highlight />
-                  {installmentLines.map((it) => (
-                    <ScheduleRow key={it.no} label={it.label} amount={it.amount} due={`Due ${formatISTDate(it.due)}`} />
-                  ))}
-                </div>
-              </div>
-              <p className="text-xs text-[var(--ca-slate-700)]">First installment ~{cfg.firstIntervalDays} days after booking, then every {cfg.intervalMonths === 1 ? "month" : `${cfg.intervalMonths} months`}.</p>
             </div>
           )}
+
+          {/* Schedule preview */}
+          <div className="ca-card p-5">
+            <h3 className="font-heading text-base font-bold text-[var(--ca-navy-900)]">Payment schedule</h3>
+            <div className="mt-3 overflow-hidden rounded-xl border border-[var(--ca-slate-200)]">
+              <div className="flex items-center justify-between bg-[var(--ca-slate-50)] px-4 py-2.5 text-xs font-bold uppercase tracking-wide text-[var(--ca-slate-700)]">
+                <span>{formatISTDate(bookingISO)} onward</span><span>IST</span>
+              </div>
+              <div className="divide-y divide-[var(--ca-slate-200)]">
+                <ScheduleRow label={todayItem?.label || "Payment"} amount={todayAmount} due="Pay now" highlight />
+                {laterItems.map((it) => (
+                  <ScheduleRow key={it.no} label={it.label} amount={it.amount} due={it.due ? `Due ${formatISTDate(it.due)}` : "Later"} />
+                ))}
+              </div>
+            </div>
+            {plan === "emi" && (
+              <p className="mt-2 text-xs text-[var(--ca-slate-700)]">
+                {seatActive
+                  ? `First installment ~${cfg.firstIntervalDays} days after booking, then every ${cfg.intervalMonths === 1 ? "month" : `${cfg.intervalMonths} months`}.`
+                  : `First installment today, then every ${cfg.intervalMonths === 1 ? "month" : `${cfg.intervalMonths} months`}.`}
+              </p>
+            )}
+          </div>
 
           {/* Your details */}
           <div className="ca-card space-y-3 p-5">
@@ -265,12 +316,14 @@ export default function CheckoutClient({ course }: { course: Course }) {
         <aside className="hidden lg:block">
           <div className="sticky top-24">
             <OrderSummary
-              mode={mode}
-              total={total}
+              plan={plan}
+              seatActive={seatActive}
+              base={base}
               todayAmount={todayAmount}
               remaining={remaining}
-              count={count}
+              laterCount={laterItems.length}
               grandTotal={grandTotal}
+              fullSavings={fullSavings}
               error={error}
               loading={loading}
               payLabel={payLabel}
@@ -284,7 +337,7 @@ export default function CheckoutClient({ course }: { course: Course }) {
       <div className="fixed inset-x-0 bottom-0 z-40 border-t border-[var(--ca-slate-200)] bg-white/95 backdrop-blur lg:hidden">
         {detailsOpen && (
           <div className="max-h-[50vh] overflow-y-auto border-b border-[var(--ca-slate-200)] p-4">
-            <SummaryRows mode={mode} total={total} todayAmount={todayAmount} remaining={remaining} count={count} grandTotal={grandTotal} />
+            <SummaryRows plan={plan} seatActive={seatActive} base={base} todayAmount={todayAmount} remaining={remaining} laterCount={laterItems.length} grandTotal={grandTotal} fullSavings={fullSavings} />
           </div>
         )}
         <div className="flex items-center gap-3 px-4 py-2.5">
@@ -306,7 +359,7 @@ export default function CheckoutClient({ course }: { course: Course }) {
 
 function ScheduleRow({ label, amount, due, highlight }: { label: string; amount: number; due: string; highlight?: boolean }) {
   return (
-    <div className={`flex items-center justify-between px-4 py-2.5 text-sm ${highlight ? "bg-[var(--ca-gold-soft)]/30" : ""}`}>
+    <div className={`flex items-center justify-between px-4 py-2.5 text-sm ${highlight ? "bg-[rgba(212,175,55,0.12)]" : ""}`}>
       <div>
         <p className="font-semibold text-[var(--ca-navy-900)]">{label}</p>
         <p className="text-xs text-[var(--ca-slate-700)]">{due}</p>
@@ -316,43 +369,51 @@ function ScheduleRow({ label, amount, due, highlight }: { label: string; amount:
   );
 }
 
-function SummaryRows({ mode, total, todayAmount, remaining, count, grandTotal }: { mode: "full" | "emi"; total: number; todayAmount: number; remaining: number; count: number; grandTotal: number }) {
+interface SummaryProps {
+  plan: Plan;
+  seatActive: boolean;
+  base: number;
+  todayAmount: number;
+  remaining: number;
+  laterCount: number;
+  grandTotal: number;
+  fullSavings: number;
+}
+
+function SummaryRows(p: SummaryProps) {
+  const baseLabel = p.plan === "full" ? "Pay-in-full price" : "Course fee";
   return (
     <div className="space-y-2.5 text-sm">
-      <Row label="Course fee" value={formatINR(total)} />
-      {mode === "emi" && (
+      <Row label={baseLabel} value={formatINR(p.base)} />
+      {p.plan === "full" && p.fullSavings > 0 && <Row label="You save" value={`− ${formatINR(p.fullSavings)}`} success />}
+      {p.seatActive && (
         <>
-          <Row label="Paying today (seat)" value={formatINR(todayAmount)} strong />
-          <Row label={`Remaining over ${count} installments`} value={formatINR(remaining)} />
+          <Row label="Seat today" value={formatINR(p.todayAmount)} strong />
+          <Row label={p.laterCount > 1 ? `Remaining over ${p.laterCount} installments` : "Remaining balance"} value={formatINR(p.remaining)} />
+        </>
+      )}
+      {!p.seatActive && p.plan === "emi" && (
+        <>
+          <Row label="Installment today" value={formatINR(p.todayAmount)} strong />
+          <Row label={`Remaining over ${p.laterCount} installments`} value={formatINR(p.remaining)} />
         </>
       )}
       <div className="my-2 border-t border-dashed border-[var(--ca-slate-300)]" />
-      <Row label="Total today" value={formatINR(todayAmount)} big />
+      <Row label="Total today" value={formatINR(p.todayAmount)} big />
       <div className="flex items-center justify-between rounded-lg bg-[var(--ca-slate-50)] px-3 py-2 text-xs">
         <span className="text-[var(--ca-slate-700)]">Grand total (GST incl.)</span>
-        <span className="font-bold text-[var(--ca-navy-900)]">{formatINR(grandTotal)}</span>
+        <span className="font-bold text-[var(--ca-navy-900)]">{formatINR(p.grandTotal)}</span>
       </div>
     </div>
   );
 }
 
-function OrderSummary(props: {
-  mode: "full" | "emi";
-  total: number;
-  todayAmount: number;
-  remaining: number;
-  count: number;
-  grandTotal: number;
-  error: string | null;
-  loading: boolean;
-  payLabel: string;
-  onPay: () => void;
-}) {
+function OrderSummary(props: SummaryProps & { error: string | null; loading: boolean; payLabel: string; onPay: () => void }) {
   return (
     <div className="ca-card p-5">
       <h3 className="font-heading text-base font-bold text-[var(--ca-navy-900)]">Order summary</h3>
       <div className="mt-4">
-        <SummaryRows mode={props.mode} total={props.total} todayAmount={props.todayAmount} remaining={props.remaining} count={props.count} grandTotal={props.grandTotal} />
+        <SummaryRows {...props} />
       </div>
       {props.error && <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-600">{props.error}</p>}
       <button onClick={props.onPay} disabled={props.loading} className="ca-btn ca-btn-gold ca-focus mt-4 w-full justify-center disabled:opacity-60">
@@ -364,11 +425,11 @@ function OrderSummary(props: {
   );
 }
 
-function Row({ label, value, strong, big }: { label: string; value: string; strong?: boolean; big?: boolean }) {
+function Row({ label, value, strong, big, success }: { label: string; value: string; strong?: boolean; big?: boolean; success?: boolean }) {
   return (
     <div className="flex items-center justify-between">
       <span className={`${big ? "font-semibold text-[var(--ca-navy-900)]" : "text-[var(--ca-slate-700)]"}`}>{label}</span>
-      <span className={`${big ? "font-heading text-xl font-extrabold text-[var(--ca-navy-900)]" : strong ? "font-bold text-[var(--ca-navy-900)]" : "font-semibold text-[var(--ca-navy-900)]"}`}>{value}</span>
+      <span className={`${big ? "font-heading text-xl font-extrabold text-[var(--ca-navy-900)]" : success ? "font-bold text-[#16a34a]" : strong ? "font-bold text-[var(--ca-navy-900)]" : "font-semibold text-[var(--ca-navy-900)]"}`}>{value}</span>
     </div>
   );
 }

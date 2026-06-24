@@ -1,24 +1,31 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowLeft, Printer } from "lucide-react";
+import { useState } from "react";
+import { ArrowLeft, Download, Printer } from "lucide-react";
 import { formatINR } from "@/lib/dates";
+import { downloadReceiptPdf, type ReceiptContact } from "@/lib/receiptPdf";
 import type { PaymentReceipt } from "@/lib/types";
 
-interface Contact {
-  name: string;
-  address: string;
-  phone: string;
-  email: string;
-  whatsapp: string;
-  logoUrl: string | null;
-  logoAlt: string;
-}
+type Contact = ReceiptContact;
 
 const NAVY = "#0a1a3f";
 const GOLD = "#b8860b";
 
 export default function ReceiptView({ receipt, contact }: { receipt: PaymentReceipt; contact: Contact }) {
+  const [downloading, setDownloading] = useState(false);
+  async function handleDownload() {
+    setDownloading(true);
+    try {
+      await downloadReceiptPdf(receipt, contact);
+    } catch {
+      // Fall back to the browser print dialog (Save as PDF) if generation fails.
+      window.print();
+    } finally {
+      setDownloading(false);
+    }
+  }
+
   const issued = new Date(receipt.issued_at).toLocaleString("en-IN", {
     timeZone: "Asia/Kolkata",
     dateStyle: "medium",
@@ -33,9 +40,14 @@ export default function ReceiptView({ receipt, contact }: { receipt: PaymentRece
         <Link href="/portal" className="inline-flex items-center gap-1.5 text-sm font-semibold text-primary">
           <ArrowLeft size={16} /> Back to my portal
         </Link>
-        <button onClick={() => window.print()} className="btn btn-primary inline-flex items-center gap-1.5 text-sm">
-          <Printer size={16} /> Download / Print
-        </button>
+        <div className="flex items-center gap-2">
+          <button onClick={() => window.print()} className="btn btn-secondary inline-flex items-center gap-1.5 text-sm" aria-label="Print receipt">
+            <Printer size={16} /> Print
+          </button>
+          <button onClick={handleDownload} disabled={downloading} className="btn btn-primary inline-flex items-center gap-1.5 text-sm disabled:opacity-60">
+            <Download size={16} /> {downloading ? "Preparing…" : "Download PDF"}
+          </button>
+        </div>
       </div>
 
       <div className="receipt-doc mx-auto max-w-2xl" style={{ color: "#0a0a0a", WebkitPrintColorAdjust: "exact", printColorAdjust: "exact" }}>

@@ -2,6 +2,7 @@ import { CalendarX } from "lucide-react";
 import Reveal, { Stagger, StaggerItem } from "@/components/ui/Reveal";
 import WebinarCard from "@/components/public/WebinarCard";
 import { getPublicWebinars } from "@/lib/dataProvider";
+import { getPurchaseSnapshot, webinarPurchased } from "@/lib/purchaseStatus";
 
 export const metadata = { title: "Webinars — Naman Sharma IAS Academy" };
 
@@ -11,6 +12,7 @@ export const dynamic = "force-dynamic";
 
 export default async function WebinarsPage() {
   const webinars = await getPublicWebinars();
+  const snapshot = await getPurchaseSnapshot();
 
   return (
     <div className="bg-[var(--ca-slate-50)]">
@@ -45,7 +47,7 @@ export default async function WebinarsPage() {
               <Stagger className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
                 {webinars.map((w) => (
                   <StaggerItem key={w.id}>
-                    <WebinarCard webinar={w} />
+                    <WebinarCard webinar={w} registered={webinarPurchased(w, snapshot)} />
                   </StaggerItem>
                 ))}
               </Stagger>

@@ -9,6 +9,7 @@ import { whatsappLink } from "@/lib/phone";
 export default async function SiteLayout({ children }: { children: React.ReactNode }) {
   const settings = await getSiteSettings();
   const [session, buyerSession] = await Promise.all([getStudentSession(), getBuyerSession()]);
+  const userName = session?.name || buyerSession?.name || null;
   const waLink = whatsappLink(
     settings.brand.whatsapp || settings.brand.support_phone,
     "Hi, I have a question about your courses / webinars."
@@ -24,6 +25,7 @@ export default async function SiteLayout({ children }: { children: React.ReactNo
         wordmarkSub={settings.content.wordmark_sub}
         isLoggedIn={!!session}
         portalLoggedIn={!!buyerSession}
+        userName={userName}
         links={resolveNavTabs(settings.nav)}
       />
       <main className="flex-1">{children}</main>

@@ -5,6 +5,7 @@ import {
   ShieldCheck, Headphones, CheckCircle2, XCircle, BookOpen, ChevronDown, CalendarClock,
 } from "lucide-react";
 import { formatINR } from "@/lib/dates";
+import { resolveEmiConfig, payInFullTotal } from "@/lib/installments";
 import { discountPct } from "@/components/public/CourseCard";
 import CourseCard from "@/components/public/CourseCard";
 import SeatCounter from "@/components/public/SeatCounter";
@@ -14,6 +15,7 @@ import BrochureCards from "@/components/public/BrochureCards";
 import BatchCountdown from "@/components/public/BatchCountdown";
 import type { Course, LibraryDoc } from "@/lib/types";
 import type { LandingView } from "@/lib/landingView";
+import type { CoursePurchaseView } from "@/lib/purchaseStatus";
 
 const COURSE_FAQ = [
   { q: "Will I get recordings?", a: "Yes, recordings are available for all live sessions for the duration of your access." },
@@ -21,14 +23,20 @@ const COURSE_FAQ = [
   { q: "Can I pay in installments?", a: "Most programs support EMI. See the Fees & EMI section for details." },
 ];
 
-export default function CourseDetail({ course, related, comparison, view, brochures = [] }: { course: Course; related: Course[]; comparison: Course[]; view: LandingView; brochures?: LibraryDoc[] }) {
+export default function CourseDetail({ course, related, comparison, view, brochures = [], purchase = null }: { course: Course; related: Course[]; comparison: Course[]; view: LandingView; brochures?: LibraryDoc[]; purchase?: CoursePurchaseView | null }) {
   const off = discountPct(course.price, course.original_price);
+  const emiCfg = resolveEmiConfig(course);
+  const payInFull = payInFullTotal(course);
+  const fullSavings = Math.max(0, course.price - payInFull);
+  const emiLine = emiCfg.enabled && emiCfg.installmentCounts.length
+    ? `EMI available — pay over up to ${Math.max(...emiCfg.installmentCounts)} months${emiCfg.seatAmount ? `, or book your seat from ${formatINR(emiCfg.seatAmount)}` : ""}.`
+    : null;
   const faqs = (course.faqs || []).filter((f) => f.q?.trim());
   const faqItems = faqs.length ? faqs : COURSE_FAQ;
   const priceLabel = course.price === 0 ? "Free" : formatINR(course.price);
   const cover = course.cover_image_url || course.image || course.mobile_image_url || null;
-  const enrollHref = course.price === 0 ? `/enroll/${course.slug}` : `/courses/${course.slug}/enroll`;
-  const enrollLabel = course.price === 0 ? "Book Now" : "Enroll Now";
+  const enrollHref = purchase ? purchase.href : course.price === 0 ? `/enroll/${course.slug}` : `/courses/${course.slug}/enroll`;
+  const enrollLabel = purchase ? purchase.cta : course.price === 0 ? "Book Now" : "Enroll Now";
   const included = (course.included || []).filter(Boolean);
   const notIncluded = (course.not_included || []).filter(Boolean);
   const curriculum = (course.curriculum || []).filter((m) => m?.title?.trim());
@@ -184,8 +192,11 @@ export default function CourseDetail({ course, related, comparison, view, brochu
               <section id="fees" className="mt-10 scroll-mt-24">
                 <h2 className="font-heading text-2xl font-extrabold text-[var(--ca-navy-900)]">Fees &amp; EMI</h2>
                 <div className="mt-4 rounded-2xl border border-[var(--ca-slate-200)] bg-white p-5 text-sm text-[var(--ca-slate-700)] shadow-soft-sm">
-                  <p>One-time fee: <b className="text-[var(--ca-navy-900)]">{formatINR(course.price)}</b>{course.gst && " + GST"}</p>
-                  {course.emi_amount && <p className="mt-2">EMI available from <b className="text-[var(--ca-navy-900)]">{formatINR(course.emi_amount)}/mo</b> for {course.emi_months} months.</p>}
+                  <p>Standard fee: <b className="text-[var(--ca-navy-900)]">{formatINR(course.price)}</b>{course.gst ? " (GST incl.)" : ""}</p>
+                  {fullSavings > 0 && (
+                    <p className="mt-2">Pay in full and save <b className="text-[#16a34a]">{formatINR(fullSavings)}</b> — pay just <b className="text-[var(--ca-navy-900)]">{formatINR(payInFull)}</b> today.</p>
+                  )}
+                  {emiLine && <p className="mt-2">{emiLine}</p>}
                   {course.brochure_link && (
                     <a href={course.brochure_link} target="_blank" rel="noopener noreferrer" className="ca-btn ca-btn-outline ca-focus mt-4 text-sm">Download brochure</a>
                   )}
@@ -234,6 +245,15 @@ export default function CourseDetail({ course, related, comparison, view, brochu
             <div className="lg:sticky lg:top-24">
               <div className="rounded-2xl bg-gradient-to-b from-white/70 via-[var(--ca-slate-200)] to-[rgba(212,175,55,0.45)] p-px shadow-[0_1px_2px_rgba(10,26,63,0.05),0_22px_50px_-28px_rgba(10,26,63,0.35)]">
                 <div className="rounded-[15px] bg-white p-6">
+                  {purchase ? (
+                    <div className="mb-3 rounded-xl border border-[#16a34a]/30 bg-[#16a34a]/10 p-3">
+                      <p className="inline-flex items-center gap-1.5 font-heading text-base font-bold text-[#15803d]"><CheckCircle2 size={18} aria-hidden="true" /> You&apos;re enrolled</p>
+                      <p className="mt-1 text-sm text-[var(--ca-slate-700)]">
+                        {purchase.label}{purchase.remaining > 0 ? ` · balance ${formatINR(purchase.remaining)}` : " · full access unlocked"}.
+                      </p>
+                    </div>
+                  ) : (
+                    <>
                   {off && <span className="mb-2 inline-flex items-center rounded-full bg-[rgba(212,175,55,0.16)] px-2.5 py-1 text-[11px] font-extrabold text-[#8a6d12]">{off}% OFF — limited time</span>}
                   <div className="flex items-baseline gap-2">
                     {course.price === 0 ? (
@@ -247,7 +267,10 @@ export default function CourseDetail({ course, related, comparison, view, brochu
                       </>
                     )}
                   </div>
-                  {course.emi_amount && <p className="mt-1 text-sm text-[var(--ca-slate-700)]">or EMI from {formatINR(course.emi_amount)}/mo</p>}
+                  {fullSavings > 0 && <p className="mt-1 text-sm font-semibold text-[#16a34a]">Pay in full {formatINR(payInFull)} — save {formatINR(fullSavings)}</p>}
+                  {emiCfg.enabled && emiCfg.installmentCounts.length > 0 && <p className="mt-1 text-sm text-[var(--ca-slate-700)]">or EMI / book your seat at checkout</p>}
+                    </>
+                  )}
 
                   <div className="mt-3"><SeatCounter seat={view.seat} compact /></div>
 
@@ -291,8 +314,8 @@ export default function CourseDetail({ course, related, comparison, view, brochu
       <div className="fixed inset-x-0 bottom-0 z-40 border-t border-[var(--ca-slate-200)] bg-white/95 px-4 py-2.5 backdrop-blur lg:hidden">
         <div className="flex items-center gap-3">
           <div className="shrink-0">
-            <p className="text-[11px] leading-none text-[var(--ca-slate-400)]">Price</p>
-            <p className="font-heading text-lg font-bold leading-tight text-[var(--ca-navy-900)]">{priceLabel}</p>
+            <p className="text-[11px] leading-none text-[var(--ca-slate-400)]">{purchase ? "Status" : "Price"}</p>
+            <p className={`font-heading text-lg font-bold leading-tight ${purchase ? "text-[#16a34a]" : "text-[var(--ca-navy-900)]"}`}>{purchase ? purchase.label : priceLabel}</p>
           </div>
           <Link href={enrollHref} className="ca-btn ca-btn-gold ca-focus flex-1 justify-center">{enrollLabel}</Link>
           <WhatsAppButton config={view.whatsapp} className="px-3" />

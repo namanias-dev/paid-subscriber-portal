@@ -118,9 +118,10 @@ create table if not exists public.courses (
   duration text,
   price int default 0,
   original_price int,
+  pay_in_full_price numeric,
   gst boolean default false,
-  emi_amount int,
-  emi_months int,
+  emi_amount int, -- deprecated: EMI auto-calculated from emi_config
+  emi_months int, -- deprecated: EMI auto-calculated from emi_config
   faculty text,
   capacity int,
   seats_left int,

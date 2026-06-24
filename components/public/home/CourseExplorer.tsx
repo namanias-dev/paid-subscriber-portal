@@ -5,8 +5,9 @@ import { GraduationCap } from "lucide-react";
 import CourseCard from "@/components/public/CourseCard";
 import { COURSE_CATEGORIES } from "@/lib/config";
 import type { Course } from "@/lib/types";
+import type { CoursePurchaseView } from "@/lib/purchaseStatus";
 
-export default function CourseExplorer({ courses, limit }: { courses: Course[]; limit?: number }) {
+export default function CourseExplorer({ courses, limit, purchaseMap }: { courses: Course[]; limit?: number; purchaseMap?: Record<string, CoursePurchaseView> }) {
   const [cat, setCat] = useState("all");
   // Only show category chips that actually have published courses (keeps the bar clean).
   const present = new Set(courses.map((c) => c.category));
@@ -52,7 +53,7 @@ export default function CourseExplorer({ courses, limit }: { courses: Course[]; 
       ) : (
         <div className="mt-6 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
           {filtered.map((c) => (
-            <CourseCard key={c.id} course={c} />
+            <CourseCard key={c.id} course={c} purchase={purchaseMap?.[c.slug] ?? null} />
           ))}
         </div>
       )}

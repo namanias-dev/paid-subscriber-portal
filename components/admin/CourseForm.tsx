@@ -170,11 +170,13 @@ export default function CourseForm({ course }: { course?: Course }) {
             label: "Pricing & Seats",
             content: (
               <>
-                <Section title="Pricing">
-                  <Field label="Price (₹)"><input type="number" className="input" value={c.price ?? 0} onChange={(e) => set("price", Number(e.target.value))} /></Field>
-                  <Field label="Original price (₹)" hint="Optional — shows a strikethrough."><input type="number" className="input" value={c.original_price ?? ""} onChange={(e) => set("original_price", e.target.value ? Number(e.target.value) : null)} /></Field>
-                  <Field label="EMI / month (₹)"><input type="number" className="input" value={c.emi_amount ?? ""} onChange={(e) => set("emi_amount", e.target.value ? Number(e.target.value) : null)} /></Field>
-                  <Field label="EMI months"><input type="number" className="input" value={c.emi_months ?? ""} onChange={(e) => set("emi_months", e.target.value ? Number(e.target.value) : null)} /></Field>
+                <Section title="Pricing" desc="Three prices, three jobs. The standard Price is the base for EMI / Book-Your-Seat. Pay-in-Full is an extra one-shot discount. Original price is just a strikethrough anchor.">
+                  <Field label="Original price (₹)" hint="Marketing anchor — shown struck through. Optional."><input type="number" className="input" value={c.original_price ?? ""} onChange={(e) => set("original_price", e.target.value ? Number(e.target.value) : null)} /></Field>
+                  <Field label="Price — standard / total fee (₹)" hint="The full fee. Used as the base for EMI & Book-Your-Seat plans."><input type="number" className="input" value={c.price ?? 0} onChange={(e) => set("price", Number(e.target.value))} /></Field>
+                  <Field label="Pay-in-Full price (₹)" hint="Optional one-shot discount, applied ONLY when the student pays the whole fee at once. Leave blank to charge the standard Price." full>
+                    <input type="number" className="input" value={c.pay_in_full_price ?? ""} onChange={(e) => set("pay_in_full_price", e.target.value ? Number(e.target.value) : null)} placeholder="e.g. 35000" />
+                  </Field>
+                  <PricingPreview original={c.original_price ?? null} price={c.price ?? 0} payInFull={c.pay_in_full_price ?? null} />
                 </Section>
                 <Section title="Seats remaining" desc="Admin-controlled. When off, no seats line appears on the public page.">
                   <SeatCounterEditor value={c.seat_config} onChange={(v) => set("seat_config", v)} />
@@ -327,6 +329,44 @@ function VideosEditor({ value, onChange }: { value: OrientationVideo[]; onChange
         </div>
       ))}
       <button type="button" onClick={() => onChange([...items, { url: "", title: "", description: "" }])} className="btn btn-secondary text-sm">+ Add video</button>
+    </div>
+  );
+}
+
+/** Shows admins exactly how the three prices relate, so the model is crystal-clear. */
+function PricingPreview({ original, price, payInFull }: { original: number | null; price: number; payInFull: number | null }) {
+  const std = Math.max(0, Math.round(price || 0));
+  const pif = payInFull && payInFull > 0 ? Math.round(payInFull) : null;
+  const fullSaving = pif != null ? std - pif : 0;
+  return (
+    <div className="sm:col-span-2 rounded-xl border border-line bg-surface2/40 p-4 text-sm">
+      <p className="mb-2 font-semibold text-ink">How students see it</p>
+      <ul className="space-y-1.5">
+        {original != null && original > std && (
+          <li className="flex items-center justify-between">
+            <span className="text-muted">Original price (anchor)</span>
+            <span className="text-muted line-through">{formatINR(original)}</span>
+          </li>
+        )}
+        <li className="flex items-center justify-between">
+          <span className="text-ink2">Standard / total fee — base for EMI &amp; Book-Your-Seat</span>
+          <span className="font-bold text-ink">{formatINR(std)}</span>
+        </li>
+        <li className="flex items-center justify-between">
+          <span className="text-ink2">Pay-in-Full price — one-shot</span>
+          <span className="font-bold text-success">{pif != null ? formatINR(pif) : `${formatINR(std)} (no extra discount)`}</span>
+        </li>
+      </ul>
+      {pif != null && fullSaving > 0 && (
+        <p className="mt-2 rounded-lg bg-success/10 px-3 py-1.5 text-xs font-semibold text-success">
+          Paying in full saves {formatINR(fullSaving)} vs the EMI base.
+        </p>
+      )}
+      {pif != null && fullSaving <= 0 && (
+        <p className="mt-2 rounded-lg bg-amber-500/10 px-3 py-1.5 text-xs font-semibold text-amber-700">
+          Pay-in-Full price should be lower than the standard Price to act as a discount.
+        </p>
+      )}
     </div>
   );
 }

@@ -10,6 +10,7 @@ import StickyMobileCTA from "@/components/public/StickyMobileCTA";
 import LandingSections from "@/components/public/LandingSections";
 import BrochureCards from "@/components/public/BrochureCards";
 import { getWebinarBySlug, getLibraryDocsByIds } from "@/lib/dataProvider";
+import { getPurchaseSnapshot, webinarPurchased } from "@/lib/purchaseStatus";
 import { buildLandingView } from "@/lib/landingView";
 import { formatINR, formatISTRange } from "@/lib/dates";
 import { SITE_URL, ACADEMY } from "@/lib/config";
@@ -43,6 +44,8 @@ export default async function WebinarDetail({ params }: { params: { slug: string
 
   const view = buildLandingView(w);
   const brochures = await getLibraryDocsByIds(w.brochure_ids);
+  const snapshot = await getPurchaseSnapshot();
+  const registered = webinarPurchased(w, snapshot);
   const completed = w.status === "completed";
   const priceLabel = w.price === 0 ? "Free" : formatINR(w.price);
   const startLabel = formatISTRange(w.datetime, w.end_datetime);
@@ -103,8 +106,21 @@ export default async function WebinarDetail({ params }: { params: { slug: string
             <SeatCounter seat={view.seat} />
           </div>
 
+          {registered && (
+            <div className="mt-5 rounded-xl border border-success/30 bg-success/10 p-4">
+              <p className="font-heading text-base font-bold text-success">✓ You&apos;re already registered</p>
+              <p className="mt-1 text-sm text-ink2">
+                {completed ? "Watch the recording below or in My Portal." : "You'll get the join link by WhatsApp/email before it starts. See it anytime in My Portal."}
+              </p>
+            </div>
+          )}
+
           <div className="mt-5 flex flex-wrap gap-3">
-            <a href="#register" className="btn btn-primary">{completed ? "Get the recording" : "Reserve your spot →"}</a>
+            {registered ? (
+              <a href="/portal" className="btn btn-primary">Go to My Portal →</a>
+            ) : (
+              <a href="#register" className="btn btn-primary">{completed ? "Get the recording" : "Reserve your spot →"}</a>
+            )}
             <WhatsAppButton config={view.whatsapp} />
           </div>
 
@@ -147,14 +163,28 @@ export default async function WebinarDetail({ params }: { params: { slug: string
 
         <div>
           <div id="register" className="card scroll-mt-24 p-6 lg:sticky lg:top-24">
-            <h3 className="text-lg">{completed ? "Watch the recording" : "Reserve your spot"}</h3>
-            <p className="mt-1 text-sm text-ink2">{completed ? "Register to get the recording link." : "Limited seats — register now."}</p>
-            <div className="mt-3">
-              <SeatCounter seat={view.seat} compact />
-            </div>
-            <div className="mt-4">
-              <WebinarRegister webinarId={w.id} webinarSlug={w.slug} price={w.price} />
-            </div>
+            {registered ? (
+              <>
+                <span className="pill pill-green mb-2">✓ Registered</span>
+                <h3 className="text-lg">You&apos;re all set</h3>
+                <p className="mt-1 text-sm text-ink2">{completed ? "Access the recording from your portal." : "We'll send the join link before the session. It's also in your portal."}</p>
+                <a href="/portal" className="btn btn-primary mt-4 w-full">Open My Portal →</a>
+                {completed && w.recording_link && (
+                  <a href={w.recording_link} target="_blank" rel="noopener noreferrer" className="btn btn-secondary mt-2 w-full">▶ Watch recording</a>
+                )}
+              </>
+            ) : (
+              <>
+                <h3 className="text-lg">{completed ? "Watch the recording" : "Reserve your spot"}</h3>
+                <p className="mt-1 text-sm text-ink2">{completed ? "Register to get the recording link." : "Limited seats — register now."}</p>
+                <div className="mt-3">
+                  <SeatCounter seat={view.seat} compact />
+                </div>
+                <div className="mt-4">
+                  <WebinarRegister webinarId={w.id} webinarSlug={w.slug} price={w.price} />
+                </div>
+              </>
+            )}
             <WhatsAppButton config={view.whatsapp} className="mt-3 w-full" />
           </div>
         </div>

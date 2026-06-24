@@ -118,6 +118,68 @@ export function buildFullSchedule(total: number): InstallmentItem[] {
   return [{ no: 0, kind: "full", label: "Full Payment", amount: Math.max(0, Math.round(total)), due: null, paid: false }];
 }
 
+/**
+ * The discounted one-shot total charged when paying the WHOLE fee in one go.
+ * Falls back to the standard price when no (smaller) pay-in-full price is set.
+ */
+export function payInFullTotal(course: Pick<Course, "price" | "pay_in_full_price">): number {
+  const std = Math.max(0, Math.round(course.price || 0));
+  const pif = course.pay_in_full_price;
+  if (pif != null && Number(pif) > 0 && Math.round(Number(pif)) < std) return Math.round(Number(pif));
+  return std;
+}
+
+/**
+ * Pay-in-full, but split into a seat now + a single remaining balance later.
+ * Guarantees seat + balance === payInFull exactly. The balance is one
+ * "installment" line so it reuses the same pay/finalize/receipt machinery.
+ */
+export function buildFullWithSeatSchedule(opts: {
+  payInFull: number;
+  seatAmount: number;
+  bookingISO: string;
+  firstIntervalDays: number;
+  seatLabel?: string;
+}): InstallmentItem[] {
+  const total = Math.max(0, Math.round(opts.payInFull));
+  const seat = Math.min(Math.max(0, Math.round(opts.seatAmount)), Math.max(0, total - 1));
+  const balance = total - seat;
+  return [
+    { no: 0, kind: "seat", label: opts.seatLabel || "Book Your Seat", amount: seat, due: null, paid: false },
+    { no: 1, kind: "installment", label: "Remaining balance", amount: balance, due: addDaysISO(opts.bookingISO, opts.firstIntervalDays), paid: false },
+  ];
+}
+
+/**
+ * Installments-only plan (no seat booking): the FIRST installment is due/paid
+ * today, the rest follow every `intervalMonths`. Sum === total exactly
+ * (remainder on the last installment).
+ */
+export function buildInstallmentOnlySchedule(opts: {
+  total: number;
+  count: number;
+  bookingISO: string;
+  intervalMonths: number;
+}): InstallmentItem[] {
+  const total = Math.max(0, Math.round(opts.total));
+  const count = Math.max(1, Math.round(opts.count));
+  const base = Math.floor(total / count);
+  const remainder = total - base * count;
+  const items: InstallmentItem[] = [];
+  for (let i = 1; i <= count; i++) {
+    const isLast = i === count;
+    items.push({
+      no: i,
+      kind: "installment",
+      label: `Installment ${i} of ${count}`,
+      amount: base + (isLast ? remainder : 0),
+      due: i === 1 ? opts.bookingISO : addMonthsISO(opts.bookingISO, (i - 1) * opts.intervalMonths),
+      paid: false,
+    });
+  }
+  return items;
+}
+
 export interface EnrollmentDerived {
   paid: number;
   remaining: number;

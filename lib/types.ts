@@ -328,8 +328,12 @@ export interface Course {
   duration: string | null;
   price: number;
   original_price: number | null;
+  /** Optional one-shot discounted price applied ONLY when paying the full fee in one go. Falls back to `price` when null. */
+  pay_in_full_price: number | null;
   gst: boolean;
+  /** @deprecated EMI is auto-calculated at checkout from `emi_config`. Retained for backward compatibility only. */
   emi_amount: number | null;
+  /** @deprecated EMI is auto-calculated at checkout from `emi_config`. Retained for backward compatibility only. */
   emi_months: number | null;
   faculty: string;
   capacity: number | null;

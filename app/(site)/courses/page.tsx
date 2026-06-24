@@ -1,5 +1,6 @@
 import CourseExplorer from "@/components/public/home/CourseExplorer";
 import { getPublishedCourses } from "@/lib/dataProvider";
+import { getPurchaseSnapshot, coursePurchaseMap } from "@/lib/purchaseStatus";
 
 export const metadata = { title: "Courses — Naman Sharma IAS Academy" };
 
@@ -9,6 +10,8 @@ export const dynamic = "force-dynamic";
 
 export default async function CoursesPage() {
   const courses = await getPublishedCourses();
+  const snapshot = await getPurchaseSnapshot();
+  const purchaseMap = coursePurchaseMap(courses, snapshot);
 
   return (
     <div className="bg-[var(--ca-slate-50)]">
@@ -30,7 +33,7 @@ export default async function CoursesPage() {
       {/* Content */}
       <div className="relative z-10 -mt-10 rounded-t-[2rem] bg-[var(--ca-slate-50)] sm:-mt-12">
         <div className="container-wide py-10 sm:py-12">
-          <CourseExplorer courses={courses} />
+          <CourseExplorer courses={courses} purchaseMap={purchaseMap} />
         </div>
       </div>
     </div>

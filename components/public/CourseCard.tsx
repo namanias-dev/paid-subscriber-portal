@@ -1,8 +1,9 @@
 import Link from "next/link";
 import Image from "next/image";
-import { GraduationCap, ArrowRight, Layers, Clock, CalendarDays, User, CalendarClock } from "lucide-react";
+import { GraduationCap, ArrowRight, Layers, Clock, CalendarDays, User, CalendarClock, CheckCircle2 } from "lucide-react";
 import { formatINR, formatISTDate } from "@/lib/dates";
 import type { Course } from "@/lib/types";
+import type { CoursePurchaseView } from "@/lib/purchaseStatus";
 
 export function discountPct(price: number, original: number | null): number | null {
   if (!original || original <= price) return null;
@@ -10,19 +11,22 @@ export function discountPct(price: number, original: number | null): number | nu
 }
 
 /** Premium course list card: cover image, glass depth, gold accents, clear price. */
-export default function CourseCard({ course }: { course: Course }) {
+export default function CourseCard({ course, purchase }: { course: Course; purchase?: CoursePurchaseView | null }) {
   const cover = course.cover_image_url || course.image || course.mobile_image_url || null;
   const off = discountPct(course.price, course.original_price);
   const category = course.badge_label?.trim() || course.category;
   const modes = course.modes?.length ? course.modes.join(" · ") : null;
   const cta = course.price === 0 ? "Start free" : "View course";
+  // When the logged-in buyer already owns this course, the whole card becomes a
+  // shortcut into the portal (no nested links) and shows their status, not a price.
+  const href = purchase ? purchase.href : `/courses/${course.slug}`;
   const timing = (course.batch_timings || []).filter(Boolean)[0];
   const batchLine = [timing ? `${timing} batch` : null, course.batch_start ? `Starts ${formatISTDate(course.batch_start)}` : null]
     .filter(Boolean)
     .join(" · ");
 
   return (
-    <Link href={`/courses/${course.slug}`} className="ca-focus group block h-full">
+    <Link href={href} className="ca-focus group block h-full">
       <article className="relative h-full rounded-2xl bg-gradient-to-b from-white/70 via-[var(--ca-slate-200)] to-[rgba(212,175,55,0.45)] p-px shadow-[0_1px_2px_rgba(10,26,63,0.05),0_18px_40px_-26px_rgba(10,26,63,0.30)] transition-all duration-200 ease-out group-hover:-translate-y-1 group-hover:shadow-[0_1px_2px_rgba(10,26,63,0.06),0_30px_60px_-24px_rgba(212,175,55,0.42)] motion-reduce:transform-none motion-reduce:transition-none">
         <div className="relative flex h-full flex-col overflow-hidden rounded-[15px] bg-white before:pointer-events-none before:absolute before:inset-x-0 before:top-0 before:z-10 before:h-px before:bg-white/70">
           {/* Cover image */}
@@ -48,7 +52,11 @@ export default function CourseCard({ course }: { course: Course }) {
               <span className="inline-flex items-center rounded-full bg-white/90 px-2.5 py-1 text-[11px] font-bold text-[var(--ca-navy-900)] shadow-sm backdrop-blur-sm">
                 {category}
               </span>
-              {off ? (
+              {purchase ? (
+                <span className="inline-flex items-center gap-1 rounded-full bg-[#16a34a] px-2.5 py-1 text-[11px] font-extrabold text-white shadow-sm backdrop-blur-sm">
+                  <CheckCircle2 size={12} /> {purchase.label}
+                </span>
+              ) : off ? (
                 <span className="inline-flex items-center rounded-full bg-[rgba(212,175,55,0.95)] px-2.5 py-1 text-[11px] font-extrabold text-[#1a1304] shadow-sm backdrop-blur-sm">
                   {off}% OFF
                 </span>
@@ -78,23 +86,34 @@ export default function CourseCard({ course }: { course: Course }) {
               </p>
             )}
 
-            <div className="mt-auto flex items-end justify-between gap-3 pt-4">
-              <div className="min-w-0">
-                {course.price === 0 ? (
-                  <span className="font-heading text-2xl font-extrabold text-[#16a34a]">Free</span>
-                ) : (
-                  <div className="flex items-baseline gap-2">
-                    <span className="font-heading text-2xl font-extrabold text-[var(--ca-navy-900)]">{formatINR(course.price)}</span>
-                    {course.original_price && course.original_price > course.price && (
-                      <span className="text-sm text-[var(--ca-slate-400)] line-through">{formatINR(course.original_price)}</span>
-                    )}
-                  </div>
-                )}
+            {purchase ? (
+              <div className="mt-auto flex items-center justify-between gap-3 pt-4">
+                <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-[#16a34a]">
+                  <CheckCircle2 size={16} aria-hidden="true" /> {purchase.remaining > 0 ? `Balance ${formatINR(purchase.remaining)}` : "Full access"}
+                </span>
+                <span className="ca-btn ca-btn-gold ca-focus shrink-0 px-3.5 py-2 text-sm">
+                  {purchase.cta} <ArrowRight size={15} className="transition-transform duration-200 group-hover:translate-x-0.5 motion-reduce:transform-none" aria-hidden="true" />
+                </span>
               </div>
-              <span className="ca-btn ca-btn-gold ca-focus shrink-0 px-3.5 py-2 text-sm">
-                {cta} <ArrowRight size={15} className="transition-transform duration-200 group-hover:translate-x-0.5 motion-reduce:transform-none" aria-hidden="true" />
-              </span>
-            </div>
+            ) : (
+              <div className="mt-auto flex items-end justify-between gap-3 pt-4">
+                <div className="min-w-0">
+                  {course.price === 0 ? (
+                    <span className="font-heading text-2xl font-extrabold text-[#16a34a]">Free</span>
+                  ) : (
+                    <div className="flex items-baseline gap-2">
+                      <span className="font-heading text-2xl font-extrabold text-[var(--ca-navy-900)]">{formatINR(course.price)}</span>
+                      {course.original_price && course.original_price > course.price && (
+                        <span className="text-sm text-[var(--ca-slate-400)] line-through">{formatINR(course.original_price)}</span>
+                      )}
+                    </div>
+                  )}
+                </div>
+                <span className="ca-btn ca-btn-gold ca-focus shrink-0 px-3.5 py-2 text-sm">
+                  {cta} <ArrowRight size={15} className="transition-transform duration-200 group-hover:translate-x-0.5 motion-reduce:transform-none" aria-hidden="true" />
+                </span>
+              </div>
+            )}
           </div>
         </div>
       </article>

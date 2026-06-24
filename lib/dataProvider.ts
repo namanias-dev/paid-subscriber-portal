@@ -704,6 +704,7 @@ export async function addCourse(input: Partial<Course>): Promise<Course> {
     duration: input.duration ?? null,
     price: input.price ?? 0,
     original_price: input.original_price ?? null,
+    pay_in_full_price: input.pay_in_full_price ?? null,
     gst: input.gst ?? false,
     emi_amount: input.emi_amount ?? null,
     emi_months: input.emi_months ?? null,
@@ -1072,6 +1073,21 @@ export async function registerWebinar(webinarId: string, name: string, phone: st
   }
   await addLead({ name, phone, source: "Webinar", webinar_registered: true });
   return { ok: true };
+}
+
+/** Set of webinar IDs this phone has registered for (free or paid). Best-effort. */
+export async function getWebinarRegistrationIdsByPhone(phone: string): Promise<Set<string>> {
+  const p = (phone || "").trim();
+  if (!p) return new Set();
+  if (demoMode()) return new Set();
+  const db = getSupabaseAdmin();
+  if (!db) return new Set();
+  try {
+    const { data } = await db.from("webinar_registrations").select("webinar_id").eq("phone", p);
+    return new Set(((data as { webinar_id: string }[]) ?? []).map((r) => r.webinar_id).filter(Boolean));
+  } catch {
+    return new Set();
+  }
 }
 
 // ============================ COUPONS ============================
