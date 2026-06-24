@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { findBuyerByLogin, rateLimited } from "@/lib/dataProvider";
 import { signBuyerToken } from "@/lib/auth";
-import { BUYER_COOKIE } from "@/lib/config";
+import { BUYER_COOKIE, SESSION_MAX_AGE } from "@/lib/config";
 import { normalizeIndianMobile } from "@/lib/phone";
 import { normalizeLoginCode } from "@/lib/buyerCode";
 
@@ -42,7 +42,7 @@ export async function POST(req: Request) {
       secure: process.env.NODE_ENV === "production",
       sameSite: "lax",
       path: "/",
-      maxAge: 60 * 60 * 24 * 7,
+      maxAge: SESSION_MAX_AGE,
     });
     return res;
   } catch {

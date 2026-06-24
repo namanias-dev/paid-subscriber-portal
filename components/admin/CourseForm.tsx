@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { FormShell, Section, Field, FormActions, Tabs } from "./FormKit";
 import {
@@ -26,7 +26,7 @@ import { useToast } from "@/components/ui/Toast";
 import { COURSE_CATEGORIES, LEARNING_MODES } from "@/lib/config";
 import { istInputToISO, isoToISTInput, formatINR, formatISTDate } from "@/lib/dates";
 import { resolveEmiConfig, buildSchedule, EMI_DEFAULTS } from "@/lib/installments";
-import type { Course, CourseCategory, LearningMode, CourseAfterRegistration, OrientationVideo, CourseEmiConfig } from "@/lib/types";
+import type { Course, CourseCategory, LearningMode, CourseAfterRegistration, OrientationVideo, CourseEmiConfig, CourseEntitlements } from "@/lib/types";
 
 const BACK = "/admin/courses";
 const BATCH_TIMINGS = ["Morning", "Afternoon", "Evening", "Weekend"];
@@ -282,6 +282,15 @@ export default function CourseForm({ course }: { course?: Course }) {
             ),
           },
           {
+            id: "access",
+            label: "Access & Entitlements",
+            content: (
+              <Section title="Mission Control" desc="Decide EXACTLY what enrolling in this course unlocks. Enrolled, logged-in students get this access automatically — no lead form, no re-asking.">
+                <EntitlementsEditor value={c.entitlements || {}} onChange={(v) => set("entitlements", v)} />
+              </Section>
+            ),
+          },
+          {
             id: "seo",
             label: "SEO",
             content: (
@@ -309,6 +318,136 @@ export default function CourseForm({ course }: { course?: Course }) {
 
       <FormActions saving={saving} onSave={save} cancelHref={BACK} saveLabel={isNew ? "Create Course" : "Save Changes"} />
     </FormShell>
+  );
+}
+
+type QuizLite = { id: string; title: string; requires_payment?: boolean };
+type CaPdfLite = { id: string; title: string; is_free?: boolean };
+
+/** "Mission Control": choose exactly what a course unlocks. Single source of truth for the central entitlement check. */
+function EntitlementsEditor({ value, onChange }: { value: CourseEntitlements; onChange: (v: CourseEntitlements) => void }) {
+  const e = value || {};
+  const set = (k: keyof CourseEntitlements, val: unknown) => onChange({ ...e, [k]: val });
+  const [quizzes, setQuizzes] = useState<QuizLite[]>([]);
+  const [caPdfs, setCaPdfs] = useState<CaPdfLite[]>([]);
+
+  useEffect(() => {
+    fetch("/api/admin/quizzes").then((r) => r.json()).then((d) => d.ok && setQuizzes(d.quizzes || [])).catch(() => {});
+    fetch("/api/admin/current-affairs/pdfs").then((r) => r.json()).then((d) => d.ok && setCaPdfs(d.pdfs || [])).catch(() => {});
+  }, []);
+
+  function toggleId(key: "quiz_ids" | "ca_pdf_ids", id: string) {
+    const cur = (e[key] as string[]) || [];
+    set(key, cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]);
+  }
+
+  const paidQuizzes = quizzes.filter((q) => q.requires_payment);
+  const freeQuizzes = quizzes.filter((q) => !q.requires_payment);
+  const accessType = e.access_type || "lifetime";
+
+  const summary: string[] = [];
+  if (e.class_hub !== false) summary.push("Class Hub / live classes");
+  if (e.recorded) summary.push("Recorded lectures");
+  if (e.quizzes_all_free) summary.push("All free quizzes");
+  if ((e.quiz_ids || []).length) summary.push(`${e.quiz_ids!.length} test${e.quiz_ids!.length > 1 ? "s" : ""}/series`);
+  if (e.ca_all_free) summary.push("All free Current Affairs");
+  if ((e.ca_pdf_ids || []).length) summary.push(`${e.ca_pdf_ids!.length} CA compilation${e.ca_pdf_ids!.length > 1 ? "s" : ""}`);
+  if ((e.library_doc_ids || []).length) summary.push(`${e.library_doc_ids!.length} study PDF${e.library_doc_ids!.length > 1 ? "s" : ""}`);
+
+  return (
+    <div className="sm:col-span-2 space-y-5">
+      {/* What this course includes — scannable summary */}
+      <div className="rounded-xl border border-line bg-surface2/40 p-4">
+        <p className="text-xs font-semibold uppercase tracking-wide text-muted">This course unlocks</p>
+        {summary.length ? (
+          <div className="mt-2 flex flex-wrap gap-2">
+            {summary.map((s) => <span key={s} className="pill pill-green">{s}</span>)}
+          </div>
+        ) : (
+          <p className="mt-1 text-sm text-muted">Nothing extra yet — enrolled students get Class Hub only. Toggle items below.</p>
+        )}
+      </div>
+
+      {/* Access type */}
+      <div className="rounded-xl border border-line p-4">
+        <p className="font-semibold text-ink">Access type</p>
+        <div className="mt-2 grid gap-3 sm:grid-cols-2">
+          <Field label="Validity">
+            <select className="input" value={accessType} onChange={(ev) => set("access_type", ev.target.value)}>
+              <option value="lifetime">Lifetime</option>
+              <option value="limited">Limited (expires after N days)</option>
+            </select>
+          </Field>
+          {accessType === "limited" && (
+            <Field label="Days of access from enrolment" hint="e.g. 365 for one year.">
+              <input type="number" className="input" value={e.access_days ?? ""} onChange={(ev) => set("access_days", ev.target.value ? Number(ev.target.value) : null)} placeholder="365" />
+            </Field>
+          )}
+        </div>
+      </div>
+
+      {/* Classes */}
+      <div className="rounded-xl border border-line p-4 space-y-2">
+        <p className="font-semibold text-ink">Classes &amp; lectures</p>
+        <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={e.class_hub !== false} onChange={(ev) => set("class_hub", ev.target.checked)} /> Class Hub / live classes</label>
+        <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={!!e.recorded} onChange={(ev) => set("recorded", ev.target.checked)} /> Recorded lectures</label>
+      </div>
+
+      {/* Quizzes */}
+      <div className="rounded-xl border border-line p-4 space-y-2">
+        <p className="font-semibold text-ink">Quizzes &amp; test series</p>
+        <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={!!e.quizzes_all_free} onChange={(ev) => set("quizzes_all_free", ev.target.checked)} /> Unlock all free practice quizzes</label>
+        {paidQuizzes.length > 0 && (
+          <div className="mt-1">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted">Paid test series — select which this course unlocks</p>
+            <div className="mt-1.5 max-h-44 space-y-1 overflow-auto rounded-lg border border-line p-2">
+              {paidQuizzes.map((q) => (
+                <label key={q.id} className="flex items-center gap-2 text-sm">
+                  <input type="checkbox" checked={(e.quiz_ids || []).includes(q.id)} onChange={() => toggleId("quiz_ids", q.id)} /> {q.title}
+                </label>
+              ))}
+            </div>
+          </div>
+        )}
+        {freeQuizzes.length > 0 && !e.quizzes_all_free && (
+          <details className="mt-1">
+            <summary className="cursor-pointer text-xs font-semibold text-primary">Or pick specific free quizzes…</summary>
+            <div className="mt-1.5 max-h-44 space-y-1 overflow-auto rounded-lg border border-line p-2">
+              {freeQuizzes.map((q) => (
+                <label key={q.id} className="flex items-center gap-2 text-sm">
+                  <input type="checkbox" checked={(e.quiz_ids || []).includes(q.id)} onChange={() => toggleId("quiz_ids", q.id)} /> {q.title}
+                </label>
+              ))}
+            </div>
+          </details>
+        )}
+      </div>
+
+      {/* Current Affairs */}
+      <div className="rounded-xl border border-line p-4 space-y-2">
+        <p className="font-semibold text-ink">Current Affairs compilations</p>
+        <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={!!e.ca_all_free} onChange={(ev) => set("ca_all_free", ev.target.checked)} /> Unlock all free Current Affairs compilations</label>
+        {caPdfs.length > 0 && (
+          <details className="mt-1">
+            <summary className="cursor-pointer text-xs font-semibold text-primary">Pick specific compilations…</summary>
+            <div className="mt-1.5 max-h-44 space-y-1 overflow-auto rounded-lg border border-line p-2">
+              {caPdfs.map((p) => (
+                <label key={p.id} className="flex items-center gap-2 text-sm">
+                  <input type="checkbox" checked={(e.ca_pdf_ids || []).includes(p.id)} onChange={() => toggleId("ca_pdf_ids", p.id)} /> {p.title}
+                </label>
+              ))}
+            </div>
+          </details>
+        )}
+      </div>
+
+      {/* Study material */}
+      <div className="rounded-xl border border-line p-4">
+        <p className="font-semibold text-ink">Study material / PDFs</p>
+        <p className="mb-2 text-xs text-muted">From the shared library — unlocked for enrolled students.</p>
+        <LibraryPicker value={e.library_doc_ids || []} onChange={(ids) => set("library_doc_ids", ids)} hint="Downloadable by enrolled students." />
+      </div>
+    </div>
   );
 }
 

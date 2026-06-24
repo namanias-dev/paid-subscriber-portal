@@ -1,9 +1,11 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { getQuizBySlug, getQuizQuestions } from "@/lib/dataProvider";
+import { Lock, CheckCircle2 } from "lucide-react";
+import { getQuizBySlug, getQuizQuestions, getAllCourses } from "@/lib/dataProvider";
 import { SITE_URL } from "@/lib/config";
 import { quizIsLive } from "@/lib/quizAccess";
+import { resolveLearner, gateQuiz } from "@/lib/entitlements";
 import { sanitizeHtml } from "@/lib/sanitizeHtml";
 
 export const dynamic = "force-dynamic";
@@ -38,10 +40,20 @@ export default async function QuizIntroPage({ params }: { params: { slug: string
     // Private quizzes are handled in the student portal.
   }
 
-  const quizQuestions = await getQuizQuestions(quiz.id);
+  const [quizQuestions, courses, learner] = await Promise.all([
+    getQuizQuestions(quiz.id),
+    getAllCourses(),
+    resolveLearner(),
+  ]);
   const live = quizIsLive(quiz);
   const totalMarks = quizQuestions.reduce((sum, qq) => sum + (qq.marks ?? quiz.marks_per_question), 0);
   const seo = quiz.seo || {};
+
+  // Central entitlement decision — drives the locked/unlocked CTA below.
+  const gate = gateQuiz(quiz, learner, courses);
+  const unlockCourses = courses.filter((c) => gate.unlockCourseIds.includes(c.id));
+  const lockedPaid = !gate.free && !gate.allowed;
+  const entitledPaid = !gate.free && gate.allowed;
 
   const jsonLd: Record<string, unknown> = {
     "@context": "https://schema.org",
@@ -110,11 +122,51 @@ export default async function QuizIntroPage({ params }: { params: { slug: string
         <div className="prose-quiz card mt-6 p-5 text-sm leading-relaxed text-ink2" dangerouslySetInnerHTML={{ __html: sanitizeHtml(seo.public_summary) }} />
       )}
 
+      {entitledPaid && (
+        <div className="mt-6 flex items-center gap-2 rounded-xl border border-success/30 bg-success/5 p-3 text-sm font-semibold text-success">
+          <CheckCircle2 size={18} aria-hidden="true" /> Unlocked — you&apos;re enrolled in a course that includes this test.
+        </div>
+      )}
+
       <div className="sticky bottom-4 mt-6">
-        {live ? (
-          <Link href={`/quizzes/${quiz.slug}/attempt`} className="btn btn-primary w-full py-3 text-base shadow-lg">Start Test →</Link>
-        ) : (
+        {!live ? (
           <div className="btn btn-secondary w-full cursor-not-allowed py-3 text-base opacity-70">This test isn&apos;t available right now</div>
+        ) : lockedPaid ? (
+          <div className="card border-amber-200 bg-amber-50/60 p-5 shadow-lg">
+            <div className="flex items-start gap-3">
+              <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-amber-100 text-amber-700">
+                <Lock size={18} aria-hidden="true" />
+              </span>
+              <div className="min-w-0">
+                <p className="font-heading text-base font-bold text-ink">Premium test</p>
+                <p className="mt-0.5 text-sm text-ink2">
+                  {gate.reason === "login"
+                    ? "Log in with your enrolled account to take this test."
+                    : gate.reason === "expired"
+                    ? "Your access has expired. Renew to continue."
+                    : unlockCourses.length
+                    ? `Unlock by enrolling in ${unlockCourses.map((c) => c.title).join(" or ")}.`
+                    : "Enrol in a course that includes this test to unlock it."}
+                </p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {gate.reason === "login" && (
+                    <Link href={`/portal/login?next=/quizzes/${quiz.slug}`} className="btn btn-primary text-sm">Log in</Link>
+                  )}
+                  {gate.reason === "expired" && (
+                    <Link href="/portal" className="btn btn-primary text-sm">Renew access</Link>
+                  )}
+                  {unlockCourses.slice(0, 2).map((c) => (
+                    <Link key={c.id} href={`/courses/${c.slug}`} className="btn btn-secondary text-sm">View {c.title} →</Link>
+                  ))}
+                  {!unlockCourses.length && gate.reason === "payment" && (
+                    <Link href="/courses" className="btn btn-secondary text-sm">Browse courses →</Link>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <Link href={`/quizzes/${quiz.slug}/attempt`} className="btn btn-primary w-full py-3 text-base shadow-lg">Start Test →</Link>
         )}
       </div>
 

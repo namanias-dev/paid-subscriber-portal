@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { findStudentByLogin, findStudentByPhone, findBuyerByLogin, touchStreakOnLogin, logAccess, rateLimited } from "@/lib/dataProvider";
 import { signStudentToken, signBuyerToken } from "@/lib/auth";
-import { STUDENT_COOKIE, BUYER_COOKIE } from "@/lib/config";
+import { STUDENT_COOKIE, BUYER_COOKIE, SESSION_MAX_AGE } from "@/lib/config";
 import { isExpired, formatDate } from "@/lib/dates";
 import { normalizeIndianMobile } from "@/lib/phone";
 import { normalizeLoginCode } from "@/lib/buyerCode";
@@ -11,7 +11,7 @@ const COOKIE_OPTS = {
   secure: process.env.NODE_ENV === "production",
   sameSite: "lax" as const,
   path: "/",
-  maxAge: 60 * 60 * 24 * 7,
+  maxAge: SESSION_MAX_AGE,
 };
 
 function clientIp(req: Request): string {

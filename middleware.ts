@@ -1,13 +1,13 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { verifyStudentToken, verifyBuyerToken, signBuyerToken } from "@/lib/auth";
-import { isDemoMode, STUDENT_COOKIE, BUYER_COOKIE } from "@/lib/config";
+import { verifyStudentToken, verifyBuyerToken, signBuyerToken, signStudentToken } from "@/lib/auth";
+import { isDemoMode, STUDENT_COOKIE, BUYER_COOKIE, SESSION_MAX_AGE } from "@/lib/config";
 
-const BUYER_COOKIE_OPTS = {
+const ROLLING_COOKIE_OPTS = {
   httpOnly: true,
   secure: process.env.NODE_ENV === "production",
   sameSite: "lax" as const,
   path: "/",
-  maxAge: 60 * 60 * 24 * 7,
+  maxAge: SESSION_MAX_AGE,
 };
 
 /**
@@ -29,8 +29,22 @@ export async function middleware(req: NextRequest) {
       if (!session) {
         const url = req.nextUrl.clone();
         url.pathname = "/login";
+        // Cookie present but invalid = expired session → graceful re-login prompt.
+        if (token) url.searchParams.set("expired", "1");
         return NextResponse.redirect(url);
       }
+      // Rolling session: re-issue a fresh token on activity so an active student
+      // is never logged out mid-use (auto-logout only after idle TTL). Subscription
+      // expiry/revoke is still enforced DB-fresh on every gated API call.
+      const res = NextResponse.next();
+      const fresh = await signStudentToken({
+        student_id: session.student_id,
+        name: session.name,
+        plan: session.plan,
+        expiry_date: session.expiry_date,
+      });
+      res.cookies.set(STUDENT_COOKIE, fresh, ROLLING_COOKIE_OPTS);
+      return res;
     }
 
     // Buyer portal: everything under /portal needs a buyer session except the
@@ -51,7 +65,7 @@ export async function middleware(req: NextRequest) {
       // after 7 days of inactivity.
       const res = NextResponse.next();
       const fresh = await signBuyerToken({ buyer_id: session.buyer_id, phone: session.phone, name: session.name });
-      res.cookies.set(BUYER_COOKIE, fresh, BUYER_COOKIE_OPTS);
+      res.cookies.set(BUYER_COOKIE, fresh, ROLLING_COOKIE_OPTS);
       return res;
     }
 

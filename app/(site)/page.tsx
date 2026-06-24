@@ -10,6 +10,7 @@ import LeadForm from "@/components/public/LeadForm";
 import LeadPopup from "@/components/public/LeadPopup";
 import CaArticleCard from "@/components/public/ca/CaArticleCard";
 import { getPublishedCourses, getPublicWebinars, getSiteSettings, getPublicCaArticles } from "@/lib/dataProvider";
+import { getPurchaseSnapshot, coursePurchaseMap } from "@/lib/purchaseStatus";
 import { ACADEMY } from "@/lib/config";
 import { directionsUrl, mapEmbedUrl } from "@/lib/maps";
 
@@ -45,6 +46,9 @@ export default async function HomePage() {
     getSiteSettings(),
     getPublicCaArticles(),
   ]);
+  // Single source of truth for purchase awareness — identical to /courses + detail.
+  const snapshot = await getPurchaseSnapshot();
+  const purchaseMap = coursePurchaseMap(courses, snapshot);
   const homeCa = (caArticles.filter((a) => a.show_on_home).length ? caArticles.filter((a) => a.show_on_home) : caArticles).slice(0, 3);
   const upcoming = webinars.filter((w) => w.status === "upcoming").slice(0, 2);
   const c = settings.content;
@@ -123,7 +127,7 @@ export default async function HomePage() {
           </div>
         </Reveal>
         <div className="mt-8">
-          <CourseExplorer courses={courses} limit={6} />
+          <CourseExplorer courses={courses} limit={6} purchaseMap={purchaseMap} />
         </div>
       </section>
 

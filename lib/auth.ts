@@ -1,15 +1,15 @@
 import { SignJWT, jwtVerify } from "jose";
-import { JWT_SECRET, ADMIN_JWT_SECRET } from "./config";
+import { JWT_SECRET, ADMIN_JWT_SECRET, SESSION_DAYS } from "./config";
 import type { SessionPayload, AdminSessionPayload, BuyerSessionPayload } from "./types";
 
 const enc = (s: string) => new TextEncoder().encode(s);
-const SEVEN_DAYS = "7d";
+const TTL = `${SESSION_DAYS}d`;
 
 export async function signStudentToken(payload: SessionPayload): Promise<string> {
   return new SignJWT({ ...payload })
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
-    .setExpirationTime(SEVEN_DAYS)
+    .setExpirationTime(TTL)
     .sign(enc(JWT_SECRET));
 }
 
@@ -29,7 +29,7 @@ export async function signBuyerToken(payload: BuyerSessionPayload): Promise<stri
   return new SignJWT({ ...payload })
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
-    .setExpirationTime(SEVEN_DAYS)
+    .setExpirationTime(TTL)
     .sign(enc(JWT_SECRET));
 }
 
@@ -49,7 +49,7 @@ export async function signAdminToken(payload: AdminSessionPayload): Promise<stri
   return new SignJWT({ ...payload })
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
-    .setExpirationTime(SEVEN_DAYS)
+    .setExpirationTime(TTL)
     .sign(enc(ADMIN_JWT_SECRET));
 }
 

@@ -2,13 +2,23 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
+import { Lock, CheckCircle2 } from "lucide-react";
 import type { Quiz } from "@/lib/types";
 
-function QuizCard({ quiz }: { quiz: Quiz }) {
+export type QuizStatus = "entitled" | "locked";
+
+function QuizCard({ quiz, status }: { quiz: Quiz; status?: QuizStatus }) {
+  const paid = quiz.requires_payment || status === "locked" || status === "entitled";
   return (
     <Link href={`/quizzes/${quiz.slug}`} className="card group flex flex-col p-5 transition hover:shadow-lg">
       <div className="mb-2 flex items-center gap-2">
-        <span className={`pill ${quiz.requires_payment ? "pill-amber" : "pill-green"}`}>{quiz.requires_payment ? "Paid" : "Free"}</span>
+        {status === "entitled" ? (
+          <span className="pill inline-flex items-center gap-1 bg-success/10 text-success"><CheckCircle2 size={12} /> Unlocked</span>
+        ) : status === "locked" ? (
+          <span className="pill inline-flex items-center gap-1 bg-amber-100 text-amber-700"><Lock size={11} /> Locked</span>
+        ) : (
+          <span className={`pill ${paid ? "pill-amber" : "pill-green"}`}>{paid ? "Paid" : "Free"}</span>
+        )}
         {quiz.subject && <span className="pill pill-blue">{quiz.subject}</span>}
       </div>
       <h3 className="font-heading text-base font-bold leading-snug group-hover:text-primary">{quiz.title}</h3>
@@ -18,12 +28,14 @@ function QuizCard({ quiz }: { quiz: Quiz }) {
         <span>★ {quiz.difficulty}</span>
         {quiz.quiz_date && <span>📅 {new Date(quiz.quiz_date).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}</span>}
       </div>
-      <span className="btn btn-primary mt-4 w-full text-sm">Start Test →</span>
+      <span className={`btn mt-4 w-full text-sm ${status === "locked" ? "btn-secondary" : "btn-primary"}`}>
+        {status === "locked" ? "Unlock →" : "Start Test →"}
+      </span>
     </Link>
   );
 }
 
-export default function QuizBrowser({ quizzes }: { quizzes: Quiz[] }) {
+export default function QuizBrowser({ quizzes, statuses }: { quizzes: Quiz[]; statuses?: Record<string, QuizStatus> }) {
   const [subject, setSubject] = useState("all");
   const [q, setQ] = useState("");
 
@@ -63,7 +75,7 @@ export default function QuizBrowser({ quizzes }: { quizzes: Quiz[] }) {
         <div className="card p-12 text-center text-muted">No quizzes found. Check back soon!</div>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {filtered.map((quiz) => <QuizCard key={quiz.id} quiz={quiz} />)}
+          {filtered.map((quiz) => <QuizCard key={quiz.id} quiz={quiz} status={statuses?.[quiz.id]} />)}
         </div>
       )}
     </div>

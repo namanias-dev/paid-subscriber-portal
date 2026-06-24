@@ -65,6 +65,16 @@ export const ADMIN_COOKIE = "naman_admin_token";
 /** Buyer portal session (phone + login code), separate from the student subscription portal. */
 export const BUYER_COOKIE = "naman_buyer_token";
 
+/**
+ * Session lifetime (auto-logout). Configurable via SESSION_DAYS env; default 7
+ * days. Sessions roll forward on activity (middleware) so active users are never
+ * interrupted; an idle session expires after this many days and prompts a
+ * graceful re-login. Access validity/expiry (subscription) is enforced
+ * separately + server-side on every gated request.
+ */
+export const SESSION_DAYS = Math.min(60, Math.max(1, Number(process.env.SESSION_DAYS) || 7));
+export const SESSION_MAX_AGE = SESSION_DAYS * 24 * 60 * 60;
+
 export const PLANS: PlanInfo[] = [
   {
     id: "1m",

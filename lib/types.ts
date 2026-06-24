@@ -386,6 +386,35 @@ export interface Course {
   after_registration?: CourseAfterRegistration;
   /** Book-Your-Seat + EMI plan config (Phase 2). */
   emi_config?: CourseEmiConfig;
+  /** "Mission Control": exactly what enrolling in this course unlocks. */
+  entitlements?: CourseEntitlements;
+}
+
+/**
+ * Per-course "Access & Entitlements" (Mission Control). Defines exactly what a
+ * student gets when they enrol — the SINGLE SOURCE OF TRUTH consumed by the
+ * central entitlement check (`lib/entitlements.ts`). All fields optional and
+ * backward-compatible: an absent/empty config means "Class Hub only" (legacy).
+ */
+export interface CourseEntitlements {
+  /** Lifetime access, or limited (expires N days after enrolment / at student expiry). */
+  access_type?: "lifetime" | "limited";
+  /** For limited access: days of access from the enrolment date. */
+  access_days?: number | null;
+  /** Unlock ALL free quizzes (practice tests) for enrolled students. */
+  quizzes_all_free?: boolean;
+  /** Specific quizzes/test-series unlocked by this course (incl. PAID ones), by quiz id. */
+  quiz_ids?: string[];
+  /** Grant access to recorded lectures (Class Hub recordings / orientation videos). */
+  recorded?: boolean;
+  /** Unlock ALL free Current Affairs compilations. */
+  ca_all_free?: boolean;
+  /** Specific (paid) Current Affairs compilations unlocked, by CaPdf id. */
+  ca_pdf_ids?: string[];
+  /** Specific study-material / PDFs from the central library, by LibraryDoc id. */
+  library_doc_ids?: string[];
+  /** Grant Class Hub / live classes access (default true for any paid course). */
+  class_hub?: boolean;
 }
 
 export interface Enrollment {

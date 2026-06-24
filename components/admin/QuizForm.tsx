@@ -353,7 +353,7 @@ export default function QuizForm({ quiz }: { quiz?: Quiz }) {
       <Section title="Access">
         <Field label="Visibility"><Toggle label="Public (crawlable, no login)" checked={isPublic} onChange={setIsPublic} /></Field>
         <Field label="Login"><Toggle label="Requires login" checked={requiresLogin} onChange={setRequiresLogin} /></Field>
-        <Field label="Payment"><Toggle label="Requires payment / enrollment" checked={requiresPayment} onChange={setRequiresPayment} /></Field>
+        <Field label="Paid test" hint="When on, only learners enrolled in a course that grants this test (below) can take it. Free quizzes stay open."><Toggle label="Paid — unlock via course enrolment" checked={requiresPayment} onChange={setRequiresPayment} /></Field>
         <Field label="Max attempts (blank = unlimited)"><input type="number" className="input" value={maxAttempts} onChange={(e) => setMaxAttempts(e.target.value)} /></Field>
         <Field label="Retry"><Toggle label="Retry allowed" checked={retryAllowed} onChange={setRetryAllowed} /></Field>
         <Field label="Counted score">
@@ -367,7 +367,7 @@ export default function QuizForm({ quiz }: { quiz?: Quiz }) {
         <Field label="One at a time"><Toggle label="Show one question at a time" checked={oneAtATime} onChange={setOneAtATime} /></Field>
         <Field label="Expires at (optional)"><input type="datetime-local" className="input" value={expiresAt || ""} onChange={(e) => setExpiresAt(e.target.value)} /></Field>
       </Section>
-      <Section title="Restrict to courses (optional)" desc="If set, only students enrolled in these courses can take the quiz.">
+      <Section title="Unlocked by courses" desc="Select which courses grant access to this test. For a Paid test, enrolling in any of these unlocks it (no lead form). You can also set this from each course's Access & Entitlements tab — both directions work.">
         <div className="sm:col-span-2 space-y-1">
           {courses.length === 0 ? <p className="text-sm text-muted">No courses available.</p> : courses.map((c) => (
             <label key={c.id} className="flex items-center gap-2 text-sm">

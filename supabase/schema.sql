@@ -159,6 +159,7 @@ create table if not exists public.courses (
   batch_timings jsonb default '[]'::jsonb,
   after_registration jsonb default '{}'::jsonb,
   emi_config jsonb default '{}'::jsonb,
+  entitlements jsonb not null default '{}'::jsonb,
   created_at timestamptz default now()
 );
 

@@ -746,6 +746,7 @@ export async function addCourse(input: Partial<Course>): Promise<Course> {
     batch_timings: input.batch_timings ?? [],
     after_registration: input.after_registration ?? {},
     emi_config: input.emi_config ?? {},
+    entitlements: input.entitlements ?? {},
     created_at: new Date().toISOString(),
   } as Course;
   if (demoMode()) {

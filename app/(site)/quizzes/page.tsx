@@ -1,10 +1,11 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Quote } from "lucide-react";
-import { getPublicQuizzes, getSiteSettings } from "@/lib/dataProvider";
+import { getPublicQuizzes, getSiteSettings, getAllCourses } from "@/lib/dataProvider";
 import { SITE_URL } from "@/lib/config";
 import { DEFAULT_CONTENT } from "@/lib/homeDefaults";
-import QuizBrowser from "@/components/public/quiz/QuizBrowser";
+import { resolveLearner, gateQuiz } from "@/lib/entitlements";
+import QuizBrowser, { type QuizStatus } from "@/components/public/quiz/QuizBrowser";
 
 export const dynamic = "force-dynamic";
 
@@ -22,9 +23,21 @@ export const metadata: Metadata = {
 };
 
 export default async function QuizzesLanding() {
-  const [quizzes, settings] = await Promise.all([getPublicQuizzes(), getSiteSettings()]);
+  const [quizzes, settings, courses, learner] = await Promise.all([
+    getPublicQuizzes(),
+    getSiteSettings(),
+    getAllCourses(),
+    resolveLearner(),
+  ]);
   const quote = settings.content.quiz_quote || DEFAULT_CONTENT.quiz_quote!;
   const quoteAuthor = settings.content.quiz_quote_author || DEFAULT_CONTENT.quiz_quote_author!;
+
+  // Per-quiz unlocked/locked state from the SAME central entitlement check.
+  const statuses: Record<string, QuizStatus> = {};
+  for (const quiz of quizzes) {
+    const gate = gateQuiz(quiz, learner, courses);
+    if (!gate.free) statuses[quiz.id] = gate.allowed ? "entitled" : "locked";
+  }
 
   const jsonLd = {
     "@context": "https://schema.org",
@@ -51,7 +64,7 @@ export default async function QuizzesLanding() {
         </div>
       </section>
 
-      <QuizBrowser quizzes={quizzes} />
+      <QuizBrowser quizzes={quizzes} statuses={statuses} />
 
       <figure className="relative mx-auto mt-14 max-w-3xl overflow-hidden rounded-3xl border border-[rgba(212,175,55,0.25)] bg-gradient-to-br from-[var(--ca-navy-900,#0a1a3f)] to-[var(--ca-navy-600,#1e3a8a)] px-6 py-10 text-center shadow-soft-lg sm:px-12 sm:py-14">
         <span className="pointer-events-none absolute -right-10 -top-10 h-44 w-44 rounded-full bg-[rgba(212,175,55,0.18)] blur-2xl" aria-hidden="true" />
