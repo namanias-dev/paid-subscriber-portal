@@ -5,7 +5,7 @@ import { getStudentSession } from "@/lib/session";
 import { getEnrollments, getAllCourses, getLibraryDocsByIds } from "@/lib/dataProvider";
 import { hasCourseAccess } from "@/lib/courseAccess";
 import { resolveLearner } from "@/lib/entitlements";
-import { getClassHubSectionsForCourse } from "@/lib/classHubServer";
+import { getClassHubSectionsForCourse, getClassHubPerformance } from "@/lib/classHubServer";
 import ClassHubContent from "@/components/dashboard/ClassHubContent";
 import ClassHubBatch from "@/components/dashboard/ClassHubBatch";
 
@@ -38,7 +38,10 @@ export default async function ClassHubPage({ params }: { params: { courseId: str
     getLibraryDocsByIds([...(ar.doc_ids || []), ...(course.brochure_ids || [])]),
     resolveLearner(),
   ]);
-  const sections = await getClassHubSectionsForCourse(course.id, learner, courses);
+  const [sections, performance] = await Promise.all([
+    getClassHubSectionsForCourse(course.id, learner),
+    getClassHubPerformance(course.id, learner, courses),
+  ]);
 
   return (
     <div className="space-y-6">
@@ -58,7 +61,7 @@ export default async function ClassHubPage({ params }: { params: { courseId: str
 
       <ClassHubContent course={course} docs={docs} />
 
-      <ClassHubBatch courseId={course.id} sections={sections} />
+      <ClassHubBatch courseId={course.id} sections={sections} performance={performance} />
     </div>
   );
 }

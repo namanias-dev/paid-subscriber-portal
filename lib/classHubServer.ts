@@ -1,37 +1,72 @@
-import { getCourseContent, getClassHubViews, getAllQuizzes, getAllCourses, getPublishedContent } from "./dataProvider";
+import { getCourseContent, getClassHubViews, getAllQuizzes, getAllCourses, getPublishedContent, getAttemptsByUser } from "./dataProvider";
 import { quizUnlockCourseIds, type Learner } from "./entitlements";
 import { getAttemptStatusForLearner } from "./quizAttemptStatus";
 import { assembleClassHubSections, totalNewCount, type ClassHubSection } from "./classHub";
-import type { Course, ContentItem } from "./types";
+import { buildPerformanceData, PERFORMANCE_SECTION, type PerformanceData } from "./performance";
+import type { Course, ContentItem, Quiz, ClassHubView } from "./types";
 
 function assignedTo(item: ContentItem, courseId: string): boolean {
   const ids = item.course_ids && item.course_ids.length ? item.course_ids : item.course_id ? [item.course_id] : [];
   return ids.includes(courseId);
 }
 
+/** Quizzes available in a course's Class Hub: free public + paid this course unlocks. */
+function availableQuizzesForCourse(published: Quiz[], courseId: string, courses: Course[]): Quiz[] {
+  return published.filter((q) =>
+    q.requires_payment ? quizUnlockCourseIds(q, courses).includes(courseId) : q.is_public,
+  );
+}
+
+/** Count newly-available quizzes since the learner last opened the Performance tab. */
+function newQuizCount(available: Quiz[], views: ClassHubView[], courseId: string): number {
+  const seen = views.find((v) => v.course_id === courseId && v.section === PERFORMANCE_SECTION);
+  const seenMs = seen ? Date.parse(seen.last_seen_at) || 0 : 0;
+  return available.filter((q) => (Date.parse(q.created_at) || 0) > seenMs).length;
+}
+
 /**
- * Server-side assembly of a batch's Class Hub sections — reused by the student
- * dashboard and buyer portal Class Hub pages. Pulls assigned content + the
- * student's last-seen rows + course-unlocked quizzes (via lib/entitlements),
- * then groups/gates/flags them via lib/classHub (the single source of truth).
+ * Server-side assembly of a batch's Class Hub content sections — reused by the
+ * student dashboard and buyer portal Class Hub pages. Pulls assigned content +
+ * the student's last-seen rows, then groups/gates/flags via lib/classHub.
+ * (Interactive quizzes live in the Performance dashboard, not here.)
  */
 export async function getClassHubSectionsForCourse(
   courseId: string,
   learner: Learner | null,
-  courses: Course[],
 ): Promise<ClassHubSection[]> {
-  const [items, views, allQuizzes, attemptMap] = await Promise.all([
+  const [items, views] = await Promise.all([
     getCourseContent(courseId),
     learner?.studentId ? getClassHubViews(learner.studentId) : Promise.resolve([]),
+  ]);
+  return assembleClassHubSections({ items, courseId, views });
+}
+
+/**
+ * Assemble the student Performance dashboard for one batch's Class Hub. Reuses
+ * the entitlement engine (available quizzes), the shared attempt-status piece,
+ * the learner's stored attempts (analytics + reviewable history) and the
+ * class_hub_views last-seen system (NEW badge). Pure aggregation in lib/performance.
+ */
+export async function getClassHubPerformance(
+  courseId: string,
+  learner: Learner | null,
+  courses: Course[],
+): Promise<PerformanceData> {
+  const empty = buildPerformanceData({ attempts: [], quizById: new Map(), available: [], attemptStatus: {}, views: [], courseId });
+  if (!learner?.studentId) return empty;
+
+  const [allQuizzes, attempts, attemptStatus, views] = await Promise.all([
     getAllQuizzes(),
+    getAttemptsByUser(learner.studentId),
     getAttemptStatusForLearner(learner),
+    getClassHubViews(learner.studentId),
   ]);
 
-  const quizzes = allQuizzes
-    .filter((q) => q.status === "published" && quizUnlockCourseIds(q, courses).includes(courseId))
-    .map((q) => ({ id: q.id, title: q.title, slug: q.slug, subject: q.subject ?? null, created_at: q.created_at, attempt: attemptMap[q.id] ?? null }));
+  const published = allQuizzes.filter((q) => q.status === "published");
+  const available = availableQuizzesForCourse(published, courseId, courses);
+  const quizById = new Map(allQuizzes.map((q) => [q.id, q]));
 
-  return assembleClassHubSections({ items, quizzes, courseId, views });
+  return buildPerformanceData({ attempts, quizById, available, attemptStatus, views, courseId });
 }
 
 /**
@@ -46,14 +81,13 @@ export async function getNewCountsForLearner(learner: Learner | null): Promise<R
     getClassHubViews(learner.studentId),
     getAllQuizzes(),
   ]);
+  const published = allQuizzes.filter((q) => q.status === "published");
   const counts: Record<string, number> = {};
   for (const courseId of learner.courseIds) {
     const items = content.filter((c) => assignedTo(c, courseId));
-    const quizzes = allQuizzes
-      .filter((q) => q.status === "published" && quizUnlockCourseIds(q, courses).includes(courseId))
-      .map((q) => ({ id: q.id, title: q.title, slug: q.slug, subject: q.subject ?? null, created_at: q.created_at }));
-    const sections = assembleClassHubSections({ items, quizzes, courseId, views });
-    const n = totalNewCount(sections);
+    const sections = assembleClassHubSections({ items, courseId, views });
+    const available = availableQuizzesForCourse(published, courseId, courses);
+    const n = totalNewCount(sections) + newQuizCount(available, views, courseId);
     if (n > 0) counts[courseId] = n;
   }
   return counts;

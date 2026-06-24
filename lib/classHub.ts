@@ -1,16 +1,20 @@
 import type { ContentItem, ContentType, ClassHubView } from "./types";
-import type { QuizAttemptStatus } from "./quizAttemptStatus";
 import { CONTENT_META } from "./contentMeta";
 
 /**
  * ============================================================================
  *  CLASS HUB ASSEMBLY — pure, serializable grouping of a batch's content into
  *  premium sections, with drip/locked states and per-student "NEW" flags.
- *  No DB access here; the page supplies content + views + unlocked quizzes.
+ *  No DB access here; the page supplies content + views.
+ *
+ *  NOTE: interactive quizzes/tests live in the "My Performance" dashboard
+ *  (lib/performance.ts), NOT in these content sections — a single quizzes
+ *  surface. mcq/test_series content items (external practice PDFs/links) sit
+ *  under "Notes & Material".
  * ============================================================================
  */
 
-export type ClassHubSectionId = "recordings" | "notes" | "tests" | "ca";
+export type ClassHubSectionId = "recordings" | "notes" | "ca";
 
 export const CLASS_HUB_SECTIONS: {
   id: ClassHubSectionId;
@@ -18,8 +22,7 @@ export const CLASS_HUB_SECTIONS: {
   empty: string;
 }[] = [
   { id: "recordings", label: "Recordings", empty: "Recordings will appear here after each class." },
-  { id: "notes", label: "Notes & Material", empty: "Notes, booklets and maps will appear here." },
-  { id: "tests", label: "Tests & Quizzes", empty: "Tests and quizzes assigned to your batch will appear here." },
+  { id: "notes", label: "Notes & Material", empty: "Notes, booklets, test material and maps will appear here." },
   { id: "ca", label: "Current Affairs & More", empty: "Current affairs, PYQs and answer writing will appear here." },
 ];
 
@@ -29,8 +32,8 @@ const SECTION_FOR_TYPE: Record<ContentType, ClassHubSectionId> = {
   notes: "notes",
   booklet: "notes",
   maps: "notes",
-  mcq: "tests",
-  test_series: "tests",
+  mcq: "notes",
+  test_series: "notes",
   current_affairs: "ca",
   pyq: "ca",
   answer_writing: "ca",
@@ -44,18 +47,14 @@ export interface ClassHubItem {
   typeLabel: string;
   classNo: number | null;
   date: string | null;
-  /** External link (YouTube/Drive/Telegram or a quiz route). Null when locked. */
+  /** External link (YouTube/Drive/Telegram). Null when locked. */
   link: string | null;
-  /** Whether to open in a new tab (external) vs internal nav (quizzes). */
   external: boolean;
   action: string;
   /** Future drip — visible as "Unlocks on …" but not openable yet. */
   locked: boolean;
   unlockOn: string | null;
   isNew: boolean;
-  /** For quiz items: slug + the learner's attempt status (✓ Attempted + report/PDF). */
-  quizSlug?: string | null;
-  attempt?: QuizAttemptStatus | null;
 }
 
 export interface ClassHubSection {
@@ -64,16 +63,6 @@ export interface ClassHubSection {
   empty: string;
   items: ClassHubItem[];
   newCount: number;
-}
-
-/** A quiz unlocked by the course, surfaced inside the Tests section. */
-export interface ClassHubQuizInput {
-  id: string;
-  title: string;
-  slug: string;
-  subject: string | null;
-  created_at: string;
-  attempt?: QuizAttemptStatus | null;
 }
 
 function firstLink(item: ContentItem): string | null {
@@ -101,12 +90,11 @@ function isDripLocked(item: ContentItem, nowMs: number): boolean {
  */
 export function assembleClassHubSections(opts: {
   items: ContentItem[];
-  quizzes?: ClassHubQuizInput[];
   courseId: string;
   views: ClassHubView[];
   now?: number;
 }): ClassHubSection[] {
-  const { items, quizzes = [], courseId, views, now = Date.now() } = opts;
+  const { items, courseId, views, now = Date.now() } = opts;
 
   const lastSeen = new Map<string, number>();
   for (const v of views) {
@@ -115,7 +103,7 @@ export function assembleClassHubSections(opts: {
   const seenFor = (s: ClassHubSectionId) => lastSeen.get(s) ?? 0;
 
   const buckets: Record<ClassHubSectionId, ClassHubItem[]> = {
-    recordings: [], notes: [], tests: [], ca: [],
+    recordings: [], notes: [], ca: [],
   };
 
   for (const item of items) {
@@ -137,28 +125,6 @@ export function assembleClassHubSections(opts: {
       locked,
       unlockOn: locked ? item.drip_date : null,
       isNew,
-    });
-  }
-
-  // Course-unlocked quizzes flow into the Tests section (entitlement-gated route).
-  for (const q of quizzes) {
-    const isNew = (Date.parse(q.created_at) || 0) > seenFor("tests");
-    buckets.tests.push({
-      id: `quiz:${q.id}`,
-      title: q.title,
-      subject: q.subject,
-      type: "test_series",
-      typeLabel: "Quiz",
-      classNo: null,
-      date: q.created_at,
-      link: `/quizzes/${q.slug}`,
-      external: false,
-      action: q.attempt ? "Re-attempt" : "Start Test",
-      locked: false,
-      unlockOn: null,
-      isNew,
-      quizSlug: q.slug,
-      attempt: q.attempt ?? null,
     });
   }
 

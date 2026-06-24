@@ -6,7 +6,8 @@ import { getBuyerSession } from "@/lib/session";
 import { getAllCourses, getLibraryDocsByIds, paidCourseIdsForPhone } from "@/lib/dataProvider";
 import { hasCourseAccess } from "@/lib/courseAccess";
 import { resolveLearner } from "@/lib/entitlements";
-import { getClassHubSectionsForCourse } from "@/lib/classHubServer";
+import { getClassHubSectionsForCourse, getClassHubPerformance } from "@/lib/classHubServer";
+import { buildPerformanceData } from "@/lib/performance";
 import ClassHubContent from "@/components/dashboard/ClassHubContent";
 import ClassHubBatch from "@/components/dashboard/ClassHubBatch";
 
@@ -48,7 +49,12 @@ export default async function PortalClassHubPage({ params }: { params: { courseI
   // Reuse the entitlement engine for limited-access expiry: if the learner's
   // valid course set no longer includes this course, the batch content is gated.
   const accessExpired = !!learner && !learner.courseIds.includes(course.id);
-  const sections = accessExpired ? [] : await getClassHubSectionsForCourse(course.id, learner, courses);
+  const [sections, performance] = accessExpired
+    ? [[], buildPerformanceData({ attempts: [], quizById: new Map(), available: [], attemptStatus: {}, views: [], courseId: course.id })]
+    : await Promise.all([
+        getClassHubSectionsForCourse(course.id, learner),
+        getClassHubPerformance(course.id, learner, courses),
+      ]);
 
   return (
     <div className="container-wide section space-y-6">
@@ -73,7 +79,7 @@ export default async function PortalClassHubPage({ params }: { params: { courseI
           <p className="mt-1 text-sm text-amber-800">Renew to regain recordings, notes, tests and current affairs. Your progress is saved.</p>
         </div>
       ) : (
-        <ClassHubBatch courseId={course.id} sections={sections} />
+        <ClassHubBatch courseId={course.id} sections={sections} performance={performance} />
       )}
     </div>
   );
