@@ -4,7 +4,10 @@ import { ArrowLeft, Lock } from "lucide-react";
 import { getStudentSession } from "@/lib/session";
 import { getEnrollments, getAllCourses, getLibraryDocsByIds } from "@/lib/dataProvider";
 import { hasCourseAccess } from "@/lib/courseAccess";
+import { resolveLearner } from "@/lib/entitlements";
+import { getClassHubSectionsForCourse } from "@/lib/classHubServer";
 import ClassHubContent from "@/components/dashboard/ClassHubContent";
+import ClassHubBatch from "@/components/dashboard/ClassHubBatch";
 
 export const dynamic = "force-dynamic";
 
@@ -31,7 +34,11 @@ export default async function ClassHubPage({ params }: { params: { courseId: str
   }
 
   const ar = course.after_registration || {};
-  const docs = await getLibraryDocsByIds([...(ar.doc_ids || []), ...(course.brochure_ids || [])]);
+  const [docs, learner] = await Promise.all([
+    getLibraryDocsByIds([...(ar.doc_ids || []), ...(course.brochure_ids || [])]),
+    resolveLearner(),
+  ]);
+  const sections = await getClassHubSectionsForCourse(course.id, learner, courses);
 
   return (
     <div className="space-y-6">
@@ -45,11 +52,13 @@ export default async function ClassHubPage({ params }: { params: { courseId: str
         <div className="relative">
           <p className="ca-eyebrow">Class Hub</p>
           <h1 className="ca-hero-title mt-2 font-heading text-2xl font-extrabold leading-tight sm:text-3xl">{course.title}</h1>
-          <p className="mt-3 max-w-2xl text-[var(--ca-slate-300)]">Everything you need for this batch — live classes, orientation videos and study material.</p>
+          <p className="mt-3 max-w-2xl text-[var(--ca-slate-300)]">Everything you need for this batch — live classes, recordings, notes, tests and current affairs.</p>
         </div>
       </section>
 
       <ClassHubContent course={course} docs={docs} />
+
+      <ClassHubBatch courseId={course.id} sections={sections} />
     </div>
   );
 }

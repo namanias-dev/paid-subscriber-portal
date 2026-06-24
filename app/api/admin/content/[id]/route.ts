@@ -26,14 +26,23 @@ export async function PATCH(
       "description",
       "drive_link",
       "youtube_link",
+      "telegram_link",
       "date",
       "duration",
       "is_published",
+      "course_id",
+      "course_ids",
+      "class_no",
+      "drip_date",
     ];
     for (const f of fields) {
       if (body[f] !== undefined) {
         patch[f] = body[f];
       }
+    }
+    // Keep the legacy single course_id in sync with the multi-assignment array.
+    if (Array.isArray(patch.course_ids)) {
+      patch.course_id = (patch.course_ids as string[])[0] ?? null;
     }
     const updated = await updateContent(params.id, patch as Partial<ContentItem>);
     if (!updated) {

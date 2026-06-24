@@ -52,6 +52,15 @@ export async function POST(req: Request) {
       );
     }
 
+    const courseIds = Array.isArray(body.course_ids)
+      ? (body.course_ids as unknown[]).map((x) => String(x)).filter(Boolean)
+      : body.course_id
+        ? [String(body.course_id)]
+        : [];
+    const classNo = body.class_no !== undefined && body.class_no !== null && body.class_no !== ""
+      ? Number(body.class_no)
+      : null;
+
     const item = await addContent({
       type,
       subject: body.subject ? String(body.subject) : null,
@@ -60,10 +69,13 @@ export async function POST(req: Request) {
       description: body.description ? String(body.description) : null,
       drive_link: body.drive_link ? String(body.drive_link) : null,
       youtube_link: body.youtube_link ? String(body.youtube_link) : null,
+      telegram_link: body.telegram_link ? String(body.telegram_link) : null,
       date: body.date ? String(body.date) : undefined,
       duration: body.duration ? String(body.duration) : null,
       is_published: Boolean(body.is_published),
-      course_id: body.course_id ? String(body.course_id) : null,
+      course_id: courseIds[0] ?? null,
+      course_ids: courseIds,
+      class_no: Number.isFinite(classNo) ? classNo : null,
       drip_date: body.drip_date ? String(body.drip_date) : null,
     });
 

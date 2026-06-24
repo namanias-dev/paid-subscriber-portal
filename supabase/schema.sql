@@ -46,9 +46,23 @@ create table if not exists public.content_items (
   duration text,
   is_published boolean default false,
   course_id text,
+  course_ids jsonb not null default '[]'::jsonb,
+  class_no integer,
+  telegram_link text,
   drip_date date,
   created_at timestamptz default now()
 );
+
+-- Per-student, per-section "last seen" timestamps powering the Class Hub NEW badge.
+create table if not exists public.class_hub_views (
+  id uuid primary key default gen_random_uuid(),
+  student_id text not null,
+  course_id text not null,
+  section text not null,
+  last_seen_at timestamptz not null default now(),
+  unique (student_id, course_id, section)
+);
+create index if not exists class_hub_views_student_idx on public.class_hub_views (student_id);
 
 -- ----------------------------- bookmarks ----------------------------
 create table if not exists public.bookmarks (

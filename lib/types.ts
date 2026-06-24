@@ -60,9 +60,25 @@ export interface ContentItem {
   date: string | null;
   duration: string | null;
   is_published: boolean;
+  /** @deprecated single-course assignment — kept for back-compat; prefer `course_ids`. */
   course_id: string | null;
+  /** Course/batch ids this item is assigned to (one item → many batches, no duplication). */
+  course_ids?: string[];
+  /** Optional class/session number for ordering recordings & notes (e.g. 1, 2, 12). */
+  class_no?: number | null;
+  /** External Telegram link (alongside Drive + YouTube). Links only — never hosted. */
+  telegram_link?: string | null;
   drip_date: string | null;
   created_at: string;
+}
+
+/** Per-student, per-Class-Hub-section "last seen" — powers the NEW badge. */
+export interface ClassHubView {
+  id: string;
+  student_id: string;
+  course_id: string;
+  section: string;
+  last_seen_at: string;
 }
 
 export interface Bookmark {

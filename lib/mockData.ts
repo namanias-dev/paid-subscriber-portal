@@ -2,6 +2,7 @@ import { DEMO_ADMIN } from "./config";
 import type {
   Student,
   ContentItem,
+  ClassHubView,
   Bookmark,
   ContentProgress,
   AdminUser,
@@ -238,6 +239,8 @@ export const bookmarks: Bookmark[] = [
   { id: "b1111111-1111-1111-1111-111111111111", student_id: "11111111-1111-1111-1111-111111111111", content_id: "c3333333-3333-3333-3333-333333333333", created_at: iso(now - 2 * DAY) },
   { id: "b2222222-2222-2222-2222-222222222222", student_id: "11111111-1111-1111-1111-111111111111", content_id: "c6666666-6666-6666-6666-666666666666", created_at: iso(now - DAY) },
 ];
+
+export const classHubViews: ClassHubView[] = [];
 
 export const contentProgress: ContentProgress[] = [
   { id: "p1111111-1111-1111-1111-111111111111", student_id: "11111111-1111-1111-1111-111111111111", content_id: "c1111111-1111-1111-1111-111111111111", completed: true, completed_at: iso(now - DAY) },

@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useDashboard } from "@/components/dashboard/DashboardContext";
 import ExpiredView from "@/components/dashboard/ExpiredView";
@@ -9,6 +10,14 @@ import { formatINR } from "@/lib/dates";
 
 export default function MyCoursesPage() {
   const { loading, expired, student, enrollments, courses } = useDashboard();
+  const [newCounts, setNewCounts] = useState<Record<string, number>>({});
+
+  useEffect(() => {
+    fetch("/api/classhub/summary")
+      .then((r) => r.json())
+      .then((d) => { if (d?.ok && d.counts) setNewCounts(d.counts); })
+      .catch(() => {});
+  }, []);
 
   if (loading)
     return (
@@ -55,7 +64,14 @@ export default function MyCoursesPage() {
               </div>
               <div className="mt-4 flex flex-wrap gap-2">
                 {course && e.status === "active" && (
-                  <Link href={`/dashboard/class/${course.id}`} className="btn btn-primary flex-1 text-sm">Class Hub →</Link>
+                  <Link href={`/dashboard/class/${course.id}`} className="btn btn-primary relative flex-1 text-sm">
+                    Class Hub →
+                    {newCounts[course.id] > 0 && (
+                      <span className="absolute -right-1.5 -top-1.5 inline-flex min-w-[20px] items-center justify-center rounded-full bg-gradient-to-r from-[var(--ca-gold-bright)] to-[var(--ca-gold)] px-1.5 text-[10px] font-extrabold text-[#1a1304] shadow-md">
+                        {newCounts[course.id]} new
+                      </span>
+                    )}
+                  </Link>
                 )}
                 <Link href="/dashboard/live" className="btn btn-secondary text-sm">Library</Link>
                 {e.pending > 0 && <Link href="/dashboard/fees" className="btn btn-secondary text-sm">Pay fees</Link>}

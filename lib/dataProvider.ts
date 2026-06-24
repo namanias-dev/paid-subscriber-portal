@@ -8,6 +8,7 @@ import type {
   Student,
   ContentItem,
   ContentType,
+  ClassHubView,
   Bookmark,
   ContentProgress,
   PlanId,
@@ -254,14 +255,18 @@ export interface NewContentInput {
   description?: string | null;
   drive_link?: string | null;
   youtube_link?: string | null;
+  telegram_link?: string | null;
   date?: string | null;
   duration?: string | null;
   is_published?: boolean;
   course_id?: string | null;
+  course_ids?: string[];
+  class_no?: number | null;
   drip_date?: string | null;
 }
 
 export async function addContent(input: NewContentInput): Promise<ContentItem> {
+  const courseIds = input.course_ids ?? (input.course_id ? [input.course_id] : []);
   const row: ContentItem = {
     id: uuid(),
     type: input.type,
@@ -271,10 +276,13 @@ export async function addContent(input: NewContentInput): Promise<ContentItem> {
     description: input.description ?? null,
     drive_link: input.drive_link ?? null,
     youtube_link: input.youtube_link ?? null,
+    telegram_link: input.telegram_link ?? null,
     date: input.date ?? todayISODate(),
     duration: input.duration ?? null,
     is_published: input.is_published ?? false,
-    course_id: input.course_id ?? null,
+    course_id: input.course_id ?? (courseIds[0] ?? null),
+    course_ids: courseIds,
+    class_no: input.class_no ?? null,
     drip_date: input.drip_date ?? null,
     created_at: new Date().toISOString(),
   };
@@ -310,6 +318,51 @@ export async function deleteContent(id: string): Promise<boolean> {
     return true;
   }
   return dbDelete("content_items", id);
+}
+
+/** True when a content item is assigned to the given course (new course_ids or legacy course_id). */
+function contentAssignedTo(item: ContentItem, courseId: string): boolean {
+  const ids = item.course_ids && item.course_ids.length ? item.course_ids : item.course_id ? [item.course_id] : [];
+  return ids.includes(courseId);
+}
+
+/**
+ * Published content items assigned to a course/batch (newest first). Drives the
+ * Class Hub. Drip + entitlement + expiry gating happens in the caller so we keep
+ * this query simple and reuse the existing publish flag as the single source.
+ */
+export async function getCourseContent(courseId: string): Promise<ContentItem[]> {
+  const published = await getPublishedContent();
+  return published.filter((c) => contentAssignedTo(c, courseId));
+}
+
+// ====================== CLASS HUB VIEWS (NEW badge) ======================
+export async function getClassHubViews(studentId: string): Promise<ClassHubView[]> {
+  if (!studentId) return [];
+  if (demoMode()) return mock.classHubViews.filter((v) => v.student_id === studentId);
+  const db = getSupabaseAdmin();
+  if (!db) return [];
+  const { data } = await db.from("class_hub_views").select("*").eq("student_id", studentId);
+  return (data as ClassHubView[]) ?? [];
+}
+
+/** Upsert the "last seen" timestamp for a (student, course, section) — clears NEW badges. */
+export async function markClassHubSeen(studentId: string, courseId: string, section: string): Promise<void> {
+  if (!studentId || !courseId || !section) return;
+  const nowISO = new Date().toISOString();
+  if (demoMode()) {
+    const existing = mock.classHubViews.find(
+      (v) => v.student_id === studentId && v.course_id === courseId && v.section === section,
+    );
+    if (existing) existing.last_seen_at = nowISO;
+    else mock.classHubViews.push({ id: uuid(), student_id: studentId, course_id: courseId, section, last_seen_at: nowISO });
+    return;
+  }
+  const db = getSupabaseAdmin();
+  if (!db) return;
+  await db
+    .from("class_hub_views")
+    .upsert({ student_id: studentId, course_id: courseId, section, last_seen_at: nowISO }, { onConflict: "student_id,course_id,section" });
 }
 
 // ============================ BOOKMARKS ============================

@@ -2,6 +2,8 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getBuyerSession } from "@/lib/session";
 import { getBuyerByPhone, getBuyerPurchases, getCourseEnrollmentsByPhone } from "@/lib/dataProvider";
+import { resolveLearner } from "@/lib/entitlements";
+import { getNewCountsForLearner } from "@/lib/classHubServer";
 import { formatINR } from "@/lib/dates";
 import { deriveEnrollment } from "@/lib/installments";
 import type { Payment } from "@/lib/types";
@@ -61,11 +63,13 @@ export default async function PortalDashboardPage() {
   const session = await getBuyerSession();
   if (!session) redirect("/portal/login");
 
-  const [buyer, purchases, courseEnrollments] = await Promise.all([
+  const [buyer, purchases, courseEnrollments, learner] = await Promise.all([
     getBuyerByPhone(session.phone),
     getBuyerPurchases(session.phone),
     getCourseEnrollmentsByPhone(session.phone),
+    resolveLearner(),
   ]);
+  const newCounts = await getNewCountsForLearner(learner);
   // Confirmed course enrollments (seat or full paid) render as rich payment cards.
   const enrolledCourses = courseEnrollments.filter((e) => e.amount_paid > 0 && e.status !== "cancelled");
   const enrolledIds = new Set(enrolledCourses.map((e) => e.id));
@@ -112,7 +116,14 @@ export default async function PortalDashboardPage() {
                 <div key={e.id} className="card flex h-full flex-col p-5">
                   <div className="flex items-start justify-between gap-2">
                     <span className="text-2xl">🎓</span>
-                    <span className={`pill text-xs ${badge.cls}`}>{badge.label}</span>
+                    <div className="flex items-center gap-1.5">
+                      {newCounts[e.course_id] > 0 && (
+                        <span className="inline-flex items-center rounded-full bg-gradient-to-r from-[var(--ca-gold-bright)] to-[var(--ca-gold)] px-2 py-0.5 text-[10px] font-extrabold text-[#1a1304]">
+                          {newCounts[e.course_id]} new
+                        </span>
+                      )}
+                      <span className={`pill text-xs ${badge.cls}`}>{badge.label}</span>
+                    </div>
                   </div>
                   <h3 className="mt-3 text-base font-semibold leading-snug">{e.course_title}</h3>
                   {e.batch_label && <p className="mt-1 text-xs text-muted">{e.batch_label}</p>}
