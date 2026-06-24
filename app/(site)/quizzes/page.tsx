@@ -5,6 +5,7 @@ import { getPublicQuizzes, getSiteSettings, getAllCourses } from "@/lib/dataProv
 import { SITE_URL } from "@/lib/config";
 import { DEFAULT_CONTENT } from "@/lib/homeDefaults";
 import { resolveLearner, gateQuiz } from "@/lib/entitlements";
+import { getAttemptStatusForLearner } from "@/lib/quizAttemptStatus";
 import QuizBrowser, { type QuizStatus } from "@/components/public/quiz/QuizBrowser";
 
 export const dynamic = "force-dynamic";
@@ -38,6 +39,8 @@ export default async function QuizzesLanding() {
     const gate = gateQuiz(quiz, learner, courses);
     if (!gate.free) statuses[quiz.id] = gate.allowed ? "entitled" : "locked";
   }
+  // Per-quiz attempt status (✓ Attempted + score + report/PDF) for logged-in learners.
+  const attempts = await getAttemptStatusForLearner(learner);
 
   const jsonLd = {
     "@context": "https://schema.org",
@@ -64,7 +67,7 @@ export default async function QuizzesLanding() {
         </div>
       </section>
 
-      <QuizBrowser quizzes={quizzes} statuses={statuses} />
+      <QuizBrowser quizzes={quizzes} statuses={statuses} attempts={attempts} />
 
       <figure className="relative mx-auto mt-14 max-w-3xl overflow-hidden rounded-3xl border border-[rgba(212,175,55,0.25)] bg-gradient-to-br from-[var(--ca-navy-900,#0a1a3f)] to-[var(--ca-navy-600,#1e3a8a)] px-6 py-10 text-center shadow-soft-lg sm:px-12 sm:py-14">
         <span className="pointer-events-none absolute -right-10 -top-10 h-44 w-44 rounded-full bg-[rgba(212,175,55,0.18)] blur-2xl" aria-hidden="true" />

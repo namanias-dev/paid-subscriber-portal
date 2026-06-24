@@ -1,5 +1,6 @@
 import { getCourseContent, getClassHubViews, getAllQuizzes, getAllCourses, getPublishedContent } from "./dataProvider";
 import { quizUnlockCourseIds, type Learner } from "./entitlements";
+import { getAttemptStatusForLearner } from "./quizAttemptStatus";
 import { assembleClassHubSections, totalNewCount, type ClassHubSection } from "./classHub";
 import type { Course, ContentItem } from "./types";
 
@@ -19,15 +20,16 @@ export async function getClassHubSectionsForCourse(
   learner: Learner | null,
   courses: Course[],
 ): Promise<ClassHubSection[]> {
-  const [items, views, allQuizzes] = await Promise.all([
+  const [items, views, allQuizzes, attemptMap] = await Promise.all([
     getCourseContent(courseId),
     learner?.studentId ? getClassHubViews(learner.studentId) : Promise.resolve([]),
     getAllQuizzes(),
+    getAttemptStatusForLearner(learner),
   ]);
 
   const quizzes = allQuizzes
     .filter((q) => q.status === "published" && quizUnlockCourseIds(q, courses).includes(courseId))
-    .map((q) => ({ id: q.id, title: q.title, slug: q.slug, subject: q.subject ?? null, created_at: q.created_at }));
+    .map((q) => ({ id: q.id, title: q.title, slug: q.slug, subject: q.subject ?? null, created_at: q.created_at, attempt: attemptMap[q.id] ?? null }));
 
   return assembleClassHubSections({ items, quizzes, courseId, views });
 }

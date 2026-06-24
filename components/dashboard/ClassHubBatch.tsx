@@ -6,6 +6,7 @@ import { Video, FileText, ListChecks, Newspaper, Search, Lock, PlayCircle, Exter
 import type { LucideIcon } from "lucide-react";
 import { formatISTDate } from "@/lib/dates";
 import type { ClassHubSection, ClassHubSectionId, ClassHubItem } from "@/lib/classHub";
+import QuizAttemptActions from "@/components/public/quiz/QuizAttemptActions";
 
 const SECTION_ICON: Record<ClassHubSectionId, LucideIcon> = {
   recordings: Video,
@@ -23,20 +24,19 @@ export default function ClassHubBatch({ courseId, sections }: { courseId: string
   const firstWithItems = sections.find((s) => s.items.length > 0)?.id ?? sections[0]?.id ?? "recordings";
   const [active, setActive] = useState<ClassHubSectionId>(firstWithItems);
   const [query, setQuery] = useState("");
-  const [cleared, setCleared] = useState<Set<ClassHubSectionId>>(new Set());
   const marked = useRef<Set<string>>(new Set());
 
-  // Mark a section seen (once per mount) when it becomes active → clears NEW.
+  // Mark a section seen (once per mount) when it becomes active. We DON'T hide
+  // the badges in this render — they stay visible for the current visit (the
+  // server already computed `isNew` from the pre-visit last_seen). On the next
+  // load the server recomputes against the updated last_seen, so opened sections
+  // are cleared and only genuinely newer items still show NEW.
   useEffect(() => {
     const key = `${courseId}:${active}`;
     if (marked.current.has(key)) return;
-    const section = sections.find((s) => s.id === active);
-    if (!section || section.newCount === 0) {
-      marked.current.add(key);
-      return;
-    }
     marked.current.add(key);
-    setCleared((prev) => new Set(prev).add(active));
+    const section = sections.find((s) => s.id === active);
+    if (!section || section.newCount === 0) return;
     fetch("/api/classhub/seen", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -80,7 +80,7 @@ export default function ClassHubBatch({ courseId, sections }: { courseId: string
         {sections.map((s) => {
           const Icon = SECTION_ICON[s.id];
           const isActive = s.id === active;
-          const count = cleared.has(s.id) ? 0 : s.newCount;
+          const count = s.newCount;
           return (
             <button
               key={s.id}
@@ -114,7 +114,7 @@ export default function ClassHubBatch({ courseId, sections }: { courseId: string
         ) : (
           <ul className="grid gap-3 sm:grid-cols-2">
             {filtered.map((item) => (
-              <ContentRow key={item.id} item={item} sectionCleared={cleared.has(active)} />
+              <ContentRow key={item.id} item={item} />
             ))}
           </ul>
         )}
@@ -123,8 +123,41 @@ export default function ClassHubBatch({ courseId, sections }: { courseId: string
   );
 }
 
-function ContentRow({ item, sectionCleared }: { item: ClassHubItem; sectionCleared: boolean }) {
-  const showNew = item.isNew && !sectionCleared;
+function ContentRow({ item }: { item: ClassHubItem }) {
+  const showNew = item.isNew;
+
+  const cardCls =
+    "block h-full rounded-2xl border border-line bg-surface p-4 transition-all duration-200 hover:-translate-y-0.5 hover:border-[rgba(212,175,55,0.5)] hover:shadow-soft motion-reduce:transform-none motion-reduce:transition-none";
+
+  // Attempted quiz → show ✓ score + report/PDF (reused everywhere) in a static card.
+  if (item.attempt && item.quizSlug) {
+    return (
+      <li>
+        <div className={cardCls}>
+          <div className="flex items-start gap-3">
+            <span className="mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-surface2 text-ink2"><ListChecks size={16} /></span>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-start justify-between gap-2">
+                <p className="line-clamp-2 font-semibold leading-snug text-ink">{item.title}</p>
+                {showNew && (
+                  <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-gradient-to-r from-[var(--ca-gold-bright)] to-[var(--ca-gold)] px-2 py-0.5 text-[10px] font-extrabold text-[#1a1304]">
+                    <Sparkles size={10} /> NEW
+                  </span>
+                )}
+              </div>
+              <div className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-muted">
+                <span>{item.typeLabel}</span>
+                {item.subject && <span>· {item.subject}</span>}
+              </div>
+              <div className="mt-3">
+                <QuizAttemptActions slug={item.quizSlug} status={item.attempt} retakeHref={`/quizzes/${item.quizSlug}/attempt`} />
+              </div>
+            </div>
+          </div>
+        </div>
+      </li>
+    );
+  }
 
   const body = (
     <div className="flex h-full items-start gap-3">
@@ -160,9 +193,6 @@ function ContentRow({ item, sectionCleared }: { item: ClassHubItem; sectionClear
       </div>
     </div>
   );
-
-  const cardCls =
-    "block h-full rounded-2xl border border-line bg-surface p-4 transition-all duration-200 hover:-translate-y-0.5 hover:border-[rgba(212,175,55,0.5)] hover:shadow-soft motion-reduce:transform-none motion-reduce:transition-none";
 
   if (item.locked || !item.link) {
     return <li><div className={`${cardCls} opacity-90`}>{body}</div></li>;

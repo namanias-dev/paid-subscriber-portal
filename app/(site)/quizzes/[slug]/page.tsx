@@ -6,7 +6,9 @@ import { getQuizBySlug, getQuizQuestions, getAllCourses } from "@/lib/dataProvid
 import { SITE_URL } from "@/lib/config";
 import { quizIsLive } from "@/lib/quizAccess";
 import { resolveLearner, gateQuiz } from "@/lib/entitlements";
+import { getAttemptStatusForLearner } from "@/lib/quizAttemptStatus";
 import { sanitizeHtml } from "@/lib/sanitizeHtml";
+import QuizAttemptActions from "@/components/public/quiz/QuizAttemptActions";
 
 export const dynamic = "force-dynamic";
 
@@ -54,6 +56,11 @@ export default async function QuizIntroPage({ params }: { params: { slug: string
   const unlockCourses = courses.filter((c) => gate.unlockCourseIds.includes(c.id));
   const lockedPaid = !gate.free && !gate.allowed;
   const entitledPaid = !gate.free && gate.allowed;
+
+  // Already-attempted? Show ✓ score + report/PDF (reusing the free-quiz report).
+  const attemptMap = await getAttemptStatusForLearner(learner);
+  const attempt = attemptMap[quiz.id];
+  const retakeAllowed = !(quiz.max_attempts && attempt && attempt.attemptCount >= quiz.max_attempts && quiz.attempt_settings?.retry_allowed === false);
 
   const jsonLd: Record<string, unknown> = {
     "@context": "https://schema.org",
@@ -129,7 +136,15 @@ export default async function QuizIntroPage({ params }: { params: { slug: string
       )}
 
       <div className="sticky bottom-4 mt-6">
-        {!live ? (
+        {attempt ? (
+          <div className="card border-success/30 bg-success/5 p-5 shadow-lg">
+            <QuizAttemptActions
+              slug={quiz.slug}
+              status={attempt}
+              retakeHref={live && !lockedPaid && retakeAllowed ? `/quizzes/${quiz.slug}/attempt` : null}
+            />
+          </div>
+        ) : !live ? (
           <div className="btn btn-secondary w-full cursor-not-allowed py-3 text-base opacity-70">This test isn&apos;t available right now</div>
         ) : lockedPaid ? (
           <div className="card border-amber-200 bg-amber-50/60 p-5 shadow-lg">

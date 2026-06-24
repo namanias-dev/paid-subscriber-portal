@@ -1,4 +1,5 @@
 import type { ContentItem, ContentType, ClassHubView } from "./types";
+import type { QuizAttemptStatus } from "./quizAttemptStatus";
 import { CONTENT_META } from "./contentMeta";
 
 /**
@@ -52,6 +53,9 @@ export interface ClassHubItem {
   locked: boolean;
   unlockOn: string | null;
   isNew: boolean;
+  /** For quiz items: slug + the learner's attempt status (✓ Attempted + report/PDF). */
+  quizSlug?: string | null;
+  attempt?: QuizAttemptStatus | null;
 }
 
 export interface ClassHubSection {
@@ -69,6 +73,7 @@ export interface ClassHubQuizInput {
   slug: string;
   subject: string | null;
   created_at: string;
+  attempt?: QuizAttemptStatus | null;
 }
 
 function firstLink(item: ContentItem): string | null {
@@ -148,10 +153,12 @@ export function assembleClassHubSections(opts: {
       date: q.created_at,
       link: `/quizzes/${q.slug}`,
       external: false,
-      action: "Start Test",
+      action: q.attempt ? "Re-attempt" : "Start Test",
       locked: false,
       unlockOn: null,
       isNew,
+      quizSlug: q.slug,
+      attempt: q.attempt ?? null,
     });
   }
 
