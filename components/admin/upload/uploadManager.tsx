@@ -268,11 +268,13 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
       resolution: opts.resolution ?? null,
       deletable: opts.deletable ?? true,
     };
-    setItems((prev) => {
-      const next = [...prev.filter((i) => i.recordingId !== opts.recordingId), item];
-      persist(next);
-      return next;
-    });
+    // Update the ref SYNCHRONOUSLY so the first run() (scheduled below) finds the
+    // item immediately — otherwise it races the React re-render that refreshes
+    // itemsRef and bails on `!item`, leaving "Uploading 0%" until pause+resume.
+    const next = [...itemsRef.current.filter((i) => i.recordingId !== opts.recordingId), item];
+    itemsRef.current = next;
+    setItems(next);
+    persist(next);
     setMinimized(false);
     setTimeout(() => run(opts.recordingId), 0);
   }, [persist, run]);

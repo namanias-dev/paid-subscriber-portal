@@ -15,10 +15,20 @@ export default async function LecturePage({ params }: { params: { id: string } }
 
   const { learner, access } = await resolveLectureAccess(rec);
 
+  // Route back to the SAME hub the learner came from. Buyers use /portal (no
+  // student cookie), students use /dashboard — sending a buyer to /dashboard
+  // trips the student-only middleware guard and bounces them to login.
+  const courseId = (rec.course_ids && rec.course_ids[0]) || rec.course_id || "";
+  const isBuyer = learner?.kind === "buyer";
+  const hubHome = !learner ? "/" : isBuyer ? "/portal" : "/dashboard/my-courses";
+  const backHref = courseId
+    ? (isBuyer ? `/portal/class/${courseId}` : `/dashboard/class/${courseId}`)
+    : hubHome;
+
   if (!access.allowed) {
     return (
       <div className="container-wide section">
-        <Link href="/dashboard/my-courses" className="inline-flex items-center gap-1.5 text-sm font-medium text-ink2 hover:text-primary">
+        <Link href={hubHome} className="inline-flex items-center gap-1.5 text-sm font-medium text-ink2 hover:text-primary">
           <ArrowLeft size={15} /> Back
         </Link>
         <div className="mx-auto mt-8 max-w-md rounded-2xl border border-line bg-surface p-8 text-center">
@@ -61,9 +71,6 @@ export default async function LecturePage({ params }: { params: { id: string } }
     learner?.studentId ? getLectureProgress(learner.studentId, rec.id) : Promise.resolve(null),
     rec.notes_pdf_key && r2Configured() ? signGetUrl(rec.notes_pdf_key, 3600).catch(() => null) : Promise.resolve(null),
   ]);
-
-  const courseId = (rec.course_ids && rec.course_ids[0]) || rec.course_id || "";
-  const backHref = courseId ? `/dashboard/class/${courseId}` : "/dashboard/my-courses";
 
   return (
     <div className="container-wide section">
