@@ -50,6 +50,22 @@ create table if not exists public.content_items (
   class_no integer,
   telegram_link text,
   drip_date date,
+  -- Hosted lecture recordings (direct-to-R2) as a source type on the same table.
+  source_type text not null default 'link',      -- 'link' | 'hosted'
+  visibility text not null default 'enrolled',    -- 'enrolled' | 'public'
+  upload_status text not null default 'idle',     -- idle|uploading|paused|completed|failed
+  processed_key text,
+  thumbnail_key text,
+  notes_pdf_key text,
+  duration_seconds integer,
+  file_size bigint,
+  resolution text,
+  public_cdn boolean not null default false,
+  multipart_upload_id text,
+  multipart_key text,
+  multipart_parts jsonb not null default '[]'::jsonb,
+  multipart_total_parts integer,
+  multipart_chunk_size integer,
   created_at timestamptz default now()
 );
 
@@ -63,6 +79,37 @@ create table if not exists public.class_hub_views (
   unique (student_id, course_id, section)
 );
 create index if not exists class_hub_views_student_idx on public.class_hub_views (student_id);
+
+-- Resume-watching + completion tracking for hosted lectures (canonical students.id).
+create table if not exists public.lecture_watch_progress (
+  id uuid primary key default gen_random_uuid(),
+  learner_id text not null,
+  recording_id text not null,
+  last_position_seconds integer not null default 0,
+  completed boolean not null default false,
+  completed_at timestamptz,
+  watch_count integer not null default 0,
+  last_watched_at timestamptz not null default now(),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (learner_id, recording_id)
+);
+create index if not exists lwp_learner_idx on public.lecture_watch_progress (learner_id);
+
+-- Admin manual access override per learner (phone) per course — always wins.
+create table if not exists public.course_access_overrides (
+  id uuid primary key default gen_random_uuid(),
+  phone text not null,
+  course_id text not null,
+  mode text not null,            -- 'grant' | 'revoke'
+  expires_at timestamptz,        -- null = lifetime grant
+  note text,
+  created_by text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (phone, course_id)
+);
+create index if not exists cao_phone_idx on public.course_access_overrides (phone);
 
 -- ----------------------------- bookmarks ----------------------------
 create table if not exists public.bookmarks (

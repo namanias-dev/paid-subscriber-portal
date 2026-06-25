@@ -1,13 +1,37 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { PageHeader, useAdminData, LoadingBlock, TableShell } from "@/components/admin/ui";
 import Modal from "@/components/ui/Modal";
 import { useToast } from "@/components/ui/Toast";
+import { useUploadManager } from "@/components/admin/upload/uploadManager";
 import { CONTENT_META } from "@/lib/contentMeta";
 import { SUBJECTS } from "@/lib/config";
 import { formatDate } from "@/lib/dates";
 import type { ContentItem, ContentType, Course } from "@/lib/types";
+
+/** Read duration + resolution from a video file (client-side; no processing). */
+function readVideoMeta(file: File): Promise<{ duration: number | null; resolution: string | null }> {
+  return new Promise((resolve) => {
+    try {
+      const url = URL.createObjectURL(file);
+      const v = document.createElement("video");
+      v.preload = "metadata";
+      v.onloadedmetadata = () => {
+        const out = {
+          duration: Number.isFinite(v.duration) ? Math.round(v.duration) : null,
+          resolution: v.videoWidth && v.videoHeight ? `${v.videoWidth}x${v.videoHeight}` : null,
+        };
+        URL.revokeObjectURL(url);
+        resolve(out);
+      };
+      v.onerror = () => { URL.revokeObjectURL(url); resolve({ duration: null, resolution: null }); };
+      v.src = url;
+    } catch {
+      resolve({ duration: null, resolution: null });
+    }
+  });
+}
 
 const TYPES = Object.keys(CONTENT_META) as ContentType[];
 
@@ -26,6 +50,8 @@ const EMPTY_FORM = {
   course_ids: [] as string[],
   is_published: true,
   drip_date: "",
+  source_type: "link" as "link" | "hosted",
+  visibility: "enrolled" as "enrolled" | "public",
 };
 type FormState = typeof EMPTY_FORM;
 
@@ -37,9 +63,12 @@ export default function ContentAdmin() {
   const { data: content, loading, reload } = useAdminData<ContentItem[]>("/api/admin/content", "content");
   const { data: courses } = useAdminData<Course[]>("/api/admin/courses", "courses");
   const { toast } = useToast();
+  const { startUpload } = useUploadManager();
 
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
+  const [videoFile, setVideoFile] = useState<File | null>(null);
+  const videoInput = useRef<HTMLInputElement>(null);
   const editing = !!form.id;
 
   // Filters
@@ -68,6 +97,7 @@ export default function ContentAdmin() {
 
   function openAdd() {
     setForm(EMPTY_FORM);
+    setVideoFile(null);
     setOpen(true);
   }
 
@@ -87,7 +117,10 @@ export default function ContentAdmin() {
       course_ids: itemCourseIds(c),
       is_published: c.is_published,
       drip_date: c.drip_date ? c.drip_date.slice(0, 10) : "",
+      source_type: c.source_type === "hosted" ? "hosted" : "link",
+      visibility: c.visibility === "public" ? "public" : "enrolled",
     });
+    setVideoFile(null);
     setOpen(true);
   }
 
@@ -103,20 +136,27 @@ export default function ContentAdmin() {
       toast("Title required", "error");
       return;
     }
+    const hosted = isRecording && form.source_type === "hosted";
+    if (hosted && !editing && !videoFile) {
+      toast("Select a video file to upload", "error");
+      return;
+    }
     const payload = {
       type: form.type,
       title: form.title.trim(),
       subject: form.subject || null,
       paper: form.paper || null,
       description: form.description || null,
-      drive_link: form.drive_link || null,
-      youtube_link: form.youtube_link || null,
-      telegram_link: form.telegram_link || null,
+      drive_link: hosted ? null : form.drive_link || null,
+      youtube_link: hosted ? null : form.youtube_link || null,
+      telegram_link: hosted ? null : form.telegram_link || null,
       duration: form.duration || null,
       class_no: form.class_no === "" ? null : Number(form.class_no),
       course_ids: form.course_ids,
       is_published: form.is_published,
       drip_date: form.drip_date || null,
+      source_type: hosted ? "hosted" : "link",
+      visibility: form.visibility,
     };
     const res = editing
       ? await fetch(`/api/admin/content/${form.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) })
@@ -125,9 +165,28 @@ export default function ContentAdmin() {
       toast("Could not save", "error");
       return;
     }
-    toast(editing ? "Content updated" : "Content added", "success");
+    const data = await res.json().catch(() => ({}));
+    const recordingId: string | undefined = data?.content?.id || form.id;
+
+    // Hosted + a file chosen → kick off the resilient background upload.
+    if (hosted && videoFile && recordingId) {
+      const meta = await readVideoMeta(videoFile);
+      startUpload({
+        recordingId,
+        title: form.title.trim(),
+        courseId: form.course_ids[0] || "_",
+        file: videoFile,
+        durationSeconds: meta.duration,
+        resolution: meta.resolution,
+        deletable: !editing,
+      });
+      toast("Upload started — it continues in the background.", "success");
+    } else {
+      toast(editing ? "Content updated" : "Content added", "success");
+    }
     setOpen(false);
     setForm(EMPTY_FORM);
+    setVideoFile(null);
     reload();
   }
 
@@ -181,7 +240,15 @@ export default function ContentAdmin() {
               <td className="px-4 py-3 font-medium">
                 {CONTENT_META[c.type].icon} {c.class_no != null && <span className="text-primary">C{c.class_no} · </span>}{c.title}
               </td>
-              <td className="px-4 py-3 text-xs">{CONTENT_META[c.type].label}</td>
+              <td className="px-4 py-3 text-xs">
+                {CONTENT_META[c.type].label}
+                {c.source_type === "hosted" && (
+                  <span className={`pill ml-1 text-[10px] ${c.upload_status === "completed" ? "pill-green" : c.upload_status === "failed" ? "pill-red" : "pill-amber"}`}>
+                    {c.upload_status === "completed" ? "Hosted" : c.upload_status === "uploading" ? "Uploading" : c.upload_status === "failed" ? "Upload failed" : "Hosted"}
+                  </span>
+                )}
+                {c.visibility === "public" && <span className="pill pill-blue ml-1 text-[10px]">Public</span>}
+              </td>
               <td className="px-4 py-3">{c.subject || "—"}</td>
               <td className="px-4 py-3">
                 {cids.length === 0 ? (
@@ -253,29 +320,77 @@ export default function ContentAdmin() {
             <input className="input self-end" placeholder="Duration" value={form.duration} onChange={(e) => setForm({ ...form, duration: e.target.value })} />
           </div>
 
-          {/* External links only */}
-          <div className="rounded-xl border border-line p-3">
-            <p className="mb-2 text-xs font-semibold text-ink2">External links only — YouTube / Drive / Telegram (any one or a combination)</p>
-            {isRecording ? (
-              <>
-                <input className="input mb-2" placeholder="YouTube link" value={form.youtube_link} onChange={(e) => setForm({ ...form, youtube_link: e.target.value })} />
-                <input className="input mb-2" placeholder="Google Drive link" value={form.drive_link} onChange={(e) => setForm({ ...form, drive_link: e.target.value })} />
-                <input className="input" placeholder="Telegram link" value={form.telegram_link} onChange={(e) => setForm({ ...form, telegram_link: e.target.value })} />
-              </>
-            ) : (
-              <>
-                <input className="input mb-2" placeholder="Google Drive / PDF link" value={form.drive_link} onChange={(e) => setForm({ ...form, drive_link: e.target.value })} />
-                <input className="input mb-2" placeholder="Telegram link" value={form.telegram_link} onChange={(e) => setForm({ ...form, telegram_link: e.target.value })} />
-                <input className="input" placeholder="YouTube link (optional)" value={form.youtube_link} onChange={(e) => setForm({ ...form, youtube_link: e.target.value })} />
-              </>
-            )}
-          </div>
+          {/* Recording source toggle (only for recordings / live links) */}
+          {isRecording && (
+            <div>
+              <label className="label">Recording source</label>
+              <div className="grid grid-cols-2 gap-2">
+                {(["link", "hosted"] as const).map((s) => (
+                  <button
+                    key={s}
+                    type="button"
+                    onClick={() => setForm({ ...form, source_type: s })}
+                    className={`min-h-[44px] rounded-xl border px-3 text-sm font-semibold transition ${form.source_type === s ? "border-[var(--ca-gold)] bg-[rgba(212,175,55,0.12)] text-ink" : "border-line bg-surface text-ink2 hover:border-[rgba(212,175,55,0.5)]"}`}
+                  >
+                    {s === "link" ? "🔗 External link" : "⬆️ Upload video (hosted)"}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Hosted upload */}
+          {isRecording && form.source_type === "hosted" ? (
+            <div className="space-y-3 rounded-xl border border-line p-3">
+              <div>
+                <p className="mb-1 text-xs font-semibold text-ink2">Upload an already-compressed MP4 (≈300–500MB). It uploads in the background — you can keep working.</p>
+                <input
+                  ref={videoInput}
+                  type="file"
+                  accept="video/mp4,video/*"
+                  className="hidden"
+                  onChange={(e) => setVideoFile(e.target.files?.[0] || null)}
+                />
+                <button type="button" onClick={() => videoInput.current?.click()} className="btn btn-secondary w-full text-sm">
+                  {videoFile ? `🎬 ${videoFile.name} (${(videoFile.size / 1024 ** 2).toFixed(0)} MB)` : editing ? "Replace video file (optional)" : "Choose video file"}
+                </button>
+              </div>
+              <div>
+                <label className="label">Visibility</label>
+                <select className="input" value={form.visibility} onChange={(e) => setForm({ ...form, visibility: e.target.value as "enrolled" | "public" })}>
+                  <option value="enrolled">Enrolled only (entitlement-gated)</option>
+                  <option value="public">Public (free / marketing — no login)</option>
+                </select>
+              </div>
+              <p className="text-xs text-muted">Full-payment access window (Lifetime / N months) is set per course under Courses → Access &amp; Entitlements. Per-student grant/extend/revoke lives in Access at Risk.</p>
+            </div>
+          ) : (
+            /* External links only */
+            <div className="rounded-xl border border-line p-3">
+              <p className="mb-2 text-xs font-semibold text-ink2">External links only — YouTube / Drive / Telegram (any one or a combination)</p>
+              {isRecording ? (
+                <>
+                  <input className="input mb-2" placeholder="YouTube link" value={form.youtube_link} onChange={(e) => setForm({ ...form, youtube_link: e.target.value })} />
+                  <input className="input mb-2" placeholder="Google Drive link" value={form.drive_link} onChange={(e) => setForm({ ...form, drive_link: e.target.value })} />
+                  <input className="input" placeholder="Telegram link" value={form.telegram_link} onChange={(e) => setForm({ ...form, telegram_link: e.target.value })} />
+                </>
+              ) : (
+                <>
+                  <input className="input mb-2" placeholder="Google Drive / PDF link" value={form.drive_link} onChange={(e) => setForm({ ...form, drive_link: e.target.value })} />
+                  <input className="input mb-2" placeholder="Telegram link" value={form.telegram_link} onChange={(e) => setForm({ ...form, telegram_link: e.target.value })} />
+                  <input className="input" placeholder="YouTube link (optional)" value={form.youtube_link} onChange={(e) => setForm({ ...form, youtube_link: e.target.value })} />
+                </>
+              )}
+            </div>
+          )}
 
           <div className="grid grid-cols-2 gap-3">
             <div><label className="label">Drip release date</label><input type="date" className="input" value={form.drip_date} onChange={(e) => setForm({ ...form, drip_date: e.target.value })} /></div>
             <label className="flex items-end gap-2 pb-2 text-sm"><input type="checkbox" checked={form.is_published} onChange={(e) => setForm({ ...form, is_published: e.target.checked })} /> Publish now</label>
           </div>
-          <button onClick={save} className="btn btn-primary w-full">{editing ? "Save changes" : "Add Content"}</button>
+          <button onClick={save} className="btn btn-primary w-full">
+            {isRecording && form.source_type === "hosted" && videoFile ? "Save & start upload" : editing ? "Save changes" : "Add Content"}
+          </button>
         </div>
       </Modal>
     </div>

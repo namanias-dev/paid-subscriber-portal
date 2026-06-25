@@ -7,6 +7,8 @@ import Logo from "@/components/ui/Logo";
 import AdminLogin from "./AdminLogin";
 import AdminPasswordModal from "./AdminPasswordModal";
 import { ADMIN_NAV } from "./adminNav";
+import { UploadManagerProvider } from "./upload/uploadManager";
+import UploadManagerWidget from "./upload/UploadManagerWidget";
 import { allPermissions, type PermissionSet } from "@/lib/permissions";
 
 interface AdminMe { username: string; role: string; role_name?: string; permissions?: PermissionSet; must_change_password?: boolean }
@@ -96,6 +98,7 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
   );
 
   return (
+    <UploadManagerProvider>
     <div className="min-h-screen bg-surface">
       <aside className="fixed inset-y-0 left-0 z-40 hidden w-64 flex-col border-r border-line bg-white lg:flex">
         {SidebarContent}
@@ -133,6 +136,8 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
       </div>
 
       <AdminPasswordModal open={pwOpen} onClose={() => setPwOpen(false)} onChanged={() => { setPwOpen(false); check(); }} />
+      <UploadManagerWidget />
     </div>
+    </UploadManagerProvider>
   );
 }

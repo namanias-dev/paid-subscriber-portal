@@ -1,9 +1,23 @@
-import { getCourseContent, getClassHubViews, getAllQuizzes, getAllCourses, getPublishedContent, getAttemptsByUser } from "./dataProvider";
-import { quizUnlockCourseIds, type Learner } from "./entitlements";
+import { getCourseContent, getClassHubViews, getAllQuizzes, getAllCourses, getPublishedContent, getAttemptsByUser, getCourseEnrollmentsByPhone, getAccessOverridesByPhone, getLectureProgressByLearner } from "./dataProvider";
+import { quizUnlockCourseIds, canAccessLecture, type Learner, type LectureAccess } from "./entitlements";
 import { getAttemptStatusForLearner } from "./quizAttemptStatus";
 import { assembleClassHubSections, totalNewCount, type ClassHubSection } from "./classHub";
 import { buildPerformanceData, PERFORMANCE_SECTION, type PerformanceData } from "./performance";
+import { r2Configured, signGetUrl } from "./r2";
 import type { Course, ContentItem, Quiz, ClassHubView } from "./types";
+
+/** Short, calm chip text for a hosted lecture's access state. */
+function accessChip(a: LectureAccess): string | null {
+  switch (a.status) {
+    case "public": return null;
+    case "active": return a.expiresAt ? `Renews ${new Date(a.expiresAt).toLocaleDateString("en-IN")}` : "Access active";
+    case "expiring": return a.daysLeft != null ? `Expires in ${a.daysLeft} day${a.daysLeft === 1 ? "" : "s"}` : "Expiring soon";
+    case "grace": return a.daysLeft != null ? `Complete installment in ${a.daysLeft} day${a.daysLeft === 1 ? "" : "s"}` : "Installment due";
+    case "blocked": return a.reason === "overdue" ? "Locked — complete pending installment" : a.reason === "expired" ? "Access expired" : "Locked";
+    case "login": return "Log in to watch";
+    default: return null;
+  }
+}
 
 function assignedTo(item: ContentItem, courseId: string): boolean {
   const ids = item.course_ids && item.course_ids.length ? item.course_ids : item.course_id ? [item.course_id] : [];
@@ -38,7 +52,59 @@ export async function getClassHubSectionsForCourse(
     getCourseContent(courseId),
     learner?.studentId ? getClassHubViews(learner.studentId) : Promise.resolve([]),
   ]);
-  return assembleClassHubSections({ items, courseId, views });
+  const sections = assembleClassHubSections({ items, courseId, views });
+  await enrichHostedLectures(sections, items, learner);
+  return sections;
+}
+
+/**
+ * Enrich hosted-lecture cards with watch progress, a signed thumbnail, and an
+ * access chip — reusing canAccessLecture (installment/expiry) so the list mirrors
+ * playback gating. No video bytes here; thumbnails only, signed short-lived.
+ */
+async function enrichHostedLectures(
+  sections: ClassHubSection[],
+  items: ContentItem[],
+  learner: Learner | null,
+): Promise<void> {
+  const hostedIds = new Set(
+    items.filter((i) => i.source_type === "hosted" && i.upload_status === "completed").map((i) => i.id),
+  );
+  if (hostedIds.size === 0) return;
+  const recById = new Map(items.map((i) => [i.id, i]));
+
+  const [courses, enrollments, overrides, progress] = await Promise.all([
+    getAllCourses(),
+    learner ? getCourseEnrollmentsByPhone(learner.phone) : Promise.resolve([]),
+    learner ? getAccessOverridesByPhone(learner.phone) : Promise.resolve([]),
+    learner?.studentId ? getLectureProgressByLearner(learner.studentId) : Promise.resolve([]),
+  ]);
+  const progById = new Map(progress.map((p) => [p.recording_id, p]));
+
+  await Promise.all(
+    sections.flatMap((s) =>
+      s.items
+        .filter((it) => it.hosted && hostedIds.has(it.id))
+        .map(async (it) => {
+          const rec = recById.get(it.id);
+          if (!rec) return;
+          const access = canAccessLecture(learner, rec, { courses, enrollments, overrides });
+          it.accessBlocked = !access.allowed;
+          it.accessLabel = accessChip(access);
+          if (!access.allowed) it.link = null; // gate the card (player also re-checks)
+
+          const prog = progById.get(it.id);
+          if (prog) {
+            it.completed = prog.completed;
+            const dur = rec.duration_seconds || it.durationSeconds || 0;
+            it.progressPct = dur > 0 ? Math.min(100, Math.round((prog.last_position_seconds / dur) * 100)) : 0;
+          }
+          if (rec.thumbnail_key && r2Configured()) {
+            it.thumbnailUrl = await signGetUrl(rec.thumbnail_key, 3600).catch(() => null);
+          }
+        }),
+    ),
+  );
 }
 
 /**

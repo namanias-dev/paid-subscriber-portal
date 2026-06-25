@@ -34,6 +34,9 @@ export async function PATCH(
       "course_ids",
       "class_no",
       "drip_date",
+      "source_type",
+      "visibility",
+      "public_cdn",
     ];
     for (const f of fields) {
       if (body[f] !== undefined) {

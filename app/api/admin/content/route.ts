@@ -77,6 +77,8 @@ export async function POST(req: Request) {
       course_ids: courseIds,
       class_no: Number.isFinite(classNo) ? classNo : null,
       drip_date: body.drip_date ? String(body.drip_date) : null,
+      source_type: body.source_type === "hosted" ? "hosted" : "link",
+      visibility: body.visibility === "public" ? "public" : "enrolled",
     });
 
     return NextResponse.json({ ok: true, content: item });

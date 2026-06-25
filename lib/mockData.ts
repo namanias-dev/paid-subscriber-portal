@@ -3,6 +3,8 @@ import type {
   Student,
   ContentItem,
   ClassHubView,
+  LectureWatchProgress,
+  CourseAccessOverride,
   Bookmark,
   ContentProgress,
   AdminUser,
@@ -241,6 +243,9 @@ export const bookmarks: Bookmark[] = [
 ];
 
 export const classHubViews: ClassHubView[] = [];
+
+export const lectureWatchProgress: LectureWatchProgress[] = [];
+export const accessOverrides: CourseAccessOverride[] = [];
 
 export const contentProgress: ContentProgress[] = [
   { id: "p1111111-1111-1111-1111-111111111111", student_id: "11111111-1111-1111-1111-111111111111", content_id: "c1111111-1111-1111-1111-111111111111", completed: true, completed_at: iso(now - DAY) },

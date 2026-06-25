@@ -47,7 +47,7 @@ export interface ClassHubItem {
   typeLabel: string;
   classNo: number | null;
   date: string | null;
-  /** External link (YouTube/Drive/Telegram). Null when locked. */
+  /** Link to open: external (YouTube/Drive/Telegram) or internal player (/lecture/:id). Null when locked. */
   link: string | null;
   external: boolean;
   action: string;
@@ -55,6 +55,15 @@ export interface ClassHubItem {
   locked: boolean;
   unlockOn: string | null;
   isNew: boolean;
+  // ---- Hosted lecture extras (enriched server-side in classHubServer) ----
+  hosted?: boolean;
+  durationSeconds?: number | null;
+  thumbnailUrl?: string | null;
+  progressPct?: number;
+  completed?: boolean;
+  /** Access chip text + whether playback is blocked (installment/expiry). */
+  accessLabel?: string | null;
+  accessBlocked?: boolean;
 }
 
 export interface ClassHubSection {
@@ -107,9 +116,13 @@ export function assembleClassHubSections(opts: {
   };
 
   for (const item of items) {
+    const hosted = item.source_type === "hosted";
+    // Only show hosted recordings once their upload is complete & playable.
+    if (hosted && item.upload_status !== "completed") continue;
+
     const section = SECTION_FOR_TYPE[item.type] ?? "notes";
     const locked = isDripLocked(item, now);
-    const link = locked ? null : firstLink(item);
+    const link = locked ? null : hosted ? `/lecture/${item.id}` : firstLink(item);
     const isNew = !locked && availableAtMs(item) > seenFor(section);
     buckets[section].push({
       id: item.id,
@@ -120,11 +133,13 @@ export function assembleClassHubSections(opts: {
       classNo: item.class_no ?? null,
       date: item.date,
       link,
-      external: true,
+      external: !hosted,
       action: item.type === "recording" || item.type === "live_link" ? "Watch" : CONTENT_META[item.type]?.action ?? "Open",
       locked,
       unlockOn: locked ? item.drip_date : null,
       isNew,
+      hosted,
+      durationSeconds: hosted ? item.duration_seconds ?? null : null,
     });
   }
 

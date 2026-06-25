@@ -66,10 +66,73 @@ export interface ContentItem {
   course_ids?: string[];
   /** Optional class/session number for ordering recordings & notes (e.g. 1, 2, 12). */
   class_no?: number | null;
-  /** External Telegram link (alongside Drive + YouTube). Links only — never hosted. */
+  /** External Telegram link (alongside Drive + YouTube). Links only for source_type='link'. */
   telegram_link?: string | null;
   drip_date: string | null;
   created_at: string;
+
+  // ---- Hosted lecture recordings (direct-to-Cloudflare-R2) ----
+  /** 'link' (external YT/Drive/Telegram — default, unchanged) or 'hosted' (R2 video). */
+  source_type?: LectureSourceType;
+  /** 'enrolled' (entitlement-gated, default) or 'public' (free/marketing, bypasses gating). */
+  visibility?: LectureVisibility;
+  /** Lifecycle of the hosted upload. */
+  upload_status?: LectureUploadStatus;
+  /** Final R2 object key for the playable MP4 (never sent raw to the client). */
+  processed_key?: string | null;
+  thumbnail_key?: string | null;
+  notes_pdf_key?: string | null;
+  duration_seconds?: number | null;
+  file_size?: number | null;
+  resolution?: string | null;
+  /** Opt-in (default false) to serve a public lecture via the R2 public CDN base URL. */
+  public_cdn?: boolean;
+  // Resumable multipart upload state (so an interrupted upload can resume).
+  multipart_upload_id?: string | null;
+  multipart_key?: string | null;
+  multipart_parts?: MultipartPart[];
+  multipart_total_parts?: number | null;
+  multipart_chunk_size?: number | null;
+}
+
+export type LectureSourceType = "link" | "hosted";
+export type LectureVisibility = "enrolled" | "public";
+export type LectureUploadStatus = "idle" | "uploading" | "paused" | "completed" | "failed";
+
+/** One completed part of an R2 multipart upload. */
+export interface MultipartPart {
+  partNumber: number;
+  etag: string;
+}
+
+/** Resume-watching + completion tracking for a hosted lecture, per learner. */
+export interface LectureWatchProgress {
+  id: string;
+  learner_id: string;
+  recording_id: string;
+  last_position_seconds: number;
+  completed: boolean;
+  completed_at: string | null;
+  watch_count: number;
+  last_watched_at: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export type CourseAccessOverrideMode = "grant" | "revoke";
+
+/** Admin manual access override per learner (phone) per course — always wins. */
+export interface CourseAccessOverride {
+  id: string;
+  phone: string;
+  course_id: string;
+  mode: CourseAccessOverrideMode;
+  /** null = lifetime grant. */
+  expires_at: string | null;
+  note: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 /** Per-student, per-Class-Hub-section "last seen" — powers the NEW badge. */

@@ -5,9 +5,10 @@ import {
   getAllCourses,
   getEnrollments,
   getCourseEnrollmentsByPhone,
+  getAccessOverridesByPhone,
 } from "./dataProvider";
 import { studentBlockReason } from "./studentAccess";
-import type { Course, Quiz, CaPdf } from "./types";
+import type { Course, Quiz, CaPdf, ContentItem, CourseEnrollment, CourseAccessOverride } from "./types";
 
 /**
  * ============================================================================
@@ -208,6 +209,182 @@ function grantedByCourses(
 /** Is a library/study-material doc unlocked by the learner's enrolments? */
 export function isLibraryDocEntitled(docId: string, learner: Learner | null, courses: Course[]): boolean {
   return grantedByCourses(learner, courses, (e) => e.library_doc_ids, docId);
+}
+
+// ----------------------------- HOSTED LECTURES ------------------------------
+
+const GRACE_DAYS = 15; // grace after an installment's due date before access is blocked
+const EXPIRING_SOON_DAYS = 7; // chip turns to a gentle countdown within this window
+
+export type LectureAccessReason =
+  | "public" | "ok" | "login" | "lifetime" | "active" | "grace"
+  | "expired" | "overdue" | "revoked" | "not_enrolled";
+export type LectureAccessStatus = "public" | "active" | "expiring" | "grace" | "blocked" | "login";
+
+export interface LectureAccess {
+  allowed: boolean;
+  reason: LectureAccessReason;
+  status: LectureAccessStatus;
+  expiresAt?: string | null;
+  graceEndsAt?: string | null;
+  daysLeft?: number | null;
+  /** Pending amount (₹) when access is at-risk/blocked by an installment — for chips + admin. */
+  amountDue?: number | null;
+}
+
+const daysBetween = (future: number, now: number) => Math.ceil((future - now) / DAY_MS);
+
+function recordingCourseIds(rec: Pick<ContentItem, "course_ids" | "course_id">): string[] {
+  return rec.course_ids && rec.course_ids.length ? rec.course_ids : rec.course_id ? [rec.course_id] : [];
+}
+
+/** Earliest unpaid installment that has a due date — the binding constraint for EMI/seat access. */
+function earliestUnpaidDue(enrollment: CourseEnrollment): { due: number; amount: number } | null {
+  const items = (enrollment.schedule || [])
+    .filter((i) => !i.paid && i.due)
+    .map((i) => ({ due: Date.parse(i.due as string) || 0, amount: i.amount }))
+    .filter((i) => i.due > 0)
+    .sort((a, b) => a.due - b.due);
+  return items[0] ?? null;
+}
+
+/**
+ * Per-course lecture access decision (pure). Reuses full-payment expiry from the
+ * course's own entitlements and the installment schedule for EMI/seat grace.
+ * Admin override (grant/revoke) always wins.
+ */
+export function lectureAccessForCourse(
+  course: Course | undefined,
+  enrollment: CourseEnrollment | undefined,
+  override: CourseAccessOverride | undefined,
+  hasLegacyAccess: boolean,
+  now: number,
+): LectureAccess {
+  // 1) Admin manual override wins.
+  if (override) {
+    if (override.mode === "revoke") return { allowed: false, reason: "revoked", status: "blocked" };
+    const exp = override.expires_at ? Date.parse(override.expires_at) || 0 : 0;
+    if (!exp) return { allowed: true, reason: "lifetime", status: "active", expiresAt: null };
+    if (now <= exp) {
+      const daysLeft = daysBetween(exp, now);
+      return { allowed: true, reason: "active", status: daysLeft <= EXPIRING_SOON_DAYS ? "expiring" : "active", expiresAt: override.expires_at, daysLeft };
+    }
+    return { allowed: false, reason: "expired", status: "blocked", expiresAt: override.expires_at };
+  }
+
+  // 2) No enrollment row: legacy LMS student enrolment grants active access; else not enrolled.
+  if (!enrollment) {
+    return hasLegacyAccess
+      ? { allowed: true, reason: "active", status: "active" }
+      : { allowed: false, reason: "not_enrolled", status: "blocked" };
+  }
+  if (enrollment.status === "cancelled") return { allowed: false, reason: "not_enrolled", status: "blocked" };
+
+  // 3) Fully paid → full-payment access window from the course's own entitlements.
+  if (enrollment.status === "fully_paid") {
+    const ent = course?.entitlements;
+    if (!ent || ent.access_type !== "limited" || !ent.access_days) {
+      return { allowed: true, reason: "lifetime", status: "active", expiresAt: null };
+    }
+    const exp = (Date.parse(enrollment.created_at) || now) + ent.access_days * DAY_MS;
+    if (now > exp) return { allowed: false, reason: "expired", status: "blocked", expiresAt: new Date(exp).toISOString() };
+    const daysLeft = daysBetween(exp, now);
+    return { allowed: true, reason: "active", status: daysLeft <= EXPIRING_SOON_DAYS ? "expiring" : "active", expiresAt: new Date(exp).toISOString(), daysLeft };
+  }
+
+  // 4) Seat-booked / partial / pending → tied to the installment schedule + 15-day grace.
+  const unpaid = earliestUnpaidDue(enrollment);
+  if (!unpaid) {
+    // No dated unpaid installment yet (e.g. only the due-today seat item) → active.
+    return { allowed: true, reason: "active", status: "active" };
+  }
+  const graceEnds = unpaid.due + GRACE_DAYS * DAY_MS;
+  if (now <= graceEnds) {
+    const overdue = now > unpaid.due;
+    return {
+      allowed: true,
+      reason: overdue ? "grace" : "active",
+      status: overdue ? "grace" : "active",
+      graceEndsAt: new Date(graceEnds).toISOString(),
+      daysLeft: daysBetween(graceEnds, now),
+      amountDue: unpaid.amount,
+    };
+  }
+  return {
+    allowed: false,
+    reason: "overdue",
+    status: "blocked",
+    graceEndsAt: new Date(graceEnds).toISOString(),
+    amountDue: unpaid.amount,
+  };
+}
+
+/** Rank access results so the aggregate picks the most generous "allowed" outcome. */
+function accessRank(a: LectureAccess): number {
+  if (!a.allowed) return -1;
+  if (a.reason === "lifetime") return 100;
+  if (a.status === "active") return 80;
+  if (a.status === "expiring") return 60;
+  if (a.status === "grace") return 40;
+  return 50;
+}
+
+/**
+ * THE hosted-lecture access decision. Public lectures bypass everything (even
+ * logged-out). Otherwise the learner must pass for AT LEAST ONE assigned course;
+ * we surface the most generous outcome (and, when blocked, the most actionable).
+ */
+export function canAccessLecture(
+  learner: Learner | null,
+  recording: Pick<ContentItem, "course_ids" | "course_id" | "visibility">,
+  ctx: { courses: Course[]; enrollments: CourseEnrollment[]; overrides: CourseAccessOverride[]; now?: number },
+): LectureAccess {
+  const now = ctx.now ?? Date.now();
+  if (recording.visibility === "public") return { allowed: true, reason: "public", status: "public" };
+  if (!learner) return { allowed: false, reason: "login", status: "login" };
+
+  const courseIds = recordingCourseIds(recording);
+  const byCourse = new Map(ctx.courses.map((c) => [c.id, c]));
+  const enrByCourse = new Map(ctx.enrollments.filter((e) => e.status !== "cancelled").map((e) => [e.course_id, e]));
+  const ovrByCourse = new Map(ctx.overrides.map((o) => [o.course_id, o]));
+
+  // Unassigned hosted recording → treat as general library for any learner with valid access.
+  if (courseIds.length === 0) {
+    return learner.courseIds.length > 0
+      ? { allowed: true, reason: "active", status: "active" }
+      : { allowed: false, reason: "not_enrolled", status: "blocked" };
+  }
+
+  const results = courseIds.map((cid) =>
+    lectureAccessForCourse(byCourse.get(cid), enrByCourse.get(cid), ovrByCourse.get(cid), learner.courseIds.includes(cid), now),
+  );
+  const allowed = results.filter((r) => r.allowed);
+  if (allowed.length) return allowed.sort((a, b) => accessRank(b) - accessRank(a))[0];
+  // None allowed → most actionable block (prefer one with an amount due / grace info).
+  return results.sort((a, b) => (b.amountDue ?? 0) - (a.amountDue ?? 0))[0] ?? { allowed: false, reason: "not_enrolled", status: "blocked" };
+}
+
+/**
+ * Async wrapper: resolve the current learner (unless provided) and load the
+ * enrolment + override context, then decide. Used by playback + Class Hub.
+ */
+export async function resolveLectureAccess(
+  recording: Pick<ContentItem, "course_ids" | "course_id" | "visibility">,
+  preloaded?: { learner?: Learner | null; courses?: Course[] },
+): Promise<{ learner: Learner | null; access: LectureAccess }> {
+  if (recording.visibility === "public") {
+    const learner = preloaded?.learner ?? (await resolveLearner());
+    return { learner, access: { allowed: true, reason: "public", status: "public" } };
+  }
+  const learner = preloaded?.learner ?? (await resolveLearner());
+  if (!learner) return { learner: null, access: { allowed: false, reason: "login", status: "login" } };
+
+  const [courses, enrollments, overrides] = await Promise.all([
+    preloaded?.courses ? Promise.resolve(preloaded.courses) : getAllCourses(),
+    getCourseEnrollmentsByPhone(learner.phone),
+    getAccessOverridesByPhone(learner.phone),
+  ]);
+  return { learner, access: canAccessLecture(learner, recording, { courses, enrollments, overrides }) };
 }
 
 /**

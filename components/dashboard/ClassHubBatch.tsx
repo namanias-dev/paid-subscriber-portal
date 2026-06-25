@@ -150,11 +150,87 @@ export default function ClassHubBatch({
   );
 }
 
+function fmtDuration(s?: number | null): string | null {
+  if (!s || s <= 0) return null;
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  return h > 0 ? `${h}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}` : `${m}:${String(sec).padStart(2, "0")}`;
+}
+
 function ContentRow({ item }: { item: ClassHubItem }) {
   const showNew = item.isNew;
 
   const cardCls =
     "block h-full rounded-2xl border border-line bg-surface p-4 transition-all duration-200 hover:-translate-y-0.5 hover:border-[rgba(212,175,55,0.5)] hover:shadow-soft motion-reduce:transform-none motion-reduce:transition-none";
+
+  // Hosted lecture card — thumbnail, duration, progress, access chip.
+  if (item.hosted) {
+    const dur = fmtDuration(item.durationSeconds);
+    const inner = (
+      <div className={`${cardCls} ${item.accessBlocked ? "opacity-95" : ""} !p-0 overflow-hidden`}>
+        <div className="relative aspect-video w-full bg-gradient-to-br from-[#0b1437] to-[#1c2d6b]">
+          {item.thumbnailUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={item.thumbnailUrl} alt="" loading="lazy" className="h-full w-full object-cover" />
+          ) : (
+            <div className="flex h-full w-full items-center justify-center text-white/70">
+              <PlayCircle size={40} />
+            </div>
+          )}
+          {!item.accessBlocked && !item.locked && (
+            <span className="absolute inset-0 grid place-items-center">
+              <span className="grid h-12 w-12 place-items-center rounded-full bg-black/45 text-white backdrop-blur-sm">
+                <PlayCircle size={26} />
+              </span>
+            </span>
+          )}
+          {dur && <span className="absolute bottom-2 right-2 rounded bg-black/70 px-1.5 py-0.5 text-[11px] font-semibold text-white">{dur}</span>}
+          {showNew && (
+            <span className="absolute left-2 top-2 inline-flex items-center gap-1 rounded-full bg-gradient-to-r from-[var(--ca-gold-bright)] to-[var(--ca-gold)] px-2 py-0.5 text-[10px] font-extrabold text-[#1a1304]">
+              <Sparkles size={10} /> NEW
+            </span>
+          )}
+          {item.completed && (
+            <span className="absolute right-2 top-2 inline-flex items-center gap-1 rounded-full bg-success px-2 py-0.5 text-[10px] font-extrabold text-white">✓ Completed</span>
+          )}
+          {item.accessBlocked && <span className="absolute inset-0 grid place-items-center bg-black/45 text-white"><Lock size={26} /></span>}
+          {!!item.progressPct && item.progressPct > 0 && !item.completed && (
+            <span className="absolute inset-x-0 bottom-0 h-1 bg-white/25">
+              <span className="block h-full bg-[var(--ca-gold)]" style={{ width: `${item.progressPct}%` }} />
+            </span>
+          )}
+        </div>
+        <div className="p-4">
+          <p className="line-clamp-2 font-semibold leading-snug text-ink">
+            {item.classNo != null && <span className="text-[var(--ca-gold)]">Class {item.classNo} · </span>}
+            {item.title}
+          </p>
+          <div className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-muted">
+            <span>Recording</span>
+            {item.subject && <span>· {item.subject}</span>}
+            {item.date && <span>· {formatISTDate(item.date)}</span>}
+          </div>
+          {item.locked ? (
+            <p className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-amber-50 px-2 py-1 text-xs font-semibold text-amber-700">
+              <Lock size={12} /> Unlocks on {item.unlockOn ? formatISTDate(item.unlockOn) : "a later date"}
+            </p>
+          ) : item.accessBlocked ? (
+            <p className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-amber-50 px-2 py-1 text-xs font-semibold text-amber-700">
+              <Lock size={12} /> {item.accessLabel || "Locked"}
+            </p>
+          ) : (
+            <span className="mt-2 inline-flex items-center gap-1.5 text-sm font-semibold text-primary">
+              {item.progressPct && item.progressPct > 0 ? "Continue watching" : "Watch now"} <PlayCircle size={13} />
+              {item.accessLabel && <span className="ml-1 text-xs font-normal text-muted">· {item.accessLabel}</span>}
+            </span>
+          )}
+        </div>
+      </div>
+    );
+    if (item.locked || item.accessBlocked || !item.link) return <li>{inner}</li>;
+    return <li><Link href={item.link} className="ca-focus block">{inner}</Link></li>;
+  }
 
   const body = (
     <div className="flex h-full items-start gap-3">

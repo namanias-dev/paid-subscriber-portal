@@ -9,6 +9,8 @@ import type {
   ContentItem,
   ContentType,
   ClassHubView,
+  LectureWatchProgress,
+  CourseAccessOverride,
   Bookmark,
   ContentProgress,
   PlanId,
@@ -263,6 +265,9 @@ export interface NewContentInput {
   course_ids?: string[];
   class_no?: number | null;
   drip_date?: string | null;
+  source_type?: ContentItem["source_type"];
+  visibility?: ContentItem["visibility"];
+  upload_status?: ContentItem["upload_status"];
 }
 
 export async function addContent(input: NewContentInput): Promise<ContentItem> {
@@ -284,6 +289,9 @@ export async function addContent(input: NewContentInput): Promise<ContentItem> {
     course_ids: courseIds,
     class_no: input.class_no ?? null,
     drip_date: input.drip_date ?? null,
+    source_type: input.source_type ?? "link",
+    visibility: input.visibility ?? "enrolled",
+    upload_status: input.upload_status ?? (input.source_type === "hosted" ? "idle" : undefined),
     created_at: new Date().toISOString(),
   };
   if (demoMode()) {
@@ -363,6 +371,129 @@ export async function markClassHubSeen(studentId: string, courseId: string, sect
   await db
     .from("class_hub_views")
     .upsert({ student_id: studentId, course_id: courseId, section, last_seen_at: nowISO }, { onConflict: "student_id,course_id,section" });
+}
+
+// ====================== HOSTED LECTURES ======================
+export async function getContentById(id: string): Promise<ContentItem | null> {
+  if (!id) return null;
+  if (demoMode()) return mock.contentItems.find((c) => c.id === id) ?? null;
+  const db = getSupabaseAdmin();
+  if (!db) return mock.contentItems.find((c) => c.id === id) ?? null;
+  const { data } = await db.from("content_items").select("*").eq("id", id).maybeSingle();
+  return (data as ContentItem) ?? null;
+}
+
+export async function getLectureProgress(learnerId: string, recordingId: string): Promise<LectureWatchProgress | null> {
+  if (!learnerId || !recordingId) return null;
+  if (demoMode()) return mock.lectureWatchProgress.find((p) => p.learner_id === learnerId && p.recording_id === recordingId) ?? null;
+  const db = getSupabaseAdmin();
+  if (!db) return null;
+  const { data } = await db.from("lecture_watch_progress").select("*").eq("learner_id", learnerId).eq("recording_id", recordingId).maybeSingle();
+  return (data as LectureWatchProgress) ?? null;
+}
+
+export async function getLectureProgressByLearner(learnerId: string): Promise<LectureWatchProgress[]> {
+  if (!learnerId) return [];
+  if (demoMode()) return mock.lectureWatchProgress.filter((p) => p.learner_id === learnerId);
+  const db = getSupabaseAdmin();
+  if (!db) return [];
+  const { data } = await db.from("lecture_watch_progress").select("*").eq("learner_id", learnerId);
+  return (data as LectureWatchProgress[]) ?? [];
+}
+
+export async function upsertLectureProgress(
+  learnerId: string,
+  recordingId: string,
+  patch: { last_position_seconds?: number; completed?: boolean; durationSeconds?: number | null },
+): Promise<void> {
+  if (!learnerId || !recordingId) return;
+  const nowISO = new Date().toISOString();
+  const completed = patch.completed === true;
+  if (demoMode()) {
+    const existing = mock.lectureWatchProgress.find((p) => p.learner_id === learnerId && p.recording_id === recordingId);
+    if (existing) {
+      if (patch.last_position_seconds != null) existing.last_position_seconds = Math.floor(patch.last_position_seconds);
+      if (completed && !existing.completed) { existing.completed = true; existing.completed_at = nowISO; }
+      existing.last_watched_at = nowISO;
+      existing.updated_at = nowISO;
+    } else {
+      mock.lectureWatchProgress.push({
+        id: uuid(), learner_id: learnerId, recording_id: recordingId,
+        last_position_seconds: Math.floor(patch.last_position_seconds ?? 0),
+        completed, completed_at: completed ? nowISO : null, watch_count: 1,
+        last_watched_at: nowISO, created_at: nowISO, updated_at: nowISO,
+      });
+    }
+    return;
+  }
+  const db = getSupabaseAdmin();
+  if (!db) return;
+  const existing = await getLectureProgress(learnerId, recordingId);
+  const row: Record<string, unknown> = {
+    learner_id: learnerId,
+    recording_id: recordingId,
+    last_watched_at: nowISO,
+    updated_at: nowISO,
+    watch_count: (existing?.watch_count ?? 0) + (existing ? 0 : 1),
+  };
+  if (patch.last_position_seconds != null) row.last_position_seconds = Math.floor(patch.last_position_seconds);
+  if (completed) { row.completed = true; row.completed_at = existing?.completed_at ?? nowISO; }
+  await db.from("lecture_watch_progress").upsert(row, { onConflict: "learner_id,recording_id" });
+}
+
+// ---- Admin manual access overrides (grant / revoke per phone per course) ----
+export async function getAccessOverridesByPhone(phone: string): Promise<CourseAccessOverride[]> {
+  const p = (phone || "").trim();
+  if (!p) return [];
+  if (demoMode()) return mock.accessOverrides.filter((o) => o.phone === p);
+  const db = getSupabaseAdmin();
+  if (!db) return [];
+  const { data } = await db.from("course_access_overrides").select("*").eq("phone", p);
+  return (data as CourseAccessOverride[]) ?? [];
+}
+
+export async function getAllAccessOverrides(): Promise<CourseAccessOverride[]> {
+  if (demoMode()) return [...mock.accessOverrides];
+  const db = getSupabaseAdmin();
+  if (!db) return [];
+  const { data } = await db.from("course_access_overrides").select("*");
+  return (data as CourseAccessOverride[]) ?? [];
+}
+
+export async function upsertAccessOverride(input: {
+  phone: string; course_id: string; mode: "grant" | "revoke"; expires_at?: string | null; note?: string | null; created_by?: string | null;
+}): Promise<void> {
+  const phone = (input.phone || "").trim();
+  if (!phone || !input.course_id) return;
+  const nowISO = new Date().toISOString();
+  if (demoMode()) {
+    const existing = mock.accessOverrides.find((o) => o.phone === phone && o.course_id === input.course_id);
+    if (existing) {
+      existing.mode = input.mode; existing.expires_at = input.expires_at ?? null; existing.note = input.note ?? null; existing.updated_at = nowISO;
+    } else {
+      mock.accessOverrides.push({ id: uuid(), phone, course_id: input.course_id, mode: input.mode, expires_at: input.expires_at ?? null, note: input.note ?? null, created_by: input.created_by ?? null, created_at: nowISO, updated_at: nowISO });
+    }
+    return;
+  }
+  const db = getSupabaseAdmin();
+  if (!db) return;
+  await db.from("course_access_overrides").upsert(
+    { phone, course_id: input.course_id, mode: input.mode, expires_at: input.expires_at ?? null, note: input.note ?? null, created_by: input.created_by ?? null, updated_at: nowISO },
+    { onConflict: "phone,course_id" },
+  );
+}
+
+export async function deleteAccessOverride(phone: string, courseId: string): Promise<void> {
+  const p = (phone || "").trim();
+  if (!p || !courseId) return;
+  if (demoMode()) {
+    const idx = mock.accessOverrides.findIndex((o) => o.phone === p && o.course_id === courseId);
+    if (idx !== -1) mock.accessOverrides.splice(idx, 1);
+    return;
+  }
+  const db = getSupabaseAdmin();
+  if (!db) return;
+  await db.from("course_access_overrides").delete().eq("phone", p).eq("course_id", courseId);
 }
 
 // ============================ BOOKMARKS ============================
