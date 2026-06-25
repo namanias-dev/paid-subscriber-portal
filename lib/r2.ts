@@ -25,28 +25,63 @@ import type { MultipartPart } from "./types";
 const UPLOAD_URL_TTL = 60 * 60; // 1h for part PUTs (a slow part shouldn't expire mid-flight)
 export const PLAYBACK_TTL = Number(process.env.LECTURE_SIGNED_URL_TTL_SECONDS || 1800);
 
+/** Always-required R2 env vars (the endpoint can be derived from ACCOUNT_ID). */
+const REQUIRED_R2_VARS = [
+  "CLOUDFLARE_R2_ACCESS_KEY_ID",
+  "CLOUDFLARE_R2_SECRET_ACCESS_KEY",
+  "CLOUDFLARE_R2_BUCKET_NAME",
+] as const;
+
+const env = (k: string) => (process.env[k] || "").trim();
+
+/** Names of any required R2 env vars that are missing/empty (trimmed). */
+export function missingR2EnvVars(): string[] {
+  const missing: string[] = REQUIRED_R2_VARS.filter((k) => !env(k));
+  // Need EITHER an explicit endpoint OR an account id to build one.
+  if (!env("CLOUDFLARE_R2_ENDPOINT") && !env("CLOUDFLARE_R2_ACCOUNT_ID")) {
+    missing.push("CLOUDFLARE_R2_ENDPOINT (or CLOUDFLARE_R2_ACCOUNT_ID)");
+  }
+  return missing;
+}
+
 export function r2Configured(): boolean {
-  return !!(
-    process.env.CLOUDFLARE_R2_ENDPOINT &&
-    process.env.CLOUDFLARE_R2_ACCESS_KEY_ID &&
-    process.env.CLOUDFLARE_R2_SECRET_ACCESS_KEY &&
-    process.env.CLOUDFLARE_R2_BUCKET_NAME
-  );
+  return missingR2EnvVars().length === 0;
+}
+
+/** Throws a clear, specific error naming exactly which R2 vars are missing. */
+export function assertR2Configured(): void {
+  const missing = missingR2EnvVars();
+  if (missing.length) {
+    throw new Error(`R2 not configured — missing/empty env var(s): ${missing.join(", ")}`);
+  }
 }
 
 function bucket(): string {
   return process.env.CLOUDFLARE_R2_BUCKET_NAME as string;
 }
 
+/**
+ * Endpoint = account host, no bucket, no trailing slash. If the explicit
+ * CLOUDFLARE_R2_ENDPOINT is empty, derive it from the account id.
+ */
+function r2Endpoint(): string {
+  const explicit = env("CLOUDFLARE_R2_ENDPOINT").replace(/\/+$/, "");
+  if (explicit) return explicit;
+  const acct = env("CLOUDFLARE_R2_ACCOUNT_ID");
+  return acct ? `https://${acct}.r2.cloudflarestorage.com` : "";
+}
+
 let client: S3Client | null = null;
 function r2(): S3Client {
   if (client) return client;
+  assertR2Configured();
   client = new S3Client({
     region: "auto",
-    endpoint: process.env.CLOUDFLARE_R2_ENDPOINT,
+    endpoint: r2Endpoint(),
+    forcePathStyle: true, // R2 requires path-style addressing
     credentials: {
-      accessKeyId: process.env.CLOUDFLARE_R2_ACCESS_KEY_ID as string,
-      secretAccessKey: process.env.CLOUDFLARE_R2_SECRET_ACCESS_KEY as string,
+      accessKeyId: (process.env.CLOUDFLARE_R2_ACCESS_KEY_ID as string).trim(),
+      secretAccessKey: (process.env.CLOUDFLARE_R2_SECRET_ACCESS_KEY as string).trim(),
     },
   });
   return client;

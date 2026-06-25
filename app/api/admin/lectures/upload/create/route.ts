@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getAdminSession } from "@/lib/session";
 import { getContentById, updateContent } from "@/lib/dataProvider";
-import { r2Configured, createMultipart, lectureVideoKey } from "@/lib/r2";
+import { missingR2EnvVars, createMultipart, lectureVideoKey } from "@/lib/r2";
 
 export const dynamic = "force-dynamic";
 
@@ -12,7 +12,14 @@ export const dynamic = "force-dynamic";
  */
 export async function POST(req: Request) {
   if (!(await getAdminSession())) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
-  if (!r2Configured()) return NextResponse.json({ ok: false, error: "Video hosting is not configured." }, { status: 503 });
+
+  // Surface the exact misconfiguration instead of a generic 503.
+  const missing = missingR2EnvVars();
+  if (missing.length) {
+    const msg = `Video hosting is not configured — missing env var(s): ${missing.join(", ")}. Set them in .env.local (restart dev) or Vercel (redeploy).`;
+    console.error("[lectures/upload/create] " + msg);
+    return NextResponse.json({ ok: false, error: msg, missing }, { status: 503 });
+  }
 
   const body = await req.json().catch(() => ({}));
   const recordingId = String(body.recordingId || "");
@@ -40,6 +47,12 @@ export async function POST(req: Request) {
     });
     return NextResponse.json({ ok: true, uploadId, key });
   } catch (e) {
-    return NextResponse.json({ ok: false, error: (e as Error).message || "Could not start upload" }, { status: 500 });
+    // Surface the REAL R2 error (InvalidAccessKeyId / SignatureDoesNotMatch /
+    // ENOTFOUND endpoint / AccessDenied / NoSuchBucket …) in logs + response.
+    const err = e as { name?: string; message?: string; Code?: string; $metadata?: { httpStatusCode?: number } };
+    const code = err.Code || err.name || "UnknownError";
+    const detail = `${code}: ${err.message || "Could not start upload"}`;
+    console.error("[lectures/upload/create] R2 createMultipart failed →", code, err.message, err.$metadata?.httpStatusCode ?? "");
+    return NextResponse.json({ ok: false, error: detail, code }, { status: 502 });
   }
 }
