@@ -1507,13 +1507,15 @@ const PAID_STATUSES = ["PAID", "captured"];
 /** Non-paid statuses eligible for (re)verification against ICICI. */
 const NONPAID_STATUSES = ["PENDING", "pending", "VERIFYING", "ABANDONED", "FAILED"];
 
-/** Window (minutes) a fresh PENDING waits before we start VERIFYING with ICICI. */
+/**
+ * Window (minutes) a fresh PENDING waits before we move it to VERIFYING.
+ * Default 120 (2 hours) so slow UPI/netbanking callbacks have ample time to land
+ * and we never prematurely move a real-but-unconfirmed payment off PENDING.
+ * Override with env WEBINAR_PENDING_WINDOW_MINUTES.
+ */
 function pendingWindowMinutes(): number {
-  return Number(
-    process.env.WEBINAR_PENDING_WINDOW_MINUTES ||
-      process.env.WEBINAR_PENDING_TIMEOUT_MINUTES ||
-      12,
-  );
+  const v = Number(process.env.WEBINAR_PENDING_WINDOW_MINUTES);
+  return Number.isFinite(v) && v > 0 ? v : 120;
 }
 
 /** Backoff schedule (minutes after created_at) for verify attempt #index. */
@@ -1676,14 +1678,18 @@ export async function reverifyPayments(opts: ReverifyOptions = {}): Promise<Reve
 
     if (dryRun) continue;
 
-    // Persist: always bump audit counters; change status only when we have one.
-    const patch: Partial<Payment> = {
-      verify_attempts: (row.verify_attempts ?? 0) + 1,
-      last_verify_at: new Date().toISOString(),
-      verify_status: rawStatus ?? row.verify_status ?? null,
-    };
+    // Persist. Only a real LIVE ICICI call bumps the verify counters / timestamp
+    // (so blind-mode stored-evidence sweeps never consume the backoff budget or
+    // write a misleading "last verified" time). Status changes always persist.
+    const patch: Partial<Payment> = {};
+    if (source === "verify") {
+      patch.verify_attempts = (row.verify_attempts ?? 0) + 1;
+      patch.last_verify_at = new Date().toISOString();
+      if (rawStatus) patch.verify_status = rawStatus;
+    }
     if (gatewayRef && !row.gateway_ref) patch.gateway_ref = gatewayRef;
     if (willChange && target) patch.status = target;
+    if (Object.keys(patch).length === 0) continue; // nothing to write
 
     const { data: upd } = await db
       .from("payments")
