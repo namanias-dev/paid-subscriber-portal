@@ -3,6 +3,7 @@ import * as mock from "./mockData";
 import { computeExpiry, isExpired, isExpiringSoon, yesterdayISODate, todayISODate, formatINR, formatISTDate } from "./dates";
 import { generateAccessCode } from "./codeGenerator";
 import { generateLoginCode } from "./buyerCode";
+import { normalizeIndianMobile } from "./phone";
 import { verifyFromStoredCallback, eazypayVerify, type VerifyOutcome } from "./eazypay";
 import type {
   Buyer,
@@ -695,6 +696,7 @@ function mapDbAccount(row: Record<string, unknown>): AdminAccount {
     username: (row.username as string) || "",
     name: (row.name as string) ?? null,
     email: (row.email as string) ?? null,
+    phone: (row.phone as string) ?? null,
     role_id: (row.role_id as string) ?? null,
     role: (row.role as string) ?? null,
     status: ((row.status as string) === "disabled" ? "disabled" : "active"),
@@ -709,7 +711,7 @@ function mapDbAccount(row: Record<string, unknown>): AdminAccount {
 export async function getAdminAccounts(): Promise<AdminAccount[]> {
   if (demoMode()) {
     const base: AdminAccount[] = mock.adminUsers.map((a) => ({
-      id: a.id, username: a.username, name: "Naman Sir", email: "admin@example.com",
+      id: a.id, username: a.username, name: "Naman Sir", email: "admin@example.com", phone: null,
       role_id: "super_admin", role: a.role, status: "active", must_change_password: false,
       permissions_override: null, created_by: null, last_login_at: null, created_at: a.created_at,
     }));
@@ -717,7 +719,7 @@ export async function getAdminAccounts(): Promise<AdminAccount[]> {
   }
   const db = getSupabaseAdmin();
   if (!db) return [];
-  const { data } = await db.from("admin_users").select("id,username,name,email,role_id,role,status,must_change_password,permissions_override,created_by,last_login_at,created_at").order("created_at", { ascending: true });
+  const { data } = await db.from("admin_users").select("id,username,name,email,phone,role_id,role,status,must_change_password,permissions_override,created_by,last_login_at,created_at").order("created_at", { ascending: true });
   return ((data as Record<string, unknown>[]) ?? []).map(mapDbAccount);
 }
 export async function getAdminAccountById(id: string): Promise<AdminAccount | null> {
@@ -767,6 +769,39 @@ export async function getActiveStaffWebinarIds(adminId: string): Promise<string[
   const grants = await getStaffAccessGrants(adminId);
   const now = Date.now();
   return grants.filter((g) => g.kind === "webinar" && grantActive(g, now)).map((g) => g.ref_id);
+}
+
+/** The staff member (admin account) linked to a USER-PORTAL phone, if any. */
+export async function getAdminAccountByPhone(phone: string): Promise<AdminAccount | null> {
+  const n = normalizeIndianMobile(phone);
+  if (!n.ok || !n.digits10) return null;
+  const accounts = await getAdminAccounts();
+  return accounts.find((a) => a.phone === n.digits10) ?? null;
+}
+
+/**
+ * Bridge: the comp courses/webinars a USER-PORTAL phone is entitled to via STAFF
+ * access. Maps phone → linked staff account → existing staff_access_grants. Empty
+ * when the phone isn't a staff phone. This is how a staff member, logged into the
+ * normal student portal, sees exactly the items comped to them — no new auth.
+ */
+export async function getActiveStaffGrantsByPhone(
+  phone: string,
+): Promise<{ adminId: string | null; courseIds: string[]; webinarIds: string[] }> {
+  const admin = await getAdminAccountByPhone(phone);
+  if (!admin) return { adminId: null, courseIds: [], webinarIds: [] };
+  const grants = await getStaffAccessGrants(admin.id);
+  const now = Date.now();
+  return {
+    adminId: admin.id,
+    courseIds: grants.filter((g) => g.kind === "course" && grantActive(g, now)).map((g) => g.ref_id),
+    webinarIds: grants.filter((g) => g.kind === "webinar" && grantActive(g, now)).map((g) => g.ref_id),
+  };
+}
+
+/** Course ids a USER-PORTAL phone has via staff comp access (entitlement merge helper). */
+export async function getActiveStaffCourseIdsByPhone(phone: string): Promise<string[]> {
+  return (await getActiveStaffGrantsByPhone(phone)).courseIds;
 }
 
 /** Idempotently add grants for a staff member (no-op for ones already present). */
@@ -873,7 +908,7 @@ function genPassword(): string {
 }
 
 export async function createAdminAccount(input: {
-  name: string; username: string; email?: string | null; role_id: string;
+  name: string; username: string; email?: string | null; phone?: string | null; role_id: string;
   password?: string; must_change_password?: boolean; permissions_override?: PermissionSet | null; created_by?: string | null;
 }): Promise<{ ok: boolean; account?: AdminAccount; password?: string; error?: string }> {
   const username = input.username.trim().toLowerCase();
@@ -883,10 +918,19 @@ export async function createAdminAccount(input: {
   if (!role) return { ok: false, error: "Invalid role." };
   const ts = new Date().toISOString();
 
+  // Optional staff phone — validated to a canonical 10-digit form; enforced unique.
+  let phone: string | null = null;
+  if (input.phone != null && String(input.phone).trim() !== "") {
+    const n = normalizeIndianMobile(String(input.phone));
+    if (!n.ok || !n.digits10) return { ok: false, error: n.error || "Enter a valid 10-digit mobile number." };
+    phone = n.digits10;
+  }
+
   if (demoMode()) {
     if (mock.adminUsers.some((a) => a.username === username) || demoExtraAccounts.some((a) => a.username === username)) return { ok: false, error: "Username already exists." };
+    if (phone && demoExtraAccounts.some((a) => a.phone === phone)) return { ok: false, error: "That phone number is already used by another staff member." };
     const account: AdminAccount = {
-      id: uuid(), username, name: input.name || username, email: input.email ?? null, role_id: input.role_id, role: role.name,
+      id: uuid(), username, name: input.name || username, email: input.email ?? null, phone, role_id: input.role_id, role: role.name,
       status: "active", must_change_password: input.must_change_password ?? true, permissions_override: input.permissions_override ?? null,
       created_by: input.created_by ?? null, last_login_at: null, created_at: ts,
     };
@@ -897,36 +941,57 @@ export async function createAdminAccount(input: {
   if (!db) return { ok: false, error: "No database." };
   const existing = await db.from("admin_users").select("id").eq("username", username).maybeSingle();
   if (existing.data) return { ok: false, error: "Username already exists." };
+  if (phone) {
+    const dupe = await db.from("admin_users").select("id").eq("phone", phone).maybeSingle();
+    if (dupe.data) return { ok: false, error: "That phone number is already used by another staff member." };
+  }
   const bcrypt = await import("bcryptjs");
   const password_hash = await bcrypt.hash(password, 10);
   const row = {
-    id: uuid(), username, password_hash, name: input.name || username, email: input.email ?? null,
+    id: uuid(), username, password_hash, name: input.name || username, email: input.email ?? null, phone,
     role_id: input.role_id, role: role.name, status: "active", must_change_password: input.must_change_password ?? true,
     permissions_override: input.permissions_override ?? null, created_by: input.created_by ?? null, created_at: ts,
   };
-  const { data, error } = await db.from("admin_users").insert(row).select("id,username,name,email,role_id,role,status,must_change_password,permissions_override,created_by,last_login_at,created_at").single();
+  const { data, error } = await db.from("admin_users").insert(row).select("id,username,name,email,phone,role_id,role,status,must_change_password,permissions_override,created_by,last_login_at,created_at").single();
   if (error) return { ok: false, error: error.message };
   return { ok: true, account: mapDbAccount(data as Record<string, unknown>), password };
 }
 
-export async function updateAdminAccount(id: string, patch: { name?: string; email?: string | null; role_id?: string; status?: "active" | "disabled"; permissions_override?: PermissionSet | null }): Promise<AdminAccount | null> {
+export async function updateAdminAccount(id: string, patch: { name?: string; email?: string | null; phone?: string | null; role_id?: string; status?: "active" | "disabled"; permissions_override?: PermissionSet | null }): Promise<{ ok: boolean; account?: AdminAccount | null; error?: string }> {
   const clean: Record<string, unknown> = {};
   if (patch.name !== undefined) clean.name = patch.name;
   if (patch.email !== undefined) clean.email = patch.email;
+  if (patch.phone !== undefined) {
+    if (patch.phone == null || String(patch.phone).trim() === "") {
+      clean.phone = null;
+    } else {
+      const n = normalizeIndianMobile(String(patch.phone));
+      if (!n.ok || !n.digits10) return { ok: false, error: n.error || "Enter a valid 10-digit mobile number." };
+      clean.phone = n.digits10;
+    }
+  }
   if (patch.role_id !== undefined) { clean.role_id = patch.role_id; const r = await getRoleById(patch.role_id); if (r) clean.role = r.name; }
   if (patch.status !== undefined) clean.status = patch.status;
   if (patch.permissions_override !== undefined) clean.permissions_override = patch.permissions_override;
   if (demoMode()) {
     const a = demoExtraAccounts.find((x) => x.id === id);
-    if (!a) return null;
+    if (!a) return { ok: false, error: "Account not found." };
+    if (clean.phone && demoExtraAccounts.some((x) => x.id !== id && x.phone === clean.phone)) {
+      return { ok: false, error: "That phone number is already used by another staff member." };
+    }
     Object.assign(a, clean);
     const { password, ...rest } = a; void password;
-    return rest;
+    return { ok: true, account: rest };
   }
   const db = getSupabaseAdmin();
-  if (!db) return null;
-  const { data } = await db.from("admin_users").update(clean).eq("id", id).select("id,username,name,email,role_id,role,status,must_change_password,permissions_override,created_by,last_login_at,created_at").single();
-  return data ? mapDbAccount(data as Record<string, unknown>) : null;
+  if (!db) return { ok: false, error: "No database." };
+  if (clean.phone) {
+    const dupe = await db.from("admin_users").select("id").eq("phone", clean.phone as string).neq("id", id).maybeSingle();
+    if (dupe.data) return { ok: false, error: "That phone number is already used by another staff member." };
+  }
+  const { data, error } = await db.from("admin_users").update(clean).eq("id", id).select("id,username,name,email,phone,role_id,role,status,must_change_password,permissions_override,created_by,last_login_at,created_at").single();
+  if (error) return { ok: false, error: error.message };
+  return { ok: true, account: data ? mapDbAccount(data as Record<string, unknown>) : null };
 }
 
 export async function resetAdminPassword(id: string, newPassword?: string): Promise<{ ok: boolean; password?: string; error?: string }> {
@@ -2016,6 +2081,76 @@ async function ensureBuyerRow(p: string, name?: string | null): Promise<Buyer | 
 }
 
 /**
+ * Provision a USER-PORTAL account for a STAFF member's phone so they can log in
+ * and test the real student view. Deliberately a BUYER-ONLY row (no student,
+ * payment, enrollment or registration rows are ever created) — that keeps staff
+ * test logins out of revenue, seat counts and "real student" analytics entirely.
+ * Idempotent: links to an existing buyer if the phone already has one (and never
+ * downgrades a real buyer to a staff flag). Returns the buyer with its login code.
+ */
+export async function ensureStaffPortalAccount(phone: string, name?: string | null): Promise<Buyer | null> {
+  const n = normalizeIndianMobile(phone);
+  if (!n.ok || !n.digits10) return null;
+  const p = n.digits10;
+
+  const existing = await getBuyerByPhone(p);
+  if (existing) return existing; // link — do not flip a real buyer's is_staff flag
+
+  const code = await uniqueLoginCode();
+  const now = new Date().toISOString();
+  const row: Buyer = { id: uuid(), phone: p, name: name?.trim() || null, login_code: code, is_staff: true, created_at: now, updated_at: now };
+
+  if (demoMode()) { demoBuyers().unshift(row); return row; }
+  const db = getSupabaseAdmin();
+  if (!db) { demoBuyers().unshift(row); return row; }
+  try {
+    const { data, error } = await db
+      .from("buyers")
+      .insert({ phone: p, name: row.name, login_code: code, is_staff: true })
+      .select()
+      .single();
+    if (error) return (await getBuyerByPhone(p)) ?? null; // unique-phone race
+    return data as Buyer;
+  } catch {
+    return (await getBuyerByPhone(p)) ?? null;
+  }
+}
+
+/** Issue a fresh login code for a phone's portal account (creates a staff account if missing). */
+export async function regenerateStaffPortalCode(phone: string, name?: string | null): Promise<Buyer | null> {
+  const n = normalizeIndianMobile(phone);
+  if (!n.ok || !n.digits10) return null;
+  const p = n.digits10;
+  await ensureStaffPortalAccount(p, name);
+  const code = await uniqueLoginCode();
+  const updatedAt = new Date().toISOString();
+  if (demoMode()) {
+    const b = demoBuyers().find((x) => x.phone === p);
+    if (b) { b.login_code = code; b.updated_at = updatedAt; }
+    return b ?? null;
+  }
+  const db = getSupabaseAdmin();
+  if (!db) {
+    const b = demoBuyers().find((x) => x.phone === p);
+    if (b) { b.login_code = code; b.updated_at = updatedAt; }
+    return b ?? null;
+  }
+  const { data } = await db.from("buyers").update({ login_code: code, updated_at: updatedAt }).eq("phone", p).select().maybeSingle();
+  return (data as Buyer) ?? (await getBuyerByPhone(p));
+}
+
+/**
+ * Ensure the staff member (by admin id) has a portal test login IF they have a
+ * phone set. Called after comp access is granted so the account is ready to use.
+ * No-op (returns null) when the staff member has no phone. Idempotent.
+ */
+export async function provisionStaffPortalAccount(adminId: string): Promise<Buyer | null> {
+  const admin = await getAdminAccountById(adminId);
+  if (!admin?.phone) return null;
+  return ensureStaffPortalAccount(admin.phone, admin.name);
+}
+
+/**
  * Ensure a master {@link Student} record exists for a paying/registered person.
  * Idempotent by phone — a person with many purchases stays ONE student row.
  * Course/webinar customers carry `plan = null` (no LMS subscription) and reuse
@@ -2195,12 +2330,21 @@ export async function updateCourseEnrollment(id: string, patch: Partial<CourseEn
 
 /** Course ids the phone has actively paid for (seat or full) — drives Class Hub access. */
 export async function paidCourseIdsForPhone(phone: string): Promise<string[]> {
-  const list = await getCourseEnrollmentsByPhone(phone);
+  const [list, staffCourseIds] = await Promise.all([
+    getCourseEnrollmentsByPhone(phone),
+    getActiveStaffCourseIdsByPhone(phone),
+  ]);
   // amount_paid > 0 covers paid seats/installments/full; status "fully_paid"
   // additionally unlocks complimentary (₹0) enrollments granted by an admin.
-  return list
-    .filter((e) => (e.amount_paid > 0 || e.status === "fully_paid") && e.status !== "cancelled")
-    .map((e) => e.course_id);
+  const ids = new Set(
+    list
+      .filter((e) => (e.amount_paid > 0 || e.status === "fully_paid") && e.status !== "cancelled")
+      .map((e) => e.course_id),
+  );
+  // Staff comp access: internal-only, never a purchase — unlocks the Class Hub the
+  // same way without any payment/enrollment row.
+  for (const id of staffCourseIds) ids.add(id);
+  return [...ids];
 }
 
 async function nextReceiptNo(): Promise<string> {

@@ -34,14 +34,16 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
       if (activeSupers.length <= 1) return NextResponse.json({ ok: false, error: "Cannot disable/demote the last Super Admin." }, { status: 400 });
     }
 
-    const updated = await updateAdminAccount(params.id, {
+    const result = await updateAdminAccount(params.id, {
       name: body.name,
       email: body.email,
+      phone: body.phone,
       role_id: body.role_id,
       status: body.status,
       permissions_override: body.permissions_override,
     });
-    return NextResponse.json({ ok: true, account: updated });
+    if (!result.ok) return NextResponse.json({ ok: false, error: result.error }, { status: 400 });
+    return NextResponse.json({ ok: true, account: result.account });
   } catch {
     return NextResponse.json({ ok: false, error: "Update failed." }, { status: 500 });
   }

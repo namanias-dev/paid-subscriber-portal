@@ -5,6 +5,8 @@ import {
   getWebinarRegistrationIdsByPhone,
   getWebinarPaymentStatusMap,
   getActiveStaffWebinarIds,
+  getActiveStaffGrantsByPhone,
+  getAllCourses,
   getWebinars,
   type WebinarPayClass,
 } from "./dataProvider";
@@ -76,7 +78,27 @@ export async function getPurchaseSnapshot(): Promise<PurchaseSnapshot | null> {
     if (p.item_type === "webinar") webinarSlugs.add(slug);
   }
 
-  return { phone, enrollmentBySlug, paidCourseSlugs, webinarSlugs, webinarIds, webinarPaymentStatus };
+  const webinarIdSet = new Set(webinarIds);
+
+  // STAFF comp access: if this portal phone belongs to a staff member, surface
+  // their comped courses/webinars exactly like a real enrolment/registration —
+  // without any payment, enrollment or registration row (so seats/revenue are
+  // untouched). Only loads the catalog when there's actually something to map.
+  const staff = await getActiveStaffGrantsByPhone(phone);
+  if (staff.courseIds.length || staff.webinarIds.length) {
+    const [allCourses, allWebinars] = await Promise.all([
+      staff.courseIds.length ? getAllCourses() : Promise.resolve([]),
+      staff.webinarIds.length ? getWebinars() : Promise.resolve([]),
+    ]);
+    const courseSet = new Set(staff.courseIds);
+    for (const c of allCourses) if (courseSet.has(c.id)) paidCourseSlugs.add(c.slug);
+    const webinarSet = new Set(staff.webinarIds);
+    for (const w of allWebinars) {
+      if (webinarSet.has(w.id)) { webinarSlugs.add(w.slug); webinarIdSet.add(w.id); }
+    }
+  }
+
+  return { phone, enrollmentBySlug, paidCourseSlugs, webinarSlugs, webinarIds: webinarIdSet, webinarPaymentStatus };
 }
 
 /**

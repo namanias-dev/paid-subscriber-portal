@@ -151,6 +151,8 @@ create table if not exists public.admin_users (
   role text default 'Super Admin',
   name text,
   email text,
+  -- Optional 10-digit mobile linking a staff member to a USER-PORTAL test login.
+  phone text,
   role_id text references public.roles(id),
   status text not null default 'active',
   must_change_password boolean not null default false,
@@ -494,10 +496,13 @@ create table if not exists public.buyers (
   phone text unique not null,
   name text,
   login_code text unique not null,
+  -- True for auto-provisioned STAFF test accounts (excluded from real-student analytics).
+  is_staff boolean not null default false,
   created_at timestamptz default now(),
   updated_at timestamptz default now()
 );
 create index if not exists buyers_phone_idx on public.buyers (phone);
+create unique index if not exists admin_users_phone_unique on public.admin_users (phone) where phone is not null;
 
 -- Durable lightweight rate-limiting for login / forgot-code.
 create table if not exists public.auth_attempts (

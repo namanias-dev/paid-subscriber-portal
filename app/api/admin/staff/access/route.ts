@@ -5,6 +5,7 @@ import {
   getAllStaffAccessGrants,
   setStaffAccess,
   revokeAllStaffAccess,
+  provisionStaffPortalAccount,
 } from "@/lib/dataProvider";
 import { getAdminSession } from "@/lib/session";
 import { requirePermission } from "@/lib/adminGuard";
@@ -58,7 +59,9 @@ export async function PUT(req: Request) {
     const courseIds = Array.isArray(body.courseIds) ? body.courseIds.map(String) : [];
     const webinarIds = Array.isArray(body.webinarIds) ? body.webinarIds.map(String) : [];
     await setStaffAccess(adminId, { courseIds, webinarIds }, session.username || session.admin_id);
-    return NextResponse.json({ ok: true });
+    // Ensure a portal test login exists for this staff member (if they have a phone).
+    const buyer = (courseIds.length || webinarIds.length) ? await provisionStaffPortalAccount(adminId).catch(() => null) : null;
+    return NextResponse.json({ ok: true, portal: buyer ? { phone: buyer.phone, loginCode: buyer.login_code } : null });
   } catch {
     return NextResponse.json({ ok: false, error: "Failed to update staff access." }, { status: 500 });
   }

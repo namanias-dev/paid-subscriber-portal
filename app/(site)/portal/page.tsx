@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getBuyerSession } from "@/lib/session";
-import { getBuyerByPhone, getBuyerPurchases, getCourseEnrollmentsByPhone } from "@/lib/dataProvider";
+import { getBuyerByPhone, getBuyerPurchases, getCourseEnrollmentsByPhone, getActiveStaffGrantsByPhone, getAllCourses, getWebinars } from "@/lib/dataProvider";
 import { resolveLearner } from "@/lib/entitlements";
 import { getNewCountsForLearner } from "@/lib/classHubServer";
 import { formatINR } from "@/lib/dates";
@@ -70,6 +70,21 @@ export default async function PortalDashboardPage() {
     resolveLearner(),
   ]);
   const newCounts = await getNewCountsForLearner(learner);
+
+  // Staff comp access (internal testing): if this phone is linked to a staff
+  // account, surface the comped courses/webinars as a dedicated section so they
+  // can open the real student view. No payments/enrolments exist for these.
+  const staffGrants = await getActiveStaffGrantsByPhone(session.phone);
+  const hasStaffAccess = staffGrants.courseIds.length > 0 || staffGrants.webinarIds.length > 0;
+  const [staffCourses, staffWebinars] = hasStaffAccess
+    ? await Promise.all([
+        staffGrants.courseIds.length ? getAllCourses() : Promise.resolve([]),
+        staffGrants.webinarIds.length ? getWebinars() : Promise.resolve([]),
+      ])
+    : [[], []];
+  const compCourses = staffCourses.filter((c) => staffGrants.courseIds.includes(c.id));
+  const compWebinars = staffWebinars.filter((w) => staffGrants.webinarIds.includes(w.id));
+
   // Confirmed course enrollments (seat or full paid) render as rich payment cards.
   const enrolledCourses = courseEnrollments.filter((e) => e.amount_paid > 0 && e.status !== "cancelled");
   const enrolledIds = new Set(enrolledCourses.map((e) => e.id));
@@ -101,6 +116,39 @@ export default async function PortalDashboardPage() {
           <span className="text-muted">Your login code:</span>
           <span className="font-mono font-bold tracking-[0.2em] text-primary">{buyer.login_code}</span>
         </div>
+      )}
+
+      {/* Staff comp access — internal test view (not a purchase) */}
+      {hasStaffAccess && (
+        <section className="mt-8">
+          <div className="flex items-center gap-2">
+            <h2 className="font-heading text-xl font-bold">Staff test access</h2>
+            <span className="pill pill-gold text-[11px]">Internal · not a purchase</span>
+          </div>
+          <p className="mt-1 text-sm text-ink2">Comped to you for QA/training. This is the real student view.</p>
+          <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {compCourses.map((c) => (
+              <div key={c.id} className="card flex h-full flex-col p-5">
+                <div className="flex items-center justify-between">
+                  <span className="text-2xl">🎓</span>
+                  <span className="pill pill-gold text-xs">Course · comp</span>
+                </div>
+                <h3 className="mt-3 text-base font-semibold leading-snug">{c.title}</h3>
+                <Link href={`/portal/class/${c.id}`} className="btn btn-primary mt-4 w-full text-sm">Go to Class Hub →</Link>
+              </div>
+            ))}
+            {compWebinars.map((w) => (
+              <div key={w.id} className="card flex h-full flex-col p-5">
+                <div className="flex items-center justify-between">
+                  <span className="text-2xl">🎥</span>
+                  <span className="pill pill-gold text-xs">Webinar · comp</span>
+                </div>
+                <h3 className="mt-3 text-base font-semibold leading-snug">{w.title}</h3>
+                <Link href={`/webinars/${w.slug}`} className="btn btn-primary mt-4 w-full text-sm">Open webinar →</Link>
+              </div>
+            ))}
+          </div>
+        </section>
       )}
 
       {/* My Courses & Payments (Book-Your-Seat + EMI) */}
@@ -154,7 +202,7 @@ export default async function PortalDashboardPage() {
         </section>
       )}
 
-      {groups.length === 0 && enrolledCourses.length === 0 ? (
+      {groups.length === 0 && enrolledCourses.length === 0 && !hasStaffAccess ? (
         <div className="mt-10 card p-8 text-center">
           <p className="text-lg font-semibold">No purchases found yet</p>
           <p className="mt-1 text-sm text-ink2">If you&apos;ve just paid, it can take a moment to appear. Refresh shortly.</p>

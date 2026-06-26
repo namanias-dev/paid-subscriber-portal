@@ -199,6 +199,8 @@ export interface Buyer {
   phone: string;
   name: string | null;
   login_code: string;
+  /** True for an auto-provisioned STAFF test account — excluded from "real student" analytics. */
+  is_staff?: boolean;
   created_at: string;
   updated_at?: string;
 }
@@ -875,6 +877,8 @@ export interface AdminAccount {
   username: string;
   name: string | null;
   email: string | null;
+  /** 10-digit mobile used as the staff member's USER-PORTAL test login (unique). */
+  phone: string | null;
   role_id: string | null;
   /** Legacy free-text role label (kept for backward compatibility / display). */
   role: string | null;

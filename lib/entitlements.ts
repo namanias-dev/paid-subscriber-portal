@@ -7,6 +7,7 @@ import {
   getCourseEnrollmentsByPhone,
   getAccessOverridesByPhone,
   getActiveStaffCourseIds,
+  getActiveStaffCourseIdsByPhone,
 } from "./dataProvider";
 import { studentBlockReason } from "./studentAccess";
 import type { Course, Quiz, CaPdf, ContentItem, CourseEnrollment, CourseAccessOverride } from "./types";
@@ -93,7 +94,12 @@ export async function resolveLearner(): Promise<Learner | null> {
   const buyer = await getBuyerSession();
   if (buyer?.phone) {
     const student = await findStudentByPhone(buyer.phone);
-    const courseIds = await learnerCourseIds(buyer.phone, student?.id);
+    const [paidCourseIds, staffCourseIds] = await Promise.all([
+      learnerCourseIds(buyer.phone, student?.id),
+      // A staff member logged into the normal portal sees comped courses too.
+      getActiveStaffCourseIdsByPhone(buyer.phone),
+    ]);
+    const courseIds = [...new Set([...paidCourseIds, ...staffCourseIds])];
     const blocked = student ? !!studentBlockReason(student) : false;
     return {
       studentId: student?.id ?? null,

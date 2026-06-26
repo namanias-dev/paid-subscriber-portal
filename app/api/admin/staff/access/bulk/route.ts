@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { bulkGrantStaffAccess } from "@/lib/dataProvider";
+import { bulkGrantStaffAccess, provisionStaffPortalAccount } from "@/lib/dataProvider";
 import { getAdminSession } from "@/lib/session";
 import { requirePermission } from "@/lib/adminGuard";
 
@@ -21,7 +21,13 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: "Select at least one course or webinar." }, { status: 400 });
     }
     const result = await bulkGrantStaffAccess(adminIds, { courseIds, webinarIds }, session.username || session.admin_id);
-    return NextResponse.json({ ok: true, ...result });
+    // Provision a portal test login for every staff member that has a phone set.
+    let provisioned = 0;
+    for (const id of adminIds) {
+      const b = await provisionStaffPortalAccount(id).catch(() => null);
+      if (b) provisioned += 1;
+    }
+    return NextResponse.json({ ok: true, ...result, provisioned });
   } catch {
     return NextResponse.json({ ok: false, error: "Failed to bulk-grant access." }, { status: 500 });
   }

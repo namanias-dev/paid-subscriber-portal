@@ -41,6 +41,7 @@ export async function POST(req: Request) {
       name,
       username,
       email: body.email || null,
+      phone: body.phone || null,
       role_id,
       password: typeof body.password === "string" && body.password ? body.password : undefined,
       must_change_password: body.must_change_password !== false,

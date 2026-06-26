@@ -148,7 +148,7 @@ export default function StaffRolesAdmin() {
               return (
               <tr key={a.id} className="border-b border-line last:border-0 hover:bg-surface2">
                 <td className="px-4 py-3 font-medium">{a.name || "—"}{a.email ? <span className="block text-xs text-muted">{a.email}</span> : null}</td>
-                <td className="px-4 py-3 font-mono text-xs">{a.username}</td>
+                <td className="px-4 py-3 font-mono text-xs">{a.username}{a.phone ? <span className="mt-0.5 block font-sans text-[10px] font-semibold text-primary" title="Has a student-portal test login">🔑 portal · {a.phone}</span> : null}</td>
                 <td className="px-4 py-3"><span className={`pill ${roleBadge(a.role_id || "")}`}>{roles.find((r) => r.id === a.role_id)?.name || a.role || "—"}</span></td>
                 <td className="px-4 py-3"><span className={`pill ${a.status === "active" ? "pill-green" : "pill-gray"}`}>{a.status}</span></td>
                 <td className="px-4 py-3">
@@ -456,6 +456,7 @@ function AddStaffModal({ roles, onClose, onCreated }: { roles: Role[]; onClose: 
   const [name, setName] = useState("");
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState("");
   const [roleId, setRoleId] = useState(roles[0]?.id || "");
   const [pwMode, setPwMode] = useState<"generate" | "manual">("generate");
   const [password, setPassword] = useState(genPassword());
@@ -471,11 +472,12 @@ function AddStaffModal({ roles, onClose, onCreated }: { roles: Role[]; onClose: 
     const finalUsername = (username.trim() || slugUsername(name)).toLowerCase();
     const finalPassword = pwMode === "manual" ? password : (password || genPassword());
     if (finalPassword.length < 8) { setErr("Password must be at least 8 characters."); return; }
+    if (phone.trim() && !/^[6-9]\d{9}$/.test(phone.replace(/\D/g, "").slice(-10))) { setErr("Enter a valid 10-digit mobile number for the portal test login (or leave it blank)."); return; }
     setBusy(true);
     const res = await fetch("/api/admin/staff", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: name.trim(), username: finalUsername, email: email.trim() || null, role_id: roleId, password: finalPassword, must_change_password: mustChange }),
+      body: JSON.stringify({ name: name.trim(), username: finalUsername, email: email.trim() || null, phone: phone.trim() || null, role_id: roleId, password: finalPassword, must_change_password: mustChange }),
     });
     const d = await res.json().catch(() => ({ ok: false }));
     setBusy(false);
@@ -490,6 +492,11 @@ function AddStaffModal({ roles, onClose, onCreated }: { roles: Role[]; onClose: 
           <label className="block text-sm"><span className="label">Full name</span><input className="input" value={name} onChange={(e) => { setName(e.target.value); if (!username) setUsername(slugUsername(e.target.value)); }} /></label>
           <label className="block text-sm"><span className="label">Email (optional)</span><input className="input" value={email} onChange={(e) => setEmail(e.target.value)} /></label>
         </div>
+        <label className="block text-sm">
+          <span className="label">Portal test login phone (optional)</span>
+          <input className="input" inputMode="numeric" placeholder="10-digit mobile" value={phone} onChange={(e) => setPhone(e.target.value)} />
+          <p className="mt-1 text-xs text-muted">Used so this staff member can log in to the <b>student portal</b> (phone + login code) and test comped courses/webinars. Not a purchase — excluded from analytics &amp; seats.</p>
+        </label>
         <label className="block text-sm">
           <span className="label">Username</span>
           <div className="flex gap-2">
@@ -530,15 +537,36 @@ function EditStaffModal({ account, roles, onClose, onChanged, onPassword, toast 
 }) {
   const [roleId, setRoleId] = useState(account.role_id || "");
   const [status, setStatus] = useState(account.status);
+  const [phone, setPhone] = useState(account.phone || "");
   const [busy, setBusy] = useState(false);
+  const [portal, setPortal] = useState<{ loginCode: string | null; provisioned: boolean } | null>(null);
+  const [portalBusy, setPortalBusy] = useState(false);
   const role = roles.find((r) => r.id === roleId);
 
+  const loadPortal = useCallback(async () => {
+    try {
+      const d = await fetch(`/api/admin/staff/${account.id}/portal`).then((r) => r.json());
+      if (d.ok) setPortal({ loginCode: d.loginCode ?? null, provisioned: !!d.provisioned });
+    } catch { /* ignore */ }
+  }, [account.id]);
+  useEffect(() => { loadPortal(); }, [loadPortal]);
+
   async function save() {
+    if (phone.trim() && !/^[6-9]\d{9}$/.test(phone.replace(/\D/g, "").slice(-10))) { toast("Enter a valid 10-digit mobile number (or leave it blank).", "error"); return; }
     setBusy(true);
-    const res = await fetch(`/api/admin/staff/${account.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ role_id: roleId, status }) });
+    const res = await fetch(`/api/admin/staff/${account.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ role_id: roleId, status, phone: phone.trim() || null }) });
     const d = await res.json().catch(() => ({ ok: false }));
     setBusy(false);
     if (d.ok) { toast("Staff updated", "success"); onChanged(); } else toast(d.error || "Update failed", "error");
+  }
+
+  async function portalAction(regenerate: boolean) {
+    setPortalBusy(true);
+    const res = await fetch(`/api/admin/staff/${account.id}/portal`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ regenerate }) });
+    const d = await res.json().catch(() => ({ ok: false }));
+    setPortalBusy(false);
+    if (d.ok) { setPortal({ loginCode: d.loginCode ?? null, provisioned: true }); toast(regenerate ? "New login code issued" : "Portal login ready", "success"); }
+    else toast(d.error || "Action failed", "error");
   }
   async function reset() {
     if (!confirm("Generate a new temporary password for this user?")) return;
@@ -573,6 +601,32 @@ function EditStaffModal({ account, roles, onClose, onChanged, onPassword, toast 
             <option value="disabled">Disabled</option>
           </select>
         </label>
+
+        {/* Portal test login — phone + login code handoff */}
+        <div className="rounded-xl border border-line bg-surface p-3">
+          <p className="mb-1 text-xs font-bold uppercase tracking-wide text-muted">Student-portal test login</p>
+          <p className="mb-2 text-xs text-ink2">Let this staff member log in to the <b>student portal</b> with their phone + login code to test comped courses/webinars. Not a purchase — never counts in analytics, revenue or seats.</p>
+          <label className="block text-sm">
+            <span className="label">Portal phone (10-digit)</span>
+            <input className="input" inputMode="numeric" placeholder="Leave blank to disable" value={phone} onChange={(e) => setPhone(e.target.value)} />
+          </label>
+          {account.phone ? (
+            <div className="mt-2">
+              {portal?.provisioned && portal.loginCode ? (
+                <CredRow label="Login code (share with staff)" value={portal.loginCode} toast={toast} />
+              ) : (
+                <p className="text-xs text-amber-700">No portal login yet. Click “Create / refresh login” after saving the phone.</p>
+              )}
+              <div className="mt-1 flex flex-wrap gap-2">
+                <button type="button" onClick={() => portalAction(false)} disabled={portalBusy} className="btn btn-secondary text-xs">{portal?.provisioned ? "Refresh status" : "Create login"}</button>
+                <button type="button" onClick={() => portalAction(true)} disabled={portalBusy} className="btn btn-secondary text-xs">Regenerate code</button>
+              </div>
+            </div>
+          ) : (
+            <p className="mt-2 text-xs text-muted">Save a phone number first to enable the portal test login.</p>
+          )}
+        </div>
+
         <div className="flex flex-wrap gap-2 pt-2">
           <button onClick={save} disabled={busy} className="btn btn-primary text-sm">Save changes</button>
           <button onClick={reset} className="btn btn-secondary text-sm">Reset password</button>
