@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { Smartphone, KeyRound, Lock } from "lucide-react";
 import { useToast } from "@/components/ui/Toast";
 
 type Mode = "login" | "forgot";
@@ -90,10 +91,10 @@ export default function PortalLoginForm() {
   }
 
   return (
-    <div className="card mx-auto max-w-md p-6">
+    <div className="lp-card mx-auto max-w-md p-7 sm:p-8">
       {mode === "login" ? (
         <>
-          <h1 className="text-xl font-bold">Access your purchases</h1>
+          <h1 className="text-xl font-bold text-[var(--navy)]">Access your purchases</h1>
           <p className="mt-1 text-sm text-ink2">Enter your mobile number and the login code from your payment receipt.</p>
 
           <form
@@ -101,36 +102,42 @@ export default function PortalLoginForm() {
               e.preventDefault();
               doLogin();
             }}
-            className="mt-5 space-y-3"
+            className="mt-6 space-y-4"
           >
             <div>
               <label className="label">Mobile Number</label>
-              <input
-                type="tel"
-                inputMode="numeric"
-                value={phone}
-                onChange={(e) => setPhone(e.target.value.replace(/\D/g, "").slice(0, 10))}
-                placeholder="10-digit mobile"
-                className="input"
-                autoComplete="tel"
-              />
+              <div className="lp-field">
+                <Smartphone size={18} className="lp-field-icon" aria-hidden />
+                <input
+                  type="tel"
+                  inputMode="numeric"
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value.replace(/\D/g, "").slice(0, 10))}
+                  placeholder="10-digit mobile"
+                  className="lp-input lp-input--icon"
+                  autoComplete="tel"
+                />
+              </div>
             </div>
             <div>
               <label className="label">Login Code</label>
-              <input
-                type="text"
-                value={code}
-                onChange={(e) => setCode(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 9))}
-                placeholder="e.g. K7P2QXR"
-                className="input font-mono tracking-[0.2em]"
-                autoComplete="off"
-              />
+              <div className="lp-field">
+                <KeyRound size={18} className="lp-field-icon" aria-hidden />
+                <input
+                  type="text"
+                  value={code}
+                  onChange={(e) => setCode(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 9))}
+                  placeholder="e.g. K7P2QXR"
+                  className="lp-input lp-input--icon font-mono tracking-[0.2em]"
+                  autoComplete="off"
+                />
+              </div>
             </div>
 
-            {error && <p className="rounded-xl bg-[#fdeaea] px-3 py-2 text-sm text-danger">{error}</p>}
+            {error && <p className="rounded-xl border border-danger/20 bg-[#fdeaea] px-3 py-2 text-sm text-danger">{error}</p>}
 
-            <button type="submit" disabled={loading} className="btn btn-primary w-full">
-              {loading ? "Logging in…" : "Log in →"}
+            <button type="submit" disabled={loading} className="lp-btn mt-1">
+              {loading ? "Logging in…" : (<><Lock size={16} aria-hidden /> Log in →</>)}
             </button>
           </form>
 
@@ -140,28 +147,31 @@ export default function PortalLoginForm() {
               setMode("forgot");
               setError(null);
             }}
-            className="mt-4 text-sm font-semibold text-primary hover:underline"
+            className="mt-5 text-sm font-semibold text-primary hover:underline"
           >
             Forgot your code?
           </button>
         </>
       ) : (
         <>
-          <h1 className="text-xl font-bold">Recover your login code</h1>
+          <h1 className="text-xl font-bold text-[var(--navy)]">Recover your login code</h1>
           <p className="mt-1 text-sm text-ink2">Verify it&apos;s you and we&apos;ll show your code instantly.</p>
 
-          <div className="mt-5 space-y-4">
+          <div className="mt-6 space-y-4">
             <div>
               <label className="label">Mobile Number</label>
-              <input
-                type="tel"
-                inputMode="numeric"
-                value={phone}
-                onChange={(e) => setPhone(e.target.value.replace(/\D/g, "").slice(0, 10))}
-                placeholder="10-digit mobile"
-                className="input"
-                autoComplete="tel"
-              />
+              <div className="lp-field">
+                <Smartphone size={18} className="lp-field-icon" aria-hidden />
+                <input
+                  type="tel"
+                  inputMode="numeric"
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value.replace(/\D/g, "").slice(0, 10))}
+                  placeholder="10-digit mobile"
+                  className="lp-input lp-input--icon"
+                  autoComplete="tel"
+                />
+              </div>
             </div>
 
             <div>
@@ -170,14 +180,14 @@ export default function PortalLoginForm() {
                 <button
                   type="button"
                   onClick={() => setFactor("ref")}
-                  className={`rounded-xl border px-3 py-2 text-sm font-medium ${factor === "ref" ? "border-primary bg-primary/5 text-primary" : "border-line text-ink2"}`}
+                  className={`lp-toggle ${factor === "ref" ? "lp-toggle--active" : ""}`}
                 >
                   Reference number
                 </button>
                 <button
                   type="button"
                   onClick={() => setFactor("date")}
-                  className={`rounded-xl border px-3 py-2 text-sm font-medium ${factor === "date" ? "border-primary bg-primary/5 text-primary" : "border-line text-ink2"}`}
+                  className={`lp-toggle ${factor === "date" ? "lp-toggle--active" : ""}`}
                 >
                   Payment date
                 </button>
@@ -186,7 +196,7 @@ export default function PortalLoginForm() {
 
             {factor === "ref" ? (
               <div>
-                <div className="rounded-xl border border-line bg-surface p-3 text-center">
+                <div className="lp-panel p-3 text-center">
                   <p className="text-xs text-muted">Your reference looks like this:</p>
                   <p className="mt-1 font-mono text-sm">
                     NAMAN-WEBINAR-MQPAJBGU-
@@ -202,30 +212,30 @@ export default function PortalLoginForm() {
                   value={refLast4}
                   onChange={(e) => setRefLast4(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 4))}
                   placeholder="1MKE"
-                  className="input text-center font-mono text-lg tracking-[0.3em]"
+                  className="lp-input text-center font-mono text-lg tracking-[0.3em]"
                   autoComplete="off"
                 />
               </div>
             ) : (
               <div>
                 <label className="label">Date of payment</label>
-                <input type="date" value={payDate} onChange={(e) => setPayDate(e.target.value)} className="input" />
+                <input type="date" value={payDate} onChange={(e) => setPayDate(e.target.value)} className="lp-input" />
                 <p className="mt-1 text-xs text-muted">Enter the date you made the payment.</p>
               </div>
             )}
 
-            {error && <p className="rounded-xl bg-[#fdeaea] px-3 py-2 text-sm text-danger">{error}</p>}
+            {error && <p className="rounded-xl border border-danger/20 bg-[#fdeaea] px-3 py-2 text-sm text-danger">{error}</p>}
 
             {revealed ? (
-              <div className="rounded-xl border border-success/30 bg-success/5 p-4 text-center">
+              <div className="lp-panel-success p-4 text-center">
                 <p className="text-xs text-muted">Your login code</p>
                 <p className="mt-1 font-mono text-2xl font-extrabold tracking-[0.3em] text-success">{revealed}</p>
-                <button onClick={() => doLogin(phone, revealed)} disabled={loading} className="btn btn-primary mt-3 w-full">
+                <button onClick={() => doLogin(phone, revealed)} disabled={loading} className="lp-btn mt-3">
                   {loading ? "Logging in…" : "Log in now →"}
                 </button>
               </div>
             ) : (
-              <button onClick={doForgot} disabled={loading} className="btn btn-primary w-full">
+              <button onClick={doForgot} disabled={loading} className="lp-btn">
                 {loading ? "Verifying…" : "Reveal my code"}
               </button>
             )}

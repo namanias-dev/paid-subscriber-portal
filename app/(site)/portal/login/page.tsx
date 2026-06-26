@@ -9,19 +9,23 @@ export const metadata = {
 export default function PortalLoginPage({ searchParams }: { searchParams?: { expired?: string } }) {
   const expired = searchParams?.expired === "1";
   return (
-    <div className="container-wide section">
-      <div className="mx-auto max-w-md text-center">
-        <p className="pill pill-blue mb-3">Your Portal</p>
-        <h1 className="text-3xl font-extrabold sm:text-4xl">Access what you purchased</h1>
-        <p className="mt-2 text-ink2">Log in with your mobile number and the login code from your payment receipt.</p>
-      </div>
-      {expired && (
-        <div className="mx-auto mt-6 max-w-md rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-center text-sm text-amber-800">
-          Your session expired. Please log in again to continue.
+    <div className="lp-shell section">
+      <div className="lp-glow lp-glow-1" aria-hidden />
+      <div className="lp-glow lp-glow-2" aria-hidden />
+      <div className="container-wide">
+        <div className="mx-auto max-w-md text-center">
+          <p className="pill pill-blue mb-3">Your Portal</p>
+          <h1 className="text-3xl font-extrabold tracking-tight text-[var(--navy)] sm:text-4xl">Access what you purchased</h1>
+          <p className="mt-2 text-ink2">Log in with your mobile number and the login code from your payment receipt.</p>
         </div>
-      )}
-      <div className="mt-8">
-        <PortalLoginForm />
+        {expired && (
+          <div className="mx-auto mt-6 max-w-md rounded-2xl border border-amber-200 bg-amber-50/80 px-4 py-3 text-center text-sm text-amber-800 backdrop-blur">
+            Your session expired. Please log in again to continue.
+          </div>
+        )}
+        <div className="mt-8">
+          <PortalLoginForm />
+        </div>
       </div>
     </div>
   );
