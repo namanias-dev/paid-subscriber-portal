@@ -266,6 +266,187 @@ export function verifyFromStoredCallback(row: {
   return "failed";
 }
 
+// ============================ ICICI EAZYPAY VERIFY URL (status API) ============================
+/**
+ * ICICI Eazypay "Verify URL" — the real, authoritative transaction-status API.
+ *
+ * Queried by Merchant ID + our own Reference No (Option 3 in the Eazypay v4.3
+ * integration doc). Needs NO new credentials, NO AES encryption and NO request
+ * signature — it is a plain GET that returns a plaintext `key=value&…` packet.
+ *
+ *   GET https://eazypay.icicibank.com/EazyPGVerify?merchantid=<MID>&pgreferenceno=<ref>
+ *
+ * Status values (8.1.5):
+ *   RIP (Reconciliation in Progress), SIP (Settlement in Progress), Success
+ *       -> money received from the payer's bank -> PAID
+ *   FAILED / TIMEOUT / Transaction Expired / Cheque-DD Returned
+ *       -> ICICI-reported non-success -> FAILED
+ *   Transaction Initiated / Challan Generated / Cheque-DD In Clearance
+ *       -> payer never completed -> ABANDONED (hot lead)
+ *   (empty / unreachable / parse error) -> "unknown" (do NOT change the row)
+ *
+ * IMPORTANT — ICICI firewalls this endpoint by source IP. It only answers from a
+ * server IP whitelisted with ICICI for the merchant. On Vercel (dynamic egress)
+ * route the call through a fixed-IP proxy whose IP ICICI has whitelisted, via
+ * EAZYPAY_VERIFY_PROXY_URL (QuotaGuard/Fixie HTTP proxy, or a relay — see env).
+ */
+export const EAZYPAY_VERIFY_URL = "https://eazypay.icicibank.com/EazyPGVerify";
+
+export type VerifyOutcome = "paid" | "failed" | "abandoned" | "unknown";
+
+export interface EazypayVerifyResult {
+  /** Did we get a parseable response from ICICI at all? */
+  reachable: boolean;
+  /** Mapped lifecycle outcome. */
+  outcome: VerifyOutcome;
+  /** Raw `status=` token from ICICI, for audit/debugging. */
+  rawStatus: string | null;
+  /** ICICI's eazypay transaction id, when present. */
+  gatewayRef: string | null;
+  /** Amount echoed back by ICICI, when present. */
+  amount: number | null;
+  /** Populated when reachable=false. */
+  error?: string;
+}
+
+/** Map an ICICI Verify-URL `status` token to our lifecycle outcome. */
+export function mapVerifyStatus(rawStatus: string | null | undefined): VerifyOutcome {
+  const s = (rawStatus || "").trim().toUpperCase();
+  if (!s) return "unknown";
+  // Money received from the bank (reconciling / settling / settled).
+  if (s === "RIP" || s === "SIP" || s === "SUCCESS" || s === "PAID") return "paid";
+  // ICICI explicitly reported a non-success terminal outcome.
+  if (
+    s === "FAILED" ||
+    s === "TIMEOUT" ||
+    s.includes("EXPIRED") ||
+    s.includes("RETURNED") ||
+    s.includes("CANCEL") ||
+    s.includes("REJECT")
+  )
+    return "failed";
+  // Payer started but never completed (or non-card challan awaiting payment).
+  if (
+    s.includes("INITIATED") ||
+    s.includes("CHALLAN") ||
+    s.includes("CLEARANCE") ||
+    s.includes("PENDING")
+  )
+    return "abandoned";
+  return "unknown";
+}
+
+/** Parse the plaintext `key=value&key=value` packet ICICI returns. */
+function parseVerifyPacket(body: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const part of (body || "").split("&")) {
+    const eq = part.indexOf("=");
+    if (eq === -1) continue;
+    const k = part.slice(0, eq).trim();
+    const v = part.slice(eq + 1).trim();
+    if (k) out[k] = v;
+  }
+  return out;
+}
+
+/**
+ * Build the proxied/direct fetch for the Verify URL.
+ *
+ * EAZYPAY_VERIFY_PROXY_URL (optional) routes the call through a fixed, ICICI-
+ * whitelisted IP. Two supported shapes:
+ *   - HTTP forward proxy (QuotaGuard/Fixie):  http://user:pass@host:port
+ *       (default) — used as an undici ProxyAgent dispatcher.
+ *   - Relay endpoint (EAZYPAY_VERIFY_PROXY_MODE=relay): your tiny static-IP
+ *       service that fetches the target. We call:  <proxyUrl>?target=<encoded>
+ *       (or substitute a `{target}` placeholder if present).
+ */
+async function fetchVerify(targetUrl: string, timeoutMs: number): Promise<Response> {
+  const proxy = (process.env.EAZYPAY_VERIFY_PROXY_URL || "").trim();
+  const mode = (process.env.EAZYPAY_VERIFY_PROXY_MODE || "").trim().toLowerCase();
+  const controller = new AbortController();
+  const t = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    if (proxy && mode === "relay") {
+      const relay = proxy.includes("{target}")
+        ? proxy.replace("{target}", encodeURIComponent(targetUrl))
+        : `${proxy}${proxy.includes("?") ? "&" : "?"}target=${encodeURIComponent(targetUrl)}`;
+      return await fetch(relay, { signal: controller.signal, cache: "no-store" });
+    }
+    if (proxy) {
+      // HTTP forward proxy (QuotaGuard/Fixie). undici ships with Node/Next at
+      // runtime. Resolve via a runtime require so neither webpack nor tsc tries
+      // to bundle/type-resolve it at build time.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const nodeRequire = eval("require") as (m: string) => any;
+      const { ProxyAgent } = nodeRequire("undici") as { ProxyAgent: new (uri: string) => unknown };
+      const dispatcher = new ProxyAgent(proxy);
+      return await fetch(targetUrl, {
+        signal: controller.signal,
+        cache: "no-store",
+        // @ts-expect-error undici dispatcher is accepted by the runtime fetch
+        dispatcher,
+      });
+    }
+    return await fetch(targetUrl, { signal: controller.signal, cache: "no-store" });
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+/**
+ * Query ICICI's Verify URL for the live status of a payment by our reference no.
+ * Never throws — on any network/parse failure returns reachable:false so callers
+ * keep the row in its current (non-terminal) state. Read-only; no DB writes here.
+ */
+export async function eazypayVerify(
+  referenceNo: string,
+  opts?: { timeoutMs?: number }
+): Promise<EazypayVerifyResult> {
+  const unreachable = (error: string): EazypayVerifyResult => ({
+    reachable: false,
+    outcome: "unknown",
+    rawStatus: null,
+    gatewayRef: null,
+    amount: null,
+    error,
+  });
+  const ref = (referenceNo || "").trim();
+  if (!ref) return unreachable("missing reference");
+
+  const qs = new URLSearchParams({
+    ezpaytranid: "",
+    amount: "",
+    paymentmode: "",
+    merchantid: getMerchantId(),
+    trandate: "",
+    pgreferenceno: ref,
+  });
+  const target = `${EAZYPAY_VERIFY_URL}?${qs.toString()}`;
+
+  try {
+    const res = await fetchVerify(target, opts?.timeoutMs ?? 12_000);
+    if (!res.ok) return unreachable(`HTTP ${res.status}`);
+    const body = await res.text();
+    const packet = parseVerifyPacket(body);
+    const rawStatus = packet["status"] ?? packet["Status"] ?? null;
+    // ICICI returns a body but with no status token for an unknown reference.
+    if (rawStatus === null && Object.keys(packet).length === 0) {
+      return { reachable: true, outcome: "unknown", rawStatus: null, gatewayRef: null, amount: null };
+    }
+    const amtRaw = packet["amount"] ?? packet["Amount"] ?? "";
+    const amt = amtRaw !== "" && !Number.isNaN(Number(amtRaw)) ? Number(amtRaw) : null;
+    return {
+      reachable: true,
+      outcome: mapVerifyStatus(rawStatus),
+      rawStatus,
+      gatewayRef: packet["ezpaytranid"] || null,
+      amount: amt,
+    };
+  } catch (e) {
+    return unreachable((e as Error).message || "verify request failed");
+  }
+}
+
 /** Human-readable item label derived from the reference prefix (NAMAN-<TYPE>-…). */
 export function itemTypeFromReference(referenceNo: string): "course" | "plan" | "webinar" | "item" {
   const seg = referenceNo.split("-")[1]?.toUpperCase() || "";

@@ -18,6 +18,34 @@ const TYPE_DEFS: { key: TypeKey; label: string; match: (p: Payment) => boolean }
 ];
 const TYPE_LABEL: Record<TypeKey, string> = Object.fromEntries(TYPE_DEFS.map((t) => [t.key, t.label])) as Record<TypeKey, string>;
 
+// ---- Payment lifecycle status (labels + colors) ----
+const isNonPaid = (s: Payment["status"]) => !isPaid(s) && s !== "refunded";
+
+function statusPillClass(s: Payment["status"]): string {
+  if (isPaid(s)) return "pill-green";
+  if (s === "VERIFYING") return "pill-blue";
+  if (s === "ABANDONED") return "pill-saffron";
+  if (s === "FAILED") return "pill-red";
+  if (s === "refunded") return "pill-gray";
+  return "pill-amber"; // PENDING / pending
+}
+function statusLabel(s: Payment["status"]): string {
+  if (s === "captured") return "PAID";
+  if (s === "pending") return "PENDING";
+  return s;
+}
+
+type StatusKey = "paid" | "pending" | "verifying" | "abandoned" | "failed" | "needs";
+const STATUS_DEFS: { key: StatusKey; label: string; match: (p: Payment) => boolean }[] = [
+  { key: "paid", label: "Paid", match: (p) => isPaid(p.status) },
+  { key: "pending", label: "Pending", match: (p) => p.status === "PENDING" || p.status === "pending" },
+  { key: "verifying", label: "Verifying", match: (p) => p.status === "VERIFYING" },
+  { key: "abandoned", label: "Abandoned", match: (p) => p.status === "ABANDONED" },
+  { key: "failed", label: "Failed", match: (p) => p.status === "FAILED" },
+  { key: "needs", label: "Needs verification", match: (p) => isNonPaid(p.status) },
+];
+const STATUS_LABEL: Record<StatusKey, string> = Object.fromEntries(STATUS_DEFS.map((s) => [s.key, s.label])) as Record<StatusKey, string>;
+
 type DateMode = "all" | "today" | "yesterday" | "month" | "year" | "date" | "range";
 
 function lastDayOfMonth(year: number, month1: number): string {
@@ -33,6 +61,9 @@ export default function PaymentsAdmin() {
 
   // ---- Filters (read-only display state) ----
   const [types, setTypes] = useState<Set<TypeKey>>(new Set());
+  const [statuses, setStatuses] = useState<Set<StatusKey>>(new Set());
+  const [reverifying, setReverifying] = useState(false);
+  const [reverifyMsg, setReverifyMsg] = useState<string | null>(null);
   const [dateMode, setDateMode] = useState<DateMode>("all");
   const [dateVal, setDateVal] = useState("");      // YYYY-MM-DD
   const [monthVal, setMonthVal] = useState("");    // YYYY-MM
@@ -77,15 +108,25 @@ export default function PaymentsAdmin() {
 
   const filtered = useMemo(() => {
     const activeTypes = [...types];
+    const activeStatuses = [...statuses];
     return payments.filter((p) => {
       if (activeTypes.length && !activeTypes.some((k) => TYPE_DEFS.find((t) => t.key === k)!.match(p))) return false;
+      if (activeStatuses.length && !activeStatuses.some((k) => STATUS_DEFS.find((s) => s.key === k)!.match(p))) return false;
       if (range) {
         const ymd = istYMD(p.created_at);
         if (!ymd || ymd < range.from || ymd > range.to) return false;
       }
       return true;
     });
-  }, [payments, types, range]);
+  }, [payments, types, statuses, range]);
+
+  // Non-paid rows in the current filtered view (targets for "Re-verify filtered").
+  const filteredNonPaidRefs = useMemo(
+    () => filtered.filter((p) => isNonPaid(p.status) && p.reference_no).map((p) => p.reference_no as string),
+    [filtered],
+  );
+  const abandoned = useMemo(() => filtered.filter((p) => p.status === "ABANDONED"), [filtered]);
+  const abandonedAllCount = useMemo(() => payments.filter((p) => p.status === "ABANDONED").length, [payments]);
 
   // ---- Today's metrics (always TODAY in IST, independent of filters) ----
   const today = useMemo(() => {
@@ -115,9 +156,6 @@ export default function PaymentsAdmin() {
     new Set(payments.map((p) => istYMD(p.created_at)?.slice(0, 4)).filter(Boolean) as string[])
   ).sort((a, b) => b.localeCompare(a));
 
-  const statusPill = (s: Payment["status"]) =>
-    isPaid(s) ? "pill-green" : s === "pending" || s === "PENDING" ? "pill-amber" : "pill-red";
-
   function toggleType(k: TypeKey) {
     setTypes((prev) => {
       const next = new Set(prev);
@@ -126,10 +164,73 @@ export default function PaymentsAdmin() {
       return next;
     });
   }
+  function toggleStatus(k: StatusKey) {
+    setStatuses((prev) => {
+      const next = new Set(prev);
+      if (next.has(k)) next.delete(k);
+      else next.add(k);
+      return next;
+    });
+  }
 
-  const hasFilters = types.size > 0 || dateMode !== "all";
+  // ---- Re-verify against ICICI (reuses the shared verifier; never downgrades PAID) ----
+  async function callReverify(body: Record<string, unknown>): Promise<boolean> {
+    setReverifying(true);
+    setReverifyMsg("Re-verifying with ICICI…");
+    try {
+      const res = await fetch("/api/admin/payments/reverify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const json = await res.json();
+      if (!json.ok) {
+        toast(json.error || "Re-verification failed.", "error");
+        setReverifyMsg(null);
+        return false;
+      }
+      const r = json.result as { scanned: number; toPaid: number; toFailed: number; toAbandoned: number; toVerifying: number; unreachable: number };
+      const parts = [
+        `${r.toPaid} → PAID`,
+        r.toFailed ? `${r.toFailed} → failed` : null,
+        r.toAbandoned ? `${r.toAbandoned} → abandoned` : null,
+        r.toVerifying ? `${r.toVerifying} → verifying` : null,
+      ].filter(Boolean);
+      toast(`Re-verified ${r.scanned}: ${parts.join(", ") || "no changes"}${r.unreachable ? ` · ${r.unreachable} unreachable` : ""}`, "success");
+      setReverifyMsg(null);
+      full.reload();
+      return true;
+    } catch {
+      toast("Re-verification failed.", "error");
+      setReverifyMsg(null);
+      return false;
+    } finally {
+      setReverifying(false);
+    }
+  }
+  const NONPAID_STATUSES = ["PENDING", "pending", "VERIFYING", "ABANDONED", "FAILED"];
+  function reverifyAll() {
+    callReverify({ statuses: NONPAID_STATUSES });
+  }
+  function reverifyFiltered() {
+    if (!filteredNonPaidRefs.length) {
+      toast("No non-paid payments in the current view.", "info");
+      return;
+    }
+    callReverify({ referenceNos: filteredNonPaidRefs });
+  }
+  function reverifyOne(ref: string | null | undefined) {
+    if (!ref) {
+      toast("This row has no ICICI reference to verify.", "info");
+      return;
+    }
+    callReverify({ referenceNos: [ref] });
+  }
+
+  const hasFilters = types.size > 0 || statuses.size > 0 || dateMode !== "all";
   function clearAll() {
     setTypes(new Set());
+    setStatuses(new Set());
     setDateMode("all");
     setDateVal(""); setMonthVal(""); setYearVal(""); setRangeFrom(""); setRangeTo("");
   }
@@ -167,7 +268,23 @@ export default function PaymentsAdmin() {
 
   return (
     <div>
-      <PageHeader title="Payments & Finance" subtitle="Razorpay & ICICI transactions, revenue & collections" action={<button onClick={exportCsv} className="btn btn-secondary text-sm">⬇ Export{hasFilters ? " (filtered)" : ""}</button>} />
+      <PageHeader
+        title="Payments & Finance"
+        subtitle="Razorpay & ICICI transactions, revenue & collections"
+        action={
+          <div className="flex flex-wrap items-center gap-2">
+            <button onClick={reverifyAll} disabled={reverifying} className="btn btn-primary text-sm disabled:opacity-60" title="Re-check every non-paid payment against ICICI's status API">
+              {reverifying ? "Re-verifying…" : "↻ Re-verify payments"}
+            </button>
+            {hasFilters && (
+              <button onClick={reverifyFiltered} disabled={reverifying} className="btn btn-secondary text-sm disabled:opacity-60" title="Re-verify only the non-paid rows in the current filtered view">
+                Re-verify filtered ({filteredNonPaidRefs.length})
+              </button>
+            )}
+            <button onClick={exportCsv} className="btn btn-secondary text-sm">⬇ Export{hasFilters ? " (filtered)" : ""}</button>
+          </div>
+        }
+      />
 
       {/* Premium "today" summary cards (always IST today) */}
       <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -195,6 +312,32 @@ export default function PaymentsAdmin() {
 
       {/* Filter bar */}
       <div className="card mb-4 p-4">
+        {/* Status chips */}
+        <div className="mb-4 border-b border-line pb-4">
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Status</p>
+          <div className="flex flex-wrap gap-2">
+            {STATUS_DEFS.map((s) => {
+              const active = statuses.has(s.key);
+              const dot =
+                s.key === "paid" ? "bg-success" :
+                s.key === "pending" ? "bg-amber-500" :
+                s.key === "verifying" ? "bg-blue-500" :
+                s.key === "abandoned" ? "bg-orange-500" :
+                s.key === "failed" ? "bg-danger" : "bg-ink2";
+              return (
+                <button
+                  key={s.key}
+                  onClick={() => toggleStatus(s.key)}
+                  className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold transition ${active ? "border-primary bg-primary/10 text-primary" : "border-line text-ink2 hover:border-primary/50"}`}
+                >
+                  <span className={`h-1.5 w-1.5 rounded-full ${dot}`} />
+                  {s.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           {/* Type chips */}
           <div>
@@ -268,6 +411,11 @@ export default function PaymentsAdmin() {
         {hasFilters && (
           <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-line pt-3">
             <span className="text-xs text-muted">Active:</span>
+            {[...statuses].map((k) => (
+              <button key={k} onClick={() => toggleStatus(k)} className="inline-flex items-center gap-1 rounded-full bg-surface2 px-2.5 py-1 text-xs font-medium hover:bg-surface">
+                {STATUS_LABEL[k]} <span aria-hidden>×</span>
+              </button>
+            ))}
             {[...types].map((k) => (
               <button key={k} onClick={() => toggleType(k)} className="inline-flex items-center gap-1 rounded-full bg-surface2 px-2.5 py-1 text-xs font-medium hover:bg-surface">
                 {TYPE_LABEL[k]} <span aria-hidden>×</span>
@@ -283,8 +431,55 @@ export default function PaymentsAdmin() {
         )}
       </div>
 
+      {/* ABANDONED = hot leads. A callout to triage + call them. */}
+      {abandonedAllCount > 0 && !statuses.has("abandoned") && (
+        <button
+          onClick={() => setStatuses(new Set(["abandoned"]))}
+          className="mb-4 flex w-full items-center gap-3 rounded-xl border border-orange-200 bg-orange-50 p-3 text-left transition hover:bg-orange-100"
+        >
+          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-orange-500/15 text-lg">🔥</span>
+          <span className="min-w-0">
+            <span className="block text-sm font-semibold text-orange-900">
+              {abandonedAllCount} abandoned {abandonedAllCount === 1 ? "checkout" : "checkouts"} — hot leads to call
+            </span>
+            <span className="block text-xs text-orange-700">Clicked Pay but never completed. Tap to view their contact details.</span>
+          </span>
+          <span className="ml-auto shrink-0 text-xs font-semibold text-orange-800">View →</span>
+        </button>
+      )}
+
+      {/* Dedicated hot-leads contact list when the Abandoned filter is active. */}
+      {statuses.has("abandoned") && abandoned.length > 0 && (
+        <div className="mb-4 rounded-xl border border-orange-200 bg-orange-50/50 p-4">
+          <p className="mb-3 text-sm font-semibold text-orange-900">🔥 Hot leads — abandoned checkouts ({abandoned.length})</p>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            {abandoned.map((p) => {
+              const wa = (p.phone || "").replace(/\D/g, "");
+              return (
+                <div key={p.id} className="rounded-lg border border-orange-200 bg-white p-3 text-sm">
+                  <p className="font-semibold text-ink">{p.student_name || "—"}</p>
+                  <p className="text-xs text-muted">{p.item}</p>
+                  <p className="mt-1 font-mono text-xs">{p.phone || "—"}</p>
+                  <p className="mt-0.5 text-[11px] text-muted">{p.created_at ? formatISTDateTime(p.created_at) : "—"}</p>
+                  <div className="mt-2 flex gap-2">
+                    {p.phone && <a href={`tel:${p.phone}`} className="btn btn-secondary px-2 py-1 text-xs">Call</a>}
+                    {wa && (
+                      <a href={`https://wa.me/91${wa.slice(-10)}`} target="_blank" rel="noopener noreferrer" className="btn btn-secondary px-2 py-1 text-xs">
+                        WhatsApp
+                      </a>
+                    )}
+                    <button onClick={() => reverifyOne(p.reference_no)} disabled={reverifying} className="btn btn-secondary px-2 py-1 text-xs disabled:opacity-60">↻ Verify</button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       <div className="mb-2 flex items-center justify-between px-1">
         <p className="text-xs text-muted">Showing {filtered.length} of {payments.length} transactions</p>
+        {reverifyMsg && <p className="text-xs font-medium text-primary">{reverifyMsg}</p>}
       </div>
 
       <TableShell headers={["Student", "Phone", "Item", "Amount", "Reference / Gateway", "Login Code", "Status", "Date", "Date & Time (IST)"]}>
@@ -312,7 +507,21 @@ export default function PaymentsAdmin() {
                   <span className="text-muted">—</span>
                 )}
               </td>
-              <td className="px-4 py-3"><span className={`pill ${statusPill(p.status)}`}>{p.status}</span></td>
+              <td className="px-4 py-3">
+                <div className="flex items-center gap-2">
+                  <span className={`pill ${statusPillClass(p.status)}`}>{statusLabel(p.status)}</span>
+                  {isNonPaid(p.status) && p.reference_no && (
+                    <button
+                      onClick={() => reverifyOne(p.reference_no)}
+                      disabled={reverifying}
+                      title="Re-verify this payment with ICICI"
+                      className="rounded-md border border-line px-1.5 py-0.5 text-xs text-ink2 transition hover:border-primary/50 hover:text-primary disabled:opacity-50"
+                    >
+                      ↻
+                    </button>
+                  )}
+                </div>
+              </td>
               <td className="px-4 py-3">{formatDate(p.created_at)}</td>
               <td className="px-4 py-3 whitespace-nowrap text-xs">{p.created_at ? formatISTDateTime(p.created_at) : "—"}</td>
             </tr>

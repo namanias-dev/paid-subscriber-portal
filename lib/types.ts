@@ -754,7 +754,24 @@ export interface WebinarRegistration {
 }
 
 // ----------------------------- Finance -----------------------------
-export type PaymentStatus = "captured" | "pending" | "refunded" | "PENDING" | "PAID" | "FAILED";
+/**
+ * Payment lifecycle.
+ *   PENDING   — initiated, within the active window. No access.
+ *   VERIFYING — window passed; we are re-checking with ICICI. No access yet.
+ *   ABANDONED — ICICI shows no successful payment (clicked Pay, never completed). Hot lead.
+ *   FAILED    — ICICI explicitly returned failure/cancellation. No access.
+ *   PAID      — ICICI success (callback OR Verify URL). Access granted.
+ * `captured`/`pending`/`refunded` are legacy/Razorpay statuses, kept for back-compat.
+ */
+export type PaymentStatus =
+  | "captured"
+  | "pending"
+  | "refunded"
+  | "PENDING"
+  | "VERIFYING"
+  | "ABANDONED"
+  | "PAID"
+  | "FAILED";
 
 export interface Payment {
   id: string;
@@ -780,6 +797,13 @@ export interface Payment {
   response_code?: string | null;
   transaction_date?: string | null;
   verified_signature?: boolean | null;
+  // --- Background ICICI re-verification (backoff scheduling + audit) ---
+  /** How many times we've queried ICICI's Verify URL for this row. */
+  verify_attempts?: number | null;
+  /** Last time we queried ICICI's Verify URL (UTC ISO). */
+  last_verify_at?: string | null;
+  /** Last raw `status=` token ICICI returned, for audit. */
+  verify_status?: string | null;
   // --- Phase 2: Book-Your-Seat + EMI ledger links (nullable; one-time payments leave these null) ---
   enrollment_id?: string | null;
   payment_kind?: "one_time" | "seat" | "installment" | "full" | null;

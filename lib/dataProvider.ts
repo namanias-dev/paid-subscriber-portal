@@ -3,7 +3,7 @@ import * as mock from "./mockData";
 import { computeExpiry, isExpired, isExpiringSoon, yesterdayISODate, todayISODate, formatINR, formatISTDate } from "./dates";
 import { generateAccessCode } from "./codeGenerator";
 import { generateLoginCode } from "./buyerCode";
-import { verifyFromStoredCallback } from "./eazypay";
+import { verifyFromStoredCallback, eazypayVerify, type VerifyOutcome } from "./eazypay";
 import type {
   Buyer,
   Student,
@@ -1495,88 +1495,261 @@ export async function getPayments(): Promise<Payment[]> {
   return rows.length ? rows : [...demoPayments()];
 }
 
-export interface ReconcileResult {
-  /** Stale pending rows that matched the window + type filter. */
-  selected: number;
-  /** Rows upgraded to PAID because stored gateway evidence confirmed success. */
+// ============================ PAYMENT VERIFICATION ENGINE (ICICI-truth) ============================
+//
+// CORE PRINCIPLE: a TIMER NEVER marks a payment FAILED. Only ICICI does — via the
+// signed return-URL callback (stored evidence) OR the Verify URL (live status).
+// A timer may only move PENDING -> VERIFYING (a label, not a terminal state).
+// ICICI success ALWAYS upgrades any non-paid row -> PAID, even days later.
+
+/** Statuses that already grant access — never re-verified, never downgraded. */
+const PAID_STATUSES = ["PAID", "captured"];
+/** Non-paid statuses eligible for (re)verification against ICICI. */
+const NONPAID_STATUSES = ["PENDING", "pending", "VERIFYING", "ABANDONED", "FAILED"];
+
+/** Window (minutes) a fresh PENDING waits before we start VERIFYING with ICICI. */
+function pendingWindowMinutes(): number {
+  return Number(
+    process.env.WEBINAR_PENDING_WINDOW_MINUTES ||
+      process.env.WEBINAR_PENDING_TIMEOUT_MINUTES ||
+      12,
+  );
+}
+
+/** Backoff schedule (minutes after created_at) for verify attempt #index. */
+const VERIFY_SCHEDULE_MIN = [2, 5, 10, 30, 60, 360];
+/** ICICI may flip to success up to T+3 days; after that the status is final. */
+const VERIFY_MAX_AGE_MS = 3 * 24 * 60 * 60 * 1000;
+
+/** Is a row due for another ICICI verify, per the backoff schedule? */
+function isVerifyDue(row: Pick<Payment, "created_at" | "verify_attempts" | "last_verify_at">): boolean {
+  const created = new Date(row.created_at).getTime();
+  if (!Number.isFinite(created)) return true;
+  const now = Date.now();
+  const age = now - created;
+  if (age > VERIFY_MAX_AGE_MS) return false; // ICICI won't change after T+3
+  const attempts = row.verify_attempts ?? 0;
+  if (attempts < VERIFY_SCHEDULE_MIN.length) {
+    return now >= created + VERIFY_SCHEDULE_MIN[attempts] * 60_000;
+  }
+  // Steady state: at most once every 6h until the T+3 cutoff.
+  const last = row.last_verify_at ? new Date(row.last_verify_at).getTime() : 0;
+  return now - last >= 6 * 60 * 60 * 1000;
+}
+
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+/** Map a verification outcome to the persisted status (null = leave unchanged). */
+function statusForOutcome(outcome: VerifyOutcome): Payment["status"] | null {
+  if (outcome === "paid") return "PAID";
+  if (outcome === "failed") return "FAILED";
+  if (outcome === "abandoned") return "ABANDONED";
+  return null; // unknown
+}
+
+export interface ReverifyResult {
+  scanned: number;
+  /** Rows where ICICI (live or stored) gave a definitive answer. */
+  reachable: number;
+  /** Rows we could not get a definitive ICICI answer for. */
+  unreachable: number;
   toPaid: number;
-  /** Rows expired to FAILED (no success evidence after the timeout window). */
   toFailed: number;
+  toAbandoned: number;
+  toVerifying: number;
+  unchanged: number;
+  /** Optional per-row detail (dry-run / small batches). */
+  details?: {
+    reference_no: string | null;
+    from: string;
+    to: string;
+    source: "callback" | "verify" | "none";
+    rawStatus: string | null;
+  }[];
+}
+
+export interface ReverifyOptions {
+  /** Verify ONLY these references (per-row button / targeted recovery). */
+  referenceNos?: string[];
+  /** Status filter when references aren't given (default: all non-paid). */
+  statuses?: string[];
+  /** item_type filter (default webinar + course). */
+  itemTypes?: string[];
+  /** Report only — never write. */
+  dryRun?: boolean;
+  /** Apply the backoff schedule (cron / lazy sweep). Ignored when referenceNos set. */
+  onlyDue?: boolean;
+  /** Max rows to process in one run. */
+  limit?: number;
+  /** Delay between ICICI calls to respect gateway limits. */
+  rateLimitMs?: number;
+  /** Skip the live Verify URL and use stored callback evidence only. */
+  storedOnly?: boolean;
+  /** Collect per-row details (for dry-run / recovery report). */
+  withDetails?: boolean;
 }
 
 /**
- * Expire stale PENDING payments to a terminal state, gateway-evidence-first.
+ * Per-row decision: stored ICICI callback evidence first (free), then the live
+ * Verify URL. Never throws; returns "unknown" when ICICI can't confirm.
+ */
+async function decidePaymentOutcome(
+  row: Payment,
+  storedOnly: boolean,
+): Promise<{ outcome: VerifyOutcome; source: "callback" | "verify" | "none"; rawStatus: string | null; gatewayRef: string | null }> {
+  const stored = verifyFromStoredCallback(row);
+  if (stored === "paid") return { outcome: "paid", source: "callback", rawStatus: row.response_code ?? null, gatewayRef: row.gateway_ref ?? null };
+
+  if (!storedOnly && row.reference_no) {
+    const live = await eazypayVerify(row.reference_no);
+    if (live.reachable) return { outcome: live.outcome, source: "verify", rawStatus: live.rawStatus, gatewayRef: live.gatewayRef };
+  }
+  // No live answer — fall back to stored evidence (callback failure IS ICICI).
+  if (stored === "failed") return { outcome: "failed", source: "callback", rawStatus: row.response_code ?? null, gatewayRef: null };
+  return { outcome: "unknown", source: "none", rawStatus: null, gatewayRef: null };
+}
+
+/**
+ * The SINGLE shared re-verification engine. Powers: Step-0 recovery, the admin
+ * global/per-row "Re-verify" buttons, the cron sweep, and the lazy on-read sweep.
  *
- * For every payment that is still `pending`/`PENDING`, of an in-scope item_type,
- * and older than the timeout window:
- *   - stored ICICI callback confirms success (E000 + verified) -> PAID
- *   - anything else (failed evidence, or no callback at all)    -> FAILED
- *
- * Timezone note: the "> N minutes" check is pure elapsed time between two UTC
- * instants (now vs created_at, both timestamptz), so it is timezone-agnostic and
- * cannot be skewed by IST/UTC. IST only matters for *display*, not this math.
- *
- * Safety: scoped to pending-only on both SELECT and UPDATE (the UPDATE re-asserts
- * the pending guard via `.in("status", [...])`), so PAID/FAILED rows are never
- * read-modified. Idempotent + re-runnable. A late success callback can still
- * upgrade a FAILED row back to PAID (updatePaymentByReference is unconditional).
+ * Safety: selects only NON-paid rows (PAID/captured are never touched, never
+ * downgraded). Idempotent + re-runnable. A timer never produces FAILED here —
+ * FAILED/ABANDONED come only from an ICICI answer (live or stored callback).
+ */
+export async function reverifyPayments(opts: ReverifyOptions = {}): Promise<ReverifyResult> {
+  const result: ReverifyResult = {
+    scanned: 0, reachable: 0, unreachable: 0, toPaid: 0, toFailed: 0, toAbandoned: 0, toVerifying: 0, unchanged: 0,
+    details: opts.withDetails ? [] : undefined,
+  };
+  if (demoMode()) return result;
+  const db = getSupabaseAdmin();
+  if (!db) return result;
+
+  const itemTypes = opts.itemTypes ?? ["webinar", "course"];
+  const limit = opts.limit ?? 500;
+  const rateLimitMs = opts.rateLimitMs ?? 200;
+  const dryRun = opts.dryRun ?? false;
+  const storedOnly = opts.storedOnly ?? false;
+
+  // Select candidate rows.
+  let query = db.from("payments").select("*").order("created_at", { ascending: true }).limit(limit);
+  if (opts.referenceNos?.length) {
+    query = query.in("reference_no", opts.referenceNos);
+  } else {
+    const statuses = (opts.statuses ?? NONPAID_STATUSES).filter((s) => !PAID_STATUSES.includes(s));
+    query = query.in("status", statuses).in("item_type", itemTypes);
+  }
+  const { data } = await query;
+  let rows = (data as Payment[] | null) ?? [];
+  // Hard guard: never operate on a paid row, even if asked by reference.
+  rows = rows.filter((r) => !PAID_STATUSES.includes(r.status));
+  if (opts.onlyDue && !opts.referenceNos?.length) rows = rows.filter((r) => isVerifyDue(r));
+
+  for (const row of rows) {
+    result.scanned += 1;
+    const { outcome, source, rawStatus, gatewayRef } = await decidePaymentOutcome(row, storedOnly);
+    if (source === "verify") await sleep(rateLimitMs);
+
+    let target = statusForOutcome(outcome);
+    // Unknown: never terminal. Promote a past-window PENDING to VERIFYING so the
+    // UI/admin reflect "we're actively checking" — but a timer never FAILs it.
+    if (target === null) {
+      result.unreachable += 1;
+      const ageMs = Date.now() - new Date(row.created_at).getTime();
+      const pastWindow = ageMs >= pendingWindowMinutes() * 60_000;
+      const isPending = row.status === "PENDING" || row.status === "pending";
+      target = isPending && pastWindow ? "VERIFYING" : null;
+    } else {
+      result.reachable += 1;
+    }
+
+    // Tally the intended transition for the report.
+    const willChange = !!target && target !== row.status;
+    if (willChange) {
+      if (target === "PAID") result.toPaid += 1;
+      else if (target === "FAILED") result.toFailed += 1;
+      else if (target === "ABANDONED") result.toAbandoned += 1;
+      else if (target === "VERIFYING") result.toVerifying += 1;
+    }
+    result.details?.push({ reference_no: row.reference_no ?? null, from: row.status, to: target ?? row.status, source, rawStatus });
+
+    if (dryRun) continue;
+
+    // Persist: always bump audit counters; change status only when we have one.
+    const patch: Partial<Payment> = {
+      verify_attempts: (row.verify_attempts ?? 0) + 1,
+      last_verify_at: new Date().toISOString(),
+      verify_status: rawStatus ?? row.verify_status ?? null,
+    };
+    if (gatewayRef && !row.gateway_ref) patch.gateway_ref = gatewayRef;
+    if (willChange && target) patch.status = target;
+
+    const { data: upd } = await db
+      .from("payments")
+      .update(patch as Record<string, unknown>)
+      .eq("id", row.id)
+      .not("status", "in", `(${PAID_STATUSES.join(",")})`) // never touch a paid row
+      .select("id,phone,student_name,reference_no,item_type,status")
+      .maybeSingle();
+
+    // Paid-side effects (idempotent): create the buyer + finalize course payment.
+    if (willChange && target === "PAID" && upd) {
+      const r = upd as Pick<Payment, "phone" | "student_name" | "reference_no" | "item_type">;
+      await ensureBuyer(r.phone, r.student_name).catch(() => null);
+      if (r.item_type === "course" && r.reference_no) await finalizeCoursePaymentByReference(r.reference_no).catch(() => null);
+    }
+  }
+
+  // `unchanged` may have been double-counted above; recompute cleanly.
+  result.unchanged = result.scanned - result.toPaid - result.toFailed - result.toAbandoned - result.toVerifying;
+  return result;
+}
+
+export interface ReconcileResult {
+  /** Rows looked at. */
+  selected: number;
+  toPaid: number;
+  toFailed: number;
+  toAbandoned: number;
+  toVerifying: number;
+}
+
+/**
+ * Lazy / cron sweep. Re-verifies DUE non-paid payments against ICICI on a
+ * backoff schedule and promotes past-window PENDING to VERIFYING. NEVER marks a
+ * row FAILED on a timer — FAILED/ABANDONED only come from an ICICI answer.
+ * Idempotent; never downgrades a paid row. Signature kept for existing callers.
  */
 export async function reconcileStalePendingPayments(opts?: {
   timeoutMinutes?: number;
   itemTypes?: string[];
 }): Promise<ReconcileResult> {
-  const empty: ReconcileResult = { selected: 0, toPaid: 0, toFailed: 0 };
+  const empty: ReconcileResult = { selected: 0, toPaid: 0, toFailed: 0, toAbandoned: 0, toVerifying: 0 };
   if (demoMode()) return empty;
   const db = getSupabaseAdmin();
   if (!db) return empty;
 
-  const timeoutMinutes =
-    opts?.timeoutMinutes ?? Number(process.env.WEBINAR_PENDING_TIMEOUT_MINUTES || 10);
-  const itemTypes = opts?.itemTypes ?? ["webinar", "course"];
-  const cutoffISO = new Date(Date.now() - timeoutMinutes * 60_000).toISOString();
-
-  const { data } = await db
-    .from("payments")
-    .select("id,response_code,verified_signature,status,item_type,created_at")
-    .in("status", ["PENDING", "pending"])
-    .in("item_type", itemTypes)
-    .lt("created_at", cutoffISO);
-  const rows = (data as Payment[] | null) ?? [];
-  if (!rows.length) return empty;
-
-  const toPaid: string[] = [];
-  const toFailed: string[] = [];
-  for (const r of rows) {
-    if (verifyFromStoredCallback(r) === "paid") toPaid.push(r.id);
-    else toFailed.push(r.id); // "failed" or "unknown" -> expire after the window
-  }
-
-  const BATCH = 50;
-  const writeAll = async (ids: string[], status: "PAID" | "FAILED"): Promise<number> => {
-    let written = 0;
-    for (let i = 0; i < ids.length; i += BATCH) {
-      const chunk = ids.slice(i, i + BATCH);
-      const { data: upd } = await db
-        .from("payments")
-        .update({ status })
-        .in("id", chunk)
-        .in("status", ["PENDING", "pending"]) // re-assert: only ever touch pending
-        .select("id");
-      written += (upd as { id: string }[] | null)?.length ?? 0;
-    }
-    return written;
-  };
-
-  const paid = await writeAll(toPaid, "PAID");
-  const failed = await writeAll(toFailed, "FAILED");
-  return { selected: rows.length, toPaid: paid, toFailed: failed };
+  // Automated sweeps only hit ICICI's Verify URL when a whitelisted egress proxy
+  // is configured (avoids slow/unreachable calls on unconfigured environments).
+  // Stored callback evidence is always applied. Manual admin/student verify calls
+  // always attempt live regardless of this guard.
+  const liveConfigured = !!(process.env.EAZYPAY_VERIFY_PROXY_URL || "").trim();
+  const r = await reverifyPayments({
+    statuses: NONPAID_STATUSES,
+    itemTypes: opts?.itemTypes ?? ["webinar", "course"],
+    onlyDue: true,
+    limit: 300,
+    storedOnly: !liveConfigured,
+  });
+  return { selected: r.scanned, toPaid: r.toPaid, toFailed: r.toFailed, toAbandoned: r.toAbandoned, toVerifying: r.toVerifying };
 }
 
 let _lastReconcileAt = 0;
 
 /**
- * Throttled, fire-safe wrapper used on read paths (e.g. the admin Payments tab)
- * so stale pending rows are expired regardless of whether the cron sweep ran.
+ * Throttled, fire-safe wrapper used on read paths (admin Payments tab, student
+ * status page) so verification advances regardless of the external scheduler.
  * Runs at most once per `minIntervalMs` per server instance; never throws.
  */
 export async function maybeReconcilePendingPayments(minIntervalMs = 60_000): Promise<void> {
@@ -1673,7 +1846,9 @@ export type WebinarPayClass = "PAID" | "PENDING" | "FAILED";
 export function webinarPayClass(status: string | null | undefined): WebinarPayClass {
   const s = (status || "").toUpperCase();
   if (s === "PAID" || s === "CAPTURED") return "PAID";
-  if (s === "FAILED" || s === "REFUNDED") return "FAILED";
+  // ABANDONED (never completed) is, for the student, a retry-able non-payment.
+  if (s === "FAILED" || s === "REFUNDED" || s === "ABANDONED") return "FAILED";
+  // PENDING + VERIFYING -> still confirming.
   return "PENDING";
 }
 const PAY_RANK: Record<WebinarPayClass, number> = { PAID: 3, PENDING: 2, FAILED: 1 };

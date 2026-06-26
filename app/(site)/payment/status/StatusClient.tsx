@@ -32,6 +32,7 @@ interface StatusData {
   status: string;
   item: string;
   itemType: string;
+  itemSlug?: string | null;
   amount: number;
   gatewayRef: string | null;
   loginCode?: string | null;
@@ -41,7 +42,10 @@ interface StatusData {
   enrollment?: EnrollmentSummary | null;
 }
 
-const TERMINAL = new Set(["PAID", "FAILED", "captured", "refunded"]);
+// Statuses we stop auto-polling on. PENDING/VERIFYING keep polling (and the user
+// can force an immediate ICICI check). ABANDONED/FAILED are terminal but the user
+// can still "Check status" once more (a late UPI success upgrades them to PAID).
+const TERMINAL = new Set(["PAID", "FAILED", "captured", "refunded", "ABANDONED"]);
 
 export default function StatusClient({ contact }: { contact: Contact }) {
   const params = useSearchParams();
@@ -54,6 +58,8 @@ export default function StatusClient({ contact }: { contact: Contact }) {
   const [data, setData] = useState<StatusData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [verifying, setVerifying] = useState(false);
+  const [verifyMsg, setVerifyMsg] = useState<string | null>(null);
 
   useEffect(() => {
     if (!ref) {
@@ -106,15 +112,58 @@ export default function StatusClient({ contact }: { contact: Contact }) {
     };
   }, [ref, demo, st, amt, sig]);
 
+  async function checkStatus() {
+    if (!ref) return;
+    setVerifying(true);
+    setVerifyMsg("Checking with the bank…");
+    try {
+      const res = await fetch(`/api/v1/bank/verify/${encodeURIComponent(ref)}`, { cache: "no-store" });
+      const json = await res.json();
+      // Refresh the full status payload (login code, enrollment, receipt).
+      const sres = await fetch(`/api/v1/bank/payment-status/${encodeURIComponent(ref)}`, { cache: "no-store" });
+      const sjson = await sres.json();
+      if (sjson.ok) setData(sjson as StatusData);
+      const st = (sjson.ok ? sjson.status : json.status) as string | undefined;
+      if (st === "PAID" || st === "captured") setVerifyMsg(null);
+      else
+        setVerifyMsg(
+          "We couldn't confirm a successful payment yet. If money was deducted it can take a few minutes — please check again shortly, or contact support.",
+        );
+    } catch {
+      setVerifyMsg("Could not check status right now. Please try again in a moment.");
+    } finally {
+      setVerifying(false);
+    }
+  }
+
   const status = data?.status ?? "PENDING";
   const isPaid = status === "PAID" || status === "captured";
-  const isFailed = status === "FAILED";
-  const isPending = !isPaid && !isFailed;
+  const notPaid = !isPaid;
   const loginCode = data?.loginCode || null;
   const amountLabel = data && data.amount > 0 ? formatINR(data.amount) : "Free";
   const dateLabel = new Date().toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" });
   const enr = data?.enrollment || null;
   const receiptNo = data?.receiptNo || null;
+
+  // Retry deep-links back to the exact item when we know it; else the listing.
+  const itemType = data?.itemType || "";
+  const itemSlug = (data?.itemSlug || "").trim();
+  const retryHref =
+    itemType === "webinar"
+      ? itemSlug
+        ? `/webinars/${itemSlug}`
+        : "/webinars"
+      : itemType === "course"
+        ? itemSlug
+          ? `/courses/${itemSlug}`
+          : "/courses"
+        : "/courses";
+  const waNumber = (contact.whatsapp || "").replace(/\D/g, "");
+  const whatsappHref = waNumber
+    ? `https://wa.me/${waNumber}?text=${encodeURIComponent(
+        `Hi, I need help with my payment. Reference: ${ref}. I may have paid but it isn't showing as confirmed.`,
+      )}`
+    : null;
   const nextDue = enr ? enr.schedule.find((s) => !s.paid && s.due) : null;
   const successTitle = enr
     ? enr.status === "seat_booked"
@@ -144,14 +193,24 @@ export default function StatusClient({ contact }: { contact: Contact }) {
             <>
               <div
                 className={`mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full text-2xl ${
-                  isPaid ? "bg-success/10 text-success" : isFailed ? "bg-danger/10 text-danger" : "bg-primary/10 text-primary"
+                  isPaid ? "bg-success/10 text-success" : "bg-primary/10 text-primary"
                 }`}
               >
-                {isPaid ? "✓" : isFailed ? "✕" : "…"}
+                {isPaid ? "✓" : verifying ? (
+                  <span className="h-6 w-6 animate-spin rounded-full border-2 border-primary/30 border-t-primary" />
+                ) : (
+                  "…"
+                )}
               </div>
               <h1 className="text-2xl">
-                {isPaid ? successTitle : isFailed ? "Payment Failed" : "Payment Pending"}
+                {isPaid ? successTitle : verifying ? "Verifying your payment…" : "Payment not completed yet"}
               </h1>
+              {notPaid && (
+                <p className="mt-2 text-sm text-muted">
+                  If money was deducted, please wait a few minutes while we confirm it with the bank — UPI/netbanking can
+                  take a little time. If you didn&apos;t finish paying, you can retry below.
+                </p>
+              )}
 
               {/* Course enrollment summary (Book-Your-Seat + EMI) */}
               {isPaid && enr && (
@@ -203,8 +262,11 @@ export default function StatusClient({ contact }: { contact: Contact }) {
                   Demo mode — this payment was simulated. Connect ICICI Eazypay (set the AES key) to process real transactions.
                 </p>
               )}
-              {isPending && (
-                <p className="mt-4 text-xs text-muted">Still confirming with the bank. This page refreshes automatically.</p>
+              {notPaid && verifyMsg && (
+                <p className="mt-4 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">{verifyMsg}</p>
+              )}
+              {notPaid && !verifyMsg && (
+                <p className="mt-4 text-xs text-muted">This page checks automatically. You can also confirm instantly below.</p>
               )}
             </>
           )}
@@ -225,11 +287,24 @@ export default function StatusClient({ contact }: { contact: Contact }) {
                 Download receipt (PDF)
               </button>
             )}
-            {isFailed && (
-              <Link href="/courses" className="btn btn-primary">
-                Try again
-              </Link>
+
+            {/* Not paid yet: verify / retry / support */}
+            {!loading && !error && notPaid && (
+              <>
+                <button onClick={checkStatus} disabled={verifying} className="btn btn-primary disabled:opacity-60">
+                  {verifying ? "Checking…" : "I have paid — Check status"}
+                </button>
+                <Link href={retryHref} className="btn btn-secondary">
+                  Retry payment
+                </Link>
+                {whatsappHref && (
+                  <a href={whatsappHref} target="_blank" rel="noopener noreferrer" className="btn btn-secondary">
+                    WhatsApp support
+                  </a>
+                )}
+              </>
             )}
+
             <Link href="/" className="btn btn-secondary">
               Back to home
             </Link>
