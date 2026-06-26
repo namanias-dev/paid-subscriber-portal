@@ -134,6 +134,22 @@ export function formatISTTime(iso?: string | null): string {
   return Number.isNaN(d.getTime()) ? "—" : IST_TIME.format(d);
 }
 
+// en-CA renders as "YYYY-MM-DD", which sorts/compares lexicographically — ideal
+// for IST calendar-day filtering without parsing back into Date objects.
+const IST_YMD = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" });
+
+/** The IST calendar day of an instant as "YYYY-MM-DD" (null when invalid). */
+export function istYMD(date?: string | Date | null): string | null {
+  if (!date) return null;
+  const d = new Date(date);
+  return Number.isNaN(d.getTime()) ? null : IST_YMD.format(d);
+}
+
+/** Today's IST calendar day as "YYYY-MM-DD". */
+export function istTodayYMD(): string {
+  return IST_YMD.format(new Date());
+}
+
 /** "28 Jun 2026, 11:00 AM IST" — compact for cards/lists. */
 export function formatISTDateTime(iso?: string | null): string {
   if (!iso) return "—";
