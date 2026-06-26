@@ -3,6 +3,7 @@ import * as mock from "./mockData";
 import { computeExpiry, isExpired, isExpiringSoon, yesterdayISODate, todayISODate, formatINR, formatISTDate } from "./dates";
 import { generateAccessCode } from "./codeGenerator";
 import { generateLoginCode } from "./buyerCode";
+import { verifyFromStoredCallback } from "./eazypay";
 import type {
   Buyer,
   Student,
@@ -1353,6 +1354,101 @@ export async function getPayments(): Promise<Payment[]> {
   if (demoMode()) return [...demoPayments()];
   const rows = await dbSelect<Payment>("payments");
   return rows.length ? rows : [...demoPayments()];
+}
+
+export interface ReconcileResult {
+  /** Stale pending rows that matched the window + type filter. */
+  selected: number;
+  /** Rows upgraded to PAID because stored gateway evidence confirmed success. */
+  toPaid: number;
+  /** Rows expired to FAILED (no success evidence after the timeout window). */
+  toFailed: number;
+}
+
+/**
+ * Expire stale PENDING payments to a terminal state, gateway-evidence-first.
+ *
+ * For every payment that is still `pending`/`PENDING`, of an in-scope item_type,
+ * and older than the timeout window:
+ *   - stored ICICI callback confirms success (E000 + verified) -> PAID
+ *   - anything else (failed evidence, or no callback at all)    -> FAILED
+ *
+ * Timezone note: the "> N minutes" check is pure elapsed time between two UTC
+ * instants (now vs created_at, both timestamptz), so it is timezone-agnostic and
+ * cannot be skewed by IST/UTC. IST only matters for *display*, not this math.
+ *
+ * Safety: scoped to pending-only on both SELECT and UPDATE (the UPDATE re-asserts
+ * the pending guard via `.in("status", [...])`), so PAID/FAILED rows are never
+ * read-modified. Idempotent + re-runnable. A late success callback can still
+ * upgrade a FAILED row back to PAID (updatePaymentByReference is unconditional).
+ */
+export async function reconcileStalePendingPayments(opts?: {
+  timeoutMinutes?: number;
+  itemTypes?: string[];
+}): Promise<ReconcileResult> {
+  const empty: ReconcileResult = { selected: 0, toPaid: 0, toFailed: 0 };
+  if (demoMode()) return empty;
+  const db = getSupabaseAdmin();
+  if (!db) return empty;
+
+  const timeoutMinutes =
+    opts?.timeoutMinutes ?? Number(process.env.WEBINAR_PENDING_TIMEOUT_MINUTES || 10);
+  const itemTypes = opts?.itemTypes ?? ["webinar", "course"];
+  const cutoffISO = new Date(Date.now() - timeoutMinutes * 60_000).toISOString();
+
+  const { data } = await db
+    .from("payments")
+    .select("id,response_code,verified_signature,status,item_type,created_at")
+    .in("status", ["PENDING", "pending"])
+    .in("item_type", itemTypes)
+    .lt("created_at", cutoffISO);
+  const rows = (data as Payment[] | null) ?? [];
+  if (!rows.length) return empty;
+
+  const toPaid: string[] = [];
+  const toFailed: string[] = [];
+  for (const r of rows) {
+    if (verifyFromStoredCallback(r) === "paid") toPaid.push(r.id);
+    else toFailed.push(r.id); // "failed" or "unknown" -> expire after the window
+  }
+
+  const BATCH = 50;
+  const writeAll = async (ids: string[], status: "PAID" | "FAILED"): Promise<number> => {
+    let written = 0;
+    for (let i = 0; i < ids.length; i += BATCH) {
+      const chunk = ids.slice(i, i + BATCH);
+      const { data: upd } = await db
+        .from("payments")
+        .update({ status })
+        .in("id", chunk)
+        .in("status", ["PENDING", "pending"]) // re-assert: only ever touch pending
+        .select("id");
+      written += (upd as { id: string }[] | null)?.length ?? 0;
+    }
+    return written;
+  };
+
+  const paid = await writeAll(toPaid, "PAID");
+  const failed = await writeAll(toFailed, "FAILED");
+  return { selected: rows.length, toPaid: paid, toFailed: failed };
+}
+
+let _lastReconcileAt = 0;
+
+/**
+ * Throttled, fire-safe wrapper used on read paths (e.g. the admin Payments tab)
+ * so stale pending rows are expired regardless of whether the cron sweep ran.
+ * Runs at most once per `minIntervalMs` per server instance; never throws.
+ */
+export async function maybeReconcilePendingPayments(minIntervalMs = 60_000): Promise<void> {
+  const now = Date.now();
+  if (now - _lastReconcileAt < minIntervalMs) return;
+  _lastReconcileAt = now;
+  try {
+    await reconcileStalePendingPayments();
+  } catch (e) {
+    console.error("[reconcile] lazy sweep failed (non-fatal):", (e as Error).message);
+  }
 }
 
 export type CreatePaymentInput = Omit<Payment, "id" | "created_at"> & {

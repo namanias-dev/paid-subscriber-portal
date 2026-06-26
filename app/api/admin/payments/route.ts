@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getPayments, getEnrollments, getBuyers } from "@/lib/dataProvider";
+import { getPayments, getEnrollments, getBuyers, maybeReconcilePendingPayments } from "@/lib/dataProvider";
 import { requireAdmin, requireAnyPermission } from "@/lib/adminGuard";
 
 export const dynamic = "force-dynamic";
@@ -11,6 +11,9 @@ export async function GET() {
     if (!(await requireAnyPermission(["view_revenue", "manage_payments"]))) {
       return NextResponse.json({ ok: false, error: "Forbidden — revenue access required." }, { status: 403 });
     }
+    // Expire stale pending rows (throttled) so the admin tab never shows a
+    // >10-min pending forever, even between scheduled cron sweeps.
+    await maybeReconcilePendingPayments();
     const [payments, enrollments, buyers] = await Promise.all([getPayments(), getEnrollments(), getBuyers()]);
     // phone -> login code, so support can resolve "forgot code" escalations.
     const buyerCodes: Record<string, string> = {};
