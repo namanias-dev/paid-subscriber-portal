@@ -243,6 +243,29 @@ export function verifyStatusSignature(
   }
 }
 
+/**
+ * Gateway-truth from the evidence we ALREADY persisted on the payment row.
+ *
+ * The verified callback (/api/v1/bank/payment) records ICICI's `Response Code`
+ * and whether its SHA-512 signature checked out. That is authoritative gateway
+ * data — no outbound call needed:
+ *   - response_code E000 + verified_signature true -> "paid"
+ *   - any other present response_code (gateway reported an outcome)      -> "failed"
+ *   - nothing recorded (callback never landed)                          -> "unknown"
+ *
+ * "unknown" is the fail-safe: callers must NOT flip such rows to failed without
+ * an explicit decision, so a genuinely-paid user is never wrongly failed.
+ */
+export function verifyFromStoredCallback(row: {
+  response_code?: string | null;
+  verified_signature?: boolean | null;
+}): "paid" | "failed" | "unknown" {
+  const code = (row.response_code || "").trim().toUpperCase();
+  if (!code) return "unknown";
+  if (code === "E000" && row.verified_signature === true) return "paid";
+  return "failed";
+}
+
 /** Human-readable item label derived from the reference prefix (NAMAN-<TYPE>-…). */
 export function itemTypeFromReference(referenceNo: string): "course" | "plan" | "webinar" | "item" {
   const seg = referenceNo.split("-")[1]?.toUpperCase() || "";

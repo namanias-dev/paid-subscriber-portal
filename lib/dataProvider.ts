@@ -1432,6 +1432,82 @@ export function isPaidStatus(status: string | null | undefined): boolean {
   return status === "PAID" || status === "captured";
 }
 
+export type WebinarPayClass = "PAID" | "PENDING" | "FAILED";
+/** Normalize any gateway status to the webinar lifecycle. PAID/captured -> PAID,
+ *  FAILED/refunded -> FAILED, everything else (incl. legacy "pending") -> PENDING. */
+export function webinarPayClass(status: string | null | undefined): WebinarPayClass {
+  const s = (status || "").toUpperCase();
+  if (s === "PAID" || s === "CAPTURED") return "PAID";
+  if (s === "FAILED" || s === "REFUNDED") return "FAILED";
+  return "PENDING";
+}
+const PAY_RANK: Record<WebinarPayClass, number> = { PAID: 3, PENDING: 2, FAILED: 1 };
+
+/**
+ * Latest webinar payment outcome per webinar SLUG for a phone (PAID wins, then
+ * PENDING, then FAILED). The single source of truth for "did this person pay for
+ * this paid webinar?" — a free `webinar_registrations` lead row is NOT payment.
+ */
+export async function getWebinarPaymentStatusMap(phone: string): Promise<Map<string, WebinarPayClass>> {
+  const p = (phone || "").trim();
+  const out = new Map<string, WebinarPayClass>();
+  if (!p) return out;
+  const add = (slug: string | null | undefined, status: string | null | undefined) => {
+    const s = (slug || "").trim();
+    if (!s) return;
+    const cls = webinarPayClass(status);
+    const prev = out.get(s);
+    if (!prev || PAY_RANK[cls] > PAY_RANK[prev]) out.set(s, cls);
+  };
+  const db = demoMode() ? null : getSupabaseAdmin();
+  if (!db) {
+    for (const x of demoPayments()) if (x.phone === p && x.item_type === "webinar") add(x.item_slug, x.status);
+    return out;
+  }
+  const { data } = await db.from("payments").select("item_slug,status").eq("phone", p).eq("item_type", "webinar");
+  for (const r of (data as { item_slug: string | null; status: string | null }[]) ?? []) add(r.item_slug, r.status);
+  return out;
+}
+
+/** Latest webinar payment outcome per PHONE for a single webinar slug (admin list). */
+export async function getWebinarPaymentStatusesForSlug(slug: string): Promise<Map<string, WebinarPayClass>> {
+  const s = (slug || "").trim();
+  const out = new Map<string, WebinarPayClass>();
+  if (!s) return out;
+  const add = (phone: string | null | undefined, status: string | null | undefined) => {
+    const ph = (phone || "").trim();
+    if (!ph) return;
+    const cls = webinarPayClass(status);
+    const prev = out.get(ph);
+    if (!prev || PAY_RANK[cls] > PAY_RANK[prev]) out.set(ph, cls);
+  };
+  const db = demoMode() ? null : getSupabaseAdmin();
+  if (!db) {
+    for (const x of demoPayments()) if (x.item_type === "webinar" && x.item_slug === s) add(x.phone, x.status);
+    return out;
+  }
+  const { data } = await db.from("payments").select("phone,status").eq("item_type", "webinar").eq("item_slug", s);
+  for (const r of (data as { phone: string | null; status: string | null }[]) ?? []) add(r.phone, r.status);
+  return out;
+}
+
+/** Registrations for a single webinar (admin registrant list). Newest first. */
+export async function getWebinarRegistrationsByWebinar(webinarId: string): Promise<WebinarRegistration[]> {
+  if (demoMode()) return [];
+  const db = getSupabaseAdmin();
+  if (!db) return [];
+  try {
+    const { data } = await db
+      .from("webinar_registrations")
+      .select("*")
+      .eq("webinar_id", webinarId)
+      .order("created_at", { ascending: false });
+    return (data as WebinarRegistration[]) ?? [];
+  } catch {
+    return [];
+  }
+}
+
 function demoBuyers(): Buyer[] {
   const g = globalThis as unknown as { __namanDemoBuyers?: Buyer[] };
   if (!g.__namanDemoBuyers) g.__namanDemoBuyers = [];

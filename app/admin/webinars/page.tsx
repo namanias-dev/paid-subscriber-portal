@@ -49,7 +49,11 @@ export default function WebinarsAdmin() {
             <td className="px-4 py-3 font-medium">{w.title}</td>
             <td className="px-4 py-3">{formatISTDateTime(w.datetime)}</td>
             <td className="px-4 py-3">{w.price === 0 ? "Free" : formatINR(w.price)}</td>
-            <td className="px-4 py-3">{w.registrations}</td>
+            <td className="px-4 py-3">
+              <Link href={`/admin/webinars/${w.id}/registrations`} className="text-primary hover:underline">
+                View registrants
+              </Link>
+            </td>
             <td className="px-4 py-3">
               {w.active === false ? (
                 <span className="pill pill-gray">Disabled</span>

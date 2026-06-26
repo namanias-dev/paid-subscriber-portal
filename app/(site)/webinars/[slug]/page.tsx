@@ -10,7 +10,7 @@ import StickyMobileCTA from "@/components/public/StickyMobileCTA";
 import LandingSections from "@/components/public/LandingSections";
 import BrochureCards from "@/components/public/BrochureCards";
 import { getWebinarBySlug, getLibraryDocsByIds } from "@/lib/dataProvider";
-import { getPurchaseSnapshot, webinarPurchased } from "@/lib/purchaseStatus";
+import { getPurchaseSnapshot, webinarStatus } from "@/lib/purchaseStatus";
 import { buildLandingView } from "@/lib/landingView";
 import { formatINR, formatISTRange } from "@/lib/dates";
 import { SITE_URL, ACADEMY } from "@/lib/config";
@@ -45,7 +45,10 @@ export default async function WebinarDetail({ params }: { params: { slug: string
   const view = buildLandingView(w);
   const brochures = await getLibraryDocsByIds(w.brochure_ids);
   const snapshot = await getPurchaseSnapshot();
-  const registered = webinarPurchased(w, snapshot);
+  const regStatus = webinarStatus(w, snapshot);
+  const registered = regStatus === "registered";
+  const paymentPending = regStatus === "pending";
+  const paymentFailed = regStatus === "failed";
   const completed = w.status === "completed";
   const priceLabel = w.price === 0 ? "Free" : formatINR(w.price);
   const startLabel = formatISTRange(w.datetime, w.end_datetime);
@@ -115,6 +118,22 @@ export default async function WebinarDetail({ params }: { params: { slug: string
             </div>
           )}
 
+          {paymentPending && (
+            <div className="mt-5 rounded-xl border border-amber-400/40 bg-amber-400/10 p-4">
+              <p className="font-heading text-base font-bold text-amber-600 dark:text-amber-400">⏳ Payment pending — confirming…</p>
+              <p className="mt-1 text-sm text-ink2">
+                We haven&apos;t received confirmation for your last payment yet. If you completed it, it&apos;ll appear in My Portal shortly. Otherwise you can try again below.
+              </p>
+            </div>
+          )}
+
+          {paymentFailed && (
+            <div className="mt-5 rounded-xl border border-danger/30 bg-danger/10 p-4">
+              <p className="font-heading text-base font-bold text-danger">Last payment didn&apos;t go through</p>
+              <p className="mt-1 text-sm text-ink2">No charge was completed. You can register &amp; pay again below.</p>
+            </div>
+          )}
+
           <div className="mt-5 flex flex-wrap gap-3">
             {registered ? (
               <a href="/portal" className="btn btn-primary">Go to My Portal →</a>
@@ -175,8 +194,23 @@ export default async function WebinarDetail({ params }: { params: { slug: string
               </>
             ) : (
               <>
-                <h3 className="text-lg">{completed ? "Watch the recording" : "Reserve your spot"}</h3>
-                <p className="mt-1 text-sm text-ink2">{completed ? "Register to get the recording link." : "Limited seats — register now."}</p>
+                {paymentPending ? (
+                  <span className="pill pill-amber mb-2">⏳ Payment pending</span>
+                ) : paymentFailed ? (
+                  <span className="pill pill-red mb-2">Payment failed</span>
+                ) : null}
+                <h3 className="text-lg">
+                  {paymentFailed ? "Register & pay again" : paymentPending ? "Finish your registration" : completed ? "Watch the recording" : "Reserve your spot"}
+                </h3>
+                <p className="mt-1 text-sm text-ink2">
+                  {paymentPending
+                    ? "Confirming your last payment. If it didn't go through, retry below."
+                    : paymentFailed
+                    ? "Your last attempt didn't complete — no charge was made."
+                    : completed
+                    ? "Register to get the recording link."
+                    : "Limited seats — register now."}
+                </p>
                 <div className="mt-3">
                   <SeatCounter seat={view.seat} compact />
                 </div>

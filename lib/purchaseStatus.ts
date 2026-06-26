@@ -3,6 +3,8 @@ import {
   getBuyerPurchases,
   getCourseEnrollmentsByPhone,
   getWebinarRegistrationIdsByPhone,
+  getWebinarPaymentStatusMap,
+  type WebinarPayClass,
 } from "./dataProvider";
 import { deriveEnrollment } from "./installments";
 import type { Course, CourseEnrollment, Webinar } from "./types";
@@ -33,8 +35,10 @@ export interface PurchaseSnapshot {
   paidCourseSlugs: Set<string>;
   /** Webinar slugs the buyer paid for. */
   webinarSlugs: Set<string>;
-  /** Webinar IDs the buyer registered for (free or paid). */
+  /** Webinar IDs the buyer has a registration row for (free OR a started paid attempt). */
   webinarIds: Set<string>;
+  /** Latest payment outcome per webinar slug (PAID wins > PENDING > FAILED). */
+  webinarPaymentStatus: Map<string, WebinarPayClass>;
 }
 
 /**
@@ -46,10 +50,11 @@ export async function getPurchaseSnapshot(): Promise<PurchaseSnapshot | null> {
   if (!session?.phone) return null;
   const phone = session.phone;
 
-  const [purchases, enrollments, webinarIds] = await Promise.all([
+  const [purchases, enrollments, webinarIds, webinarPaymentStatus] = await Promise.all([
     getBuyerPurchases(phone),
     getCourseEnrollmentsByPhone(phone),
     getWebinarRegistrationIdsByPhone(phone),
+    getWebinarPaymentStatusMap(phone),
   ]);
 
   // Latest active enrollment per slug (course_enrollments is the rich source).
@@ -69,7 +74,7 @@ export async function getPurchaseSnapshot(): Promise<PurchaseSnapshot | null> {
     if (p.item_type === "webinar") webinarSlugs.add(slug);
   }
 
-  return { phone, enrollmentBySlug, paidCourseSlugs, webinarSlugs, webinarIds };
+  return { phone, enrollmentBySlug, paidCourseSlugs, webinarSlugs, webinarIds, webinarPaymentStatus };
 }
 
 /** Resolve a course's purchase view from a snapshot (pure). Null = not purchased. */
@@ -124,13 +129,41 @@ export function coursePurchaseView(
   return null;
 }
 
-/** True when the buyer has registered/paid for this webinar. */
+/** Where this buyer stands on a specific webinar. */
+export type WebinarRegStatus =
+  | "registered" // PAID (any webinar) or a registration row for a FREE webinar
+  | "pending"    // PAID webinar with an in-flight (PENDING) payment, not yet confirmed
+  | "failed"     // PAID webinar whose last payment FAILED — offer retry
+  | "none";      // not started (show the register/pay form)
+
+/**
+ * Canonical registration status for a webinar.
+ * - PAID always wins (edge case: a paid row + any pending/failed → registered).
+ * - FREE webinars: a registration row IS the confirmation.
+ * - PAID webinars: ONLY a confirmed PAID payment counts as registered. A bare
+ *   `webinar_registrations` lead row (created before checkout) does NOT.
+ */
+export function webinarStatus(
+  webinar: Pick<Webinar, "id" | "slug" | "price">,
+  snap: PurchaseSnapshot | null
+): WebinarRegStatus {
+  if (!snap) return "none";
+  const pay = snap.webinarPaymentStatus.get(webinar.slug);
+  if (pay === "PAID" || snap.webinarSlugs.has(webinar.slug)) return "registered";
+  if ((webinar.price ?? 0) <= 0) {
+    return snap.webinarIds.has(webinar.id) ? "registered" : "none";
+  }
+  if (pay === "PENDING") return "pending";
+  if (pay === "FAILED") return "failed";
+  return "none";
+}
+
+/** True only when the buyer is actually registered (paid, or free-confirmed). */
 export function webinarPurchased(
-  webinar: Pick<Webinar, "id" | "slug">,
+  webinar: Pick<Webinar, "id" | "slug" | "price">,
   snap: PurchaseSnapshot | null
 ): boolean {
-  if (!snap) return false;
-  return snap.webinarSlugs.has(webinar.slug) || snap.webinarIds.has(webinar.id);
+  return webinarStatus(webinar, snap) === "registered";
 }
 
 /** Build a slug→view record for a list of courses (serializable for client). */
