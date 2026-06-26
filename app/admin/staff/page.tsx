@@ -16,6 +16,10 @@ import {
 } from "@/lib/permissions";
 import type { Role, AdminAccount } from "@/lib/types";
 
+interface AccessOption { id: string; title: string; category?: string }
+interface StaffGrant { courseIds: string[]; webinarIds: string[] }
+interface AccessData { courses: AccessOption[]; webinars: AccessOption[]; grants: Record<string, StaffGrant> }
+
 const BADGE: Record<string, string> = { gold: "pill-gold", navy: "pill-blue", blue: "pill-blue", green: "pill-green", amber: "pill-amber", red: "pill-red", gray: "pill-gray" };
 function roleBadge(id: string): string {
   return BADGE[DEFAULT_ROLES.find((r) => r.id === id)?.badge || "gray"] || "pill-gray";
@@ -53,11 +57,22 @@ export default function StaffRolesAdmin() {
   const [creds, setCreds] = useState<{ username: string; password: string } | null>(null);
   // Role editor modal
   const [roleEditor, setRoleEditor] = useState<{ role: Role | null } | null>(null);
+  // Staff comp access
+  const [access, setAccess] = useState<AccessData>({ courses: [], webinars: [], grants: {} });
+  const [grantFor, setGrantFor] = useState<AdminAccount | null>(null);
+  const [bulkOpen, setBulkOpen] = useState(false);
 
   // Filters
   const [q, setQ] = useState("");
   const [roleFilter, setRoleFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
+
+  const loadAccess = useCallback(async () => {
+    try {
+      const a = await fetch("/api/admin/staff/access").then((r) => r.json());
+      if (a.ok) setAccess({ courses: a.courses || [], webinars: a.webinars || [], grants: a.grants || {} });
+    } catch { /* ignore */ }
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -69,9 +84,10 @@ export default function StaffRolesAdmin() {
       if (s.ok) { setAccounts(s.accounts || []); setRoles(s.roles || []); }
       // Legacy tokens (pre-RBAC) carry no permissions field — treat as full access.
       setMyPerms(me.admin?.permissions === undefined ? allPermissions() : (me.admin.permissions as PermissionSet));
+      await loadAccess();
     } catch { /* ignore */ }
     setLoading(false);
-  }, []);
+  }, [loadAccess]);
   useEffect(() => { load(); }, [load]);
 
   const canManageRoles = myPerms.manage_roles === true;
@@ -118,25 +134,39 @@ export default function StaffRolesAdmin() {
               <option value="active">Active</option>
               <option value="disabled">Disabled</option>
             </select>
-            <div className="ml-auto">
+            <div className="ml-auto flex gap-2">
+              <button onClick={() => setBulkOpen(true)} className="btn btn-secondary text-sm">Bulk enroll</button>
               <button onClick={() => setAddOpen(true)} className="btn btn-primary text-sm">+ Add Staff</button>
             </div>
           </div>
 
-          <TableShell headers={["Name", "Username", "Role", "Status", "Last login", "Actions"]}>
-            {filtered.map((a) => (
+          <TableShell headers={["Name", "Username", "Role", "Status", "Access", "Last login", "Actions"]}>
+            {filtered.map((a) => {
+              const g = access.grants[a.id];
+              const nC = g?.courseIds.length || 0;
+              const nW = g?.webinarIds.length || 0;
+              return (
               <tr key={a.id} className="border-b border-line last:border-0 hover:bg-surface2">
                 <td className="px-4 py-3 font-medium">{a.name || "—"}{a.email ? <span className="block text-xs text-muted">{a.email}</span> : null}</td>
                 <td className="px-4 py-3 font-mono text-xs">{a.username}</td>
                 <td className="px-4 py-3"><span className={`pill ${roleBadge(a.role_id || "")}`}>{roles.find((r) => r.id === a.role_id)?.name || a.role || "—"}</span></td>
                 <td className="px-4 py-3"><span className={`pill ${a.status === "active" ? "pill-green" : "pill-gray"}`}>{a.status}</span></td>
-                <td className="px-4 py-3 text-xs text-muted">{a.last_login_at ? new Date(a.last_login_at).toLocaleDateString("en-IN") : "Never"}</td>
                 <td className="px-4 py-3">
+                  {nC + nW > 0 ? (
+                    <span className="pill pill-gold text-[11px]" title="Internal staff access (not a purchase)">
+                      🛡 {nC > 0 ? `${nC} course${nC > 1 ? "s" : ""}` : ""}{nC > 0 && nW > 0 ? " · " : ""}{nW > 0 ? `${nW} webinar${nW > 1 ? "s" : ""}` : ""}
+                    </span>
+                  ) : <span className="text-xs text-muted">—</span>}
+                </td>
+                <td className="px-4 py-3 text-xs text-muted">{a.last_login_at ? new Date(a.last_login_at).toLocaleDateString("en-IN") : "Never"}</td>
+                <td className="px-4 py-3 whitespace-nowrap">
+                  <button onClick={() => setGrantFor(a)} className="text-primary text-xs font-semibold">Grant access</button>
+                  <span className="mx-1.5 text-line">|</span>
                   <button onClick={() => setEditAcc(a)} className="text-primary text-xs font-semibold">Manage</button>
                 </td>
               </tr>
-            ))}
-            {filtered.length === 0 && <tr><td colSpan={6} className="px-4 py-8 text-center text-ink2">No staff match these filters.</td></tr>}
+            );})}
+            {filtered.length === 0 && <tr><td colSpan={7} className="px-4 py-8 text-center text-ink2">No staff match these filters.</td></tr>}
           </TableShell>
         </>
       ) : (
@@ -184,7 +214,211 @@ export default function StaffRolesAdmin() {
           toast={toast}
         />
       )}
+
+      {/* Grant access (per staff) */}
+      {grantFor && (
+        <GrantAccessModal
+          account={grantFor}
+          courses={access.courses}
+          webinars={access.webinars}
+          current={access.grants[grantFor.id] || { courseIds: [], webinarIds: [] }}
+          onClose={() => setGrantFor(null)}
+          onSaved={() => { setGrantFor(null); loadAccess(); }}
+          toast={toast}
+        />
+      )}
+
+      {/* Bulk enroll (across staff) */}
+      {bulkOpen && (
+        <BulkEnrollModal
+          accounts={accounts}
+          courses={access.courses}
+          webinars={access.webinars}
+          onClose={() => setBulkOpen(false)}
+          onSaved={() => { setBulkOpen(false); loadAccess(); }}
+          toast={toast}
+        />
+      )}
     </div>
+  );
+}
+
+/** Reusable searchable multi-select with Select All / Deselect All + live count. */
+function MultiSelectSection({ label, options, selected, onToggle, onSelectAll, onClear }: {
+  label: string;
+  options: AccessOption[];
+  selected: Set<string>;
+  onToggle: (id: string) => void;
+  onSelectAll: () => void;
+  onClear: () => void;
+}) {
+  const [q, setQ] = useState("");
+  const shown = useMemo(() => {
+    const t = q.trim().toLowerCase();
+    return t ? options.filter((o) => o.title.toLowerCase().includes(t)) : options;
+  }, [q, options]);
+  const selCount = options.filter((o) => selected.has(o.id)).length;
+
+  return (
+    <div className="rounded-xl border border-line">
+      <div className="flex flex-wrap items-center gap-2 border-b border-line p-3">
+        <span className="text-sm font-semibold">{label}</span>
+        <span className="pill pill-gray text-[11px]">{selCount} of {options.length} selected</span>
+        <div className="ml-auto flex gap-2">
+          <button type="button" onClick={onSelectAll} className="text-xs font-semibold text-primary">Select all</button>
+          <span className="text-line">|</span>
+          <button type="button" onClick={onClear} className="text-xs font-semibold text-ink2">Deselect all</button>
+        </div>
+      </div>
+      <div className="p-3">
+        <input className="input mb-2" placeholder={`Search ${label.toLowerCase()}…`} value={q} onChange={(e) => setQ(e.target.value)} />
+        <div className="max-h-52 space-y-1 overflow-y-auto pr-1">
+          {shown.map((o) => (
+            <label key={o.id} className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-sm hover:bg-surface2">
+              <input type="checkbox" checked={selected.has(o.id)} onChange={() => onToggle(o.id)} />
+              <span className="flex-1">{o.title}</span>
+              {o.category && <span className="pill pill-blue text-[10px]">{o.category}</span>}
+            </label>
+          ))}
+          {shown.length === 0 && <p className="px-2 py-3 text-center text-xs text-muted">No matches.</p>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function GrantAccessModal({ account, courses, webinars, current, onClose, onSaved, toast }: {
+  account: AdminAccount;
+  courses: AccessOption[];
+  webinars: AccessOption[];
+  current: StaffGrant;
+  onClose: () => void;
+  onSaved: () => void;
+  toast: (m: string, t?: "success" | "error") => void;
+}) {
+  const [courseSel, setCourseSel] = useState<Set<string>>(new Set(current.courseIds));
+  const [webinarSel, setWebinarSel] = useState<Set<string>>(new Set(current.webinarIds));
+  const [busy, setBusy] = useState(false);
+
+  const toggle = (set: React.Dispatch<React.SetStateAction<Set<string>>>) => (id: string) =>
+    set((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+
+  async function save() {
+    setBusy(true);
+    const res = await fetch("/api/admin/staff/access", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ adminId: account.id, courseIds: [...courseSel], webinarIds: [...webinarSel] }),
+    });
+    const d = await res.json().catch(() => ({ ok: false }));
+    setBusy(false);
+    if (d.ok) { toast("Access updated", "success"); onSaved(); } else toast(d.error || "Save failed", "error");
+  }
+
+  async function revokeAll() {
+    if (!confirm(`Revoke ALL internal access for ${account.name || account.username}? They'll immediately lose access to every granted course and webinar.`)) return;
+    setBusy(true);
+    const res = await fetch("/api/admin/staff/access", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ adminId: account.id }),
+    });
+    const d = await res.json().catch(() => ({ ok: false }));
+    setBusy(false);
+    if (d.ok) { toast("All access revoked", "success"); onSaved(); } else toast(d.error || "Revoke failed", "error");
+  }
+
+  const hasAny = courseSel.size + webinarSel.size > 0;
+
+  return (
+    <Modal open onClose={onClose} title={`Grant access — ${account.name || account.username}`} maxWidth="max-w-2xl">
+      <p className="mb-3 text-sm text-ink2">
+        Internal comp access for QA, training & support. Staff see this content through the normal student experience using their own login.
+        <b> This is not a purchase</b> — it never creates payment, revenue or seat records.
+      </p>
+      <div className="space-y-3">
+        <MultiSelectSection
+          label="Courses" options={courses} selected={courseSel}
+          onToggle={toggle(setCourseSel)}
+          onSelectAll={() => setCourseSel(new Set(courses.map((c) => c.id)))}
+          onClear={() => setCourseSel(new Set())}
+        />
+        <MultiSelectSection
+          label="Webinars" options={webinars} selected={webinarSel}
+          onToggle={toggle(setWebinarSel)}
+          onSelectAll={() => setWebinarSel(new Set(webinars.map((w) => w.id)))}
+          onClear={() => setWebinarSel(new Set())}
+        />
+      </div>
+      <div className="mt-4 flex flex-wrap items-center gap-2">
+        <button onClick={save} disabled={busy} className="btn btn-primary text-sm">{busy ? "Saving…" : "Save access"}</button>
+        <button onClick={onClose} className="btn btn-secondary text-sm">Cancel</button>
+        <button onClick={revokeAll} disabled={busy || !hasAny} className="btn btn-ghost ml-auto text-sm text-danger disabled:opacity-40">Revoke all</button>
+      </div>
+    </Modal>
+  );
+}
+
+function BulkEnrollModal({ accounts, courses, webinars, onClose, onSaved, toast }: {
+  accounts: AdminAccount[];
+  courses: AccessOption[];
+  webinars: AccessOption[];
+  onClose: () => void;
+  onSaved: () => void;
+  toast: (m: string, t?: "success" | "error") => void;
+}) {
+  const [staffSel, setStaffSel] = useState<Set<string>>(new Set());
+  const [courseSel, setCourseSel] = useState<Set<string>>(new Set());
+  const [webinarSel, setWebinarSel] = useState<Set<string>>(new Set());
+  const [busy, setBusy] = useState(false);
+
+  const toggle = (set: React.Dispatch<React.SetStateAction<Set<string>>>) => (id: string) =>
+    set((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+
+  const staffOptions: AccessOption[] = accounts.map((a) => ({ id: a.id, title: a.name || a.username, category: a.status }));
+
+  async function save() {
+    if (staffSel.size === 0) { toast("Select at least one staff member.", "error"); return; }
+    if (courseSel.size + webinarSel.size === 0) { toast("Select at least one course or webinar.", "error"); return; }
+    setBusy(true);
+    const res = await fetch("/api/admin/staff/access/bulk", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ adminIds: [...staffSel], courseIds: [...courseSel], webinarIds: [...webinarSel] }),
+    });
+    const d = await res.json().catch(() => ({ ok: false }));
+    setBusy(false);
+    if (d.ok) { toast(`Access granted to ${d.staff} staff`, "success"); onSaved(); } else toast(d.error || "Bulk grant failed", "error");
+  }
+
+  return (
+    <Modal open onClose={onClose} title="Bulk enroll staff" maxWidth="max-w-2xl">
+      <p className="mb-3 text-sm text-ink2">Grant the selected courses/webinars to multiple staff at once (additive — existing access is kept). Internal access only; never affects payments or seat counts.</p>
+      <div className="space-y-3">
+        <MultiSelectSection
+          label="Staff" options={staffOptions} selected={staffSel}
+          onToggle={toggle(setStaffSel)}
+          onSelectAll={() => setStaffSel(new Set(staffOptions.map((s) => s.id)))}
+          onClear={() => setStaffSel(new Set())}
+        />
+        <MultiSelectSection
+          label="Courses" options={courses} selected={courseSel}
+          onToggle={toggle(setCourseSel)}
+          onSelectAll={() => setCourseSel(new Set(courses.map((c) => c.id)))}
+          onClear={() => setCourseSel(new Set())}
+        />
+        <MultiSelectSection
+          label="Webinars" options={webinars} selected={webinarSel}
+          onToggle={toggle(setWebinarSel)}
+          onSelectAll={() => setWebinarSel(new Set(webinars.map((w) => w.id)))}
+          onClear={() => setWebinarSel(new Set())}
+        />
+      </div>
+      <div className="mt-4 flex gap-2">
+        <button onClick={save} disabled={busy} className="btn btn-primary text-sm">{busy ? "Granting…" : "Grant to selected staff"}</button>
+        <button onClick={onClose} className="btn btn-secondary text-sm">Cancel</button>
+      </div>
+    </Modal>
   );
 }
 

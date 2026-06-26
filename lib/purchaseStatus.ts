@@ -1,9 +1,11 @@
-import { getBuyerSession } from "./session";
+import { getBuyerSession, getAdminSession } from "./session";
 import {
   getBuyerPurchases,
   getCourseEnrollmentsByPhone,
   getWebinarRegistrationIdsByPhone,
   getWebinarPaymentStatusMap,
+  getActiveStaffWebinarIds,
+  getWebinars,
   type WebinarPayClass,
 } from "./dataProvider";
 import { deriveEnrollment } from "./installments";
@@ -47,7 +49,7 @@ export interface PurchaseSnapshot {
  */
 export async function getPurchaseSnapshot(): Promise<PurchaseSnapshot | null> {
   const session = await getBuyerSession();
-  if (!session?.phone) return null;
+  if (!session?.phone) return staffPurchaseSnapshot();
   const phone = session.phone;
 
   const [purchases, enrollments, webinarIds, webinarPaymentStatus] = await Promise.all([
@@ -75,6 +77,30 @@ export async function getPurchaseSnapshot(): Promise<PurchaseSnapshot | null> {
   }
 
   return { phone, enrollmentBySlug, paidCourseSlugs, webinarSlugs, webinarIds, webinarPaymentStatus };
+}
+
+/**
+ * Snapshot for a logged-in STAFF member (admin session) with comp webinar grants
+ * — so they see the registered/recording view exactly like a paid attendee.
+ * Course maps stay empty (course access flows through resolveLearner). Returns
+ * null when there's no staff session or no granted webinars.
+ */
+async function staffPurchaseSnapshot(): Promise<PurchaseSnapshot | null> {
+  const admin = await getAdminSession();
+  if (!admin?.admin_id) return null;
+  const webinarIds = await getActiveStaffWebinarIds(admin.admin_id);
+  if (!webinarIds.length) return null;
+  const idSet = new Set(webinarIds);
+  const webinars = await getWebinars();
+  const webinarSlugs = new Set(webinars.filter((w) => idSet.has(w.id)).map((w) => w.slug));
+  return {
+    phone: `staff:${admin.admin_id}`,
+    enrollmentBySlug: new Map(),
+    paidCourseSlugs: new Set(),
+    webinarSlugs,
+    webinarIds: idSet,
+    webinarPaymentStatus: new Map(),
+  };
 }
 
 /** Resolve a course's purchase view from a snapshot (pure). Null = not purchased. */

@@ -1,4 +1,4 @@
-import { getStudentSession, getBuyerSession } from "./session";
+import { getStudentSession, getBuyerSession, getAdminSession } from "./session";
 import {
   getStudentById,
   findStudentByPhone,
@@ -6,6 +6,7 @@ import {
   getEnrollments,
   getCourseEnrollmentsByPhone,
   getAccessOverridesByPhone,
+  getActiveStaffCourseIds,
 } from "./dataProvider";
 import { studentBlockReason } from "./studentAccess";
 import type { Course, Quiz, CaPdf, ContentItem, CourseEnrollment, CourseAccessOverride } from "./types";
@@ -42,7 +43,7 @@ export interface Learner {
   hasPlan: boolean;
   /** LMS subscription blocked (revoked/expired). Course-only customers: false. */
   blocked: boolean;
-  kind: "buyer" | "student";
+  kind: "buyer" | "student" | "staff";
 }
 
 const DAY_MS = 86_400_000;
@@ -121,6 +122,24 @@ export async function resolveLearner(): Promise<Learner | null> {
       hasPlan: !!student.plan && !blocked,
       blocked,
       kind: "student",
+    };
+  }
+
+  // Staff comp access: a logged-in staff member (admin session) views granted
+  // courses through the SAME student experience. Pure internal access — no
+  // payment/enrolment rows, so it never affects revenue/seat/registration counts.
+  const admin = await getAdminSession();
+  if (admin?.admin_id) {
+    const courseIds = await getActiveStaffCourseIds(admin.admin_id);
+    return {
+      studentId: null,
+      phone: `staff:${admin.admin_id}`,
+      name: admin.username || "Staff",
+      email: null,
+      courseIds,
+      hasPlan: false,
+      blocked: false,
+      kind: "staff",
     };
   }
 

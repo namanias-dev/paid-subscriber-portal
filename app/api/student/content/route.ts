@@ -5,13 +5,20 @@ import {
   getProgress,
   getEnrollments,
   getAllCourses,
+  getActiveStaffCourseIds,
 } from "@/lib/dataProvider";
 import { resolveStudentAccess } from "@/lib/studentAccess";
+import { getAdminSession } from "@/lib/session";
+import type { Enrollment } from "@/lib/types";
 
 export async function GET() {
   try {
     const { session, student, blocked, reason } = await resolveStudentAccess();
     if (!session) {
+      // Staff comp access: feed the dashboard shell from staff grants so a logged-in
+      // staff member sees their granted courses through the normal experience.
+      const staff = await staffDashboardPayload();
+      if (staff) return NextResponse.json(staff);
       return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
     }
     if (!student) {
@@ -50,4 +57,33 @@ export async function GET() {
   } catch {
     return NextResponse.json({ ok: false, error: "Failed to load content." }, { status: 500 });
   }
+}
+
+/**
+ * Build the dashboard payload for a logged-in STAFF member from their comp
+ * grants. Granted courses are surfaced as active (synthesized, fee-free)
+ * enrollments so "My Courses" + Class Hub work identically — no payment data.
+ */
+async function staffDashboardPayload() {
+  const admin = await getAdminSession();
+  if (!admin?.admin_id) return null;
+  const [courseIds, courses] = await Promise.all([getActiveStaffCourseIds(admin.admin_id), getAllCourses()]);
+  const granted = new Set(courseIds);
+  const now = new Date().toISOString();
+  const enrollments: Enrollment[] = courses
+    .filter((c) => granted.has(c.id))
+    .map((c) => ({
+      id: `staff-${admin.admin_id}-${c.id}`,
+      student_id: `staff:${admin.admin_id}`,
+      course_id: c.id,
+      status: "active",
+      fee_total: 0,
+      fee_collected: 0,
+      pending: 0,
+      installments: [],
+      progress: 0,
+      enrolled_at: now,
+    }));
+  const content = await getPublishedContent();
+  return { ok: true, staff: true, student: null, content, bookmarks: [], progress: [], enrollments, courses };
 }

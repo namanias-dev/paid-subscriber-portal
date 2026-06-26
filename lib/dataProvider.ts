@@ -25,6 +25,7 @@ import type {
   Payment,
   Referral,
   Staff,
+  StaffAccessGrant,
   SiteSettings,
   Question,
   Quiz,
@@ -722,6 +723,144 @@ export async function getAdminAccounts(): Promise<AdminAccount[]> {
 export async function getAdminAccountById(id: string): Promise<AdminAccount | null> {
   const all = await getAdminAccounts();
   return all.find((a) => a.id === id) ?? null;
+}
+
+// ----------------------------- STAFF COMP ACCESS -----------------------------
+// Internal access grants (staff → course/webinar). A separate table that NEVER
+// touches payments/course_enrollments/webinar_registrations, so it can't affect
+// any revenue, seat or "registrations today" metric. Idempotent everywhere.
+
+let _demoStaffGrants: StaffAccessGrant[] = [];
+
+const grantActive = (g: StaffAccessGrant, now = Date.now()): boolean =>
+  !g.expires_at || Date.parse(g.expires_at) > now;
+
+/** All grants for one staff member (admin_users.id). */
+export async function getStaffAccessGrants(adminId: string): Promise<StaffAccessGrant[]> {
+  const id = (adminId || "").trim();
+  if (!id) return [];
+  if (demoMode()) return _demoStaffGrants.filter((g) => g.admin_id === id);
+  const db = getSupabaseAdmin();
+  if (!db) return [];
+  const { data } = await db.from("staff_access_grants").select("*").eq("admin_id", id);
+  return (data as StaffAccessGrant[]) ?? [];
+}
+
+/** Every grant across all staff — for admin badges/summary. */
+export async function getAllStaffAccessGrants(): Promise<StaffAccessGrant[]> {
+  if (demoMode()) return [..._demoStaffGrants];
+  const db = getSupabaseAdmin();
+  if (!db) return [];
+  const { data } = await db.from("staff_access_grants").select("*");
+  return (data as StaffAccessGrant[]) ?? [];
+}
+
+/** Course ids a staff member currently has ACTIVE (non-expired) comp access to. */
+export async function getActiveStaffCourseIds(adminId: string): Promise<string[]> {
+  const grants = await getStaffAccessGrants(adminId);
+  const now = Date.now();
+  return grants.filter((g) => g.kind === "course" && grantActive(g, now)).map((g) => g.ref_id);
+}
+
+/** Webinar ids a staff member currently has ACTIVE (non-expired) comp access to. */
+export async function getActiveStaffWebinarIds(adminId: string): Promise<string[]> {
+  const grants = await getStaffAccessGrants(adminId);
+  const now = Date.now();
+  return grants.filter((g) => g.kind === "webinar" && grantActive(g, now)).map((g) => g.ref_id);
+}
+
+/** Idempotently add grants for a staff member (no-op for ones already present). */
+async function addStaffGrants(
+  adminId: string,
+  kind: "course" | "webinar",
+  refIds: string[],
+  grantedBy: string | null,
+): Promise<void> {
+  const ids = [...new Set(refIds.map((r) => (r || "").trim()).filter(Boolean))];
+  if (!ids.length) return;
+  if (demoMode()) {
+    for (const ref_id of ids) {
+      if (!_demoStaffGrants.some((g) => g.admin_id === adminId && g.kind === kind && g.ref_id === ref_id)) {
+        _demoStaffGrants.push({
+          id: uuid(), admin_id: adminId, kind, ref_id, granted_by: grantedBy,
+          expires_at: null, created_at: new Date().toISOString(),
+        });
+      }
+    }
+    return;
+  }
+  const db = getSupabaseAdmin();
+  if (!db) return;
+  const rows = ids.map((ref_id) => ({ admin_id: adminId, kind, ref_id, granted_by: grantedBy }));
+  // ON CONFLICT (admin_id, kind, ref_id) DO NOTHING — safe to re-run.
+  await db.from("staff_access_grants").upsert(rows, { onConflict: "admin_id,kind,ref_id", ignoreDuplicates: true });
+}
+
+/** Remove specific grants. Removing one that doesn't exist is a no-op. */
+async function removeStaffGrants(adminId: string, kind: "course" | "webinar", refIds: string[]): Promise<void> {
+  const ids = [...new Set(refIds.map((r) => (r || "").trim()).filter(Boolean))];
+  if (!ids.length) return;
+  if (demoMode()) {
+    _demoStaffGrants = _demoStaffGrants.filter(
+      (g) => !(g.admin_id === adminId && g.kind === kind && ids.includes(g.ref_id)),
+    );
+    return;
+  }
+  const db = getSupabaseAdmin();
+  if (!db) return;
+  await db.from("staff_access_grants").delete().eq("admin_id", adminId).eq("kind", kind).in("ref_id", ids);
+}
+
+/**
+ * Reconcile a staff member's grants to EXACTLY the desired selection (adds
+ * missing, removes unselected). Powers the modal's single Save = grant + revoke.
+ */
+export async function setStaffAccess(
+  adminId: string,
+  desired: { courseIds: string[]; webinarIds: string[] },
+  grantedBy: string | null,
+): Promise<void> {
+  const id = (adminId || "").trim();
+  if (!id) return;
+  const existing = await getStaffAccessGrants(id);
+  const curCourses = new Set(existing.filter((g) => g.kind === "course").map((g) => g.ref_id));
+  const curWebinars = new Set(existing.filter((g) => g.kind === "webinar").map((g) => g.ref_id));
+  const wantCourses = new Set((desired.courseIds || []).map((r) => r.trim()).filter(Boolean));
+  const wantWebinars = new Set((desired.webinarIds || []).map((r) => r.trim()).filter(Boolean));
+
+  await Promise.all([
+    addStaffGrants(id, "course", [...wantCourses].filter((c) => !curCourses.has(c)), grantedBy),
+    addStaffGrants(id, "webinar", [...wantWebinars].filter((w) => !curWebinars.has(w)), grantedBy),
+    removeStaffGrants(id, "course", [...curCourses].filter((c) => !wantCourses.has(c))),
+    removeStaffGrants(id, "webinar", [...curWebinars].filter((w) => !wantWebinars.has(w))),
+  ]);
+}
+
+/** Additively grant the same courses/webinars to MANY staff at once (idempotent). */
+export async function bulkGrantStaffAccess(
+  adminIds: string[],
+  add: { courseIds: string[]; webinarIds: string[] },
+  grantedBy: string | null,
+): Promise<{ staff: number }> {
+  const ids = [...new Set(adminIds.map((a) => (a || "").trim()).filter(Boolean))];
+  for (const adminId of ids) {
+    await addStaffGrants(adminId, "course", add.courseIds || [], grantedBy);
+    await addStaffGrants(adminId, "webinar", add.webinarIds || [], grantedBy);
+  }
+  return { staff: ids.length };
+}
+
+/** Remove ALL grants for a staff member (Revoke all). */
+export async function revokeAllStaffAccess(adminId: string): Promise<void> {
+  const id = (adminId || "").trim();
+  if (!id) return;
+  if (demoMode()) {
+    _demoStaffGrants = _demoStaffGrants.filter((g) => g.admin_id !== id);
+    return;
+  }
+  const db = getSupabaseAdmin();
+  if (!db) return;
+  await db.from("staff_access_grants").delete().eq("admin_id", id);
 }
 
 function genPassword(): string {

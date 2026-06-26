@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { verifyStudentToken, verifyBuyerToken, signBuyerToken, signStudentToken } from "@/lib/auth";
-import { isDemoMode, STUDENT_COOKIE, BUYER_COOKIE, SESSION_MAX_AGE } from "@/lib/config";
+import { verifyStudentToken, verifyBuyerToken, verifyAdminToken, signBuyerToken, signStudentToken } from "@/lib/auth";
+import { isDemoMode, STUDENT_COOKIE, BUYER_COOKIE, ADMIN_COOKIE, SESSION_MAX_AGE } from "@/lib/config";
 
 const ROLLING_COOKIE_OPTS = {
   httpOnly: true,
@@ -27,6 +27,9 @@ export async function middleware(req: NextRequest) {
       const token = req.cookies.get(STUDENT_COOKIE)?.value;
       const session = await verifyStudentToken(token);
       if (!session) {
+        // Staff comp access: a valid admin/staff session may browse the student
+        // experience for QA/training. Pass through (no student cookie re-issue).
+        if (await verifyAdminToken(req.cookies.get(ADMIN_COOKIE)?.value)) return NextResponse.next();
         const url = req.nextUrl.clone();
         url.pathname = "/login";
         // Cookie present but invalid = expired session → graceful re-login prompt.
@@ -53,6 +56,7 @@ export async function middleware(req: NextRequest) {
       const token = req.cookies.get(BUYER_COOKIE)?.value;
       const session = await verifyBuyerToken(token);
       if (!session) {
+        if (await verifyAdminToken(req.cookies.get(ADMIN_COOKIE)?.value)) return NextResponse.next();
         const url = req.nextUrl.clone();
         url.pathname = "/portal/login";
         // Distinguish an expired/invalid session (cookie present) from a fresh

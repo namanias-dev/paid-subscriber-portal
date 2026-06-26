@@ -811,6 +811,27 @@ export interface Staff {
   created_at: string;
 }
 
+/**
+ * Internal comp access granted to a staff member (admin_users.id) so they can
+ * view a course/webinar through the normal student-facing experience for QA,
+ * training and support. This is NOT a payment — it never touches payments,
+ * course_enrollments or webinar_registrations, and is excluded from all
+ * revenue / seat / "registrations today" metrics.
+ */
+export interface StaffAccessGrant {
+  id: string;
+  /** admin_users.id of the staff member receiving access. */
+  admin_id: string;
+  kind: "course" | "webinar";
+  /** courses.id or webinars.id (both text). */
+  ref_id: string;
+  /** username/admin_id of whoever granted it (audit). */
+  granted_by: string | null;
+  /** Optional temporary-access expiry; null = no expiry. */
+  expires_at: string | null;
+  created_at: string;
+}
+
 // ----------------------------- RBAC (roles + admin accounts) -----------------------------
 export interface Role {
   id: string;
