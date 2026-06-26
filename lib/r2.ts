@@ -97,6 +97,11 @@ export function lectureThumbnailKey(courseId: string, recordingId: string): stri
 export function lectureNotesKey(courseId: string, recordingId: string): string {
   return `notes/${courseId || "_"}/${recordingId}/notes.pdf`;
 }
+/** Private key for a student-uploaded payment-proof file (screenshots/PDFs). */
+export function paymentProofKey(paymentId: string, fileId: string, ext: string): string {
+  const safeExt = (ext || "").replace(/[^a-z0-9]/gi, "").toLowerCase() || "bin";
+  return `payment-proofs/${paymentId || "_"}/${fileId}.${safeExt}`;
+}
 
 // ----------------------------- Multipart -----------------------------
 export async function createMultipart(key: string, contentType = "video/mp4"): Promise<string> {

@@ -421,6 +421,31 @@ create unique index if not exists payments_reference_no_idx on public.payments (
 create index if not exists payments_phone_idx on public.payments (phone);
 create index if not exists payments_enrollment_idx on public.payments (enrollment_id);
 
+-- ----------------- payment_proofs (self-service recovery) -----------------
+-- Student-submitted proof for PENDING/VERIFYING/FAILED payments. SEPARATE from
+-- the payment status enum: uploading proof never grants access. Access is still
+-- granted only on PAID (ICICI) or an explicit admin Accept (reuses the PAID path).
+create table if not exists public.payment_proofs (
+  id uuid primary key default gen_random_uuid(),
+  payment_id text not null references public.payments(id) on delete cascade,
+  reference_no text,
+  phone text not null,
+  item_type text,
+  item_slug text,
+  item text,
+  -- submitted -> reupload_requested -> submitted (re-upload) -> accepted / rejected
+  status text not null default 'submitted',
+  files jsonb not null default '[]'::jsonb,
+  student_note text,
+  admin_reason text,
+  audit jsonb not null default '[]'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create unique index if not exists payment_proofs_payment_id_uniq on public.payment_proofs (payment_id);
+create index if not exists payment_proofs_phone_idx on public.payment_proofs (phone);
+create index if not exists payment_proofs_status_idx on public.payment_proofs (status);
+
 -- ----------------- course_enrollments (Book-Your-Seat + EMI) -----------------
 create table if not exists public.course_enrollments (
   id text primary key,

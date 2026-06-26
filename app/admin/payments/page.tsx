@@ -4,7 +4,16 @@ import { useMemo, useState } from "react";
 import { PageHeader, useAdminData, LoadingBlock, TableShell, KpiCard } from "@/components/admin/ui";
 import { useToast } from "@/components/ui/Toast";
 import { formatINR, formatDate, formatISTDateTime, istYMD, istTodayYMD } from "@/lib/dates";
-import type { Payment, Enrollment } from "@/lib/types";
+import type { Payment, Enrollment, PaymentProof } from "@/lib/types";
+
+type ProofWithAccess = PaymentProof & { hasAccess: boolean };
+
+const PROOF_STATUS_META: Record<string, { label: string; cls: string }> = {
+  submitted: { label: "Proof uploaded", cls: "pill-blue" },
+  reupload_requested: { label: "Reupload requested", cls: "pill-amber" },
+  accepted: { label: "Proof accepted", cls: "pill-green" },
+  rejected: { label: "Proof rejected", cls: "pill-red" },
+};
 
 const isPaid = (s: Payment["status"]) => s === "captured" || s === "PAID";
 
@@ -57,11 +66,14 @@ export default function PaymentsAdmin() {
   const full = useAdminData<Payment[]>("/api/admin/payments", "payments");
   const enr = useAdminData<Enrollment[]>("/api/admin/payments", "enrollments");
   const codes = useAdminData<Record<string, string>>("/api/admin/payments", "buyerCodes");
+  const proofsHook = useAdminData<Record<string, ProofWithAccess>>("/api/admin/payments", "proofs");
   const { toast } = useToast();
 
   // ---- Filters (read-only display state) ----
   const [types, setTypes] = useState<Set<TypeKey>>(new Set());
   const [statuses, setStatuses] = useState<Set<StatusKey>>(new Set());
+  const [onlyProof, setOnlyProof] = useState(false);
+  const [proofModal, setProofModal] = useState<{ payment: Payment; proof: ProofWithAccess } | null>(null);
   const [reverifying, setReverifying] = useState(false);
   const [reverifyMsg, setReverifyMsg] = useState<string | null>(null);
   const [dateMode, setDateMode] = useState<DateMode>("all");
@@ -74,6 +86,11 @@ export default function PaymentsAdmin() {
   const payments = useMemo(() => full.data || [], [full.data]);
   const enrollments = enr.data || [];
   const buyerCodes = codes.data || {};
+  const proofs = useMemo(() => proofsHook.data || {}, [proofsHook.data]);
+  const proofCount = useMemo(
+    () => Object.values(proofs).filter((p) => p.status === "submitted" || p.status === "reupload_requested").length,
+    [proofs],
+  );
 
   const todayYMD = istTodayYMD();
 
@@ -112,13 +129,14 @@ export default function PaymentsAdmin() {
     return payments.filter((p) => {
       if (activeTypes.length && !activeTypes.some((k) => TYPE_DEFS.find((t) => t.key === k)!.match(p))) return false;
       if (activeStatuses.length && !activeStatuses.some((k) => STATUS_DEFS.find((s) => s.key === k)!.match(p))) return false;
+      if (onlyProof && !proofs[p.id]) return false;
       if (range) {
         const ymd = istYMD(p.created_at);
         if (!ymd || ymd < range.from || ymd > range.to) return false;
       }
       return true;
     });
-  }, [payments, types, statuses, range]);
+  }, [payments, types, statuses, onlyProof, proofs, range]);
 
   // Non-paid rows in the current filtered view (targets for "Re-verify filtered").
   const filteredNonPaidRefs = useMemo(
@@ -227,12 +245,48 @@ export default function PaymentsAdmin() {
     callReverify({ referenceNos: [ref] });
   }
 
-  const hasFilters = types.size > 0 || statuses.size > 0 || dateMode !== "all";
+  const hasFilters = types.size > 0 || statuses.size > 0 || onlyProof || dateMode !== "all";
   function clearAll() {
     setTypes(new Set());
     setStatuses(new Set());
+    setOnlyProof(false);
     setDateMode("all");
     setDateVal(""); setMonthVal(""); setYearVal(""); setRangeFrom(""); setRangeTo("");
+  }
+
+  // ---- Proof actions (request reupload / accept payment / add note) ----
+  async function proofAction(body: Record<string, unknown>): Promise<boolean> {
+    try {
+      const res = await fetch("/api/admin/payments/proof", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const json = await res.json();
+      if (!json.ok) {
+        toast(json.error || "Action failed.", "error");
+        return false;
+      }
+      full.reload();
+      proofsHook.reload();
+      return true;
+    } catch {
+      toast("Action failed.", "error");
+      return false;
+    }
+  }
+  async function viewProofFile(key: string) {
+    try {
+      const res = await fetch(`/api/admin/payments/proof/view?key=${encodeURIComponent(key)}`);
+      const json = await res.json();
+      if (!json.ok) {
+        toast(json.error || "Could not open the file.", "error");
+        return;
+      }
+      window.open(json.url, "_blank", "noopener,noreferrer");
+    } catch {
+      toast("Could not open the file.", "error");
+    }
   }
 
   function dateChipLabel(): string | null {
@@ -335,6 +389,14 @@ export default function PaymentsAdmin() {
                 </button>
               );
             })}
+            <button
+              onClick={() => setOnlyProof((v) => !v)}
+              className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold transition ${onlyProof ? "border-primary bg-primary/10 text-primary" : "border-line text-ink2 hover:border-primary/50"}`}
+              title="Show only payments with a student-submitted proof"
+            >
+              <span aria-hidden>📎</span>
+              Proof uploaded{proofCount > 0 ? ` (${proofCount})` : ""}
+            </button>
           </div>
         </div>
 
@@ -421,6 +483,11 @@ export default function PaymentsAdmin() {
                 {TYPE_LABEL[k]} <span aria-hidden>×</span>
               </button>
             ))}
+            {onlyProof && (
+              <button onClick={() => setOnlyProof(false)} className="inline-flex items-center gap-1 rounded-full bg-surface2 px-2.5 py-1 text-xs font-medium hover:bg-surface">
+                Proof uploaded <span aria-hidden>×</span>
+              </button>
+            )}
             {dateChipLabel() && (
               <button onClick={() => { setDateMode("all"); setDateVal(""); setMonthVal(""); setYearVal(""); setRangeFrom(""); setRangeTo(""); }} className="inline-flex items-center gap-1 rounded-full bg-surface2 px-2.5 py-1 text-xs font-medium hover:bg-surface">
                 {dateChipLabel()} <span aria-hidden>×</span>
@@ -508,7 +575,7 @@ export default function PaymentsAdmin() {
                 )}
               </td>
               <td className="px-4 py-3">
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   <span className={`pill ${statusPillClass(p.status)}`}>{statusLabel(p.status)}</span>
                   {isNonPaid(p.status) && p.reference_no && (
                     <button
@@ -520,6 +587,15 @@ export default function PaymentsAdmin() {
                       ↻
                     </button>
                   )}
+                  {proofs[p.id] && (
+                    <button
+                      onClick={() => setProofModal({ payment: p, proof: proofs[p.id] })}
+                      className={`pill ${PROOF_STATUS_META[proofs[p.id].status]?.cls || "pill-gray"} cursor-pointer`}
+                      title="View submitted payment proof"
+                    >
+                      📎 {PROOF_STATUS_META[proofs[p.id].status]?.label || proofs[p.id].status}
+                    </button>
+                  )}
                 </div>
               </td>
               <td className="px-4 py-3">{formatDate(p.created_at)}</td>
@@ -528,6 +604,161 @@ export default function PaymentsAdmin() {
           ))
         )}
       </TableShell>
+
+      {proofModal && (
+        <ProofModal
+          payment={proofModal.payment}
+          proof={proofModal.proof}
+          buyerCode={buyerCodes[(proofModal.payment.phone || "").trim()]}
+          onClose={() => setProofModal(null)}
+          onViewFile={viewProofFile}
+          onAction={async (body) => {
+            const ok = await proofAction(body);
+            if (ok) setProofModal(null);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function ProofModal({
+  payment,
+  proof,
+  buyerCode,
+  onClose,
+  onViewFile,
+  onAction,
+}: {
+  payment: Payment;
+  proof: ProofWithAccess;
+  buyerCode?: string;
+  onClose: () => void;
+  onViewFile: (key: string) => void;
+  onAction: (body: Record<string, unknown>) => void;
+}) {
+  const [reason, setReason] = useState("");
+  const [note, setNote] = useState("");
+  const meta = PROOF_STATUS_META[proof.status] || { label: proof.status, cls: "pill-gray" };
+  const isPaidRow = isPaid(payment.status);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4" onClick={onClose}>
+      <div className="max-h-[92vh] w-full max-w-lg overflow-y-auto rounded-t-2xl bg-white p-6 shadow-2xl sm:rounded-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h3 className="text-lg font-bold">Payment proof</h3>
+            <p className="text-sm text-muted">{payment.student_name} · {payment.phone}</p>
+          </div>
+          <span className={`pill ${meta.cls}`}>{meta.label}</span>
+        </div>
+
+        {/* Already-has-access guard */}
+        {proof.hasAccess && (
+          <div className="mt-3 flex items-center gap-2 rounded-lg border border-green-200 bg-green-50 p-3 text-xs text-green-900">
+            <span>✅</span>
+            <span>This student <span className="font-semibold">already has access</span> to this item (paid on another attempt or a valid grant). Accepting is usually unnecessary.</span>
+          </div>
+        )}
+
+        {/* Payment metadata */}
+        <div className="mt-4 grid grid-cols-2 gap-2 rounded-lg bg-surface2 p-3 text-xs">
+          <div><span className="text-muted">Item</span><div className="font-medium">{payment.item}</div></div>
+          <div><span className="text-muted">Amount</span><div className="font-medium">{formatINR(payment.amount)}</div></div>
+          <div><span className="text-muted">Status</span><div className="font-medium">{statusLabel(payment.status)}</div></div>
+          <div><span className="text-muted">Login code</span><div className="font-mono font-medium">{buyerCode || "—"}</div></div>
+          <div className="col-span-2"><span className="text-muted">Reference</span><div className="font-mono">{payment.reference_no || payment.razorpay_payment_id || "—"}</div></div>
+          <div className="col-span-2"><span className="text-muted">Submitted</span><div>{formatISTDateTime(proof.created_at)}</div></div>
+        </div>
+
+        {/* Files */}
+        <div className="mt-4">
+          <p className="text-sm font-semibold">Uploaded files ({proof.files.length})</p>
+          <div className="mt-2 space-y-2">
+            {proof.files.length === 0 && <p className="text-xs text-muted">No files.</p>}
+            {proof.files.map((f) => (
+              <button
+                key={f.key}
+                onClick={() => onViewFile(f.key)}
+                className="flex w-full items-center justify-between rounded-lg border border-line px-3 py-2 text-left text-xs transition hover:border-primary/50"
+              >
+                <span className="truncate">{f.name}</span>
+                <span className="ml-2 shrink-0 font-semibold text-primary">View (signed) →</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Student note */}
+        {proof.student_note && (
+          <div className="mt-4">
+            <p className="text-sm font-semibold">Student note</p>
+            <p className="mt-1 rounded-lg bg-surface2 p-3 text-xs">{proof.student_note}</p>
+          </div>
+        )}
+
+        {/* Audit trail */}
+        {proof.audit.length > 0 && (
+          <div className="mt-4">
+            <p className="text-sm font-semibold">Audit trail</p>
+            <ul className="mt-1 space-y-1 text-xs">
+              {proof.audit.map((a, i) => (
+                <li key={i} className="flex flex-wrap gap-1 text-muted">
+                  <span className="font-medium text-ink">{a.action}</span>
+                  <span>by {a.by || "—"}</span>
+                  <span>· {formatISTDateTime(a.at)}</span>
+                  {a.note && <span className="w-full text-ink2">“{a.note}”</span>}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {/* Actions */}
+        <div className="mt-5 space-y-3 border-t border-line pt-4">
+          <div>
+            <input
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder="Reason (shown to student on reupload/reject)"
+              className="input w-full text-sm"
+            />
+            <div className="mt-2 flex flex-wrap gap-2">
+              <button onClick={() => onAction({ action: "request_reupload", proofId: proof.id, reason })} className="btn btn-secondary text-sm">
+                Request reupload
+              </button>
+              <button onClick={() => onAction({ action: "reject", proofId: proof.id, reason })} className="btn btn-secondary text-sm">
+                Reject proof
+              </button>
+            </div>
+          </div>
+
+          <div>
+            <div className="flex gap-2">
+              <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Internal note" className="input w-full text-sm" />
+              <button onClick={() => note.trim() && onAction({ action: "note", proofId: proof.id, note })} className="btn btn-secondary text-sm">
+                Add note
+              </button>
+            </div>
+          </div>
+
+          <button
+            onClick={() => {
+              if (isPaidRow) return;
+              if (confirm(`Accept payment and grant access to ${payment.student_name}? This marks the payment PAID.`)) {
+                onAction({ action: "accept", paymentId: payment.id });
+              }
+            }}
+            disabled={isPaidRow}
+            className="btn btn-primary w-full text-sm disabled:opacity-60"
+            title={isPaidRow ? "Already paid" : "Mark this payment PAID and grant access (reuses the standard access path)"}
+          >
+            {isPaidRow ? "Already paid ✓" : "✓ Accept payment & grant access"}
+          </button>
+        </div>
+
+        <button onClick={onClose} className="btn btn-secondary mt-3 w-full text-sm">Close</button>
+      </div>
     </div>
   );
 }

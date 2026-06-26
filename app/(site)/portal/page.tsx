@@ -8,6 +8,7 @@ import { formatINR } from "@/lib/dates";
 import { deriveEnrollment } from "@/lib/installments";
 import type { Payment } from "@/lib/types";
 import PortalLogoutButton from "@/components/portal/PortalLogoutButton";
+import PaymentRecovery from "@/components/portal/PaymentRecovery";
 
 export const dynamic = "force-dynamic";
 export const metadata = {
@@ -110,6 +111,10 @@ export default async function PortalDashboardPage() {
         </div>
         <PortalLogoutButton />
       </div>
+
+      {/* Self-service payment-proof recovery — only renders for items the buyer
+          lacks access to with a PENDING/VERIFYING/FAILED payment. */}
+      <PaymentRecovery />
 
       {buyer && (
         <div className="mt-6 inline-flex items-center gap-2 rounded-xl border border-line bg-surface px-4 py-2 text-sm">

@@ -1861,6 +1861,17 @@ export async function createPayment(input: CreatePaymentInput): Promise<Payment>
   }
 }
 
+/** ALL payments for a phone (every status) — drives the proof-recovery engine. */
+export async function getPaymentsByPhone(phone: string): Promise<Payment[]> {
+  const p = (phone || "").trim();
+  if (!p) return [];
+  if (demoMode()) return demoPayments().filter((x) => x.phone === p);
+  const db = getSupabaseAdmin();
+  if (!db) return demoPayments().filter((x) => x.phone === p);
+  const { data } = await db.from("payments").select("*").eq("phone", p).order("created_at", { ascending: false });
+  return (data as Payment[]) ?? [];
+}
+
 export async function getPaymentByReference(referenceNo: string): Promise<Payment | null> {
   if (demoMode()) {
     return demoPayments().find((p) => p.reference_no === referenceNo) ?? null;
@@ -1870,6 +1881,16 @@ export async function getPaymentByReference(referenceNo: string): Promise<Paymen
   const { data } = await db.from("payments").select("*").eq("reference_no", referenceNo).maybeSingle();
   if (data) return data as Payment;
   return demoPayments().find((p) => p.reference_no === referenceNo) ?? null;
+}
+
+export async function getPaymentById(id: string): Promise<Payment | null> {
+  const pid = (id || "").trim();
+  if (!pid) return null;
+  if (demoMode()) return demoPayments().find((p) => p.id === pid) ?? null;
+  const db = getSupabaseAdmin();
+  if (!db) return demoPayments().find((p) => p.id === pid) ?? null;
+  const { data } = await db.from("payments").select("*").eq("id", pid).maybeSingle();
+  return (data as Payment) ?? null;
 }
 
 export async function updatePaymentByReference(

@@ -814,6 +814,46 @@ export interface Payment {
   receipt_no?: string | null;
 }
 
+// ----------------------------- Payment proof (self-service recovery) -----------------------------
+/** Proof lifecycle — INDEPENDENT of payment status. "none" = no proof row yet. */
+export type PaymentProofStatus = "submitted" | "reupload_requested" | "accepted" | "rejected";
+
+export interface PaymentProofFile {
+  key: string;
+  name: string;
+  content_type: string;
+  size: number;
+  uploaded_at: string;
+}
+
+export interface PaymentProofAudit {
+  action: string;
+  by: string | null;
+  at: string;
+  note?: string | null;
+}
+
+/**
+ * A student-submitted proof-of-payment for a specific payment row. Separate from
+ * the ICICI verify engine — uploading proof never grants access.
+ */
+export interface PaymentProof {
+  id: string;
+  payment_id: string;
+  reference_no: string | null;
+  phone: string;
+  item_type: string | null;
+  item_slug: string | null;
+  item: string | null;
+  status: PaymentProofStatus;
+  files: PaymentProofFile[];
+  student_note: string | null;
+  admin_reason: string | null;
+  audit: PaymentProofAudit[];
+  created_at: string;
+  updated_at: string;
+}
+
 export interface Referral {
   id: string;
   referrer_name: string;
