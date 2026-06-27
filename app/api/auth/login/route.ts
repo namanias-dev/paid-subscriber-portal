@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { findStudentByLogin, findStudentByPhone, findBuyerByLogin, touchStreakOnLogin, logAccess, rateLimited } from "@/lib/dataProvider";
+import { findStudentByLogin, findStudentByPhone, findBuyerByLogin, touchStreakOnLogin, logAccess, rateLimited, ensureStudentForCustomer, claimGuestAttempts } from "@/lib/dataProvider";
 import { signStudentToken, signBuyerToken } from "@/lib/auth";
 import { STUDENT_COOKIE, BUYER_COOKIE, SESSION_MAX_AGE } from "@/lib/config";
 import { isExpired, formatDate } from "@/lib/dates";
@@ -47,6 +47,15 @@ export async function POST(req: Request) {
     // 1) Buyer (post-payment) login — the code shown on the receipt / admin Payments.
     const buyer = codeAlnum ? await findBuyerByLogin(phoneDigits, codeAlnum) : null;
     if (buyer) {
+      // Unify quiz history on login (code-proven): ensure a canonical student row
+      // for this phone, then CLAIM any pre-login guest attempts to it so cross-device
+      // viewing works via the strong user_id path. Skipped for STAFF test accounts.
+      if (!buyer.is_staff) {
+        try {
+          const student = await ensureStudentForCustomer(buyer.phone, buyer.name, buyer.login_code);
+          if (student?.id) await claimGuestAttempts(buyer.phone, student.id);
+        } catch { /* best-effort */ }
+      }
       const token = await signBuyerToken({ buyer_id: buyer.id, phone: buyer.phone, name: buyer.name, sv: buyer.session_version ?? 0 });
       const res = NextResponse.json({ ok: true, kind: "buyer", redirect: "/portal", name: buyer.name });
       res.cookies.set(BUYER_COOKIE, token, COOKIE_OPTS);

@@ -34,7 +34,12 @@ export default function WelcomeOverlay() {
       }
     } catch { /* ignore */ }
 
-    const onWelcome = (e: Event) => play((e as CustomEvent).detail?.name || "");
+    const onWelcome = (e: Event) => {
+      // Consume any leftover one-shot flag so a hard reload right after a soft-nav
+      // login can't replay the overlay a second time.
+      try { sessionStorage.removeItem(KEY); } catch { /* ignore */ }
+      play((e as CustomEvent).detail?.name || "");
+    };
     window.addEventListener("nsa:welcome", onWelcome);
     return () => window.removeEventListener("nsa:welcome", onWelcome);
   }, [play]);

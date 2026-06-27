@@ -2140,6 +2140,30 @@ export async function bumpBuyerSessionVersion(phone: string): Promise<void> {
   }
 }
 
+/**
+ * Current status of an admin account, for per-request session re-validation.
+ * Returns:
+ *   • "active" / "disabled" / other → the live DB status
+ *   • "missing" → the row no longer exists (deny)
+ *   • null → couldn't determine (no DB / error) → callers FAIL-OPEN so an infra
+ *     hiccup never locks every admin out at once.
+ */
+export async function getAdminStatus(id: string): Promise<string | null> {
+  const a = (id || "").trim();
+  if (!a) return null;
+  if (demoMode()) return "active";
+  const db = getSupabaseAdmin();
+  if (!db) return null;
+  try {
+    const { data, error } = await db.from("admin_users").select("status").eq("id", a).maybeSingle();
+    if (error) return null;
+    if (!data) return "missing";
+    return (data as { status: string | null }).status || "active";
+  } catch {
+    return null;
+  }
+}
+
 /** Bump the portal session of the buyer linked to a staff member's phone (if any). */
 export async function bumpStaffPortalSession(adminId: string): Promise<void> {
   try {

@@ -2,7 +2,7 @@ import { cache } from "react";
 import { cookies } from "next/headers";
 import { STUDENT_COOKIE, ADMIN_COOKIE, BUYER_COOKIE } from "./config";
 import { verifyStudentToken, verifyAdminToken, verifyBuyerToken } from "./auth";
-import { getBuyerSessionVersion } from "./dataProvider";
+import { getBuyerSessionVersion, getAdminStatus } from "./dataProvider";
 import type { SessionPayload, AdminSessionPayload, BuyerSessionPayload } from "./types";
 
 /** Read & verify the student session from the httpOnly cookie (server-side). */
@@ -34,7 +34,18 @@ export const getBuyerSession = cache(async (): Promise<BuyerSessionPayload | nul
 });
 
 /** Read & verify the admin session from the httpOnly cookie (server-side). */
-export async function getAdminSession(): Promise<AdminSessionPayload | null> {
+/**
+ * Read & verify the admin session. Beyond the signed token, this re-validates the
+ * admin's CURRENT status against the DB on each request, so a disabled/deleted
+ * admin loses access immediately on ALL devices (not after the 7-day token TTL).
+ * Fail-open if status can't be read (infra hiccup never locks out every admin).
+ * Per-request cached so the extra read happens at most once per request.
+ */
+export const getAdminSession = cache(async (): Promise<AdminSessionPayload | null> => {
   const token = cookies().get(ADMIN_COOKIE)?.value;
-  return verifyAdminToken(token);
-}
+  const payload = await verifyAdminToken(token);
+  if (!payload) return null;
+  const status = await getAdminStatus(payload.admin_id);
+  if (status === null) return payload; // unknown → fail-open
+  return status === "active" ? payload : null;
+});
