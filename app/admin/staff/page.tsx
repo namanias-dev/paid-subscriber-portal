@@ -189,6 +189,7 @@ export default function StaffRolesAdmin() {
           roles={assignableRoles}
           onClose={() => setEditAcc(null)}
           onChanged={() => { setEditAcc(null); load(); }}
+          onRefresh={load}
           onPassword={(c) => { setEditAcc(null); setCreds(c); }}
           toast={toast}
         />
@@ -532,16 +533,21 @@ function AddStaffModal({ roles, onClose, onCreated }: { roles: Role[]; onClose: 
   );
 }
 
-function EditStaffModal({ account, roles, onClose, onChanged, onPassword, toast }: {
-  account: AdminAccount; roles: Role[]; onClose: () => void; onChanged: () => void; onPassword: (c: { username: string; password: string }) => void; toast: (m: string, t?: "success" | "error") => void;
+function EditStaffModal({ account, roles, onClose, onChanged, onRefresh, onPassword, toast }: {
+  account: AdminAccount; roles: Role[]; onClose: () => void; onChanged: () => void; onRefresh: () => void; onPassword: (c: { username: string; password: string }) => void; toast: (m: string, t?: "success" | "error") => void;
 }) {
   const [roleId, setRoleId] = useState(account.role_id || "");
   const [status, setStatus] = useState(account.status);
   const [phone, setPhone] = useState(account.phone || "");
+  const [savedPhone, setSavedPhone] = useState(account.phone || "");
   const [busy, setBusy] = useState(false);
   const [portal, setPortal] = useState<{ loginCode: string | null; provisioned: boolean } | null>(null);
   const [portalBusy, setPortalBusy] = useState(false);
   const role = roles.find((r) => r.id === roleId);
+
+  // Same validation Add Staff uses (last 10 digits, Indian mobile).
+  const phoneDigits = phone.replace(/\D/g, "").slice(-10);
+  const phoneValid = /^[6-9]\d{9}$/.test(phoneDigits);
 
   const loadPortal = useCallback(async () => {
     try {
@@ -552,7 +558,7 @@ function EditStaffModal({ account, roles, onClose, onChanged, onPassword, toast 
   useEffect(() => { loadPortal(); }, [loadPortal]);
 
   async function save() {
-    if (phone.trim() && !/^[6-9]\d{9}$/.test(phone.replace(/\D/g, "").slice(-10))) { toast("Enter a valid 10-digit mobile number (or leave it blank).", "error"); return; }
+    if (phone.trim() && !phoneValid) { toast("Enter a valid 10-digit mobile number (or leave it blank).", "error"); return; }
     setBusy(true);
     const res = await fetch(`/api/admin/staff/${account.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ role_id: roleId, status, phone: phone.trim() || null }) });
     const d = await res.json().catch(() => ({ ok: false }));
@@ -560,8 +566,20 @@ function EditStaffModal({ account, roles, onClose, onChanged, onPassword, toast 
     if (d.ok) { toast("Staff updated", "success"); onChanged(); } else toast(d.error || "Update failed", "error");
   }
 
+  // Reuses BOTH existing endpoints with no forked logic: persist the phone via
+  // the same PATCH that "Save changes" uses (so the provisioner can read it),
+  // then mint/rotate the code via the existing /portal endpoint. This lets an
+  // existing staff member get a phone + login code in ONE step (no reopen).
   async function portalAction(regenerate: boolean) {
+    if (!phoneValid) { toast("Enter a valid 10-digit mobile number first.", "error"); return; }
     setPortalBusy(true);
+    if (phoneDigits !== (savedPhone || "")) {
+      const pr = await fetch(`/api/admin/staff/${account.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ phone: phoneDigits }) });
+      const pd = await pr.json().catch(() => ({ ok: false }));
+      if (!pd.ok) { setPortalBusy(false); toast(pd.error || "Could not save the phone number.", "error"); return; }
+      setSavedPhone(phoneDigits);
+      onRefresh(); // surface the 🔑 portal badge without closing the modal
+    }
     const res = await fetch(`/api/admin/staff/${account.id}/portal`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ regenerate }) });
     const d = await res.json().catch(() => ({ ok: false }));
     setPortalBusy(false);
@@ -610,20 +628,20 @@ function EditStaffModal({ account, roles, onClose, onChanged, onPassword, toast 
             <span className="label">Portal phone (10-digit)</span>
             <input className="input" inputMode="numeric" placeholder="Leave blank to disable" value={phone} onChange={(e) => setPhone(e.target.value)} />
           </label>
-          {account.phone ? (
+          {phoneValid ? (
             <div className="mt-2">
               {portal?.provisioned && portal.loginCode ? (
                 <CredRow label="Login code (share with staff)" value={portal.loginCode} toast={toast} />
               ) : (
-                <p className="text-xs text-amber-700">No portal login yet. Click “Create / refresh login” after saving the phone.</p>
+                <p className="text-xs text-amber-700">No portal login yet. Click “Create login” to generate the login code.</p>
               )}
               <div className="mt-1 flex flex-wrap gap-2">
-                <button type="button" onClick={() => portalAction(false)} disabled={portalBusy} className="btn btn-secondary text-xs">{portal?.provisioned ? "Refresh status" : "Create login"}</button>
+                <button type="button" onClick={() => portalAction(false)} disabled={portalBusy} className="btn btn-secondary text-xs">{portalBusy ? "Working…" : portal?.provisioned ? "Refresh status" : "Create login"}</button>
                 <button type="button" onClick={() => portalAction(true)} disabled={portalBusy} className="btn btn-secondary text-xs">Regenerate code</button>
               </div>
             </div>
           ) : (
-            <p className="mt-2 text-xs text-muted">Save a phone number first to enable the portal test login.</p>
+            <p className="mt-2 text-xs text-muted">Enter a valid 10-digit phone to enable the portal test login.</p>
           )}
         </div>
 
