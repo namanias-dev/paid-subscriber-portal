@@ -10,6 +10,7 @@ import {
   getWebinarRegistrationIdsByPhone,
   isPaidStatus,
   ensureBuyer,
+  bumpBuyerSessionVersion,
   finalizeCoursePaymentByReference,
 } from "./dataProvider";
 import type {
@@ -412,6 +413,9 @@ export async function acceptPaymentManually(
   if (r.item_type === "course" && r.reference_no) {
     await finalizeCoursePaymentByReference(r.reference_no).catch(() => null);
   }
+  // This buyer's access just changed — invalidate their sessions on all devices so
+  // the new paid access shows up everywhere (not just where the admin clicked).
+  await bumpBuyerSessionVersion(r.phone).catch(() => null);
 
   await markProofAccepted();
   return { ok: true };

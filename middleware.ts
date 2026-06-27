@@ -68,7 +68,9 @@ export async function middleware(req: NextRequest) {
       // user is never logged out mid-use. Logout only happens explicitly or
       // after 7 days of inactivity.
       const res = NextResponse.next();
-      const fresh = await signBuyerToken({ buyer_id: session.buyer_id, phone: session.phone, name: session.name });
+      // Preserve the session/access version so rolling never resets it; the
+      // version is validated DB-fresh in getBuyerSession on each page/API load.
+      const fresh = await signBuyerToken({ buyer_id: session.buyer_id, phone: session.phone, name: session.name, sv: session.sv });
       res.cookies.set(BUYER_COOKIE, fresh, ROLLING_COOKIE_OPTS);
       return res;
     }

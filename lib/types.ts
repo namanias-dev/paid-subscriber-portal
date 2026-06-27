@@ -201,6 +201,15 @@ export interface Buyer {
   login_code: string;
   /** True for an auto-provisioned STAFF test account — excluded from "real student" analytics. */
   is_staff?: boolean;
+  /**
+   * True for a non-paying LEAD account auto-created from the quiz lead form, so
+   * the lead can log back in to retake quizzes and see results. Carries ZERO
+   * entitlements — the central access gate default-denies all paid content.
+   * Cleared automatically if/when the lead ever makes a real payment.
+   */
+  is_lead?: boolean;
+  /** Session/access version — bumped on real access changes to invalidate stale device sessions. */
+  session_version?: number;
   created_at: string;
   updated_at?: string;
 }
@@ -209,6 +218,8 @@ export interface BuyerSessionPayload {
   buyer_id: string;
   phone: string;
   name: string | null;
+  /** Session/access version embedded at sign time; validated against the buyer's current version. */
+  sv?: number;
 }
 
 export interface AdminSessionPayload {

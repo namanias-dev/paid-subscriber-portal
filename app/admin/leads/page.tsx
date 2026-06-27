@@ -17,8 +17,11 @@ function waLink(phone: string, text: string) {
   return `https://wa.me/${withCountry}?text=${encodeURIComponent(text)}`;
 }
 
+interface LeadAccount { id: string; name: string | null; phone: string; login_code: string; created_at: string }
+
 export default function LeadsPage() {
   const { data: leads, loading, reload } = useAdminData<Lead[]>("/api/admin/leads", "leads");
+  const { data: leadAccounts } = useAdminData<LeadAccount[]>("/api/admin/leads/accounts", "leads");
   const { toast } = useToast();
   const [view, setView] = useState<"kanban" | "table">("kanban");
   const [q, setQ] = useState("");
@@ -86,6 +89,34 @@ export default function LeadsPage() {
           <button onClick={() => setView("table")} className="px-3 py-2 text-sm" style={{ background: view === "table" ? "var(--primary)" : "#fff", color: view === "table" ? "#fff" : "var(--ink2)" }}>Table</button>
         </div>
       </div>
+
+      {/* Portal lead accounts (quiz/marketing leads with a login code — never in seats/finance). */}
+      <details className="card mb-4 p-0">
+        <summary className="flex cursor-pointer items-center justify-between gap-2 p-4">
+          <span className="font-semibold">
+            Portal lead accounts
+            <span className="ml-2 pill pill-blue">{leadAccounts?.length ?? 0}</span>
+          </span>
+          <span className="text-xs text-muted">Quiz/marketing leads with a login code · excluded from seats &amp; finance</span>
+        </summary>
+        <div className="border-t border-line p-0">
+          {leadAccounts && leadAccounts.length > 0 ? (
+            <TableShell headers={["Name", "Phone", "Login code", "Created", ""]}>
+              {leadAccounts.map((b) => (
+                <tr key={b.id} className="border-b border-line last:border-0 hover:bg-surface2">
+                  <td className="px-4 py-3 font-medium">{b.name || "—"}</td>
+                  <td className="px-4 py-3">{b.phone}</td>
+                  <td className="px-4 py-3 font-mono text-xs">{b.login_code}</td>
+                  <td className="px-4 py-3 whitespace-nowrap text-xs text-muted">{b.created_at ? new Date(b.created_at).toLocaleDateString("en-IN") : "—"}</td>
+                  <td className="px-4 py-3"><a href={waLink(b.phone, `Hi ${b.name || ""}, this is Naman IAS Academy. `)} target="_blank" rel="noopener noreferrer" className="text-primary">WhatsApp</a></td>
+                </tr>
+              ))}
+            </TableShell>
+          ) : (
+            <p className="p-4 text-sm text-muted">No lead accounts yet.</p>
+          )}
+        </div>
+      </details>
 
       {view === "kanban" ? (
         <div className="no-scrollbar flex gap-3 overflow-x-auto pb-4">

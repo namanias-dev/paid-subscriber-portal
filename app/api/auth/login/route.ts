@@ -47,7 +47,7 @@ export async function POST(req: Request) {
     // 1) Buyer (post-payment) login — the code shown on the receipt / admin Payments.
     const buyer = codeAlnum ? await findBuyerByLogin(phoneDigits, codeAlnum) : null;
     if (buyer) {
-      const token = await signBuyerToken({ buyer_id: buyer.id, phone: buyer.phone, name: buyer.name });
+      const token = await signBuyerToken({ buyer_id: buyer.id, phone: buyer.phone, name: buyer.name, sv: buyer.session_version ?? 0 });
       const res = NextResponse.json({ ok: true, kind: "buyer", redirect: "/portal" });
       res.cookies.set(BUYER_COOKIE, token, COOKIE_OPTS);
       return res;

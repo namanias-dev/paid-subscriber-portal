@@ -869,6 +869,8 @@ export async function setStaffAccess(
     removeStaffGrants(id, "course", [...curCourses].filter((c) => !wantCourses.has(c))),
     removeStaffGrants(id, "webinar", [...curWebinars].filter((w) => !wantWebinars.has(w))),
   ]);
+  // Access changed → refresh this staff member's portal across all their devices.
+  await bumpStaffPortalSession(id);
 }
 
 /** Additively grant the same courses/webinars to MANY staff at once (idempotent). */
@@ -881,6 +883,7 @@ export async function bulkGrantStaffAccess(
   for (const adminId of ids) {
     await addStaffGrants(adminId, "course", add.courseIds || [], grantedBy);
     await addStaffGrants(adminId, "webinar", add.webinarIds || [], grantedBy);
+    await bumpStaffPortalSession(adminId);
   }
   return { staff: ids.length };
 }
@@ -891,11 +894,13 @@ export async function revokeAllStaffAccess(adminId: string): Promise<void> {
   if (!id) return;
   if (demoMode()) {
     _demoStaffGrants = _demoStaffGrants.filter((g) => g.admin_id !== id);
+    await bumpStaffPortalSession(id);
     return;
   }
   const db = getSupabaseAdmin();
   if (!db) return;
   await db.from("staff_access_grants").delete().eq("admin_id", id);
+  await bumpStaffPortalSession(id);
 }
 
 function genPassword(): string {
@@ -2060,11 +2065,148 @@ export async function ensureBuyer(phone: string, name?: string | null): Promise<
   const p = (phone || "").trim();
   if (!p) return null;
   const buyer = await ensureBuyerRow(p, name);
-  // UNIFIED IDENTITY: every paying/registered person is also a first-class student
-  // so they ALWAYS surface in Students & Enrollments. Idempotent (keyed by phone),
-  // and the student carries the SAME login code as access code (one code per person).
-  if (buyer) await ensureStudentForCustomer(p, name, buyer.login_code).catch(() => null);
+  if (buyer) {
+    // Conversion: a former quiz LEAD with a confirmed PAID purchase is no longer a
+    // lead — drop the marker AND bump their session version so every device that
+    // was logged in as a lead re-authenticates and sees their new paid access.
+    // (Gated on an actual paid purchase so a FREE webinar registration, which also
+    // routes through ensureBuyer, never mis-clears the lead marker.)
+    if (buyer.is_lead) {
+      const paid = await getBuyerPurchases(p);
+      if (paid.length > 0) {
+        await markBuyerLead(buyer.id, false);
+        buyer.is_lead = false;
+        await bumpBuyerSessionVersion(p);
+      }
+    }
+    // UNIFIED IDENTITY: every paying/registered person is also a first-class student
+    // so they ALWAYS surface in Students & Enrollments. Idempotent (keyed by phone),
+    // and the student carries the SAME login code as access code (one code per person).
+    await ensureStudentForCustomer(p, name, buyer.login_code).catch(() => null);
+  }
   return buyer;
+}
+
+/**
+ * Current session/access version for a buyer. Returns null when it can't be
+ * determined (no DB / not found) so callers can FAIL-OPEN — we never mass-logout
+ * users because of an infra hiccup.
+ */
+export async function getBuyerSessionVersion(buyerId: string): Promise<number | null> {
+  const id = (buyerId || "").trim();
+  if (!id) return null;
+  if (demoMode()) {
+    const b = demoBuyers().find((x) => x.id === id);
+    return b ? (b.session_version ?? 0) : null;
+  }
+  const db = getSupabaseAdmin();
+  if (!db) return null;
+  try {
+    const { data, error } = await db.from("buyers").select("session_version").eq("id", id).maybeSingle();
+    if (error || !data) return null;
+    return (data as { session_version: number | null }).session_version ?? 0;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Bump a buyer's session/access version — TARGETED cross-device invalidation.
+ * Call ONLY on a real access/role change (lead->paid, admin payment accept, staff
+ * access change, login-code regen). Every existing session token for this phone
+ * then mismatches and is forced to re-authenticate; no other user is affected.
+ */
+export async function bumpBuyerSessionVersion(phone: string): Promise<void> {
+  const p = (phone || "").trim();
+  if (!p) return;
+  if (demoMode()) {
+    const b = demoBuyers().find((x) => x.phone === p);
+    if (b) b.session_version = (b.session_version ?? 0) + 1;
+    return;
+  }
+  const db = getSupabaseAdmin();
+  if (!db) {
+    const b = demoBuyers().find((x) => x.phone === p);
+    if (b) b.session_version = (b.session_version ?? 0) + 1;
+    return;
+  }
+  try {
+    const { data } = await db.from("buyers").select("id,session_version").eq("phone", p).maybeSingle();
+    if (!data) return;
+    const row = data as { id: string; session_version: number | null };
+    await db.from("buyers").update({ session_version: (row.session_version ?? 0) + 1, updated_at: new Date().toISOString() }).eq("id", row.id);
+  } catch {
+    /* best-effort — never throw on housekeeping */
+  }
+}
+
+/** Bump the portal session of the buyer linked to a staff member's phone (if any). */
+export async function bumpStaffPortalSession(adminId: string): Promise<void> {
+  try {
+    const accounts = await getAdminAccounts();
+    const acc = accounts.find((a) => a.id === adminId);
+    if (acc?.phone) await bumpBuyerSessionVersion(acc.phone);
+  } catch {
+    /* best-effort */
+  }
+}
+
+/** Best-effort toggle of the lead marker. No-op if the `is_lead` column isn't present yet. */
+async function markBuyerLead(id: string, value: boolean): Promise<void> {
+  if (demoMode()) {
+    const b = demoBuyers().find((x) => x.id === id);
+    if (b) b.is_lead = value;
+    return;
+  }
+  const db = getSupabaseAdmin();
+  if (!db) {
+    const b = demoBuyers().find((x) => x.id === id);
+    if (b) b.is_lead = value;
+    return;
+  }
+  try {
+    await db.from("buyers").update({ is_lead: value, updated_at: new Date().toISOString() }).eq("id", id);
+  } catch { /* column may not exist yet — best-effort, never fatal */ }
+}
+
+/**
+ * Create-or-reuse a non-paying LEAD account for a quiz-taker's phone so they can
+ * log back in (phone + login code) to retake quizzes and see results. Reuses the
+ * SAME buyer/login-code primitive as paying users — deduped by phone:
+ *   • existing buyer (paid OR prior lead) → returned AS-IS (code never regenerated,
+ *     a real buyer's flags are never altered)
+ *   • new phone → fresh buyer + unique login code, marked is_lead.
+ * Deliberately does NOT create a student row — that happens lazily on first login
+ * (so the Students table isn't polluted by leads who never return). Idempotent.
+ * Carries ZERO entitlements: the central access gate default-denies all paid content.
+ */
+export async function ensureLeadBuyer(phone: string, name?: string | null): Promise<Buyer | null> {
+  const n = normalizeIndianMobile(phone);
+  if (!n.ok || !n.digits10) return null;
+  const p = n.digits10;
+  const existing = await getBuyerByPhone(p);
+  if (existing) return existing;
+  const created = await ensureBuyerRow(p, name);
+  if (created) { await markBuyerLead(created.id, true); created.is_lead = true; }
+  return created;
+}
+
+/**
+ * All non-paying LEAD accounts (is_lead = true) for admin visibility. These are
+ * quiz/marketing leads with a portal login code; they carry zero entitlements and
+ * never appear in seats/finance (those derive from payments/enrolments). A lead
+ * that converts to paid is dropped from this list automatically (flag cleared).
+ */
+export async function getLeadBuyers(): Promise<Buyer[]> {
+  if (demoMode()) return demoBuyers().filter((b) => b.is_lead);
+  const db = getSupabaseAdmin();
+  if (!db) return [];
+  try {
+    const { data } = await db.from("buyers").select("*").eq("is_lead", true).order("created_at", { ascending: false });
+    return (data as Buyer[]) ?? [];
+  } catch {
+    return [];
+  }
 }
 
 async function ensureBuyerRow(p: string, name?: string | null): Promise<Buyer | null> {
@@ -2157,6 +2299,8 @@ export async function regenerateStaffPortalCode(phone: string, name?: string | n
     return b ?? null;
   }
   const { data } = await db.from("buyers").update({ login_code: code, updated_at: updatedAt }).eq("phone", p).select().maybeSingle();
+  // A new code invalidates the old one — bump so any device on the old session re-auths.
+  await bumpBuyerSessionVersion(p);
   return (data as Buyer) ?? (await getBuyerByPhone(p));
 }
 
@@ -3370,6 +3514,45 @@ export async function getAttemptsByUser(userId: string): Promise<QuizAttempt[]> 
   if (!db) return [];
   const { data } = await db.from("quiz_attempts").select("*").eq("user_id", userId).order("created_at", { ascending: false });
   return (data as QuizAttempt[]) ?? [];
+}
+
+/** All attempts a guest made with this mobile number (pre-login lead history). */
+export async function getAttemptsByGuestMobile(phone: string): Promise<QuizAttempt[]> {
+  const p = (phone || "").trim();
+  if (!p) return [];
+  if (demoMode()) return mock.quizAttempts.filter((a) => a.guest_mobile === p);
+  const db = getSupabaseAdmin();
+  if (!db) return [];
+  const { data } = await db.from("quiz_attempts").select("*").eq("guest_mobile", p).order("created_at", { ascending: false });
+  return (data as QuizAttempt[]) ?? [];
+}
+
+/**
+ * Claim a returning user's pre-login GUEST attempts (made with `phone`) by
+ * attaching them to their canonical student id. This unifies a lead's quiz
+ * history the moment they log in, so resume/results/retakes all work through the
+ * normal `user_id` path. Non-destructive (only sets user_id where it was null)
+ * and idempotent. Returns the number of attempts claimed.
+ */
+export async function claimGuestAttempts(phone: string, studentId: string): Promise<number> {
+  const p = (phone || "").trim();
+  if (!p || !studentId) return 0;
+  if (demoMode()) {
+    let n = 0;
+    for (const a of mock.quizAttempts) {
+      if (!a.user_id && a.guest_mobile === p) { a.user_id = studentId; n++; }
+    }
+    return n;
+  }
+  const db = getSupabaseAdmin();
+  if (!db) return 0;
+  const { data } = await db
+    .from("quiz_attempts")
+    .update({ user_id: studentId, updated_at: new Date().toISOString() })
+    .eq("guest_mobile", p)
+    .is("user_id", null)
+    .select("id");
+  return (data as { id: string }[] | null)?.length ?? 0;
 }
 export async function addAttempt(input: Partial<QuizAttempt> & { quiz_id: string }): Promise<QuizAttempt> {
   const ts = new Date().toISOString();

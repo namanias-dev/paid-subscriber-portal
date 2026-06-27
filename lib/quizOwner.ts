@@ -14,8 +14,15 @@ export async function ownsAttempt(attempt: QuizAttempt): Promise<boolean> {
     const learner = await resolveLearner();
     return !!learner && learner.studentId === attempt.user_id;
   }
-  if (attempt.guest_session_id) {
-    return cookies().get(QUIZ_GUEST_COOKIE)?.value === attempt.guest_session_id;
+  // Guest attempt: matched by the browser cookie...
+  if (attempt.guest_session_id && cookies().get(QUIZ_GUEST_COOKIE)?.value === attempt.guest_session_id) {
+    return true;
+  }
+  // ...or, for a returning LEAD logged in on another device, by their own phone.
+  // (A logged-in learner may only ever match attempts made with THEIR number.)
+  if (attempt.guest_mobile) {
+    const learner = await resolveLearner();
+    if (learner?.phone && learner.phone === attempt.guest_mobile) return true;
   }
   return false;
 }

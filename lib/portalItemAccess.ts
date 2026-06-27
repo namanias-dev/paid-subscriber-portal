@@ -3,6 +3,7 @@ import {
   getActiveStaffGrantsByPhone,
   getWebinarBySlug,
   getCourseBySlug,
+  getWebinarRegistrationIdsByPhone,
 } from "./dataProvider";
 import type { Payment } from "./types";
 
@@ -58,6 +59,17 @@ export async function resolvePortalItemAccess(reference: string, phone: string):
     const course = await getCourseBySlug(ref);
     if (course && staff.courseIds.includes(course.id)) {
       return { ok: true, itemType: "course", slug: course.slug, purchase: null, isStaff: true, title: course.title };
+    }
+  }
+
+  // 3) FREE webinar by registration — genuinely-free content gated on an is-free
+  // (price ≤ 0) + registration check, NOT the paid default-deny. Lets leads/free
+  // users open the free webinars they registered for. Paid items are untouched.
+  const webinar = await getWebinarBySlug(ref);
+  if (webinar && (webinar.price ?? 0) <= 0) {
+    const regIds = await getWebinarRegistrationIdsByPhone(ph);
+    if (regIds.has(webinar.id)) {
+      return { ok: true, itemType: "webinar", slug: webinar.slug, purchase: null, isStaff: false, title: webinar.title };
     }
   }
 

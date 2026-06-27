@@ -523,6 +523,12 @@ create table if not exists public.buyers (
   login_code text unique not null,
   -- True for auto-provisioned STAFF test accounts (excluded from real-student analytics).
   is_staff boolean not null default false,
+  -- True for non-paying LEAD accounts auto-created from the quiz lead form (zero
+  -- entitlements; cleared if the lead ever pays). See migrations/2026-lead-accounts.sql.
+  is_lead boolean not null default false,
+  -- Per-user session/access version for targeted cross-device invalidation: embedded
+  -- in the buyer JWT and bumped on real access changes. See migrations/2026-session-version.sql.
+  session_version integer not null default 0,
   created_at timestamptz default now(),
   updated_at timestamptz default now()
 );

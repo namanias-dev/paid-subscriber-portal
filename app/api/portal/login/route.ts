@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { findBuyerByLogin, rateLimited } from "@/lib/dataProvider";
+import { findBuyerByLogin, rateLimited, ensureStudentForCustomer, claimGuestAttempts } from "@/lib/dataProvider";
 import { signBuyerToken } from "@/lib/auth";
 import { BUYER_COOKIE, SESSION_MAX_AGE } from "@/lib/config";
 import { normalizeIndianMobile } from "@/lib/phone";
@@ -35,7 +35,19 @@ export async function POST(req: Request) {
       );
     }
 
-    const token = await signBuyerToken({ buyer_id: buyer.id, phone: buyer.phone, name: buyer.name });
+    // Unify quiz history on login: ensure a canonical student row for this phone,
+    // then claim any pre-login GUEST attempts made with this number so the lead's
+    // dashboard, resume and retakes all work through the normal user_id path.
+    // Skipped for STAFF test accounts (deliberately buyer-only — kept out of
+    // real-student analytics). Non-fatal — login never fails on housekeeping.
+    if (!buyer.is_staff) {
+      try {
+        const student = await ensureStudentForCustomer(buyer.phone, buyer.name, buyer.login_code);
+        if (student?.id) await claimGuestAttempts(buyer.phone, student.id);
+      } catch { /* best-effort */ }
+    }
+
+    const token = await signBuyerToken({ buyer_id: buyer.id, phone: buyer.phone, name: buyer.name, sv: buyer.session_version ?? 0 });
     const res = NextResponse.json({ ok: true });
     res.cookies.set(BUYER_COOKIE, token, {
       httpOnly: true,
