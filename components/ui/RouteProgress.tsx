@@ -16,11 +16,21 @@ export default function RouteProgress() {
   const [visible, setVisible] = useState(false);
   const rampRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const hideRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const safetyRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const activeRef = useRef(false);
 
   const clearTimers = () => {
     if (rampRef.current) { clearInterval(rampRef.current); rampRef.current = null; }
     if (hideRef.current) { clearTimeout(hideRef.current); hideRef.current = null; }
+    if (safetyRef.current) { clearTimeout(safetyRef.current); safetyRef.current = null; }
+  };
+
+  const finish = () => {
+    if (!activeRef.current) return;
+    activeRef.current = false;
+    clearTimers();
+    setWidth(100);
+    hideRef.current = setTimeout(() => { setVisible(false); setWidth(0); }, 280);
   };
 
   const start = () => {
@@ -31,14 +41,9 @@ export default function RouteProgress() {
     rampRef.current = setInterval(() => {
       setWidth((w) => (w < 88 ? w + Math.max(0.4, (92 - w) * 0.06) : w));
     }, 180);
-  };
-
-  const finish = () => {
-    if (!activeRef.current) return;
-    activeRef.current = false;
-    clearTimers();
-    setWidth(100);
-    hideRef.current = setTimeout(() => { setVisible(false); setWidth(0); }, 280);
+    // Safety: never leave the bar hanging if a navigation is cancelled or only
+    // changes the query string (no pathname commit to complete it).
+    safetyRef.current = setTimeout(() => finish(), 8000);
   };
 
   // Begin on any internal, same-tab link click.
