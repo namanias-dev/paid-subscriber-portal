@@ -1,15 +1,13 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-
 export default function PortalLogoutButton() {
-  const router = useRouter();
   async function logout() {
     try {
       await fetch("/api/portal/logout", { method: "POST" });
     } finally {
-      router.push("/portal/login");
-      router.refresh();
+      // Hard navigation: fully drops the in-memory router cache so no stale
+      // "logged in / registered" RSC payload survives the logout.
+      window.location.replace("/portal/login");
     }
   }
   return (
