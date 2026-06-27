@@ -8,7 +8,7 @@
  */
 import { normalizeIndianMobile } from "../phone";
 import { renderTemplate, validateBody } from "./templates";
-import { getTemplate, getSettings, insertQueuedLog, updateLog, countSentSince, recentSameTrigger } from "./store";
+import { getTemplate, getSettings, insertQueuedLog, updateLog, countSentSince, recentSameTemplate } from "./store";
 import { sendViaGateway } from "./gateway";
 import { gatewayConfigured, smsEnvEnabled, loginUrlForTemplate, SMS_DEFAULT_SENDER_ID, SMS_DEFAULT_ROUTE } from "./config";
 import type { SmsLogStatus } from "./types";
@@ -94,6 +94,8 @@ export async function sendSms(input: SendSmsInput): Promise<SendSmsResult> {
   if (!t) return { ok: false, skipped: "template_missing" };
   if (!(t.status === "active" || t.status === "approved")) return { ok: false, skipped: "not_approved" };
   if (!t.gateway_template_id) return { ok: false, skipped: "no_dlt_id" };
+  // No promo route: promotional templates may never go to the "all" audience.
+  if (t.message_type === "promotional" && input.audienceType === "all") return { ok: false, skipped: "promotional_all_blocked" };
 
   // 3. mobile
   const n = normalizeIndianMobile(input.mobile);
@@ -113,11 +115,14 @@ export async function sendSms(input: SendSmsInput): Promise<SendSmsResult> {
     if (now < hmToMin(settings.windowStart) || now > hmToMin(settings.windowEnd)) return { ok: false, skipped: "outside_window" };
   }
 
-  // 6. caps + anti-spam
+  // 6. caps + anti-spam (HARD — bulk runs sequentially so each prior send in the
+  // batch is already counted/logged before the next cap check below).
   const since = istMidnightISO();
   if (settings.dailyCap > 0 && (await countSentSince(since)) >= settings.dailyCap) return { ok: false, skipped: "daily_cap" };
   if (settings.perMobileDailyCap > 0 && (await countSentSince(since, normalized)) >= settings.perMobileDailyCap) return { ok: false, skipped: "per_mobile_cap" };
-  if (input.triggerEvent && !input.allowRecentOverride && (await recentSameTrigger(normalized, input.triggerEvent, SAME_TRIGGER_WINDOW_MIN))) {
+  // 30-min same-template guard applies to BOTH auto and manual sends. Manual
+  // callers may pass allowRecentOverride to deliberately re-send.
+  if (!input.allowRecentOverride && (await recentSameTemplate(normalized, input.templateId, SAME_TRIGGER_WINDOW_MIN))) {
     return { ok: false, skipped: "recent_duplicate" };
   }
 

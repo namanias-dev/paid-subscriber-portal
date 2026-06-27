@@ -37,7 +37,9 @@ export const DEFAULT_SETTINGS = (): SmsSettings => ({
   windowStart: "10:00",
   windowEnd: "21:00",
   t19OffsetMinutes: 240,
-  t19FallbackAllRegistered: true,
+  // Attendees-only by default: if attendance is unknown for a webinar, T19 sends
+  // to NOBODY rather than blasting all registered. Flip on per preference.
+  t19FallbackAllRegistered: false,
 });
 
 // ---------------------------------------------------------------------------
@@ -275,16 +277,20 @@ export async function countSentSince(sinceISO: string, normalizedMobile?: string
   } catch { return 0; }
 }
 
-/** Recent send to the same mobile+trigger within N minutes (anti-spam window). */
-export async function recentSameTrigger(normalizedMobile: string, trigger: string, withinMinutes: number): Promise<boolean> {
+/**
+ * HARD anti-spam window: has the SAME template gone to this mobile within N
+ * minutes (any non-failed attempt)? Applies to auto AND manual sends so a
+ * recipient is never hit twice with the same message in quick succession.
+ */
+export async function recentSameTemplate(normalizedMobile: string, templateId: string, withinMinutes: number): Promise<boolean> {
   const sinceISO = new Date(Date.now() - withinMinutes * 60000).toISOString();
   const db = getSupabaseAdmin();
   if (!db) {
-    return demo().logs.some((l) => l.normalized_mobile === normalizedMobile && l.trigger_event === trigger && ["SENT", "DELIVERED", "QUEUED"].includes(l.status) && l.created_at >= sinceISO);
+    return demo().logs.some((l) => l.normalized_mobile === normalizedMobile && l.template_id === templateId && ["SENT", "DELIVERED", "QUEUED"].includes(l.status) && l.created_at >= sinceISO);
   }
   try {
     const { count } = await db.from("sms_logs").select("id", { count: "exact", head: true })
-      .eq("normalized_mobile", normalizedMobile).eq("trigger_event", trigger)
+      .eq("normalized_mobile", normalizedMobile).eq("template_id", templateId)
       .gte("created_at", sinceISO).in("status", ["SENT", "DELIVERED", "QUEUED"]);
     return (count || 0) > 0;
   } catch { return false; }

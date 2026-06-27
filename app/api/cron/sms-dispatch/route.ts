@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getPayments, getWebinars } from "@/lib/dataProvider";
 import { resolveAudience, type AudienceSpec } from "@/lib/sms/audiences";
-import { getRule } from "@/lib/sms/store";
+import { getRule, getSettings } from "@/lib/sms/store";
 import { sendSms, istMinutesOfDay } from "@/lib/sms/service";
 import { normalizeIndianMobile } from "@/lib/phone";
 import type { SmsAutoRule } from "@/lib/sms/types";
@@ -60,6 +60,7 @@ async function run(req: Request) {
 
   try {
     const webinars = await getWebinars();
+    const settings = await getSettings();
 
     // ---- delayed payment nudges (T1 pending, T6 abandoned) ----
     const payments = await getPayments();
@@ -135,12 +136,19 @@ async function run(req: Request) {
         result.starting_soon = (result.starting_soon || 0) + await sendToAudience(soon, { type: "webinar_registered", webinarId: w.id, webinarSlug: w.slug }, w.id, today);
       }
 
-      // post-webinar T19: end + offset elapsed (within window via enforceWindow)
+      // post-webinar T19: end + offset elapsed (within window via enforceWindow).
+      // Attendees-only by default; fall back to all-registered ONLY when the
+      // setting is on AND there are no tracked attendees (else send to nobody).
       const t19 = await getRule("post_webinar_thankyou");
       if (t19?.enabled) {
-        const offsetMs = (t19.offset_minutes ?? 240) * 60000;
+        const offsetMs = (t19.offset_minutes ?? settings.t19OffsetMinutes ?? 240) * 60000;
         if (Date.now() >= endMs + offsetMs && Date.now() < endMs + offsetMs + 24 * 3600 * 1000) {
-          result.post_webinar = (result.post_webinar || 0) + await sendToAudience(t19, { type: "webinar_attendees", webinarId: w.id, webinarSlug: w.slug }, w.id, istDateKeyOf(new Date(endMs).toISOString()));
+          let spec: AudienceSpec = { type: "webinar_attendees", webinarId: w.id, webinarSlug: w.slug };
+          if (settings.t19FallbackAllRegistered) {
+            const attendees = await resolveAudience(spec);
+            if (attendees.length === 0) spec = { type: "webinar_registered", webinarId: w.id, webinarSlug: w.slug };
+          }
+          result.post_webinar = (result.post_webinar || 0) + await sendToAudience(t19, spec, w.id, istDateKeyOf(new Date(endMs).toISOString()));
         }
       }
     }

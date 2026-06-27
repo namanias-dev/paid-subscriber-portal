@@ -169,11 +169,16 @@ function SendTab({ meta }: { meta: Meta | null }) {
   const [stage, setStage] = useState("");
   const [preview, setPreview] = useState<any>(null);
   const [busy, setBusy] = useState(false);
+  const [allowOverride, setAllowOverride] = useState(false);
 
   useEffect(() => { fetch("/api/admin/sms/templates").then((r) => r.json()).then((d) => d.ok && setTemplates(d.templates)).catch(() => {}); }, []);
 
   const sendable = templates.filter((t) => (t.status === "active" || t.status === "approved") && t.gateway_template_id);
   const needsWebinar = audType.startsWith("webinar_");
+  const selectedTpl = templates.find((t) => t.id === templateId);
+  const isPromo = selectedTpl?.message_type === "promotional";
+  // Promotional templates have no promo route -> warm audiences only, never "all".
+  useEffect(() => { if (isPromo && audType === "all") { setAudType("person"); setPreview(null); } }, [isPromo, audType]);
 
   function buildAudience() {
     return { type: audType, mobile, name, webinarSlug: needsWebinar ? webinarSlug : null, source: audType === "leads" ? source : null, stage: audType === "leads" ? stage : null };
@@ -191,7 +196,7 @@ function SendTab({ meta }: { meta: Meta | null }) {
     if (!preview) { await doPreview(); return; }
     if (!confirm(`Send "${templates.find((t) => t.id === templateId)?.name}" to ${preview.count} recipient(s)?`)) return;
     setBusy(true);
-    const r = await fetch("/api/admin/sms/send", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ audience: buildAudience(), templateId }) }).then((x) => x.json());
+    const r = await fetch("/api/admin/sms/send", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ audience: buildAudience(), templateId, allowRecentOverride: allowOverride }) }).then((x) => x.json());
     setBusy(false);
     if (r.ok) { toast(`Sent ${r.sent}/${r.requested}. ${Object.keys(r.skipped || {}).length ? "Skipped: " + Object.entries(r.skipped).map(([k, v]) => `${k}:${v}`).join(", ") : ""}`, "success"); setPreview(null); }
     else toast(r.error || "Send failed", "error");
@@ -213,8 +218,9 @@ function SendTab({ meta }: { meta: Meta | null }) {
             <optgroup label="Direct"><option value="person">A specific person</option></optgroup>
             <optgroup label="Payments"><option value="payment_pending">Pending</option><option value="payment_failed">Failed</option><option value="payment_paid">Paid</option><option value="payment_abandoned">Abandoned</option><option value="payment_all">All payments</option></optgroup>
             <optgroup label="Webinar"><option value="webinar_registered">Registered</option><option value="webinar_not_registered">NOT registered</option><option value="webinar_attendees">Attended</option><option value="webinar_no_show">No-show</option></optgroup>
-            <optgroup label="People"><option value="leads">Leads</option><option value="users_with_mobile">All users with mobile</option><option value="all">Everyone (guarded)</option></optgroup>
+            <optgroup label="People"><option value="leads">Leads</option><option value="users_with_mobile">All users with mobile</option>{!isPromo && <option value="all">Everyone (guarded)</option>}</optgroup>
           </select>
+          {isPromo && <p className="mt-1 text-xs text-amber-700">Promotional template — warm audiences only (leads / users / webinar). The All audience is disabled (no promo route).</p>}
         </Field>
 
         {audType === "person" && (
@@ -238,9 +244,11 @@ function SendTab({ meta }: { meta: Meta | null }) {
           </div>
         )}
 
+        <label className="flex items-center gap-2 text-xs text-muted"><input type="checkbox" checked={allowOverride} onChange={(e) => setAllowOverride(e.target.checked)} /> Override 30-min re-send guard (only if you really mean to re-send)</label>
+
         <div className="flex gap-2 pt-1">
           <button onClick={doPreview} disabled={busy} className="btn btn-secondary">{busy ? "…" : "Preview"}</button>
-          <button onClick={doSend} disabled={busy || !templateId} className="btn btn-primary"><Send size={15} /> {preview ? `Send to ${preview.count}` : "Preview & send"}</button>
+          <button onClick={doSend} disabled={busy || !templateId || !!preview?.blocked} className="btn btn-primary"><Send size={15} /> {preview ? `Send to ${preview.count}` : "Preview & send"}</button>
         </div>
       </div>
 
@@ -251,9 +259,10 @@ function SendTab({ meta }: { meta: Meta | null }) {
             <div className="flex flex-wrap gap-2 text-xs">
               <span className="pill pill-blue">{preview.count} recipients</span>
               <span className="pill pill-gray">{preview.audienceLabel}</span>
-              {preview.promotionalForCold && <span className="pill pill-amber">Promo route + consent for cold numbers</span>}
+              {preview.promotional && <span className="pill pill-amber">Promotional · warm only · route 12</span>}
               {preview.willExceedDaily && <span className="pill pill-amber">Exceeds remaining daily cap ({preview.remainingDaily})</span>}
             </div>
+            {preview.blocked && <p className="text-xs text-danger">{preview.blockedReason}</p>}
             {preview.preview ? (
               <div className="rounded-xl bg-surface p-3 text-sm">
                 <p className="whitespace-pre-wrap">{preview.preview.text}</p>

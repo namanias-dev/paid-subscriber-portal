@@ -23,9 +23,13 @@ export function gatewayConfigured(): boolean {
   return !!(env("SMS_API_AUTH_KEY") && env("SMS_API_USERNAME") && env("SMS_API_PASSWORD") && SMS_API_BASE_URL);
 }
 
-/** Hard kill switch from env (default ON unless explicitly "false"). */
+/**
+ * Hard kill switch from env. Defaults to OFF — sending is disabled unless
+ * SMS_ENABLED is explicitly "true" (set it only after a DLT id is pasted and one
+ * manual test has passed).
+ */
 export function smsEnvEnabled(): boolean {
-  return env("SMS_ENABLED") !== "false";
+  return env("SMS_ENABLED") === "true";
 }
 
 export function envDailyCap(): number {

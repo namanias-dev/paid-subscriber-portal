@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { requirePermission } from "@/lib/adminGuard";
 import { resolveAudience, AUDIENCE_OPTIONS, type AudienceSpec } from "@/lib/sms/audiences";
 import { previewSms } from "@/lib/sms/service";
-import { getSettings, countSentSince } from "@/lib/sms/store";
+import { getSettings, countSentSince, getTemplate } from "@/lib/sms/store";
 
 export const dynamic = "force-dynamic";
 
@@ -22,6 +22,9 @@ export async function POST(req: Request) {
   const recipients = await resolveAudience(spec);
   const settings = await getSettings();
   const opt = AUDIENCE_OPTIONS.find((o) => o.type === spec.type);
+  const tpl = templateId ? await getTemplate(templateId) : null;
+  const promotional = tpl?.message_type === "promotional";
+  const blocked = promotional && spec.type === "all";
 
   let preview: { text: string; ok: boolean; errors: string[]; warnings: string[]; missing: string[]; length: number; segments: number } | null = null;
   if (templateId && recipients[0]) {
@@ -35,9 +38,11 @@ export async function POST(req: Request) {
 
   return NextResponse.json({
     ok: true,
-    count: recipients.length,
+    count: blocked ? 0 : recipients.length,
     audienceLabel: opt?.label || spec.type,
-    promotionalForCold: !!opt?.promotionalForCold,
+    promotional,
+    blocked,
+    blockedReason: blocked ? "Promotional templates can't target the All audience (no promo route). Choose a warm segment." : null,
     perMobileCap: settings.perMobileDailyCap || null,
     dailyCap: settings.dailyCap || null,
     remainingDaily,

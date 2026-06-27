@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requirePermission, requireSuperAdmin, currentAdminId } from "@/lib/adminGuard";
 import { resolveAudience, type AudienceSpec } from "@/lib/sms/audiences";
 import { sendSms } from "@/lib/sms/service";
+import { getTemplate } from "@/lib/sms/store";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -19,6 +20,13 @@ export async function POST(req: Request) {
   const templateId = body.templateId as string;
   const allowRecentOverride = !!body.allowRecentOverride;
   if (!spec?.type || !templateId) return NextResponse.json({ ok: false, error: "Missing template or audience" }, { status: 400 });
+
+  // No promo route: promotional templates (T12/T13) are warm-audience only and
+  // can never be sent to the guarded "all" audience.
+  const tpl = await getTemplate(templateId);
+  if (tpl?.message_type === "promotional" && spec.type === "all") {
+    return NextResponse.json({ ok: false, error: "Promotional templates can't be sent to the All audience without a promo route. Pick a warm segment (leads / users / webinar)." }, { status: 400 });
+  }
 
   const recipients = await resolveAudience(spec);
   const isBulk = recipients.length > 1;
