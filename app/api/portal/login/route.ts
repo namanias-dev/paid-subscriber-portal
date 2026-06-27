@@ -48,7 +48,7 @@ export async function POST(req: Request) {
     }
 
     const token = await signBuyerToken({ buyer_id: buyer.id, phone: buyer.phone, name: buyer.name, sv: buyer.session_version ?? 0 });
-    const res = NextResponse.json({ ok: true });
+    const res = NextResponse.json({ ok: true, name: buyer.name });
     res.cookies.set(BUYER_COOKIE, token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",

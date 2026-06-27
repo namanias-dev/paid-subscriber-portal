@@ -3,6 +3,8 @@ import { Sora, Inter } from "next/font/google";
 import "./globals.css";
 import { ToastProvider } from "@/components/ui/Toast";
 import DemoBanner from "@/components/layout/DemoBanner";
+import RouteProgress from "@/components/ui/RouteProgress";
+import WelcomeOverlay from "@/components/ui/WelcomeOverlay";
 
 const sora = Sora({
   subsets: ["latin"],
@@ -35,8 +37,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en" className={`${sora.variable} ${inter.variable}`}>
       <body>
         <ToastProvider>
+          <RouteProgress />
           <DemoBanner />
           {children}
+          <WelcomeOverlay />
         </ToastProvider>
       </body>
     </html>

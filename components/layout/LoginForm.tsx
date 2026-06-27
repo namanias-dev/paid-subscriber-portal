@@ -3,15 +3,14 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Smartphone, KeyRound, Lock } from "lucide-react";
-import { useToast } from "@/components/ui/Toast";
 import { isDemoMode } from "@/lib/config";
+import { triggerWelcome } from "@/lib/welcome";
 
 type Mode = "login" | "forgot";
 type Factor = "ref" | "date";
 
 export default function LoginForm() {
   const router = useRouter();
-  const { toast } = useToast();
 
   const [mode, setMode] = useState<Mode>("login");
   const [phone, setPhone] = useState("");
@@ -40,7 +39,7 @@ export default function LoginForm() {
       });
       const data = await res.json();
       if (data.ok) {
-        toast("Welcome back! 🎯", "success");
+        triggerWelcome(data.student?.name ?? data.name);
         router.push(data.redirect || "/dashboard");
         router.refresh();
       } else {

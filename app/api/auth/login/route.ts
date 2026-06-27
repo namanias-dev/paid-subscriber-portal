@@ -48,7 +48,7 @@ export async function POST(req: Request) {
     const buyer = codeAlnum ? await findBuyerByLogin(phoneDigits, codeAlnum) : null;
     if (buyer) {
       const token = await signBuyerToken({ buyer_id: buyer.id, phone: buyer.phone, name: buyer.name, sv: buyer.session_version ?? 0 });
-      const res = NextResponse.json({ ok: true, kind: "buyer", redirect: "/portal" });
+      const res = NextResponse.json({ ok: true, kind: "buyer", redirect: "/portal", name: buyer.name });
       res.cookies.set(BUYER_COOKIE, token, COOKIE_OPTS);
       return res;
     }

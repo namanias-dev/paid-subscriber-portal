@@ -843,3 +843,97 @@ a {
     display: none !important;
   }
 }
+
+/* ============================================================
+   Route progress indicator (Task 7) — GPU-friendly width/opacity.
+   ============================================================ */
+.nsa-progress {
+  position: fixed;
+  inset: 0 0 auto 0;
+  z-index: 200;
+  height: 3px;
+  pointer-events: none;
+}
+.nsa-progress__bar {
+  height: 100%;
+  background: linear-gradient(90deg, var(--primary, #0057ff), #4f8bff 70%, var(--ca-gold-bright, #f4c430));
+  box-shadow: 0 0 10px rgba(0, 87, 255, 0.5);
+  border-radius: 0 2px 2px 0;
+  transition: width 0.22s ease;
+  will-change: width;
+}
+
+/* ============================================================
+   Per-login welcome overlay (Task 6) — pure CSS, GPU-accelerated.
+   ============================================================ */
+.nsa-welcome {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  background:
+    radial-gradient(1200px 600px at 50% -10%, rgba(0, 87, 255, 0.16), transparent 60%),
+    radial-gradient(900px 500px at 50% 120%, rgba(244, 196, 48, 0.12), transparent 60%),
+    rgba(248, 250, 253, 0.86);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  animation: nsaWelcomeIn 0.45s ease both;
+}
+.nsa-welcome--leaving {
+  animation: nsaWelcomeOut 0.42s ease forwards;
+}
+.nsa-welcome__card {
+  text-align: center;
+  perspective: 800px;
+  transform: translateZ(0);
+}
+.nsa-welcome__logo {
+  display: inline-grid;
+  place-items: center;
+  padding: 1.1rem;
+  border-radius: 1.75rem;
+  background: rgba(255, 255, 255, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  box-shadow: 0 30px 60px -24px rgba(8, 20, 50, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  transform-style: preserve-3d;
+  animation: nsaLogoAssemble 0.9s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.nsa-welcome__hi {
+  margin-top: 1.4rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink2, #475569);
+  animation: nsaWelcomeRise 0.7s 0.18s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.nsa-welcome__name {
+  margin-top: 0.2rem;
+  font-family: var(--font-sora), system-ui, sans-serif;
+  font-size: clamp(1.8rem, 6vw, 2.8rem);
+  font-weight: 800;
+  line-height: 1.05;
+  color: var(--navy, #0a1a3f);
+  animation: nsaWelcomeRise 0.7s 0.3s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@keyframes nsaWelcomeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes nsaWelcomeOut { from { opacity: 1; } to { opacity: 0; } }
+@keyframes nsaLogoAssemble {
+  0% { opacity: 0; transform: translateY(14px) rotateX(38deg) scale(0.78); }
+  60% { opacity: 1; }
+  100% { opacity: 1; transform: translateY(0) rotateX(0deg) scale(1); }
+}
+@keyframes nsaWelcomeRise {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .nsa-welcome,
+  .nsa-welcome--leaving { animation: nsaWelcomeIn 0.2s ease both; }
+  .nsa-welcome__logo,
+  .nsa-welcome__hi,
+  .nsa-welcome__name { animation: nsaWelcomeIn 0.2s ease both; }
+  .nsa-progress__bar { transition: none; }
+}

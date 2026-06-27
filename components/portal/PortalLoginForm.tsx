@@ -3,16 +3,13 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Smartphone, KeyRound, Lock } from "lucide-react";
-import { useToast } from "@/components/ui/Toast";
+import { triggerWelcome } from "@/lib/welcome";
 
 type Mode = "login" | "forgot";
 type Factor = "ref" | "date";
 
-const SAMPLE_REF = "NAMAN-WEBINAR-MQPAJBGU-1MKE";
-
 export default function PortalLoginForm() {
   const router = useRouter();
-  const { toast } = useToast();
 
   const [mode, setMode] = useState<Mode>("login");
   const [phone, setPhone] = useState("");
@@ -41,7 +38,7 @@ export default function PortalLoginForm() {
       });
       const data = await res.json();
       if (data.ok) {
-        toast("Welcome! 🎉", "success");
+        triggerWelcome(data.name);
         router.push("/portal");
         router.refresh();
       } else {
