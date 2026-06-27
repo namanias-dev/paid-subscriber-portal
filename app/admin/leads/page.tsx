@@ -4,12 +4,29 @@ import { useMemo, useState } from "react";
 import { PageHeader, useAdminData, LoadingBlock, TableShell } from "@/components/admin/ui";
 import Modal from "@/components/ui/Modal";
 import SearchBar from "@/components/ui/SearchBar";
+import GroupedTimeline, { type TimelineGroup } from "@/components/admin/GroupedTimeline";
+import SortControl from "@/components/admin/SortControl";
 import { useToast } from "@/components/ui/Toast";
+import { usePersistentState } from "@/lib/usePersistentState";
 import { formatINR } from "@/lib/dates";
 import type { Lead, LeadStatus } from "@/lib/types";
 
 const STAGES: LeadStatus[] = ["New", "Contacted", "Demo Booked", "Demo Attended", "Negotiation", "Admitted", "Lost"];
 const SOURCES = ["Instagram", "Meta Form", "Webinar", "Demo", "Website", "WhatsApp", "Referral", "home_popup"];
+
+type LeadSort = "recent" | "activity" | "name";
+const LEAD_SORTS: { value: LeadSort; label: string }[] = [
+  { value: "recent", label: "Most recent activity" },
+  { value: "activity", label: "Most activity" },
+  { value: "name", label: "Name (A → Z)" },
+];
+
+const TEMP_DOT: Record<string, string> = {
+  Interested: "bg-success",
+  Warm: "bg-amber-500",
+  Cold: "bg-ink2",
+  Junk: "bg-danger",
+};
 
 function waLink(phone: string, text: string) {
   const cleaned = phone.replace(/\D/g, "");
@@ -23,7 +40,8 @@ export default function LeadsPage() {
   const { data: leads, loading, reload } = useAdminData<Lead[]>("/api/admin/leads", "leads");
   const { data: leadAccounts } = useAdminData<LeadAccount[]>("/api/admin/leads/accounts", "leads");
   const { toast } = useToast();
-  const [view, setView] = useState<"kanban" | "table">("kanban");
+  const [view, setView] = useState<"kanban" | "list">("kanban");
+  const [sort, setSort] = usePersistentState<LeadSort>("nsa.leads.sort", "recent");
   const [q, setQ] = useState("");
   const [source, setSource] = useState("all");
   const [addOpen, setAddOpen] = useState(false);
@@ -38,6 +56,71 @@ export default function LeadsPage() {
       return true;
     });
   }, [leads, q, source]);
+
+  // Group the (already filtered) leads by PERSON (phone) — purely presentational.
+  // Multiple submissions for one phone stack as a timeline; one-off leads render
+  // compact. No lead is dropped or merged; every row appears as a node.
+  const leadGroups = useMemo((): TimelineGroup[] => {
+    const byPhone = new Map<string, Lead[]>();
+    for (const l of filtered) {
+      const key = (l.phone || "").trim() || `id:${l.id}`;
+      const arr = byPhone.get(key);
+      if (arr) arr.push(l); else byPhone.set(key, [l]);
+    }
+    const rows = [...byPhone.entries()].map(([key, list]) => {
+      const sorted = [...list].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+      const latest = sorted[0];
+      const name = (sorted.find((l) => l.name)?.name || latest.name || "—").trim() || "—";
+      const flags = (l: Lead) => [
+        l.demo_booked ? "Demo booked" : null,
+        l.demo_attended ? "Demo attended" : null,
+        l.webinar_registered ? "Webinar reg." : null,
+        l.admitted ? "Admitted" : null,
+      ].filter(Boolean).join(" · ");
+      const nodes = sorted.map((l) => ({
+        id: l.id,
+        dot: TEMP_DOT[l.temperature] || "bg-ink2",
+        title: (
+          <button onClick={() => setActive(l)} className="text-left font-medium text-ink hover:text-primary">
+            {l.source}{l.course_interest ? ` · ${l.course_interest}` : ""}
+          </button>
+        ),
+        subtitle: [l.counsellor ? `Counsellor: ${l.counsellor}` : null, flags(l) || null, l.city || null].filter(Boolean).join(" · ") || undefined,
+        datetime: l.created_at,
+        badge: (
+          <span className="flex items-center gap-1.5">
+            <span className="pill pill-blue">{l.status}</span>
+            <span className={`pill ${l.temperature === "Interested" ? "pill-green" : l.temperature === "Warm" ? "pill-amber" : l.temperature === "Junk" ? "pill-red" : "pill-gray"}`}>{l.temperature}</span>
+          </span>
+        ),
+      }));
+      return { key, name, phone: (latest.phone || "").trim(), latestAt: new Date(latest.created_at).getTime(), count: sorted.length, latestStatus: latest.status, nodes };
+    });
+
+    rows.sort((a, b) => {
+      if (sort === "activity") return b.count - a.count || b.latestAt - a.latestAt;
+      if (sort === "name") return a.name.localeCompare(b.name);
+      return b.latestAt - a.latestAt;
+    });
+
+    return rows.map((r): TimelineGroup => ({
+      id: r.key,
+      name: r.name,
+      phone: r.phone || undefined,
+      summary: (
+        <span className="flex items-center gap-1.5">
+          <span className="text-[11px] text-muted">{r.count} {r.count === 1 ? "touchpoint" : "touchpoints"}</span>
+          <span className="pill pill-blue">{r.latestStatus}</span>
+        </span>
+      ),
+      nodes: r.nodes,
+    }));
+  }, [filtered, sort]);
+
+  const matchOpenIds = useMemo(
+    () => (q.trim() ? new Set(leadGroups.map((g) => g.id)) : undefined),
+    [q, leadGroups],
+  );
 
   async function setStatus(lead: Lead, status: LeadStatus) {
     await fetch(`/api/admin/leads/${lead.id}`, {
@@ -84,9 +167,10 @@ export default function LeadsPage() {
           <option value="all">All sources</option>
           {SOURCES.map((s) => <option key={s}>{s}</option>)}
         </select>
+        {view === "list" && <SortControl value={sort} onChange={setSort} options={LEAD_SORTS} />}
         <div className="flex overflow-hidden rounded-xl border border-line">
           <button onClick={() => setView("kanban")} className="px-3 py-2 text-sm" style={{ background: view === "kanban" ? "var(--primary)" : "#fff", color: view === "kanban" ? "#fff" : "var(--ink2)" }}>Kanban</button>
-          <button onClick={() => setView("table")} className="px-3 py-2 text-sm" style={{ background: view === "table" ? "var(--primary)" : "#fff", color: view === "table" ? "#fff" : "var(--ink2)" }}>Table</button>
+          <button onClick={() => setView("list")} className="px-3 py-2 text-sm" style={{ background: view === "list" ? "var(--primary)" : "#fff", color: view === "list" ? "#fff" : "var(--ink2)" }}>Stacked</button>
         </div>
       </div>
 
@@ -147,20 +231,12 @@ export default function LeadsPage() {
           })}
         </div>
       ) : (
-        <TableShell headers={["Name", "Phone", "Email", "Source", "Interest", "Status", "Date", ""]}>
-          {filtered.map((l) => (
-            <tr key={l.id} className="border-b border-line last:border-0 hover:bg-surface2">
-              <td className="px-4 py-3 font-medium">{l.name}</td>
-              <td className="px-4 py-3">{l.phone}</td>
-              <td className="px-4 py-3">{l.email || "—"}</td>
-              <td className="px-4 py-3">{l.source}</td>
-              <td className="px-4 py-3">{l.course_interest}</td>
-              <td className="px-4 py-3"><span className="pill pill-blue">{l.status}</span></td>
-              <td className="px-4 py-3 whitespace-nowrap text-xs text-muted">{l.created_at ? new Date(l.created_at).toLocaleDateString("en-IN") : "—"}</td>
-              <td className="px-4 py-3"><button onClick={() => setActive(l)} className="text-primary">Open</button></td>
-            </tr>
-          ))}
-        </TableShell>
+        <>
+          <p className="mb-2 px-1 text-xs text-muted">
+            Showing {filtered.length} {filtered.length === 1 ? "lead" : "leads"} · {leadGroups.length} {leadGroups.length === 1 ? "person" : "people"}
+          </p>
+          <GroupedTimeline groups={leadGroups} forceOpenIds={matchOpenIds} emptyText="No leads match these filters." />
+        </>
       )}
 
       <AddLeadModal open={addOpen} onClose={() => setAddOpen(false)} onAdded={reload} />

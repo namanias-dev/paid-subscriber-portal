@@ -1,12 +1,24 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { PageHeader, useAdminData, LoadingBlock, TableShell, KpiCard } from "@/components/admin/ui";
+import { PageHeader, useAdminData, LoadingBlock, KpiCard } from "@/components/admin/ui";
 import WebinarRegistrationsTrend from "@/components/admin/WebinarRegistrationsTrend";
+import GroupedTimeline, { type TimelineGroup } from "@/components/admin/GroupedTimeline";
+import SortControl from "@/components/admin/SortControl";
+import SearchBar from "@/components/ui/SearchBar";
 import { useToast } from "@/components/ui/Toast";
-import { formatINR, formatDate, formatISTDateTime, istYMD, istTodayYMD } from "@/lib/dates";
+import { usePersistentState } from "@/lib/usePersistentState";
+import { formatINR, formatISTDateTime, istYMD, istTodayYMD } from "@/lib/dates";
 import { dedupedPaidTotal, distinctRegistrations } from "@/lib/paymentsAgg";
 import type { Payment, Enrollment, PaymentProof } from "@/lib/types";
+
+type PaymentSort = "recent" | "spent" | "count" | "name";
+const PAYMENT_SORTS: { value: PaymentSort; label: string }[] = [
+  { value: "recent", label: "Most recent activity" },
+  { value: "spent", label: "Total spent (high → low)" },
+  { value: "count", label: "Most transactions" },
+  { value: "name", label: "Name (A → Z)" },
+];
 
 type ProofWithAccess = PaymentProof & { hasAccess: boolean };
 
@@ -72,6 +84,8 @@ export default function PaymentsAdmin() {
   const { toast } = useToast();
 
   // ---- Filters (read-only display state) ----
+  const [q, setQ] = useState("");
+  const [sort, setSort] = usePersistentState<PaymentSort>("nsa.payments.sort", "recent");
   const [types, setTypes] = useState<Set<TypeKey>>(new Set());
   const [statuses, setStatuses] = useState<Set<StatusKey>>(new Set());
   const [onlyProof, setOnlyProof] = useState(false);
@@ -128,6 +142,7 @@ export default function PaymentsAdmin() {
   const filtered = useMemo(() => {
     const activeTypes = [...types];
     const activeStatuses = [...statuses];
+    const query = q.trim().toLowerCase();
     return payments.filter((p) => {
       if (activeTypes.length && !activeTypes.some((k) => TYPE_DEFS.find((t) => t.key === k)!.match(p))) return false;
       if (activeStatuses.length && !activeStatuses.some((k) => STATUS_DEFS.find((s) => s.key === k)!.match(p))) return false;
@@ -136,9 +151,104 @@ export default function PaymentsAdmin() {
         const ymd = istYMD(p.created_at);
         if (!ymd || ymd < range.from || ymd > range.to) return false;
       }
+      if (query) {
+        const hay = `${p.student_name || ""} ${p.phone || ""} ${p.item || ""} ${p.reference_no || ""}`.toLowerCase();
+        if (!hay.includes(query)) return false;
+      }
       return true;
     });
-  }, [payments, types, statuses, onlyProof, proofs, range]);
+  }, [payments, types, statuses, onlyProof, proofs, range, q]);
+
+  // Group the (already filtered) transactions by USER — purely presentational.
+  // The sum of all nodes equals filtered.length; no row is dropped or merged.
+  const userGroups = useMemo((): TimelineGroup[] => {
+    const byPhone = new Map<string, Payment[]>();
+    for (const p of filtered) {
+      const key = (p.phone || "").trim() || `id:${p.id}`;
+      const arr = byPhone.get(key);
+      if (arr) arr.push(p); else byPhone.set(key, [p]);
+    }
+    const dotFor = (s: Payment["status"]) =>
+      isPaid(s) ? "bg-success" : s === "VERIFYING" ? "bg-blue-500" : s === "ABANDONED" ? "bg-orange-500" : s === "FAILED" ? "bg-danger" : s === "refunded" ? "bg-ink2" : "bg-amber-500";
+
+    const rows = [...byPhone.entries()].map(([key, list]) => {
+      const sorted = [...list].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+      const latest = sorted[0];
+      const name = (sorted.find((r) => r.student_name)?.student_name || latest.student_name || "—").trim() || "—";
+      const phone = (latest.phone || "").trim();
+      const paidTotal = sorted.filter((r) => isPaid(r.status)).reduce((a, r) => a + r.amount, 0);
+      const code = buyerCodes[phone] || "";
+
+      const nodes = sorted.map((p) => ({
+        id: p.id,
+        dot: dotFor(p.status),
+        title: p.item || "—",
+        subtitle: [
+          p.payment_kind || p.item_type,
+          p.installment_no ? `installment #${p.installment_no}` : null,
+          p.reference_no || p.razorpay_payment_id || null,
+          p.gateway || (p.mode ? `Razorpay · ${p.mode}` : null),
+        ].filter(Boolean).join(" · "),
+        right: formatINR(p.amount),
+        datetime: p.created_at,
+        badge: (
+          <span className="flex items-center gap-1.5">
+            <span className={`pill ${statusPillClass(p.status)}`}>{statusLabel(p.status)}</span>
+            {isNonPaid(p.status) && p.reference_no && (
+              <button
+                onClick={(e) => { e.stopPropagation(); reverifyOne(p.reference_no); }}
+                disabled={reverifying}
+                title="Re-verify this payment with ICICI"
+                className="rounded-md border border-line px-1.5 py-0.5 text-xs text-ink2 transition hover:border-primary/50 hover:text-primary disabled:opacity-50"
+              >
+                ↻
+              </button>
+            )}
+            {proofs[p.id] && (
+              <button
+                onClick={(e) => { e.stopPropagation(); setProofModal({ payment: p, proof: proofs[p.id] }); }}
+                className={`pill ${PROOF_STATUS_META[proofs[p.id].status]?.cls || "pill-gray"} cursor-pointer`}
+                title="View submitted payment proof"
+              >
+                📎 {PROOF_STATUS_META[proofs[p.id].status]?.label || proofs[p.id].status}
+              </button>
+            )}
+          </span>
+        ),
+      }));
+
+      return { key, name, phone, latestAt: new Date(latest.created_at).getTime(), paidTotal, count: sorted.length, latestStatus: latest.status, code, nodes };
+    });
+
+    rows.sort((a, b) => {
+      if (sort === "spent") return b.paidTotal - a.paidTotal || b.latestAt - a.latestAt;
+      if (sort === "count") return b.count - a.count || b.latestAt - a.latestAt;
+      if (sort === "name") return a.name.localeCompare(b.name);
+      return b.latestAt - a.latestAt; // recent
+    });
+
+    return rows.map((r): TimelineGroup => ({
+      id: r.key,
+      name: r.name,
+      phone: r.phone || undefined,
+      tag: r.code ? <span className="font-mono text-[11px] font-semibold text-primary">{r.code}</span> : undefined,
+      summary: (
+        <div className="flex flex-col items-end gap-1">
+          <span className="text-sm font-bold text-ink">{formatINR(r.paidTotal)}</span>
+          <span className="flex items-center gap-1.5">
+            <span className="text-[11px] text-muted">{r.count} txn{r.count === 1 ? "" : "s"}</span>
+            <span className={`pill ${statusPillClass(r.latestStatus)}`}>{statusLabel(r.latestStatus)}</span>
+          </span>
+        </div>
+      ),
+      nodes: r.nodes,
+    }));
+  }, [filtered, sort, buyerCodes, proofs, reverifying]);
+
+  const matchOpenIds = useMemo(
+    () => (q.trim() ? new Set(userGroups.map((g) => g.id)) : undefined),
+    [q, userGroups],
+  );
 
   // Non-paid rows in the current filtered view (targets for "Re-verify filtered").
   const filteredNonPaidRefs = useMemo(
@@ -552,66 +662,26 @@ export default function PaymentsAdmin() {
         </div>
       )}
 
-      <div className="mb-2 flex items-center justify-between px-1">
-        <p className="text-xs text-muted">Showing {filtered.length} of {payments.length} transactions</p>
+      {/* Search + sort toolbar (display-only; operates on the filtered set) */}
+      <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center">
+        <div className="min-w-[220px] flex-1">
+          <SearchBar value={q} onChange={setQ} placeholder="Search name / phone / item / reference" />
+        </div>
+        <SortControl value={sort} onChange={setSort} options={PAYMENT_SORTS} />
+      </div>
+
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2 px-1">
+        <p className="text-xs text-muted">
+          Showing {filtered.length} of {payments.length} transactions · {userGroups.length} {userGroups.length === 1 ? "user" : "users"}
+        </p>
         {reverifyMsg && <p className="text-xs font-medium text-primary">{reverifyMsg}</p>}
       </div>
 
-      <TableShell headers={["Student", "Phone", "Item", "Amount", "Reference / Gateway", "Login Code", "Status", "Date", "Date & Time (IST)"]}>
-        {filtered.length === 0 ? (
-          <tr>
-            <td colSpan={9} className="px-4 py-12 text-center text-sm text-muted">
-              {payments.length === 0 ? "No payments yet." : "No payments match these filters."}
-            </td>
-          </tr>
-        ) : (
-          filtered.map((p) => (
-            <tr key={p.id} className="border-b border-line last:border-0 hover:bg-surface2">
-              <td className="px-4 py-3 font-medium">{p.student_name}</td>
-              <td className="px-4 py-3">{p.phone}</td>
-              <td className="px-4 py-3 text-xs">{p.item}</td>
-              <td className="px-4 py-3">{formatINR(p.amount)}</td>
-              <td className="px-4 py-3 text-xs">
-                {p.reference_no ? <span className="font-mono">{p.reference_no}</span> : <span className="text-muted">{p.razorpay_payment_id || "—"}</span>}
-                <div className="text-muted">{p.gateway || (p.mode ? `Razorpay · ${p.mode}` : "")}</div>
-              </td>
-              <td className="px-4 py-3">
-                {buyerCodes[(p.phone || "").trim()] ? (
-                  <span className="font-mono text-xs font-semibold text-primary">{buyerCodes[(p.phone || "").trim()]}</span>
-                ) : (
-                  <span className="text-muted">—</span>
-                )}
-              </td>
-              <td className="px-4 py-3">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className={`pill ${statusPillClass(p.status)}`}>{statusLabel(p.status)}</span>
-                  {isNonPaid(p.status) && p.reference_no && (
-                    <button
-                      onClick={() => reverifyOne(p.reference_no)}
-                      disabled={reverifying}
-                      title="Re-verify this payment with ICICI"
-                      className="rounded-md border border-line px-1.5 py-0.5 text-xs text-ink2 transition hover:border-primary/50 hover:text-primary disabled:opacity-50"
-                    >
-                      ↻
-                    </button>
-                  )}
-                  {proofs[p.id] && (
-                    <button
-                      onClick={() => setProofModal({ payment: p, proof: proofs[p.id] })}
-                      className={`pill ${PROOF_STATUS_META[proofs[p.id].status]?.cls || "pill-gray"} cursor-pointer`}
-                      title="View submitted payment proof"
-                    >
-                      📎 {PROOF_STATUS_META[proofs[p.id].status]?.label || proofs[p.id].status}
-                    </button>
-                  )}
-                </div>
-              </td>
-              <td className="px-4 py-3">{formatDate(p.created_at)}</td>
-              <td className="px-4 py-3 whitespace-nowrap text-xs">{p.created_at ? formatISTDateTime(p.created_at) : "—"}</td>
-            </tr>
-          ))
-        )}
-      </TableShell>
+      <GroupedTimeline
+        groups={userGroups}
+        forceOpenIds={matchOpenIds}
+        emptyText={payments.length === 0 ? "No payments yet." : "No payments match these filters."}
+      />
 
       {proofModal && (
         <ProofModal
