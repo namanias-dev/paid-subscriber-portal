@@ -12,8 +12,20 @@ import { getSupabaseAdmin } from "../supabase";
 import { normalizeIndianMobile } from "../phone";
 import { flattenForStamp, type AttributionState } from "../attribution";
 import { sendMetaPurchase } from "./thirdParty";
+import { fireAutoSms } from "../sms/dispatch";
+import { TRIGGERS } from "../sms/templates";
 import type { EventName } from "./events";
 import type { Payment, Buyer } from "../types";
+
+/** Map a payment's item to the related-entity id used by SMS logs. */
+function smsEntityForPayment(p: Payment): { payment_id: string; course_id?: string | null; webinar_id?: string | null; student_name: string | null } {
+  return {
+    payment_id: p.id,
+    course_id: p.item_type === "course" ? p.item_slug ?? null : null,
+    webinar_id: p.item_type === "webinar" ? p.item_slug ?? null : null,
+    student_name: p.student_name ?? null,
+  };
+}
 
 export interface DeviceInfo { type: string; os: string; browser: string }
 
@@ -153,6 +165,10 @@ export async function recordPaymentStatusChanged(p: Payment, toStatus: string, s
       channel: p.gateway || "icici_eazypay", source,
     },
   });
+  // Auto-SMS (disabled by default): payment failed.
+  if (toStatus === "FAILED") {
+    fireAutoSms({ trigger: TRIGGERS.payment_failed, phone: p.phone, name: p.student_name, vars: { item_short: p.item }, entity: smsEntityForPayment(p), entityId: ref });
+  }
 }
 
 /**
@@ -180,6 +196,12 @@ export async function recordPaymentPaid(p: Payment, source = "system"): Promise<
   if (newlyPaid) {
     await backfillBuyerSource(phone, p.attribution_source ?? null, p.attribution_campaign ?? null);
     await sendMetaPurchase(p).catch(() => {});
+    // Auto-SMS (disabled by default) — fired ONLY from this verified-PAID
+    // chokepoint, once per payment (dedupe_key), never off a click/intent.
+    fireAutoSms({ trigger: TRIGGERS.payment_success, phone: p.phone, name: p.student_name, vars: { item_short: p.item, payment_status: "PAID", amount: p.amount }, entity: smsEntityForPayment(p), entityId: ref });
+    if (p.item_type === "course") {
+      fireAutoSms({ trigger: TRIGGERS.course_enrolled, phone: p.phone, name: p.student_name, vars: { item_short: p.item }, entity: smsEntityForPayment(p), entityId: ref });
+    }
   }
 }
 
@@ -206,6 +228,8 @@ export async function recordProofUploaded(p: Payment, proofId: string): Promise<
     dedupe_key: `proof:${proofId}`,
     props: { payment_ref: ref, proof_id: proofId, item_type: p.item_type, item_slug: p.item_slug ?? null },
   });
+  // Auto-SMS (disabled by default): payment proof received.
+  fireAutoSms({ trigger: TRIGGERS.proof_uploaded, phone: p.phone, name: p.student_name, vars: { item_short: p.item }, entity: smsEntityForPayment(p), entityId: ref });
 }
 
 export async function recordStaffReview(p: Payment, decision: "approved" | "rejected", staffId: string | null, reason?: string | null): Promise<void> {
@@ -215,6 +239,10 @@ export async function recordStaffReview(p: Payment, decision: "approved" | "reje
     phone: normPhone(p.phone),
     props: { payment_ref: ref, decision, staff_id: staffId, reason: reason || null },
   });
+  // Auto-SMS (disabled by default): access approved on manual acceptance.
+  if (decision === "approved") {
+    fireAutoSms({ trigger: TRIGGERS.admin_approval, phone: p.phone, name: p.student_name, vars: { item_short: p.item }, entity: smsEntityForPayment(p), entityId: ref });
+  }
 }
 
 export async function recordRegistrationCreated(reg: { id?: string; webinar_id: string; webinar_slug?: string | null; phone: string; price?: number; is_free?: boolean }): Promise<void> {
@@ -300,6 +328,9 @@ export async function stitchIdentityOnLogin(opts: {
     phone,
     props: { visitor_id: opts.visitorId, buyer_id: opts.buyer.id, phone, matched_via: opts.matchedVia || "login", events_merged_count: merged },
   });
+  // Auto-SMS (disabled by default): welcome / first login. The dedupe_key keyed
+  // on the buyer id ensures this fires at most once, ever.
+  fireAutoSms({ trigger: TRIGGERS.first_login, phone: opts.buyer.phone, entity: { user_id: opts.buyer.id }, entityId: opts.buyer.id });
 }
 
 export async function recordLogout(buyerId: string | null, visitorId: string | null): Promise<void> {

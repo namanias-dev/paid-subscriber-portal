@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { PageHeader, useAdminData, LoadingBlock, KpiCard } from "@/components/admin/ui";
 import WebinarRegistrationsTrend from "@/components/admin/WebinarRegistrationsTrend";
 import GroupedTimeline, { type TimelineGroup } from "@/components/admin/GroupedTimeline";
+import SendSmsButton from "@/components/admin/sms/SendSmsButton";
 import SortControl from "@/components/admin/SortControl";
 import SearchBar from "@/components/ui/SearchBar";
 import { useToast } from "@/components/ui/Toast";
@@ -654,6 +655,7 @@ export default function PaymentsAdmin() {
                       </a>
                     )}
                     <button onClick={() => reverifyOne(p.reference_no)} disabled={reverifying} className="btn btn-secondary px-2 py-1 text-xs disabled:opacity-60">↻ Verify</button>
+                    <SendSmsButton phone={p.phone} name={p.student_name} className="btn btn-secondary px-2 py-1 text-xs" label="SMS" />
                   </div>
                 </div>
               );

@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { PageHeader, useAdminData, LoadingBlock, TableShell } from "@/components/admin/ui";
 import Modal from "@/components/ui/Modal";
 import JourneyTimeline from "@/components/admin/JourneyTimeline";
+import SendSmsButton from "@/components/admin/sms/SendSmsButton";
 import SearchBar from "@/components/ui/SearchBar";
 import GroupedTimeline, { type TimelineGroup } from "@/components/admin/GroupedTimeline";
 import SortControl from "@/components/admin/SortControl";
@@ -340,6 +341,7 @@ function LeadDetail({
         <div className="flex gap-2">
           <a href={waLink(lead.phone, `Hi ${lead.name}, this is Naman IAS Academy team. `)} target="_blank" rel="noopener noreferrer" className="btn btn-secondary flex-1 text-sm">💬 WhatsApp</a>
           <a href={`tel:${lead.phone}`} className="btn btn-secondary flex-1 text-sm">📞 Call</a>
+          <SendSmsButton phone={lead.phone} name={lead.name} className="btn btn-secondary flex-1 justify-center text-sm" label="📱 SMS" />
         </div>
 
         <div>

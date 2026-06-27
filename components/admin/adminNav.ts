@@ -16,6 +16,7 @@ export const ADMIN_NAV: AdminNavItem[] = [
   { href: "/admin/toppers", label: "Toppers / Results", icon: "🏅", group: "Website", perm: "manage_settings" },
   { href: "/admin/navigation", label: "Navigation / Header", icon: "🧭", group: "Website", perm: "manage_settings" },
   { href: "/admin/about", label: "About Page", icon: "📖", group: "Website", perm: "manage_settings" },
+  { href: "/admin/communications/sms", label: "SMS Mission Control", icon: "📱", group: "Communications", perm: "send_sms" },
   { href: "/admin/leads", label: "Lead CRM", icon: "🎯", group: "Sales", perm: "manage_students_leads" },
   { href: "/admin/forms", label: "Lead Forms", icon: "📋", group: "Sales", perm: "manage_students_leads" },
   { href: "/admin/registrations", label: "Landing Pages", icon: "🚀", group: "Sales", perm: "manage_students_leads" },

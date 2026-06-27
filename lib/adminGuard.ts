@@ -1,5 +1,5 @@
 import { getAdminSession } from "./session";
-import { hasPermission, allPermissions, type PermissionKey, type PermissionSet } from "./permissions";
+import { hasPermission, allPermissions, isSuperAdmin, type PermissionKey, type PermissionSet } from "./permissions";
 import type { AdminSessionPayload } from "./types";
 
 /**
@@ -37,4 +37,17 @@ export async function requireAnyPermission(keys: PermissionKey[]): Promise<boole
   if (!session) return false;
   const perms = effectivePermissions(session);
   return keys.some((k) => hasPermission(perms, k));
+}
+
+/** True only for a Super Admin (manage_roles + manage_staff + view_revenue). */
+export async function requireSuperAdmin(): Promise<boolean> {
+  const session = await getAdminSession();
+  if (!session) return false;
+  return isSuperAdmin(effectivePermissions(session));
+}
+
+/** Current admin's id (for sms_logs.sent_by_user_id), or null. */
+export async function currentAdminId(): Promise<string | null> {
+  const session = await getAdminSession();
+  return session?.admin_id || null;
 }

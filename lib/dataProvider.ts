@@ -6,6 +6,8 @@ import { generateLoginCode } from "./buyerCode";
 import { normalizeIndianMobile } from "./phone";
 import { verifyFromStoredCallback, eazypayVerify, type VerifyOutcome } from "./eazypay";
 import { recordPaymentPaid, recordPaymentInitiated, recordPaymentStatusChanged, recordRegistrationCreated } from "./analytics/server";
+import { fireAutoSms } from "./sms/dispatch";
+import { TRIGGERS } from "./sms/templates";
 import type {
   Buyer,
   Student,
@@ -1495,6 +1497,7 @@ export async function registerWebinar(webinarId: string, name: string, phone: st
     // also push into CRM as a lead
     await addLead({ name, phone, source: "Webinar", webinar_registered: true, campaign: w?.title });
     await ensureBuyer(phone, name).catch(() => null);
+    fireAutoSms({ trigger: TRIGGERS.registration_created, phone, name, vars: { item_short: w?.title || "your webinar" }, entity: { webinar_id: webinarId }, entityId: webinarId });
     return { ok: true };
   }
   const db = getSupabaseAdmin();
@@ -1507,6 +1510,10 @@ export async function registerWebinar(webinarId: string, name: string, phone: st
   }
   // Analytics (best-effort, idempotent): a webinar registration milestone.
   void recordRegistrationCreated({ webinar_id: webinarId, phone, is_free: true }).catch(() => {});
+  // Auto-SMS (disabled by default): webinar registered. Title fetched cheaply.
+  let webinarTitle: string | null = null;
+  if (db) { try { const { data } = await db.from("webinars").select("title").eq("id", webinarId).maybeSingle(); webinarTitle = (data?.title as string) ?? null; } catch { /* ignore */ } }
+  fireAutoSms({ trigger: TRIGGERS.registration_created, phone, name, vars: { item_short: webinarTitle || "your webinar" }, entity: { webinar_id: webinarId }, entityId: webinarId });
   await addLead({ name, phone, source: "Webinar", webinar_registered: true });
   // UNIFIED IDENTITY: a webinar registrant (free or paid) becomes a first-class
   // student + buyer so they appear in Students & Enrollments and can open their

@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { PageHeader, useAdminData, LoadingBlock, TableShell } from "@/components/admin/ui";
+import SendSmsButton from "@/components/admin/sms/SendSmsButton";
 import { formatISTDateTime } from "@/lib/dates";
 
 type RegStatus = "paid" | "pending" | "failed" | "unpaid" | "free";
@@ -63,7 +64,7 @@ export default function WebinarRegistrantsAdmin({ params }: { params: { id: stri
       </div>
 
       <div className="mt-6">
-        <TableShell headers={["Name", "Phone", "Registered", "Status", "Attended"]}>
+        <TableShell headers={["Name", "Phone", "Registered", "Status", "Attended", "SMS"]}>
           {registrants.map((r) => {
             const pill = STATUS_PILL[r.status];
             return (
@@ -73,12 +74,13 @@ export default function WebinarRegistrantsAdmin({ params }: { params: { id: stri
                 <td className="px-4 py-3 text-sm">{formatISTDateTime(r.created_at)}</td>
                 <td className="px-4 py-3"><span className={`pill ${pill.cls}`}>{pill.label}</span></td>
                 <td className="px-4 py-3 text-sm">{r.attended ? "Yes" : "—"}</td>
+                <td className="px-4 py-3"><SendSmsButton phone={r.phone} name={r.name} /></td>
               </tr>
             );
           })}
           {registrants.length === 0 && (
             <tr>
-              <td colSpan={5} className="px-4 py-8 text-center text-sm text-muted">No registrations yet.</td>
+              <td colSpan={6} className="px-4 py-8 text-center text-sm text-muted">No registrations yet.</td>
             </tr>
           )}
         </TableShell>

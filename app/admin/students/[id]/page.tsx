@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import { LoadingBlock } from "@/components/admin/ui";
 import JourneyTimeline from "@/components/admin/JourneyTimeline";
+import SendSmsButton from "@/components/admin/sms/SendSmsButton";
 import StatusPill, { statusOf } from "@/components/ui/StatusPill";
 import Modal from "@/components/ui/Modal";
 import { useToast } from "@/components/ui/Toast";
@@ -247,6 +248,7 @@ export default function StudentProfilePage({ params }: { params: { id: string } 
               <span className="inline-flex items-center gap-1.5"><Phone size={14} className="opacity-60" />{s.phone}</span>
               {s.email && <span className="inline-flex items-center gap-1.5"><Mail size={14} className="opacity-60" />{s.email}</span>}
               <span className="inline-flex items-center gap-1.5 uppercase"><GraduationCap size={14} className="opacity-60" />{s.plan}</span>
+              <SendSmsButton phone={s.phone} name={s.name} />
             </div>
             <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
               <span className="inline-flex items-center gap-1.5 text-muted"><KeyRound size={13} /> Access</span>
