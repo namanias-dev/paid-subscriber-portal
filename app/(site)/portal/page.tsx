@@ -10,6 +10,12 @@ import type { Payment } from "@/lib/types";
 import PortalLogoutButton from "@/components/portal/PortalLogoutButton";
 import PaymentRecovery from "@/components/portal/PaymentRecovery";
 import LeadPromoBanner, { type PromoItem } from "@/components/portal/LeadPromoBanner";
+import EnrolledCard from "@/components/portal/EnrolledCard";
+
+const courseCover = (c: { cover_image_url?: string | null; image?: string | null; mobile_image_url?: string | null } | undefined) =>
+  c?.cover_image_url || c?.image || c?.mobile_image_url || null;
+const webinarCover = (w: { cover_image_url?: string | null; mobile_image_url?: string | null } | undefined) =>
+  w?.cover_image_url || w?.mobile_image_url || null;
 
 export const dynamic = "force-dynamic";
 export const metadata = {
@@ -97,6 +103,15 @@ export default async function PortalDashboardPage() {
   const otherPurchases = purchases.filter((p) => !(p.enrollment_id && enrolledIds.has(p.enrollment_id)));
   const groups = groupPurchases(otherPurchases);
 
+  // Lookups to surface the existing cover image (and webinar timing) on the
+  // enrolled cards — display-only join, no new queries.
+  const serverNow = Date.now();
+  const courseById = new Map(allCoursesList.map((c) => [c.id, c]));
+  const courseBySlug = new Map(allCoursesList.map((c) => [c.slug, c]));
+  const webinarBySlug = new Map(allWebinars.map((w) => [w.slug, w]));
+  const webinarByTitle = new Map(allWebinars.map((w) => [w.title, w]));
+  const courseByTitle = new Map(allCoursesList.map((c) => [c.title, c]));
+
   // A "free user" (lead / marketing audience) has no paid purchases, no paid
   // enrolments and no staff comp — show them rotating Enroll nudges for paid items.
   const isFreeUser = purchases.length === 0 && enrolledCourses.length === 0 && !hasStaffAccess;
@@ -167,25 +182,35 @@ export default async function PortalDashboardPage() {
           </div>
           <p className="mt-1 text-sm text-ink2">Comped to you for QA/training. This is the real student view.</p>
           <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {compCourses.map((c) => (
-              <div key={c.id} className="card flex h-full flex-col p-5">
-                <div className="flex items-center justify-between">
-                  <span className="text-2xl">🎓</span>
-                  <span className="pill pill-gold text-xs">Course · comp</span>
-                </div>
-                <h3 className="mt-3 text-base font-semibold leading-snug">{c.title}</h3>
-                <Link href={`/portal/class/${c.id}`} className="btn btn-primary mt-4 w-full text-sm">Go to Class Hub →</Link>
-              </div>
+            {compCourses.map((c, i) => (
+              <EnrolledCard
+                key={c.id}
+                index={i}
+                variant="course"
+                title={c.title}
+                description={c.description}
+                image={courseCover(c)}
+                metaLine={c.faculty || c.duration || null}
+                href={`/portal/class/${c.id}`}
+                cta="Go to Class Hub"
+                cornerBadge={{ label: "Comp", tone: "gold" }}
+              />
             ))}
-            {compWebinars.map((w) => (
-              <div key={w.id} className="card flex h-full flex-col p-5">
-                <div className="flex items-center justify-between">
-                  <span className="text-2xl">🎥</span>
-                  <span className="pill pill-gold text-xs">Webinar · comp</span>
-                </div>
-                <h3 className="mt-3 text-base font-semibold leading-snug">{w.title}</h3>
-                <Link href={`/portal/item/${encodeURIComponent(w.slug)}`} className="btn btn-primary mt-4 w-full text-sm">Open webinar →</Link>
-              </div>
+            {compWebinars.map((w, i) => (
+              <EnrolledCard
+                key={w.id}
+                index={compCourses.length + i}
+                variant="webinar"
+                title={w.title}
+                description={w.description}
+                image={webinarCover(w)}
+                datetime={w.datetime}
+                endDatetime={w.end_datetime}
+                adminStatus={w.status}
+                serverNow={serverNow}
+                href={`/portal/item/${encodeURIComponent(w.slug)}`}
+                cornerBadge={{ label: "Comp", tone: "gold" }}
+              />
             ))}
           </div>
         </section>
@@ -200,15 +225,21 @@ export default async function PortalDashboardPage() {
           </div>
           <p className="mt-1 text-sm text-ink2">Sessions you registered for, free of charge.</p>
           <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {freeWebinars.map((w) => (
-              <div key={w.id} className="card flex h-full flex-col p-5">
-                <div className="flex items-center justify-between">
-                  <span className="text-2xl">🎥</span>
-                  <span className="pill pill-green text-xs">Webinar · free</span>
-                </div>
-                <h3 className="mt-3 text-base font-semibold leading-snug">{w.title}</h3>
-                <Link href={`/portal/item/${encodeURIComponent(w.slug)}`} className="btn btn-primary mt-4 w-full text-sm">Open webinar →</Link>
-              </div>
+            {freeWebinars.map((w, i) => (
+              <EnrolledCard
+                key={w.id}
+                index={i}
+                variant="webinar"
+                title={w.title}
+                description={w.description}
+                image={webinarCover(w)}
+                datetime={w.datetime}
+                endDatetime={w.end_datetime}
+                adminStatus={w.status}
+                serverNow={serverNow}
+                href={`/portal/item/${encodeURIComponent(w.slug)}`}
+                cornerBadge={{ label: "Free", tone: "green" }}
+              />
             ))}
           </div>
         </section>
@@ -219,46 +250,37 @@ export default async function PortalDashboardPage() {
         <section className="mt-8">
           <h2 className="font-heading text-xl font-bold">My Courses & Payments</h2>
           <div className="mt-4 grid gap-4 sm:grid-cols-2">
-            {enrolledCourses.map((e) => {
+            {enrolledCourses.map((e, i) => {
               const d = deriveEnrollment(e);
               const badge = STATUS_BADGE[e.status] || { label: e.status, cls: "pill-gray" };
               const nextDue = e.schedule.find((s) => !s.paid && s.due);
+              const tone = e.status === "fully_paid" ? "green" : e.status === "seat_booked" ? "amber" : "blue";
+              const course = courseById.get(e.course_id) || courseBySlug.get(e.course_slug);
               return (
-                <div key={e.id} className="card flex h-full flex-col p-5">
-                  <div className="flex items-start justify-between gap-2">
-                    <span className="text-2xl">🎓</span>
-                    <div className="flex items-center gap-1.5">
-                      {newCounts[e.course_id] > 0 && (
-                        <span className="inline-flex items-center rounded-full bg-gradient-to-r from-[var(--ca-gold-bright)] to-[var(--ca-gold)] px-2 py-0.5 text-[10px] font-extrabold text-[#1a1304]">
-                          {newCounts[e.course_id]} new
-                        </span>
-                      )}
-                      <span className={`pill text-xs ${badge.cls}`}>{badge.label}</span>
-                    </div>
-                  </div>
-                  <h3 className="mt-3 text-base font-semibold leading-snug">{e.course_title}</h3>
-                  {e.batch_label && <p className="mt-1 text-xs text-muted">{e.batch_label}</p>}
-                  <div className="mt-3">
-                    <div className="flex items-center justify-between text-xs">
-                      <span className="font-semibold text-ink">{formatINR(d.paid)} of {formatINR(e.total_fee)}</span>
-                      <span className="text-muted">{d.progressPct}%</span>
-                    </div>
-                    <div className="mt-1 h-2 w-full overflow-hidden rounded-full bg-surface2">
-                      <div className="h-full rounded-full bg-primary" style={{ width: `${Math.min(100, d.progressPct)}%` }} />
-                    </div>
-                    {d.remaining > 0 ? (
-                      <p className="mt-2 text-xs text-ink2">
+                <EnrolledCard
+                  key={e.id}
+                  index={i}
+                  variant="course"
+                  title={e.course_title}
+                  image={courseCover(course)}
+                  metaLine={e.batch_label}
+                  href={`/portal/course/${e.id}`}
+                  cta={d.remaining > 0 ? "View & pay" : "View payments"}
+                  cornerBadge={{ label: badge.label, tone }}
+                  newCount={newCounts[e.course_id] || 0}
+                  progressPct={d.progressPct}
+                  progressNote={`${formatINR(d.paid)} of ${formatINR(e.total_fee)}`}
+                  progressFootnote={
+                    d.remaining > 0 ? (
+                      <>
                         Remaining {formatINR(d.remaining)}{nextDue ? ` · next ${formatINR(nextDue.amount)}` : ""}
                         {d.hasOverdue && <span className="ml-1 font-bold text-danger">· Overdue</span>}
-                      </p>
+                      </>
                     ) : (
-                      <p className="mt-2 text-xs font-semibold text-success">Fully paid ✓</p>
-                    )}
-                  </div>
-                  <Link href={`/portal/course/${e.id}`} className="btn btn-primary mt-4 w-full text-sm">
-                    {d.remaining > 0 ? "View & pay →" : "View payments →"}
-                  </Link>
-                </div>
+                      <span className="font-semibold text-success">Fully paid ✓</span>
+                    )
+                  }
+                />
               );
             })}
           </div>
@@ -273,44 +295,45 @@ export default async function PortalDashboardPage() {
         </div>
       ) : (
         <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {groups.map((g) => {
+          {groups.map((g, i) => {
             const meta = TYPE_META[g.type] || TYPE_META.item;
+            const slug = g.latest.item_slug || "";
+            const web = g.type === "webinar" ? (webinarBySlug.get(slug) || webinarByTitle.get(g.title)) : undefined;
+            const crs = g.type === "course" ? (courseBySlug.get(slug) || courseByTitle.get(g.title)) : undefined;
+            const variant = g.type === "webinar" ? "webinar" : g.type === "course" ? "course" : "generic";
             return (
-              <div key={g.key} className="card flex h-full flex-col p-5">
-                <div className="flex items-center justify-between">
-                  <span className="text-2xl">{meta.icon}</span>
-                  <div className="flex items-center gap-1.5">
-                    {g.count > 1 && (
-                      <span className="pill pill-blue text-xs">Registered {g.count}×</span>
-                    )}
-                    <span className="pill pill-gray text-xs">{meta.label}</span>
-                  </div>
-                </div>
-                <h3 className="mt-3 text-base font-semibold leading-snug">{g.title}</h3>
-                <div className="mt-2 text-xs text-muted">Latest: {fmtDate(g.latest.created_at)}</div>
-
-                <Link
-                  href={`/portal/item/${encodeURIComponent(g.latest.reference_no || g.latest.id)}`}
-                  className="btn btn-primary mt-4 w-full text-sm"
-                >
-                  Open content →
-                </Link>
-
-                {g.count > 1 && (
-                  <details className="mt-3 text-sm">
-                    <summary className="cursor-pointer text-primary">View {g.count} enrollments</summary>
-                    <ul className="mt-2 space-y-2">
-                      {g.items.map((p) => (
-                        <li key={p.id} className="rounded-lg border border-line p-2 text-xs">
-                          <div className="font-medium">{p.student_name || "—"}</div>
-                          <div className="text-muted">{fmtDate(p.created_at)} · {p.amount > 0 ? formatINR(p.amount) : "Free"}</div>
-                          <div className="truncate font-mono text-[10px] text-muted">{p.reference_no}</div>
-                        </li>
-                      ))}
-                    </ul>
-                  </details>
-                )}
-              </div>
+              <EnrolledCard
+                key={g.key}
+                index={i}
+                variant={variant}
+                title={g.title}
+                description={web?.description || crs?.description || null}
+                image={web ? webinarCover(web) : crs ? courseCover(crs) : null}
+                datetime={web?.datetime}
+                endDatetime={web?.end_datetime}
+                adminStatus={web?.status}
+                serverNow={serverNow}
+                metaLine={variant === "course" ? (crs?.faculty || crs?.duration || `Latest: ${fmtDate(g.latest.created_at)}`) : variant === "generic" ? `Latest: ${fmtDate(g.latest.created_at)}` : null}
+                href={`/portal/item/${encodeURIComponent(g.latest.reference_no || g.latest.id)}`}
+                cta={variant === "generic" ? "Open content" : undefined}
+                cornerBadge={g.count > 1 ? { label: `Registered ${g.count}×`, tone: "blue" } : { label: meta.label, tone: "gray" }}
+                footerSlot={
+                  g.count > 1 ? (
+                    <details className="mt-3 text-sm">
+                      <summary className="cursor-pointer text-primary">View {g.count} enrollments</summary>
+                      <ul className="mt-2 space-y-2">
+                        {g.items.map((p) => (
+                          <li key={p.id} className="rounded-lg border border-line p-2 text-xs">
+                            <div className="font-medium">{p.student_name || "—"}</div>
+                            <div className="text-muted">{fmtDate(p.created_at)} · {p.amount > 0 ? formatINR(p.amount) : "Free"}</div>
+                            <div className="truncate font-mono text-[10px] text-muted">{p.reference_no}</div>
+                          </li>
+                        ))}
+                      </ul>
+                    </details>
+                  ) : undefined
+                }
+              />
             );
           })}
         </div>
