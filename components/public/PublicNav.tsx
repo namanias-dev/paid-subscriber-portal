@@ -5,7 +5,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
 import {
-  Menu, X, ArrowRight, LogOut, LayoutDashboard, UserCircle,
+  Menu, X, ArrowRight, LogOut, LogIn, LayoutDashboard, UserCircle,
   BookOpen, Newspaper, ListChecks, Trophy, Video, Gift, Info, Phone, Sparkles,
   type LucideIcon,
 } from "lucide-react";
@@ -56,6 +56,7 @@ export default function PublicNav({
   portalLoggedIn = false,
   userName = null,
   links = DEFAULT_NAV_TABS,
+  hasUpcomingWebinars = false,
 }: {
   logoUrl?: string | null;
   logoAlt?: string | null;
@@ -67,6 +68,7 @@ export default function PublicNav({
   portalLoggedIn?: boolean;
   userName?: string | null;
   links?: NavTab[];
+  hasUpcomingWebinars?: boolean;
 }) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
@@ -164,6 +166,9 @@ export default function PublicNav({
                 className={`ca-focus group relative rounded-lg px-3 py-2 text-sm font-medium transition-colors duration-200 ${active ? "text-white" : "text-white/70 hover:text-white"}`}
               >
                 {l.label}
+                {hasUpcomingWebinars && l.href === "/webinars" && (
+                  <span className="ml-1.5 inline-flex items-center rounded-full bg-[var(--ca-gold-bright)] px-1.5 py-0.5 align-middle text-[9px] font-extrabold uppercase leading-none tracking-wide text-[#1a1304] shadow-sm">New</span>
+                )}
                 <span
                   className={`pointer-events-none absolute inset-x-3 -bottom-px h-0.5 origin-left rounded-full bg-[var(--ca-gold-bright)] transition-all duration-200 motion-reduce:transition-none ${
                     active ? "scale-x-100 opacity-100" : "scale-x-0 opacity-0 group-hover:scale-x-100 group-hover:opacity-100"
@@ -194,7 +199,7 @@ export default function PublicNav({
             </>
           ) : (
             <>
-              <Link href="/login" className="ca-btn ca-btn-glass ca-focus px-4 text-sm">Login</Link>
+              <Link href="/login" className="ca-btn ca-btn-glass ca-focus px-4 text-sm"><LogIn size={15} aria-hidden="true" /> Login</Link>
               <Link href="/demo" className="ca-btn ca-btn-gold ca-focus px-4 text-sm">Book Free Demo <ArrowRight size={15} /></Link>
             </>
           )}
@@ -270,6 +275,9 @@ export default function PublicNav({
                         <Icon size={18} strokeWidth={1.75} aria-hidden="true" />
                       </span>
                       {l.label}
+                      {hasUpcomingWebinars && l.href === "/webinars" && (
+                        <span className="ml-auto inline-flex items-center rounded-full bg-[var(--ca-gold-bright)] px-2 py-0.5 text-[10px] font-extrabold uppercase leading-none tracking-wide text-[#1a1304]">New</span>
+                      )}
                     </Link>
                   </li>
                 );
@@ -300,7 +308,7 @@ export default function PublicNav({
             ) : (
               <>
                 <Link href="/demo" onClick={() => setOpen(false)} className="ca-btn ca-btn-gold ca-focus w-full justify-center">Book Free Demo <ArrowRight size={16} /></Link>
-                <Link href="/login" onClick={() => setOpen(false)} className="ca-btn ca-btn-glass ca-focus w-full justify-center">Login</Link>
+                <Link href="/login" onClick={() => setOpen(false)} className="ca-btn ca-btn-glass ca-focus w-full justify-center"><LogIn size={16} aria-hidden="true" /> Login</Link>
               </>
             )}
           </div>
