@@ -6,6 +6,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { motion, useReducedMotion } from "framer-motion";
 import { Calendar, Clock, User, ArrowRight, Video, GraduationCap, Package } from "lucide-react";
 import { formatISTDateTime } from "@/lib/dates";
+import { trackClient } from "@/lib/analytics/client";
 
 type Variant = "webinar" | "course" | "generic";
 type Tone = "gold" | "green" | "blue" | "amber" | "gray";
@@ -82,6 +83,20 @@ export default function EnrolledCard(props: EnrolledCardProps) {
   const reduce = useReducedMotion();
   const [now, setNow] = useState<number>(serverNow ?? Date.now());
   const [imgOk, setImgOk] = useState(true);
+  const itemSlug = (href || "").split("?")[0].split("/").filter(Boolean).pop() || null;
+
+  useEffect(() => {
+    // Engagement signal: the enrolled card was seen in the portal.
+    if (variant === "webinar" || variant === "course") {
+      trackClient("enrolled_card_viewed", { item_type: variant, item_slug: itemSlug });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  function onCtaClick() {
+    if (variant === "webinar") trackClient("zoom_link_clicked", { webinar_slug: itemSlug, registration_id: null, minutes_before_start: startMs != null ? Math.round((startMs - Date.now()) / 60000) : null });
+    else if (variant === "course") trackClient("course_opened", { course_slug: itemSlug });
+  }
 
   useEffect(() => {
     if (variant !== "webinar" || !datetime) return;
@@ -201,7 +216,7 @@ export default function EnrolledCard(props: EnrolledCardProps) {
             ) : null}
 
             <div className="mt-auto pt-4">
-              <Link href={href} className="ca-btn ca-btn-gold ca-focus w-full justify-center text-sm">
+              <Link href={href} onClick={onCtaClick} className="ca-btn ca-btn-gold ca-focus w-full justify-center text-sm">
                 {ctaLabel} <ArrowRight size={16} className="transition-transform duration-200 group-hover:translate-x-0.5 motion-reduce:transform-none" aria-hidden="true" />
               </Link>
               {footerSlot}

@@ -23,6 +23,7 @@ import {
   Wallet,
 } from "lucide-react";
 import { LoadingBlock } from "@/components/admin/ui";
+import JourneyTimeline from "@/components/admin/JourneyTimeline";
 import StatusPill, { statusOf } from "@/components/ui/StatusPill";
 import Modal from "@/components/ui/Modal";
 import { useToast } from "@/components/ui/Toast";
@@ -144,6 +145,7 @@ export default function StudentProfilePage({ params }: { params: { id: string } 
   const [busy, setBusy] = useState(false);
   const [customDate, setCustomDate] = useState("");
   const [modal, setModal] = useState<null | "edit" | "enroll" | "webinar" | "pay">(null);
+  const [showJourney, setShowJourney] = useState(false);
   const [payCourse, setPayCourse] = useState<CourseCard | null>(null);
   const [catalog, setCatalog] = useState<{ courses: Course[]; webinars: Webinar[] } | null>(null);
 
@@ -346,6 +348,23 @@ export default function StudentProfilePage({ params }: { params: { id: string } 
             </details>
           )}
         </div>
+      </Card>
+
+      {/* ---------------- CUSTOMER JOURNEY (analytics) ---------------- */}
+      <Card
+        title="Customer journey"
+        icon={<Activity size={17} />}
+        action={
+          <button onClick={() => setShowJourney((v) => !v)} className="inline-flex items-center gap-1 text-sm font-semibold text-primary hover:underline">
+            {showJourney ? "Hide" : "View journey"}
+          </button>
+        }
+      >
+        {showJourney ? (
+          <JourneyTimeline phone={s.phone} />
+        ) : (
+          <p className="text-sm text-muted">Source, campaign, first page and the full chronological activity timeline for this person.</p>
+        )}
       </Card>
 
       {/* ---------------- ENROLLED COURSES ---------------- */}

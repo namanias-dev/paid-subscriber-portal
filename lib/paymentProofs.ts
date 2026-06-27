@@ -1,4 +1,5 @@
 import { getSupabaseAdmin } from "./supabase";
+import { recordPaymentPaid, recordStaffReview, recordProofUploaded } from "./analytics/server";
 import {
   getPaymentById,
   getPaymentByReference,
@@ -282,11 +283,15 @@ export async function submitPaymentProof(
   if (existing) {
     const { data, error } = await db.from("payment_proofs").update(patch).eq("id", existing.id).select().maybeSingle();
     if (error) return { ok: false, error: error.message };
-    return { ok: true, proof: data ? mapProof(data as Record<string, unknown>) : undefined };
+    const proof = data ? mapProof(data as Record<string, unknown>) : undefined;
+    if (proof) void recordProofUploaded(payment, proof.id).catch(() => {});
+    return { ok: true, proof };
   }
   const { data, error } = await db.from("payment_proofs").insert(patch).select().maybeSingle();
   if (error) return { ok: false, error: error.message };
-  return { ok: true, proof: data ? mapProof(data as Record<string, unknown>) : undefined };
+  const proof = data ? mapProof(data as Record<string, unknown>) : undefined;
+  if (proof) void recordProofUploaded(payment, proof.id).catch(() => {});
+  return { ok: true, proof };
 }
 
 // ----------------------------- Admin actions -----------------------------
@@ -341,6 +346,8 @@ export async function adminRejectProof(
       updated_at: nowISO(),
     })
     .eq("id", proofId);
+  const pay = await getPaymentById(proof.payment_id).catch(() => null);
+  if (pay) void recordStaffReview(pay, "rejected", adminId, reason ?? null).catch(() => {});
   return { ok: true };
 }
 
@@ -418,5 +425,9 @@ export async function acceptPaymentManually(
   await bumpBuyerSessionVersion(r.phone).catch(() => null);
 
   await markProofAccepted();
+  // Analytics (best-effort, idempotent): the manual accept is a PAID milestone +
+  // a staff decision. recordPaymentPaid dedupes against any later cron/callback.
+  void recordPaymentPaid({ ...payment, status: "PAID" }, "staff").catch(() => {});
+  void recordStaffReview(payment, "approved", opts.adminId, opts.note ?? null).catch(() => {});
   return { ok: true };
 }

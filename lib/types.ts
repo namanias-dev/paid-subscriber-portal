@@ -823,6 +823,9 @@ export interface Payment {
   /** Installment number this payment settles (0 = seat/full). */
   installment_no?: number | null;
   receipt_no?: string | null;
+  // --- Attribution (analytics; normalized first-touch source snapshot) ---
+  attribution_source?: string | null;
+  attribution_campaign?: string | null;
 }
 
 // ----------------------------- Payment proof (self-service recovery) -----------------------------

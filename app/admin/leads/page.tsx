@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { PageHeader, useAdminData, LoadingBlock, TableShell } from "@/components/admin/ui";
 import Modal from "@/components/ui/Modal";
+import JourneyTimeline from "@/components/admin/JourneyTimeline";
 import SearchBar from "@/components/ui/SearchBar";
 import GroupedTimeline, { type TimelineGroup } from "@/components/admin/GroupedTimeline";
 import SortControl from "@/components/admin/SortControl";
@@ -301,6 +302,7 @@ function LeadDetail({
   const { toast } = useToast();
   const [note, setNote] = useState("");
   const [status, setLocalStatus] = useState<LeadStatus>(lead.status);
+  const [showJourney, setShowJourney] = useState(false);
 
   async function addNote() {
     if (!note.trim()) return;
@@ -346,6 +348,13 @@ function LeadDetail({
             <input className="input" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Called, sent brochure..." />
             <button onClick={addNote} className="btn btn-primary text-sm">Log</button>
           </div>
+        </div>
+
+        <div className="border-t border-line pt-3">
+          <button onClick={() => setShowJourney((v) => !v)} className="text-sm font-semibold text-primary hover:underline">
+            {showJourney ? "Hide customer journey" : "View customer journey"}
+          </button>
+          {showJourney && <div className="mt-3"><JourneyTimeline phone={lead.phone} /></div>}
         </div>
       </div>
     </Modal>

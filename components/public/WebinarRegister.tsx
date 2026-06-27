@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useToast } from "@/components/ui/Toast";
 import { startPayment } from "@/lib/startPayment";
 import { formatINR } from "@/lib/dates";
+import { trackClient } from "@/lib/analytics/client";
 
 export default function WebinarRegister({
   webinarId,
@@ -28,6 +29,11 @@ export default function WebinarRegister({
 
   const isPaid = price > 0;
   const payable = applied ? applied.finalAmount : price;
+
+  useEffect(() => {
+    trackClient("webinar_view", { webinar_id: webinarId, webinar_slug: webinarSlug ?? null, is_paid: isPaid, price });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function applyCoupon() {
     if (!coupon.trim() || !webinarSlug) return;
@@ -73,6 +79,7 @@ export default function WebinarRegister({
       }
 
       if (isPaid && webinarSlug) {
+        trackClient("click_register_pay", { webinar_id: webinarId, webinar_slug: webinarSlug, item_type: "webinar", price: payable, source_section: "webinar_register" });
         const result = await startPayment({
           itemType: "webinar",
           webinarSlug,

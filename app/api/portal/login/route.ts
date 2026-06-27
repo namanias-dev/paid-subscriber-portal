@@ -1,9 +1,12 @@
 import { NextResponse } from "next/server";
+import { cookies } from "next/headers";
 import { findBuyerByLogin, rateLimited, ensureStudentForCustomer, claimGuestAttempts } from "@/lib/dataProvider";
 import { signBuyerToken } from "@/lib/auth";
 import { BUYER_COOKIE, SESSION_MAX_AGE } from "@/lib/config";
 import { normalizeIndianMobile } from "@/lib/phone";
 import { normalizeLoginCode } from "@/lib/buyerCode";
+import { VISITOR_COOKIE, ATTR_COOKIE, parseAttrCookie } from "@/lib/attribution";
+import { stampBuyerAttribution, stitchIdentityOnLogin } from "@/lib/analytics/server";
 
 export const dynamic = "force-dynamic";
 
@@ -46,6 +49,15 @@ export async function POST(req: Request) {
         if (student?.id) await claimGuestAttempts(buyer.phone, student.id);
       } catch { /* best-effort */ }
     }
+
+    // Analytics (best-effort): identity-stitch + attribution stamp on login.
+    try {
+      const jar = cookies();
+      const visitorId = jar.get(VISITOR_COOKIE)?.value || null;
+      const attr = parseAttrCookie(jar.get(ATTR_COOKIE)?.value);
+      await stampBuyerAttribution(buyer.phone, attr);
+      await stitchIdentityOnLogin({ visitorId, buyer: { id: buyer.id, phone: buyer.phone }, matchedVia: "login" });
+    } catch { /* best-effort */ }
 
     const token = await signBuyerToken({ buyer_id: buyer.id, phone: buyer.phone, name: buyer.name, sv: buyer.session_version ?? 0 });
     const res = NextResponse.json({ ok: true, name: buyer.name });

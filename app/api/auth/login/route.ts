@@ -1,10 +1,13 @@
 import { NextResponse } from "next/server";
+import { cookies } from "next/headers";
 import { findStudentByLogin, findStudentByPhone, findBuyerByLogin, touchStreakOnLogin, logAccess, rateLimited, ensureStudentForCustomer, claimGuestAttempts } from "@/lib/dataProvider";
 import { signStudentToken, signBuyerToken } from "@/lib/auth";
 import { STUDENT_COOKIE, BUYER_COOKIE, SESSION_MAX_AGE } from "@/lib/config";
 import { isExpired, formatDate } from "@/lib/dates";
 import { normalizeIndianMobile } from "@/lib/phone";
 import { normalizeLoginCode } from "@/lib/buyerCode";
+import { VISITOR_COOKIE, ATTR_COOKIE, parseAttrCookie } from "@/lib/attribution";
+import { stampBuyerAttribution, stitchIdentityOnLogin } from "@/lib/analytics/server";
 
 const COOKIE_OPTS = {
   httpOnly: true,
@@ -56,6 +59,16 @@ export async function POST(req: Request) {
           if (student?.id) await claimGuestAttempts(buyer.phone, student.id);
         } catch { /* best-effort */ }
       }
+      // Analytics (best-effort): the KEY identity-stitch moment. Merge this
+      // visitor's anon events into the buyer (code-proven), and freeze/refresh
+      // their attribution. Never blocks or breaks login.
+      try {
+        const jar = cookies();
+        const visitorId = jar.get(VISITOR_COOKIE)?.value || null;
+        const attr = parseAttrCookie(jar.get(ATTR_COOKIE)?.value);
+        await stampBuyerAttribution(buyer.phone, attr);
+        await stitchIdentityOnLogin({ visitorId, buyer: { id: buyer.id, phone: buyer.phone }, matchedVia: "login" });
+      } catch { /* best-effort */ }
       const token = await signBuyerToken({ buyer_id: buyer.id, phone: buyer.phone, name: buyer.name, sv: buyer.session_version ?? 0 });
       const res = NextResponse.json({ ok: true, kind: "buyer", redirect: "/portal", name: buyer.name });
       res.cookies.set(BUYER_COOKIE, token, COOKIE_OPTS);

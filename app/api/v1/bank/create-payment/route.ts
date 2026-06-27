@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { cookies } from "next/headers";
 import {
   getCourseBySlug,
   getWebinarBySlug,
@@ -6,6 +7,8 @@ import {
   getPaymentByReference,
   incrementCouponUsage,
 } from "@/lib/dataProvider";
+import { ATTR_COOKIE, parseAttrCookie, flattenForStamp } from "@/lib/attribution";
+import { stampBuyerAttribution } from "@/lib/analytics/server";
 import { getPlan } from "@/lib/config";
 import { validateCoupon } from "@/lib/coupons";
 import type { Coupon } from "@/lib/types";
@@ -95,6 +98,10 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: "Item not found." }, { status: 404 });
     }
 
+    // Attribution snapshot from the first-party cookie (best-effort; never blocks).
+    const attr = parseAttrCookie(cookies().get(ATTR_COOKIE)?.value);
+    const attrFlat = flattenForStamp(attr);
+
     // Amount is computed server-side; any client-supplied amount is ignored.
     const baseAmount = Number(resolved.amount) || 0;
     let amount = baseAmount;
@@ -127,7 +134,10 @@ export async function POST(req: Request) {
         reference_no: referenceNo,
         razorpay_payment_id: null,
         mode: null,
+        attribution_source: attrFlat.source,
+        attribution_campaign: attrFlat.campaign,
       });
+      void stampBuyerAttribution(mobile, attr).catch(() => {});
       if (appliedCoupon && resolved.entityId && resolved.couponEntity) {
         await incrementCouponUsage(resolved.couponEntity, resolved.entityId, appliedCoupon);
       }
@@ -157,7 +167,10 @@ export async function POST(req: Request) {
       transaction_amount: amount,
       razorpay_payment_id: null,
       mode: null,
+      attribution_source: attrFlat.source,
+      attribution_campaign: attrFlat.campaign,
     });
+    void stampBuyerAttribution(mobile, attr).catch(() => {});
 
     if (appliedCoupon && resolved.entityId && resolved.couponEntity) {
       await incrementCouponUsage(resolved.couponEntity, resolved.entityId, appliedCoupon);

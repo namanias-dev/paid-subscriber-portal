@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import { Suspense } from "react";
 import { Sora, Inter } from "next/font/google";
 import "./globals.css";
 import { ToastProvider } from "@/components/ui/Toast";
@@ -6,6 +7,9 @@ import DemoBanner from "@/components/layout/DemoBanner";
 import RouteProgress from "@/components/ui/RouteProgress";
 import WelcomeOverlay from "@/components/ui/WelcomeOverlay";
 import LogoutFlow from "@/components/ui/LogoutFlow";
+import Tracker from "@/components/analytics/Tracker";
+import ConsentBanner from "@/components/analytics/ConsentBanner";
+import ThirdParty from "@/components/analytics/ThirdParty";
 
 const sora = Sora({
   subsets: ["latin"],
@@ -43,6 +47,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           {children}
           <WelcomeOverlay />
           <LogoutFlow />
+          <Suspense fallback={null}><Tracker /></Suspense>
+          <ConsentBanner />
+          <ThirdParty />
         </ToastProvider>
       </body>
     </html>

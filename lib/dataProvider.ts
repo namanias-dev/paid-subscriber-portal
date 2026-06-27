@@ -5,6 +5,7 @@ import { generateAccessCode } from "./codeGenerator";
 import { generateLoginCode } from "./buyerCode";
 import { normalizeIndianMobile } from "./phone";
 import { verifyFromStoredCallback, eazypayVerify, type VerifyOutcome } from "./eazypay";
+import { recordPaymentPaid, recordPaymentInitiated, recordPaymentStatusChanged, recordRegistrationCreated } from "./analytics/server";
 import type {
   Buyer,
   Student,
@@ -1504,6 +1505,8 @@ export async function registerWebinar(webinarId: string, name: string, phone: st
       /* ignore */
     }
   }
+  // Analytics (best-effort, idempotent): a webinar registration milestone.
+  void recordRegistrationCreated({ webinar_id: webinarId, phone, is_free: true }).catch(() => {});
   await addLead({ name, phone, source: "Webinar", webinar_registered: true });
   // UNIFIED IDENTITY: a webinar registrant (free or paid) becomes a first-class
   // student + buyer so they appear in Students & Enrollments and can open their
@@ -1892,6 +1895,10 @@ export async function createPayment(input: CreatePaymentInput): Promise<Payment>
   try {
     const saved = await dbInsert<Payment>("payments", row as unknown as Record<string, unknown>);
     if (isPaidStatus(saved.status)) await ensureBuyer(saved.phone, saved.student_name).catch(() => null);
+    // Analytics (best-effort, idempotent, never throws): a brand-new PAID row is a
+    // completed purchase; a PENDING row is an initiated checkout.
+    if (isPaidStatus(saved.status)) void recordPaymentPaid(saved, "checkout").catch(() => {});
+    else if (saved.status === "PENDING") void recordPaymentInitiated(saved).catch(() => {});
     return saved;
   } catch {
     // Best-effort: fall back to in-memory so the flow still works pre-migration.
@@ -1959,6 +1966,12 @@ export async function updatePaymentByReference(
     if (data) {
       const row = data as Payment;
       if (isPaidStatus(patch.status)) await ensureBuyer(row.phone, row.student_name).catch(() => null);
+      // Analytics (best-effort): record the transition. PAID funnels through the
+      // idempotent paid emitter (callback / verify / cron / demo all converge).
+      if (patch.status) {
+        if (isPaidStatus(patch.status)) void recordPaymentPaid(row, "verify").catch(() => {});
+        else void recordPaymentStatusChanged(row, String(patch.status), "verify").catch(() => {});
+      }
       return row;
     }
   }

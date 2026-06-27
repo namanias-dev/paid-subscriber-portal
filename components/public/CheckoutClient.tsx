@@ -1,8 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
+import { trackClient } from "@/lib/analytics/client";
 import {
   ArrowLeft,
   ShieldCheck,
@@ -29,6 +30,10 @@ import type { Course, InstallmentItem } from "@/lib/types";
 type Plan = "full" | "emi";
 
 export default function CheckoutClient({ course }: { course: Course }) {
+  useEffect(() => {
+    trackClient("course_view", { course_id: course.id, course_slug: course.slug, course_title: course.title, price: course.price });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const cfg = useMemo(() => resolveEmiConfig(course), [course]);
   const standardTotal = Math.max(0, Math.round(course.price));
   const payInFull = useMemo(() => payInFullTotal(course), [course]);
@@ -100,6 +105,7 @@ export default function CheckoutClient({ course }: { course: Course }) {
       return;
     }
     setLoading(true);
+    trackClient("click_enroll", { course_id: course.id, course_slug: course.slug, item_type: "course", price: course.price });
     try {
       const res = await fetch("/api/v1/enroll/create-payment", {
         method: "POST",
