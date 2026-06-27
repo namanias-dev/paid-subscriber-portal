@@ -149,7 +149,7 @@ export default async function PortalDashboardPage() {
                   <span className="pill pill-gold text-xs">Webinar · comp</span>
                 </div>
                 <h3 className="mt-3 text-base font-semibold leading-snug">{w.title}</h3>
-                <Link href={`/webinars/${w.slug}`} className="btn btn-primary mt-4 w-full text-sm">Open webinar →</Link>
+                <Link href={`/portal/item/${encodeURIComponent(w.slug)}`} className="btn btn-primary mt-4 w-full text-sm">Open webinar →</Link>
               </div>
             ))}
           </div>

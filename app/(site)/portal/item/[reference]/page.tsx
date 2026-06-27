@@ -2,12 +2,12 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getBuyerSession } from "@/lib/session";
 import {
-  getPaidPurchaseForPhone,
   getBuyerPurchases,
   getCourseBySlug,
   getWebinarBySlug,
   getSiteSettings,
 } from "@/lib/dataProvider";
+import { resolvePortalItemAccess } from "@/lib/portalItemAccess";
 import { formatINR, formatISTDateTime } from "@/lib/dates";
 import { parseRecording } from "@/lib/recordingEmbed";
 import { whatsappLink } from "@/lib/phone";
@@ -39,10 +39,12 @@ export default async function PortalItemPage({ params }: { params: { reference: 
   if (!session) redirect("/portal/login");
 
   const reference = decodeURIComponent(params.reference || "");
-  // Server-side entitlement check: the purchase must be PAID AND belong to this phone.
-  const purchase = await getPaidPurchaseForPhone(reference, session.phone);
+  // SINGLE source-of-truth access check: a PAID purchase for this phone (paying
+  // students, unchanged) OR staff comp access for this item (no payment row).
+  const access = await resolvePortalItemAccess(reference, session.phone);
+  const purchase = access.purchase;
 
-  if (!purchase) {
+  if (!access.ok) {
     return (
       <div className="container-wide section">
         <div className="mx-auto max-w-lg card p-8 text-center">
@@ -57,15 +59,18 @@ export default async function PortalItemPage({ params }: { params: { reference: 
     );
   }
 
-  const slug = purchase.item_slug || "";
-  const course = purchase.item_type === "course" && slug ? await getCourseBySlug(slug) : null;
-  const webinar = purchase.item_type === "webinar" && slug ? await getWebinarBySlug(slug) : null;
+  const slug = access.slug;
+  const course = access.itemType === "course" && slug ? await getCourseBySlug(slug) : null;
+  const webinar = access.itemType === "webinar" && slug ? await getWebinarBySlug(slug) : null;
 
   // Enrollment history: every paid purchase of this same item by this phone.
+  // Staff comp access has no payment rows, so the history is simply empty.
   const allPurchases = await getBuyerPurchases(session.phone);
-  const enrollments: Payment[] = allPurchases.filter(
-    (p) => p.item_type === purchase.item_type && (p.item_slug || p.item) === (purchase.item_slug || purchase.item)
-  );
+  const enrollments: Payment[] = purchase
+    ? allPurchases.filter(
+        (p) => p.item_type === purchase.item_type && (p.item_slug || p.item) === (purchase.item_slug || purchase.item)
+      )
+    : [];
 
   // ---- Webinar rich experience ----
   if (webinar) {
@@ -255,14 +260,22 @@ export default async function PortalItemPage({ params }: { params: { reference: 
 
       <div className="mt-3 card p-6 sm:p-8">
         <div className="flex flex-wrap items-center gap-2">
-          <span className="pill pill-blue">{purchase.item_type}</span>
+          <span className="pill pill-blue">{purchase ? purchase.item_type : access.itemType}</span>
           {enrollments.length > 1 && <span className="pill pill-gray text-xs">Registered {enrollments.length}×</span>}
-          <span className="pill pill-gray text-xs">Reference: {purchase.reference_no}</span>
+          {purchase ? (
+            <span className="pill pill-gray text-xs">Reference: {purchase.reference_no}</span>
+          ) : (
+            <span className="pill pill-gold text-xs">Staff access</span>
+          )}
         </div>
-        <h1 className="mt-3 text-2xl font-extrabold sm:text-3xl">{purchase.item}</h1>
-        <p className="mt-2 text-sm text-muted">
-          Paid {purchase.amount > 0 ? formatINR(purchase.amount) : "Free"} · Status: {purchase.status}
-        </p>
+        <h1 className="mt-3 text-2xl font-extrabold sm:text-3xl">{purchase?.item || access.title || course?.title || "Your access"}</h1>
+        {purchase ? (
+          <p className="mt-2 text-sm text-muted">
+            Paid {purchase.amount > 0 ? formatINR(purchase.amount) : "Free"} · Status: {purchase.status}
+          </p>
+        ) : (
+          <p className="mt-2 text-sm text-muted">Staff comp access — internal testing view.</p>
+        )}
 
         {videoUrl && (
           <div className="mt-6">
