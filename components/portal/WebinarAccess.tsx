@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { RecordingEmbed } from "@/lib/recordingEmbed";
+import { trackClient } from "@/lib/analytics/client";
 
 type Phase = "upcoming" | "live" | "ended";
 
@@ -11,6 +12,10 @@ interface Props {
   sessionType: "live" | "recorded";
   zoomLink: string | null;
   recording: RecordingEmbed | null;
+  /** Analytics context for the real "Join Zoom" show-up signal. */
+  webinarId?: string | null;
+  webinarSlug?: string | null;
+  registrationId?: string | null;
 }
 
 /** Default assumed live duration when no explicit end time is set. */
@@ -70,7 +75,7 @@ function RecordingPlayer({ recording }: { recording: RecordingEmbed }) {
   );
 }
 
-export default function WebinarAccess({ startISO, endISO, sessionType, zoomLink, recording }: Props) {
+export default function WebinarAccess({ startISO, endISO, sessionType, zoomLink, recording, webinarId, webinarSlug, registrationId }: Props) {
   const start = startISO ? new Date(startISO).getTime() : null;
   const end = endISO
     ? new Date(endISO).getTime()
@@ -85,6 +90,17 @@ export default function WebinarAccess({ startISO, endISO, sessionType, zoomLink,
   }, []);
 
   const phase = computePhase(now, start, end, sessionType);
+
+  // Real show-up signal: fired on the ACTUAL Join-Zoom click. Fire-and-forget
+  // (sendBeacon) — navigation to Zoom happens regardless, with zero added latency.
+  function onJoinZoom() {
+    trackClient("zoom_link_clicked", {
+      webinar_id: webinarId ?? null,
+      webinar_slug: webinarSlug ?? null,
+      registration_id: registrationId ?? null,
+      minutes_before_start: start !== null ? Math.round((start - Date.now()) / 60000) : null,
+    });
+  }
 
   // Recorded session: straight to the player.
   if (sessionType === "recorded") {
@@ -107,7 +123,7 @@ export default function WebinarAccess({ startISO, endISO, sessionType, zoomLink,
         <div className="text-sm font-semibold text-muted">Webinar starts in</div>
         {start !== null && <CountdownPills ms={start - now} />}
         {zoomLink ? (
-          <a href={zoomLink} target="_blank" rel="noopener noreferrer" className="btn btn-primary w-full sm:w-auto">
+          <a href={zoomLink} onClick={onJoinZoom} target="_blank" rel="noopener noreferrer" className="btn btn-primary w-full sm:w-auto">
             Attend Live Class →
           </a>
         ) : (
@@ -128,7 +144,7 @@ export default function WebinarAccess({ startISO, endISO, sessionType, zoomLink,
           LIVE NOW
         </div>
         {zoomLink ? (
-          <a href={zoomLink} target="_blank" rel="noopener noreferrer" className="btn btn-primary w-full sm:w-auto">
+          <a href={zoomLink} onClick={onJoinZoom} target="_blank" rel="noopener noreferrer" className="btn btn-primary w-full sm:w-auto">
             Attend Live Class →
           </a>
         ) : (

@@ -41,7 +41,7 @@ export default function AnalyticsDashboardPage() {
   }, [days, source]);
 
   const sourceOptions = useMemo(
-    () => [{ value: "all", label: "All sources" }, ...(data?.sources || []).map((s) => ({ value: s, label: s.charAt(0).toUpperCase() + s.slice(1) }))],
+    () => [{ value: "all", label: "All sources" }, ...(data?.sources || []).map((s) => ({ value: s, label: s === "untracked" ? "Untracked (pre-tracking)" : s.charAt(0).toUpperCase() + s.slice(1) }))],
     [data?.sources],
   );
 
@@ -144,15 +144,21 @@ export default function AnalyticsDashboardPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {data.bySource.map((r) => (
-                        <tr key={r.source} className="border-b border-line/60 last:border-0">
-                          <td className="py-2 pr-2 font-semibold capitalize text-ink">{r.source}</td>
-                          <td className="px-2 py-2 text-right">{r.visitors.toLocaleString("en-IN")}</td>
-                          <td className="px-2 py-2 text-right">{r.paid.toLocaleString("en-IN")}</td>
-                          <td className="px-2 py-2 text-right">{r.conversion}%</td>
-                          <td className="py-2 pl-2 text-right font-semibold">{formatINR(r.revenue)}</td>
-                        </tr>
-                      ))}
+                      {data.bySource.map((r) => {
+                        const untracked = r.source === "untracked";
+                        return (
+                          <tr key={r.source} className={`border-b border-line/60 last:border-0 ${untracked ? "bg-surface2/40 text-muted" : ""}`}>
+                            <td className={`py-2 pr-2 font-semibold capitalize ${untracked ? "text-muted" : "text-ink"}`}>
+                              {untracked ? "Untracked" : r.source}
+                              {untracked && <span className="ml-1 text-[10px] font-normal normal-case">(pre-tracking)</span>}
+                            </td>
+                            <td className="px-2 py-2 text-right">{r.visitors.toLocaleString("en-IN")}</td>
+                            <td className="px-2 py-2 text-right">{r.paid.toLocaleString("en-IN")}</td>
+                            <td className="px-2 py-2 text-right">{untracked ? "—" : `${r.conversion}%`}</td>
+                            <td className={`py-2 pl-2 text-right font-semibold ${untracked ? "text-ink2" : ""}`}>{formatINR(r.revenue)}</td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>

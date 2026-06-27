@@ -93,9 +93,11 @@ export default function EnrolledCard(props: EnrolledCardProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // NOTE: the webinar CTA only navigates to the item page — the REAL "Join Zoom"
+  // click is tracked there (WebinarAccess), so we don't fire an approximate
+  // zoom_link_clicked here (avoids a conflicting/duplicate show-up signal).
   function onCtaClick() {
-    if (variant === "webinar") trackClient("zoom_link_clicked", { webinar_slug: itemSlug, registration_id: null, minutes_before_start: startMs != null ? Math.round((startMs - Date.now()) / 60000) : null });
-    else if (variant === "course") trackClient("course_opened", { course_slug: itemSlug });
+    if (variant === "course") trackClient("course_opened", { course_slug: itemSlug });
   }
 
   useEffect(() => {

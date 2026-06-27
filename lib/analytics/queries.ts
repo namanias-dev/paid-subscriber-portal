@@ -8,9 +8,17 @@
  */
 import { getSupabaseAdmin } from "../supabase";
 import { getPayments } from "../dataProvider";
-import { isPaidStatus, dedupedPaidTotal, distinctRegistrations, itemKey } from "../paymentsAgg";
+import { isPaidStatus, dedupePaidRows, dedupedPaidTotal, distinctRegistrations, itemKey } from "../paymentsAgg";
 import { normalizeIndianMobile } from "../phone";
 import type { Payment } from "../types";
+
+/**
+ * Bucket for records created BEFORE attribution tracking existed (NULL source).
+ * Kept distinct from the real "direct" channel and shown muted in the UI — it is
+ * "pre-tracking / unknown", not an acquisition source. Its revenue is ALWAYS
+ * included so by-source totals reconcile with the Payments tab.
+ */
+export const UNTRACKED = "untracked";
 
 export interface EventLite {
   event_id: string;
@@ -31,11 +39,15 @@ function normPhone(p: string | null | undefined): string | null {
 }
 
 export function sourceOfEvent(e: EventLite): string {
-  return e.attribution?.first_touch?.source || e.attribution?.last_touch?.source || "direct";
+  // A captured attribution with no UTM/referrer is genuinely "direct"; a totally
+  // missing attribution object means we never tracked it -> "untracked".
+  const s = e.attribution?.first_touch?.source || e.attribution?.last_touch?.source;
+  return s || UNTRACKED;
 }
 
 export function sourceOfPayment(p: Payment): string {
-  return (p.attribution_source || "direct").toLowerCase();
+  // NULL = created before tracking -> "untracked" (never silently "direct").
+  return p.attribution_source ? p.attribution_source.toLowerCase() : UNTRACKED;
 }
 
 const EVENT_FETCH_CAP = 50000;
@@ -97,15 +109,19 @@ export async function getDashboardSummary(opts: { from: string; to: string; sour
   const fromMs = new Date(fromISO).getTime();
   const toMs = new Date(toISO).getTime();
   const allPayments = await getPayments();
-  let paidRows = allPayments.filter((p) => {
+  let paidRowsRaw = allPayments.filter((p) => {
     const t = new Date(p.created_at).getTime();
     return isPaidStatus(p.status) && t >= fromMs && t <= toMs;
   });
-  if (wantSource && wantSource !== "all") paidRows = paidRows.filter((p) => sourceOfPayment(p) === wantSource);
-  if (wantCampaign) paidRows = paidRows.filter((p) => (p.attribution_campaign || "").toLowerCase() === wantCampaign);
+  if (wantSource && wantSource !== "all") paidRowsRaw = paidRowsRaw.filter((p) => sourceOfPayment(p) === wantSource);
+  if (wantCampaign) paidRowsRaw = paidRowsRaw.filter((p) => (p.attribution_campaign || "").toLowerCase() === wantCampaign);
 
-  const revenue = dedupedPaidTotal(paidRows);
-  const paidCount = distinctRegistrations(paidRows);
+  // Collapse retry-duplicate paid rows FIRST, then bucket by source — so the sum
+  // of every source bucket (incl. "untracked") === dedupedPaidTotal exactly, and
+  // ties out to the Payments tab. Money/seat numbers all derive from this set.
+  const paidRows = dedupePaidRows(paidRowsRaw);
+  const revenue = dedupedPaidTotal(paidRowsRaw); // == sum(paidRows.amount)
+  const paidCount = distinctRegistrations(paidRowsRaw);
 
   const visitorSet = new Set<string>();
   let sessions = 0, pageViews = 0, registrations = 0, webinarViews = 0, clicks = 0, initiated = 0, paidEvents = 0, abandoned = 0;
@@ -308,10 +324,26 @@ export async function getSegment(key: SegmentKey): Promise<SegmentRow[]> {
   }
 
   if (key === "paid_not_clicked_zoom") {
-    const clickedZoom = await phonesWithEvent("zoom_link_clicked");
+    // Per (phone, webinar) accuracy: a phone leaves this segment for a given
+    // webinar the moment ANY real zoom_link_clicked is recorded for that
+    // phone+webinar_slug. A phone stays listed only while it has >=1 paid webinar
+    // it has never joined.
+    const zoomSet = new Set<string>(); // `${phone}|${slug}`
+    const { data } = await db
+      .from("analytics_events")
+      .select("phone,props")
+      .eq("event_name", "zoom_link_clicked")
+      .not("phone", "is", null)
+      .limit(20000);
+    for (const r of (data as { phone: string; props: { webinar_slug?: string } | null }[]) || []) {
+      const ph = normPhone(r.phone);
+      const slug = String(r.props?.webinar_slug || "").toLowerCase();
+      if (ph) zoomSet.add(`${ph}|${slug}`);
+    }
     const rows: SegmentRow[] = [];
-    for (const ph of webinarPaid.keys()) {
-      if (!clickedZoom.has(ph)) rows.push({ phone: ph, name: nameOf(ph), detail: "Paid webinar — no Zoom click", source: sourceOf(ph), lastAt: latestOf(ph), buyerId: null });
+    for (const [ph, slugs] of webinarPaid) {
+      const notJoined = [...slugs].filter((k) => !zoomSet.has(`${ph}|${k}`));
+      if (notJoined.length) rows.push({ phone: ph, name: nameOf(ph), detail: `${notJoined.length} paid webinar(s) — no Zoom click`, source: sourceOf(ph), lastAt: latestOf(ph), buyerId: null });
     }
     return rows.sort((a, b) => (b.lastAt || "").localeCompare(a.lastAt || ""));
   }
