@@ -5,6 +5,7 @@ import { ToastProvider } from "@/components/ui/Toast";
 import DemoBanner from "@/components/layout/DemoBanner";
 import RouteProgress from "@/components/ui/RouteProgress";
 import WelcomeOverlay from "@/components/ui/WelcomeOverlay";
+import LogoutFlow from "@/components/ui/LogoutFlow";
 
 const sora = Sora({
   subsets: ["latin"],
@@ -41,6 +42,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <DemoBanner />
           {children}
           <WelcomeOverlay />
+          <LogoutFlow />
         </ToastProvider>
       </body>
     </html>

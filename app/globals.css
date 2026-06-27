@@ -937,3 +937,61 @@ a {
   .nsa-welcome__name { animation: nsaWelcomeIn 0.2s ease both; }
   .nsa-progress__bar { transition: none; }
 }
+
+/* ============================================================
+   Logout confirmation dialog (Task A) — premium glass card.
+   ============================================================ */
+.nsa-logout-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 110;
+  display: grid;
+  place-items: center;
+  padding: 1.25rem;
+  background:
+    radial-gradient(1000px 500px at 50% -10%, rgba(0, 87, 255, 0.1), transparent 60%),
+    rgba(10, 20, 50, 0.42);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  animation: nsaWelcomeIn 0.22s ease both;
+}
+.nsa-logout-card {
+  width: 100%;
+  max-width: 24rem;
+  text-align: center;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  border-radius: 1.5rem;
+  padding: 1.75rem 1.5rem;
+  box-shadow: 0 40px 80px -28px rgba(8, 20, 50, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  animation: nsaLogoutPop 0.28s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.nsa-logout-icon {
+  font-size: 2rem;
+  line-height: 1;
+}
+.nsa-logout-title {
+  margin-top: 0.75rem;
+  font-family: var(--font-sora), system-ui, sans-serif;
+  font-size: 1.4rem;
+  font-weight: 800;
+  color: var(--navy, #0a1a3f);
+}
+.nsa-logout-sub {
+  margin-top: 0.4rem;
+  font-size: 0.9rem;
+  color: var(--ink2, #475569);
+}
+.nsa-logout-actions {
+  margin-top: 1.4rem;
+  display: flex;
+  gap: 0.625rem;
+}
+@keyframes nsaLogoutPop {
+  from { opacity: 0; transform: translateY(10px) scale(0.96); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .nsa-logout-backdrop,
+  .nsa-logout-card { animation: nsaWelcomeIn 0.15s ease both; }
+}

@@ -12,16 +12,11 @@ import {
 import Logo from "@/components/ui/Logo";
 import { ACADEMY } from "@/lib/config";
 import { DEFAULT_NAV_TABS, type NavTab } from "@/lib/navConfig";
+import { requestLogout } from "@/lib/welcome";
 
-async function doLogout() {
-  try { await fetch("/api/auth/logout", { method: "POST" }); } catch { /* ignore */ }
-  window.location.href = "/";
-}
-
-async function doPortalLogout() {
-  try { await fetch("/api/portal/logout", { method: "POST" }); } catch { /* ignore */ }
-  window.location.href = "/";
-}
+// Route logout through the global LogoutFlow (confirm + farewell + true logout).
+function doLogout() { requestLogout("/api/auth/logout", "/"); }
+function doPortalLogout() { requestLogout("/api/portal/logout", "/"); }
 
 /** Lucide icon per route for the premium nav (desktop hover + mobile drawer rows). */
 const NAV_ICONS: Record<string, LucideIcon> = {
