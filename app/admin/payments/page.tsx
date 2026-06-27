@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { PageHeader, useAdminData, LoadingBlock, TableShell, KpiCard } from "@/components/admin/ui";
+import WebinarRegistrationsTrend from "@/components/admin/WebinarRegistrationsTrend";
 import { useToast } from "@/components/ui/Toast";
 import { formatINR, formatDate, formatISTDateTime, istYMD, istTodayYMD } from "@/lib/dates";
 import type { Payment, Enrollment, PaymentProof } from "@/lib/types";
@@ -341,7 +342,7 @@ export default function PaymentsAdmin() {
       />
 
       {/* Premium "today" summary cards (always IST today) */}
-      <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+      <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
         <TodayCard
           icon="🎥"
           label="Webinar Registrations Today"
@@ -355,6 +356,7 @@ export default function PaymentsAdmin() {
           sub={today.crsAmount > 0 ? `${formatINR(today.crsAmount)} collected` : "No collections yet"}
           delta={today.crsDelta}
         />
+        <WebinarRegistrationsTrend payments={payments} />
       </div>
 
       <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
