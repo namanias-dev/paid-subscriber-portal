@@ -50,6 +50,7 @@ import type {
 import { deriveEnrollment, enrollmentStatusFromSchedule, installmentsSummary, planCourseEnrollment } from "./installments";
 import { mergeSiteSettings } from "./homeDefaults";
 import { DEFAULT_ROLES, resolvePermissions, type PermissionSet } from "./permissions";
+import { dedupedPaidTotal } from "./paymentsAgg";
 
 /**
  * The switchboard every API route uses.
@@ -1379,6 +1380,39 @@ export async function getWebinars(): Promise<Webinar[]> {
   const rows = await dbSelect<Webinar>("webinars");
   return rows.length ? rows : [...mock.webinars];
 }
+
+// Lightweight "is any webinar upcoming?" check for the public-nav NEW badge, which
+// renders on EVERY public page. Avoids the full getWebinars() select(*) by reading
+// only two columns, and caches the boolean for 60s across requests/pages.
+let _upcomingWebinarCache: { v: boolean; exp: number } | null = null;
+const UPCOMING_TTL_MS = 60000;
+const _isUpcomingWebinar = (w: { status?: string | null; datetime?: string | null }): boolean =>
+  w.status !== "completed" && (!w.datetime || new Date(w.datetime).getTime() > Date.now());
+
+export async function hasUpcomingWebinars(): Promise<boolean> {
+  const now = Date.now();
+  if (_upcomingWebinarCache && _upcomingWebinarCache.exp > now) return _upcomingWebinarCache.v;
+  let v = false;
+  if (demoMode()) {
+    v = mock.webinars.some(_isUpcomingWebinar);
+  } else {
+    const db = getSupabaseAdmin();
+    if (!db) {
+      v = mock.webinars.some(_isUpcomingWebinar);
+    } else {
+      try {
+        const { data } = await db.from("webinars").select("status,datetime");
+        const rows = (data as { status: string | null; datetime: string | null }[]) ?? [];
+        // Parity with getWebinars(): an empty table falls back to the mock set.
+        v = rows.length ? rows.some(_isUpcomingWebinar) : mock.webinars.some(_isUpcomingWebinar);
+      } catch {
+        v = mock.webinars.some(_isUpcomingWebinar);
+      }
+    }
+  }
+  _upcomingWebinarCache = { v, exp: now + UPCOMING_TTL_MS };
+  return v;
+}
 /** Public webinars only — hides disabled items (Task 7). */
 export async function getPublicWebinars(): Promise<Webinar[]> {
   const all = await getWebinars();
@@ -2092,9 +2126,17 @@ export async function ensureBuyer(phone: string, name?: string | null): Promise<
  * determined (no DB / not found) so callers can FAIL-OPEN — we never mass-logout
  * users because of an infra hiccup.
  */
-export async function getBuyerSessionVersion(buyerId: string): Promise<number | null> {
-  const id = (buyerId || "").trim();
-  if (!id) return null;
+// Short-TTL in-memory cache for the session-version check. getBuyerSession() runs
+// on EVERY authenticated render, so without this each render would hit the DB just
+// to read one integer. Trade-off (accepted): after a real access change on one
+// serverless instance, OTHER instances may serve the previous version for up to
+// SV_TTL_MS before re-reading — so a forced re-auth can lag by a few seconds
+// cross-instance. bumpBuyerSessionVersion() refreshes the cache on the LOCAL
+// instance immediately. Fail-open semantics (null = "couldn't read") are preserved.
+const SV_TTL_MS = 15000;
+const _svCache = new Map<string, { v: number | null; exp: number }>();
+
+async function readBuyerSessionVersion(id: string): Promise<number | null> {
   if (demoMode()) {
     const b = demoBuyers().find((x) => x.id === id);
     return b ? (b.session_version ?? 0) : null;
@@ -2110,6 +2152,17 @@ export async function getBuyerSessionVersion(buyerId: string): Promise<number | 
   }
 }
 
+export async function getBuyerSessionVersion(buyerId: string): Promise<number | null> {
+  const id = (buyerId || "").trim();
+  if (!id) return null;
+  const now = Date.now();
+  const hit = _svCache.get(id);
+  if (hit && hit.exp > now) return hit.v;
+  const v = await readBuyerSessionVersion(id);
+  _svCache.set(id, { v, exp: now + SV_TTL_MS });
+  return v;
+}
+
 /**
  * Bump a buyer's session/access version — TARGETED cross-device invalidation.
  * Call ONLY on a real access/role change (lead->paid, admin payment accept, staff
@@ -2121,20 +2174,24 @@ export async function bumpBuyerSessionVersion(phone: string): Promise<void> {
   if (!p) return;
   if (demoMode()) {
     const b = demoBuyers().find((x) => x.phone === p);
-    if (b) b.session_version = (b.session_version ?? 0) + 1;
+    if (b) { b.session_version = (b.session_version ?? 0) + 1; _svCache.set(b.id, { v: b.session_version, exp: Date.now() + SV_TTL_MS }); }
     return;
   }
   const db = getSupabaseAdmin();
   if (!db) {
     const b = demoBuyers().find((x) => x.phone === p);
-    if (b) b.session_version = (b.session_version ?? 0) + 1;
+    if (b) { b.session_version = (b.session_version ?? 0) + 1; _svCache.set(b.id, { v: b.session_version, exp: Date.now() + SV_TTL_MS }); }
     return;
   }
   try {
     const { data } = await db.from("buyers").select("id,session_version").eq("phone", p).maybeSingle();
     if (!data) return;
     const row = data as { id: string; session_version: number | null };
-    await db.from("buyers").update({ session_version: (row.session_version ?? 0) + 1, updated_at: new Date().toISOString() }).eq("id", row.id);
+    const next = (row.session_version ?? 0) + 1;
+    await db.from("buyers").update({ session_version: next, updated_at: new Date().toISOString() }).eq("id", row.id);
+    // Reflect the new version on THIS instance immediately so the short-TTL cache
+    // can't serve the stale (still-valid) version right after a real access change.
+    _svCache.set(row.id, { v: next, exp: Date.now() + SV_TTL_MS });
   } catch {
     /* best-effort — never throw on housekeeping */
   }
@@ -3112,10 +3169,12 @@ export async function getDashboard(): Promise<DashboardData> {
   const monthStart = new Date();
   monthStart.setDate(1);
 
-  const revenueTotal = payments.filter((p) => p.status === "captured").reduce((a, p) => a + p.amount, 0);
-  const revenueMonth = payments
-    .filter((p) => p.status === "captured" && new Date(p.created_at) >= monthStart)
-    .reduce((a, p) => a + p.amount, 0);
+  // Revenue counts BOTH Razorpay "captured" and ICICI "PAID" (previously PAID was
+  // dropped → undercount), with retry-duplicate paid rows collapsed so a double
+  // settlement of one purchase isn't counted twice. Installments are preserved.
+  const paidRows = payments.filter((p) => isPaidStatus(p.status));
+  const revenueTotal = dedupedPaidTotal(paidRows);
+  const revenueMonth = dedupedPaidTotal(paidRows.filter((p) => new Date(p.created_at) >= monthStart));
   const pendingCollections = enrollments.reduce((a, e) => a + (e.pending || 0), 0);
   const admitted = leads.filter((l) => l.admitted).length;
   const conversionRate = leads.length ? Math.round((admitted / leads.length) * 100) : 0;
@@ -3136,7 +3195,7 @@ export async function getDashboard(): Promise<DashboardData> {
   const revenueByCourse = courses
     .map((c) => ({
       name: c.title.length > 18 ? c.title.slice(0, 16) + "…" : c.title,
-      value: payments.filter((p) => p.item === c.title && p.status === "captured").reduce((a, p) => a + p.amount, 0),
+      value: dedupedPaidTotal(paidRows.filter((p) => p.item === c.title)),
     }))
     .filter((r) => r.value > 0)
     .sort((a, b) => b.value - a.value)

@@ -4,9 +4,8 @@ import { useMemo, useState } from "react";
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Cell } from "recharts";
 import Modal from "@/components/ui/Modal";
 import { istYMD } from "@/lib/dates";
+import { isPaidStatus as isPaid, itemKey } from "@/lib/paymentsAgg";
 import type { Payment } from "@/lib/types";
-
-const isPaid = (s: Payment["status"]) => s === "captured" || s === "PAID";
 
 /** YMD (IST) for `daysAgo` days before today. */
 function ymdDaysAgo(daysAgo: number): string {
@@ -33,14 +32,21 @@ export default function WebinarRegistrationsTrend({ payments }: { payments: Paym
   const [month, setMonth] = useState(() => (istYMD(new Date()) || "").slice(0, 7)); // YYYY-MM
   const [year, setYear] = useState(() => Number((istYMD(new Date()) || "2026").slice(0, 4)));
 
-  // Paid webinar registrations bucketed by IST day (ymd -> count).
+  // Paid webinar registrations bucketed by IST day — counted DISTINCT by
+  // (phone, webinar) per day, so a retry that leaves two paid rows for the same
+  // person+webinar on a day counts as ONE registration (matches the seat count).
   const byDay = useMemo(() => {
-    const map = new Map<string, number>();
+    const perDay = new Map<string, Set<string>>();
     for (const p of payments) {
       if (!isPaid(p.status) || p.item_type !== "webinar") continue;
       const ymd = istYMD(p.created_at);
-      if (ymd) map.set(ymd, (map.get(ymd) || 0) + 1);
+      if (!ymd) continue;
+      let s = perDay.get(ymd);
+      if (!s) { s = new Set(); perDay.set(ymd, s); }
+      s.add(`${(p.phone || "").trim()}|${itemKey(p)}`);
     }
+    const map = new Map<string, number>();
+    for (const [ymd, s] of perDay) map.set(ymd, s.size);
     return map;
   }, [payments]);
 

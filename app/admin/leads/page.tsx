@@ -69,7 +69,7 @@ export default function LeadsPage() {
     <div>
       <PageHeader
         title="Lead CRM"
-        subtitle={`${filtered.length} leads`}
+        subtitle={`${filtered.length} sales-pipeline leads`}
         action={
           <div className="flex flex-wrap gap-2">
             <button onClick={exportCsv} className="btn btn-secondary text-sm">⬇ Export CSV</button>
@@ -94,10 +94,10 @@ export default function LeadsPage() {
       <details className="card mb-4 p-0">
         <summary className="flex cursor-pointer items-center justify-between gap-2 p-4">
           <span className="font-semibold">
-            Portal lead accounts
+            Portal login-code leads
             <span className="ml-2 pill pill-blue">{leadAccounts?.length ?? 0}</span>
           </span>
-          <span className="text-xs text-muted">Quiz/marketing leads with a login code · excluded from seats &amp; finance</span>
+          <span className="text-xs text-muted">Self-service quiz/marketing signups (can log in) · distinct from the sales pipeline below · never in seats &amp; finance</span>
         </summary>
         <div className="border-t border-line p-0">
           {leadAccounts && leadAccounts.length > 0 ? (

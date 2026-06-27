@@ -62,7 +62,7 @@ export default function WelcomeOverlay() {
     >
       <div className="nsa-welcome__card">
         <div className="nsa-welcome__logo"><Logo size={64} /></div>
-        <p className="nsa-welcome__hi">Welcome back{first ? "," : ""}</p>
+        <p className="nsa-welcome__hi">Welcome back{first ? "," : "!"}</p>
         {first && <p className="nsa-welcome__name">{first}</p>}
       </div>
     </div>

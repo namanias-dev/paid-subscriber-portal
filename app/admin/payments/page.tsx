@@ -5,6 +5,7 @@ import { PageHeader, useAdminData, LoadingBlock, TableShell, KpiCard } from "@/c
 import WebinarRegistrationsTrend from "@/components/admin/WebinarRegistrationsTrend";
 import { useToast } from "@/components/ui/Toast";
 import { formatINR, formatDate, formatISTDateTime, istYMD, istTodayYMD } from "@/lib/dates";
+import { dedupedPaidTotal, distinctRegistrations } from "@/lib/paymentsAgg";
 import type { Payment, Enrollment, PaymentProof } from "@/lib/types";
 
 type ProofWithAccess = PaymentProof & { hasAccess: boolean };
@@ -156,18 +157,23 @@ export default function PaymentsAdmin() {
     const webYest = paidOn(yYMD, (p) => p.item_type === "webinar");
     const crsToday = paidOn(todayYMD, (p) => p.item_type === "course");
     const crsYest = paidOn(yYMD, (p) => p.item_type === "course");
+    // Seats/registrations are counted DISTINCT-by-(phone, item) so a retry that
+    // leaves two paid rows for the same person+item is one seat; revenue collapses
+    // exact retry-duplicates but keeps legitimate installments/seat+full.
+    const webCount = distinctRegistrations(webToday);
+    const crsCount = distinctRegistrations(crsToday);
     return {
-      webCount: webToday.length,
-      webDelta: webToday.length - webYest.length,
-      crsCount: crsToday.length,
-      crsAmount: crsToday.reduce((a, p) => a + p.amount, 0),
-      crsDelta: crsToday.length - crsYest.length,
+      webCount,
+      webDelta: webCount - distinctRegistrations(webYest),
+      crsCount,
+      crsAmount: dedupedPaidTotal(crsToday),
+      crsDelta: crsCount - distinctRegistrations(crsYest),
     };
   }, [payments, todayYMD]);
 
   if (full.loading || enr.loading) return <LoadingBlock />;
 
-  const captured = payments.filter((p) => isPaid(p.status)).reduce((a, p) => a + p.amount, 0);
+  const captured = dedupedPaidTotal(payments.filter((p) => isPaid(p.status)));
   const refunded = payments.filter((p) => p.status === "refunded").reduce((a, p) => a + p.amount, 0);
   const pending = enrollments.reduce((a, e) => a + (e.pending || 0), 0);
 

@@ -2,7 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getBuyerSession } from "@/lib/session";
 import { resolveLearner } from "@/lib/entitlements";
-import { getAttemptsByUser, getAttemptsByGuestMobile, getAllQuizzes } from "@/lib/dataProvider";
+import { getAttemptsByUser, getAllQuizzes } from "@/lib/dataProvider";
 import { formatISTDateTime } from "@/lib/dates";
 import type { QuizAttempt } from "@/lib/types";
 
@@ -32,16 +32,17 @@ export default async function PortalQuizzesPage() {
 
   const learner = await resolveLearner();
 
-  // A lead's history lives under their student id (claimed on login) AND/OR under
-  // their phone (pre-login guest attempts). Merge both, dedup by attempt id.
-  const [byUser, byPhone, quizzes] = await Promise.all([
+  // Show ONLY genuinely-owned attempts: those CLAIMED to this learner's student id.
+  // Pre-login guest attempts are claimed (code-proven) to that id at login, so this
+  // covers cross-device history WITHOUT ever listing by a self-reported phone — a
+  // typo'd/shared number can therefore never surface another person's results here.
+  const [byUser, quizzes] = await Promise.all([
     learner?.studentId ? getAttemptsByUser(learner.studentId) : Promise.resolve([] as QuizAttempt[]),
-    getAttemptsByGuestMobile(session.phone),
     getAllQuizzes(),
   ]);
 
   const map = new Map<string, QuizAttempt>();
-  for (const a of [...byUser, ...byPhone]) map.set(a.id, a);
+  for (const a of byUser) map.set(a.id, a);
   const attempts = [...map.values()].sort(
     (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
   );
