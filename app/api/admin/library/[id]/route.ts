@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
 import { updateLibraryDoc, deleteLibraryDoc, getLibraryDocUsage } from "@/lib/dataProvider";
-import { requireAdmin } from "@/lib/adminGuard";
+import { requirePermission } from "@/lib/adminGuard";
 
 export const dynamic = "force-dynamic";
 
 export async function PATCH(req: Request, { params }: { params: { id: string } }) {
   try {
-    if (!(await requireAdmin())) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+    if (!(await requirePermission("content_pdfs_media"))) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
     const body = await req.json().catch(() => ({}));
     const patch: Record<string, unknown> = {};
     if (typeof body.title === "string") patch.title = body.title.trim();
@@ -22,7 +22,7 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
 
 export async function DELETE(req: Request, { params }: { params: { id: string } }) {
   try {
-    if (!(await requireAdmin())) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+    if (!(await requirePermission("content_pdfs_media"))) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
     const force = new URL(req.url).searchParams.get("force") === "1";
     const usage = await getLibraryDocUsage(params.id);
     const inUse = usage.courses.length + usage.webinars.length;

@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
 import { getLibraryDocs, addLibraryDoc } from "@/lib/dataProvider";
-import { requireAdmin } from "@/lib/adminGuard";
+import { requirePermission, requireAnyPermission } from "@/lib/adminGuard";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
-    if (!(await requireAdmin())) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+    if (!(await requireAnyPermission(["content_pdfs_media", "content_courses", "content_webinars"]))) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
     const docs = await getLibraryDocs();
     return NextResponse.json({ ok: true, docs });
   } catch {
@@ -16,7 +16,7 @@ export async function GET() {
 
 export async function POST(req: Request) {
   try {
-    if (!(await requireAdmin())) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+    if (!(await requirePermission("content_pdfs_media"))) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
     const body = await req.json().catch(() => ({}));
     if (!body.title?.trim()) return NextResponse.json({ ok: false, error: "Title required." }, { status: 400 });
     if (!body.file_url?.trim()) return NextResponse.json({ ok: false, error: "File is required." }, { status: 400 });

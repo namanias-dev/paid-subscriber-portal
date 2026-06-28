@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getContentById, updateContent, deleteContent } from "@/lib/dataProvider";
-import { getAdminSession } from "@/lib/session";
+import { requirePermission } from "@/lib/adminGuard";
 import {
   r2Configured,
   deleteObject,
@@ -11,17 +11,12 @@ import {
 } from "@/lib/r2";
 import type { ContentItem } from "@/lib/types";
 
-async function requireAdmin() {
-  const session = await getAdminSession();
-  return !!session;
-}
-
 export async function PATCH(
   req: Request,
   { params }: { params: { id: string } }
 ) {
   try {
-    if (!(await requireAdmin())) {
+    if (!(await requirePermission("content_courses"))) {
       return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
     }
     const body = await req.json().catch(() => ({}));
@@ -106,7 +101,7 @@ export async function DELETE(
   { params }: { params: { id: string } }
 ) {
   try {
-    if (!(await requireAdmin())) {
+    if (!(await requirePermission("content_courses"))) {
       return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
     }
     // Fetch first so we know the source_type + R2 keys before the row is gone.

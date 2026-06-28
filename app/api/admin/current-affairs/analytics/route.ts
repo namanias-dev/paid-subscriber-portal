@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
-import { requireAdmin } from "@/lib/adminGuard";
+import { requirePermission } from "@/lib/adminGuard";
 import { getCaArticles, getCaPdfs, getCaEvents, getCaLeads } from "@/lib/dataProvider";
 import { caCategoryName } from "@/lib/caConstants";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  if (!(await requireAdmin())) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+  if (!(await requirePermission("content_current_affairs"))) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
 
   const [articles, pdfs, events, leads] = await Promise.all([
     getCaArticles(),

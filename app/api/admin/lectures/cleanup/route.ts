@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getAdminSession } from "@/lib/session";
+import { requirePermission } from "@/lib/adminGuard";
 import { r2Configured, listStaleMultipart, abortMultipart } from "@/lib/r2";
 
 export const dynamic = "force-dynamic";
@@ -12,7 +12,7 @@ const DEFAULT_STALE_MS = 24 * 60 * 60 * 1000; // 24h
  * multipart uploads is the recommended belt-and-braces — documented in handoff.)
  */
 export async function POST(req: Request) {
-  if (!(await getAdminSession())) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+  if (!(await requirePermission("content_courses"))) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   if (!r2Configured()) return NextResponse.json({ ok: false, error: "Video hosting is not configured." }, { status: 503 });
 
   const body = await req.json().catch(() => ({}));

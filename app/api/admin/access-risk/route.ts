@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getAdminSession } from "@/lib/session";
+import { requireAnyPermission } from "@/lib/adminGuard";
 import { getAllCourseEnrollments, getAllCourses, getAllAccessOverrides } from "@/lib/dataProvider";
 import { lectureAccessForCourse } from "@/lib/entitlements";
 
@@ -13,7 +13,7 @@ const DAY = 86_400_000;
  * within 7 days). Reuses the SAME lectureAccessForCourse engine as playback.
  */
 export async function GET() {
-  if (!(await getAdminSession())) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+  if (!(await requireAnyPermission(["view_revenue", "manage_payments"]))) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
 
   const [enrollments, courses, overrides] = await Promise.all([
     getAllCourseEnrollments(),

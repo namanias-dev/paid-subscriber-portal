@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
 import { reorderCourses } from "@/lib/dataProvider";
-import { requireAdmin } from "@/lib/adminGuard";
+import { requirePermission } from "@/lib/adminGuard";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(req: Request) {
   try {
-    if (!(await requireAdmin())) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+    if (!(await requirePermission("content_courses"))) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
     const body = await req.json().catch(() => ({}));
     const ids = Array.isArray(body?.ids) ? body.ids.filter((x: unknown): x is string => typeof x === "string") : null;
     if (!ids || ids.length === 0) return NextResponse.json({ ok: false, error: "ids[] required." }, { status: 400 });

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireAdmin } from "@/lib/adminGuard";
+import { requirePermission } from "@/lib/adminGuard";
 import { getCaArticles, addCaArticle } from "@/lib/dataProvider";
 import { normalizeCaArticleInput } from "@/lib/caNormalize";
 
@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
-    if (!(await requireAdmin())) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+    if (!(await requirePermission("content_current_affairs"))) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
     const articles = await getCaArticles();
     return NextResponse.json({ ok: true, articles });
   } catch {
@@ -17,7 +17,7 @@ export async function GET() {
 
 export async function POST(req: Request) {
   try {
-    if (!(await requireAdmin())) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+    if (!(await requirePermission("content_current_affairs"))) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
     const body = await req.json().catch(() => ({}));
     if (!body.title) return NextResponse.json({ ok: false, error: "Title required." }, { status: 400 });
     const norm = normalizeCaArticleInput(body);

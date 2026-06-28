@@ -1,13 +1,13 @@
 import { NextResponse } from "next/server";
 import { getSiteSettings, updateSiteSettings } from "@/lib/dataProvider";
-import { requireAdmin } from "@/lib/adminGuard";
+import { requirePermission } from "@/lib/adminGuard";
 import type { SiteSettings } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
-    if (!(await requireAdmin())) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+    if (!(await requirePermission("manage_settings"))) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
     const settings = await getSiteSettings();
     return NextResponse.json({ ok: true, settings });
   } catch {
@@ -17,7 +17,7 @@ export async function GET() {
 
 export async function PUT(req: Request) {
   try {
-    if (!(await requireAdmin())) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+    if (!(await requirePermission("manage_settings"))) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
     const body = (await req.json().catch(() => ({}))) as Partial<SiteSettings>;
 
     // Clamp popup delay to a sane range so the popup can't be configured to never/instantly fire badly.

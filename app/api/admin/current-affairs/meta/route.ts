@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
-import { requireAdmin } from "@/lib/adminGuard";
+import { requirePermission } from "@/lib/adminGuard";
 import { getCaCategories, getCaTags, getCaPdfs, getAllQuizzes } from "@/lib/dataProvider";
 
 export const dynamic = "force-dynamic";
 
 /** Picker data for the article editor: categories, tags, PDFs and quizzes. */
 export async function GET() {
-  if (!(await requireAdmin())) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+  if (!(await requirePermission("content_current_affairs"))) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   const [categories, tags, pdfs, quizzes] = await Promise.all([
     getCaCategories(),
     getCaTags(),

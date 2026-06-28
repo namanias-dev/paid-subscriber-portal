@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getQuestions, setQuizQuestions, getQuizById } from "@/lib/dataProvider";
-import { requireAdmin } from "@/lib/adminGuard";
+import { requirePermission } from "@/lib/adminGuard";
 import { buildSnapshot } from "@/lib/quizSnapshot";
 
 export const dynamic = "force-dynamic";
@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 /** Auto-generate a quiz's question list from the bank by filters. */
 export async function POST(req: Request, { params }: { params: { id: string } }) {
   try {
-    if (!(await requireAdmin())) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+    if (!(await requirePermission("content_quizzes"))) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
     const quiz = await getQuizById(params.id);
     if (!quiz) return NextResponse.json({ ok: false, error: "Quiz not found" }, { status: 404 });
 

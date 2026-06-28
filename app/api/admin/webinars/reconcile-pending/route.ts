@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireAdmin } from "@/lib/adminGuard";
+import { requirePermission } from "@/lib/adminGuard";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { verifyFromStoredCallback } from "@/lib/eazypay";
 import type { Payment } from "@/lib/types";
@@ -32,7 +32,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 type Decision = "stay_pending" | "to_paid" | "to_failed" | "needs_verification";
 
 export async function POST(req: Request) {
-  if (!(await requireAdmin())) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+  if (!(await requirePermission("content_webinars"))) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
 
   const body = await req.json().catch(() => ({}));
   const dryRun = body.dryRun !== false; // default TRUE — must be explicitly disabled to write

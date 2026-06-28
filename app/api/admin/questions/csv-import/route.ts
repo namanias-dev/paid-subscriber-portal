@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireAdmin } from "@/lib/adminGuard";
+import { requirePermission } from "@/lib/adminGuard";
 import { parseCsvQuestions } from "@/lib/csvQuestions";
 import { previewParsed, importParsed } from "@/lib/quizImport";
 
@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 
 export async function POST(req: Request) {
   try {
-    if (!(await requireAdmin())) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+    if (!(await requirePermission("content_quizzes"))) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
 
     const ct = req.headers.get("content-type") || "";
     let csvText = "";

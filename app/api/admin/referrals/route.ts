@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
 import { getReferrals, updateReferral } from "@/lib/dataProvider";
-import { requireAdmin } from "@/lib/adminGuard";
+import { requirePermission } from "@/lib/adminGuard";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
-    if (!(await requireAdmin())) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+    if (!(await requirePermission("manage_students_leads"))) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
     const referrals = await getReferrals();
     return NextResponse.json({ ok: true, referrals });
   } catch {
@@ -16,7 +16,7 @@ export async function GET() {
 
 export async function PATCH(req: Request) {
   try {
-    if (!(await requireAdmin())) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+    if (!(await requirePermission("manage_students_leads"))) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
     const body = await req.json().catch(() => ({}));
     const referral = await updateReferral(String(body.id), body.patch || {});
     return NextResponse.json({ ok: true, referral });

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getAdminSession } from "@/lib/session";
+import { requirePermission } from "@/lib/adminGuard";
 import { getContentById } from "@/lib/dataProvider";
 import { r2Configured, listUploadedParts } from "@/lib/r2";
 
@@ -10,7 +10,7 @@ export const dynamic = "force-dynamic";
  * uploads only the MISSING chunks — no restart from zero after a crash/network drop.
  */
 export async function GET(req: Request) {
-  if (!(await getAdminSession())) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+  if (!(await requirePermission("content_courses"))) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   if (!r2Configured()) return NextResponse.json({ ok: false, error: "Video hosting is not configured." }, { status: 503 });
 
   const recordingId = new URL(req.url).searchParams.get("recordingId") || "";

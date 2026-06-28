@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getAdminSession } from "@/lib/session";
+import { requirePermission } from "@/lib/adminGuard";
 import { getContentById, updateContent } from "@/lib/dataProvider";
 import { r2Configured, signPutUrl, lectureThumbnailKey, lectureNotesKey } from "@/lib/r2";
 
@@ -10,7 +10,7 @@ export const dynamic = "force-dynamic";
  * files — no multipart needed). Persists the resulting key on the record.
  */
 export async function POST(req: Request) {
-  if (!(await getAdminSession())) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+  if (!(await requirePermission("content_courses"))) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   if (!r2Configured()) return NextResponse.json({ ok: false, error: "Video hosting is not configured." }, { status: 503 });
 
   const body = await req.json().catch(() => ({}));

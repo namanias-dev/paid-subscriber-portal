@@ -27,6 +27,8 @@ If you forget your password, ask a Super Admin to reset it for you on the **Staf
 
 On every admin page there is a **`❓ Help & Learn`** button (top bar / floating). Click it to open this handbook. It automatically shows the guide for the page you are on, lets you **search** all topics, browse the full **topic list**, and **ask a question**. You can open it any time you are stuck.
 
+> 📌 **Admin setup (one-time):** The "Ask a question" box sends to the academy's **WhatsApp number** and **support email**. Make sure both are filled in under `People` → `Settings` (fields `WhatsApp number` and `Support email`). If they're blank, the Ask-a-question buttons stay hidden until you add them.
+
 ## Why some menu items or buttons are missing for you
 
 The Admin Panel uses **roles and permissions**. Your role decides what you can see and do. If a menu item or button does not appear for you, it usually means **your role does not have that permission** — this is normal and intended, not a bug.

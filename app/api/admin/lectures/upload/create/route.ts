@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getAdminSession } from "@/lib/session";
+import { requirePermission } from "@/lib/adminGuard";
 import { getContentById, updateContent } from "@/lib/dataProvider";
 import { missingR2EnvVars, createMultipart, lectureVideoKey } from "@/lib/r2";
 
@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
  * id/key + chunking plan so the upload can resume after a crash or refresh.
  */
 export async function POST(req: Request) {
-  if (!(await getAdminSession())) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+  if (!(await requirePermission("content_courses"))) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
 
   // Surface the exact misconfiguration instead of a generic 503.
   const missing = missingR2EnvVars();

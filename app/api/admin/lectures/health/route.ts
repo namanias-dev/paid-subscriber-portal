@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getAdminSession } from "@/lib/session";
+import { requirePermission } from "@/lib/adminGuard";
 import { missingR2EnvVars, listStaleMultipart } from "@/lib/r2";
 
 export const dynamic = "force-dynamic";
@@ -10,7 +10,7 @@ export const dynamic = "force-dynamic";
  * credentials/endpoint work BEFORE attempting an upload. Never logs secrets.
  */
 export async function GET() {
-  if (!(await getAdminSession())) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+  if (!(await requirePermission("content_courses"))) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
 
   const present = {
     CLOUDFLARE_R2_ENDPOINT: !!(process.env.CLOUDFLARE_R2_ENDPOINT || "").trim(),

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getQuestions, addQuestion, addImportJob } from "@/lib/dataProvider";
-import { requireAdmin } from "@/lib/adminGuard";
+import { requirePermission } from "@/lib/adminGuard";
 import { parseBulkQuestions, questionHash } from "@/lib/quizParse";
 import { sanitizeHtml } from "@/lib/sanitizeHtml";
 import type { Question } from "@/lib/types";
@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 
 export async function POST(req: Request) {
   try {
-    if (!(await requireAdmin())) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+    if (!(await requirePermission("content_quizzes"))) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
     const body = await req.json().catch(() => ({}));
     const action = String(body.action || "preview");
     const text = String(body.text || "");

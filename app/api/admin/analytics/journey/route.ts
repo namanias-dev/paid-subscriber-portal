@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
-import { requireAdmin } from "@/lib/adminGuard";
+import { requirePermission } from "@/lib/adminGuard";
 import { getJourney } from "@/lib/analytics/queries";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(req: Request) {
   try {
-    if (!(await requireAdmin())) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+    if (!(await requirePermission("manage_students_leads"))) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
     const phone = new URL(req.url).searchParams.get("phone") || "";
     if (!phone) return NextResponse.json({ ok: false, error: "Missing phone." }, { status: 400 });
     const journey = await getJourney(phone);

@@ -1,6 +1,17 @@
 import { NextResponse } from "next/server";
-import { requireAdmin } from "@/lib/adminGuard";
+import { requireAnyPermission } from "@/lib/adminGuard";
 import { getSupabaseAdmin } from "@/lib/supabase";
+
+// Shared media upload used by many editors (courses, webinars, library, home,
+// toppers, about, current affairs). Allow any content/settings manager.
+const UPLOAD_PERMS = [
+  "content_courses",
+  "content_webinars",
+  "content_pdfs_media",
+  "content_current_affairs",
+  "content_quizzes",
+  "manage_settings",
+] as const;
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -10,7 +21,7 @@ const MAX_BYTES = 8 * 1024 * 1024; // 8 MB
 
 export async function POST(req: Request) {
   try {
-    if (!(await requireAdmin())) {
+    if (!(await requireAnyPermission([...UPLOAD_PERMS]))) {
       return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
     }
 

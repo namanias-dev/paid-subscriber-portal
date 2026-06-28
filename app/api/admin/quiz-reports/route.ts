@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
 import { getAllQuizzes, getAllAttempts, getAllAnswers, getAttemptsByQuiz, getAnswersByAttempt } from "@/lib/dataProvider";
-import { requireAdmin } from "@/lib/adminGuard";
+import { requirePermission } from "@/lib/adminGuard";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(req: Request) {
   try {
-    if (!(await requireAdmin())) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+    if (!(await requirePermission("content_quizzes"))) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
     const { searchParams } = new URL(req.url);
     const quizId = searchParams.get("quizId");
 

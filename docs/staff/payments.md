@@ -8,6 +8,8 @@
 
 This is the money screen. It shows every payment transaction (ICICI and older Razorpay), revenue, and collections. Heading: `Payments & Finance`, subtitle `Razorpay & ICICI transactions, revenue & collections`.
 
+> ⚠️ **Recording a cash/UPI/bank (offline) payment? Don't look here.** Offline payments are **always** recorded from the student's profile (`People` → `Students & Enrollments` → open the student → `Record payment`), never on this Payments page. See [Students & Enrollments](students) and [Course & Portal Access](course-access).
+
 ## Payment statuses (what each one means)
 
 | Status shown | Meaning | Has access? |

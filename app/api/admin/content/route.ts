@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getAllContent, addContent } from "@/lib/dataProvider";
-import { getAdminSession } from "@/lib/session";
+import { requirePermission } from "@/lib/adminGuard";
 import type { ContentType } from "@/lib/types";
 
 const VALID_TYPES: ContentType[] = [
@@ -16,14 +16,9 @@ const VALID_TYPES: ContentType[] = [
   "maps",
 ];
 
-async function requireAdmin() {
-  const session = await getAdminSession();
-  return !!session;
-}
-
 export async function GET() {
   try {
-    if (!(await requireAdmin())) {
+    if (!(await requirePermission("content_courses"))) {
       return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
     }
     const content = await getAllContent();
@@ -38,7 +33,7 @@ export async function GET() {
 
 export async function POST(req: Request) {
   try {
-    if (!(await requireAdmin())) {
+    if (!(await requirePermission("content_courses"))) {
       return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
     }
     const body = await req.json().catch(() => ({}));

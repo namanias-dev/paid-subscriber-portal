@@ -1,13 +1,13 @@
 import { NextResponse } from "next/server";
 import { getQuestions, addQuestion } from "@/lib/dataProvider";
-import { requireAdmin } from "@/lib/adminGuard";
+import { requirePermission } from "@/lib/adminGuard";
 import { sanitizeQuestionInput } from "@/lib/quizSanitize";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
-    if (!(await requireAdmin())) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+    if (!(await requirePermission("content_quizzes"))) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
     const questions = await getQuestions();
     return NextResponse.json({ ok: true, questions });
   } catch {
@@ -17,7 +17,7 @@ export async function GET() {
 
 export async function POST(req: Request) {
   try {
-    if (!(await requireAdmin())) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+    if (!(await requirePermission("content_quizzes"))) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
     const body = await req.json().catch(() => ({}));
     const input = sanitizeQuestionInput(body);
     if (!input.question_html) return NextResponse.json({ ok: false, error: "Question text is required." }, { status: 400 });

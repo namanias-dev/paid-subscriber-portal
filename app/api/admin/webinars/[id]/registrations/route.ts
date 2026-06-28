@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireAdmin } from "@/lib/adminGuard";
+import { requirePermission } from "@/lib/adminGuard";
 import {
   getWebinars,
   getWebinarRegistrationsByWebinar,
@@ -18,7 +18,7 @@ type RegStatus = "paid" | "pending" | "failed" | "unpaid" | "free";
  */
 export async function GET(_req: Request, { params }: { params: { id: string } }) {
   try {
-    if (!(await requireAdmin())) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+    if (!(await requirePermission("content_webinars"))) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
 
     const webinar = (await getWebinars()).find((w) => w.id === params.id);
     if (!webinar) return NextResponse.json({ ok: false, error: "Webinar not found" }, { status: 404 });

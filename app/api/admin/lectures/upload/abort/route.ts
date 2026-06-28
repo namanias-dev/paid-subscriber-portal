@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getAdminSession } from "@/lib/session";
+import { requirePermission } from "@/lib/adminGuard";
 import { getContentById, updateContent, deleteContent } from "@/lib/dataProvider";
 import { r2Configured, abortMultipart } from "@/lib/r2";
 
@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
  * (default — nothing left behind) or reset it to idle.
  */
 export async function POST(req: Request) {
-  if (!(await getAdminSession())) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+  if (!(await requirePermission("content_courses"))) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
 
   const body = await req.json().catch(() => ({}));
   const recordingId = String(body.recordingId || "");
