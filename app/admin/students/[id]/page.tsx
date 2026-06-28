@@ -72,6 +72,18 @@ interface CourseCard {
   planChangedReason?: string | null;
   planHistory?: { id: string; oldPlan: string | null; newPlan: string | null; oldOutstanding: number; newOutstanding: number; reason: string | null; changedBy: string | null; createdAt: string }[];
 }
+interface AttemptCard {
+  key: string;
+  courseId: string;
+  title: string;
+  slug: string | null;
+  batch: string | null;
+  attemptCount: number;
+  latestStatus: string;
+  latestAt: string;
+  enrollmentIds: string[];
+  attempts: { id: string; date: string; amount: number; status: string; reference: string | null }[];
+}
 interface WebinarRow { id: string; title: string; datetime: string | null; paid: boolean; amount: number | null; status: string }
 interface LedgerRow { id: string; date: string; amount: number; type: string; label: string; method: string; reference: string | null; receiptNo: string | null }
 interface RecentAttempt { attemptId: string; slug: string; title: string; score: number; max_score: number; accuracy: number; submitted_at: string | null }
@@ -79,6 +91,7 @@ interface Profile {
   student: Student;
   buyerCode: string | null;
   courses: CourseCard[];
+  attempts: AttemptCard[];
   webinars: WebinarRow[];
   ledger: LedgerRow[];
   receipts: PaymentReceipt[];
@@ -401,14 +414,14 @@ export default function StudentProfilePage({ params }: { params: { id: string } 
         )}
       </Card>
 
-      {/* ---------------- ENROLLED COURSES ---------------- */}
+      {/* ---------------- ACTIVE ENROLLED COURSES ---------------- */}
       <Card
-        title={`Enrolled courses (${profile.courses.length})`}
+        title={`Active enrolled courses (${profile.courses.length})`}
         icon={<GraduationCap size={17} />}
         action={<button onClick={() => { ensureCatalog(); setModal("enroll"); }} className="inline-flex items-center gap-1 text-sm font-semibold text-primary hover:underline"><Plus size={15} /> Enroll</button>}
       >
         {profile.courses.length === 0 ? (
-          <Empty>No course enrollments yet.</Empty>
+          <Empty>No active course enrollments yet.</Empty>
         ) : (
           <div className="grid gap-3 sm:grid-cols-2">
             {profile.courses.map((c) => (
@@ -459,6 +472,21 @@ export default function StudentProfilePage({ params }: { params: { id: string } 
           </div>
         )}
       </Card>
+
+      {/* ---------------- PENDING / ATTEMPTED REGISTRATIONS ---------------- */}
+      {profile.attempts.length > 0 && (
+        <Card title={`Pending / attempted registrations (${profile.attempts.length})`} icon={<CalendarClock size={17} />}>
+          <p className="mb-3 text-xs text-muted">
+            These are payment <strong>attempts</strong>, not enrollments — they do <strong>not</strong> count toward enrolled courses or
+            outstanding, and do not unlock access. Approve a verifying payment (Payments page) to turn one into a real enrollment.
+          </p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {profile.attempts.map((a) => (
+              <AttemptGroupCard key={a.key} attempt={a} phone={s.phone} name={s.name} />
+            ))}
+          </div>
+        </Card>
+      )}
 
       {/* ---------------- WEBINARS ---------------- */}
       <Card
@@ -959,6 +987,47 @@ function ManagePlanModal({ course, onClose, request, onPay, onDone }: {
         </div>
       </div>
     </Modal>
+  );
+}
+
+function AttemptGroupCard({ attempt, phone, name }: { attempt: AttemptCard; phone: string; name: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="rounded-xl border border-dashed border-warning/50 bg-warning/5 p-4">
+      <div className="flex items-start justify-between gap-2">
+        <h3 className="font-semibold leading-snug">{attempt.title}</h3>
+        <span className="pill pill-amber capitalize">{attempt.latestStatus}</span>
+      </div>
+      <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted">
+        {attempt.batch && <span>{attempt.batch}</span>}
+        <span>{attempt.attemptCount} attempt{attempt.attemptCount === 1 ? "" : "s"}</span>
+        <span>· Last tried {formatISTDate(attempt.latestAt)}</span>
+      </div>
+      <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1.5">
+        {attempt.attempts.length > 0 && (
+          <button onClick={() => setOpen((v) => !v)} className="inline-flex items-center gap-1 text-xs font-semibold text-primary hover:underline">
+            <Receipt size={13} /> {open ? "Hide attempts" : `View attempts (${attempt.attempts.length})`}
+          </button>
+        )}
+        <Link href={`/admin/payments?q=${encodeURIComponent(phone)}`} className="inline-flex items-center gap-1 text-xs font-semibold text-muted hover:text-primary">
+          <Wallet size={13} /> Manage / approve
+        </Link>
+        <SendSmsButton phone={phone} name={name} />
+      </div>
+      {open && attempt.attempts.length > 0 && (
+        <ul className="mt-3 space-y-1.5 border-t border-warning/30 pt-3">
+          {attempt.attempts.map((p) => (
+            <li key={p.id} className="flex items-center justify-between gap-2 text-xs">
+              <span className="text-muted">{formatISTDateTime(p.date)}</span>
+              <span className="flex items-center gap-2">
+                <span className="font-semibold tabular-nums">{formatINR(p.amount)}</span>
+                <span className="pill pill-gray">{p.status}</span>
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }
 

@@ -55,7 +55,7 @@ import type {
   EnrollmentMergeLog,
   InstallmentItem,
 } from "./types";
-import { deriveEnrollment, enrollmentStatusFromSchedule, installmentsSummary, planCourseEnrollment, resolveEmiConfig, isLineCancelledOrWaived } from "./installments";
+import { deriveEnrollment, enrollmentStatusFromSchedule, installmentsSummary, planCourseEnrollment, resolveEmiConfig, isLineCancelledOrWaived, isActiveEnrollment, isAttemptEnrollment } from "./installments";
 import { changePlan, type ChangePlanTarget, type ConvertOptions } from "./paymentPlanChange";
 import { mergeSiteSettings } from "./homeDefaults";
 import { DEFAULT_ROLES, resolvePermissions, type PermissionSet } from "./permissions";
@@ -2879,13 +2879,34 @@ export async function enrollStudentInCourse(
   const course = await getCourseBySlug(input.courseSlug);
   if (!course) return { ok: false, error: "Course not found." };
 
-  // Don't double-enroll the same phone into the same course.
-  const existing = (await getCourseEnrollmentsByPhone(phone)).find((e) => e.course_id === course.id && e.status !== "cancelled");
-  if (existing) return { ok: false, error: `Already enrolled in ${course.title}.` };
+  // Don't double-enroll the same phone into the same course. Only a REAL active
+  // enrollment (confirmed payment / comp grant) blocks; a stale PENDING attempt
+  // does NOT — instead we REUSE that one booking intent so manually enrolling a
+  // student who has abandoned attempts activates a single enrollment with no
+  // duplicate card (test case D).
+  const courseEnrollments = (await getCourseEnrollmentsByPhone(phone)).filter(
+    (e) => e.course_id === course.id && e.status !== "cancelled",
+  );
+  const activeExisting = courseEnrollments.find(isActiveEnrollment);
+  if (activeExisting) return { ok: false, error: `Already enrolled in ${course.title}.` };
+  const attemptToReuse = courseEnrollments.find(isAttemptEnrollment) || null;
 
   const now = new Date().toISOString();
 
   if (input.plan === "complimentary") {
+    if (attemptToReuse) {
+      // Convert the abandoned attempt into the single comp enrollment.
+      const enrollment = await updateCourseEnrollment(attemptToReuse.id, {
+        plan_type: "full",
+        total_fee: 0,
+        amount_paid: 0,
+        installment_count: 0,
+        status: "fully_paid",
+        schedule: [{ no: 0, kind: "full", label: "Complimentary access", amount: 0, due: null, paid: true, paid_at: now }],
+      });
+      await ensureBuyer(phone, input.name).catch(() => null);
+      return { ok: true, enrollment: enrollment || attemptToReuse };
+    }
     const enrollment = await addCourseEnrollment({
       phone,
       student_name: input.name,
@@ -2913,6 +2934,22 @@ export async function enrollStudentInCourse(
     installmentCount: input.installmentCount ?? null,
   });
   if (!planned.ok) return { ok: false, error: planned.error };
+
+  if (attemptToReuse) {
+    // Re-plan the abandoned attempt to the new selection (no duplicate row). It
+    // stays an attempt (₹0) until a payment is recorded, which activates it.
+    const enrollment = await updateCourseEnrollment(attemptToReuse.id, {
+      batch_label: planned.plan.batchLabel,
+      plan_type: planned.plan.planType,
+      total_fee: planned.plan.totalFee,
+      amount_paid: 0,
+      installment_count: planned.plan.installmentCount,
+      status: "pending",
+      schedule: planned.plan.schedule,
+    });
+    await ensureBuyer(phone, input.name).catch(() => null);
+    return { ok: true, enrollment: enrollment || attemptToReuse };
+  }
 
   const enrollment = await addCourseEnrollment({
     phone,
@@ -3148,7 +3185,11 @@ function enrollmentOutstanding(e: CourseEnrollment): number {
  */
 export async function findDuplicateEnrollmentGroups(limitGroups = 200): Promise<DuplicateEnrollmentGroup[]> {
   const all = await getAllCourseEnrollments();
-  const active = all.filter((e) => e.status !== "cancelled");
+  // Only REAL enrollments (confirmed payment or comp grant) can be "duplicates".
+  // Multiple PENDING ₹0 attempts are not duplicates — they're one booking intent
+  // and are surfaced as "Pending/Attempted", not flagged here. This keeps the
+  // dashboard badge quiet now that attempts no longer count as enrollments.
+  const active = all.filter(isActiveEnrollment);
   const byKey = new Map<string, CourseEnrollment[]>();
   for (const e of active) {
     const phone = (e.phone || "").trim();
@@ -3179,6 +3220,140 @@ export async function findDuplicateEnrollmentGroups(limitGroups = 200): Promise<
     });
   }
   return groups.sort((a, b) => b.count - a.count).slice(0, limitGroups);
+}
+
+export interface AttemptBackfillAction {
+  phone: string;
+  course_id: string;
+  course_title: string;
+  /** The active enrollment we keep (if any) — null when the whole group is attempts. */
+  keptId: string | null;
+  /** Attempt/provisional enrollments superseded (status→cancelled, superseded_by). */
+  supersededIds: string[];
+  /** Open payments on superseded rows marked ABANDONED (never deleted). */
+  abandonedPaymentIds: string[];
+  reason: string;
+}
+
+export interface AttemptBackfillResult {
+  ok: boolean;
+  dryRun: boolean;
+  scannedGroups: number;
+  changedGroups: number;
+  actions: AttemptBackfillAction[];
+}
+
+/**
+ * Safe, reversible cleanup of provisional/duplicate course enrollments so that
+ * payment ATTEMPTS never count as enrollments. For each phone+course group of
+ * non-cancelled enrollments:
+ *   • If a REAL active enrollment exists (confirmed payment / comp), keep ONE
+ *     (the most-paid, else newest) and supersede every OTHER attempt sibling
+ *     (status→cancelled, superseded_by=keptId). Open payments on the superseded
+ *     rows are marked ABANDONED (never deleted) so receipts/history survive.
+ *   • If the group is ALL attempts (no confirmed payment), keep the NEWEST
+ *     attempt as the single "Pending/Attempted" intent and supersede the older
+ *     duplicate attempts. Nothing is activated; outstanding stays ₹0.
+ * Single-row groups are untouched. Idempotent. Pass dryRun=true to preview.
+ * Reconciles with the Merge tool (same supersede mechanism + audit log).
+ */
+export async function backfillProvisionalEnrollments(opts: {
+  dryRun?: boolean;
+  actor?: { id?: string; name?: string; role?: string };
+} = {}): Promise<AttemptBackfillResult> {
+  const dryRun = opts.dryRun !== false; // default to dry-run for safety
+  const all = await getAllCourseEnrollments();
+  const live = all.filter((e) => e.status !== "cancelled" && (e.phone || "").trim() && e.course_id);
+
+  const byKey = new Map<string, CourseEnrollment[]>();
+  for (const e of live) {
+    const key = `${(e.phone || "").trim()}|${e.course_id}`;
+    const arr = byKey.get(key) || byKey.set(key, []).get(key)!;
+    arr.push(e);
+  }
+
+  const actions: AttemptBackfillAction[] = [];
+  for (const [, arr] of byKey) {
+    if (arr.length < 2) continue; // single row — nothing to dedupe
+    const actives = arr.filter(isActiveEnrollment);
+    const attempts = arr.filter(isAttemptEnrollment);
+
+    // Choose the canonical row to KEEP.
+    let kept: CourseEnrollment;
+    let supersede: CourseEnrollment[];
+    if (actives.length >= 1) {
+      kept = [...actives].sort(
+        (a, b) => (b.amount_paid || 0) - (a.amount_paid || 0) || (b.created_at || "").localeCompare(a.created_at || ""),
+      )[0];
+      // Supersede every NON-active attempt; if multiple actives exist that's a real
+      // duplicate — leave the extra active rows for the Merge tool (don't auto-cancel money).
+      supersede = attempts;
+    } else {
+      // All attempts: keep the newest intent, supersede the older ones.
+      const sorted = [...attempts].sort((a, b) => (b.created_at || "").localeCompare(a.created_at || ""));
+      kept = sorted[0];
+      supersede = sorted.slice(1);
+    }
+    if (supersede.length === 0) continue;
+
+    const abandonedPaymentIds: string[] = [];
+    const reason = actives.length >= 1 ? "Superseded attempt (active enrollment exists)" : "Superseded duplicate attempt";
+
+    if (!dryRun) {
+      for (const dup of supersede) {
+        await updateCourseEnrollment(dup.id, { status: "cancelled", superseded_by: kept.id }).catch(() => null);
+        const pays = await getPaymentsByEnrollmentId(dup.id).catch(() => [] as Payment[]);
+        for (const p of pays) {
+          if (!isPaidStatus(p.status) && p.status !== "ABANDONED" && p.reference_no) {
+            await updatePaymentByReference(p.reference_no, { status: "ABANDONED" }).catch(() => null);
+            abandonedPaymentIds.push(p.id);
+          }
+        }
+      }
+      const db = getSupabaseAdmin();
+      if (db) {
+        try {
+          await db.from("enrollment_merge_log").insert({
+            id: uuid(),
+            phone: kept.phone,
+            course_id: kept.course_id,
+            course_title: kept.course_title,
+            kept_enrollment_id: kept.id,
+            cancelled_enrollment_ids: supersede.map((e) => e.id),
+            repointed_payment_ids: [],
+            abandoned_payment_ids: abandonedPaymentIds,
+            old_outstanding: 0,
+            new_outstanding: 0,
+            old_enrollment_count: arr.length,
+            reason: `backfill: ${reason}`,
+            actor_id: opts.actor?.id ?? "system",
+            actor_name: opts.actor?.name ?? "Attempt backfill",
+            actor_role: opts.actor?.role ?? "system",
+            metadata: { backfill: true, actives: actives.length, attempts: attempts.length },
+            created_at: new Date().toISOString(),
+          });
+        } catch { /* best-effort audit */ }
+      }
+    } else {
+      // Preview only: still enumerate which payments WOULD be abandoned.
+      for (const dup of supersede) {
+        const pays = await getPaymentsByEnrollmentId(dup.id).catch(() => [] as Payment[]);
+        for (const p of pays) if (!isPaidStatus(p.status) && p.status !== "ABANDONED") abandonedPaymentIds.push(p.id);
+      }
+    }
+
+    actions.push({
+      phone: kept.phone,
+      course_id: kept.course_id,
+      course_title: kept.course_title,
+      keptId: actives.length >= 1 ? kept.id : null,
+      supersededIds: supersede.map((e) => e.id),
+      abandonedPaymentIds,
+      reason,
+    });
+  }
+
+  return { ok: true, dryRun, scannedGroups: byKey.size, changedGroups: actions.length, actions };
 }
 
 export interface MergeDuplicatesResult {

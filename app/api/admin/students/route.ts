@@ -22,7 +22,7 @@ import { getPlan } from "@/lib/config";
 import { buildWelcomeMessage, buildWhatsAppLink } from "@/lib/whatsapp";
 import { sendAccessCodeEmail } from "@/lib/email";
 import { formatDate, formatINR, istInputToISO } from "@/lib/dates";
-import { deriveEnrollment } from "@/lib/installments";
+import { deriveEnrollment, isActiveEnrollment } from "@/lib/installments";
 import type { PlanId, Payment, CourseEnrollment, WebinarRegistration } from "@/lib/types";
 
 export interface StudentSummary {
@@ -84,7 +84,10 @@ export async function GET() {
     ]);
 
     const paid = payments.filter((p) => isPaidStatus(p.status));
-    const enrByPhone = groupByPhone(enrollments.filter((e) => e.status !== "cancelled"));
+    // Only REAL enrollments count toward course counts / outstanding. PENDING ₹0
+    // payment attempts (and cancelled duplicates) are excluded so a student who
+    // merely tried to pay is not shown as enrolled with an inflated balance.
+    const enrByPhone = groupByPhone(enrollments.filter(isActiveEnrollment));
     const paidByPhone = groupByPhone<Payment>(paid);
     const regsByPhone = groupByPhone<WebinarRegistration>(regs);
     const webinarById = new Map(webinars.map((w) => [w.id, w]));

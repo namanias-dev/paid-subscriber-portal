@@ -7,6 +7,7 @@ import {
   getEnrollments,
   getAllCourses,
   getBuyerPurchases,
+  getPaymentsByPhone,
   getReceiptsByPhone,
   getAttemptsByUser,
   getAllQuizzes,
@@ -20,7 +21,7 @@ import {
 import { getAdminSession } from "@/lib/session";
 import { requirePermission } from "@/lib/adminGuard";
 import { computeExpiry, istInputToISO } from "@/lib/dates";
-import { deriveEnrollment } from "@/lib/installments";
+import { deriveEnrollment, isActiveEnrollment, isAttemptEnrollment } from "@/lib/installments";
 import { getEnrollmentPlanChangeLogs } from "@/lib/dataProvider";
 import type { Student, PlanId, InstallmentItem, PaymentPlan } from "@/lib/types";
 
@@ -53,10 +54,11 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
 
     const phone = student.phone;
     const [
-      courseEnrollments,
+      courseEnrollmentsAll,
       legacyEnrollments,
       allCourses,
       paidPayments,
+      allPhonePayments,
       receipts,
       attempts,
       quizzes,
@@ -70,6 +72,7 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
       getEnrollments(student.id),
       getAllCourses(),
       getBuyerPurchases(phone),
+      getPaymentsByPhone(phone),
       getReceiptsByPhone(phone),
       getAttemptsByUser(student.id),
       getAllQuizzes(),
@@ -81,6 +84,13 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
     ]);
 
     const courseTitleById = new Map(allCourses.map((c) => [c.id, c]));
+
+    // CORE FIX: a payment ATTEMPT is not an enrollment. Only confirmed/approved
+    // (amount_paid > 0) or admin-granted (₹0 "fully_paid") enrollments are real;
+    // PENDING/abandoned ₹0 attempts and cancelled/superseded duplicates are split
+    // out so they never inflate the enrolled-courses count or outstanding balance.
+    const courseEnrollments = courseEnrollmentsAll.filter(isActiveEnrollment);
+    const attemptEnrollments = courseEnrollmentsAll.filter(isAttemptEnrollment);
 
     // ---- Unified course cards (phone-keyed CourseEnrollment + legacy student-keyed Enrollment) ----
     type CourseCard = {
@@ -184,6 +194,72 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
         unpaid: [],
       });
     }
+
+    // ---- Pending / Attempted course registrations (grouped per course+batch) ----
+    // One card per course+batch that has NO active enrollment. Attempt count comes
+    // from the real payment attempts (course payments), so multiple tries collapse
+    // into a single intent. Once a payment is approved, the course leaves this list
+    // and appears under Active Enrolled Courses (attempts become history only).
+    const activeCourseKeys = new Set(courseEnrollments.map((e) => `${e.course_id}|${e.batch_label || ""}`));
+    type AttemptCard = {
+      key: string;
+      courseId: string;
+      title: string;
+      slug: string | null;
+      batch: string | null;
+      attemptCount: number;
+      latestStatus: string;
+      latestAt: string;
+      enrollmentIds: string[];
+      attempts: { id: string; date: string; amount: number; status: string; reference: string | null }[];
+    };
+    const attemptMap = new Map<string, AttemptCard>();
+    for (const e of attemptEnrollments) {
+      const key = `${e.course_id}|${e.batch_label || ""}`;
+      if (activeCourseKeys.has(key)) continue; // a real enrollment already exists — fold as history
+      const card = attemptMap.get(key) || {
+        key,
+        courseId: e.course_id,
+        title: e.course_title,
+        slug: e.course_slug,
+        batch: e.batch_label,
+        attemptCount: 0,
+        latestStatus: humanizeCourseStatus(e.status),
+        latestAt: e.created_at,
+        enrollmentIds: [],
+        attempts: [],
+      };
+      card.enrollmentIds.push(e.id);
+      if ((e.updated_at || e.created_at) > card.latestAt) {
+        card.latestAt = e.updated_at || e.created_at;
+        card.latestStatus = humanizeCourseStatus(e.status);
+      }
+      attemptMap.set(key, card);
+    }
+    // Attach the individual payment attempts (all statuses) per course and use their
+    // count as the authoritative "attempts" number.
+    for (const card of attemptMap.values()) {
+      const enrIds = new Set(card.enrollmentIds);
+      const pays = allPhonePayments.filter(
+        (p) => p.item_type === "course" && ((p.enrollment_id && enrIds.has(p.enrollment_id)) || p.item_slug === card.slug),
+      );
+      card.attempts = pays
+        .sort((a, b) => (b.transaction_date || b.created_at || "").localeCompare(a.transaction_date || a.created_at || ""))
+        .map((p) => ({
+          id: p.id,
+          date: p.transaction_date || p.created_at,
+          amount: p.amount,
+          status: p.status,
+          reference: p.reference_no || p.razorpay_payment_id || null,
+        }));
+      card.attemptCount = Math.max(card.attempts.length, card.enrollmentIds.length);
+      const latestPay = card.attempts[0];
+      if (latestPay && latestPay.date > card.latestAt) {
+        card.latestAt = latestPay.date;
+        card.latestStatus = latestPay.status;
+      }
+    }
+    const attemptCards = [...attemptMap.values()].sort((a, b) => b.latestAt.localeCompare(a.latestAt));
 
     // ---- Webinars (paid payments + free registrations, deduped by webinar) ----
     const webinarById = new Map(webinars.map((w) => [w.id, w]));
@@ -291,6 +367,7 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
         student,
         buyerCode: buyer?.login_code || null,
         courses,
+        attempts: attemptCards,
         webinars: webinarRows,
         ledger,
         receipts,

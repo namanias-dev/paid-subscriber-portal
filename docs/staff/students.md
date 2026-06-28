@@ -76,7 +76,28 @@ On the course card, click **`Change plan`** (switch Full/EMI/Custom — paid amo
 On the profile, in **`Customer journey`**, click **`View journey`** to see their timeline (pages, payments, logins, Zoom clicks).
 
 ## What the profile shows
-A single scrolling page with: header (name, status, phone, email, `Access`/`Portal` codes, `SMS` button, `Edit`, `Revoke`/`Restore`, `+30 days`), KPI tiles (`Total paid`, `Outstanding`, `Next due`, `Tests attempted`), `Access control`, `Customer journey`, `Enrolled courses`, `Webinars registered`, `Payments ledger`, and `Activity & performance`.
+A single scrolling page with: header (name, status, phone, email, `Access`/`Portal` codes, `SMS` button, `Edit`, `Revoke`/`Restore`, `+30 days`), KPI tiles (`Total paid`, `Outstanding`, `Next due`, `Tests attempted`), `Access control`, `Customer journey`, `Active enrolled courses`, `Pending / attempted registrations`, `Webinars registered`, `Payments ledger`, and `Activity & performance`.
+
+## Enrolled vs Attempted vs Payment History (important!)
+
+A student is **enrolled** in a course only when there is a **confirmed/approved payment** (even a partial seat/EMI payment) **or an admin granted complimentary access**. Simply *trying* to pay — a payment that is still `PENDING`/`VERIFYING`, or that was `FAILED`/abandoned/cancelled — is **not** an enrollment. The profile keeps these three things clearly separate:
+
+| Section | What it shows | Counts toward "enrolled" / outstanding? | Unlocks course access? |
+|---|---|---|---|
+| **Active enrolled courses** | Real enrollments — confirmed/partial payment or comp grant | ✅ Yes (outstanding = fee − confirmed paid) | ✅ Yes (incl. partial-paid, per the 15-day rule) |
+| **Pending / attempted registrations** | One card per course showing how many times they tried to pay, the latest status, and when | ❌ No — never inflates counts or balance | ❌ No |
+| **Payments ledger** | Every **confirmed** payment (for receipts) | — | — |
+
+> Why this matters: if a student clicked "Book your seat" four times but never completed payment, they show **0 active courses, ₹0 outstanding**, and **one** "Pending / attempted" card with "4 attempts" — not four ₹45,000 courses.
+
+### Turn a pending attempt into a real enrollment (approve a payment)
+When a student has actually paid (e.g. uploaded proof, or an offline/`VERIFYING` payment is genuine):
+1. Go to **`People` → `Payments & Finance`** (or click **`Manage / approve`** on the attempt card, which opens Payments filtered to that phone).
+2. Open the payment's **`Manage`** window and **`Approve`** it (see **[Payments](payments)**).
+3. The course immediately moves from **Pending / attempted** to **Active enrolled courses**; the other attempts become history only. No duplicate card is created.
+
+### Manually enrolling someone who has only attempts
+Use **`Enroll`** as normal. If the student already has a pending attempt for that course, the system **reuses that single booking** — it will not create a duplicate. Record their payment afterwards to activate it.
 
 ## What you can't do here (by design)
 - You can't **regenerate** a student's portal login code from these pages (only staff test accounts can be regenerated, on the Staff page).

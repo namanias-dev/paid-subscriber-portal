@@ -27,3 +27,12 @@ When a student clicks **Book Your Seat** more than once for the **same course** 
 ⚠️ **"Multiple paid" warning:** if more than one copy has real money on it, the card shows an amber warning. Double-check which copy to keep before merging — the kept copy receives all re-pointed payments.
 
 The dashboard badge **clears automatically** once every student has only one active enrollment per course.
+
+## How this relates to "Pending / attempted" registrations
+
+The Merge tool and the dashboard badge now only ever look at **real enrollments** — a student who paid (even partially) or was granted comp access. Repeated *unpaid* attempts (someone clicking "Book your seat" several times without completing payment) are **no longer treated as duplicate enrollments**. They show up as a single **Pending / attempted registration** card on the student's profile and never inflate counts or balances, so the badge stays quiet for them.
+
+That means you should rarely need this tool now — duplicates are prevented at the source. It remains for the rare case where two *paid* enrollments exist for the same course.
+
+### One-off cleanup (Super Admin, technical)
+There is a safe, reversible cleanup endpoint `POST /api/admin/enrollments/backfill` that supersedes leftover duplicate **attempt** rows (keeping one booking intent per course, never deleting payments, fully audit-logged). It runs as a **dry-run by default** — send `{ "apply": true }` only after reviewing the previewed `actions`. In practice the live data is already clean, so it reports zero changes.

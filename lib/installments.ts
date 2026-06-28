@@ -304,6 +304,28 @@ export function isLineCancelledOrWaived(item: Pick<InstallmentItem, "status">): 
   return item.status === "cancelled" || item.status === "waived";
 }
 
+/**
+ * THE source-of-truth distinction between a real enrollment and a mere payment
+ * attempt. A student counts as ENROLLED in a course only when:
+ *   • there is a confirmed/approved payment (amount_paid > 0 — covers seat/partial/
+ *     installment/full, online OR offline/manual-approved), OR
+ *   • an admin granted complimentary access (status "fully_paid" at ₹0).
+ * A PENDING/VERIFYING/FAILED/ABANDONED/EXPIRED attempt (amount_paid 0, status
+ * "pending") or a CANCELLED/superseded duplicate is NOT an active enrollment, so it
+ * must never inflate the enrolled-courses count or outstanding. Access already
+ * follows the same rule (lib/entitlements + paidCourseIdsForPhone). Partial-paid
+ * students stay active (they are NOT locked out) — outstanding = fee − confirmed paid.
+ */
+export function isActiveEnrollment(e: Pick<CourseEnrollment, "status" | "amount_paid">): boolean {
+  if (e.status === "cancelled") return false;
+  return (e.amount_paid || 0) > 0 || e.status === "fully_paid";
+}
+
+/** Inverse of isActiveEnrollment — a payment attempt / intent, not a real enrollment. */
+export function isAttemptEnrollment(e: Pick<CourseEnrollment, "status" | "amount_paid">): boolean {
+  return !isActiveEnrollment(e);
+}
+
 /** A line the student still owes money on (drives next-payable + 15-day access grace). */
 export function isLineOutstanding(item: Pick<InstallmentItem, "paid" | "status">): boolean {
   return !item.paid && !isLineCancelledOrWaived(item);
