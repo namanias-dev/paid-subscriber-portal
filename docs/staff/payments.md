@@ -2,7 +2,7 @@
 
 **Menu:** `People` → `Payments & Finance`  ·  **Web address:** `/admin/payments`
 **Related pages:** `Course EMI & Seats` (`/admin/course-payments`) and `Access at Risk` (`/admin/access-risk`).
-**Who can open them:** staff whose role has **View revenue dashboards**. Accepting proofs and re-verifying also need **View revenue** or **Manage payments**.
+**Who can open them:** staff whose role has **View revenue dashboards**. Re-verifying needs **View revenue** or **Manage payments**. **Uploading proof and approving a payment** need **Manage payments**. **Reversing an approval** and the **Staff accountability** report are **Super Admin only**.
 
 ## What this page is for
 
@@ -40,26 +40,52 @@ Payments are confirmed by **re-verifying** with the bank (ICICI). There is no se
 
 > Re-verifying is **safe** — it can only upgrade or correctly fail a payment; it never removes access from someone already `PAID`.
 
-## Payment proofs (student-submitted screenshots)
+## Payment proofs & approving a payment
 
-If a student paid but the system shows it as not paid, they can upload proof from their portal. You then review it.
+Every payment row now has a **`Manage`** button (for staff with **Manage payments**). It opens the **`Manage payment`** window where you can upload proof, approve, ask for a better screenshot, and (Super Admins) reverse or see the full history. Students can also upload proof themselves from their portal — both land in the same place.
 
-### Find and review a proof
-1. Use the **`Proof uploaded`** filter chip, or look for a **`📎`** badge on a payment row (e.g. `📎 Proof uploaded`). Click it.
-2. The `Payment proof` window opens. Click **`View (signed) →`** to open each screenshot/PDF.
+> 💡 **Login codes:** as soon as a student starts a payment (even before it's confirmed) they now get a portal **login code**, so they can sign in to upload their own proof and track status. You no longer have to wait for `PAID`.
 
-### Approve a proof and grant access
-1. In the proof window, click **`✓ Accept payment & grant access`**.
-2. Confirm the dialog: `Accept payment and grant access to {name}? This marks the payment PAID.`
-3. The payment becomes `PAID` and the student gets access. ⚠️ **This is real and grants access — only do it once you've checked the screenshot is genuine.**
-4. If you see a banner saying the student already has access, accepting is usually unnecessary.
+### Find a payment to manage
+1. Search by name / phone / item / reference, or use the **`Proof uploaded`** filter chip, or look for a **`📎`** badge.
+2. Click **`Manage`** on the row (or click the **`📎`** badge to jump straight to an existing proof).
+
+### Upload payment proof on a student's behalf
+Use this when a student sends you a screenshot over WhatsApp/email instead of uploading it themselves.
+1. In the `Manage payment` window, under **`Upload payment proof (on student's behalf)`**, click **Choose files** and pick the screenshot(s)/PDF (images or PDF, up to 3 files, 8 MB each).
+2. The files upload to secure storage and attach to the payment. ⚠️ **Uploading proof never grants access by itself** — you still have to approve.
+
+### View an uploaded proof
+- In the `Uploaded files` list, click **`View (signed) →`** to open each screenshot/PDF in a secure, short-lived link.
+
+### Approve a payment and grant access
+1. In the `Manage payment` window, click **`✓ Approve payment & grant access`**.
+2. Confirm the dialog: `Approve payment and grant access to {name}? This marks the payment PAID.`
+3. The payment becomes `PAID` and the student gets access (this runs the exact same steps a normal bank confirmation does — login code + course access). ⚠️ **This is real and grants access — only do it once you've checked the screenshot is genuine.**
+4. If you see a banner saying the student already has access, approving is usually unnecessary.
 
 ### Ask for a better screenshot / reject
 - **`Request reupload`** — asks the student to upload again (type a `Reason` they'll see).
 - **`Reject proof`** — rejects it (type a `Reason`). This does **not** grant access.
 - **`Add note`** — an internal note for staff only.
 
-> ⚠️ Uploading or accepting proof is the **only** way to move a `FAILED` payment to `PAID` by hand.
+> ⚠️ Approving (with or without proof) is the **only** way to move a `FAILED` payment to `PAID` by hand. Every upload and approval is recorded against your name in an audit log.
+
+## Reversing an approval (Super Admin only)
+
+If a payment was approved by mistake (e.g. a fake screenshot), a **Super Admin** can undo it.
+1. Open the payment's **`Manage`** window. For a `PAID` row, scroll to the red **`Reverse approval (Super Admin)`** box.
+2. Type a **reason** (required) and click **`↩ Reverse approval`**, then confirm.
+3. The payment goes back to its previous status, the student's access is **re-locked**, and for course EMIs the settled installment + receipt are rolled back. **Nothing is deleted** — the payment record and the proof files are kept, and the reversal is logged.
+
+> Reversal is permission-gated to Super Admins. Regular staff do not see this option.
+
+## Staff accountability report (Super Admin only)
+
+At the top of the Payments page, Super Admins see a **`Staff accountability (Super Admin)`** panel (click **`View`**).
+- It shows **per staff member**: how many proofs they uploaded, how many payments they approved, plus reversals and rejections, and their last action time.
+- Click **`Drill-down`** on any staff member to see their recent individual actions (which payment, the status change, reason, and time).
+- ⚠️ Regular staff **cannot** see this panel — it's Super Admin only.
 
 ## Recording an OFFLINE payment (cash / bank transfer / UPI)
 
@@ -99,5 +125,6 @@ Lists learners whose lecture access is blocked or expiring, so you can recover r
 
 ## Where the data comes from
 - All transactions → the `payments` table.
-- Student screenshots → `payment_proofs`.
+- Student & staff screenshots → `payment_proofs` (files stored privately).
+- Every proof upload, approval, rejection and reversal → the immutable `payment_action_log` (this powers the per-payment history and the Super Admin accountability report). It is append-only — entries are never edited or deleted.
 - Online payments are written by the **ICICI Eazypay** return/verify and the older **Razorpay** webhook. Offline ones are written when staff record them. (There is no Pabbly here.)

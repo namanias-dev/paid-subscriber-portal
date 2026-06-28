@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getPayments, getEnrollments, getBuyers, maybeReconcilePendingPayments } from "@/lib/dataProvider";
 import { getAllProofs, phoneHasAccessToItem } from "@/lib/paymentProofs";
-import { requireAdmin, requireAnyPermission } from "@/lib/adminGuard";
+import { requireAdmin, requireAnyPermission, requirePermission, requireSuperAdmin } from "@/lib/adminGuard";
 import type { PaymentProof } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -36,7 +36,11 @@ export async function GET() {
       }),
     );
 
-    return NextResponse.json({ ok: true, payments, enrollments, buyerCodes, proofs });
+    // UI capability flags: who can take staff write actions (manage_payments) and
+    // who can see super-admin-only controls (reverse, accountability, history).
+    const [canManage, isSuper] = await Promise.all([requirePermission("manage_payments"), requireSuperAdmin()]);
+
+    return NextResponse.json({ ok: true, payments, enrollments, buyerCodes, proofs, canManage, isSuper });
   } catch {
     return NextResponse.json({ ok: false, error: "Failed to load payments." }, { status: 500 });
   }

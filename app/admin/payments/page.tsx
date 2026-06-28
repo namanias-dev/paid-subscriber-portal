@@ -5,13 +5,14 @@ import { PageHeader, useAdminData, LoadingBlock, KpiCard } from "@/components/ad
 import WebinarRegistrationsTrend from "@/components/admin/WebinarRegistrationsTrend";
 import GroupedTimeline, { type TimelineGroup } from "@/components/admin/GroupedTimeline";
 import SendSmsButton from "@/components/admin/sms/SendSmsButton";
+import PaymentAccountability from "@/components/admin/payments/PaymentAccountability";
 import SortControl from "@/components/admin/SortControl";
 import SearchBar from "@/components/ui/SearchBar";
 import { useToast } from "@/components/ui/Toast";
 import { usePersistentState } from "@/lib/usePersistentState";
 import { formatINR, formatISTDateTime, istYMD, istTodayYMD } from "@/lib/dates";
 import { dedupedPaidTotal, distinctRegistrations } from "@/lib/paymentsAgg";
-import type { Payment, Enrollment, PaymentProof } from "@/lib/types";
+import type { Payment, Enrollment, PaymentProof, PaymentProofFile, PaymentActionLog } from "@/lib/types";
 
 type PaymentSort = "recent" | "spent" | "count" | "name";
 const PAYMENT_SORTS: { value: PaymentSort; label: string }[] = [
@@ -82,6 +83,8 @@ export default function PaymentsAdmin() {
   const enr = useAdminData<Enrollment[]>("/api/admin/payments", "enrollments");
   const codes = useAdminData<Record<string, string>>("/api/admin/payments", "buyerCodes");
   const proofsHook = useAdminData<Record<string, ProofWithAccess>>("/api/admin/payments", "proofs");
+  const canManage = useAdminData<boolean>("/api/admin/payments", "canManage").data || false;
+  const isSuper = useAdminData<boolean>("/api/admin/payments", "isSuper").data || false;
   const { toast } = useToast();
 
   // ---- Filters (read-only display state) ----
@@ -90,7 +93,7 @@ export default function PaymentsAdmin() {
   const [types, setTypes] = useState<Set<TypeKey>>(new Set());
   const [statuses, setStatuses] = useState<Set<StatusKey>>(new Set());
   const [onlyProof, setOnlyProof] = useState(false);
-  const [proofModal, setProofModal] = useState<{ payment: Payment; proof: ProofWithAccess } | null>(null);
+  const [proofModal, setProofModal] = useState<{ payment: Payment; proof: ProofWithAccess | null } | null>(null);
   const [reverifying, setReverifying] = useState(false);
   const [reverifyMsg, setReverifyMsg] = useState<string | null>(null);
   const [dateMode, setDateMode] = useState<DateMode>("all");
@@ -214,6 +217,15 @@ export default function PaymentsAdmin() {
                 📎 {PROOF_STATUS_META[proofs[p.id].status]?.label || proofs[p.id].status}
               </button>
             )}
+            {canManage && (
+              <button
+                onClick={(e) => { e.stopPropagation(); setProofModal({ payment: p, proof: proofs[p.id] || null }); }}
+                title="Upload proof, approve, reverse or view full history"
+                className="rounded-md border border-line px-1.5 py-0.5 text-xs text-ink2 transition hover:border-primary/50 hover:text-primary"
+              >
+                Manage
+              </button>
+            )}
           </span>
         ),
       }));
@@ -244,7 +256,7 @@ export default function PaymentsAdmin() {
       ),
       nodes: r.nodes,
     }));
-  }, [filtered, sort, buyerCodes, proofs, reverifying]);
+  }, [filtered, sort, buyerCodes, proofs, reverifying, canManage]);
 
   const matchOpenIds = useMemo(
     () => (q.trim() ? new Set(userGroups.map((g) => g.id)) : undefined),
@@ -393,6 +405,27 @@ export default function PaymentsAdmin() {
       return false;
     }
   }
+  async function reversePayment(paymentId: string, reason: string): Promise<boolean> {
+    try {
+      const res = await fetch("/api/admin/payments/reverse", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paymentId, reason }),
+      });
+      const json = await res.json();
+      if (!json.ok) {
+        toast(json.error || "Reversal failed.", "error");
+        return false;
+      }
+      toast("Approval reversed. Access re-locked and logged.", "success");
+      full.reload();
+      proofsHook.reload();
+      return true;
+    } catch {
+      toast("Reversal failed.", "error");
+      return false;
+    }
+  }
   async function viewProofFile(key: string) {
     try {
       const res = await fetch(`/api/admin/payments/proof/view?key=${encodeURIComponent(key)}`);
@@ -475,6 +508,8 @@ export default function PaymentsAdmin() {
         />
         <WebinarRegistrationsTrend payments={payments} />
       </div>
+
+      {isSuper && <PaymentAccountability />}
 
       <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <KpiCard label="Captured" value={formatINR(captured)} tone="green" />
@@ -690,8 +725,10 @@ export default function PaymentsAdmin() {
           payment={proofModal.payment}
           proof={proofModal.proof}
           buyerCode={buyerCodes[(proofModal.payment.phone || "").trim()]}
+          isSuper={isSuper}
           onClose={() => setProofModal(null)}
           onViewFile={viewProofFile}
+          onReverse={reversePayment}
           onAction={async (body) => {
             const ok = await proofAction(body);
             if (ok) setProofModal(null);
@@ -702,39 +739,96 @@ export default function PaymentsAdmin() {
   );
 }
 
+const PROOF_ACCEPT_TYPES = ["image/jpeg", "image/png", "image/webp", "application/pdf"];
+const PROOF_MAX_BYTES = 8 * 1024 * 1024;
+const PROOF_MAX_FILES = 3;
+
 function ProofModal({
   payment,
   proof,
   buyerCode,
+  isSuper,
   onClose,
   onViewFile,
   onAction,
+  onReverse,
 }: {
   payment: Payment;
-  proof: ProofWithAccess;
+  proof: ProofWithAccess | null;
   buyerCode?: string;
+  isSuper: boolean;
   onClose: () => void;
   onViewFile: (key: string) => void;
   onAction: (body: Record<string, unknown>) => void;
+  onReverse: (paymentId: string, reason: string) => Promise<boolean>;
 }) {
+  const { toast } = useToast();
   const [reason, setReason] = useState("");
   const [note, setNote] = useState("");
-  const meta = PROOF_STATUS_META[proof.status] || { label: proof.status, cls: "pill-gray" };
+  const [uploading, setUploading] = useState(false);
+  const [reverseReason, setReverseReason] = useState("");
+  const [reversing, setReversing] = useState(false);
+  const [history, setHistory] = useState<PaymentActionLog[] | null>(null);
+  const [showHistory, setShowHistory] = useState(false);
+  const meta = proof ? PROOF_STATUS_META[proof.status] || { label: proof.status, cls: "pill-gray" } : null;
   const isPaidRow = isPaid(payment.status);
+
+  async function uploadFiles(fileList: FileList | null) {
+    if (!fileList || fileList.length === 0) return;
+    const room = PROOF_MAX_FILES - (proof?.files.length ?? 0);
+    if (room <= 0) { toast(`Up to ${PROOF_MAX_FILES} files only.`, "error"); return; }
+    const files = Array.from(fileList).slice(0, room);
+    setUploading(true);
+    const uploaded: PaymentProofFile[] = [];
+    try {
+      for (const file of files) {
+        if (!PROOF_ACCEPT_TYPES.includes(file.type)) { toast(`${file.name}: only images/PDF allowed.`, "error"); continue; }
+        if (file.size > PROOF_MAX_BYTES) { toast(`${file.name}: must be 8 MB or smaller.`, "error"); continue; }
+        const signRes = await fetch("/api/admin/payments/proof/sign-upload", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ paymentId: payment.id, fileName: file.name, contentType: file.type, size: file.size }),
+        });
+        const sign = await signRes.json();
+        if (!sign.ok) { toast(sign.error || "Upload failed.", "error"); continue; }
+        const put = await fetch(sign.uploadUrl, { method: "PUT", headers: { "Content-Type": file.type }, body: file });
+        if (!put.ok) { toast(`${file.name}: upload failed.`, "error"); continue; }
+        uploaded.push(sign.file as PaymentProofFile);
+      }
+      if (uploaded.length) {
+        onAction({ action: "upload", paymentId: payment.id, files: uploaded, note: note || null });
+      }
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function loadHistory() {
+    setShowHistory(true);
+    if (history) return;
+    try {
+      const res = await fetch(`/api/admin/payments/${encodeURIComponent(payment.id)}/history`);
+      const json = await res.json();
+      if (json.ok) setHistory(json.history as PaymentActionLog[]);
+      else toast(json.error || "Could not load history.", "error");
+    } catch {
+      toast("Could not load history.", "error");
+    }
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4" onClick={onClose}>
       <div className="max-h-[92vh] w-full max-w-lg overflow-y-auto rounded-t-2xl bg-white p-6 shadow-2xl sm:rounded-2xl" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-start justify-between gap-3">
           <div>
-            <h3 className="text-lg font-bold">Payment proof</h3>
+            <h3 className="text-lg font-bold">Manage payment</h3>
             <p className="text-sm text-muted">{payment.student_name} · {payment.phone}</p>
           </div>
-          <span className={`pill ${meta.cls}`}>{meta.label}</span>
+          {meta ? <span className={`pill ${meta.cls}`}>{meta.label}</span> : <span className={`pill ${statusPillClass(payment.status)}`}>{statusLabel(payment.status)}</span>}
         </div>
 
         {/* Already-has-access guard */}
-        {proof.hasAccess && (
+        {proof?.hasAccess && (
           <div className="mt-3 flex items-center gap-2 rounded-lg border border-green-200 bg-green-50 p-3 text-xs text-green-900">
             <span>✅</span>
             <span>This student <span className="font-semibold">already has access</span> to this item (paid on another attempt or a valid grant). Accepting is usually unnecessary.</span>
@@ -748,72 +842,73 @@ function ProofModal({
           <div><span className="text-muted">Status</span><div className="font-medium">{statusLabel(payment.status)}</div></div>
           <div><span className="text-muted">Login code</span><div className="font-mono font-medium">{buyerCode || "—"}</div></div>
           <div className="col-span-2"><span className="text-muted">Reference</span><div className="font-mono">{payment.reference_no || payment.razorpay_payment_id || "—"}</div></div>
-          <div className="col-span-2"><span className="text-muted">Submitted</span><div>{formatISTDateTime(proof.created_at)}</div></div>
         </div>
+
+        {/* Staff upload (non-paid only) */}
+        {!isPaidRow && (
+          <div className="mt-4 rounded-lg border border-dashed border-line p-3">
+            <p className="text-sm font-semibold">Upload payment proof (on student&apos;s behalf)</p>
+            <p className="mt-0.5 text-xs text-muted">Images or PDF, up to {PROOF_MAX_FILES} files · 8 MB each. Uploading never grants access.</p>
+            <input
+              type="file"
+              multiple
+              accept={PROOF_ACCEPT_TYPES.join(",")}
+              disabled={uploading}
+              onChange={(e) => uploadFiles(e.target.files)}
+              className="mt-2 block w-full text-xs file:mr-3 file:rounded-md file:border-0 file:bg-primary/10 file:px-3 file:py-1.5 file:text-primary"
+            />
+            {uploading && <p className="mt-2 text-xs font-medium text-primary">Uploading…</p>}
+          </div>
+        )}
 
         {/* Files */}
-        <div className="mt-4">
-          <p className="text-sm font-semibold">Uploaded files ({proof.files.length})</p>
-          <div className="mt-2 space-y-2">
-            {proof.files.length === 0 && <p className="text-xs text-muted">No files.</p>}
-            {proof.files.map((f) => (
-              <button
-                key={f.key}
-                onClick={() => onViewFile(f.key)}
-                className="flex w-full items-center justify-between rounded-lg border border-line px-3 py-2 text-left text-xs transition hover:border-primary/50"
-              >
-                <span className="truncate">{f.name}</span>
-                <span className="ml-2 shrink-0 font-semibold text-primary">View (signed) →</span>
-              </button>
-            ))}
+        {proof && (
+          <div className="mt-4">
+            <p className="text-sm font-semibold">Uploaded files ({proof.files.length})</p>
+            <div className="mt-2 space-y-2">
+              {proof.files.length === 0 && <p className="text-xs text-muted">No files.</p>}
+              {proof.files.map((f) => (
+                <button
+                  key={f.key}
+                  onClick={() => onViewFile(f.key)}
+                  className="flex w-full items-center justify-between rounded-lg border border-line px-3 py-2 text-left text-xs transition hover:border-primary/50"
+                >
+                  <span className="truncate">{f.name}</span>
+                  <span className="ml-2 shrink-0 font-semibold text-primary">View (signed) →</span>
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
+        )}
 
         {/* Student note */}
-        {proof.student_note && (
+        {proof?.student_note && (
           <div className="mt-4">
-            <p className="text-sm font-semibold">Student note</p>
+            <p className="text-sm font-semibold">Note</p>
             <p className="mt-1 rounded-lg bg-surface2 p-3 text-xs">{proof.student_note}</p>
           </div>
         )}
 
-        {/* Audit trail */}
-        {proof.audit.length > 0 && (
-          <div className="mt-4">
-            <p className="text-sm font-semibold">Audit trail</p>
-            <ul className="mt-1 space-y-1 text-xs">
-              {proof.audit.map((a, i) => (
-                <li key={i} className="flex flex-wrap gap-1 text-muted">
-                  <span className="font-medium text-ink">{a.action}</span>
-                  <span>by {a.by || "—"}</span>
-                  <span>· {formatISTDateTime(a.at)}</span>
-                  {a.note && <span className="w-full text-ink2">“{a.note}”</span>}
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-
-        {/* Actions */}
-        <div className="mt-5 space-y-3 border-t border-line pt-4">
-          <div>
-            <input
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-              placeholder="Reason (shown to student on reupload/reject)"
-              className="input w-full text-sm"
-            />
-            <div className="mt-2 flex flex-wrap gap-2">
-              <button onClick={() => onAction({ action: "request_reupload", proofId: proof.id, reason })} className="btn btn-secondary text-sm">
-                Request reupload
-              </button>
-              <button onClick={() => onAction({ action: "reject", proofId: proof.id, reason })} className="btn btn-secondary text-sm">
-                Reject proof
-              </button>
+        {/* Proof actions (only when a proof exists) */}
+        {proof && (
+          <div className="mt-5 space-y-3 border-t border-line pt-4">
+            <div>
+              <input
+                value={reason}
+                onChange={(e) => setReason(e.target.value)}
+                placeholder="Reason (shown to student on reupload/reject)"
+                className="input w-full text-sm"
+              />
+              <div className="mt-2 flex flex-wrap gap-2">
+                <button onClick={() => onAction({ action: "request_reupload", proofId: proof.id, paymentId: payment.id, reason })} className="btn btn-secondary text-sm">
+                  Request reupload
+                </button>
+                <button onClick={() => onAction({ action: "reject", proofId: proof.id, paymentId: payment.id, reason })} className="btn btn-secondary text-sm">
+                  Reject proof
+                </button>
+              </div>
             </div>
-          </div>
 
-          <div>
             <div className="flex gap-2">
               <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Internal note" className="input w-full text-sm" />
               <button onClick={() => note.trim() && onAction({ action: "note", proofId: proof.id, note })} className="btn btn-secondary text-sm">
@@ -821,23 +916,86 @@ function ProofModal({
               </button>
             </div>
           </div>
+        )}
 
+        {/* Approve */}
+        <div className="mt-4 border-t border-line pt-4">
           <button
             onClick={() => {
               if (isPaidRow) return;
-              if (confirm(`Accept payment and grant access to ${payment.student_name}? This marks the payment PAID.`)) {
-                onAction({ action: "accept", paymentId: payment.id });
+              if (confirm(`Approve payment and grant access to ${payment.student_name}? This marks the payment PAID.`)) {
+                onAction({ action: "accept", paymentId: payment.id, note: note || null });
               }
             }}
             disabled={isPaidRow}
             className="btn btn-primary w-full text-sm disabled:opacity-60"
             title={isPaidRow ? "Already paid" : "Mark this payment PAID and grant access (reuses the standard access path)"}
           >
-            {isPaidRow ? "Already paid ✓" : "✓ Accept payment & grant access"}
+            {isPaidRow ? "Already paid ✓" : "✓ Approve payment & grant access"}
           </button>
         </div>
 
-        <button onClick={onClose} className="btn btn-secondary mt-3 w-full text-sm">Close</button>
+        {/* Reverse (super admin, paid only) */}
+        {isSuper && isPaidRow && (
+          <div className="mt-4 rounded-lg border border-red-200 bg-red-50/50 p-3">
+            <p className="text-sm font-semibold text-red-900">Reverse approval (Super Admin)</p>
+            <p className="mt-0.5 text-xs text-red-700">Reverts to the prior status, re-locks access and rolls back the schedule/receipt. The payment record &amp; proof are never deleted.</p>
+            <input
+              value={reverseReason}
+              onChange={(e) => setReverseReason(e.target.value)}
+              placeholder="Reason for reversal (required)"
+              className="input mt-2 w-full text-sm"
+            />
+            <button
+              onClick={async () => {
+                if (!reverseReason.trim()) { toast("A reason is required to reverse.", "error"); return; }
+                if (!confirm(`Reverse this approval for ${payment.student_name}? Access will be re-locked.`)) return;
+                setReversing(true);
+                const ok = await onReverse(payment.id, reverseReason.trim());
+                setReversing(false);
+                if (ok) onClose();
+              }}
+              disabled={reversing}
+              className="btn mt-2 w-full bg-red-600 text-sm text-white hover:bg-red-700 disabled:opacity-60"
+            >
+              {reversing ? "Reversing…" : "↩ Reverse approval"}
+            </button>
+          </div>
+        )}
+
+        {/* Lifecycle history (super admin) */}
+        {isSuper && (
+          <div className="mt-4 border-t border-line pt-4">
+            {!showHistory ? (
+              <button onClick={loadHistory} className="text-xs font-semibold text-primary hover:underline">
+                View full lifecycle history →
+              </button>
+            ) : (
+              <div>
+                <p className="text-sm font-semibold">Lifecycle history</p>
+                {history === null ? (
+                  <p className="mt-1 text-xs text-muted">Loading…</p>
+                ) : history.length === 0 ? (
+                  <p className="mt-1 text-xs text-muted">No recorded actions yet.</p>
+                ) : (
+                  <ul className="mt-2 space-y-1.5 text-xs">
+                    {history.map((l) => (
+                      <li key={l.id} className="flex flex-wrap gap-1 text-muted">
+                        <span className="font-medium text-ink">{l.action}</span>
+                        <span>by {l.actor_name || l.actor_id || "—"}</span>
+                        {(l.old_status || l.new_status) && <span>· {l.old_status || "—"} → {l.new_status || "—"}</span>}
+                        <span>· {formatISTDateTime(l.created_at)}</span>
+                        {l.reason && <span className="w-full text-ink2">“{l.reason}”</span>}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        <button onClick={onClose} className="btn btn-secondary mt-4 w-full text-sm">Close</button>
       </div>
     </div>
   );

@@ -927,6 +927,53 @@ export interface PaymentProof {
   updated_at: string;
 }
 
+/** Action types recorded in the immutable payment_action_log ledger. */
+export type PaymentActionType =
+  | "proof_upload"
+  | "approve"
+  | "reject"
+  | "reupload_request"
+  | "note"
+  | "reverse";
+
+/**
+ * One immutable, append-only entry in the payment action ledger. Captures who did
+ * what to which payment, the status transition, the reason, and any file refs.
+ * Never updated or deleted — the full lifecycle is reconstructed by ordering rows.
+ */
+export interface PaymentActionLog {
+  id: string;
+  action: PaymentActionType;
+  payment_id: string | null;
+  reference_no: string | null;
+  enrollment_id: string | null;
+  student_id: string | null;
+  phone: string | null;
+  actor_id: string | null;
+  actor_name: string | null;
+  actor_role: string | null;
+  actor_is_super: boolean;
+  old_status: string | null;
+  new_status: string | null;
+  reason: string | null;
+  files: PaymentProofFile[];
+  file_count: number;
+  metadata: Record<string, unknown>;
+  created_at: string;
+}
+
+/** Per-staff rollup for the super-admin Accountability report. */
+export interface StaffAccountabilityRow {
+  actor_id: string;
+  actor_name: string | null;
+  actor_role: string | null;
+  uploads: number;
+  approvals: number;
+  reversals: number;
+  rejections: number;
+  last_action_at: string | null;
+}
+
 export interface Referral {
   id: string;
   referrer_name: string;

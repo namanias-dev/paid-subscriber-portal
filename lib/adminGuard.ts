@@ -55,3 +55,23 @@ export async function currentAdminId(): Promise<string | null> {
   const session = await getAdminSession();
   return session?.admin_id || null;
 }
+
+/** Identity for attributing payment/audit actions to the logged-in admin. */
+export interface ActionActor {
+  id: string;
+  name: string | null;
+  role: string | null;
+  isSuper: boolean;
+}
+
+/** Resolve the current admin as an audit actor (null when not logged in). */
+export async function getActionActor(): Promise<ActionActor | null> {
+  const session = await getAdminSession();
+  if (!session) return null;
+  return {
+    id: session.username || session.admin_id || "admin",
+    name: session.username || null,
+    role: session.role_name || session.role || null,
+    isSuper: isSuperAdmin(effectivePermissions(session)),
+  };
+}

@@ -1899,12 +1899,19 @@ export async function createPayment(input: CreatePaymentInput): Promise<Payment>
   } as Payment;
   if (demoMode()) {
     demoPayments().unshift(row);
-    if (isPaidStatus(row.status)) await ensureBuyer(row.phone, row.student_name).catch(() => null);
+    // Issue the portal login code at payment INITIATION (idempotent, phone-keyed).
+    // A buyer row grants NO content access on its own (access stays gated by PAID /
+    // amount_paid / grants) — it only lets a pending student log in to upload proof
+    // and track status, which the proof-recovery flow + payment_pending SMS assume.
+    await ensureBuyer(row.phone, row.student_name).catch(() => null);
     return row;
   }
   try {
     const saved = await dbInsert<Payment>("payments", row as unknown as Record<string, unknown>);
-    if (isPaidStatus(saved.status)) await ensureBuyer(saved.phone, saved.student_name).catch(() => null);
+    // Issue the portal login code at payment INITIATION (idempotent, phone-keyed) so
+    // PENDING/VERIFYING students can log in to upload proof. Access is still gated by
+    // PAID/amount_paid — a buyer row never grants course/webinar content by itself.
+    await ensureBuyer(saved.phone, saved.student_name).catch(() => null);
     // Analytics (best-effort, idempotent, never throws): a brand-new PAID row is a
     // completed purchase; a PENDING row is an initiated checkout.
     if (isPaidStatus(saved.status)) void recordPaymentPaid(saved, "checkout").catch(() => {});
@@ -2142,6 +2149,45 @@ export async function ensureBuyer(phone: string, name?: string | null): Promise<
     await ensureStudentForCustomer(p, name, buyer.login_code).catch(() => null);
   }
   return buyer;
+}
+
+/**
+ * Idempotent backfill: every phone that has a payment or course enrollment but no
+ * buyer row gets one (with a login code) so they can log into the portal — e.g.
+ * pending/verifying students who booked a seat before login codes were issued at
+ * initiation. Never creates duplicates (ensureBuyer is keyed by phone). Returns
+ * how many buyers were created. Read-only on phones that already have a buyer.
+ */
+export async function backfillMissingBuyers(): Promise<{ scanned: number; created: number }> {
+  const db = getSupabaseAdmin();
+  if (!db) return { scanned: 0, created: 0 };
+
+  const namesByPhone = new Map<string, string | null>();
+  const addRows = (rows: { phone?: string | null; student_name?: string | null; name?: string | null }[] | null) => {
+    for (const r of rows ?? []) {
+      const p = (r.phone || "").trim();
+      if (!p) continue;
+      if (!namesByPhone.has(p) || !namesByPhone.get(p)) {
+        namesByPhone.set(p, (r.student_name || r.name || null));
+      }
+    }
+  };
+  const [{ data: pays }, { data: enrs }] = await Promise.all([
+    db.from("payments").select("phone,student_name"),
+    db.from("course_enrollments").select("phone,student_name"),
+  ]);
+  addRows(pays as { phone?: string | null; student_name?: string | null }[] | null);
+  addRows(enrs as { phone?: string | null; student_name?: string | null }[] | null);
+
+  const phones = [...namesByPhone.keys()];
+  let created = 0;
+  for (const p of phones) {
+    const existing = await getBuyerByPhone(p);
+    if (existing) continue;
+    const b = await ensureBuyer(p, namesByPhone.get(p) ?? null).catch(() => null);
+    if (b) created += 1;
+  }
+  return { scanned: phones.length, created };
 }
 
 /**
