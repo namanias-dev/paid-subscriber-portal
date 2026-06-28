@@ -21,7 +21,8 @@ import { getAdminSession } from "@/lib/session";
 import { requirePermission } from "@/lib/adminGuard";
 import { computeExpiry, istInputToISO } from "@/lib/dates";
 import { deriveEnrollment } from "@/lib/installments";
-import type { Student, PlanId } from "@/lib/types";
+import { getEnrollmentPlanChangeLogs } from "@/lib/dataProvider";
+import type { Student, PlanId, InstallmentItem, PaymentPlan } from "@/lib/types";
 
 const DAY = 86400000;
 const PRESET_MONTHS: Record<string, number> = { "1m": 1, "3m": 3, "6m": 6, "12m": 12 };
@@ -99,16 +100,31 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
       source: "course" | "legacy";
       /** Unpaid schedule lines an admin can settle with a cash/offline payment. */
       unpaid: { kind: "seat" | "installment" | "full"; no: number; label: string; amount: number; due: string | null }[];
+      /** Precise payment plan (FULL/EMI/CUSTOM_INSTALLMENTS) for admin actions. */
+      paymentPlan?: PaymentPlan;
+      installmentCount?: number;
+      /** Full schedule (incl. paid/cancelled/waived lines) for the manage-plan view. */
+      schedule?: InstallmentItem[];
+      previousPlan?: PaymentPlan | null;
+      planChangedAt?: string | null;
+      planChangedReason?: string | null;
+      /** Plan-change audit history for this enrollment. */
+      planHistory?: { id: string; oldPlan: string | null; newPlan: string | null; oldOutstanding: number; newOutstanding: number; reason: string | null; changedBy: string | null; createdAt: string }[];
     };
 
-    const courses: CourseCard[] = courseEnrollments.map((e) => {
+    const planLogsLists = await Promise.all(courseEnrollments.map((e) => getEnrollmentPlanChangeLogs(e.id).catch(() => [])));
+
+    const courses: CourseCard[] = courseEnrollments.map((e, i) => {
       const d = deriveEnrollment(e);
+      const paymentPlan: PaymentPlan = e.payment_plan || (e.plan_type === "emi" ? "EMI" : "FULL");
       const planLabel =
-        e.status === "seat_booked"
+        e.status === "seat_booked" && paymentPlan !== "CUSTOM_INSTALLMENTS"
           ? "Seat booked"
-          : e.plan_type === "emi"
-            ? `EMI · ${e.installment_count || d.installmentTotal} parts`
-            : "Pay in full";
+          : paymentPlan === "CUSTOM_INSTALLMENTS"
+            ? `Custom · ${e.installment_count || d.installmentTotal} parts`
+            : paymentPlan === "EMI"
+              ? `EMI · ${e.installment_count || d.installmentTotal} parts`
+              : "Pay in full";
       return {
         id: e.id,
         title: e.course_title,
@@ -127,8 +143,24 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
         createdAt: e.created_at,
         source: "course",
         unpaid: (e.schedule || [])
-          .filter((s) => !s.paid)
+          .filter((s) => !s.paid && s.status !== "cancelled" && s.status !== "waived")
           .map((s) => ({ kind: s.kind, no: s.no, label: s.label, amount: s.amount, due: s.due })),
+        paymentPlan,
+        installmentCount: e.installment_count,
+        schedule: e.schedule || [],
+        previousPlan: e.previous_payment_plan ?? null,
+        planChangedAt: e.payment_plan_changed_at ?? null,
+        planChangedReason: e.payment_plan_change_reason ?? null,
+        planHistory: (planLogsLists[i] || []).map((l) => ({
+          id: l.id,
+          oldPlan: l.old_plan,
+          newPlan: l.new_plan,
+          oldOutstanding: l.old_outstanding,
+          newOutstanding: l.new_outstanding,
+          reason: l.reason,
+          changedBy: l.changed_by,
+          createdAt: l.created_at,
+        })),
       };
     });
 

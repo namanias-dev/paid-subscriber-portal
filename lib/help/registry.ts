@@ -28,6 +28,7 @@ export const HELP_TOPICS: HelpTopic[] = [
 
   { slug: "payments", title: "Payments & Finance", group: "People & Money", match: ["/admin/payments", "/admin/course-payments", "/admin/access-risk"] },
   { slug: "students", title: "Students & Enrollments", group: "People & Money", match: ["/admin/students"] },
+  { slug: "payment-plans", title: "Changing a Student's Payment Plan", group: "People & Money", match: [] },
   { slug: "course-access", title: "Course & Portal Access", group: "People & Money", match: [] },
   { slug: "staff", title: "Staff & Roles", group: "People & Money", match: ["/admin/staff"] },
   { slug: "roles-permissions", title: "Roles & Permissions", group: "People & Money", match: [] },

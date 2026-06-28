@@ -28,6 +28,7 @@ export const DEFAULT_RULES: RuleSeed[] = [
   { trigger: TRIGGERS.post_webinar_thankyou, template_id: "post_webinar_thankyou", offset_minutes: 240, audience_type: "webinar_attendees" },
   { trigger: TRIGGERS.first_login, template_id: "welcome_first_login" },
   { trigger: TRIGGERS.course_enrolled, template_id: "course_enrolled" },
+  { trigger: TRIGGERS.payment_plan_changed, template_id: "payment_plan_changed" },
 ];
 
 export const DEFAULT_SETTINGS = (): SmsSettings => ({

@@ -21,6 +21,11 @@ import {
   History,
   Plus,
   Wallet,
+  Repeat,
+  SlidersHorizontal,
+  CalendarClock,
+  Ban,
+  XCircle,
 } from "lucide-react";
 import { LoadingBlock } from "@/components/admin/ui";
 import JourneyTimeline from "@/components/admin/JourneyTimeline";
@@ -29,9 +34,15 @@ import StatusPill, { statusOf } from "@/components/ui/StatusPill";
 import Modal from "@/components/ui/Modal";
 import { useToast } from "@/components/ui/Toast";
 import { formatINR, formatISTDate, formatISTDateTime, isoToISTInput } from "@/lib/dates";
-import { resolveEmiConfig, payInFullTotal, planCourseEnrollment } from "@/lib/installments";
+import { resolveEmiConfig, payInFullTotal, planCourseEnrollment, installmentStatus, deriveEnrollment } from "@/lib/installments";
 import { downloadReceiptPdf, type ReceiptContact } from "@/lib/receiptPdf";
-import type { Student, PaymentReceipt, Course, Webinar } from "@/lib/types";
+import type { Student, PaymentReceipt, Course, Webinar, InstallmentItem, PaymentPlan } from "@/lib/types";
+
+const PLAN_LABEL: Record<PaymentPlan, string> = {
+  FULL: "Full payment",
+  EMI: "EMI",
+  CUSTOM_INSTALLMENTS: "Custom installments",
+};
 
 const inputCls = "w-full rounded-lg border border-line bg-surface px-3 py-2.5 text-sm focus:border-primary focus:outline-none";
 const METHODS = ["Cash", "Bank Transfer", "Offline UPI"];
@@ -53,6 +64,13 @@ interface CourseCard {
   createdAt: string;
   source: "course" | "legacy";
   unpaid: { kind: "seat" | "installment" | "full"; no: number; label: string; amount: number; due: string | null }[];
+  paymentPlan?: PaymentPlan;
+  installmentCount?: number;
+  schedule?: InstallmentItem[];
+  previousPlan?: PaymentPlan | null;
+  planChangedAt?: string | null;
+  planChangedReason?: string | null;
+  planHistory?: { id: string; oldPlan: string | null; newPlan: string | null; oldOutstanding: number; newOutstanding: number; reason: string | null; changedBy: string | null; createdAt: string }[];
 }
 interface WebinarRow { id: string; title: string; datetime: string | null; paid: boolean; amount: number | null; status: string }
 interface LedgerRow { id: string; date: string; amount: number; type: string; label: string; method: string; reference: string | null; receiptNo: string | null }
@@ -145,9 +163,10 @@ export default function StudentProfilePage({ params }: { params: { id: string } 
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [customDate, setCustomDate] = useState("");
-  const [modal, setModal] = useState<null | "edit" | "enroll" | "webinar" | "pay">(null);
+  const [modal, setModal] = useState<null | "edit" | "enroll" | "webinar" | "pay" | "changePlan" | "managePlan">(null);
   const [showJourney, setShowJourney] = useState(false);
   const [payCourse, setPayCourse] = useState<CourseCard | null>(null);
+  const [planCourse, setPlanCourse] = useState<CourseCard | null>(null);
   const [catalog, setCatalog] = useState<{ courses: Course[]; webinars: Webinar[] } | null>(null);
 
   const load = useCallback(() => {
@@ -186,6 +205,19 @@ export default function StudentProfilePage({ params }: { params: { id: string } 
       return false;
     } catch { toast("Network error", "error"); return false; }
     finally { setBusy(false); }
+  }
+
+  // Raw POST that returns the JSON so a modal can manage its own inline errors /
+  // re-confirm flow (used by Change Plan + installment actions).
+  async function rawPost(path: string, body: Record<string, unknown>): Promise<{ ok: boolean; error?: string; warnings?: string[] }> {
+    try {
+      const res = await fetch(`/api/admin/students/${params.id}${path}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      return await res.json();
+    } catch { return { ok: false, error: "Network error" }; }
   }
 
   async function act(body: Record<string, unknown>, okMsg: string) {
@@ -385,6 +417,14 @@ export default function StudentProfilePage({ params }: { params: { id: string } 
                   <h3 className="font-semibold leading-snug">{c.title}</h3>
                   <span className={`pill ${c.remaining <= 0 ? "pill-green" : c.hasOverdue ? "pill-red" : "pill-amber"}`}>{c.status}</span>
                 </div>
+                <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                  {c.source === "course" && c.paymentPlan && (
+                    <span className="pill pill-blue">{PLAN_LABEL[c.paymentPlan]}</span>
+                  )}
+                  {c.previousPlan && c.previousPlan !== c.paymentPlan && (
+                    <span className="text-[10px] text-muted">was {PLAN_LABEL[c.previousPlan]}</span>
+                  )}
+                </div>
                 <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted">
                   <span>{c.plan}</span>
                   {c.batch && <span>· {c.batch}</span>}
@@ -400,9 +440,15 @@ export default function StudentProfilePage({ params }: { params: { id: string } 
                 {c.nextDue && c.remaining > 0 && (
                   <p className="mt-2 text-xs text-muted">Next: {c.nextDue.label} · {formatINR(c.nextDue.amount)}{c.nextDue.due ? ` · ${formatISTDate(c.nextDue.due)}` : ""}</p>
                 )}
-                <div className="mt-3 flex items-center gap-3">
+                <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1.5">
                   {c.source === "course" && c.remaining > 0 && (
                     <button onClick={() => { setPayCourse(c); setModal("pay"); }} className="inline-flex items-center gap-1 text-xs font-semibold text-primary hover:underline"><Wallet size={13} /> Record payment</button>
+                  )}
+                  {c.source === "course" && (
+                    <button onClick={() => { setPlanCourse(c); setModal("changePlan"); }} className="inline-flex items-center gap-1 text-xs font-semibold text-primary hover:underline"><Repeat size={13} /> Change plan</button>
+                  )}
+                  {c.source === "course" && (c.schedule?.length ?? 0) > 0 && (
+                    <button onClick={() => { setPlanCourse(c); setModal("managePlan"); }} className="inline-flex items-center gap-1 text-xs font-semibold text-muted hover:text-primary"><SlidersHorizontal size={13} /> Manage installments</button>
                   )}
                   {c.slug && (
                     <Link href={`/courses/${c.slug}`} className="text-xs font-semibold text-muted hover:text-primary">View course →</Link>
@@ -515,6 +561,23 @@ export default function StudentProfilePage({ params }: { params: { id: string } 
       {modal === "enroll" && <EnrollModal catalog={catalog} enrolledCourseTitles={profile.courses.map((c) => c.title)} busy={busy} onClose={() => setModal(null)} onSave={(body) => postAction("/enroll", body, "Enrolled")} />}
       {modal === "webinar" && <WebinarModal catalog={catalog} busy={busy} onClose={() => setModal(null)} onSave={(body) => postAction("/webinar", body, "Webinar registered")} />}
       {modal === "pay" && payCourse && <PayModal course={payCourse} busy={busy} onClose={() => setModal(null)} onSave={(body) => postAction("/payment", body, "Payment recorded")} />}
+      {modal === "changePlan" && planCourse && (
+        <ChangePlanModal
+          course={planCourse}
+          onClose={() => setModal(null)}
+          request={(body) => rawPost("/change-plan", body)}
+          onDone={(warnings) => { toast(warnings.length ? `Plan updated · ${warnings.join("; ")}` : "Payment plan updated", warnings.length ? "error" : "success"); setModal(null); load(); }}
+        />
+      )}
+      {modal === "managePlan" && planCourse && (
+        <ManagePlanModal
+          course={planCourse}
+          onClose={() => setModal(null)}
+          request={(body) => rawPost("/installment", body)}
+          onPay={() => { setPayCourse(planCourse); setModal("pay"); }}
+          onDone={(msg) => { toast(msg, "success"); load(); }}
+        />
+      )}
     </div>
   );
 }
@@ -673,6 +736,226 @@ function PayModal({ course, busy, onClose, onSave }: { course: CourseCard; busy:
             )}
             className="btn btn-primary text-sm"
           >Record {formatINR(amount)}</button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+type PlanReqResult = { ok: boolean; error?: string; warnings?: string[]; enrollment?: { schedule?: InstallmentItem[]; total_fee?: number } };
+
+const EMI_COUNT_OPTIONS = [2, 3, 4, 6, 10, 12];
+
+function ChangePlanModal({ course, onClose, request, onDone }: {
+  course: CourseCard;
+  onClose: () => void;
+  request: (b: Record<string, unknown>) => Promise<PlanReqResult>;
+  onDone: (warnings: string[]) => void;
+}) {
+  const current: PaymentPlan = course.paymentPlan || "FULL";
+  const [plan, setPlan] = useState<PaymentPlan>(current === "FULL" ? "EMI" : "FULL");
+  const [count, setCount] = useState(3);
+  const [reason, setReason] = useState("");
+  const [lines, setLines] = useState<{ title: string; amount: string; due: string; grace: string; notes: string }[]>([
+    { title: "Installment 1", amount: "", due: "", grace: "", notes: "" },
+  ]);
+  const [confirmBackdated, setConfirmBackdated] = useState(false);
+  const [confirmDifference, setConfirmDifference] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const outstanding = course.remaining;
+  const customSum = lines.reduce((a, l) => a + (Math.round(Number(l.amount)) || 0), 0);
+  const needsBackdated = !!error && /past/i.test(error);
+  const needsDifference = !!error && /effective fee/i.test(error);
+  const perEmi = count > 0 ? Math.floor(outstanding / count) : 0;
+
+  async function submit() {
+    setBusy(true); setError(null);
+    const body: Record<string, unknown> = { enrollmentId: course.id, plan, reason: reason || null, confirmBackdated, confirmDifference };
+    if (plan === "EMI") body.count = count;
+    if (plan === "CUSTOM_INSTALLMENTS") {
+      body.lines = lines.map((l) => ({ title: l.title, amount: Math.round(Number(l.amount)) || 0, due: l.due || null, grace: l.grace || null, notes: l.notes || null }));
+    }
+    const res = await request(body);
+    setBusy(false);
+    if (res.ok) { onDone(res.warnings || []); return; }
+    setError(res.error || "Failed");
+  }
+
+  return (
+    <Modal open onClose={onClose} title={`Change payment plan · ${course.title}`}>
+      <div className="space-y-3">
+        <div className="rounded-xl border border-primary/30 bg-primary/5 p-3 text-xs text-ink2">
+          Use this only when a student originally selected Full Payment but later requests EMI/custom installments. Existing paid amount will be preserved. The future outstanding amount will be converted into installments.
+        </div>
+        <div className="rounded-xl bg-surface2 p-3 text-sm">
+          <div className="flex justify-between"><span className="text-muted">Current plan</span><span className="font-semibold">{PLAN_LABEL[current]}</span></div>
+          <div className="flex justify-between"><span className="text-muted">Paid so far</span><span className="font-semibold">{formatINR(course.paid)} / {formatINR(course.total)}</span></div>
+          <div className="flex justify-between"><span className="text-muted">Outstanding</span><span className="font-semibold text-warning">{formatINR(outstanding)}</span></div>
+        </div>
+
+        <div>
+          <span className="mb-1 block text-xs font-medium text-muted">New plan</span>
+          <div className="flex flex-wrap gap-2">
+            {(["FULL", "EMI", "CUSTOM_INSTALLMENTS"] as PaymentPlan[]).map((p) => (
+              <button key={p} type="button" onClick={() => { setPlan(p); setError(null); }} className={`rounded-lg border px-3 py-1.5 text-xs font-semibold transition ${plan === p ? "border-primary bg-primary/10 text-primary" : "border-line"}`}>
+                {p === "FULL" ? "Full payment" : p === "EMI" ? "EMI" : "Custom (staff)"}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {plan === "EMI" && (
+          <div>
+            <span className="mb-1 block text-xs font-medium text-muted">Number of installments</span>
+            <div className="flex flex-wrap items-center gap-2">
+              {EMI_COUNT_OPTIONS.map((n) => (
+                <button key={n} onClick={() => setCount(n)} className={`rounded-lg border px-2.5 py-1 text-xs font-semibold ${count === n ? "border-primary bg-primary/10 text-primary" : "border-line"}`}>{n}×</button>
+              ))}
+              <input type="number" min={1} value={count} onChange={(e) => setCount(Math.max(1, Math.round(Number(e.target.value) || 1)))} className="w-16 rounded-lg border border-line bg-surface px-2 py-1 text-sm" />
+            </div>
+            <p className="mt-2 text-xs text-muted">{formatINR(outstanding)} over {count} installments ≈ <strong>{formatINR(perEmi)}</strong> each (last absorbs the remainder). Due dates follow the course schedule.</p>
+          </div>
+        )}
+
+        {plan === "FULL" && (
+          <p className="text-xs text-muted">The remaining <strong>{formatINR(outstanding)}</strong> becomes a single outstanding balance. Unpaid installments are superseded; paid amounts are kept.</p>
+        )}
+
+        {plan === "CUSTOM_INSTALLMENTS" && (
+          <div className="space-y-2">
+            <span className="block text-xs font-medium text-muted">Custom installments (staff-only)</span>
+            {lines.map((l, i) => (
+              <div key={i} className="rounded-lg border border-line p-2.5">
+                <div className="flex items-center gap-2">
+                  <input value={l.title} onChange={(e) => setLines((xs) => xs.map((x, j) => j === i ? { ...x, title: e.target.value } : x))} placeholder={`Installment ${i + 1}`} className="flex-1 rounded-lg border border-line bg-surface px-2 py-1.5 text-sm" />
+                  <input type="number" value={l.amount} onChange={(e) => setLines((xs) => xs.map((x, j) => j === i ? { ...x, amount: e.target.value } : x))} placeholder="Amount" className="w-28 rounded-lg border border-line bg-surface px-2 py-1.5 text-sm" />
+                  {lines.length > 1 && <button onClick={() => setLines((xs) => xs.filter((_, j) => j !== i))} className="text-muted hover:text-danger"><XCircle size={16} /></button>}
+                </div>
+                <div className="mt-2 grid grid-cols-2 gap-2">
+                  <label className="block"><span className="mb-0.5 block text-[10px] text-muted">Due date (IST)</span><input type="date" value={l.due} onChange={(e) => setLines((xs) => xs.map((x, j) => j === i ? { ...x, due: e.target.value } : x))} className="w-full rounded-lg border border-line bg-surface px-2 py-1.5 text-sm" /></label>
+                  <label className="block"><span className="mb-0.5 block text-[10px] text-muted">Grace date (optional)</span><input type="date" value={l.grace} onChange={(e) => setLines((xs) => xs.map((x, j) => j === i ? { ...x, grace: e.target.value } : x))} className="w-full rounded-lg border border-line bg-surface px-2 py-1.5 text-sm" /></label>
+                </div>
+              </div>
+            ))}
+            <button onClick={() => setLines((xs) => [...xs, { title: `Installment ${xs.length + 1}`, amount: "", due: "", grace: "", notes: "" }])} className="inline-flex items-center gap-1 text-xs font-semibold text-primary hover:underline"><Plus size={13} /> Add installment</button>
+            <p className={`text-xs ${customSum === outstanding ? "text-muted" : "text-warning"}`}>Total {formatINR(customSum)} {customSum === outstanding ? "= outstanding" : `vs outstanding ${formatINR(outstanding)} — re-confirm to change the effective fee`}</p>
+          </div>
+        )}
+
+        <label className="block"><span className="mb-1 block text-xs font-medium text-muted">Reason / note (recommended)</span><input value={reason} onChange={(e) => setReason(e.target.value)} className={inputCls} placeholder="e.g. Student requested EMI after booking seat" /></label>
+
+        {needsBackdated && (
+          <label className="flex items-center gap-2 rounded-lg border border-danger/40 bg-danger/5 p-2.5 text-xs text-danger"><input type="checkbox" checked={confirmBackdated} onChange={(e) => setConfirmBackdated(e.target.checked)} className="accent-[var(--danger)]" /> I understand a backdated due date (&gt;15 days past) will immediately revoke access.</label>
+        )}
+        {needsDifference && (
+          <label className="flex items-center gap-2 rounded-lg border border-warning/40 bg-warning/5 p-2.5 text-xs text-ink2"><input type="checkbox" checked={confirmDifference} onChange={(e) => setConfirmDifference(e.target.checked)} className="accent-[var(--warning)]" /> I confirm changing the effective course fee (installments total differs from outstanding).</label>
+        )}
+        {error && <p className="rounded-lg bg-danger/10 px-3 py-2 text-xs text-danger">{error}</p>}
+
+        <div className="flex justify-end gap-2 pt-1">
+          <button onClick={onClose} className="btn btn-secondary text-sm">Cancel</button>
+          <button disabled={busy} onClick={submit} className="btn btn-primary text-sm">{busy ? "Applying…" : "Apply plan change"}</button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function ManagePlanModal({ course, onClose, request, onPay, onDone }: {
+  course: CourseCard;
+  onClose: () => void;
+  request: (b: Record<string, unknown>) => Promise<PlanReqResult>;
+  onPay: () => void;
+  onDone: (msg: string) => void;
+}) {
+  const [sched, setSched] = useState<InstallmentItem[]>(course.schedule || []);
+  const [totalFee, setTotalFee] = useState<number>(course.total);
+  const [editNo, setEditNo] = useState<number | null>(null);
+  const [editDue, setEditDue] = useState("");
+  const [confirmBackdated, setConfirmBackdated] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const d = deriveEnrollment({ total_fee: totalFee, schedule: sched });
+
+  async function run(body: Record<string, unknown>, key: string, okMsg: string) {
+    setBusy(key); setError(null);
+    const res = await request(body);
+    setBusy(null);
+    if (!res.ok) { setError(res.error || "Failed"); return; }
+    if (res.enrollment?.schedule) setSched(res.enrollment.schedule);
+    if (typeof res.enrollment?.total_fee === "number") setTotalFee(res.enrollment.total_fee);
+    setEditNo(null); setConfirmBackdated(false);
+    onDone(okMsg);
+  }
+
+  return (
+    <Modal open onClose={onClose} title={`Manage installments · ${course.title}`}>
+      <div className="space-y-3">
+        <div className="rounded-xl bg-surface2 p-3 text-sm">
+          <div className="flex justify-between"><span className="text-muted">Paid so far</span><span className="font-semibold">{formatINR(d.paid)} / {formatINR(totalFee)}</span></div>
+          <div className="flex justify-between"><span className="text-muted">Outstanding</span><span className="font-semibold text-warning">{formatINR(d.remaining)}</span></div>
+        </div>
+
+        <div className="divide-y divide-line rounded-xl border border-line">
+          {sched.map((item) => {
+            const st = installmentStatus(item);
+            const editable = !item.paid && st !== "cancelled" && st !== "waived";
+            return (
+              <div key={item.no} className="px-3 py-2.5">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold">{item.label}</p>
+                    <p className="text-xs text-muted">
+                      {item.paid ? `Paid${item.paid_at ? ` · ${formatISTDate(item.paid_at)}` : ""}` : item.due ? `Due ${formatISTDate(item.due)}` : "Due now"}
+                      <span className={`ml-1.5 pill ${st === "paid" ? "pill-green" : st === "overdue" ? "pill-red" : st === "waived" || st === "cancelled" ? "pill-gray" : "pill-amber"}`}>{st}</span>
+                    </p>
+                  </div>
+                  <span className={`shrink-0 font-semibold ${item.paid ? "text-muted line-through" : st === "cancelled" || st === "waived" ? "text-muted line-through" : ""}`}>{formatINR(item.amount)}</span>
+                </div>
+                {editable && (
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    {editNo === item.no ? (
+                      <>
+                        <input type="date" value={editDue} onChange={(e) => setEditDue(e.target.value)} className="rounded-lg border border-line bg-surface px-2 py-1 text-xs" />
+                        <button disabled={!!busy || !editDue} onClick={() => run({ enrollmentId: course.id, no: item.no, action: "edit_due", due: editDue, confirmBackdated }, `due${item.no}`, "Due date updated")} className="rounded-lg border border-primary px-2 py-1 text-xs font-semibold text-primary">Save</button>
+                        <button onClick={() => { setEditNo(null); setConfirmBackdated(false); }} className="text-xs text-muted">Cancel</button>
+                        <label className="flex items-center gap-1 text-[10px] text-muted"><input type="checkbox" checked={confirmBackdated} onChange={(e) => setConfirmBackdated(e.target.checked)} /> allow backdated</label>
+                      </>
+                    ) : (
+                      <button onClick={() => { setEditNo(item.no); setEditDue(item.due ? isoToISTInput(item.due).slice(0, 10) : ""); }} className="inline-flex items-center gap-1 text-xs font-semibold text-primary hover:underline"><CalendarClock size={12} /> Edit due</button>
+                    )}
+                    <button disabled={!!busy} onClick={() => run({ enrollmentId: course.id, no: item.no, action: "waive", reason: "Waived by admin" }, `w${item.no}`, "Installment waived")} className="inline-flex items-center gap-1 text-xs font-semibold text-muted hover:text-warning"><Ban size={12} /> Waive</button>
+                    <button disabled={!!busy} onClick={() => run({ enrollmentId: course.id, no: item.no, action: "cancel", reason: "Cancelled by admin" }, `c${item.no}`, "Installment cancelled")} className="inline-flex items-center gap-1 text-xs font-semibold text-muted hover:text-danger"><XCircle size={12} /> Cancel</button>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        {error && <p className="rounded-lg bg-danger/10 px-3 py-2 text-xs text-danger">{error}</p>}
+
+        {course.planHistory && course.planHistory.length > 0 && (
+          <details className="text-sm">
+            <summary className="flex cursor-pointer items-center gap-1.5 text-muted"><History size={14} /> Plan change history ({course.planHistory.length})</summary>
+            <ul className="mt-2 space-y-1.5">
+              {course.planHistory.map((h) => (
+                <li key={h.id} className="border-b border-line py-1.5 text-xs last:border-0">
+                  <span className="font-semibold">{h.oldPlan} → {h.newPlan}</span> · outstanding {formatINR(h.oldOutstanding)} → {formatINR(h.newOutstanding)}
+                  {h.reason && <span className="text-muted"> · {h.reason}</span>}
+                  <span className="block text-muted">{formatISTDateTime(h.createdAt)}{h.changedBy ? ` · by ${h.changedBy}` : ""}</span>
+                </li>
+              ))}
+            </ul>
+          </details>
+        )}
+
+        <div className="flex justify-between gap-2 pt-1">
+          {d.remaining > 0 ? <button onClick={onPay} className="btn btn-secondary text-sm"><Wallet size={14} /> Record payment</button> : <span />}
+          <button onClick={onClose} className="btn btn-primary text-sm">Done</button>
         </div>
       </div>
     </Modal>

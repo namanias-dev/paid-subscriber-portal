@@ -548,6 +548,13 @@ export interface CourseEmiConfig {
 
 export type InstallmentKind = "seat" | "installment" | "full";
 
+/**
+ * Per-line status. `paid` boolean stays the canonical "money received" flag for
+ * backward compatibility; `status` adds non-outstanding states an admin can set.
+ * "waived" and "cancelled" are NOT outstanding and never block course access.
+ */
+export type InstallmentLineStatus = "pending" | "paid" | "overdue" | "waived" | "cancelled";
+
 /** One line in a course enrollment's payment schedule (seat + installments). */
 export interface InstallmentItem {
   /** 0 = seat/full (today); 1..N = installments. */
@@ -562,6 +569,28 @@ export interface InstallmentItem {
   reference_no?: string | null;
   gateway_ref?: string | null;
   receipt_no?: string | null;
+  // --- Payment-plan management extensions (all optional; stored in the JSONB) ---
+  /** Explicit line status. Absent → derived from `paid`/`due`. */
+  status?: InstallmentLineStatus;
+  /**
+   * Optional explicit grace-end date. When set, the SAME 15-day access rule uses
+   * this instead of (due + 15 days) — it is not a second grace mechanism.
+   */
+  grace?: string | null;
+  /** Amount actually received against this line (usually equals `amount` when paid). */
+  paid_amount?: number | null;
+  /** Ledger payment id that settled this line, if any. */
+  payment_id?: string | null;
+  /** True for a staff-built custom installment (never exposed in public checkout). */
+  is_custom?: boolean;
+  /** Admin username/id who created this custom line. */
+  created_by?: string | null;
+  /** Why a line was cancelled/superseded/waived. */
+  cancelled_reason?: string | null;
+  /** Free-text staff note for this line. */
+  notes?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
 }
 
 export type CourseEnrollmentStatus =
@@ -572,6 +601,9 @@ export type CourseEnrollmentStatus =
   | "cancelled";
 
 export type CoursePlanType = "full" | "emi";
+
+/** Precise payment plan an admin can convert between (superset of plan_type). */
+export type PaymentPlan = "FULL" | "EMI" | "CUSTOM_INSTALLMENTS";
 
 /**
  * A course purchase keyed by buyer phone (matches the existing buyer/portal
@@ -598,6 +630,33 @@ export interface CourseEnrollment {
   schedule: InstallmentItem[];
   created_at: string;
   updated_at: string;
+  // --- Payment-plan management (additive; admin-driven plan conversion) ---
+  /** Precise plan (FULL/EMI/CUSTOM_INSTALLMENTS). Falls back to plan_type when absent. */
+  payment_plan?: PaymentPlan | null;
+  previous_payment_plan?: PaymentPlan | null;
+  payment_plan_changed_at?: string | null;
+  payment_plan_changed_by?: string | null;
+  payment_plan_change_reason?: string | null;
+  /** When true, show the student a one-time "your plan changed" notice on next login. */
+  plan_change_notice_pending?: boolean | null;
+  plan_change_notice_seen_at?: string | null;
+}
+
+/** Immutable audit record of a single payment-plan change. */
+export interface EnrollmentPlanChangeLog {
+  id: string;
+  enrollment_id: string;
+  student_id: string | null;
+  phone: string | null;
+  course_id: string | null;
+  old_plan: string | null;
+  new_plan: string | null;
+  old_outstanding: number;
+  new_outstanding: number;
+  reason: string | null;
+  changed_by: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
 }
 
 /** Immutable payment receipt. A correction issues a new receipt, never edits one. */

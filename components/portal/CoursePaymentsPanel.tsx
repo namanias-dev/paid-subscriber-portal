@@ -135,9 +135,11 @@ export default function CoursePaymentsPanel({
       <div className="ca-card p-0">
         <h3 className="border-b border-[var(--ca-slate-200)] px-5 py-3.5 font-heading text-base font-bold text-[var(--ca-navy-900)]">Payment schedule</h3>
         <div className="divide-y divide-[var(--ca-slate-200)]">
-          {enrollment.schedule.map((item) => {
+          {/* Cancelled/superseded lines are hidden so an old plan's demand never lingers. */}
+          {enrollment.schedule.filter((item) => item.status !== "cancelled").map((item) => {
             const st = installmentStatus(item);
             const receipt = item.reference_no ? receiptByRef.get(item.reference_no) : null;
+            const waived = st === "waived";
             return (
               <div key={item.no} className="flex items-center justify-between gap-3 px-5 py-3">
                 <div className="min-w-0">
@@ -148,20 +150,22 @@ export default function CoursePaymentsPanel({
                   <p className="mt-0.5 pl-6 text-xs text-[var(--ca-slate-700)]">
                     {item.paid
                       ? `Paid${item.paid_at ? ` · ${formatISTDate(item.paid_at)}` : ""}`
-                      : item.due
-                        ? `Due ${formatISTDate(item.due)}`
-                        : "Due now"}
+                      : waived
+                        ? "Waived by the academy"
+                        : item.due
+                          ? `Due ${formatISTDate(item.due)}`
+                          : "Due now"}
                     {st === "overdue" && <span className="ml-1 font-bold text-red-600">· OVERDUE</span>}
                     {st === "due-soon" && !item.paid && <span className="ml-1 font-semibold text-amber-600">· Due soon</span>}
                   </p>
                 </div>
                 <div className="flex shrink-0 items-center gap-3">
-                  <span className={`font-heading font-bold ${item.paid ? "text-[var(--ca-slate-400)] line-through" : "text-[var(--ca-navy-900)]"}`}>{formatINR(item.amount)}</span>
+                  <span className={`font-heading font-bold ${item.paid || waived ? "text-[var(--ca-slate-400)] line-through" : "text-[var(--ca-navy-900)]"}`}>{formatINR(item.amount)}</span>
                   {item.paid && receipt ? (
                     <Link href={`/portal/receipt/${encodeURIComponent(receipt.receipt_no)}`} className="ca-focus inline-flex items-center gap-1 rounded-lg border border-[var(--ca-slate-300)] px-2 py-1 text-xs font-semibold text-[var(--ca-navy-600)] hover:bg-[var(--ca-slate-50)]">
                       <Download size={13} /> Receipt
                     </Link>
-                  ) : !item.paid && item.kind === "installment" && d.nextPayable?.no !== item.no ? (
+                  ) : !item.paid && !waived && item.kind === "installment" && d.nextPayable?.no !== item.no ? (
                     <button
                       onClick={() => pay("installment", item.no, `i${item.no}`)}
                       disabled={!!busy}
@@ -204,7 +208,7 @@ export default function CoursePaymentsPanel({
 }
 
 function StatusIcon({ st }: { st: string }) {
-  if (st === "paid") return <CheckCircle2 size={16} className="text-emerald-600" />;
+  if (st === "paid" || st === "waived") return <CheckCircle2 size={16} className={st === "waived" ? "text-[var(--ca-slate-400)]" : "text-emerald-600"} />;
   if (st === "overdue") return <AlertTriangle size={16} className="text-red-600" />;
   return <Clock size={16} className="text-[var(--ca-slate-400)]" />;
 }

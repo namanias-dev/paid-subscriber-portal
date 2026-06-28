@@ -71,6 +71,10 @@ If a student paid but the system shows it as not paid, they can upload proof fro
 
 This creates a `PAID` record (marked as offline) and a receipt.
 
+## Converting a student from Full Payment to EMI / Custom installments
+
+If a student paid (or booked) a course as **Pay in Full** and later wants **EMI** or a **custom** schedule (or vice-versa), don't re-enrol them. Open their profile → on the course card use **`Change plan`** (paid amounts are always preserved) or **`Manage installments`**. Full guide, including how due dates drive the 15-day access timer: **[Changing a Student's Payment Plan](payment-plans)**.
+
 ## Refunds
 
 ⚠️ There is **no "mark refunded" button** anywhere in the admin panel. The `Refunded` figure on this page only **displays** old Razorpay refunds. Refunds must be handled outside this system (e.g. directly in the payment gateway / bank), and there is currently no way to record a new refund here. Flag refund requests to a Super Admin / finance.

@@ -51,6 +51,9 @@ For most course/webinar students, the one they need to log into the portal is th
 2. Choose the `Course`, pick `Pay in full` / `EMI` / `Complimentary` (and installments / `Book seat first` if relevant).
 3. Click **`Enroll`**.
 
+### Change an existing enrolment's payment plan (Full ↔ EMI ↔ Custom)
+On the course card, click **`Change plan`** (switch Full/EMI/Custom — paid amounts are kept) or **`Manage installments`** (edit due dates, waive or cancel an installment, see history). Full step-by-step, including how due dates affect the 15-day access timer and what the student sees: **[Changing a Student's Payment Plan](payment-plans)**.
+
 ### Register an existing student for a webinar
 1. Open the profile → in **`Webinars registered`** click **`Register`**.
 2. Choose the `Webinar`. Enter `Amount paid (₹, leave 0 for free)`. If more than 0, pick `Method` and `Date (IST)`.

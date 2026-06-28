@@ -253,7 +253,7 @@ export default async function PortalDashboardPage() {
             {enrolledCourses.map((e, i) => {
               const d = deriveEnrollment(e);
               const badge = STATUS_BADGE[e.status] || { label: e.status, cls: "pill-gray" };
-              const nextDue = e.schedule.find((s) => !s.paid && s.due);
+              const nextDue = d.nextPayable && d.nextPayable.due ? d.nextPayable : undefined;
               const tone = e.status === "fully_paid" ? "green" : e.status === "seat_booked" ? "amber" : "blue";
               const course = courseById.get(e.course_id) || courseBySlug.get(e.course_slug);
               return (

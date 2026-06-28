@@ -299,6 +299,16 @@ export function planCourseEnrollment(
   };
 }
 
+/** A line removed from the plan (superseded/forgiven) — never outstanding, never blocks access. */
+export function isLineCancelledOrWaived(item: Pick<InstallmentItem, "status">): boolean {
+  return item.status === "cancelled" || item.status === "waived";
+}
+
+/** A line the student still owes money on (drives next-payable + 15-day access grace). */
+export function isLineOutstanding(item: Pick<InstallmentItem, "paid" | "status">): boolean {
+  return !item.paid && !isLineCancelledOrWaived(item);
+}
+
 export interface EnrollmentDerived {
   paid: number;
   remaining: number;
@@ -317,10 +327,11 @@ export function deriveEnrollment(enr: Pick<CourseEnrollment, "total_fee" | "sche
   const schedule = enr.schedule || [];
   const paid = schedule.filter((s) => s.paid).reduce((a, s) => a + s.amount, 0);
   const remaining = Math.max(0, enr.total_fee - paid);
-  const installments = schedule.filter((s) => s.kind === "installment");
+  // Installments that still count toward the plan (paid, or outstanding — not cancelled/waived).
+  const installments = schedule.filter((s) => s.kind === "installment" && (s.paid || !isLineCancelledOrWaived(s)));
   const paidInstallments = installments.filter((s) => s.paid).length;
-  const nextPayable = schedule.find((s) => !s.paid) || null;
-  const hasOverdue = schedule.some((s) => !s.paid && s.due != null && new Date(s.due).getTime() < now);
+  const nextPayable = schedule.find((s) => isLineOutstanding(s)) || null;
+  const hasOverdue = schedule.some((s) => isLineOutstanding(s) && s.due != null && new Date(s.due).getTime() < now);
   return {
     paid,
     remaining,
@@ -334,8 +345,10 @@ export function deriveEnrollment(enr: Pick<CourseEnrollment, "total_fee" | "sche
 }
 
 /** Display status for a schedule line. */
-export function installmentStatus(item: InstallmentItem, now = Date.now()): "paid" | "overdue" | "due-soon" | "upcoming" {
+export function installmentStatus(item: InstallmentItem, now = Date.now()): "paid" | "overdue" | "due-soon" | "upcoming" | "waived" | "cancelled" {
   if (item.paid) return "paid";
+  if (item.status === "waived") return "waived";
+  if (item.status === "cancelled") return "cancelled";
   if (item.due == null) return "due-soon";
   const t = new Date(item.due).getTime();
   if (t < now) return "overdue";

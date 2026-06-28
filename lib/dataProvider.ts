@@ -49,8 +49,11 @@ import type {
   LibraryDoc,
   CourseEnrollment,
   PaymentReceipt,
+  EnrollmentPlanChangeLog,
+  PaymentPlan,
 } from "./types";
-import { deriveEnrollment, enrollmentStatusFromSchedule, installmentsSummary, planCourseEnrollment } from "./installments";
+import { deriveEnrollment, enrollmentStatusFromSchedule, installmentsSummary, planCourseEnrollment, resolveEmiConfig } from "./installments";
+import { changePlan, type ChangePlanTarget, type ConvertOptions } from "./paymentPlanChange";
 import { mergeSiteSettings } from "./homeDefaults";
 import { DEFAULT_ROLES, resolvePermissions, type PermissionSet } from "./permissions";
 import { dedupedPaidTotal } from "./paymentsAgg";
@@ -2951,6 +2954,268 @@ export async function recordOfflineCoursePayment(
   const finalized = await finalizeCoursePaymentByReference(ref);
   if (!finalized) return { ok: false, error: "Could not apply the payment." };
   return { ok: true, enrollment: finalized.enrollment, receipt: finalized.receipt };
+}
+
+// ==================== ADMIN: PAYMENT-PLAN CONVERSION + INSTALLMENT MANAGEMENT ====================
+// Convert an existing enrollment between FULL / EMI / CUSTOM_INSTALLMENTS after
+// enrollment, preserving every paid amount and feeding the SAME 15-day access
+// rule. The installment "table" is the course_enrollments.schedule JSONB — we
+// extend it, never fork it.
+
+const PLAN_DAY_MS = 86_400_000;
+
+function demoPlanLogs(): EnrollmentPlanChangeLog[] {
+  const g = globalThis as unknown as { __namanPlanLogs?: EnrollmentPlanChangeLog[] };
+  if (!g.__namanPlanLogs) g.__namanPlanLogs = [];
+  return g.__namanPlanLogs;
+}
+
+/** All payments tied to an enrollment (any status). */
+export async function getPaymentsByEnrollmentId(enrollmentId: string): Promise<Payment[]> {
+  const id = (enrollmentId || "").trim();
+  if (!id) return [];
+  if (demoMode()) return demoPayments().filter((p) => p.enrollment_id === id);
+  const db = getSupabaseAdmin();
+  if (!db) return demoPayments().filter((p) => p.enrollment_id === id);
+  const { data } = await db.from("payments").select("*").eq("enrollment_id", id).order("created_at", { ascending: false });
+  return (data as Payment[]) ?? [];
+}
+
+/** Expire stale PENDING/VERIFYING payment attempts for an enrollment. Never touches PAID. */
+export async function cancelStalePendingPayments(enrollmentId: string): Promise<number> {
+  const id = (enrollmentId || "").trim();
+  if (!id) return 0;
+  if (demoMode()) {
+    let n = 0;
+    for (const p of demoPayments()) {
+      if (p.enrollment_id === id && (p.status === "PENDING" || p.status === "VERIFYING")) { p.status = "ABANDONED"; n++; }
+    }
+    return n;
+  }
+  const db = getSupabaseAdmin();
+  if (!db) return 0;
+  try {
+    const { data } = await db
+      .from("payments")
+      .update({ status: "ABANDONED" })
+      .eq("enrollment_id", id)
+      .in("status", ["PENDING", "VERIFYING"])
+      .select("id");
+    return (data || []).length;
+  } catch { return 0; }
+}
+
+export async function addEnrollmentPlanChangeLog(
+  input: Omit<EnrollmentPlanChangeLog, "id" | "created_at"> & { id?: string; created_at?: string },
+): Promise<EnrollmentPlanChangeLog> {
+  const row = {
+    id: input.id ?? uuid(),
+    created_at: input.created_at ?? new Date().toISOString(),
+    ...input,
+  } as EnrollmentPlanChangeLog;
+  if (demoMode()) { demoPlanLogs().unshift(row); return row; }
+  try {
+    return await dbInsert<EnrollmentPlanChangeLog>("enrollment_plan_change_log", row as unknown as Record<string, unknown>);
+  } catch {
+    demoPlanLogs().unshift(row);
+    return row;
+  }
+}
+
+export async function getEnrollmentPlanChangeLogs(enrollmentId: string): Promise<EnrollmentPlanChangeLog[]> {
+  const id = (enrollmentId || "").trim();
+  if (!id) return [];
+  if (demoMode()) return demoPlanLogs().filter((l) => l.enrollment_id === id);
+  const db = getSupabaseAdmin();
+  if (!db) return demoPlanLogs().filter((l) => l.enrollment_id === id);
+  const { data } = await db
+    .from("enrollment_plan_change_log")
+    .select("*")
+    .eq("enrollment_id", id)
+    .order("created_at", { ascending: false });
+  return (data as EnrollmentPlanChangeLog[]) ?? [];
+}
+
+export interface ChangeEnrollmentPlanInput {
+  enrollmentId: string;
+  target: ChangePlanTarget;
+  reason?: string | null;
+  changedBy?: string | null;
+  confirmBackdated?: boolean;
+  confirmDifference?: boolean;
+}
+
+/**
+ * Convert an enrollment's payment plan. Preserves all paid lines, recomputes
+ * outstanding from the new schedule, expires stale pending requests, writes an
+ * audit row, flags the student notice, and fires the (default-OFF) SMS hook.
+ */
+export async function changeEnrollmentPaymentPlan(
+  input: ChangeEnrollmentPlanInput,
+): Promise<{ ok: true; enrollment: CourseEnrollment; warnings: string[] } | { ok: false; error: string }> {
+  const enrollment = await getCourseEnrollmentById(input.enrollmentId);
+  if (!enrollment) return { ok: false, error: "Enrollment not found." };
+  if (enrollment.status === "cancelled") return { ok: false, error: "This enrollment is cancelled." };
+
+  const before = deriveEnrollment(enrollment);
+  const oldPlan: PaymentPlan = enrollment.payment_plan || (enrollment.plan_type === "emi" ? "EMI" : "FULL");
+
+  // Course-driven interval defaults for the EMI builder (fall back to sensible defaults).
+  let firstIntervalDays = 7;
+  let intervalMonths = 1;
+  try {
+    const course = await getCourseBySlug(enrollment.course_slug);
+    if (course) { const cfg = resolveEmiConfig(course); firstIntervalDays = cfg.firstIntervalDays; intervalMonths = cfg.intervalMonths; }
+  } catch { /* defaults */ }
+
+  const changedAt = new Date().toISOString();
+  const opts: ConvertOptions = {
+    bookingISO: changedAt,
+    firstIntervalDays,
+    intervalMonths,
+    changedBy: input.changedBy ?? null,
+    confirmBackdated: input.confirmBackdated,
+    confirmDifference: input.confirmDifference,
+  };
+  const outcome = changePlan(enrollment, input.target, opts);
+  if (!outcome.ok) return { ok: false, error: outcome.error };
+  const { schedule, planType, paymentPlan, installmentCount, totalFee, warnings } = outcome.result;
+
+  // Expire any unfinished "pay full"/installment attempts so the old plan's
+  // pending request never reappears. Paid rows are untouched.
+  await cancelStalePendingPayments(enrollment.id);
+
+  const status = enrollmentStatusFromSchedule({ total_fee: totalFee, schedule, plan_type: planType });
+  const derivedAfter = deriveEnrollment({ total_fee: totalFee, schedule });
+
+  const updated = await updateCourseEnrollment(enrollment.id, {
+    schedule,
+    plan_type: planType,
+    payment_plan: paymentPlan,
+    previous_payment_plan: oldPlan,
+    total_fee: totalFee,
+    installment_count: installmentCount,
+    amount_paid: derivedAfter.paid,
+    status,
+    payment_plan_changed_at: changedAt,
+    payment_plan_changed_by: input.changedBy ?? null,
+    payment_plan_change_reason: input.reason ?? null,
+    plan_change_notice_pending: true,
+    plan_change_notice_seen_at: null,
+  });
+  const finalEnrollment = updated || {
+    ...enrollment,
+    schedule,
+    plan_type: planType,
+    payment_plan: paymentPlan,
+    previous_payment_plan: oldPlan,
+    total_fee: totalFee,
+    installment_count: installmentCount,
+    amount_paid: derivedAfter.paid,
+    status,
+  };
+
+  // Audit (best-effort).
+  const student = await findStudentByPhone(enrollment.phone).catch(() => null);
+  await addEnrollmentPlanChangeLog({
+    enrollment_id: enrollment.id,
+    student_id: student?.id ?? null,
+    phone: enrollment.phone,
+    course_id: enrollment.course_id,
+    old_plan: oldPlan,
+    new_plan: paymentPlan,
+    old_outstanding: before.remaining,
+    new_outstanding: derivedAfter.remaining,
+    reason: input.reason ?? null,
+    changed_by: input.changedBy ?? null,
+    metadata: {
+      previous_schedule: enrollment.schedule,
+      new_schedule: schedule,
+      total_fee_before: enrollment.total_fee,
+      total_fee_after: totalFee,
+      warnings,
+    },
+  }).catch(() => null);
+
+  // SMS hook — fire-and-forget; the rule is OFF by default so nothing sends
+  // unless a Super Admin enables it. Idempotent via dedupe on enrollment+change.
+  fireAutoSms({
+    trigger: TRIGGERS.payment_plan_changed,
+    phone: enrollment.phone,
+    name: enrollment.student_name,
+    vars: { item_short: enrollment.course_title },
+    entity: { course_id: enrollment.course_id },
+    entityId: `${enrollment.id}:${changedAt}`,
+  });
+
+  return { ok: true, enrollment: finalEnrollment, warnings };
+}
+
+export interface InstallmentLineActionInput {
+  enrollmentId: string;
+  /** schedule line `no`. */
+  no: number;
+  action: "edit_due" | "waive" | "cancel";
+  due?: string | null;
+  grace?: string | null;
+  reason?: string | null;
+  changedBy?: string | null;
+  confirmBackdated?: boolean;
+}
+
+/** Edit a due date, or waive / cancel a single unpaid installment line. */
+export async function updateInstallmentLine(
+  input: InstallmentLineActionInput,
+): Promise<{ ok: true; enrollment: CourseEnrollment } | { ok: false; error: string }> {
+  const e = await getCourseEnrollmentById(input.enrollmentId);
+  if (!e) return { ok: false, error: "Enrollment not found." };
+  const schedule = [...(e.schedule || [])];
+  const idx = schedule.findIndex((s) => s.no === input.no);
+  if (idx < 0) return { ok: false, error: "Installment not found." };
+  const line = schedule[idx];
+  if (line.paid) return { ok: false, error: "This installment is already paid and cannot be changed." };
+  const now = new Date().toISOString();
+
+  let totalFee = e.total_fee;
+  if (input.action === "edit_due") {
+    if (!input.due) return { ok: false, error: "A due date is required." };
+    const dueMs = Date.parse(input.due) || 0;
+    if (dueMs < Date.now() - 15 * PLAN_DAY_MS && !input.confirmBackdated) {
+      return { ok: false, error: "That due date is more than 15 days in the past and will immediately revoke access. Re-confirm to proceed." };
+    }
+    schedule[idx] = { ...line, due: input.due, grace: input.grace ?? line.grace ?? null, status: "pending", updated_at: now };
+  } else if (input.action === "waive") {
+    // Waiving forgives this amount → reduce the effective fee so totals reconcile.
+    totalFee = Math.max(0, e.total_fee - line.amount);
+    schedule[idx] = { ...line, status: "waived", cancelled_reason: input.reason || "Waived by admin", updated_at: now };
+  } else if (input.action === "cancel") {
+    schedule[idx] = { ...line, status: "cancelled", cancelled_reason: input.reason || "Cancelled by admin", updated_at: now };
+  } else {
+    return { ok: false, error: "Unknown action." };
+  }
+
+  const status = enrollmentStatusFromSchedule({ total_fee: totalFee, schedule, plan_type: e.plan_type });
+  const derived = deriveEnrollment({ total_fee: totalFee, schedule });
+  const updated = await updateCourseEnrollment(e.id, { schedule, total_fee: totalFee, amount_paid: derived.paid, status });
+  return { ok: true, enrollment: updated || { ...e, schedule, total_fee: totalFee, amount_paid: derived.paid, status } };
+}
+
+/** Enrollments for a phone with an unacknowledged plan-change notice. */
+export async function getPlanChangeNoticesForPhone(phone: string): Promise<CourseEnrollment[]> {
+  const list = await getCourseEnrollmentsByPhone(phone);
+  return list.filter((e) => !!e.plan_change_notice_pending && e.status !== "cancelled");
+}
+
+/** Mark the plan-change notice as seen for the affected student (phone-scoped). */
+export async function acknowledgePlanChangeNotice(enrollmentId: string, phone: string): Promise<boolean> {
+  const e = await getCourseEnrollmentById(enrollmentId);
+  if (!e) return false;
+  if (e.phone !== (phone || "").trim()) return false;
+  await updateCourseEnrollment(enrollmentId, {
+    plan_change_notice_pending: false,
+    plan_change_notice_seen_at: new Date().toISOString(),
+  });
+  return true;
 }
 
 export interface OfflineWebinarPaymentInput {

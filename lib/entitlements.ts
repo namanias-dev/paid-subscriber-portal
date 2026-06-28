@@ -10,6 +10,7 @@ import {
   getActiveStaffCourseIdsByPhone,
 } from "./dataProvider";
 import { studentBlockReason } from "./studentAccess";
+import { isLineOutstanding } from "./installments";
 import type { Course, Quiz, CaPdf, ContentItem, CourseEnrollment, CourseAccessOverride } from "./types";
 
 /**
@@ -263,11 +264,19 @@ function recordingCourseIds(rec: Pick<ContentItem, "course_ids" | "course_id">):
   return rec.course_ids && rec.course_ids.length ? rec.course_ids : rec.course_id ? [rec.course_id] : [];
 }
 
-/** Earliest unpaid installment that has a due date — the binding constraint for EMI/seat access. */
-function earliestUnpaidDue(enrollment: CourseEnrollment): { due: number; amount: number } | null {
+/**
+ * Earliest OUTSTANDING installment that has a due date — the binding constraint
+ * for EMI/seat access. Cancelled/waived lines are skipped (they're not owed).
+ * `grace`, when present, is an explicit grace-end fed into the SAME 15-day window.
+ */
+function earliestUnpaidDue(enrollment: CourseEnrollment): { due: number; amount: number; grace: number | null } | null {
   const items = (enrollment.schedule || [])
-    .filter((i) => !i.paid && i.due)
-    .map((i) => ({ due: Date.parse(i.due as string) || 0, amount: i.amount }))
+    .filter((i) => isLineOutstanding(i) && i.due)
+    .map((i) => ({
+      due: Date.parse(i.due as string) || 0,
+      amount: i.amount,
+      grace: i.grace ? (Date.parse(i.grace) || null) : null,
+    }))
     .filter((i) => i.due > 0)
     .sort((a, b) => a.due - b.due);
   return items[0] ?? null;
@@ -320,10 +329,13 @@ export function lectureAccessForCourse(
   // 4) Seat-booked / partial / pending → tied to the installment schedule + 15-day grace.
   const unpaid = earliestUnpaidDue(enrollment);
   if (!unpaid) {
-    // No dated unpaid installment yet (e.g. only the due-today seat item) → active.
+    // No dated outstanding installment yet (e.g. only the due-today seat item, or
+    // an EMI→FULL remaining balance with no due date) → access stays active.
     return { allowed: true, reason: "active", status: "active" };
   }
-  const graceEnds = unpaid.due + GRACE_DAYS * DAY_MS;
+  // Explicit grace-end (if an admin set one) overrides due+15d, but it's the SAME
+  // single grace window — not a parallel mechanism.
+  const graceEnds = unpaid.grace ?? unpaid.due + GRACE_DAYS * DAY_MS;
   if (now <= graceEnds) {
     const overdue = now > unpaid.due;
     return {

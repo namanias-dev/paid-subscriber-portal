@@ -30,6 +30,7 @@ export const TRIGGERS = {
   post_webinar_thankyou: "post_webinar_thankyou",
   first_login: "first_login",
   course_enrolled: "course_enrolled",
+  payment_plan_changed: "payment_plan_changed",
 } as const;
 
 export interface SeedTemplate {
@@ -89,6 +90,8 @@ export const SEED_TEMPLATES: SeedTemplate[] = [
     body: "Hi {first_name}, your login code is {login_code}. Login: {login_url}. Naman Sharma IAS Academy" },
   { id: "course_enrolled", name: "Course Enrolled", use_case: "ONBOARDING", message_type: "service", trigger_event: TRIGGERS.course_enrolled, audience_type: "paid",
     body: "Hi {first_name}, you are enrolled in {item_short}! Login {login_url} code {login_code} to start. Naman Sharma IAS Academy" },
+  { id: "payment_plan_changed", name: "Payment Plan Changed", use_case: "PAYMENT", message_type: "service", trigger_event: TRIGGERS.payment_plan_changed, audience_type: "paid",
+    body: "Hi {first_name}, payment plan for {item_short} updated. Login {login_url} code {login_code} to view installments. Naman Sharma IAS Academy" },
   { id: "reengagement_inactive", name: "Re-Engagement Inactive", use_case: "ONBOARDING", message_type: "service", trigger_event: null, audience_type: "inactive",
     body: "Hi {first_name}, new UPSC sessions are live! Login {login_url} to continue learning. Naman Sharma IAS Academy" },
 ];
