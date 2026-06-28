@@ -9,6 +9,7 @@ import AdminPasswordModal from "./AdminPasswordModal";
 import { ADMIN_NAV } from "./adminNav";
 import { UploadManagerProvider } from "./upload/uploadManager";
 import UploadManagerWidget from "./upload/UploadManagerWidget";
+import HelpPanel from "./help/HelpPanel";
 import { allPermissions, type PermissionSet } from "@/lib/permissions";
 
 interface AdminMe { username: string; role: string; role_name?: string; permissions?: PermissionSet; must_change_password?: boolean }
@@ -137,6 +138,7 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
 
       <AdminPasswordModal open={pwOpen} onClose={() => setPwOpen(false)} onChanged={() => { setPwOpen(false); check(); }} />
       <UploadManagerWidget />
+      <HelpPanel />
     </div>
     </UploadManagerProvider>
   );
