@@ -4,6 +4,6 @@
     { "path": "/api/cron/ping", "schedule": "0 6 * * *" },
     { "path": "/api/cron/verify-payments", "schedule": "0 3 * * *" },
     { "path": "/api/cron/analytics-rollup", "schedule": "30 19 * * *" },
-    { "path": "/api/cron/sms-dispatch", "schedule": "30 * * * *" }
+    { "path": "/api/cron/sms-dispatch", "schedule": "30 4 * * *" }
   ]
 }

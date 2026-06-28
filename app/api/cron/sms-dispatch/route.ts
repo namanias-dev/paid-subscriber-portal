@@ -15,8 +15,13 @@ export const maxDuration = 60;
  * per-payment dedupe_key, and sendSms inserts-then-sends under a UNIQUE index so
  * re-runs / overlapping invocations cannot double-send.
  *
- * Schedule it at "30 * * * *" (UTC) so it lands on IST :00, or hit it from any
- * external scheduler. Guarded by CRON_SECRET.
+ * Vercel cron runs it once daily ("30 4 * * *" UTC = 10:00 IST) to stay within
+ * Hobby limits. For time-sensitive sends (1hr-before, T19 end+offset), point a
+ * free external scheduler (e.g. cron-job.org) at this route HOURLY:
+ *   GET  /api/cron/sms-dispatch?secret=<CRON_SECRET>
+ *   or   Authorization: Bearer <CRON_SECRET>
+ * Every job no-ops unless its rule is enabled, and all sends are idempotent, so
+ * extra pings are safe.
  */
 function istDateKey(d = new Date()): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).format(d);
