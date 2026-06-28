@@ -7,9 +7,11 @@
  * funnel and source attribution only.
  */
 import { getSupabaseAdmin } from "../supabase";
-import { getPayments } from "../dataProvider";
+import { getPayments, getAdminAccounts } from "../dataProvider";
 import { isPaidStatus, dedupePaidRows, dedupedPaidTotal, distinctRegistrations, itemKey } from "../paymentsAgg";
 import { normalizeIndianMobile } from "../phone";
+import { istInputToISO } from "../dates";
+import { NON_ATTRIBUTABLE_SOURCES, sourceLabel } from "./metrics";
 import type { Payment } from "../types";
 
 /**
@@ -26,6 +28,7 @@ export interface EventLite {
   visitor_id: string | null;
   buyer_id: string | null;
   phone: string | null;
+  session_id: string | null;
   occurred_at: string;
   page_path: string | null;
   attribution: { first_touch?: { source?: string; campaign?: string }; last_touch?: { source?: string; campaign?: string } } | null;
@@ -57,7 +60,7 @@ async function fetchEvents(fromISO: string, toISO: string): Promise<EventLite[]>
   if (!db) return [];
   const { data } = await db
     .from("analytics_events")
-    .select("event_id,event_name,visitor_id,buyer_id,phone,occurred_at,page_path,attribution,props")
+    .select("event_id,event_name,visitor_id,buyer_id,phone,session_id,occurred_at,page_path,attribution,props")
     .gte("occurred_at", fromISO)
     .lte("occurred_at", toISO)
     .eq("is_bot", false)
@@ -368,4 +371,341 @@ export async function getSegment(key: SegmentKey): Promise<SegmentRow[]> {
     if (unpaid.length) rows.push({ phone: ph, name: nameOf(ph), detail: `${unpaid.length} item(s) clicked, not paid`, source: sourceOf(ph), lastAt: latestOf(ph), buyerId: null });
   }
   return rows.sort((a, b) => (b.lastAt || "").localeCompare(a.lastAt || ""));
+}
+
+// ============================================================================
+// PHASE 1 — ACCURACY FOUNDATION
+// A single, documented definition for every metric. Money/people come from the
+// payments table (authoritative, works for pre-tracking data too); behaviour and
+// visitor attribution come from analytics_events. Conversions are only shown when
+// the denominator is valid — otherwise N/A (never an impossible %).
+// ============================================================================
+
+const IST_MS = 5.5 * 3600 * 1000;
+
+/** UTC instant of IST-midnight for the day containing `d`. */
+function istStartOfDay(d: Date): Date {
+  const shifted = d.getTime() + IST_MS;
+  const dayStart = Math.floor(shifted / 86400000) * 86400000;
+  return new Date(dayStart - IST_MS);
+}
+
+export type RangePreset = "today" | "yesterday" | "7d" | "30d" | "this_month" | "custom";
+
+/** Resolve a preset (or custom from/to IST dates) into UTC ISO bounds. */
+export function resolveRange(preset: RangePreset, fromStr?: string | null, toStr?: string | null): { from: string; to: string } {
+  const now = new Date();
+  if (preset === "custom" && fromStr && toStr) {
+    return { from: istInputToISO(`${fromStr}T00:00`), to: istInputToISO(`${toStr}T23:59`) };
+  }
+  if (preset === "today") return { from: istStartOfDay(now).toISOString(), to: now.toISOString() };
+  if (preset === "yesterday") {
+    const todayStart = istStartOfDay(now);
+    const yStart = new Date(todayStart.getTime() - 86400000);
+    return { from: yStart.toISOString(), to: todayStart.toISOString() };
+  }
+  if (preset === "this_month") {
+    const shifted = new Date(now.getTime() + IST_MS);
+    const first = new Date(Date.UTC(shifted.getUTCFullYear(), shifted.getUTCMonth(), 1) - IST_MS);
+    return { from: first.toISOString(), to: now.toISOString() };
+  }
+  const days = preset === "7d" ? 7 : 30;
+  return { from: new Date(now.getTime() - days * 86400000).toISOString(), to: now.toISOString() };
+}
+
+/** Earliest tracked event time (UTC ms) — anything paid before this is "pre-tracking". */
+export async function getTrackingStartMs(): Promise<number | null> {
+  const db = getSupabaseAdmin();
+  if (!db) return null;
+  const { data } = await db
+    .from("analytics_events")
+    .select("occurred_at")
+    .order("occurred_at", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  const t = (data as { occurred_at?: string } | null)?.occurred_at;
+  return t ? new Date(t).getTime() : null;
+}
+
+/** Internal staff phones (admin_users) — used by the "Exclude admin traffic" toggle. */
+async function getStaffPhoneSet(): Promise<Set<string>> {
+  const set = new Set<string>();
+  try {
+    const accounts = await getAdminAccounts();
+    for (const a of accounts) {
+      const ph = normPhone((a as { phone?: string | null }).phone ?? null);
+      if (ph) set.add(ph);
+    }
+  } catch { /* best-effort */ }
+  return set;
+}
+
+/**
+ * Classify a payment into a source bucket. NEVER silently calls a no-source row
+ * "direct": offline/admin rows are "admin"; rows made before tracking are
+ * "pre_tracking"; everything else with no source is "untracked".
+ */
+export function classifyPaymentSource(p: Payment, trackingStartMs: number | null): string {
+  const gw = (p.gateway || "").toLowerCase();
+  if (gw === "offline" || gw === "admin" || gw === "manual") return "admin";
+  if (p.attribution_source) return p.attribution_source.toLowerCase();
+  const t = new Date(p.created_at).getTime();
+  if (trackingStartMs && t < trackingStartMs) return "pre_tracking";
+  return "untracked";
+}
+
+function pct(numerator: number, denominator: number): number {
+  return Math.round((numerator / denominator) * 1000) / 10;
+}
+
+export interface AnalyticsOverview {
+  range: { from: string; to: string };
+  trackingStartISO: string | null;
+  excludeAdmin: boolean;
+  kpis: {
+    visitors: number;
+    sessions: number;
+    pageViews: number;
+    logins: number;
+    loginUsers: number;
+    registrations: number;
+    paymentInitiated: number;
+    paidStudents: number;
+    paidTransactions: number;
+    revenue: number;
+    abandoned: number;
+    proofPending: number;
+    verifyingAmount: number;
+  };
+  conversions: {
+    visitorToPaid: number | null;
+    registrationToPaid: number | null;
+    paymentToPaid: number | null;
+    avgRevenuePerStudent: number | null;
+  };
+}
+
+export async function getAnalyticsOverview(opts: { from: string; to: string; excludeAdmin?: boolean }): Promise<AnalyticsOverview> {
+  const fromISO = new Date(opts.from).toISOString();
+  const toISO = new Date(opts.to).toISOString();
+  const fromMs = new Date(fromISO).getTime();
+  const toMs = new Date(toISO).getTime();
+  const excludeAdmin = !!opts.excludeAdmin;
+
+  const [allEvents, allPayments, trackingStartMs, staffPhones, proofPending] = await Promise.all([
+    fetchEvents(fromISO, toISO),
+    getPayments(),
+    getTrackingStartMs(),
+    excludeAdmin ? getStaffPhoneSet() : Promise.resolve(new Set<string>()),
+    countSubmittedProofs(),
+  ]);
+
+  const events = excludeAdmin ? allEvents.filter((e) => !(e.phone && staffPhones.has(normPhone(e.phone)!))) : allEvents;
+
+  // Behaviour metrics (events).
+  const visitorSet = new Set<string>();
+  const sessionSet = new Set<string>();
+  const loginUserSet = new Set<string>();
+  let pageViews = 0, sessionStarts = 0, logins = 0, registrations = 0;
+  for (const e of events) {
+    if (e.visitor_id) visitorSet.add(e.visitor_id);
+    if (e.session_id) sessionSet.add(e.session_id);
+    switch (e.event_name) {
+      case "page_view": pageViews++; break;
+      case "session_start": sessionStarts++; break;
+      case "login": logins++; { const u = e.buyer_id || (e.phone ? normPhone(e.phone) : null); if (u) loginUserSet.add(u); } break;
+      case "registration_created": registrations++; break;
+    }
+  }
+
+  // Payment metrics (authoritative — work even before event tracking existed).
+  const inRange = (p: Payment) => { const t = new Date(p.created_at).getTime(); return t >= fromMs && t <= toMs; };
+  let payments = allPayments.filter((p) => !p.deleted_at && inRange(p));
+  if (excludeAdmin) payments = payments.filter((p) => !(p.phone && staffPhones.has(normPhone(p.phone)!)));
+
+  const paymentInitiated = payments.length;
+  const abandoned = payments.filter((p) => (p.status || "").toUpperCase() === "ABANDONED").length;
+  const verifyingAmount = payments.filter((p) => (p.status || "").toUpperCase() === "VERIFYING").reduce((a, p) => a + (p.amount || 0), 0);
+
+  const paidRowsRaw = payments.filter((p) => isPaidStatus(p.status));
+  const paidRows = dedupePaidRows(paidRowsRaw);
+  const revenue = dedupedPaidTotal(paidRowsRaw);
+  const paidTransactions = paidRows.length;
+  const paidStudentSet = new Set<string>();
+  for (const p of paidRows) { const ph = normPhone(p.phone); if (ph) paidStudentSet.add(ph); }
+  const paidStudents = paidStudentSet.size;
+
+  // Tracked paid students = those attributed to a REAL acquisition source, so the
+  // global Visitor→Paid denominator (visitors) and numerator come from the same
+  // tracked world. Pre-tracking/untracked/admin payers are excluded here (shown
+  // separately in the source table with N/A conversion).
+  const trackedPaidStudentSet = new Set<string>();
+  for (const p of paidRows) {
+    const src = classifyPaymentSource(p, trackingStartMs);
+    if (!NON_ATTRIBUTABLE_SOURCES.has(src)) { const ph = normPhone(p.phone); if (ph) trackedPaidStudentSet.add(ph); }
+  }
+
+  return {
+    range: { from: fromISO, to: toISO },
+    trackingStartISO: trackingStartMs ? new Date(trackingStartMs).toISOString() : null,
+    excludeAdmin,
+    kpis: {
+      visitors: visitorSet.size,
+      sessions: sessionSet.size || sessionStarts,
+      pageViews,
+      logins,
+      loginUsers: loginUserSet.size,
+      registrations,
+      paymentInitiated,
+      paidStudents,
+      paidTransactions,
+      revenue,
+      abandoned,
+      proofPending,
+      verifyingAmount,
+    },
+    conversions: {
+      visitorToPaid: visitorSet.size > 0 ? pct(trackedPaidStudentSet.size, visitorSet.size) : null,
+      registrationToPaid: registrations > 0 ? pct(paidStudents, registrations) : null,
+      paymentToPaid: paymentInitiated > 0 ? pct(paidTransactions, paymentInitiated) : null,
+      avgRevenuePerStudent: paidStudents > 0 ? Math.round(revenue / paidStudents) : null,
+    },
+  };
+}
+
+async function countSubmittedProofs(): Promise<number> {
+  const db = getSupabaseAdmin();
+  if (!db) return 0;
+  const { count } = await db.from("payment_proofs").select("id", { count: "exact", head: true }).eq("status", "submitted");
+  return count || 0;
+}
+
+export interface SourceRow {
+  source: string;
+  label: string;
+  isSpecial: boolean;
+  visitors: number;
+  sessions: number;
+  registrations: number;
+  paymentInitiated: number;
+  paidStudents: number;
+  paidTransactions: number;
+  revenue: number;
+  visitorToPaid: number | null;
+  registrationToPaid: number | null;
+  paymentToPaid: number | null;
+  avgRevenuePerStudent: number | null;
+}
+
+export interface SourcesResult {
+  range: { from: string; to: string };
+  trackingStartISO: string | null;
+  excludeAdmin: boolean;
+  rows: SourceRow[];
+  totals: SourceRow;
+}
+
+export async function getAnalyticsSources(opts: { from: string; to: string; excludeAdmin?: boolean }): Promise<SourcesResult> {
+  const fromISO = new Date(opts.from).toISOString();
+  const toISO = new Date(opts.to).toISOString();
+  const fromMs = new Date(fromISO).getTime();
+  const toMs = new Date(toISO).getTime();
+  const excludeAdmin = !!opts.excludeAdmin;
+
+  const [allEvents, allPayments, trackingStartMs, staffPhones] = await Promise.all([
+    fetchEvents(fromISO, toISO),
+    getPayments(),
+    getTrackingStartMs(),
+    excludeAdmin ? getStaffPhoneSet() : Promise.resolve(new Set<string>()),
+  ]);
+  const events = excludeAdmin ? allEvents.filter((e) => !(e.phone && staffPhones.has(normPhone(e.phone)!))) : allEvents;
+
+  // Event-side per source: visitors, sessions, registrations.
+  const srcVisitors = new Map<string, Set<string>>();
+  const srcSessions = new Map<string, Set<string>>();
+  const srcRegs = new Map<string, number>();
+  for (const e of events) {
+    const s = sourceOfEvent(e);
+    if (e.visitor_id) { (srcVisitors.get(s) || srcVisitors.set(s, new Set()).get(s)!).add(e.visitor_id); }
+    if (e.session_id) { (srcSessions.get(s) || srcSessions.set(s, new Set()).get(s)!).add(e.session_id); }
+    if (e.event_name === "registration_created") srcRegs.set(s, (srcRegs.get(s) || 0) + 1);
+  }
+
+  // Payment-side per source: initiated, paid students, paid transactions, revenue.
+  const inRange = (p: Payment) => { const t = new Date(p.created_at).getTime(); return t >= fromMs && t <= toMs; };
+  let payments = allPayments.filter((p) => !p.deleted_at && inRange(p));
+  if (excludeAdmin) payments = payments.filter((p) => !(p.phone && staffPhones.has(normPhone(p.phone)!)));
+
+  const srcInitiated = new Map<string, number>();
+  const srcPaidRowsRaw = new Map<string, Payment[]>();
+  for (const p of payments) {
+    const s = classifyPaymentSource(p, trackingStartMs);
+    srcInitiated.set(s, (srcInitiated.get(s) || 0) + 1);
+    if (isPaidStatus(p.status)) (srcPaidRowsRaw.get(s) || srcPaidRowsRaw.set(s, []).get(s)!).push(p);
+  }
+
+  const keys = new Set<string>([...srcVisitors.keys(), ...srcSessions.keys(), ...srcRegs.keys(), ...srcInitiated.keys(), ...srcPaidRowsRaw.keys()]);
+
+  function buildRow(source: string, opts2: { visitors: number; sessions: number; registrations: number; initiated: number; paidRaw: Payment[] }): SourceRow {
+    const isSpecial = NON_ATTRIBUTABLE_SOURCES.has(source);
+    const paidRows = dedupePaidRows(opts2.paidRaw);
+    const revenue = dedupedPaidTotal(opts2.paidRaw);
+    const paidStudentSet = new Set<string>();
+    for (const p of paidRows) { const ph = normPhone(p.phone); if (ph) paidStudentSet.add(ph); }
+    const paidStudents = paidStudentSet.size;
+    const paidTransactions = paidRows.length;
+    return {
+      source,
+      label: sourceLabel(source),
+      isSpecial,
+      visitors: opts2.visitors,
+      sessions: opts2.sessions,
+      registrations: opts2.registrations,
+      paymentInitiated: opts2.initiated,
+      paidStudents,
+      paidTransactions,
+      revenue,
+      // Visitor→Paid only when this is a real source WITH tracked visitors.
+      visitorToPaid: !isSpecial && opts2.visitors > 0 ? pct(paidStudents, opts2.visitors) : null,
+      registrationToPaid: opts2.registrations > 0 ? pct(paidStudents, opts2.registrations) : null,
+      paymentToPaid: opts2.initiated > 0 ? pct(paidTransactions, opts2.initiated) : null,
+      avgRevenuePerStudent: paidStudents > 0 ? Math.round(revenue / paidStudents) : null,
+    };
+  }
+
+  const rows = [...keys].map((s) => buildRow(s, {
+    visitors: srcVisitors.get(s)?.size || 0,
+    sessions: srcSessions.get(s)?.size || 0,
+    registrations: srcRegs.get(s) || 0,
+    initiated: srcInitiated.get(s) || 0,
+    paidRaw: srcPaidRowsRaw.get(s) || [],
+  }));
+
+  // Real sources first (by revenue, then visitors); special buckets always last.
+  rows.sort((a, b) => {
+    if (a.isSpecial !== b.isSpecial) return a.isSpecial ? 1 : -1;
+    return b.revenue - a.revenue || b.visitors - a.visitors;
+  });
+
+  const allPaidRaw = [...srcPaidRowsRaw.values()].flat();
+  const totals = buildRow("__total__", {
+    visitors: new Set(events.filter((e) => e.visitor_id).map((e) => e.visitor_id!)).size,
+    sessions: new Set(events.filter((e) => e.session_id).map((e) => e.session_id!)).size,
+    registrations: [...srcRegs.values()].reduce((a, b) => a + b, 0),
+    initiated: payments.length,
+    paidRaw: allPaidRaw,
+  });
+  totals.label = "Total";
+  totals.isSpecial = false;
+  // Totals conversion uses overall visitors but spans tracked+untracked payers, so
+  // leave Visitor→Paid as N/A to avoid an apples-to-oranges %.
+  totals.visitorToPaid = null;
+
+  return {
+    range: { from: fromISO, to: toISO },
+    trackingStartISO: trackingStartMs ? new Date(trackingStartMs).toISOString() : null,
+    excludeAdmin,
+    rows,
+    totals,
+  };
 }

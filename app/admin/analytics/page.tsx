@@ -1,182 +1,261 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid } from "recharts";
-import { Users, MousePointerClick, TicketCheck, IndianRupee, TrendingDown, ArrowRight } from "lucide-react";
+import {
+  Users, MousePointerClick, TicketCheck, IndianRupee, ArrowRight, LogIn, FileClock, Wallet,
+  CreditCard, UserCheck, TrendingDown, Download, Hourglass, Receipt,
+} from "lucide-react";
 import { LoadingBlock } from "@/components/admin/ui";
-import SortControl from "@/components/admin/SortControl";
+import InfoTip from "@/components/admin/InfoTip";
 import { formatINR } from "@/lib/dates";
+import { METRICS, GLOBAL_NOTES, type MetricDef } from "@/lib/analytics/metrics";
 
-interface Summary {
+interface Overview {
   range: { from: string; to: string };
-  kpis: { visitors: number; sessions: number; pageViews: number; registrations: number; paidCount: number; revenue: number; abandoned: number };
-  funnel: { label: string; value: number }[];
-  bySource: { source: string; visitors: number; registrations: number; paid: number; revenue: number; conversion: number }[];
-  daily: { day: string; visitors: number; registrations: number; paid: number; revenue: number }[];
-  sources: string[];
+  trackingStartISO: string | null;
+  excludeAdmin: boolean;
+  kpis: {
+    visitors: number; sessions: number; pageViews: number; logins: number; loginUsers: number;
+    registrations: number; paymentInitiated: number; paidStudents: number; paidTransactions: number;
+    revenue: number; abandoned: number; proofPending: number; verifyingAmount: number;
+  };
+  conversions: { visitorToPaid: number | null; registrationToPaid: number | null; paymentToPaid: number | null; avgRevenuePerStudent: number | null };
 }
 
-const FUNNEL_COLORS = ["#2563eb", "#7c3aed", "#d97706", "#16a34a"];
+interface SourceRow {
+  source: string; label: string; isSpecial: boolean;
+  visitors: number; sessions: number; registrations: number; paymentInitiated: number;
+  paidStudents: number; paidTransactions: number; revenue: number;
+  visitorToPaid: number | null; registrationToPaid: number | null; paymentToPaid: number | null; avgRevenuePerStudent: number | null;
+}
+interface Sources { range: { from: string; to: string }; trackingStartISO: string | null; rows: SourceRow[]; totals: SourceRow }
 
-function dayLabel(ymd: string): string {
-  const [, m, d] = ymd.split("-");
-  return d && m ? `${d}/${m}` : ymd;
+type Preset = "today" | "yesterday" | "7d" | "30d" | "this_month" | "custom";
+const PRESET_LABELS: Record<Preset, string> = {
+  today: "Today", yesterday: "Yesterday", "7d": "7 days", "30d": "30 days", this_month: "This month", custom: "Custom",
+};
+
+const nf = (n: number) => n.toLocaleString("en-IN");
+const pctStr = (v: number | null) => (v === null ? "N/A" : `${v}%`);
+
+function istDateLabel(iso: string | null): string {
+  if (!iso) return "—";
+  const d = new Date(new Date(iso).getTime() + 5.5 * 3600 * 1000);
+  return d.toISOString().slice(0, 10);
 }
 
 export default function AnalyticsDashboardPage() {
-  const [days, setDays] = useState<"7" | "30" | "90">("30");
-  const [source, setSource] = useState<string>("all");
-  const [data, setData] = useState<Summary | null>(null);
+  const [preset, setPreset] = useState<Preset>("30d");
+  const [customFrom, setCustomFrom] = useState("");
+  const [customTo, setCustomTo] = useState("");
+  const [excludeAdmin, setExcludeAdmin] = useState(false);
+  const [overview, setOverview] = useState<Overview | null>(null);
+  const [sources, setSources] = useState<Sources | null>(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
+  const qs = useMemo(() => {
+    const p = new URLSearchParams({ preset });
+    if (preset === "custom" && customFrom && customTo) { p.set("from", customFrom); p.set("to", customTo); }
+    if (excludeAdmin) p.set("excludeAdmin", "1");
+    return p.toString();
+  }, [preset, customFrom, customTo, excludeAdmin]);
+
+  const load = useCallback(() => {
+    if (preset === "custom" && (!customFrom || !customTo)) return;
     setLoading(true);
-    const qs = new URLSearchParams({ days, ...(source !== "all" ? { source } : {}) });
-    fetch(`/api/admin/analytics/summary?${qs.toString()}`)
-      .then((r) => r.json())
-      .then((d) => setData(d.ok ? d.summary : null))
-      .catch(() => setData(null))
+    Promise.all([
+      fetch(`/api/admin/analytics/overview?${qs}`).then((r) => r.json()),
+      fetch(`/api/admin/analytics/sources?${qs}`).then((r) => r.json()),
+    ])
+      .then(([o, s]) => { setOverview(o.ok ? o.overview : null); setSources(s.ok ? s.sources : null); })
+      .catch(() => { setOverview(null); setSources(null); })
       .finally(() => setLoading(false));
-  }, [days, source]);
+  }, [qs, preset, customFrom, customTo]);
 
-  const sourceOptions = useMemo(
-    () => [{ value: "all", label: "All sources" }, ...(data?.sources || []).map((s) => ({ value: s, label: s === "untracked" ? "Untracked (pre-tracking)" : s.charAt(0).toUpperCase() + s.slice(1) }))],
-    [data?.sources],
-  );
+  useEffect(() => { load(); }, [load]);
 
-  const maxFunnel = Math.max(1, ...(data?.funnel.map((f) => f.value) || [1]));
+  function exportCsv() {
+    if (!sources) return;
+    const headers = ["Source", "Unique visitors", "Sessions", "Registrations", "Payment initiated", "Paid students", "Paid transactions", "Revenue", "Visitor→Paid %", "Registration→Paid %", "Payment→Paid %", "Avg revenue/student"];
+    const line = (r: SourceRow) => [
+      r.label, r.visitors, r.sessions, r.registrations, r.paymentInitiated, r.paidStudents, r.paidTransactions, r.revenue,
+      pctStr(r.visitorToPaid), pctStr(r.registrationToPaid), pctStr(r.paymentToPaid), r.avgRevenuePerStudent ?? "N/A",
+    ].map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",");
+    const csv = [headers.join(","), ...sources.rows.map(line), line(sources.totals)].join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = `analytics-sources-${preset}.csv`; a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  const trackingStart = istDateLabel(overview?.trackingStartISO || sources?.trackingStartISO || null);
 
   return (
     <div className="space-y-5 pb-16">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="font-heading text-2xl font-extrabold">Business Analytics</h1>
-          <p className="text-sm text-muted">Acquisition, funnel & revenue — reconciled to the Payments tab.</p>
+          <p className="text-sm text-muted">Acquisition, conversion &amp; revenue — every number defined, reconciled to Payments.</p>
         </div>
         <Link href="/admin/analytics/segments" className="btn btn-secondary text-sm">
           Re-engagement segments <ArrowRight size={15} />
         </Link>
       </div>
 
-      {/* Filters */}
+      {/* Controls */}
       <div className="flex flex-wrap items-center gap-2">
-        <div className="inline-flex overflow-hidden rounded-xl border border-line">
-          {(["7", "30", "90"] as const).map((d) => (
-            <button key={d} onClick={() => setDays(d)} className={`px-3 py-2 text-sm font-semibold transition ${days === d ? "bg-primary text-white" : "bg-white text-ink hover:bg-surface2"}`}>
-              {d}d
+        <div className="inline-flex flex-wrap overflow-hidden rounded-xl border border-line">
+          {(Object.keys(PRESET_LABELS) as Preset[]).map((p) => (
+            <button key={p} onClick={() => setPreset(p)} className={`px-3 py-2 text-sm font-semibold transition ${preset === p ? "bg-primary text-white" : "bg-white text-ink hover:bg-surface2"}`}>
+              {PRESET_LABELS[p]}
             </button>
           ))}
         </div>
-        <SortControl value={source} onChange={setSource} options={sourceOptions} label="Source" />
+        {preset === "custom" && (
+          <div className="inline-flex items-center gap-1.5">
+            <input type="date" value={customFrom} onChange={(e) => setCustomFrom(e.target.value)} className="rounded-lg border border-line bg-surface px-2 py-1.5 text-sm" />
+            <span className="text-muted">→</span>
+            <input type="date" value={customTo} onChange={(e) => setCustomTo(e.target.value)} className="rounded-lg border border-line bg-surface px-2 py-1.5 text-sm" />
+          </div>
+        )}
+        <label className="ml-auto inline-flex cursor-pointer items-center gap-2 rounded-xl border border-line bg-surface px-3 py-2 text-sm">
+          <input type="checkbox" checked={excludeAdmin} onChange={(e) => setExcludeAdmin(e.target.checked)} className="h-4 w-4 accent-[var(--primary)]" />
+          Exclude admin traffic
+        </label>
       </div>
 
       {loading ? (
         <div className="space-y-4"><LoadingBlock /><LoadingBlock /></div>
-      ) : !data ? (
+      ) : !overview ? (
         <div className="card p-10 text-center text-sm text-muted">No analytics yet. Data appears as visitors arrive.</div>
       ) : (
         <>
-          {/* KPIs */}
+          {/* KPI cards */}
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-            <Kpi icon={<Users size={16} />} label="Visitors" value={data.kpis.visitors.toLocaleString("en-IN")} hint={`${data.kpis.pageViews.toLocaleString("en-IN")} page views`} />
-            <Kpi icon={<MousePointerClick size={16} />} label="Registrations" value={data.kpis.registrations.toLocaleString("en-IN")} hint={`${data.kpis.sessions.toLocaleString("en-IN")} sessions`} />
-            <Kpi icon={<TicketCheck size={16} />} label="Paid" value={data.kpis.paidCount.toLocaleString("en-IN")} hint="distinct purchases" tone="green" />
-            <Kpi icon={<IndianRupee size={16} />} label="Revenue" value={formatINR(data.kpis.revenue)} hint="ties to Payments" tone="green" />
+            <Kpi def={METRICS.visitors} icon={<Users size={16} />} value={nf(overview.kpis.visitors)} hint={`${nf(overview.kpis.pageViews)} page views · ${nf(overview.kpis.sessions)} sessions`} />
+            <Kpi def={METRICS.registrations} icon={<MousePointerClick size={16} />} value={nf(overview.kpis.registrations)} />
+            <Kpi def={METRICS.paymentInitiated} icon={<CreditCard size={16} />} value={nf(overview.kpis.paymentInitiated)} hint={`${nf(overview.kpis.abandoned)} abandoned`} />
+            <Kpi def={METRICS.logins} icon={<LogIn size={16} />} value={nf(overview.kpis.logins)} hint={`${nf(overview.kpis.loginUsers)} unique users`} />
+            <Kpi def={METRICS.paidStudents} icon={<UserCheck size={16} />} value={nf(overview.kpis.paidStudents)} tone="green" />
+            <Kpi def={METRICS.paidTransactions} icon={<TicketCheck size={16} />} value={nf(overview.kpis.paidTransactions)} tone="green" />
+            <Kpi def={METRICS.revenue} icon={<IndianRupee size={16} />} value={formatINR(overview.kpis.revenue)} tone="green" />
+            <Kpi def={METRICS.verifyingAmount} icon={<Hourglass size={16} />} value={formatINR(overview.kpis.verifyingAmount)} hint={`${nf(overview.kpis.proofPending)} proofs pending`} tone="amber" />
           </div>
 
-          {/* Daily trend */}
+          {/* Conversion cards */}
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+            <Kpi def={METRICS.visitorToPaid} icon={<TrendingDown size={16} />} value={pctStr(overview.conversions.visitorToPaid)} />
+            <Kpi def={METRICS.registrationToPaid} icon={<TrendingDown size={16} />} value={pctStr(overview.conversions.registrationToPaid)} />
+            <Kpi def={METRICS.paymentToPaid} icon={<TrendingDown size={16} />} value={pctStr(overview.conversions.paymentToPaid)} />
+            <Kpi def={METRICS.avgRevenuePerStudent} icon={<Wallet size={16} />} value={overview.conversions.avgRevenuePerStudent === null ? "N/A" : formatINR(overview.conversions.avgRevenuePerStudent)} />
+          </div>
+
+          {/* By source */}
           <div className="card p-4">
-            <h2 className="mb-3 font-heading text-base font-bold">Daily activity</h2>
-            <div className="h-64">
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={data.daily.map((d) => ({ ...d, label: dayLabel(d.day) }))}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#eef0f4" />
-                  <XAxis dataKey="label" tick={{ fontSize: 11 }} />
-                  <YAxis tick={{ fontSize: 11 }} allowDecimals={false} />
-                  <Tooltip />
-                  <Line type="monotone" dataKey="visitors" name="Visitors" stroke="#2563eb" strokeWidth={2} dot={false} />
-                  <Line type="monotone" dataKey="registrations" name="Registrations" stroke="#d97706" strokeWidth={2} dot={false} />
-                  <Line type="monotone" dataKey="paid" name="Paid" stroke="#16a34a" strokeWidth={2} dot={false} />
-                </LineChart>
-              </ResponsiveContainer>
+            <div className="mb-3 flex items-center justify-between gap-2">
+              <h2 className="font-heading text-base font-bold">By source</h2>
+              <button onClick={exportCsv} className="inline-flex items-center gap-1.5 rounded-lg border border-line px-2.5 py-1.5 text-xs font-semibold text-ink transition hover:bg-surface2">
+                <Download size={13} /> Export CSV
+              </button>
             </div>
-          </div>
-
-          <div className="grid gap-4 lg:grid-cols-2">
-            {/* Funnel */}
-            <div className="card p-4">
-              <h2 className="mb-3 font-heading text-base font-bold">Conversion funnel</h2>
-              <div className="space-y-3">
-                {data.funnel.map((f, i) => (
-                  <div key={f.label}>
-                    <div className="mb-1 flex items-center justify-between text-sm">
-                      <span className="text-ink2">{f.label}</span>
-                      <span className="font-semibold text-ink">{f.value.toLocaleString("en-IN")}</span>
-                    </div>
-                    <div className="h-2.5 w-full overflow-hidden rounded-full bg-surface2">
-                      <div className="h-full rounded-full" style={{ width: `${(f.value / maxFunnel) * 100}%`, background: FUNNEL_COLORS[i % FUNNEL_COLORS.length] }} />
-                    </div>
-                  </div>
-                ))}
-                <div className="flex items-center gap-2 rounded-xl bg-surface2 p-3 text-xs text-ink2">
-                  <TrendingDown size={14} className="text-warning" />
-                  {data.kpis.abandoned.toLocaleString("en-IN")} payment(s) abandoned in this window.
-                </div>
-              </div>
-            </div>
-
-            {/* By source */}
-            <div className="card p-4">
-              <h2 className="mb-3 font-heading text-base font-bold">By source</h2>
-              {data.bySource.length === 0 ? (
-                <p className="text-sm text-muted">No attributed traffic yet.</p>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b border-line text-left text-xs text-muted">
-                        <th className="py-2 pr-2">Source</th>
-                        <th className="px-2 py-2 text-right">Visitors</th>
-                        <th className="px-2 py-2 text-right">Paid</th>
-                        <th className="px-2 py-2 text-right">Conv %</th>
-                        <th className="py-2 pl-2 text-right">Revenue</th>
+            {!sources || sources.rows.length === 0 ? (
+              <p className="text-sm text-muted">No attributed traffic yet.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[920px] text-sm">
+                  <thead>
+                    <tr className="border-b border-line text-left text-xs text-muted">
+                      <Th>Source</Th>
+                      <Th right def={METRICS.visitors}>Visitors</Th>
+                      <Th right def={METRICS.sessions}>Sessions</Th>
+                      <Th right def={METRICS.registrations}>Regs</Th>
+                      <Th right def={METRICS.paymentInitiated}>Pay init.</Th>
+                      <Th right def={METRICS.paidStudents}>Paid students</Th>
+                      <Th right def={METRICS.paidTransactions}>Paid txns</Th>
+                      <Th right def={METRICS.revenue}>Revenue</Th>
+                      <Th right def={METRICS.visitorToPaid}>V→Paid</Th>
+                      <Th right def={METRICS.registrationToPaid}>R→Paid</Th>
+                      <Th right def={METRICS.paymentToPaid}>P→Paid</Th>
+                      <Th right def={METRICS.avgRevenuePerStudent}>Avg/student</Th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sources.rows.map((r) => (
+                      <tr key={r.source} className={`border-b border-line/60 last:border-0 ${r.isSpecial ? "bg-surface2/40 text-muted" : ""}`}>
+                        <td className={`py-2 pr-2 font-semibold ${r.isSpecial ? "text-muted" : "text-ink"}`}>{r.label}</td>
+                        <Td>{nf(r.visitors)}</Td>
+                        <Td>{nf(r.sessions)}</Td>
+                        <Td>{nf(r.registrations)}</Td>
+                        <Td>{nf(r.paymentInitiated)}</Td>
+                        <Td>{nf(r.paidStudents)}</Td>
+                        <Td>{nf(r.paidTransactions)}</Td>
+                        <Td className="font-semibold">{formatINR(r.revenue)}</Td>
+                        <Td muted={r.visitorToPaid === null}>{pctStr(r.visitorToPaid)}</Td>
+                        <Td muted={r.registrationToPaid === null}>{pctStr(r.registrationToPaid)}</Td>
+                        <Td muted={r.paymentToPaid === null}>{pctStr(r.paymentToPaid)}</Td>
+                        <Td muted={r.avgRevenuePerStudent === null}>{r.avgRevenuePerStudent === null ? "N/A" : formatINR(r.avgRevenuePerStudent)}</Td>
                       </tr>
-                    </thead>
-                    <tbody>
-                      {data.bySource.map((r) => {
-                        const untracked = r.source === "untracked";
-                        return (
-                          <tr key={r.source} className={`border-b border-line/60 last:border-0 ${untracked ? "bg-surface2/40 text-muted" : ""}`}>
-                            <td className={`py-2 pr-2 font-semibold capitalize ${untracked ? "text-muted" : "text-ink"}`}>
-                              {untracked ? "Untracked" : r.source}
-                              {untracked && <span className="ml-1 text-[10px] font-normal normal-case">(pre-tracking)</span>}
-                            </td>
-                            <td className="px-2 py-2 text-right">{r.visitors.toLocaleString("en-IN")}</td>
-                            <td className="px-2 py-2 text-right">{r.paid.toLocaleString("en-IN")}</td>
-                            <td className="px-2 py-2 text-right">{untracked ? "—" : `${r.conversion}%`}</td>
-                            <td className={`py-2 pl-2 text-right font-semibold ${untracked ? "text-ink2" : ""}`}>{formatINR(r.revenue)}</td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
+                    ))}
+                    <tr className="border-t-2 border-line font-semibold">
+                      <td className="py-2 pr-2 text-ink">{sources.totals.label}</td>
+                      <Td>{nf(sources.totals.visitors)}</Td>
+                      <Td>{nf(sources.totals.sessions)}</Td>
+                      <Td>{nf(sources.totals.registrations)}</Td>
+                      <Td>{nf(sources.totals.paymentInitiated)}</Td>
+                      <Td>{nf(sources.totals.paidStudents)}</Td>
+                      <Td>{nf(sources.totals.paidTransactions)}</Td>
+                      <Td>{formatINR(sources.totals.revenue)}</Td>
+                      <Td muted>{pctStr(sources.totals.visitorToPaid)}</Td>
+                      <Td muted={sources.totals.registrationToPaid === null}>{pctStr(sources.totals.registrationToPaid)}</Td>
+                      <Td muted={sources.totals.paymentToPaid === null}>{pctStr(sources.totals.paymentToPaid)}</Td>
+                      <Td muted={sources.totals.avgRevenuePerStudent === null}>{sources.totals.avgRevenuePerStudent === null ? "N/A" : formatINR(sources.totals.avgRevenuePerStudent)}</Td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
+
+          {/* About these numbers */}
+          <details className="card p-4 text-sm">
+            <summary className="flex cursor-pointer items-center gap-2 font-heading text-base font-bold">
+              <Receipt size={16} className="text-primary" /> About these numbers
+            </summary>
+            <ul className="mt-3 space-y-2 text-ink2">
+              {GLOBAL_NOTES.map((n, i) => (
+                <li key={i} className="flex gap-2"><span className="text-primary">•</span><span>{n.replace("{trackingStart}", trackingStart)}</span></li>
+              ))}
+            </ul>
+          </details>
         </>
       )}
     </div>
   );
 }
 
-function Kpi({ icon, label, value, hint, tone }: { icon: React.ReactNode; label: string; value: string; hint?: string; tone?: "green" }) {
+function Kpi({ def, icon, value, hint, tone }: { def: MetricDef; icon: React.ReactNode; value: string; hint?: string; tone?: "green" | "amber" }) {
   return (
     <div className="card p-4">
-      <div className="flex items-center gap-2 text-muted">{icon}<span className="text-xs font-medium">{label}</span></div>
-      <p className={`mt-1.5 font-heading text-2xl font-extrabold ${tone === "green" ? "text-success" : "text-ink"}`}>{value}</p>
+      <div className="flex items-center gap-2 text-muted">
+        {icon}
+        <span className="inline-flex items-center text-xs font-medium">{def.label}<InfoTip label={def.label} meaning={def.meaning} formula={def.formula} /></span>
+      </div>
+      <p className={`mt-1.5 font-heading text-2xl font-extrabold ${tone === "green" ? "text-success" : tone === "amber" ? "text-warning" : "text-ink"}`}>{value}</p>
       {hint && <p className="mt-0.5 text-xs text-muted">{hint}</p>}
     </div>
   );
+}
+
+function Th({ children, right, def }: { children?: React.ReactNode; right?: boolean; def?: MetricDef }) {
+  return (
+    <th className={`py-2 ${right ? "px-2 text-right" : "pr-2"}`}>
+      <span className="inline-flex items-center">{children}{def && <InfoTip label={def.label} meaning={def.meaning} formula={def.formula} />}</span>
+    </th>
+  );
+}
+
+function Td({ children, className = "", muted }: { children: React.ReactNode; className?: string; muted?: boolean }) {
+  return <td className={`px-2 py-2 text-right tabular-nums ${muted ? "text-muted" : ""} ${className}`}>{children}</td>;
 }
