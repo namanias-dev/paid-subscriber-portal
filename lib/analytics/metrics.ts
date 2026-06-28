@@ -124,6 +124,28 @@ export const METRICS: Record<string, MetricDef> = {
     meaning: "Average spend per paying student.",
     formula: "Revenue ÷ paid students. N/A when paid students = 0.",
   },
+
+  // ---- Phase 2: student activity ----
+  loggedInStudents: { key: "loggedInStudents", label: "Logged-in students", meaning: "Unique students who logged in.", formula: "Distinct users with a login event in range." },
+  viewedDashboard: { key: "viewedDashboard", label: "Viewed dashboard", meaning: "Students who opened their enrolled content.", formula: "Distinct users with an enrolled-card-viewed or course-opened event in range." },
+  attemptedQuiz: { key: "attemptedQuiz", label: "Attempted a quiz", meaning: "Unique people who started a quiz.", formula: "Distinct quiz takers (logged-in user or guest mobile) with an attempt started in range." },
+  startedQuizNotSubmitted: { key: "startedQuizNotSubmitted", label: "Started, not submitted", meaning: "Quiz takers who started but never finished.", formula: "Distinct takers whose attempt is in-progress / expired / abandoned (not submitted)." },
+  paidNotLoggedIn: { key: "paidNotLoggedIn", label: "Paid · never logged in", meaning: "Paying students who never logged into the portal.", formula: "Distinct paid phones with no login event ever recorded." },
+  loggedInNoStudy: { key: "loggedInNoStudy", label: "Logged in · no study", meaning: "Logged in but opened no content and took no quiz.", formula: "Logged-in students in range minus those with any study activity (course/card open, Zoom click, quiz)." },
+
+  // ---- Phase 2: quiz ----
+  quizAttempts: { key: "quizAttempts", label: "Quiz attempts", meaning: "Total quiz attempts started.", formula: "Count of quiz_attempts started in range (events, not people)." },
+  uniqueTakers: { key: "uniqueTakers", label: "Unique takers", meaning: "Unique people who attempted.", formula: "Distinct logged-in users + guest mobiles in range." },
+  quizSubmitRate: { key: "quizSubmitRate", label: "Submit rate", meaning: "Attempts that were finished.", formula: "Submitted (incl. auto-submitted) ÷ attempts started." },
+  avgScorePct: { key: "avgScorePct", label: "Avg score", meaning: "Average score of finished attempts.", formula: "Mean of (score ÷ max score) over submitted attempts." },
+  avgAccuracy: { key: "avgAccuracy", label: "Avg accuracy", meaning: "Average answer accuracy.", formula: "Mean accuracy across submitted attempts." },
+
+  // ---- Phase 2: payment intelligence ----
+  proofUploaded: { key: "proofUploaded", label: "Proofs uploaded", meaning: "Payment proofs submitted by students.", formula: "Count of payment_proofs created in range." },
+  adminApproved: { key: "adminApproved", label: "Admin-approved", meaning: "Payments manually approved by staff.", formula: "Ledger entries with action ‘approve’ → status PAID in range." },
+  revenueRecoveredViaProof: { key: "revenueRecoveredViaProof", label: "Recovered via proof", meaning: "Revenue rescued through the proof flow.", formula: "Sum of amounts for admin-approved payments that had a proof on file." },
+  recoveryRate: { key: "recoveryRate", label: "Recovery rate", meaning: "Stuck payments staff managed to approve.", formula: "Admin-approved ÷ (admin-approved + still-verifying). N/A when none." },
+  duplicateAttempts: { key: "duplicateAttempts", label: "Duplicate attempts", meaning: "Retry-duplicate paid rows collapsed.", formula: "Paid rows minus deduped paid rows in range (never inflate revenue)." },
 };
 
 /** Source-bucket display labels (kept in sync with classifyPaymentSource). */

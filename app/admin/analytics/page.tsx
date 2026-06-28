@@ -10,6 +10,12 @@ import { LoadingBlock } from "@/components/admin/ui";
 import InfoTip from "@/components/admin/InfoTip";
 import { formatINR } from "@/lib/dates";
 import { METRICS, GLOBAL_NOTES, type MetricDef } from "@/lib/analytics/metrics";
+import Trends from "@/components/admin/analytics/Trends";
+import ActivityTab from "@/components/admin/analytics/Activity";
+import QuizTab from "@/components/admin/analytics/Quiz";
+import WebinarsTab from "@/components/admin/analytics/Webinars";
+import PaymentsTab from "@/components/admin/analytics/Payments";
+import CampaignsTab from "@/components/admin/analytics/Campaigns";
 
 interface Overview {
   range: { from: string; to: string };
@@ -36,6 +42,17 @@ const PRESET_LABELS: Record<Preset, string> = {
   today: "Today", yesterday: "Yesterday", "7d": "7 days", "30d": "30 days", this_month: "This month", custom: "Custom",
 };
 
+type Tab = "overview" | "trends" | "activity" | "quiz" | "webinars" | "payments" | "campaigns";
+const TABS: { id: Tab; label: string }[] = [
+  { id: "overview", label: "Overview" },
+  { id: "trends", label: "Trends" },
+  { id: "activity", label: "Student activity" },
+  { id: "quiz", label: "Quiz" },
+  { id: "webinars", label: "Webinars" },
+  { id: "payments", label: "Payments" },
+  { id: "campaigns", label: "Campaigns" },
+];
+
 const nf = (n: number) => n.toLocaleString("en-IN");
 const pctStr = (v: number | null) => (v === null ? "N/A" : `${v}%`);
 
@@ -46,6 +63,7 @@ function istDateLabel(iso: string | null): string {
 }
 
 export default function AnalyticsDashboardPage() {
+  const [tab, setTab] = useState<Tab>("overview");
   const [preset, setPreset] = useState<Preset>("30d");
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
@@ -62,6 +80,7 @@ export default function AnalyticsDashboardPage() {
   }, [preset, customFrom, customTo, excludeAdmin]);
 
   const load = useCallback(() => {
+    if (tab !== "overview") return;
     if (preset === "custom" && (!customFrom || !customTo)) return;
     setLoading(true);
     Promise.all([
@@ -71,7 +90,7 @@ export default function AnalyticsDashboardPage() {
       .then(([o, s]) => { setOverview(o.ok ? o.overview : null); setSources(s.ok ? s.sources : null); })
       .catch(() => { setOverview(null); setSources(null); })
       .finally(() => setLoading(false));
-  }, [qs, preset, customFrom, customTo]);
+  }, [qs, tab, preset, customFrom, customTo]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -126,7 +145,27 @@ export default function AnalyticsDashboardPage() {
         </label>
       </div>
 
-      {loading ? (
+      {/* Tabs */}
+      <div className="-mb-1 flex flex-wrap gap-1 border-b border-line">
+        {TABS.map((t) => (
+          <button
+            key={t.id}
+            onClick={() => setTab(t.id)}
+            className={`rounded-t-lg px-3 py-2 text-sm font-semibold transition ${tab === t.id ? "border-b-2 border-primary text-primary" : "text-muted hover:text-ink"}`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {tab === "trends" && <Trends qs={qs} />}
+      {tab === "activity" && <ActivityTab qs={qs} />}
+      {tab === "quiz" && <QuizTab qs={qs} />}
+      {tab === "webinars" && <WebinarsTab qs={qs} />}
+      {tab === "payments" && <PaymentsTab qs={qs} />}
+      {tab === "campaigns" && <CampaignsTab qs={qs} />}
+
+      {tab === "overview" && (loading ? (
         <div className="space-y-4"><LoadingBlock /><LoadingBlock /></div>
       ) : !overview ? (
         <div className="card p-10 text-center text-sm text-muted">No analytics yet. Data appears as visitors arrive.</div>
@@ -230,7 +269,7 @@ export default function AnalyticsDashboardPage() {
             </ul>
           </details>
         </>
-      )}
+      ))}
     </div>
   );
 }

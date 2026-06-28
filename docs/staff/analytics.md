@@ -43,14 +43,28 @@ These definitions match exactly how the numbers are computed in code (the ⓘ to
 - **Untracked** = no source was captured. **Pre-tracking** = the payment was made before visitor tracking began, so there are no visitors to compare against. **Admin (manual)** = offline/admin-recorded payments. These three rows show **N/A** for Visitor→Paid % on purpose — comparing their revenue to visitors would be meaningless (this was the cause of the old “35 paid out of 23 visitors” anomaly).
 - Real ad/channel sources (Instagram, Facebook, Google, etc.) show full conversion rates.
 
+## Tabs (Phase 2 — deeper insight)
+Above the page, switch between:
+- **Overview** — KPI + conversion cards and the By-source table (Phase 1).
+- **Trends** — daily charts: visitors/registrations/paid, revenue, payments (initiated/paid/abandoned), engagement (logins/quiz attempts).
+- **Student activity** — logged-in students, viewed dashboard, attempted quiz, started-but-not-submitted, paid-but-never-logged-in, logged-in-but-no-study. A “Not tracked yet” note lists what we can’t measure (e.g. notes downloads).
+- **Quiz** — attempts, unique takers, submit rate, average score/accuracy, and a top-quizzes table.
+- **Webinars** — a step funnel (views → register/pay click → registered → paid → joined) and a per-webinar table. “Joined” = real Zoom-button clicks.
+- **Payments** — status breakdown plus payment intelligence: admin-approved, revenue recovered via proof, recovery rate, amount stuck in verifying, duplicate attempts collapsed.
+- **Campaigns** — break traffic down by campaign / medium / landing page / device. Paid & revenue only appear for campaign (payments don’t store medium/landing/device).
+
+> Every tab follows the same date range and **Exclude admin traffic** toggle.
+
 ## Re-engagement segments (very useful for follow-up)
 Click **`Re-engagement segments`** (opens `/admin/analytics/segments`). This gives ready-to-action contact lists:
 - `Paid · not logged in`
 - `Payment pending / abandoned`
+- `Verifying` (paid, awaiting verification)
 - `Clicked pay · not paid`
 - `Paid webinar · no Zoom click` (the practical way to find webinar no-shows)
+- `Registered · no quiz`
 
-For each segment you can **`Export CSV`** or use the per-row WhatsApp/call icons under `Reach out`.
+For each person you can open **`Journey`** (full event timeline + first-touch source + payment/login status), send an **SMS** (uses SMS Mission Control — only Approved/Active templates, all caps enforced), **WhatsApp**, or **Call**. You can also **`Export CSV`**.
 
 > ⚠️ Exported lists contain personal data — keep them private.
 
