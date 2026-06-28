@@ -10,6 +10,10 @@ import type { AdminSessionPayload } from "./types";
 export function effectivePermissions(session: AdminSessionPayload | null): PermissionSet {
   if (!session) return {};
   if (session.permissions === undefined) return allPermissions();
+  // A Super Admin is unrestricted by definition: always grant every permission,
+  // including ones added AFTER this token/role snapshot was minted (e.g. send_sms).
+  // This means no re-login or role reseed is needed when new permissions ship.
+  if (isSuperAdmin(session.permissions)) return allPermissions();
   return session.permissions;
 }
 
