@@ -6,6 +6,7 @@ import {
   createPayment,
   getPaymentByReference,
   incrementCouponUsage,
+  findRecentOpenPaymentForItem,
 } from "@/lib/dataProvider";
 import { ATTR_COOKIE, parseAttrCookie, flattenForStamp } from "@/lib/attribution";
 import { stampBuyerAttribution } from "@/lib/analytics/server";
@@ -149,8 +150,21 @@ export async function POST(req: Request) {
       });
     }
 
-    const referenceNo = await uniqueReference(itemType);
     const subMerchantId = eazypaySubMerchantId(itemType, resolved.itemSlug);
+
+    // Idempotency dedupe: a double-click / refresh within 2 min re-uses the SAME
+    // open attempt instead of minting a duplicate PENDING/VERIFYING row.
+    const recent = await findRecentOpenPaymentForItem(mobile, itemType, resolved.itemSlug, 120000);
+    if (recent && recent.reference_no && Math.round(recent.amount) === Math.round(amount)) {
+      if (isEazypayConfigured()) {
+        const url = buildPaymentUrl({ referenceNo: recent.reference_no, subMerchantId, amount, name, email: gatewayEmail, mobile });
+        if (url) return NextResponse.json({ ok: true, referenceNo: recent.reference_no, paymentUrl: url, reused: true });
+      } else {
+        return NextResponse.json({ ok: true, demo: true, referenceNo: recent.reference_no, paymentUrl: `/payment/status?ref=${encodeURIComponent(recent.reference_no)}&demo=1`, reused: true });
+      }
+    }
+
+    const referenceNo = await uniqueReference(itemType);
 
     await createPayment({
       student_name: name,

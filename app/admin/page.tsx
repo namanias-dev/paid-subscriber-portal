@@ -4,6 +4,7 @@ import dynamic from "next/dynamic";
 import { KpiCard, useAdminData, LoadingBlock, PageHeader } from "@/components/admin/ui";
 import { formatINR } from "@/lib/dates";
 import type { DashboardData } from "@/lib/dataProvider";
+import DuplicateEnrollmentAlert from "@/components/admin/DuplicateEnrollmentAlert";
 
 const EnrollmentsArea = dynamic(() => import("@/components/admin/Charts").then((m) => m.EnrollmentsArea), { ssr: false, loading: () => <LoadingBlock /> });
 const RevenueBars = dynamic(() => import("@/components/admin/Charts").then((m) => m.RevenueBars), { ssr: false, loading: () => <LoadingBlock /> });
@@ -18,6 +19,9 @@ export default function AdminDashboard() {
   return (
     <div>
       <PageHeader title="Dashboard" subtitle="Your academy at a glance" />
+
+      {/* Super-admin-only: flags duplicate active enrollments (renders nothing otherwise). */}
+      <DuplicateEnrollmentAlert />
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <KpiCard label="Total Leads" value={data.totalLeads} hint={`${data.newLeadsToday} new today`} />

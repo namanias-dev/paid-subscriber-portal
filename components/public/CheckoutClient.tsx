@@ -90,6 +90,7 @@ export default function CheckoutClient({ course }: { course: Course }) {
   const seatInvalid = seatActive && (seatTooLow || seatTooHigh);
 
   async function proceed() {
+    if (loading) return; // re-entry guard: a submit is already in flight
     setError(null);
     if (!name.trim() || !/^\d{10}$/.test(phone)) {
       setError("Enter your name and a valid 10-digit mobile number.");

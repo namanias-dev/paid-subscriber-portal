@@ -27,6 +27,7 @@ export const HELP_TOPICS: HelpTopic[] = [
   { slug: "marketing-tools", title: "Marketing Tools", group: "Sales", match: ["/admin/marketing", "/admin/registrations", "/admin/forms", "/admin/referrals"] },
 
   { slug: "payments", title: "Payments & Finance", group: "People & Money", match: ["/admin/payments", "/admin/course-payments", "/admin/access-risk"] },
+  { slug: "duplicate-enrollments", title: "Duplicate Enrollments (Merge tool)", group: "People & Money", match: ["/admin/enrollments/duplicates", "/admin/enrollments"] },
   { slug: "students", title: "Students & Enrollments", group: "People & Money", match: ["/admin/students"] },
   { slug: "payment-plans", title: "Changing a Student's Payment Plan", group: "People & Money", match: [] },
   { slug: "course-access", title: "Course & Portal Access", group: "People & Money", match: [] },

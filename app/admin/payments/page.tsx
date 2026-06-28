@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { PageHeader, useAdminData, LoadingBlock, KpiCard } from "@/components/admin/ui";
 import WebinarRegistrationsTrend from "@/components/admin/WebinarRegistrationsTrend";
 import GroupedTimeline, { type TimelineGroup } from "@/components/admin/GroupedTimeline";
@@ -94,6 +94,7 @@ export default function PaymentsAdmin() {
   const [statuses, setStatuses] = useState<Set<StatusKey>>(new Set());
   const [onlyProof, setOnlyProof] = useState(false);
   const [proofModal, setProofModal] = useState<{ payment: Payment; proof: ProofWithAccess | null } | null>(null);
+  const [showTrash, setShowTrash] = useState(false);
   const [reverifying, setReverifying] = useState(false);
   const [reverifyMsg, setReverifyMsg] = useState<string | null>(null);
   const [dateMode, setDateMode] = useState<DateMode>("all");
@@ -405,6 +406,34 @@ export default function PaymentsAdmin() {
       return false;
     }
   }
+  async function editPayment(paymentId: string, patch: Record<string, unknown>, reason: string): Promise<boolean> {
+    try {
+      const res = await fetch("/api/admin/payments/edit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paymentId, patch, reason }),
+      });
+      const json = await res.json();
+      if (!json.ok) { toast(json.error || "Edit failed.", "error"); return false; }
+      toast("Payment updated and logged.", "success");
+      full.reload(); proofsHook.reload();
+      return true;
+    } catch { toast("Edit failed.", "error"); return false; }
+  }
+  async function deletePayment(paymentId: string, reason: string): Promise<boolean> {
+    try {
+      const res = await fetch("/api/admin/payments/delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paymentId, reason }),
+      });
+      const json = await res.json();
+      if (!json.ok) { toast(json.error || "Delete failed.", "error"); return false; }
+      toast("Payment moved to Trash (recoverable).", "success");
+      full.reload(); proofsHook.reload();
+      return true;
+    } catch { toast("Delete failed.", "error"); return false; }
+  }
   async function reversePayment(paymentId: string, reason: string): Promise<boolean> {
     try {
       const res = await fetch("/api/admin/payments/reverse", {
@@ -487,6 +516,9 @@ export default function PaymentsAdmin() {
               </button>
             )}
             <button onClick={exportCsv} className="btn btn-secondary text-sm">⬇ Export{hasFilters ? " (filtered)" : ""}</button>
+            {isSuper && (
+              <button onClick={() => setShowTrash(true)} className="btn btn-secondary text-sm" title="Recoverable Trash — soft-deleted payments">🗑 Trash</button>
+            )}
           </div>
         }
       />
@@ -729,12 +761,20 @@ export default function PaymentsAdmin() {
           onClose={() => setProofModal(null)}
           onViewFile={viewProofFile}
           onReverse={reversePayment}
+          onEdit={editPayment}
+          onDelete={async (id, reason) => {
+            const ok = await deletePayment(id, reason);
+            if (ok) setProofModal(null);
+            return ok;
+          }}
           onAction={async (body) => {
             const ok = await proofAction(body);
             if (ok) setProofModal(null);
           }}
         />
       )}
+
+      {showTrash && isSuper && <TrashModal onClose={() => { setShowTrash(false); full.reload(); proofsHook.reload(); }} />}
     </div>
   );
 }
@@ -752,6 +792,8 @@ function ProofModal({
   onViewFile,
   onAction,
   onReverse,
+  onEdit,
+  onDelete,
 }: {
   payment: Payment;
   proof: ProofWithAccess | null;
@@ -761,6 +803,8 @@ function ProofModal({
   onViewFile: (key: string) => void;
   onAction: (body: Record<string, unknown>) => void;
   onReverse: (paymentId: string, reason: string) => Promise<boolean>;
+  onEdit: (paymentId: string, patch: Record<string, unknown>, reason: string) => Promise<boolean>;
+  onDelete: (paymentId: string, reason: string) => Promise<boolean>;
 }) {
   const { toast } = useToast();
   const [reason, setReason] = useState("");
@@ -768,6 +812,15 @@ function ProofModal({
   const [uploading, setUploading] = useState(false);
   const [reverseReason, setReverseReason] = useState("");
   const [reversing, setReversing] = useState(false);
+  const [showEdit, setShowEdit] = useState(false);
+  const [editAmount, setEditAmount] = useState(String(payment.amount));
+  const [editStatus, setEditStatus] = useState(payment.status);
+  const [editRef, setEditRef] = useState(payment.reference_no || "");
+  const [editName, setEditName] = useState(payment.student_name || "");
+  const [editReason, setEditReason] = useState("");
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [deleteReason, setDeleteReason] = useState("");
+  const [deleting, setDeleting] = useState(false);
   const [history, setHistory] = useState<PaymentActionLog[] | null>(null);
   const [showHistory, setShowHistory] = useState(false);
   const meta = proof ? PROOF_STATUS_META[proof.status] || { label: proof.status, cls: "pill-gray" } : null;
@@ -963,6 +1016,70 @@ function ProofModal({
           </div>
         )}
 
+        {/* Edit + soft-delete (super admin) */}
+        {isSuper && (
+          <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50/50 p-3">
+            <div className="flex items-center justify-between">
+              <p className="text-sm font-semibold text-amber-900">Edit / delete payment (Super Admin)</p>
+              <button onClick={() => setShowEdit((v) => !v)} className="text-xs font-semibold text-primary hover:underline">{showEdit ? "Hide" : "Edit fields"}</button>
+            </div>
+            {showEdit && (
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                <label className="flex flex-col gap-1 text-xs text-muted">Amount (₹)
+                  <input type="number" value={editAmount} onChange={(e) => setEditAmount(e.target.value)} className="input text-sm" />
+                </label>
+                <label className="flex flex-col gap-1 text-xs text-muted">Status
+                  <select value={editStatus} onChange={(e) => setEditStatus(e.target.value as Payment["status"])} className="input text-sm">
+                    {["PENDING", "VERIFYING", "PAID", "FAILED", "ABANDONED", "refunded"].map((s) => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                </label>
+                <label className="col-span-2 flex flex-col gap-1 text-xs text-muted">Reference no.
+                  <input value={editRef} onChange={(e) => setEditRef(e.target.value)} className="input text-sm" />
+                </label>
+                <label className="col-span-2 flex flex-col gap-1 text-xs text-muted">Student name
+                  <input value={editName} onChange={(e) => setEditName(e.target.value)} className="input text-sm" />
+                </label>
+                <input value={editReason} onChange={(e) => setEditReason(e.target.value)} placeholder="Reason (required, logged)" className="input col-span-2 text-sm" />
+                <button
+                  disabled={savingEdit}
+                  onClick={async () => {
+                    if (!editReason.trim()) { toast("A reason is required to edit.", "error"); return; }
+                    const patch: Record<string, unknown> = {};
+                    if (Number(editAmount) !== payment.amount) patch.amount = Number(editAmount);
+                    if (editStatus !== payment.status) patch.status = editStatus;
+                    if (editRef !== (payment.reference_no || "")) patch.reference_no = editRef;
+                    if (editName !== (payment.student_name || "")) patch.student_name = editName;
+                    if (Object.keys(patch).length === 0) { toast("No changes.", "info"); return; }
+                    setSavingEdit(true);
+                    const ok = await onEdit(payment.id, patch, editReason.trim());
+                    setSavingEdit(false);
+                    if (ok) onClose();
+                  }}
+                  className="btn btn-primary col-span-2 text-sm disabled:opacity-60"
+                >
+                  {savingEdit ? "Saving…" : "Save changes"}
+                </button>
+              </div>
+            )}
+            <div className="mt-3 border-t border-amber-200 pt-3">
+              <input value={deleteReason} onChange={(e) => setDeleteReason(e.target.value)} placeholder="Reason for delete (required)" className="input w-full text-sm" />
+              <button
+                disabled={deleting}
+                onClick={async () => {
+                  if (!deleteReason.trim()) { toast("A reason is required to delete.", "error"); return; }
+                  if (!confirm(`Move this payment to Trash? It stays fully recoverable. ${isPaidRow ? "Access will be re-locked." : ""}`)) return;
+                  setDeleting(true);
+                  await onDelete(payment.id, deleteReason.trim());
+                  setDeleting(false);
+                }}
+                className="btn mt-2 w-full bg-red-600 text-sm text-white hover:bg-red-700 disabled:opacity-60"
+              >
+                {deleting ? "Deleting…" : "🗑 Move to Trash (recoverable)"}
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Lifecycle history (super admin) */}
         {isSuper && (
           <div className="mt-4 border-t border-line pt-4">
@@ -996,6 +1113,81 @@ function ProofModal({
         )}
 
         <button onClick={onClose} className="btn btn-secondary mt-4 w-full text-sm">Close</button>
+      </div>
+    </div>
+  );
+}
+
+function TrashModal({ onClose }: { onClose: () => void }) {
+  const { toast } = useToast();
+  const [rows, setRows] = useState<Payment[] | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+
+  function load() {
+    fetch("/api/admin/payments/trash")
+      .then((r) => r.json())
+      .then((d) => setRows(d.ok ? (d.payments as Payment[]) : []))
+      .catch(() => setRows([]));
+  }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(load, []);
+
+  async function restore(id: string) {
+    setBusy(id);
+    try {
+      const res = await fetch("/api/admin/payments/restore", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ paymentId: id }) });
+      const json = await res.json();
+      if (!json.ok) { toast(json.error || "Restore failed.", "error"); return; }
+      toast("Payment restored.", "success");
+      load();
+    } finally { setBusy(null); }
+  }
+  async function permaDelete(id: string) {
+    const reason = prompt("Permanent delete is irreversible. Type a reason to confirm:");
+    if (!reason || !reason.trim()) return;
+    setBusy(id);
+    try {
+      const res = await fetch("/api/admin/payments/permanent-delete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ paymentId: id, reason: reason.trim() }) });
+      const json = await res.json();
+      if (!json.ok) { toast(json.error || "Permanent delete failed.", "error"); return; }
+      toast("Payment permanently deleted.", "success");
+      load();
+    } finally { setBusy(null); }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4" onClick={onClose}>
+      <div className="max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-t-2xl bg-white p-6 shadow-2xl sm:rounded-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between">
+          <h3 className="text-lg font-bold">🗑 Payment Trash (recoverable)</h3>
+          <button onClick={onClose} className="text-sm text-muted hover:text-ink">✕</button>
+        </div>
+        <p className="mt-1 text-sm text-muted">Soft-deleted payments. Restore re-applies the ledger effect. Permanent delete is irreversible (and audit-logged).</p>
+        {rows === null ? (
+          <p className="mt-4 text-sm text-muted">Loading…</p>
+        ) : rows.length === 0 ? (
+          <p className="mt-6 text-center text-sm text-muted">Trash is empty.</p>
+        ) : (
+          <div className="mt-4 space-y-2">
+            {rows.map((p) => (
+              <div key={p.id} className="rounded-lg border border-line p-3 text-sm">
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="font-semibold">{p.student_name || "—"} · {p.phone}</p>
+                    <p className="text-xs text-muted">{p.item} · {formatINR(p.amount)} · {statusLabel(p.status)}</p>
+                    <p className="truncate font-mono text-[10px] text-muted">{p.reference_no || p.id}</p>
+                    {p.deleted_reason && <p className="mt-0.5 text-xs text-ink2">Reason: {p.deleted_reason}</p>}
+                    {p.deleted_at && <p className="text-[11px] text-muted">Deleted {formatISTDateTime(p.deleted_at)}</p>}
+                  </div>
+                  <div className="flex shrink-0 gap-2">
+                    <button disabled={busy === p.id} onClick={() => restore(p.id)} className="btn btn-secondary px-2 py-1 text-xs disabled:opacity-60">Restore</button>
+                    <button disabled={busy === p.id} onClick={() => permaDelete(p.id)} className="btn bg-red-600 px-2 py-1 text-xs text-white hover:bg-red-700 disabled:opacity-60">Delete forever</button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

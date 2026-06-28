@@ -4,6 +4,7 @@ import {
   getCourseEnrollmentById,
   createPayment,
   getPaymentByReference,
+  findRecentOpenInstallmentPayment,
 } from "@/lib/dataProvider";
 import {
   isEazypayConfigured,
@@ -71,8 +72,22 @@ export async function POST(req: Request) {
 
     if (amount <= 0) return NextResponse.json({ ok: false, error: "Nothing to pay." }, { status: 400 });
 
-    const referenceNo = await uniqueReference("course");
     const subMerchantId = eazypaySubMerchantId("course", enrollment.course_slug);
+
+    // Idempotency dedupe: a double-click on the same installment within 2 min
+    // re-uses the existing open attempt instead of creating a second PENDING row
+    // (which could otherwise over-apply to the next installment on finalize).
+    const recentOpen = await findRecentOpenInstallmentPayment(enrollment.id, payInstallmentNo, 120000);
+    if (recentOpen && recentOpen.reference_no && Math.round(recentOpen.amount) === Math.round(amount)) {
+      if (isEazypayConfigured()) {
+        const url = buildPaymentUrl({ referenceNo: recentOpen.reference_no, subMerchantId, amount, name: enrollment.student_name, email: enrollment.email || `${enrollment.phone}@guest.namanias.com`, mobile: enrollment.phone });
+        if (url) return NextResponse.json({ ok: true, referenceNo: recentOpen.reference_no, paymentUrl: url, reused: true });
+      } else {
+        return NextResponse.json({ ok: true, demo: true, referenceNo: recentOpen.reference_no, paymentUrl: `/payment/status?ref=${encodeURIComponent(recentOpen.reference_no)}&demo=1`, reused: true });
+      }
+    }
+
+    const referenceNo = await uniqueReference("course");
 
     await createPayment({
       student_name: enrollment.student_name,

@@ -101,6 +101,20 @@ This creates a `PAID` record (marked as offline) and a receipt.
 
 If a student paid (or booked) a course as **Pay in Full** and later wants **EMI** or a **custom** schedule (or vice-versa), don't re-enrol them. Open their profile → on the course card use **`Change plan`** (paid amounts are always preserved) or **`Manage installments`**. Full guide, including how due dates drive the 15-day access timer: **[Changing a Student's Payment Plan](payment-plans)**.
 
+## Editing or deleting a payment (Super Admin only)
+
+Open any payment's **`Manage`** window. Super Admins see an amber **Edit / delete payment** box:
+
+- **Edit fields** — correct the **Amount**, **Status**, **Reference no.**, or **Student name**. A **Reason** is required and every change is saved to the immutable audit log (old → new values). Changing a course payment's amount/status/reference automatically **recomputes the enrollment** (balance, installments, access).
+- **🗑 Move to Trash (recoverable)** — a soft-delete. The payment is **never erased** — it goes to **Trash** and can be restored anytime. If the deleted payment was PAID, access is safely re-locked and the balance recomputed. A reason is required.
+
+### Trash (recover a deleted payment)
+Click **🗑 Trash** at the top-right of the Payments page (Super Admin only):
+- **Restore** — brings the payment back and re-applies its effect on the student's balance/access.
+- **Delete forever** — permanent, irreversible removal (only possible for items already in Trash). You must type a reason; it is logged **before** the row is removed.
+
+⚠️ Staff (non-super) cannot edit, delete, restore, or permanently delete payments — those controls only appear for Super Admins.
+
 ## Refunds
 
 ⚠️ There is **no "mark refunded" button** anywhere in the admin panel. The `Refunded` figure on this page only **displays** old Razorpay refunds. Refunds must be handled outside this system (e.g. directly in the payment gateway / bank), and there is currently no way to record a new refund here. Flag refund requests to a Super Admin / finance.

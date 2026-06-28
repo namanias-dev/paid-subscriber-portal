@@ -51,8 +51,11 @@ import type {
   PaymentReceipt,
   EnrollmentPlanChangeLog,
   PaymentPlan,
+  DuplicateEnrollmentGroup,
+  EnrollmentMergeLog,
+  InstallmentItem,
 } from "./types";
-import { deriveEnrollment, enrollmentStatusFromSchedule, installmentsSummary, planCourseEnrollment, resolveEmiConfig } from "./installments";
+import { deriveEnrollment, enrollmentStatusFromSchedule, installmentsSummary, planCourseEnrollment, resolveEmiConfig, isLineCancelledOrWaived } from "./installments";
 import { changePlan, type ChangePlanTarget, type ConvertOptions } from "./paymentPlanChange";
 import { mergeSiteSettings } from "./homeDefaults";
 import { DEFAULT_ROLES, resolvePermissions, type PermissionSet } from "./permissions";
@@ -1607,9 +1610,23 @@ function demoPayments(): Payment[] {
 }
 
 export async function getPayments(): Promise<Payment[]> {
-  if (demoMode()) return [...demoPayments()];
-  const rows = await dbSelect<Payment>("payments");
-  return rows.length ? rows : [...demoPayments()];
+  if (demoMode()) return demoPayments().filter((p) => !p.deleted_at);
+  const db = getSupabaseAdmin();
+  if (!db) return demoPayments().filter((p) => !p.deleted_at);
+  // Exclude soft-deleted rows (Trash) from every money/access read. Restore/Trash
+  // views use getPaymentById / getDeletedPayments which intentionally include them.
+  const { data } = await db.from("payments").select("*").is("deleted_at", null).order("created_at", { ascending: false });
+  const rows = (data as Payment[]) ?? [];
+  return rows.length ? rows : demoPayments().filter((p) => !p.deleted_at);
+}
+
+/** Soft-deleted payments only — powers the super-admin recoverable Trash view. */
+export async function getDeletedPayments(): Promise<Payment[]> {
+  if (demoMode()) return demoPayments().filter((p) => !!p.deleted_at);
+  const db = getSupabaseAdmin();
+  if (!db) return demoPayments().filter((p) => !!p.deleted_at);
+  const { data } = await db.from("payments").select("*").not("deleted_at", "is", null).order("deleted_at", { ascending: false });
+  return (data as Payment[]) ?? [];
 }
 
 // ============================ PAYMENT VERIFICATION ENGINE (ICICI-truth) ============================
@@ -1928,22 +1945,24 @@ export async function createPayment(input: CreatePaymentInput): Promise<Payment>
 export async function getPaymentsByPhone(phone: string): Promise<Payment[]> {
   const p = (phone || "").trim();
   if (!p) return [];
-  if (demoMode()) return demoPayments().filter((x) => x.phone === p);
+  if (demoMode()) return demoPayments().filter((x) => x.phone === p && !x.deleted_at);
   const db = getSupabaseAdmin();
-  if (!db) return demoPayments().filter((x) => x.phone === p);
-  const { data } = await db.from("payments").select("*").eq("phone", p).order("created_at", { ascending: false });
+  if (!db) return demoPayments().filter((x) => x.phone === p && !x.deleted_at);
+  const { data } = await db.from("payments").select("*").eq("phone", p).is("deleted_at", null).order("created_at", { ascending: false });
   return (data as Payment[]) ?? [];
 }
 
 export async function getPaymentByReference(referenceNo: string): Promise<Payment | null> {
+  // Soft-deleted rows are excluded so a callback/verify/finalize never resurrects a
+  // payment the super-admin moved to Trash. Restore clears deleted_at first.
   if (demoMode()) {
-    return demoPayments().find((p) => p.reference_no === referenceNo) ?? null;
+    return demoPayments().find((p) => p.reference_no === referenceNo && !p.deleted_at) ?? null;
   }
   const db = getSupabaseAdmin();
-  if (!db) return demoPayments().find((p) => p.reference_no === referenceNo) ?? null;
-  const { data } = await db.from("payments").select("*").eq("reference_no", referenceNo).maybeSingle();
+  if (!db) return demoPayments().find((p) => p.reference_no === referenceNo && !p.deleted_at) ?? null;
+  const { data } = await db.from("payments").select("*").eq("reference_no", referenceNo).is("deleted_at", null).maybeSingle();
   if (data) return data as Payment;
-  return demoPayments().find((p) => p.reference_no === referenceNo) ?? null;
+  return demoPayments().find((p) => p.reference_no === referenceNo && !p.deleted_at) ?? null;
 }
 
 export async function getPaymentById(id: string): Promise<Payment | null> {
@@ -3020,6 +3039,17 @@ function demoPlanLogs(): EnrollmentPlanChangeLog[] {
 export async function getPaymentsByEnrollmentId(enrollmentId: string): Promise<Payment[]> {
   const id = (enrollmentId || "").trim();
   if (!id) return [];
+  if (demoMode()) return demoPayments().filter((p) => p.enrollment_id === id && !p.deleted_at);
+  const db = getSupabaseAdmin();
+  if (!db) return demoPayments().filter((p) => p.enrollment_id === id && !p.deleted_at);
+  const { data } = await db.from("payments").select("*").eq("enrollment_id", id).is("deleted_at", null).order("created_at", { ascending: false });
+  return (data as Payment[]) ?? [];
+}
+
+/** Every payment row for an enrollment INCLUDING soft-deleted (for comp-detection in recompute). */
+export async function getAllPaymentRowsByEnrollmentId(enrollmentId: string): Promise<Payment[]> {
+  const id = (enrollmentId || "").trim();
+  if (!id) return [];
   if (demoMode()) return demoPayments().filter((p) => p.enrollment_id === id);
   const db = getSupabaseAdmin();
   if (!db) return demoPayments().filter((p) => p.enrollment_id === id);
@@ -3049,6 +3079,466 @@ export async function cancelStalePendingPayments(enrollmentId: string): Promise<
       .select("id");
     return (data || []).length;
   } catch { return 0; }
+}
+
+// ==================== ENROLLMENT RECOMPUTE (ledger-from-payments, comp-safe) ====================
+//
+// Rebuilds a course enrollment's schedule paid-flags + amount_paid + status purely
+// from its NON-DELETED PAID payment rows. Used by the duplicate-merge tool and by
+// payment edit/delete/restore so the ledger always reflects real money.
+//
+// COMP-SAFE: an enrollment with ZERO payment rows (manual/complimentary grant) is
+// left untouched — we never zero out an admin-granted ₹0 enrollment.
+// Waived/cancelled schedule lines are preserved (the plan-change tool owns them).
+
+function applyPaidPaymentToSchedule(schedule: InstallmentItem[], payment: Payment): void {
+  const kind = (payment.payment_kind || "full") as "one_time" | "seat" | "installment" | "full";
+  if (kind === "one_time") return; // not tied to the EMI schedule
+  const gatewayRef = payment.gateway_ref || payment.razorpay_payment_id || null;
+  const paidAt = payment.transaction_date || payment.created_at || new Date().toISOString();
+  const ref = payment.reference_no || null;
+  const mark = (i: number) => {
+    schedule[i] = { ...schedule[i], paid: true, paid_at: paidAt, reference_no: ref, gateway_ref: gatewayRef, payment_id: payment.id };
+  };
+  if (kind === "full") {
+    schedule.forEach((s, i) => { if (!s.paid && !isLineCancelledOrWaived(s)) mark(i); });
+    return;
+  }
+  const exact = schedule.findIndex((s) => s.no === (payment.installment_no ?? (kind === "seat" ? 0 : -1)) && !s.paid && !isLineCancelledOrWaived(s));
+  const idx = exact === -1 ? schedule.findIndex((s) => s.kind === kind && !s.paid && !isLineCancelledOrWaived(s)) : exact;
+  if (idx >= 0) mark(idx);
+}
+
+/**
+ * Recompute a course enrollment from its non-deleted PAID payments. Returns the
+ * updated enrollment (or the untouched one for comp/manual enrollments with no
+ * payment rows). Idempotent.
+ */
+export async function recomputeCourseEnrollment(enrollmentId: string): Promise<CourseEnrollment | null> {
+  const enr = await getCourseEnrollmentById(enrollmentId);
+  if (!enr) return null;
+  const all = await getAllPaymentRowsByEnrollmentId(enrollmentId);
+  if (all.length === 0) return enr; // comp/manual — nothing payment-driven to recompute
+  const paid = all
+    .filter((p) => !p.deleted_at && isPaidStatus(p.status))
+    .sort((a, b) => (a.created_at || "").localeCompare(b.created_at || ""));
+  const schedule = (enr.schedule || []).map((s) =>
+    isLineCancelledOrWaived(s)
+      ? { ...s }
+      : { ...s, paid: false, paid_at: null, reference_no: null, gateway_ref: null, payment_id: null },
+  );
+  for (const p of paid) applyPaidPaymentToSchedule(schedule, p);
+  const derived = deriveEnrollment({ total_fee: enr.total_fee, schedule });
+  const status = enrollmentStatusFromSchedule({ total_fee: enr.total_fee, schedule, plan_type: enr.plan_type });
+  const updated = await updateCourseEnrollment(enrollmentId, { schedule, amount_paid: derived.paid, status });
+  if (enr.phone) await bumpBuyerSessionVersion(enr.phone).catch(() => null);
+  return updated || { ...enr, schedule, amount_paid: derived.paid, status };
+}
+
+// ==================== DUPLICATE-ENROLLMENT DETECTION + MERGE (super-admin) ====================
+
+/** Outstanding for one enrollment (total_fee minus paid lines). */
+function enrollmentOutstanding(e: CourseEnrollment): number {
+  return deriveEnrollment({ total_fee: e.total_fee, schedule: e.schedule || [] }).remaining;
+}
+
+/**
+ * On-demand detection of duplicate ACTIVE enrollments (same phone + course).
+ * "Active" = not cancelled. Query-based (no cron). Lightweight; capped.
+ */
+export async function findDuplicateEnrollmentGroups(limitGroups = 200): Promise<DuplicateEnrollmentGroup[]> {
+  const all = await getAllCourseEnrollments();
+  const active = all.filter((e) => e.status !== "cancelled");
+  const byKey = new Map<string, CourseEnrollment[]>();
+  for (const e of active) {
+    const phone = (e.phone || "").trim();
+    if (!phone || !e.course_id) continue;
+    const key = `${phone}|${e.course_id}`;
+    const arr = byKey.get(key) || byKey.set(key, []).get(key)!;
+    arr.push(e);
+  }
+  const groups: DuplicateEnrollmentGroup[] = [];
+  for (const [, arr] of byKey) {
+    if (arr.length < 2) continue;
+    const sorted = [...arr].sort((a, b) => (a.created_at || "").localeCompare(b.created_at || ""));
+    const paidCount = sorted.filter((e) => (e.amount_paid || 0) > 0).length;
+    groups.push({
+      phone: sorted[0].phone,
+      course_id: sorted[0].course_id,
+      course_title: sorted[0].course_title,
+      student_name: sorted.find((e) => e.student_name)?.student_name || sorted[0].student_name,
+      count: sorted.length,
+      hasMultiplePaid: paidCount > 1,
+      enrollments: sorted.map((e) => ({
+        id: e.id,
+        status: e.status,
+        total_fee: e.total_fee,
+        amount_paid: e.amount_paid || 0,
+        created_at: e.created_at,
+      })),
+    });
+  }
+  return groups.sort((a, b) => b.count - a.count).slice(0, limitGroups);
+}
+
+export interface MergeDuplicatesResult {
+  ok: boolean;
+  error?: string;
+  keptId?: string;
+  cancelledIds?: string[];
+  repointedPaymentIds?: string[];
+  abandonedPaymentIds?: string[];
+  oldOutstanding?: number;
+  newOutstanding?: number;
+  oldCount?: number;
+  noop?: boolean;
+}
+
+/**
+ * Merge duplicate active enrollments for one phone+course into a single canonical
+ * row. Keeps ONE enrollment, cancels the rest (status=cancelled, superseded_by),
+ * re-points any PAID payments to the canonical row, marks the duplicates' non-paid
+ * payments ABANDONED (never deletes a payment), recomputes the canonical balance,
+ * and writes an immutable enrollment_merge_log row. Idempotent.
+ */
+export async function mergeDuplicateEnrollments(input: {
+  phone: string;
+  courseId: string;
+  keepId?: string | null;
+  reason?: string | null;
+  actor?: { id?: string | null; name?: string | null; role?: string | null } | null;
+}): Promise<MergeDuplicatesResult> {
+  const phone = (input.phone || "").trim();
+  const courseId = (input.courseId || "").trim();
+  if (!phone || !courseId) return { ok: false, error: "phone and courseId are required." };
+
+  const db = getSupabaseAdmin();
+  const all = await getCourseEnrollmentsByPhone(phone);
+  const dups = all.filter((e) => e.course_id === courseId && e.status !== "cancelled");
+  if (dups.length < 2) {
+    return { ok: true, noop: true, keptId: dups[0]?.id, cancelledIds: [], oldCount: dups.length };
+  }
+
+  // Choose canonical: most money paid wins; tie-break = earliest created.
+  const ranked = [...dups].sort((a, b) => {
+    const pa = a.amount_paid || 0;
+    const pb = b.amount_paid || 0;
+    if (pb !== pa) return pb - pa;
+    return (a.created_at || "").localeCompare(b.created_at || "");
+  });
+  const requested = input.keepId ? dups.find((e) => e.id === input.keepId) : null;
+  const canonical = requested || ranked[0];
+  const others = dups.filter((e) => e.id !== canonical.id);
+
+  const oldOutstanding = dups.reduce((sum, e) => sum + enrollmentOutstanding(e), 0);
+
+  const repointedPaymentIds: string[] = [];
+  const abandonedPaymentIds: string[] = [];
+
+  for (const dup of others) {
+    const pays = await getAllPaymentRowsByEnrollmentId(dup.id);
+    for (const p of pays) {
+      if (p.deleted_at) continue; // leave trashed rows alone
+      if (isPaidStatus(p.status)) {
+        // Real money — re-point to the canonical enrollment (never lost).
+        if (db) {
+          try { await db.from("payments").update({ enrollment_id: canonical.id }).eq("id", p.id); } catch { /* best-effort */ }
+          if (p.reference_no) {
+            try { await db.from("payment_receipts").update({ enrollment_id: canonical.id }).eq("reference_no", p.reference_no); } catch { /* best-effort */ }
+          }
+        }
+        repointedPaymentIds.push(p.id);
+      } else if (p.status === "PENDING" || p.status === "VERIFYING") {
+        // Stale attempt on a soon-to-be-cancelled duplicate — abandon (preserve row).
+        if (db) {
+          try { await db.from("payments").update({ status: "ABANDONED" }).eq("id", p.id); } catch { /* best-effort */ }
+        }
+        abandonedPaymentIds.push(p.id);
+      }
+    }
+    await updateCourseEnrollment(dup.id, {
+      status: "cancelled",
+      superseded_by: canonical.id,
+      payment_plan_change_reason: (input.reason || "Merged duplicate enrollment").slice(0, 500),
+    }).catch(() => null);
+  }
+
+  // Recompute the canonical row from its (now possibly re-pointed) PAID payments.
+  const recomputed = await recomputeCourseEnrollment(canonical.id);
+  const newOutstanding = recomputed ? enrollmentOutstanding(recomputed) : enrollmentOutstanding(canonical);
+  await bumpBuyerSessionVersion(phone).catch(() => null);
+
+  // ---- Immutable audit ----
+  if (db) {
+    const logRow = {
+      id: uuid(),
+      phone,
+      course_id: courseId,
+      course_title: canonical.course_title,
+      kept_enrollment_id: canonical.id,
+      cancelled_enrollment_ids: others.map((e) => e.id),
+      repointed_payment_ids: repointedPaymentIds,
+      abandoned_payment_ids: abandonedPaymentIds,
+      old_outstanding: Math.round(oldOutstanding),
+      new_outstanding: Math.round(newOutstanding),
+      old_enrollment_count: dups.length,
+      reason: (input.reason || "").trim() || null,
+      actor_id: input.actor?.id ?? null,
+      actor_name: input.actor?.name ?? null,
+      actor_role: input.actor?.role ?? null,
+      metadata: { repointed: repointedPaymentIds.length, abandoned: abandonedPaymentIds.length },
+      created_at: new Date().toISOString(),
+    };
+    try { await db.from("enrollment_merge_log").insert(logRow); } catch { /* best-effort */ }
+  }
+
+  return {
+    ok: true,
+    keptId: canonical.id,
+    cancelledIds: others.map((e) => e.id),
+    repointedPaymentIds,
+    abandonedPaymentIds,
+    oldOutstanding: Math.round(oldOutstanding),
+    newOutstanding: Math.round(newOutstanding),
+    oldCount: dups.length,
+  };
+}
+
+export async function getEnrollmentMergeLogs(limit = 200): Promise<EnrollmentMergeLog[]> {
+  const db = getSupabaseAdmin();
+  if (!db) return [];
+  const { data } = await db.from("enrollment_merge_log").select("*").order("created_at", { ascending: false }).limit(limit);
+  return (data as EnrollmentMergeLog[]) ?? [];
+}
+
+// ==================== CHECKOUT GUARDS: resume + idempotency dedupe ====================
+
+/**
+ * Find an existing non-cancelled, not-fully-paid enrollment for this phone+course
+ * the checkout flow should RESUME instead of creating a duplicate. Returns the most
+ * recently-created match (so the latest in-progress booking is reused).
+ */
+export async function findResumableCourseEnrollment(phone: string, courseId: string): Promise<CourseEnrollment | null> {
+  const p = (phone || "").trim();
+  const c = (courseId || "").trim();
+  if (!p || !c) return null;
+  const list = await getCourseEnrollmentsByPhone(p);
+  const candidates = list
+    .filter((e) => e.course_id === c && e.status !== "cancelled" && e.status !== "fully_paid")
+    .sort((a, b) => (b.created_at || "").localeCompare(a.created_at || ""));
+  return candidates[0] || null;
+}
+
+/** Is this phone fully paid for this course already? (overpayment / re-pay guard) */
+export async function isCourseFullyPaidForPhone(phone: string, courseId: string): Promise<boolean> {
+  const p = (phone || "").trim();
+  const c = (courseId || "").trim();
+  if (!p || !c) return false;
+  const list = await getCourseEnrollmentsByPhone(p);
+  return list.some((e) => e.course_id === c && e.status !== "cancelled" && enrollmentOutstanding(e) <= 0 && (e.amount_paid || 0) > 0);
+}
+
+/**
+ * Short-window idempotency: return the most recent still-open (PENDING/VERIFYING)
+ * course payment attempt for this phone+course created within `withinMs`. Lets the
+ * server re-hand-back the SAME payment instead of minting a new row on a double-click
+ * / refresh / back-button.
+ */
+export async function findRecentOpenCoursePayment(phone: string, courseSlug: string, withinMs = 120000): Promise<Payment | null> {
+  return findRecentOpenPaymentForItem(phone, "course", courseSlug, withinMs);
+}
+
+/**
+ * Generic short-window idempotency for ANY item type (course/webinar/plan): the
+ * most recent still-open (PENDING/VERIFYING) attempt for this phone+item within
+ * `withinMs`. Lets a checkout re-hand-back the same payment on a double-submit.
+ */
+export async function findRecentOpenPaymentForItem(
+  phone: string,
+  itemType: "course" | "webinar" | "plan",
+  itemSlug: string,
+  withinMs = 120000,
+): Promise<Payment | null> {
+  const p = (phone || "").trim();
+  const slug = (itemSlug || "").trim();
+  if (!p || !slug) return null;
+  const db = getSupabaseAdmin();
+  if (!db) return null;
+  const since = new Date(Date.now() - withinMs).toISOString();
+  const { data } = await db
+    .from("payments")
+    .select("*")
+    .eq("phone", p)
+    .eq("item_type", itemType)
+    .eq("item_slug", slug)
+    .is("deleted_at", null)
+    .in("status", ["PENDING", "VERIFYING"])
+    .gte("created_at", since)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  return (data as Payment) ?? null;
+}
+
+/** Recent open payment attempt for a specific installment on an enrollment (dedupe). */
+export async function findRecentOpenInstallmentPayment(
+  enrollmentId: string,
+  installmentNo: number,
+  withinMs = 120000,
+): Promise<Payment | null> {
+  const id = (enrollmentId || "").trim();
+  if (!id) return null;
+  const db = getSupabaseAdmin();
+  if (!db) return null;
+  const since = new Date(Date.now() - withinMs).toISOString();
+  const { data } = await db
+    .from("payments")
+    .select("*")
+    .eq("enrollment_id", id)
+    .eq("installment_no", installmentNo)
+    .is("deleted_at", null)
+    .in("status", ["PENDING", "VERIFYING"])
+    .gte("created_at", since)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  return (data as Payment) ?? null;
+}
+
+// ==================== PAYMENT EDIT / SOFT-DELETE / RESTORE (super-admin) ====================
+
+export interface PaymentMutationResult {
+  ok: boolean;
+  error?: string;
+  payment?: Payment;
+  oldValues?: Partial<Payment>;
+  newValues?: Partial<Payment>;
+  enrollmentId?: string | null;
+  noop?: boolean;
+}
+
+const EDITABLE_PAYMENT_FIELDS: (keyof Payment)[] = ["amount", "status", "reference_no", "student_name", "payment_mode"];
+
+/** Edit safe fields on a payment and re-sync the affected course enrollment. */
+export async function editPaymentById(
+  paymentId: string,
+  patch: Partial<Pick<Payment, "amount" | "status" | "reference_no" | "student_name" | "payment_mode">>,
+): Promise<PaymentMutationResult> {
+  const db = getSupabaseAdmin();
+  if (!db) return { ok: false, error: "Storage unavailable." };
+  const existing = await getPaymentById(paymentId);
+  if (!existing) return { ok: false, error: "Payment not found." };
+  if (existing.deleted_at) return { ok: false, error: "Restore this payment from Trash before editing it." };
+
+  const next: Record<string, unknown> = {};
+  const oldValues: Record<string, unknown> = {};
+  const newValues: Record<string, unknown> = {};
+  const existingRec = existing as unknown as Record<string, unknown>;
+  const patchRec = patch as Record<string, unknown>;
+  for (const f of EDITABLE_PAYMENT_FIELDS) {
+    const key = f as string;
+    if (key in patchRec && patchRec[key] !== undefined && patchRec[key] !== existingRec[key]) {
+      next[key] = patchRec[key];
+      oldValues[key] = existingRec[key];
+      newValues[key] = patchRec[key];
+    }
+  }
+  if (typeof next.amount === "number" && (next.amount < 0 || !Number.isFinite(next.amount))) {
+    return { ok: false, error: "Amount must be a non-negative number." };
+  }
+  if (Object.keys(next).length === 0) return { ok: true, noop: true, payment: existing, enrollmentId: existing.enrollment_id ?? null };
+
+  let updated: Payment = existing;
+  try {
+    const { data, error } = await db.from("payments").update(next).eq("id", paymentId).select().maybeSingle();
+    if (error) return { ok: false, error: error.message };
+    if (data) updated = data as Payment;
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Update failed." };
+  }
+
+  // Re-sync the course enrollment whenever money-affecting fields changed.
+  const affectsLedger = "status" in next || "amount" in next || "reference_no" in next;
+  if (affectsLedger && updated.item_type === "course" && updated.enrollment_id) {
+    if (isPaidStatus(updated.status) && updated.reference_no) {
+      await finalizeCoursePaymentByReference(updated.reference_no).catch(() => null);
+    }
+    await recomputeCourseEnrollment(updated.enrollment_id).catch(() => null);
+  }
+  if (updated.phone) await bumpBuyerSessionVersion(updated.phone).catch(() => null);
+  return { ok: true, payment: updated, oldValues, newValues, enrollmentId: updated.enrollment_id ?? null };
+}
+
+/** Soft-delete a payment to Trash (recoverable). Re-syncs the enrollment. */
+export async function softDeletePaymentById(paymentId: string, reason: string, deletedBy: string | null): Promise<PaymentMutationResult> {
+  const db = getSupabaseAdmin();
+  if (!db) return { ok: false, error: "Storage unavailable." };
+  const existing = await getPaymentById(paymentId);
+  if (!existing) return { ok: false, error: "Payment not found." };
+  if (existing.deleted_at) return { ok: true, noop: true, payment: existing, enrollmentId: existing.enrollment_id ?? null };
+
+  const patch = { deleted_at: new Date().toISOString(), deleted_by: deletedBy, deleted_reason: (reason || "").trim() || null };
+  let updated: Payment = existing;
+  try {
+    const { data, error } = await db.from("payments").update(patch).eq("id", paymentId).select().maybeSingle();
+    if (error) return { ok: false, error: error.message };
+    if (data) updated = data as Payment;
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Delete failed." };
+  }
+
+  // If this was a PAID course payment, drop its receipt and recompute (re-locks access).
+  if (existing.item_type === "course" && existing.enrollment_id) {
+    if (isPaidStatus(existing.status) && existing.reference_no) {
+      const receipt = await getReceiptByReference(existing.reference_no).catch(() => null);
+      if (receipt) { try { await db.from("payment_receipts").delete().eq("id", receipt.id); } catch { /* best-effort */ } }
+    }
+    await recomputeCourseEnrollment(existing.enrollment_id).catch(() => null);
+  }
+  if (existing.phone) await bumpBuyerSessionVersion(existing.phone).catch(() => null);
+  return { ok: true, payment: updated, enrollmentId: existing.enrollment_id ?? null };
+}
+
+/** Restore a soft-deleted payment from Trash. Re-applies its ledger effect. */
+export async function restorePaymentById(paymentId: string): Promise<PaymentMutationResult> {
+  const db = getSupabaseAdmin();
+  if (!db) return { ok: false, error: "Storage unavailable." };
+  const existing = await getPaymentById(paymentId);
+  if (!existing) return { ok: false, error: "Payment not found." };
+  if (!existing.deleted_at) return { ok: true, noop: true, payment: existing, enrollmentId: existing.enrollment_id ?? null };
+
+  let updated: Payment = existing;
+  try {
+    const { data, error } = await db.from("payments").update({ deleted_at: null, deleted_by: null, deleted_reason: null }).eq("id", paymentId).select().maybeSingle();
+    if (error) return { ok: false, error: error.message };
+    if (data) updated = data as Payment;
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Restore failed." };
+  }
+
+  if (updated.item_type === "course" && updated.enrollment_id) {
+    if (isPaidStatus(updated.status) && updated.reference_no) {
+      await finalizeCoursePaymentByReference(updated.reference_no).catch(() => null);
+    }
+    await recomputeCourseEnrollment(updated.enrollment_id).catch(() => null);
+  }
+  if (updated.phone) await bumpBuyerSessionVersion(updated.phone).catch(() => null);
+  return { ok: true, payment: updated, enrollmentId: updated.enrollment_id ?? null };
+}
+
+/** Permanent (hard) delete — SUPER ADMIN ONLY, only allowed for already-trashed rows. */
+export async function permanentDeletePaymentById(paymentId: string): Promise<PaymentMutationResult> {
+  const db = getSupabaseAdmin();
+  if (!db) return { ok: false, error: "Storage unavailable." };
+  const existing = await getPaymentById(paymentId);
+  if (!existing) return { ok: false, error: "Payment not found." };
+  if (!existing.deleted_at) return { ok: false, error: "Move the payment to Trash first (soft-delete) before permanent deletion." };
+  try {
+    await db.from("payments").delete().eq("id", paymentId);
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Permanent delete failed." };
+  }
+  return { ok: true, payment: existing, enrollmentId: existing.enrollment_id ?? null };
 }
 
 export async function addEnrollmentPlanChangeLog(

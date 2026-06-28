@@ -15,6 +15,9 @@ A quick "academy at a glance" home screen. Heading: `Dashboard`, subtitle `Your 
 - `Pending Collections` — only with **View revenue**
 - `Webinar Regs`
 
+## Duplicate-enrollment alert (Super Admin only)
+If any student has booked the **same course more than once**, a red banner appears at the top of the dashboard with a count and a **Review & merge →** button. It links to the **Duplicate Enrollments** tool where you keep one enrollment and cancel the rest. The banner clears automatically once everything is merged. See **[Duplicate Enrollments](duplicate-enrollments)**.
+
 ## The charts
 - `Enrollments over time`
 - `Revenue by course`

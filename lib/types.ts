@@ -640,6 +640,8 @@ export interface CourseEnrollment {
   /** When true, show the student a one-time "your plan changed" notice on next login. */
   plan_change_notice_pending?: boolean | null;
   plan_change_notice_seen_at?: string | null;
+  /** Set on a cancelled duplicate → points at the canonical enrollment it was merged into. */
+  superseded_by?: string | null;
 }
 
 /** Immutable audit record of a single payment-plan change. */
@@ -885,6 +887,10 @@ export interface Payment {
   // --- Attribution (analytics; normalized first-touch source snapshot) ---
   attribution_source?: string | null;
   attribution_campaign?: string | null;
+  // --- Recoverable soft-delete (super-admin Trash; never hard-deleted) ---
+  deleted_at?: string | null;
+  deleted_by?: string | null;
+  deleted_reason?: string | null;
 }
 
 // ----------------------------- Payment proof (self-service recovery) -----------------------------
@@ -934,7 +940,11 @@ export type PaymentActionType =
   | "reject"
   | "reupload_request"
   | "note"
-  | "reverse";
+  | "reverse"
+  | "edit"
+  | "soft_delete"
+  | "restore"
+  | "permanent_delete";
 
 /**
  * One immutable, append-only entry in the payment action ledger. Captures who did
@@ -958,6 +968,45 @@ export interface PaymentActionLog {
   reason: string | null;
   files: PaymentProofFile[];
   file_count: number;
+  metadata: Record<string, unknown>;
+  created_at: string;
+}
+
+/** One detected group of duplicate active enrollments (same phone + course). */
+export interface DuplicateEnrollmentGroup {
+  phone: string;
+  course_id: string;
+  course_title: string;
+  student_name: string;
+  count: number;
+  /** True if more than one of the duplicates carries real (PAID) money. */
+  hasMultiplePaid: boolean;
+  enrollments: {
+    id: string;
+    status: string;
+    total_fee: number;
+    amount_paid: number;
+    created_at: string;
+  }[];
+}
+
+/** Immutable audit row written for each duplicate-enrollment merge. */
+export interface EnrollmentMergeLog {
+  id: string;
+  phone: string | null;
+  course_id: string | null;
+  course_title: string | null;
+  kept_enrollment_id: string;
+  cancelled_enrollment_ids: string[];
+  repointed_payment_ids: string[];
+  abandoned_payment_ids: string[];
+  old_outstanding: number;
+  new_outstanding: number;
+  old_enrollment_count: number;
+  reason: string | null;
+  actor_id: string | null;
+  actor_name: string | null;
+  actor_role: string | null;
   metadata: Record<string, unknown>;
   created_at: string;
 }
