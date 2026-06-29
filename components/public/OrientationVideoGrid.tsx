@@ -1,39 +1,61 @@
 import { PlayCircle } from "lucide-react";
-import { parseVideo } from "@/lib/videoEmbed";
+import { r2Configured, signGetUrl } from "@/lib/r2";
+import PremiumVideoCard from "./PremiumVideoCard";
 import type { AssignedOrientationVideo, OrientationVideo } from "@/lib/types";
 
 /**
  * Renders orientation / starter videos in a student's post-registration view
- * (course Class Hub + webinar portal). Source of truth is the reusable library
+ * (course Class Hub + webinar portal) using the shared PremiumVideoCard so they
+ * look identical to recording cards. Source of truth is the reusable library
  * assignments (`assigned`); `inline` is the legacy per-course URL list, merged in
  * and de-duplicated so migrated courses never show a video twice.
  *
- * Access is gated by the CALLER (enrolled-student checks) — this is render-only.
+ * Access is gated by the CALLER (enrolled-student checks) — render-only. Hosted
+ * orientation videos still open the signed-URL R2 player at /lecture/:id.
  */
 
-type View = {
+type Card = {
   key: string;
-  title?: string | null;
+  title: string;
   description?: string | null;
-  url?: string | null;        // youtube / drive link for inline embed or open
-  lectureId?: string | null;  // hosted recording → /lecture/:id (own access rules)
+  kindLabel: string;
+  subject?: string | null;
+  date?: string | null;
+  durationSeconds?: number | null;
+  thumbnailUrl?: string | null;
+  youtubeUrl?: string | null;
+  lectureHref?: string | null;
+  externalUrl?: string | null;
 };
 
-function viewsFromAssigned(assigned: AssignedOrientationVideo[]): View[] {
-  return assigned.map((a) => {
-    const c = a.content;
-    const isHosted = c.source_type === "hosted";
-    return {
-      key: `a-${a.assignment_id}`,
-      title: c.title,
-      description: c.description,
-      url: isHosted ? null : c.youtube_link || c.drive_link || null,
-      lectureId: isHosted ? c.id : null,
-    };
-  });
+async function cardsFromAssigned(assigned: AssignedOrientationVideo[]): Promise<Card[]> {
+  return Promise.all(
+    assigned.map(async (a) => {
+      const c = a.content;
+      const isHosted = c.source_type === "hosted";
+      const kindLabel = a.role === "starter" ? "Starter video" : "Orientation";
+      let thumbnailUrl: string | null = null;
+      if (isHosted && c.thumbnail_key && r2Configured()) {
+        thumbnailUrl = await signGetUrl(c.thumbnail_key, 3600).catch(() => null);
+      }
+      return {
+        key: `a-${a.assignment_id}`,
+        title: c.title,
+        description: c.description,
+        kindLabel,
+        subject: c.subject,
+        date: c.date,
+        durationSeconds: isHosted ? c.duration_seconds ?? null : null,
+        thumbnailUrl,
+        youtubeUrl: isHosted ? null : c.youtube_link || null,
+        lectureHref: isHosted ? `/lecture/${c.id}` : null,
+        externalUrl: isHosted ? null : c.youtube_link ? null : c.drive_link || null,
+      };
+    }),
+  );
 }
 
-export default function OrientationVideoGrid({
+export default async function OrientationVideoGrid({
   assigned,
   inline = [],
   heading = "Orientation & starter videos",
@@ -42,21 +64,25 @@ export default function OrientationVideoGrid({
   inline?: OrientationVideo[];
   heading?: string;
 }) {
-  const assignedViews = viewsFromAssigned(assigned);
+  const assignedCards = await cardsFromAssigned(assigned);
 
-  // De-dupe: skip any inline URL that's already represented by a linked library
-  // video (covers the migration window before inline data is cleared).
+  // De-dupe: skip any inline URL already represented by a linked library video.
   const assignedUrls = new Set(
-    assigned
-      .map((a) => (a.content.youtube_link || a.content.drive_link || "").trim())
-      .filter(Boolean),
+    assigned.map((a) => (a.content.youtube_link || a.content.drive_link || "").trim()).filter(Boolean),
   );
-  const inlineViews: View[] = (inline || [])
+  const inlineCards: Card[] = (inline || [])
     .filter((v) => v.url?.trim() && !assignedUrls.has(v.url.trim()))
-    .map((v, i) => ({ key: `i-${i}`, title: v.title, description: v.description, url: v.url }));
+    .map((v, i) => ({
+      key: `i-${i}`,
+      title: v.title || "Orientation video",
+      description: v.description,
+      kindLabel: "Orientation",
+      youtubeUrl: v.url || null,
+      externalUrl: v.url && !/youtu/i.test(v.url) ? v.url : null,
+    }));
 
-  const views = [...assignedViews, ...inlineViews];
-  if (views.length === 0) return null;
+  const cards = [...assignedCards, ...inlineCards];
+  if (cards.length === 0) return null;
 
   return (
     <section>
@@ -64,44 +90,21 @@ export default function OrientationVideoGrid({
         <PlayCircle size={18} className="text-[var(--ca-gold)]" /> {heading}
       </h2>
       <div className="mt-4 grid gap-5 sm:grid-cols-2">
-        {views.map((v) => {
-          const parsed = v.url ? parseVideo(v.url) : null;
-          return (
-            <div key={v.key} className="overflow-hidden rounded-2xl border border-line bg-surface">
-              {v.lectureId ? (
-                <a
-                  href={`/lecture/${v.lectureId}`}
-                  className="flex aspect-video w-full flex-col items-center justify-center gap-2 bg-surface2 text-sm font-semibold text-primary"
-                >
-                  <PlayCircle size={32} />
-                  Watch recording →
-                </a>
-              ) : parsed?.kind === "youtube" && parsed.embedUrl ? (
-                <div className="relative aspect-video w-full bg-black">
-                  <iframe
-                    src={parsed.embedUrl}
-                    title={v.title || "Orientation video"}
-                    loading="lazy"
-                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                    allowFullScreen
-                    referrerPolicy="strict-origin-when-cross-origin"
-                    className="absolute inset-0 h-full w-full"
-                  />
-                </div>
-              ) : v.url ? (
-                <a href={v.url} target="_blank" rel="noopener noreferrer" className="flex aspect-video w-full items-center justify-center bg-surface2 text-sm text-primary">
-                  Open video ↗
-                </a>
-              ) : null}
-              {(v.title || v.description) && (
-                <div className="p-4">
-                  {v.title && <p className="font-semibold">{v.title}</p>}
-                  {v.description && <p className="mt-1 text-sm text-ink2">{v.description}</p>}
-                </div>
-              )}
-            </div>
-          );
-        })}
+        {cards.map((c) => (
+          <PremiumVideoCard
+            key={c.key}
+            title={c.title}
+            description={c.description}
+            kindLabel={c.kindLabel}
+            subject={c.subject}
+            date={c.date}
+            durationSeconds={c.durationSeconds}
+            thumbnailUrl={c.thumbnailUrl}
+            youtubeUrl={c.youtubeUrl}
+            lectureHref={c.lectureHref}
+            externalUrl={c.externalUrl}
+          />
+        ))}
       </div>
     </section>
   );

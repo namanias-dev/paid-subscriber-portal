@@ -46,6 +46,8 @@ const EMPTY_FORM = {
   youtube_link: "",
   telegram_link: "",
   duration: "",
+  faculty: "",
+  date: "",
   class_no: "",
   course_ids: [] as string[],
   is_published: true,
@@ -70,6 +72,8 @@ export default function ContentAdmin() {
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [videoFile, setVideoFile] = useState<File | null>(null);
   const videoInput = useRef<HTMLInputElement>(null);
+  const [thumbFile, setThumbFile] = useState<File | null>(null);
+  const thumbInput = useRef<HTMLInputElement>(null);
   const editing = !!form.id;
 
   // Orientation / starter assignment (reuse this video in After-Registration of
@@ -105,6 +109,7 @@ export default function ContentAdmin() {
   function openAdd() {
     setForm(EMPTY_FORM);
     setVideoFile(null);
+    setThumbFile(null);
     setOrientRole("orientation");
     setOrientTargets(new Set());
     setOpen(true);
@@ -122,6 +127,8 @@ export default function ContentAdmin() {
       youtube_link: c.youtube_link || "",
       telegram_link: c.telegram_link || "",
       duration: c.duration || "",
+      faculty: c.faculty || "",
+      date: c.date ? c.date.slice(0, 10) : "",
       class_no: c.class_no != null ? String(c.class_no) : "",
       course_ids: itemCourseIds(c),
       is_published: c.is_published,
@@ -130,6 +137,7 @@ export default function ContentAdmin() {
       visibility: c.visibility === "public" ? "public" : "enrolled",
     });
     setVideoFile(null);
+    setThumbFile(null);
     setOrientRole("orientation");
     setOrientTargets(new Set());
     setOpen(true);
@@ -182,6 +190,8 @@ export default function ContentAdmin() {
       youtube_link: hosted ? null : form.youtube_link || null,
       telegram_link: hosted ? null : form.telegram_link || null,
       duration: form.duration || null,
+      faculty: form.faculty || null,
+      date: form.date || null,
       class_no: form.class_no === "" ? null : Number(form.class_no),
       course_ids: form.course_ids,
       is_published: form.is_published,
@@ -213,6 +223,25 @@ export default function ContentAdmin() {
       }).catch(() => null);
     }
 
+    // Optional thumbnail → presigned PUT to R2 (persists thumbnail_key). Best-effort.
+    if (thumbFile && recordingId) {
+      try {
+        const sign = await fetch("/api/admin/lectures/asset/sign", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ recordingId, kind: "thumbnail", contentType: thumbFile.type || "image/jpeg" }),
+        });
+        const sd = await sign.json().catch(() => ({}));
+        if (sd?.ok && sd.url) {
+          await fetch(sd.url, { method: "PUT", headers: { "Content-Type": thumbFile.type || "image/jpeg" }, body: thumbFile });
+        } else {
+          toast("Thumbnail upload skipped (hosting not configured)", "error");
+        }
+      } catch {
+        toast("Thumbnail upload failed — content was saved", "error");
+      }
+    }
+
     // Hosted + a file chosen → kick off the resilient background upload.
     if (hosted && videoFile && recordingId) {
       const meta = await readVideoMeta(videoFile);
@@ -232,6 +261,7 @@ export default function ContentAdmin() {
     setOpen(false);
     setForm(EMPTY_FORM);
     setVideoFile(null);
+    setThumbFile(null);
     reload();
   }
 
@@ -416,9 +446,34 @@ export default function ContentAdmin() {
               <label className="label">Class / Session #</label>
               <input className="input" type="number" min={0} placeholder="e.g. 1" value={form.class_no} onChange={(e) => setForm({ ...form, class_no: e.target.value })} />
             </div>
-            <input className="input self-end" placeholder="Paper (e.g. GS2)" value={form.paper} onChange={(e) => setForm({ ...form, paper: e.target.value })} />
+            <input className="input self-end" placeholder="Topic / Paper (e.g. GS2)" value={form.paper} onChange={(e) => setForm({ ...form, paper: e.target.value })} />
             <input className="input self-end" placeholder="Duration" value={form.duration} onChange={(e) => setForm({ ...form, duration: e.target.value })} />
           </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="label">Lecture date</label>
+              <input type="date" className="input" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} />
+            </div>
+            {isRecording && (
+              <div>
+                <label className="label">Faculty (optional)</label>
+                <input className="input" placeholder="e.g. Naman Sir" value={form.faculty} onChange={(e) => setForm({ ...form, faculty: e.target.value })} />
+              </div>
+            )}
+          </div>
+
+          {/* Optional custom thumbnail (recordings). YouTube auto-derives; else branded fallback. */}
+          {isRecording && (
+            <div>
+              <label className="label">Thumbnail (optional)</label>
+              <input ref={thumbInput} type="file" accept="image/*" className="hidden" onChange={(e) => setThumbFile(e.target.files?.[0] || null)} />
+              <button type="button" onClick={() => thumbInput.current?.click()} className="btn btn-secondary w-full text-sm">
+                {thumbFile ? `🖼️ ${thumbFile.name} (${(thumbFile.size / 1024).toFixed(0)} KB)` : "Upload custom thumbnail"}
+              </button>
+              <p className="mt-1 text-xs text-muted">Never required. YouTube videos auto-use their own thumbnail; anything without one gets a premium branded fallback.</p>
+            </div>
+          )}
 
           {/* Recording source toggle (only for recordings / live links) */}
           {isRecording && (

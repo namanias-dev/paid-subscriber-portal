@@ -58,52 +58,57 @@ export async function getClassHubSectionsForCourse(
 }
 
 /**
- * Enrich hosted-lecture cards with watch progress, a signed thumbnail, and an
- * access chip — reusing canAccessLecture (installment/expiry) so the list mirrors
- * playback gating. No video bytes here; thumbnails only, signed short-lived.
+ * Enrich recording cards: a signed (short-lived) thumbnail for ANY recording
+ * with an uploaded thumbnail (hosted or external custom), plus — for hosted
+ * lectures — watch progress and an access chip reusing canAccessLecture
+ * (installment/expiry) so the list mirrors playback gating. No video bytes here.
  */
 async function enrichHostedLectures(
   sections: ClassHubSection[],
   items: ContentItem[],
   learner: Learner | null,
 ): Promise<void> {
-  const hostedIds = new Set(
-    items.filter((i) => i.source_type === "hosted" && i.upload_status === "completed").map((i) => i.id),
-  );
-  if (hostedIds.size === 0) return;
+  const recItems = sections.flatMap((s) => s.items).filter((it) => it.type === "recording" || it.type === "live_link");
+  if (recItems.length === 0) return;
   const recById = new Map(items.map((i) => [i.id, i]));
+  const hasHosted = recItems.some((it) => it.hosted);
 
-  const [courses, enrollments, overrides, progress] = await Promise.all([
-    getAllCourses(),
-    learner ? getCourseEnrollmentsByPhone(learner.phone) : Promise.resolve([]),
-    learner ? getAccessOverridesByPhone(learner.phone) : Promise.resolve([]),
-    learner?.studentId ? getLectureProgressByLearner(learner.studentId) : Promise.resolve([]),
-  ]);
+  // Only pay for entitlement/progress lookups when there are hosted lectures.
+  const [courses, enrollments, overrides, progress] = hasHosted
+    ? await Promise.all([
+        getAllCourses(),
+        learner ? getCourseEnrollmentsByPhone(learner.phone) : Promise.resolve([]),
+        learner ? getAccessOverridesByPhone(learner.phone) : Promise.resolve([]),
+        learner?.studentId ? getLectureProgressByLearner(learner.studentId) : Promise.resolve([]),
+      ])
+    : [[], [], [], []];
   const progById = new Map(progress.map((p) => [p.recording_id, p]));
 
   await Promise.all(
-    sections.flatMap((s) =>
-      s.items
-        .filter((it) => it.hosted && hostedIds.has(it.id))
-        .map(async (it) => {
-          const rec = recById.get(it.id);
-          if (!rec) return;
-          const access = canAccessLecture(learner, rec, { courses, enrollments, overrides });
-          it.accessBlocked = !access.allowed;
-          it.accessLabel = accessChip(access);
-          if (!access.allowed) it.link = null; // gate the card (player also re-checks)
+    recItems.map(async (it) => {
+      const rec = recById.get(it.id);
+      if (!rec) return;
 
-          const prog = progById.get(it.id);
-          if (prog) {
-            it.completed = prog.completed;
-            const dur = rec.duration_seconds || it.durationSeconds || 0;
-            it.progressPct = dur > 0 ? Math.min(100, Math.round((prog.last_position_seconds / dur) * 100)) : 0;
-          }
-          if (rec.thumbnail_key && r2Configured()) {
-            it.thumbnailUrl = await signGetUrl(rec.thumbnail_key, 3600).catch(() => null);
-          }
-        }),
-    ),
+      // Uploaded thumbnail (works for hosted + external custom). YouTube cards
+      // derive their own thumbnail client-side; Drive/Telegram use the fallback.
+      if (rec.thumbnail_key && r2Configured()) {
+        it.thumbnailUrl = (await signGetUrl(rec.thumbnail_key, 3600).catch(() => null)) ?? it.thumbnailUrl ?? null;
+      }
+
+      if (it.hosted && rec.upload_status === "completed") {
+        const access = canAccessLecture(learner, rec, { courses, enrollments, overrides });
+        it.accessBlocked = !access.allowed;
+        it.accessLabel = accessChip(access);
+        if (!access.allowed) it.link = null; // gate the card (player also re-checks)
+
+        const prog = progById.get(it.id);
+        if (prog) {
+          it.completed = prog.completed;
+          const dur = rec.duration_seconds || it.durationSeconds || 0;
+          it.progressPct = dur > 0 ? Math.min(100, Math.round((prog.last_position_seconds / dur) * 100)) : 0;
+        }
+      }
+    }),
   );
 }
 

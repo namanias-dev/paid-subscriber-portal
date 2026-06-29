@@ -25,6 +25,7 @@ export async function PATCH(
       "type",
       "subject",
       "paper",
+      "faculty",
       "title",
       "description",
       "drive_link",

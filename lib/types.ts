@@ -53,6 +53,8 @@ export interface ContentItem {
   type: ContentType;
   subject: string | null;
   paper: string | null;
+  /** Optional faculty/teacher name for a recording/lecture (display + search). */
+  faculty?: string | null;
   title: string;
   description: string | null;
   drive_link: string | null;

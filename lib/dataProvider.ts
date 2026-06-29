@@ -271,6 +271,7 @@ export interface NewContentInput {
   type: ContentType;
   subject?: string | null;
   paper?: string | null;
+  faculty?: string | null;
   title: string;
   description?: string | null;
   drive_link?: string | null;
@@ -295,6 +296,7 @@ export async function addContent(input: NewContentInput): Promise<ContentItem> {
     type: input.type,
     subject: input.subject ?? null,
     paper: input.paper ?? null,
+    faculty: input.faculty ?? null,
     title: input.title,
     description: input.description ?? null,
     drive_link: input.drive_link ?? null,

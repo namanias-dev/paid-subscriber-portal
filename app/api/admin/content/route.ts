@@ -60,6 +60,7 @@ export async function POST(req: Request) {
       type,
       subject: body.subject ? String(body.subject) : null,
       paper: body.paper ? String(body.paper) : null,
+      faculty: body.faculty ? String(body.faculty) : null,
       title,
       description: body.description ? String(body.description) : null,
       drive_link: body.drive_link ? String(body.drive_link) : null,

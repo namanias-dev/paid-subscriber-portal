@@ -2,13 +2,16 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { Video, FileText, BarChart3, Newspaper, Search, Lock, PlayCircle, ExternalLink, Sparkles } from "lucide-react";
+import { Video, FileText, BarChart3, Newspaper, Search, Lock, PlayCircle, ExternalLink, Sparkles, ChevronRight, ChevronLeft } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { formatISTDate } from "@/lib/dates";
+import { groupContentBySubject, GENERAL_SUBJECT } from "@/lib/classHub";
 import type { ClassHubSection, ClassHubSectionId, ClassHubItem } from "@/lib/classHub";
 import type { PerformanceData } from "@/lib/performance";
 import { PERFORMANCE_SECTION } from "@/lib/performance";
 import PerformanceDashboard from "./PerformanceDashboard";
+import PremiumVideoCard from "@/components/public/PremiumVideoCard";
+import SubjectFolderCard from "@/components/public/SubjectFolderCard";
 
 type TabId = ClassHubSectionId | typeof PERFORMANCE_SECTION;
 
@@ -43,7 +46,14 @@ export default function ClassHubBatch({
       : sections[0]?.id ?? "recordings";
   const [active, setActive] = useState<TabId>(initial);
   const [query, setQuery] = useState("");
+  const [openSubject, setOpenSubject] = useState<string | null>(null);
   const marked = useRef<Set<string>>(new Set());
+
+  const selectTab = (id: TabId) => {
+    setActive(id);
+    setQuery("");
+    setOpenSubject(null);
+  };
 
   const newCountFor = (id: TabId) =>
     id === PERFORMANCE_SECTION ? performance.newCount : sections.find((s) => s.id === id)?.newCount ?? 0;
@@ -67,19 +77,42 @@ export default function ClassHubBatch({
   }, [active, courseId, sections, performance]);
 
   const activeSection = sections.find((s) => s.id === active);
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q || !activeSection) return activeSection?.items ?? [];
-    return activeSection.items.filter(
-      (i) => i.title.toLowerCase().includes(q) || (i.subject || "").toLowerCase().includes(q),
-    );
-  }, [activeSection, query]);
+  const onPerformance = active === PERFORMANCE_SECTION;
+  // Recordings + Notes get subject folders; Current Affairs stays a flat list.
+  const folderable = active === "recordings" || active === "notes";
+
+  const q = query.trim().toLowerCase();
+  const matches = (i: ClassHubItem): boolean => {
+    if (!q) return true;
+    const fields: (string | null | undefined)[] =
+      active === "recordings"
+        ? [i.title, i.subject, i.topic, i.faculty]
+        : active === "ca"
+          ? [i.title, i.topic, i.date]
+          : [i.title, i.subject];
+    return fields.some((f) => (f || "").toLowerCase().includes(q));
+  };
+
+  const subjectKey = (i: ClassHubItem) => (i.subject && i.subject.trim()) || GENERAL_SUBJECT;
+  const sectionItems = activeSection?.items ?? [];
+  const groups = useMemo(
+    () => (folderable ? groupContentBySubject(sectionItems) : []),
+    [folderable, sectionItems],
+  );
+  const showFolders = folderable && !openSubject && !q && groups.length > 1 && sectionItems.length > 2;
+
+  const visibleItems = useMemo(() => {
+    if (openSubject) return sectionItems.filter((i) => subjectKey(i) === openSubject).filter(matches);
+    return sectionItems.filter(matches);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sectionItems, openSubject, q, active]);
 
   const tabs: { id: TabId; label: string }[] = [
     ...sections.map((s) => ({ id: s.id as TabId, label: s.label })),
-    { id: PERFORMANCE_SECTION, label: "My Performance" },
+    { id: PERFORMANCE_SECTION, label: "Quizzes" },
   ];
-  const onPerformance = active === PERFORMANCE_SECTION;
+
+  const showSearch = !onPerformance && activeSection && sectionItems.length > 0 && !showFolders;
 
   return (
     <section>
@@ -87,13 +120,13 @@ export default function ClassHubBatch({
         <h2 className="flex items-center gap-2 font-heading text-lg font-bold">
           <PlayCircle size={18} className="text-[var(--ca-gold)]" /> Batch content
         </h2>
-        {!onPerformance && activeSection && activeSection.items.length > 0 && (
+        {showSearch && (
           <label className="relative flex items-center">
             <Search size={15} className="pointer-events-none absolute left-3 text-muted" aria-hidden="true" />
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search this section…"
+              placeholder={openSubject ? `Search in ${openSubject}…` : `Search ${activeSection?.label ?? "this section"}…`}
               className="input min-h-[44px] w-full pl-9 sm:w-64"
               aria-label="Search batch content"
             />
@@ -101,8 +134,8 @@ export default function ClassHubBatch({
         )}
       </div>
 
-      {/* Tabs */}
-      <div className="no-scrollbar mt-4 -mx-1 flex gap-2 overflow-x-auto px-1 py-1">
+      {/* Tabs — 2×2 grid on mobile, horizontal pills on tablet/desktop */}
+      <div className="mt-4 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
         {tabs.map((t) => {
           const Icon = SECTION_ICON[t.id];
           const isActive = t.id === active;
@@ -111,19 +144,19 @@ export default function ClassHubBatch({
             <button
               key={t.id}
               type="button"
-              onClick={() => setActive(t.id)}
+              onClick={() => selectTab(t.id)}
               aria-pressed={isActive}
-              className={`ca-focus inline-flex min-h-[44px] shrink-0 items-center gap-2 rounded-full px-4 text-sm font-semibold transition-all duration-200 motion-reduce:transition-none ${
+              className={`ca-focus inline-flex min-h-[44px] w-full items-center justify-center gap-2 rounded-full px-3 text-sm font-semibold transition-all duration-200 motion-reduce:transition-none sm:w-auto sm:px-4 ${
                 isActive
                   ? "bg-gradient-to-r from-[var(--ca-gold-bright)] to-[var(--ca-gold)] text-[#1a1304] shadow-[0_8px_20px_-8px_rgba(212,175,55,0.6)]"
                   : "border border-line bg-surface text-ink2 hover:border-[rgba(212,175,55,0.6)] hover:text-ink"
               }`}
             >
-              {Icon && <Icon size={15} aria-hidden="true" />}
-              {t.label}
+              {Icon && <Icon size={15} aria-hidden="true" className="shrink-0" />}
+              <span className="truncate">{t.label}</span>
               {count > 0 && (
-                <span className="inline-flex items-center rounded-full bg-[#16a34a] px-1.5 text-[11px] font-extrabold leading-5 text-white">
-                  {count} new
+                <span className="inline-flex shrink-0 items-center rounded-full bg-[#16a34a] px-1.5 text-[11px] font-extrabold leading-5 text-white">
+                  {count}
                 </span>
               )}
             </button>
@@ -131,19 +164,86 @@ export default function ClassHubBatch({
         })}
       </div>
 
+      {/* Breadcrumb when a subject folder is open */}
+      {!onPerformance && openSubject && (
+        <div className="mt-4 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-sm text-muted">
+          <button onClick={() => { setOpenSubject(null); setQuery(""); }} className="font-medium hover:text-ink">
+            {activeSection?.label}
+          </button>
+          <ChevronRight size={14} aria-hidden="true" />
+          <span className="font-semibold text-ink">{openSubject}</span>
+        </div>
+      )}
+
       <div className="mt-5">
         {onPerformance ? (
           <PerformanceDashboard data={performance} />
-        ) : !activeSection || activeSection.items.length === 0 ? (
+        ) : !activeSection || sectionItems.length === 0 ? (
           <EmptyHub message={activeSection?.empty ?? "Nothing here yet."} />
-        ) : filtered.length === 0 ? (
-          <EmptyHub message="No items match your search." />
-        ) : (
-          <ul className="grid gap-3 sm:grid-cols-2">
-            {filtered.map((item) => (
-              <ContentRow key={item.id} item={item} />
+        ) : showFolders ? (
+          <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {groups.map((g) => (
+              <li key={g.subject}>
+                <SubjectFolderCard
+                  subject={g.subject}
+                  count={g.count}
+                  latestDate={g.latestDate}
+                  completedCount={g.completedCount}
+                  onClick={() => { setOpenSubject(g.subject); setQuery(""); }}
+                />
+              </li>
             ))}
           </ul>
+        ) : visibleItems.length === 0 ? (
+          <EmptyHub
+            message={
+              q
+                ? "No items match your search."
+                : openSubject
+                  ? "No lectures in this subject yet."
+                  : activeSection.empty
+            }
+          />
+        ) : (
+          <>
+            {openSubject && (
+              <button
+                onClick={() => { setOpenSubject(null); setQuery(""); }}
+                className="ca-focus mb-3 inline-flex items-center gap-1 text-sm font-semibold text-primary"
+              >
+                <ChevronLeft size={14} /> All subjects
+              </button>
+            )}
+            <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {visibleItems.map((item) =>
+                active === "recordings" ? (
+                  <li key={item.id}>
+                    <PremiumVideoCard
+                      title={item.title}
+                      kindLabel={item.type === "live_link" ? "Live Class" : "Recording"}
+                      subject={item.subject}
+                      date={item.date}
+                      durationSeconds={item.durationSeconds}
+                      classNo={item.classNo}
+                      thumbnailUrl={item.thumbnailUrl}
+                      youtubeUrl={item.youtubeUrl}
+                      lectureHref={item.hosted ? item.link : null}
+                      externalUrl={!item.hosted ? item.link : null}
+                      progressPct={item.progressPct}
+                      completed={item.completed}
+                      isNew={item.isNew}
+                      locked={item.locked}
+                      unlockOn={item.unlockOn}
+                      accessBlocked={item.accessBlocked}
+                      accessLabel={item.accessLabel}
+                    />
+                  </li>
+                ) : (
+                  <ContentRow key={item.id} item={item} />
+                ),
+              )}
+            </ul>
+          </>
         )}
       </div>
     </section>

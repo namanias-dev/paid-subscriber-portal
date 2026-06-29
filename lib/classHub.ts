@@ -43,6 +43,11 @@ export interface ClassHubItem {
   id: string;
   title: string;
   subject: string | null;
+  /** Topic (stored as `paper`) + faculty — shown on cards and used by scoped search. */
+  topic: string | null;
+  faculty: string | null;
+  /** External YouTube URL (for deriving a thumbnail + inline play on the card). */
+  youtubeUrl: string | null;
   type: ContentType;
   typeLabel: string;
   classNo: number | null;
@@ -128,6 +133,9 @@ export function assembleClassHubSections(opts: {
       id: item.id,
       title: item.title,
       subject: item.subject,
+      topic: item.paper ?? null,
+      faculty: item.faculty ?? null,
+      youtubeUrl: !hosted ? item.youtube_link ?? null : null,
       type: item.type,
       typeLabel: CONTENT_META[item.type]?.label ?? item.type,
       classNo: item.class_no ?? null,
@@ -171,4 +179,77 @@ export function assembleClassHubSections(opts: {
 /** Total NEW items across all sections for a course (entry-point dot). */
 export function totalNewCount(sections: ClassHubSection[]): number {
   return sections.reduce((sum, s) => sum + s.newCount, 0);
+}
+
+// ===================== SUBJECT FOLDERS =====================
+
+/** Bucket key for an item with no subject metadata. */
+export const GENERAL_SUBJECT = "General";
+
+/**
+ * Canonical display order for subject folders. Anything unknown sorts after the
+ * known list (alphabetically); "General" always sorts dead last.
+ */
+const SUBJECT_ORDER = [
+  "Polity", "History", "Geography", "Economy", "Environment",
+  "S&T", "Science & Tech", "IR", "Current Affairs", "CSAT",
+  "Ethics", "Public Administration", "Optional", "Orientation", "Starter",
+];
+
+function subjectRank(s: string): number {
+  if (s === GENERAL_SUBJECT) return 100000;
+  const i = SUBJECT_ORDER.indexOf(s);
+  return i === -1 ? 50000 : i;
+}
+
+export interface SubjectGroup {
+  subject: string;
+  items: ClassHubItem[];
+  count: number;
+  /** Most recent lecture date in the group (ISO) or null. */
+  latestDate: string | null;
+  /** How many lectures the learner has completed (hosted progress). */
+  completedCount: number;
+}
+
+/**
+ * Group Class Hub items into subject folders. The folder key reads the SAME
+ * `subject` metadata the admin form sets (no parallel taxonomy), so folders and
+ * the admin never drift. Items lacking a subject fall into "General".
+ */
+export function groupContentBySubject(items: ClassHubItem[]): SubjectGroup[] {
+  const map = new Map<string, ClassHubItem[]>();
+  for (const it of items) {
+    const key = (it.subject && it.subject.trim()) || GENERAL_SUBJECT;
+    const arr = map.get(key);
+    if (arr) arr.push(it);
+    else map.set(key, [it]);
+  }
+
+  const groups: SubjectGroup[] = [...map.entries()].map(([subject, list]) => {
+    let latest = 0;
+    let latestStr: string | null = null;
+    for (const i of list) {
+      const t = i.date ? Date.parse(i.date) : NaN;
+      if (Number.isFinite(t) && t > latest) {
+        latest = t;
+        latestStr = i.date;
+      }
+    }
+    return {
+      subject,
+      items: list,
+      count: list.length,
+      latestDate: latestStr,
+      completedCount: list.filter((i) => i.completed).length,
+    };
+  });
+
+  groups.sort(
+    (a, b) =>
+      subjectRank(a.subject) - subjectRank(b.subject) ||
+      b.count - a.count ||
+      a.subject.localeCompare(b.subject),
+  );
+  return groups;
 }

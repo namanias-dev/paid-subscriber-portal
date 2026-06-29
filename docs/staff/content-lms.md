@@ -60,6 +60,28 @@ For **uploaded (hosted) lecture and orientation videos**, the student player is 
 
 **Note:** orientation/welcome videos added as plain **YouTube/Drive links** are hosted by YouTube/Google, so their own download rules apply — only videos you **upload** into our library get the protections above.
 
+## Recording details: subject, thumbnail, date & faculty
+
+When you **Add / Edit Content** for a recording or live class, you can now set extra details that make the student's Class Hub look premium and organised:
+
+- **Subject** — pick from the dropdown (Polity, Economy, Geography, …). This drives the **subject folders** students see (see below). Recordings without a subject are grouped under **"General"** — nothing breaks, they just sit together.
+- **Topic / Paper** — free text (e.g. "GS2", "Fundamental Rights").
+- **Lecture date** — the class date (used for ordering and the "latest lecture" shown on folders).
+- **Class / Session #** — orders recordings (Class 1, 2, 3…).
+- **Faculty (optional)** — the teacher's name; shown on the card and searchable.
+- **Thumbnail (optional)** — upload a custom cover image. **Never required:**
+  - **YouTube** recordings auto-use the YouTube thumbnail.
+  - **Uploaded (hosted)** videos use your custom thumbnail if you add one.
+  - Anything without a thumbnail gets a **premium branded fallback** (navy/gold with the academy name + lecture title) — students never see a blank dark box.
+
+⚠️ None of these change who can watch — access rules are unchanged. Locked recordings stay locked (students see the cover + a "Locked" note, but no playable video).
+
+## Subject folders in the Class Hub (student view)
+
+In a batch's **Recordings** and **Notes & Material** tabs, when there are **several subjects**, students first see clean **subject folders** (Polity, History, …) showing the lecture count, latest date and how many they've completed. Clicking a folder opens that subject's lectures with a **breadcrumb** (e.g. *Recordings → Polity*) and a **back to all subjects** link. Search inside an open folder only searches that subject. If a tab has just one subject or only a couple of items, students see a simple flat list instead — no unnecessary folders.
+
+The folders read the **same Subject** you set on each item, so the admin and the student view never drift. On mobile the four batch tabs (**Recordings · Notes & Material · Current Affairs & More · Quizzes**) show as a tidy 2×2 grid. *(The old "My Performance" tab is now simply labelled **Quizzes** — the dashboard inside it is unchanged.)*
+
 ## Lecture Q&A (comments + faculty answers)
 
 Under each uploaded lecture/recording (the `/lecture/...` watch page in the student Class Hub) there's a **Questions & discussion** thread.
