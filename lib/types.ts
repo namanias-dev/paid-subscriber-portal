@@ -305,6 +305,34 @@ export interface AssignedOrientationVideo {
   sort_order: number;
 }
 
+/** Whether a lecture comment was written by an enrolled learner or by staff. */
+export type CommentAuthorKind = "student" | "staff";
+
+/**
+ * A comment/question on a specific lecture (content_items recording). Top-level
+ * when parent_comment_id is null; otherwise a one-level reply. Soft-deleted via
+ * deleted_at — rows are never hard-deleted.
+ */
+export interface LectureComment {
+  id: string;
+  recording_id: string;
+  course_id: string | null;
+  author_kind: CommentAuthorKind;
+  author_id: string;
+  author_name: string;
+  author_phone: string | null;
+  author_role: string | null;
+  body: string;
+  parent_comment_id: string | null;
+  is_pinned: boolean;
+  is_hidden: boolean;
+  is_answered: boolean;
+  notified_at: string | null;
+  created_at: string;
+  edited_at: string | null;
+  deleted_at: string | null;
+}
+
 /**
  * Per-course "After Registration" / Class Hub configuration. Shown only to
  * enrolled students (Phase 1 gating = active enrollment; Phase 2 = payment).

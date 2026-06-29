@@ -6,6 +6,7 @@ import { resolveLectureAccess } from "@/lib/entitlements";
 import { r2Configured, signGetUrl } from "@/lib/r2";
 import { formatISTDate } from "@/lib/dates";
 import LecturePlayer from "@/components/lecture/LecturePlayer";
+import LectureComments from "@/components/lecture/LectureComments";
 
 export const dynamic = "force-dynamic";
 
@@ -89,6 +90,7 @@ export default async function LecturePage({ params }: { params: { id: string } }
         backHref={backHref}
         watermark={learner ? `${learner.name}${learner.phone ? ` · ${learner.phone}` : ""} · Naman IAS Academy` : null}
       />
+      <LectureComments recordingId={rec.id} />
     </div>
   );
 }

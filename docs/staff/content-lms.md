@@ -60,6 +60,27 @@ For **uploaded (hosted) lecture and orientation videos**, the student player is 
 
 **Note:** orientation/welcome videos added as plain **YouTube/Drive links** are hosted by YouTube/Google, so their own download rules apply — only videos you **upload** into our library get the protections above.
 
+## Lecture Q&A (comments + faculty answers)
+
+Under each uploaded lecture/recording (the `/lecture/...` watch page in the student Class Hub) there's a **Questions & discussion** thread.
+
+**Who can see/post:** only students **enrolled in that course** (the same access rule as watching the video). Non-enrolled users see nothing. Everyone enrolled sees all questions on that lecture, so students learn from each other.
+
+**How students use it:** type a question and press **`Post`**. They can **Reply** to a comment (one level deep, like YouTube) and **Edit/Delete their own** comment for **15 minutes** after posting.
+
+**How staff reply:** open the lecture and reply in the thread, **or** use the dedicated queue (below). Staff replies show a **`Faculty`** badge (or **`Admin`** for admin/super-admin roles), are highlighted, and automatically mark the question **Answered**. The student is notified (SMS) if reply notifications are configured.
+
+**Moderation (staff with Manage courses permission):** on any comment you can **Pin** it to the top, **Hide** it (soft-delete — it's kept in the database, never lost), **Mark answered/unmark**, and edit. Nothing is ever hard-deleted.
+
+### Unanswered-questions queue
+**Menu:** `Academics` → `Lecture Q&A`  ·  **Web address:** `/admin/lecture-comments`  ·  **Permission:** Manage courses.
+
+Shows **every unanswered student question across all lectures**, **oldest first**, so nothing gets buried per-video. A red **count** shows how many are open; **filter chips** narrow to one course. For each question you can **Reply** (resolves it + notifies the student), **Mark answered**, **Pin**, **Hide**, or **Open lecture ↗**. Answered questions drop off the queue automatically.
+
+⚠️ Comments are stored as plain text — any pasted HTML/script shows as text and never runs.
+
+> **Enabling SMS reply notifications (optional):** set the `SMS_LECTURE_REPLY_TEMPLATE_ID` environment variable to a registered DLT template id (and have SMS enabled). Until then, replies still work and resolve the thread — they just don't send an SMS. Notifications are idempotent (one SMS per reply).
+
 ## Course Manager
 **Menu:** `Academics` → `Courses`  ·  **Web address:** `/admin/courses`  ·  **Permission:** Manage courses.
 

@@ -18,6 +18,7 @@ import type {
   OrientationRole,
   OrientationTargetType,
   AssignedOrientationVideo,
+  LectureComment,
   LectureWatchProgress,
   CourseAccessOverride,
   Bookmark,
@@ -528,6 +529,114 @@ export async function setOrientationTargetsForContent(
     await assignOrientationVideo({ contentId, targetType: t.type, targetId: t.id, role });
   }
   return true;
+}
+
+// ====================== LECTURE COMMENTS / Q&A ======================
+// Per-lecture comment threads (one level of replies). All reads/writes are
+// service-role only; the API layer enforces enrolled-access + ownership.
+
+const COMMENTS_TABLE = "lecture_comments";
+
+export interface NewLectureComment {
+  recording_id: string;
+  course_id?: string | null;
+  author_kind: LectureComment["author_kind"];
+  author_id: string;
+  author_name: string;
+  author_phone?: string | null;
+  author_role?: string | null;
+  body: string;
+  parent_comment_id?: string | null;
+}
+
+/** All non-deleted comments for a lecture, oldest-first (UI groups replies). */
+export async function getLectureComments(recordingId: string): Promise<LectureComment[]> {
+  if (!recordingId) return [];
+  const db = getSupabaseAdmin();
+  if (!db) return [];
+  const { data } = await db
+    .from(COMMENTS_TABLE)
+    .select("*")
+    .eq("recording_id", recordingId)
+    .is("deleted_at", null)
+    .order("created_at", { ascending: true });
+  return (data as LectureComment[]) ?? [];
+}
+
+export async function getLectureCommentById(id: string): Promise<LectureComment | null> {
+  if (!id) return null;
+  const db = getSupabaseAdmin();
+  if (!db) return null;
+  const { data } = await db.from(COMMENTS_TABLE).select("*").eq("id", id).maybeSingle();
+  return (data as LectureComment) ?? null;
+}
+
+export async function createLectureComment(input: NewLectureComment): Promise<LectureComment | null> {
+  const db = getSupabaseAdmin();
+  if (!db) return null;
+  const { data, error } = await db.from(COMMENTS_TABLE).insert({
+    recording_id: input.recording_id,
+    course_id: input.course_id ?? null,
+    author_kind: input.author_kind,
+    author_id: input.author_id,
+    author_name: input.author_name,
+    author_phone: input.author_phone ?? null,
+    author_role: input.author_role ?? null,
+    body: input.body,
+    parent_comment_id: input.parent_comment_id ?? null,
+  }).select().single();
+  if (error) throw new Error(error.message);
+  return data as LectureComment;
+}
+
+export async function updateLectureComment(id: string, patch: Partial<LectureComment>): Promise<LectureComment | null> {
+  const db = getSupabaseAdmin();
+  if (!db) return null;
+  const { data, error } = await db.from(COMMENTS_TABLE).update(patch).eq("id", id).select().single();
+  if (error) throw new Error(error.message);
+  return data as LectureComment;
+}
+
+/** Soft-delete a comment (and any replies) — history is preserved. */
+export async function softDeleteLectureComment(id: string): Promise<boolean> {
+  const db = getSupabaseAdmin();
+  if (!db) return false;
+  const now = new Date().toISOString();
+  await db.from(COMMENTS_TABLE).update({ deleted_at: now }).or(`id.eq.${id},parent_comment_id.eq.${id}`);
+  return true;
+}
+
+/** Rate-limit helper: how many comments this author posted since `sinceISO`. */
+export async function countRecentLectureComments(authorId: string, sinceISO: string): Promise<number> {
+  const db = getSupabaseAdmin();
+  if (!db) return 0;
+  const { count } = await db
+    .from(COMMENTS_TABLE)
+    .select("id", { count: "exact", head: true })
+    .eq("author_id", authorId)
+    .gte("created_at", sinceISO);
+  return count ?? 0;
+}
+
+/**
+ * Moderation queue: top-level, non-hidden, non-deleted STUDENT comments that
+ * are not yet answered, oldest-first. Optional course filter.
+ */
+export async function getUnansweredLectureComments(courseId?: string): Promise<LectureComment[]> {
+  const db = getSupabaseAdmin();
+  if (!db) return [];
+  let q = db
+    .from(COMMENTS_TABLE)
+    .select("*")
+    .eq("author_kind", "student")
+    .eq("is_answered", false)
+    .eq("is_hidden", false)
+    .is("parent_comment_id", null)
+    .is("deleted_at", null)
+    .order("created_at", { ascending: true });
+  if (courseId) q = q.eq("course_id", courseId);
+  const { data } = await q;
+  return (data as LectureComment[]) ?? [];
 }
 
 // ====================== CLASS HUB VIEWS (NEW badge) ======================
