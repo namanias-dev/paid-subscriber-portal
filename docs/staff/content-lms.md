@@ -48,6 +48,18 @@ There are **two ways** to set this up — both create the same shared link:
 
 **Note on "One-off video URLs (legacy)":** the small editor below the library picker is for pasting a single YouTube URL that isn't in the library. Prefer the library picker so the video can be reused. Existing inline orientation videos were automatically migrated into the library, so they now appear in the picker.
 
+## Video protection (downloads disabled + per-student watermark)
+
+For **uploaded (hosted) lecture and orientation videos**, the student player is hardened against casual piracy:
+
+- **No download button.** The player's download control is removed and right-click "Save video as" is blocked. Picture-in-Picture and "cast to device" are disabled too.
+- **No shareable link.** Videos stream from a **short-lived signed URL** that is created only after we re-check the student is enrolled. The raw file address never appears in the page and a copied link **stops working within ~30 minutes**, so it can't be passed around.
+- **Per-student moving watermark.** A faint label showing the **student's name + phone** and a **live clock** floats over the video and moves every few seconds. If anyone screen-records and leaks a lecture, the watermark identifies exactly which account did it.
+
+⚠️ These are strong deterrents, **not** unbreakable DRM — a determined person can still point a phone camera at the screen. True "black screen on screen-record" protection needs a dedicated DRM video platform (e.g. VdoCipher); see the engineering notes if we ever want to evaluate that.
+
+**Note:** orientation/welcome videos added as plain **YouTube/Drive links** are hosted by YouTube/Google, so their own download rules apply — only videos you **upload** into our library get the protections above.
+
 ## Course Manager
 **Menu:** `Academics` → `Courses`  ·  **Web address:** `/admin/courses`  ·  **Permission:** Manage courses.
 

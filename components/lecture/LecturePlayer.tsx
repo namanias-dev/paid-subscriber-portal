@@ -44,6 +44,25 @@ export default function LecturePlayer({
   const resumed = useRef(false);
   const lastSaved = useRef(0);
 
+  // Anti-piracy watermark: student identity + live IST clock, repositioned every
+  // few seconds so it can't be cropped out and so a DevTools delete is re-applied
+  // on the next tick (React re-renders the node from state). pointer-events:none
+  // keeps it from blocking the controls.
+  const [wm, setWm] = useState<{ top: number; left: number; clock: string }>({ top: 50, left: 50, clock: "" });
+  useEffect(() => {
+    if (!watermark) return;
+    const tick = () => {
+      setWm({
+        top: 14 + Math.random() * 64, // keep the (center-anchored) label inside the frame
+        left: 16 + Math.random() * 60,
+        clock: new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata", hour12: true, hour: "2-digit", minute: "2-digit", second: "2-digit" }),
+      });
+    };
+    tick();
+    const id = setInterval(tick, 4000);
+    return () => clearInterval(id);
+  }, [watermark]);
+
   // Fetch the signed URL on mount (access re-checked server-side).
   useEffect(() => {
     let alive = true;
@@ -118,9 +137,13 @@ export default function LecturePlayer({
                 ref={videoRef}
                 src={url}
                 controls
+                controlsList="nodownload noplaybackrate noremoteplayback"
+                disablePictureInPicture
+                disableRemotePlayback
                 playsInline
                 preload="metadata"
                 className="h-full w-full"
+                onContextMenu={(e) => e.preventDefault()}
                 onLoadedMetadata={onLoadedMeta}
                 onPause={() => save()}
                 onEnded={() => save(true)}
@@ -130,9 +153,19 @@ export default function LecturePlayer({
                 }}
               />
               {watermark && (
-                <span className="pointer-events-none absolute bottom-10 right-3 select-none text-[10px] font-medium text-white/30">
-                  {watermark}
-                </span>
+                <div
+                  aria-hidden
+                  className="pointer-events-none absolute z-10 select-none whitespace-nowrap text-[11px] font-semibold uppercase tracking-wide text-white/30"
+                  style={{
+                    top: `${wm.top}%`,
+                    left: `${wm.left}%`,
+                    transform: "translate(-50%, -50%) rotate(-18deg)",
+                    textShadow: "0 1px 4px rgba(0,0,0,0.7)",
+                    transition: "top 1s ease, left 1s ease",
+                  }}
+                >
+                  {watermark}{wm.clock ? ` · ${wm.clock}` : ""}
+                </div>
               )}
             </>
           )}
