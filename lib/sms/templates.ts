@@ -31,6 +31,7 @@ export const TRIGGERS = {
   first_login: "first_login",
   course_enrolled: "course_enrolled",
   payment_plan_changed: "payment_plan_changed",
+  webinar_moved: "webinar_moved",
 } as const;
 
 export interface SeedTemplate {
@@ -78,6 +79,8 @@ export const SEED_TEMPLATES: SeedTemplate[] = [
     body: "Hi {first_name}, our next UPSC webinar is open! View list & enroll: {login_url}. Naman Sharma IAS Academy" },
   { id: "missed_webinar_followup", name: "Missed Webinar Follow-up", use_case: "WEBINAR", message_type: "service", trigger_event: null, audience_type: "webinar_no_show",
     body: "Hi {first_name}, sorry we missed you at {item_short}. Catch our upcoming sessions: {login_url}. Naman Sharma IAS Academy" },
+  { id: "webinar_moved", name: "Webinar Moved", use_case: "WEBINAR", message_type: "service", trigger_event: TRIGGERS.webinar_moved, audience_type: "webinar_registered",
+    body: "Hi {first_name}, your registration is moved to {item_short} on {date}. Your access stays valid. Login {login_url}. Naman Sharma IAS Academy" },
 
   // ---------------- POST-WEBINAR -> ADMISSIONS ----------------
   { id: "post_webinar_thankyou", name: "Post-Webinar Thank You", use_case: "POST_WEBINAR", message_type: "service", trigger_event: TRIGGERS.post_webinar_thankyou, audience_type: "webinar_attendees",

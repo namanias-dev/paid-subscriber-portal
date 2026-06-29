@@ -68,6 +68,11 @@ export default function WebinarForm({ webinar }: { webinar?: Webinar }) {
   const [recordingLink, setRecordingLink] = useState(webinar?.recording_link || "");
   const [status, setStatus] = useState<Webinar["status"]>(webinar?.status || "upcoming");
   const [endDatetime, setEndDatetime] = useState(toLocalInput(webinar?.end_datetime));
+  const [registrationStatus, setRegistrationStatus] = useState<NonNullable<Webinar["registration_status"]>>(
+    (webinar?.registration_status as NonNullable<Webinar["registration_status"]>) || "OPEN",
+  );
+  const [autoClose, setAutoClose] = useState<boolean>(webinar?.auto_close_registration !== false);
+  const [registrationClosesAt, setRegistrationClosesAt] = useState(toLocalInput(webinar?.registration_closes_at));
   const [longDescription, setLongDescription] = useState(webinar?.long_description || "");
   const [coverImageUrl, setCoverImageUrl] = useState<string | null>(webinar?.cover_image_url || null);
   const [mobileImageUrl, setMobileImageUrl] = useState<string | null>(webinar?.mobile_image_url || null);
@@ -115,6 +120,9 @@ export default function WebinarForm({ webinar }: { webinar?: Webinar }) {
       link: link.trim() || null,
       recording_link: recordingLink.trim() || null,
       status,
+      registration_status: registrationStatus,
+      auto_close_registration: autoClose,
+      registration_closes_at: registrationClosesAt ? istInputToISO(registrationClosesAt) : null,
       cover_image_url: coverImageUrl,
       mobile_image_url: mobileImageUrl,
       faqs: faqs.filter((f) => f.q.trim()),
@@ -197,6 +205,26 @@ export default function WebinarForm({ webinar }: { webinar?: Webinar }) {
                   </Field>
                   <Field label="End date & time (IST, optional)" hint="Leave blank for a single-time session.">
                     <input type="datetime-local" className="input" value={endDatetime} onChange={(e) => setEndDatetime(e.target.value)} />
+                  </Field>
+                </Section>
+
+                <Section title="Registration window" desc="Controls who can register & pay. Once registration closes, the public Register/Pay button is hidden and the server rejects new payments — so no one pays for a session that has already passed.">
+                  <Field label="Registration" hint="Open = normal (auto-closes at start unless turned off). Closed/Disabled hide it now. Draft keeps it hidden while you edit.">
+                    <select className="input" value={registrationStatus} onChange={(e) => setRegistrationStatus(e.target.value as NonNullable<Webinar["registration_status"]>)}>
+                      <option value="OPEN">Open</option>
+                      <option value="CLOSED">Closed (stop new registrations now)</option>
+                      <option value="DISABLED">Disabled (hidden from public)</option>
+                      <option value="DRAFT">Draft (not yet published)</option>
+                    </select>
+                  </Field>
+                  <Field label="Auto-close at start" hint="When on, registration closes automatically once the start (or custom cutoff) time passes. Recording sessions stay open.">
+                    <label className="flex items-center gap-2 text-sm">
+                      <input type="checkbox" checked={autoClose} onChange={(e) => setAutoClose(e.target.checked)} />
+                      Automatically close registration after it passes
+                    </label>
+                  </Field>
+                  <Field label="Custom registration cutoff (IST, optional)" hint="Leave blank to close at the start time.">
+                    <input type="datetime-local" className="input" value={registrationClosesAt} onChange={(e) => setRegistrationClosesAt(e.target.value)} />
                   </Field>
                 </Section>
 

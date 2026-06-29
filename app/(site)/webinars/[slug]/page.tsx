@@ -9,7 +9,8 @@ import TrustStrip from "@/components/public/TrustStrip";
 import StickyMobileCTA from "@/components/public/StickyMobileCTA";
 import LandingSections from "@/components/public/LandingSections";
 import BrochureCards from "@/components/public/BrochureCards";
-import { getWebinarBySlug, getLibraryDocsByIds } from "@/lib/dataProvider";
+import { getWebinarBySlug, getWebinarById, getLibraryDocsByIds } from "@/lib/dataProvider";
+import { canRegisterForWebinar, EXPIRED_COPY } from "@/lib/webinarLifecycle";
 import { getPurchaseSnapshot, webinarStatus } from "@/lib/purchaseStatus";
 import { buildLandingView } from "@/lib/landingView";
 import { formatINR, formatISTRange } from "@/lib/dates";
@@ -52,6 +53,18 @@ export default async function WebinarDetail({ params }: { params: { slug: string
   const completed = w.status === "completed";
   const priceLabel = w.price === 0 ? "Free" : formatINR(w.price);
   const startLabel = formatISTRange(w.datetime, w.end_datetime);
+
+  // Lifecycle: registration auto-closes once the session passes (unless it's a
+  // recording sale). "closed" only matters for not-yet-registered visitors.
+  const canRegister = canRegisterForWebinar(w);
+  const closed = !canRegister && !registered;
+  let nextWebinarSlug: string | null = null;
+  if (closed && w.next_webinar_id) {
+    const next = await getWebinarById(w.next_webinar_id);
+    nextWebinarSlug = next && next.active !== false ? next.slug : null;
+  }
+  const closedCtaHref = nextWebinarSlug ? `/webinars/${nextWebinarSlug}` : "/webinars";
+  const closedCtaLabel = nextWebinarSlug ? EXPIRED_COPY.ctaNext : EXPIRED_COPY.ctaUpcoming;
 
   const trust = [
     { icon: "🗓", label: completed ? "Recording available" : "Live + recording" },
@@ -137,6 +150,8 @@ export default async function WebinarDetail({ params }: { params: { slug: string
           <div className="mt-5 flex flex-wrap gap-3">
             {registered ? (
               <a href="/portal" className="btn btn-primary">Go to My Portal →</a>
+            ) : closed ? (
+              <a href={closedCtaHref} className="btn btn-primary">{closedCtaLabel} →</a>
             ) : (
               <a href="#register" className="btn btn-primary">{completed ? "Get the recording" : "Reserve your spot →"}</a>
             )}
@@ -145,7 +160,7 @@ export default async function WebinarDetail({ params }: { params: { slug: string
 
           <TrustStrip items={trust} />
 
-          {!completed && (
+          {!completed && !closed && (
             <div className="mt-7">
               <p className="mb-2 text-sm font-medium text-ink2">Starts in</p>
               <Countdown to={w.datetime} />
@@ -192,6 +207,13 @@ export default async function WebinarDetail({ params }: { params: { slug: string
                   <a href={w.recording_link} target="_blank" rel="noopener noreferrer" className="btn btn-secondary mt-2 w-full">▶ Watch recording</a>
                 )}
               </>
+            ) : closed ? (
+              <>
+                <span className="pill pill-gray mb-2">Registration closed</span>
+                <h3 className="text-lg font-bold">{EXPIRED_COPY.title}</h3>
+                <p className="mt-1 text-sm text-ink2">{EXPIRED_COPY.body}</p>
+                <a href={closedCtaHref} className="btn btn-primary mt-4 w-full">{closedCtaLabel} →</a>
+              </>
             ) : (
               <>
                 {paymentPending ? (
@@ -226,8 +248,8 @@ export default async function WebinarDetail({ params }: { params: { slug: string
 
       <StickyMobileCTA
         priceLabel={priceLabel}
-        ctaLabel={completed ? "Get recording" : "Reserve spot"}
-        ctaHref="#register"
+        ctaLabel={closed ? closedCtaLabel : completed ? "Get recording" : "Reserve spot"}
+        ctaHref={closed ? closedCtaHref : "#register"}
         whatsapp={view.whatsapp}
       />
     </div>

@@ -8,6 +8,7 @@ import { verifyFromStoredCallback, eazypayVerify, type VerifyOutcome } from "./e
 import { recordPaymentPaid, recordPaymentInitiated, recordPaymentStatusChanged, recordRegistrationCreated } from "./analytics/server";
 import { fireAutoSms } from "./sms/dispatch";
 import { TRIGGERS } from "./sms/templates";
+import { NON_DUPLICABLE_WEBINAR_FIELDS, buildDuplicateSlug } from "./webinarLifecycle";
 import type {
   Buyer,
   Student,
@@ -1776,6 +1777,12 @@ export async function addWebinar(input: Partial<Webinar>): Promise<Webinar> {
     materials: input.materials ?? [],
     cross_sell: input.cross_sell ?? {},
     brochure_ids: input.brochure_ids ?? [],
+    registration_status: input.registration_status ?? "OPEN",
+    auto_close_registration: input.auto_close_registration ?? true,
+    registration_closes_at: input.registration_closes_at ?? null,
+    ended_at: input.ended_at ?? null,
+    next_webinar_id: input.next_webinar_id ?? null,
+    previous_webinar_id: input.previous_webinar_id ?? null,
     created_at: new Date().toISOString(),
   } as Webinar;
   if (demoMode()) {
@@ -2385,6 +2392,347 @@ export async function getWebinarPaymentStatusesForSlug(slug: string): Promise<Ma
   const { data } = await db.from("payments").select("phone,status").eq("item_type", "webinar").eq("item_slug", s);
   for (const r of (data as { phone: string | null; status: string | null }[]) ?? []) add(r.phone, r.status);
   return out;
+}
+
+/** Single webinar by id (admin actions). */
+export async function getWebinarById(id: string): Promise<Webinar | null> {
+  const all = await getWebinars();
+  return all.find((w) => w.id === id) ?? null;
+}
+
+// ====================== WEBINAR LIFECYCLE AUDIT ======================
+
+export interface WebinarAuditEntry {
+  action: "webinar_duplicated" | "registration_moved" | "registration_auto_closed" | "payment_blocked_expired";
+  webinar_id?: string | null;
+  target_webinar_id?: string | null;
+  actor?: string | null;
+  count?: number | null;
+  detail?: Record<string, unknown> | null;
+}
+
+/** Best-effort append to the webinar audit log. Never throws. */
+export async function logWebinarAudit(entry: WebinarAuditEntry): Promise<void> {
+  const db = getSupabaseAdmin();
+  if (!db) return;
+  await db
+    .from("webinar_audit_log")
+    .insert({
+      action: entry.action,
+      webinar_id: entry.webinar_id ?? null,
+      target_webinar_id: entry.target_webinar_id ?? null,
+      actor: entry.actor ?? null,
+      count: entry.count ?? null,
+      detail: entry.detail ?? {},
+    })
+    .then(undefined, () => {});
+}
+
+// ====================== DUPLICATE WEBINAR (FEATURE 2) ======================
+
+export interface DuplicateWebinarOptions {
+  datetime: string;            // new start (UTC ISO, already IST-converted)
+  end_datetime?: string | null;
+  slug?: string | null;        // optional custom slug; auto-generated when blank
+  status?: "DRAFT" | "LIVE";   // publish state of the NEW webinar
+  copyZoomLink?: boolean;      // copy join link (default false)
+  markOldEnded?: boolean;      // close/end the source (default true)
+  actor?: string | null;
+}
+
+/**
+ * Duplicate a webinar by REFERENCE — all content/media/files are copied as
+ * URLs/ids (no R2 binary is duplicated). Registrants and payment attempts are
+ * NOT copied. Sets reciprocal lineage (old.next ↔ new.previous) and, by
+ * default, marks the source as ended/closed so it stops accepting payments.
+ */
+export async function duplicateWebinar(
+  sourceId: string,
+  opts: DuplicateWebinarOptions,
+): Promise<{ ok: boolean; webinar?: Webinar; error?: string }> {
+  const source = await getWebinarById(sourceId);
+  if (!source) return { ok: false, error: "Source webinar not found." };
+
+  const status = opts.status === "LIVE" ? "LIVE" : "DRAFT";
+  // Build a clean copy of every content field by reference.
+  const copy: Partial<Webinar> = { ...source };
+  for (const f of NON_DUPLICABLE_WEBINAR_FIELDS) delete (copy as Record<string, unknown>)[f];
+
+  // New scheduling + publish state.
+  copy.datetime = opts.datetime;
+  copy.end_datetime = opts.end_datetime ?? null;
+  copy.status = "upcoming";
+  copy.registrations = 0;
+  copy.registration_status = status === "LIVE" ? "OPEN" : "DRAFT";
+  // A duplicate is a fresh future session — keep it active for the public page
+  // only when published LIVE; DRAFT stays hidden.
+  copy.active = status === "LIVE";
+  copy.auto_close_registration = source.auto_close_registration ?? true;
+  copy.registration_closes_at = null; // default to (new) start unless admin edits
+  copy.ended_at = null;
+  copy.recording_link = null; // a new live session has no recording yet
+  if (!opts.copyZoomLink) copy.link = null;
+
+  // Unique slug.
+  let slug = (opts.slug || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  if (!slug) slug = buildDuplicateSlug(source.title, opts.datetime);
+  const existingSlugs = new Set((await getWebinars()).map((w) => w.slug));
+  if (existingSlugs.has(slug)) {
+    let n = 2;
+    while (existingSlugs.has(`${slug}-${n}`)) n++;
+    slug = `${slug}-${n}`;
+  }
+  copy.slug = slug;
+  copy.previous_webinar_id = source.id;
+
+  const created = await addWebinar(copy);
+
+  // Reciprocal lineage + optionally end the old session.
+  const sourcePatch: Partial<Webinar> = { next_webinar_id: created.id };
+  if (opts.markOldEnded !== false) {
+    sourcePatch.registration_status = "CLOSED";
+    sourcePatch.ended_at = new Date().toISOString();
+    if (source.status !== "completed") sourcePatch.status = "completed";
+  }
+  await updateWebinar(source.id, sourcePatch);
+
+  await logWebinarAudit({
+    action: "webinar_duplicated",
+    webinar_id: source.id,
+    target_webinar_id: created.id,
+    actor: opts.actor ?? null,
+    detail: {
+      new_slug: created.slug,
+      new_datetime: created.datetime,
+      status,
+      copy_zoom_link: !!opts.copyZoomLink,
+      mark_old_ended: opts.markOldEnded !== false,
+    },
+  });
+
+  return { ok: true, webinar: created };
+}
+
+// ====================== MOVE LATE REGISTRATIONS (FEATURE 3) ======================
+
+/** Payment statuses eligible to be moved by default (paid + in-flight). */
+export const MOVABLE_PAYMENT_STATUSES = ["PAID", "VERIFYING", "PENDING", "captured", "pending"] as const;
+/** Never moved unless explicitly included. */
+export const NON_MOVABLE_PAYMENT_STATUSES = ["FAILED", "ABANDONED", "refunded"] as const;
+
+export interface MoveCandidate {
+  registration_id: string;
+  name: string;
+  phone: string;
+  login_code: string | null;
+  payment_status: string;          // normalized label: PAID/PENDING/VERIFYING/FAILED/.../FREE/UNPAID
+  amount: number | null;
+  payment_id: string | null;
+  reference_no: string | null;
+  included: boolean;
+  excluded_reason?: string | null;
+}
+
+export interface MovePreview {
+  totalFound: number;
+  includedCount: number;
+  excludedCount: number;
+  perStatus: Record<string, number>;
+  candidates: MoveCandidate[];
+}
+
+export interface MoveRegistrationsInput {
+  sourceId: string;
+  targetId: string;
+  cutoffISO?: string | null;       // only registrations created at/after this instant
+  includeStatuses?: string[];      // overrides the default movable set
+  actor?: string | null;
+}
+
+/**
+ * Compute the move preview (DRY RUN). Joins free registrations + paid attempts
+ * by phone so each row shows its real payment status, amount, and login code.
+ * Never mutates anything.
+ */
+export async function previewMoveRegistrations(input: MoveRegistrationsInput): Promise<{ ok: boolean; error?: string; source?: Webinar; target?: Webinar; preview?: MovePreview }> {
+  const source = await getWebinarById(input.sourceId);
+  const target = await getWebinarById(input.targetId);
+  if (!source) return { ok: false, error: "Source webinar not found." };
+  if (!target) return { ok: false, error: "Target webinar not found." };
+  if (source.id === target.id) return { ok: false, error: "Source and target must differ." };
+
+  const include = new Set(
+    (input.includeStatuses && input.includeStatuses.length
+      ? input.includeStatuses
+      : (MOVABLE_PAYMENT_STATUSES as readonly string[])
+    ).map((s) => s.toUpperCase()),
+  );
+  const cutoffMs = input.cutoffISO ? Date.parse(input.cutoffISO) : NaN;
+
+  const isFree = (source.price ?? 0) <= 0;
+  const [regs, payByPhone, payRowByPhone] = await Promise.all([
+    getWebinarRegistrationsByWebinar(source.id),
+    isFree ? Promise.resolve(new Map<string, string>()) : getWebinarPaymentStatusesForSlug(source.slug),
+    isFree ? Promise.resolve(new Map<string, Payment>()) : getWebinarPaymentRowsForSlug(source.slug),
+  ]);
+
+  const candidates: MoveCandidate[] = [];
+  const perStatus: Record<string, number> = {};
+  for (const r of regs) {
+    if (!Number.isNaN(cutoffMs) && Date.parse(r.created_at) < cutoffMs) continue;
+    const phone = (r.phone || "").trim();
+    const payRow = payRowByPhone.get(phone) || null;
+    let label: string;
+    if (isFree) label = "FREE";
+    else {
+      const cls = payByPhone.get(phone);
+      label = cls ? cls : "UNPAID";
+    }
+    perStatus[label] = (perStatus[label] || 0) + 1;
+
+    let included = false;
+    let excluded_reason: string | null = null;
+    if (isFree) {
+      included = true; // free regs are always movable (no revenue risk)
+    } else if (include.has(label)) {
+      included = true;
+    } else {
+      excluded_reason = `Status ${label} not selected`;
+    }
+
+    const login = await loginCodeForPhone(phone);
+    candidates.push({
+      registration_id: r.id,
+      name: r.name || payRow?.student_name || "—",
+      phone,
+      login_code: login,
+      payment_status: label,
+      amount: payRow?.amount ?? null,
+      payment_id: payRow?.id ?? null,
+      reference_no: payRow?.reference_no ?? null,
+      included,
+      excluded_reason,
+    });
+  }
+
+  const includedCount = candidates.filter((c) => c.included).length;
+  const preview: MovePreview = {
+    totalFound: candidates.length,
+    includedCount,
+    excludedCount: candidates.length - includedCount,
+    perStatus,
+    candidates,
+  };
+  return { ok: true, source, target, preview };
+}
+
+/**
+ * APPLY the move. For each included candidate:
+ *  - re-point its webinar_registrations.webinar_id to the target + stamp move audit cols
+ *  - re-point its matching payment's item_slug/item to the target + stamp move cols
+ * Nothing is deleted, no revenue is duplicated, no student is re-created. Returns
+ * the list of moved students for idempotent notification by the caller.
+ */
+export async function applyMoveRegistrations(
+  input: MoveRegistrationsInput & { reason?: string | null },
+): Promise<{ ok: boolean; error?: string; moved: { registration_id: string; payment_id: string | null; name: string; phone: string }[]; source?: Webinar; target?: Webinar }> {
+  const pre = await previewMoveRegistrations(input);
+  if (!pre.ok || !pre.preview || !pre.source || !pre.target) return { ok: false, error: pre.error || "Preview failed.", moved: [] };
+  const { source, target } = pre;
+  const db = getSupabaseAdmin();
+  if (!db) return { ok: false, error: "Database unavailable.", moved: [] };
+
+  const nowISO = new Date().toISOString();
+  const actor = input.actor ?? null;
+  const reason = input.reason ?? null;
+  const moved: { registration_id: string; payment_id: string | null; name: string; phone: string }[] = [];
+
+  for (const c of pre.preview.candidates) {
+    if (!c.included) continue;
+    // Move the registration row.
+    await db
+      .from("webinar_registrations")
+      .update({
+        webinar_id: target.id,
+        moved_from_webinar_id: source.id,
+        moved_to_webinar_id: target.id,
+        moved_at: nowISO,
+        moved_by: actor,
+        move_reason: reason,
+        is_moved_registration: true,
+      })
+      .eq("id", c.registration_id)
+      .then(undefined, () => {});
+
+    // Re-point the paid attempt (if any) so portal access follows. We never
+    // change the amount/status — only where it points. Skips FAILED/etc. since
+    // those weren't included.
+    if (c.payment_id) {
+      await db
+        .from("payments")
+        .update({
+          item_slug: target.slug,
+          item: target.title,
+          moved_from_webinar_id: source.id,
+          moved_to_webinar_id: target.id,
+          moved_at: nowISO,
+          moved_by: actor,
+          move_reason: reason,
+          is_moved_registration: true,
+        })
+        .eq("id", c.payment_id)
+        .then(undefined, () => {});
+    }
+
+    moved.push({ registration_id: c.registration_id, payment_id: c.payment_id, name: c.name, phone: c.phone });
+  }
+
+  await logWebinarAudit({
+    action: "registration_moved",
+    webinar_id: source.id,
+    target_webinar_id: target.id,
+    actor,
+    count: moved.length,
+    detail: {
+      reason,
+      cutoff: input.cutoffISO ?? null,
+      include_statuses: input.includeStatuses ?? Array.from(MOVABLE_PAYMENT_STATUSES),
+      moved_phones: moved.map((m) => m.phone),
+    },
+  });
+
+  return { ok: true, moved, source, target };
+}
+
+/** All webinar payment rows for a slug, best (paid-wins) row per phone. */
+export async function getWebinarPaymentRowsForSlug(slug: string): Promise<Map<string, Payment>> {
+  const out = new Map<string, Payment>();
+  const s = (slug || "").trim();
+  if (!s) return out;
+  const db = demoMode() ? null : getSupabaseAdmin();
+  if (!db) return out;
+  const { data } = await db.from("payments").select("*").eq("item_type", "webinar").eq("item_slug", s);
+  const rows = (data as Payment[]) ?? [];
+  for (const r of rows) {
+    if (r.deleted_at) continue;
+    const ph = (r.phone || "").trim();
+    if (!ph) continue;
+    const prev = out.get(ph);
+    if (!prev || PAY_RANK[webinarPayClass(r.status)] > PAY_RANK[webinarPayClass(prev.status)]) out.set(ph, r);
+  }
+  return out;
+}
+
+/** Login code for a phone (buyer), or null. */
+async function loginCodeForPhone(phone: string): Promise<string | null> {
+  const db = getSupabaseAdmin();
+  if (!db || !phone) return null;
+  try {
+    const { data } = await db.from("buyers").select("login_code").eq("phone", phone).maybeSingle();
+    return (data?.login_code as string) ?? null;
+  } catch {
+    return null;
+  }
 }
 
 /** Registrations for a single webinar (admin registrant list). Newest first. */

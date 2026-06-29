@@ -121,6 +121,16 @@ export default async function PortalItemPage({ params }: { params: { reference: 
             <h1 className="mt-3 text-2xl font-extrabold sm:text-3xl">{webinar.title}</h1>
             {webinar.description && <p className="mt-2 text-ink2">{webinar.description}</p>}
 
+            {/* Moved-registration notice (FEATURE 5) — shows the NEW schedule. */}
+            {purchase?.is_moved_registration && (
+              <div className="mt-4 rounded-xl border border-primary/30 bg-primary/5 p-4">
+                <p className="font-heading text-sm font-bold text-primary">Your registration has been moved to the next live session.</p>
+                <p className="mt-1 text-sm text-ink2">
+                  This session is now scheduled for <b>{formatISTDateTime(webinar.datetime)}</b>. Your payment / access remains valid.
+                </p>
+              </div>
+            )}
+
             {/* Smart, state-aware access */}
             <div className="mt-6">
               <WebinarAccess

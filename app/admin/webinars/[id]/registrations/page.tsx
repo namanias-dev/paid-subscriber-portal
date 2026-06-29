@@ -1,8 +1,10 @@
 "use client";
 
 import Link from "next/link";
+import { useState } from "react";
 import { PageHeader, useAdminData, LoadingBlock, TableShell } from "@/components/admin/ui";
 import SendSmsButton from "@/components/admin/sms/SendSmsButton";
+import MoveRegistrationsModal from "@/components/admin/MoveRegistrationsModal";
 import { formatISTDateTime } from "@/lib/dates";
 
 type RegStatus = "paid" | "pending" | "failed" | "unpaid" | "free";
@@ -23,10 +25,11 @@ const STATUS_PILL: Record<RegStatus, { label: string; cls: string }> = {
 };
 
 export default function WebinarRegistrantsAdmin({ params }: { params: { id: string } }) {
-  const { data, loading } = useAdminData<RegistrantsResponse>(
+  const { data, loading, reload } = useAdminData<RegistrantsResponse>(
     `/api/admin/webinars/${params.id}/registrations`,
     `webinar-regs-${params.id}`,
   );
+  const [moveOpen, setMoveOpen] = useState(false);
 
   if (loading) return <LoadingBlock />;
   if (!data?.ok) {
@@ -52,7 +55,12 @@ export default function WebinarRegistrantsAdmin({ params }: { params: { id: stri
       <PageHeader
         title={`Registrants — ${webinar.title}`}
         subtitle={`${webinar.isFree ? "Free webinar" : "Paid webinar"} · Confirmed counts paid + free only — pending/failed/unpaid are not registered.`}
-        action={<Link href="/admin/webinars" className="btn btn-secondary text-sm">← Webinars</Link>}
+        action={
+          <div className="flex gap-2">
+            <button onClick={() => setMoveOpen(true)} className="btn btn-secondary text-sm">Move late registrations</button>
+            <Link href="/admin/webinars" className="btn btn-secondary text-sm">← Webinars</Link>
+          </div>
+        }
       />
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
@@ -85,6 +93,14 @@ export default function WebinarRegistrantsAdmin({ params }: { params: { id: stri
           )}
         </TableShell>
       </div>
+
+      {moveOpen && (
+        <MoveRegistrationsModal
+          source={{ id: webinar.id, title: webinar.title }}
+          onClose={() => setMoveOpen(false)}
+          onDone={() => { setMoveOpen(false); reload(); }}
+        />
+      )}
     </div>
   );
 }

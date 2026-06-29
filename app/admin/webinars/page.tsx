@@ -1,14 +1,18 @@
 "use client";
 
 import Link from "next/link";
+import { useState } from "react";
 import { PageHeader, useAdminData, LoadingBlock, TableShell } from "@/components/admin/ui";
 import { useToast } from "@/components/ui/Toast";
 import { formatINR, formatISTDateTime } from "@/lib/dates";
+import { webinarBadge } from "@/lib/webinarLifecycle";
+import DuplicateWebinarModal from "@/components/admin/DuplicateWebinarModal";
 import type { Webinar } from "@/lib/types";
 
 export default function WebinarsAdmin() {
   const { data: webinars, loading, reload } = useAdminData<Webinar[]>("/api/admin/webinars", "webinars");
   const { toast } = useToast();
+  const [dupe, setDupe] = useState<{ id: string; title: string } | null>(null);
 
   async function remove(id: string) {
     if (!confirm("Delete webinar?")) return;
@@ -55,11 +59,10 @@ export default function WebinarsAdmin() {
               </Link>
             </td>
             <td className="px-4 py-3">
-              {w.active === false ? (
-                <span className="pill pill-gray">Disabled</span>
-              ) : (
-                <span className={`pill ${w.status === "completed" ? "pill-gray" : "pill-green"}`}>{w.status}</span>
-              )}
+              {(() => {
+                const b = webinarBadge(w);
+                return <span className={`pill ${b.cls}`}>{b.label}</span>;
+              })()}
             </td>
             <td className="px-4 py-3">
               <div className="flex gap-2 text-xs">
@@ -70,6 +73,7 @@ export default function WebinarsAdmin() {
             <td className="px-4 py-3">
               <div className="flex gap-2">
                 <Link href={`/admin/webinars/${w.id}/edit`} className="text-primary text-xs">Edit</Link>
+                <button onClick={() => setDupe({ id: w.id, title: w.title })} className="text-xs text-primary">Duplicate</button>
                 <button onClick={() => toggleActive(w)} className="text-xs text-ink2">{w.active === false ? "Enable" : "Disable"}</button>
                 <button onClick={() => remove(w.id)} className="text-danger text-xs">Delete</button>
               </div>
@@ -77,6 +81,14 @@ export default function WebinarsAdmin() {
           </tr>
         ))}
       </TableShell>
+
+      {dupe && (
+        <DuplicateWebinarModal
+          webinar={dupe}
+          onClose={() => setDupe(null)}
+          onDone={() => { setDupe(null); reload(); }}
+        />
+      )}
     </div>
   );
 }

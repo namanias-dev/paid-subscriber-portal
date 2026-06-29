@@ -3,11 +3,14 @@ import { cookies } from "next/headers";
 import {
   getCourseBySlug,
   getWebinarBySlug,
+  getWebinarById,
   createPayment,
   getPaymentByReference,
   incrementCouponUsage,
   findRecentOpenPaymentForItem,
+  logWebinarAudit,
 } from "@/lib/dataProvider";
+import { canRegisterForWebinar, buildClosedError } from "@/lib/webinarLifecycle";
 import { ATTR_COOKIE, parseAttrCookie, flattenForStamp } from "@/lib/attribution";
 import { stampBuyerAttribution } from "@/lib/analytics/server";
 import { getPlan } from "@/lib/config";
@@ -97,6 +100,26 @@ export async function POST(req: Request) {
     const resolved = await resolveItem(itemType, body);
     if (!resolved) {
       return NextResponse.json({ ok: false, error: "Item not found." }, { status: 404 });
+    }
+
+    // FEATURE 6 — server is the source of truth: never initiate a payment for a
+    // webinar whose registration has closed/ended (auto-close or manual).
+    if (itemType === "webinar") {
+      const webinar = await getWebinarBySlug(resolved.itemSlug);
+      if (webinar && !canRegisterForWebinar(webinar)) {
+        let nextSlug: string | null = null;
+        if (webinar.next_webinar_id) {
+          const next = await getWebinarById(webinar.next_webinar_id);
+          nextSlug = next?.slug ?? null;
+        }
+        await logWebinarAudit({
+          action: "payment_blocked_expired",
+          webinar_id: webinar.id,
+          actor: "system",
+          detail: { phone: mobile, slug: resolved.itemSlug },
+        });
+        return NextResponse.json(buildClosedError(webinar, nextSlug), { status: 409 });
+      }
     }
 
     // Attribution snapshot from the first-party cookie (best-effort; never blocks).

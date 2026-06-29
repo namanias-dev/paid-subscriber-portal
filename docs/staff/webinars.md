@@ -13,8 +13,59 @@ Columns: `Title`, `When`, `Price` (`Free` or amount), `Regs` (a `View registrant
 - **`+ New Webinar`** — create a webinar.
 - **`Copy link`** / **`WhatsApp`** (under `Share`) — share the public registration page.
 - **`Edit`** — edit it.
+- **`Duplicate`** — make a copy for the next session (see *Duplicating a webinar* below).
 - **`Disable`** / **`Enable`** — hide/show on the public site (reversible).
 - **`Delete`** — ⚠️ **permanently deletes the webinar AND all its registrations.** This cannot be undone.
+
+**Status badge** is now computed automatically and is always accurate:
+- `Upcoming` — in the future, registration open.
+- `Live` — happening now.
+- `Ended` — the start time has passed; **registration is auto-closed** and new payments are rejected.
+- `Registration Closed` — you manually closed registration (even before the start).
+- `Recording` — a completed/recorded session that still sells the recording (stays open on purpose).
+- `Disabled` — hidden from the public site.
+- `Draft` — not yet published.
+
+> A past-start webinar will **never** show "Upcoming" again — it shows `Ended` and stops taking money.
+
+## Registration window (auto-close)
+
+In **`Edit` → Basic Details → Registration window`** you control when people can register & pay:
+- **`Registration`** — `Open` (normal), `Closed` (stop now), `Disabled` (hide), or `Draft` (not published yet).
+- **`Auto-close at start`** (on by default) — once the start time (or your custom cutoff) passes, the public **Register / Pay** button disappears **and the server refuses new payments**. This is the safeguard that stops people paying for a session that already happened.
+- **`Custom registration cutoff (IST)`** — optional; close registration earlier than the start time. Leave blank to close at the start.
+
+The expired public page shows: **"This webinar has ended"** with a button to **upcoming webinars** — or, if you linked a next session (via Duplicate), **"Register for the next live session."**
+
+> Recording / completed sessions stay open on purpose so you can keep selling the recording. Turn **Auto-close** off if you ever want a live session to keep accepting registrations after it starts.
+
+## Duplicating a webinar
+
+Use **`Duplicate`** on the list to spin up the next session in seconds. It opens **Duplicate webinar** and copies **all** content, media, price, seats, mentor, reviews, SEO, WhatsApp and registration settings **by reference** — ⚠️ no files are re-uploaded, so it never wastes storage.
+
+You set:
+- **New date & time (IST)** (required) and optional **End time**.
+- **Slug** — leave blank to auto-generate (e.g. `upsc-strategy-01072026`).
+- **Publish state** — `Draft` (hidden while you finish editing) or `Live` (public immediately).
+- **Copy the Zoom / joining link** — usually off (you'll set a fresh link).
+- **Mark the original as ended** (on by default) — closes the old session's registration and links the two so the old page points students to the new one.
+
+Registrants and payment attempts are **not** copied. The original is kept (archived/ended), not deleted.
+
+## Moving late registrations to the next session
+
+If people registered/paid for a session that has now passed, move them forward instead of refunding. On **`View registrants`**, click **`Move late registrations`**:
+1. Pick the **target webinar**, an optional **cutoff** (only people who registered after this time), and which **statuses** to include (`Paid`, `Pending/Verifying`; free registrants are always included; `Failed`/`Abandoned` are excluded).
+2. Click **`Preview (dry run)`** — you'll see totals, a per-status breakdown, and a list (name / mobile / login code / status / amount) of exactly who will move. **Nothing changes yet.**
+3. Click **`Confirm move`** to apply.
+
+What a move does (and does **not**) do:
+- ✅ Re-points each person's registration (and their paid payment) to the new webinar, so their **portal immediately shows the new date**.
+- ✅ Keeps payment history, paid status, login code, proof uploads and access.
+- ✅ Notifies each moved student **once** (via the `Webinar Moved` SMS template, if you've enabled it).
+- ❌ Never deletes anyone, never duplicates revenue, never re-charges, never creates duplicate students.
+
+Every duplicate / move / auto-close / blocked-payment is recorded in `webinar_audit_log` (with the admin and timestamp).
 
 ## Creating / editing a webinar
 
@@ -65,3 +116,7 @@ On the registrants table, the `SMS` column has a **`SMS`** button per person. Cl
 
 ## Where the data lives
 - Webinars → `webinars`; registrations → `webinar_registrations` (deleted with the webinar). Paid status comes from `payments`. Zoom clicks → `analytics_events`.
+- Lifecycle columns on `webinars`: `registration_status`, `auto_close_registration`, `registration_closes_at`, `ended_at`, `next_webinar_id`, `previous_webinar_id`.
+- Move provenance lives on both `webinar_registrations` and `payments`: `moved_from_webinar_id`, `moved_to_webinar_id`, `moved_at`, `moved_by`, `move_reason`, `is_moved_registration`.
+- Lifecycle actions are audited in `webinar_audit_log`.
+- "Has it ended?" is computed on every page/API hit (no cron) by comparing the current instant to the stored UTC time — correct in IST on any server.

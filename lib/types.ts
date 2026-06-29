@@ -875,6 +875,18 @@ export interface Webinar {
   sections?: PageSection[];
   /** Central library document ids (brochures/resources) shown publicly. */
   brochure_ids?: string[];
+  // --- Lifecycle controls (additive; see lib/webinarLifecycle.ts) ---
+  /** Admin intent for registration. EFFECTIVE status (incl. computed ENDED) is derived on-read. */
+  registration_status?: "OPEN" | "CLOSED" | "DISABLED" | "DRAFT" | null;
+  /** When true, registration auto-closes once `registration_closes_at` (or start) passes. Default true. */
+  auto_close_registration?: boolean | null;
+  /** Custom registration cutoff (UTC ISO). Defaults to `datetime` (start) when null. */
+  registration_closes_at?: string | null;
+  /** Stamped when a session is marked ended (display/audit only). */
+  ended_at?: string | null;
+  /** Lineage to the duplicated "next" session and the "previous" one. */
+  next_webinar_id?: string | null;
+  previous_webinar_id?: string | null;
 }
 
 export interface WebinarRegistration {
@@ -884,6 +896,13 @@ export interface WebinarRegistration {
   phone: string;
   attended: boolean;
   created_at: string;
+  // --- Late-registration migration provenance (additive) ---
+  moved_from_webinar_id?: string | null;
+  moved_to_webinar_id?: string | null;
+  moved_at?: string | null;
+  moved_by?: string | null;
+  move_reason?: string | null;
+  is_moved_registration?: boolean | null;
 }
 
 // ----------------------------- Finance -----------------------------
@@ -957,6 +976,15 @@ export interface Payment {
   superseded_by_payment_id?: string | null;
   superseded_at?: string | null;
   superseded_reason?: string | null;
+  // --- Late-registration migration (webinar): item_slug is re-pointed to the
+  // target webinar so portal access follows; these preserve the original linkage
+  // + who/when/why. No revenue is duplicated — the same row simply moves. ---
+  moved_from_webinar_id?: string | null;
+  moved_to_webinar_id?: string | null;
+  moved_at?: string | null;
+  moved_by?: string | null;
+  move_reason?: string | null;
+  is_moved_registration?: boolean | null;
 }
 
 // ----------------------------- Payment proof (self-service recovery) -----------------------------

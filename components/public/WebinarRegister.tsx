@@ -73,6 +73,16 @@ export default function WebinarRegister({
       });
       const data = await res.json();
       if (!data.ok) {
+        // Registration closed/ended (server is source of truth) — guide the user forward.
+        if (data.closed) {
+          if (data.nextWebinarUrl) {
+            window.location.href = data.nextWebinarUrl;
+            return;
+          }
+          setError(data.error || "Registration for this webinar has closed.");
+          setLoading(false);
+          return;
+        }
         setError(data.error || "Could not register.");
         setLoading(false);
         return;
