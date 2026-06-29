@@ -60,6 +60,23 @@ For **uploaded (hosted) lecture and orientation videos**, the student player is 
 
 **Note:** orientation/welcome videos added as plain **YouTube/Drive links** are hosted by YouTube/Google, so their own download rules apply — only videos you **upload** into our library get the protections above.
 
+## Storage cleanup (deleting recordings & reclaiming space)
+
+Uploaded videos are stored in our Cloudflare R2 bucket. To avoid paying for files nobody can see:
+
+- **Deleting a recording removes the video file too.** When you delete a hosted recording in **Content / LMS**, we delete the database record **and** its underlying R2 video (plus thumbnail/notes) so storage is reclaimed. If a file fails to delete, it's **logged** (in `storage_audit_log`) and the response warns you — it's never silently left behind.
+- **Cancelling an upload cleans up after itself.** Aborting/deleting a half-finished or finished upload also removes any bytes already stored.
+- **No "ghost" files on upload.** The database record is always created **before** the video is uploaded, so an upload can't leave a file with no admin-visible row.
+
+### Orphan-cleanup tool (for engineers)
+
+If older files ever get stranded (e.g. from before this safeguard existed), there's a safe reconciliation tool — **dry-run first, delete only with explicit confirmation**:
+
+- **In-app (super-admin):** `GET /api/admin/lectures/orphans` returns a dry-run report (orphans + reclaimable MB + any dangling references). `POST` with `{ "confirm": "DELETE" }` reclaims them. It re-scans server-side and never deletes a file that still belongs to a live recording. Payment-proof files are never touched.
+- **Command line:** `node scripts/r2-orphans.mjs` (dry-run) → `node scripts/r2-orphans.mjs --apply` (delete). Needs the R2 + Supabase service-role env vars.
+
+> History: a one-time cleanup on 29 June reclaimed **~421 MB** of two orphaned `lecture.mp4` files left over from a ~1-hour window on 25 June (before delete-cascade existed). The bucket is now clean.
+
 ## Recording details: subject, thumbnail, date & faculty
 
 When you **Add / Edit Content** for a recording or live class, you can now set extra details that make the student's Class Hub look premium and organised:

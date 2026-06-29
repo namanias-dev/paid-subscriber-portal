@@ -6,6 +6,7 @@ import {
   UploadPartCommand,
   ListPartsCommand,
   ListMultipartUploadsCommand,
+  ListObjectsV2Command,
   GetObjectCommand,
   PutObjectCommand,
   DeleteObjectCommand,
@@ -170,6 +171,42 @@ export function publicCdnUrl(key: string): string | null {
   return base ? `${base.replace(/\/$/, "")}/${key}` : null;
 }
 
-export async function deleteObject(key: string): Promise<void> {
-  await r2().send(new DeleteObjectCommand({ Bucket: bucket(), Key: key })).catch(() => {});
+/**
+ * Delete one object. Returns true on success, false on failure (never throws) so
+ * callers can detect and surface failed deletes instead of silently orphaning.
+ */
+export async function deleteObject(key: string): Promise<boolean> {
+  try {
+    await r2().send(new DeleteObjectCommand({ Bucket: bucket(), Key: key }));
+    return true;
+  } catch (e) {
+    console.error(`[r2.deleteObject] failed for ${key}:`, (e as Error).message);
+    return false;
+  }
+}
+
+export interface R2Object {
+  key: string;
+  size: number;
+  lastModified: string | null;
+}
+
+/**
+ * List every object in the bucket (paginated), optionally under a key prefix.
+ * Used by the orphan-cleanup tool to reconcile R2 vs the DB. Read-only.
+ */
+export async function listAllObjects(prefix?: string): Promise<R2Object[]> {
+  const out: R2Object[] = [];
+  let token: string | undefined;
+  do {
+    const res = await r2().send(
+      new ListObjectsV2Command({ Bucket: bucket(), Prefix: prefix, ContinuationToken: token }),
+    );
+    for (const o of res.Contents || []) {
+      if (!o.Key) continue;
+      out.push({ key: o.Key, size: o.Size ?? 0, lastModified: o.LastModified?.toISOString() || null });
+    }
+    token = res.IsTruncated ? res.NextContinuationToken : undefined;
+  } while (token);
+  return out;
 }

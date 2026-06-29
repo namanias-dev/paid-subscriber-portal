@@ -533,6 +533,28 @@ export async function setOrientationTargetsForContent(
   return true;
 }
 
+// ====================== STORAGE AUDIT LOG ======================
+
+export interface StorageAuditEntry {
+  action: "delete_cascade" | "orphan_reclaim" | "abort_cleanup";
+  r2_key: string;
+  recording_id?: string | null;
+  status: "deleted" | "failed";
+  actor?: string | null;
+  detail?: string | null;
+}
+
+/** Best-effort append to the R2 storage audit log. Never throws. */
+export async function logStorageAudit(entries: StorageAuditEntry[]): Promise<void> {
+  if (!entries.length) return;
+  const db = getSupabaseAdmin();
+  if (!db) return;
+  await db
+    .from("storage_audit_log")
+    .insert(entries.map((e) => ({ ...e, recording_id: e.recording_id ?? null, actor: e.actor ?? null, detail: e.detail ?? null })))
+    .then(undefined, () => {});
+}
+
 // ====================== LECTURE COMMENTS / Q&A ======================
 // Per-lecture comment threads (one level of replies). All reads/writes are
 // service-role only; the API layer enforces enrolled-access + ownership.
