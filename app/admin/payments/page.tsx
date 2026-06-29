@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { PageHeader, useAdminData, LoadingBlock, KpiCard } from "@/components/admin/ui";
 import WebinarRegistrationsTrend from "@/components/admin/WebinarRegistrationsTrend";
 import GroupedTimeline, { type TimelineGroup } from "@/components/admin/GroupedTimeline";
@@ -12,7 +12,14 @@ import { useToast } from "@/components/ui/Toast";
 import { usePersistentState } from "@/lib/usePersistentState";
 import { formatINR, formatISTDateTime, istYMD, istTodayYMD } from "@/lib/dates";
 import { dedupedPaidTotal, distinctRegistrations } from "@/lib/paymentsAgg";
-import type { Payment, Enrollment, PaymentProof, PaymentProofFile, PaymentActionLog } from "@/lib/types";
+import {
+  buildPaymentGroups,
+  GROUP_STATUS_META,
+  purposeLabel,
+  type GroupStatus,
+  type PaymentGroup,
+} from "@/lib/paymentGroups";
+import type { Payment, Enrollment, PaymentProof, PaymentProofFile, PaymentProofStatus, PaymentActionLog } from "@/lib/types";
 
 type PaymentSort = "recent" | "spent" | "count" | "name";
 const PAYMENT_SORTS: { value: PaymentSort; label: string }[] = [
@@ -60,16 +67,23 @@ function statusLabel(s: Payment["status"]): string {
   return s;
 }
 
+// Status chips now filter by the CANONICAL GROUP status (paid-wins), so a group
+// with a paid attempt never shows up under Verifying/Pending/Needs-verification.
 type StatusKey = "paid" | "pending" | "verifying" | "abandoned" | "failed" | "needs";
-const STATUS_DEFS: { key: StatusKey; label: string; match: (p: Payment) => boolean }[] = [
-  { key: "paid", label: "Paid", match: (p) => isPaid(p.status) },
-  { key: "pending", label: "Pending", match: (p) => p.status === "PENDING" || p.status === "pending" },
-  { key: "verifying", label: "Verifying", match: (p) => p.status === "VERIFYING" },
-  { key: "abandoned", label: "Abandoned", match: (p) => p.status === "ABANDONED" },
-  { key: "failed", label: "Failed", match: (p) => p.status === "FAILED" },
-  { key: "needs", label: "Needs verification", match: (p) => isNonPaid(p.status) },
+const STATUS_DEFS: { key: StatusKey; label: string }[] = [
+  { key: "paid", label: "Paid" },
+  { key: "pending", label: "Pending" },
+  { key: "verifying", label: "Verifying" },
+  { key: "abandoned", label: "Abandoned" },
+  { key: "failed", label: "Failed" },
+  { key: "needs", label: "Needs verification" },
 ];
 const STATUS_LABEL: Record<StatusKey, string> = Object.fromEntries(STATUS_DEFS.map((s) => [s.key, s.label])) as Record<StatusKey, string>;
+
+function groupMatchesStatus(g: PaymentGroup, key: StatusKey): boolean {
+  if (key === "needs") return g.needsAction;
+  return g.status === (key as GroupStatus);
+}
 
 type DateMode = "all" | "today" | "yesterday" | "month" | "year" | "date" | "range";
 
@@ -93,6 +107,11 @@ export default function PaymentsAdmin() {
   const [types, setTypes] = useState<Set<TypeKey>>(new Set());
   const [statuses, setStatuses] = useState<Set<StatusKey>>(new Set());
   const [onlyProof, setOnlyProof] = useState(false);
+  // Group-level toggles (canonical view).
+  const [showSuperseded, setShowSuperseded] = useState(false);
+  const [needsActionOnly, setNeedsActionOnly] = useState(false);
+  const [paidWithDup, setPaidWithDup] = useState(false);
+  const [proofPending, setProofPending] = useState(false);
   const [proofModal, setProofModal] = useState<{ payment: Payment; proof: ProofWithAccess | null } | null>(null);
   const [showTrash, setShowTrash] = useState(false);
   const [reverifying, setReverifying] = useState(false);
@@ -108,6 +127,11 @@ export default function PaymentsAdmin() {
   const enrollments = enr.data || [];
   const buyerCodes = codes.data || {};
   const proofs = useMemo(() => proofsHook.data || {}, [proofsHook.data]);
+  const proofStatusByPayment = useMemo(() => {
+    const m: Record<string, PaymentProofStatus | undefined> = {};
+    for (const [pid, pr] of Object.entries(proofs)) m[pid] = pr.status;
+    return m;
+  }, [proofs]);
   const proofCount = useMemo(
     () => Object.values(proofs).filter((p) => p.status === "submitted" || p.status === "reupload_requested").length,
     [proofs],
@@ -144,13 +168,13 @@ export default function PaymentsAdmin() {
     }
   }, [dateMode, dateVal, monthVal, yearVal, rangeFrom, rangeTo, todayYMD]);
 
-  const filtered = useMemo(() => {
+  // Per-attempt predicate (type / date / search / has-proof). Status is NO LONGER
+  // a per-attempt filter — it is applied at the canonical GROUP level below.
+  const attemptPasses = useMemo(() => {
     const activeTypes = [...types];
-    const activeStatuses = [...statuses];
     const query = q.trim().toLowerCase();
-    return payments.filter((p) => {
+    return (p: Payment): boolean => {
       if (activeTypes.length && !activeTypes.some((k) => TYPE_DEFS.find((t) => t.key === k)!.match(p))) return false;
-      if (activeStatuses.length && !activeStatuses.some((k) => STATUS_DEFS.find((s) => s.key === k)!.match(p))) return false;
       if (onlyProof && !proofs[p.id]) return false;
       if (range) {
         const ymd = istYMD(p.created_at);
@@ -161,82 +185,121 @@ export default function PaymentsAdmin() {
         if (!hay.includes(query)) return false;
       }
       return true;
+    };
+  }, [types, onlyProof, proofs, range, q]);
+
+  // Flat list of attempts passing the per-attempt filters (used by CSV / re-verify
+  // / abandoned hot-leads / counts). Status filtering is NOT applied here.
+  const filtered = useMemo(() => payments.filter(attemptPasses), [payments, attemptPasses]);
+
+  // Canonical groups built from the FULL payment set so a paid attempt always
+  // counts towards a group's status even if a date filter would hide it.
+  const allGroups = useMemo(
+    () => buildPaymentGroups(payments, proofStatusByPayment),
+    [payments, proofStatusByPayment],
+  );
+
+  // Groups surviving the active filters (group-level status + toggles).
+  const visibleGroups = useMemo(() => {
+    const activeStatuses = [...statuses];
+    return allGroups.filter((g) => {
+      if (!g.attempts.some(attemptPasses)) return false;
+      if (activeStatuses.length && !activeStatuses.some((k) => groupMatchesStatus(g, k))) return false;
+      if (needsActionOnly && !g.needsAction) return false;
+      if (paidWithDup && !(g.duplicatePaid || (g.status === "paid" && g.supersededIds.size > 0))) return false;
+      if (proofPending && !(g.needsAction && g.attempts.some((a) => {
+        const s = proofs[a.id]?.status;
+        return s === "submitted" || s === "reupload_requested";
+      }))) return false;
+      return true;
     });
-  }, [payments, types, statuses, onlyProof, proofs, range, q]);
+  }, [allGroups, attemptPasses, statuses, needsActionOnly, paidWithDup, proofPending, proofs]);
 
-  // Group the (already filtered) transactions by USER — purely presentational.
-  // The sum of all nodes equals filtered.length; no row is dropped or merged.
+  // Roll the surviving canonical groups up into per-USER collapsible cards. Each
+  // node is one GROUP (item + purpose) carrying its canonical, paid-wins status.
   const userGroups = useMemo((): TimelineGroup[] => {
-    const byPhone = new Map<string, Payment[]>();
-    for (const p of filtered) {
-      const key = (p.phone || "").trim() || `id:${p.id}`;
+    const byPhone = new Map<string, PaymentGroup[]>();
+    for (const g of visibleGroups) {
+      const key = (g.attempts[0].phone || "").trim() || `id:${g.attempts[0].id}`;
       const arr = byPhone.get(key);
-      if (arr) arr.push(p); else byPhone.set(key, [p]);
+      if (arr) arr.push(g); else byPhone.set(key, [g]);
     }
-    const dotFor = (s: Payment["status"]) =>
-      isPaid(s) ? "bg-success" : s === "VERIFYING" ? "bg-blue-500" : s === "ABANDONED" ? "bg-orange-500" : s === "FAILED" ? "bg-danger" : s === "refunded" ? "bg-ink2" : "bg-amber-500";
 
-    const rows = [...byPhone.entries()].map(([key, list]) => {
-      const sorted = [...list].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-      const latest = sorted[0];
-      const name = (sorted.find((r) => r.student_name)?.student_name || latest.student_name || "—").trim() || "—";
-      const phone = (latest.phone || "").trim();
-      const paidTotal = sorted.filter((r) => isPaid(r.status)).reduce((a, r) => a + r.amount, 0);
+    const rows = [...byPhone.entries()].map(([key, groups]) => {
+      const sorted = [...groups].sort((a, b) => b.latestAt - a.latestAt);
+      const sampleAttempts = sorted.flatMap((g) => g.attempts);
+      const name = (sampleAttempts.find((r) => r.student_name)?.student_name || "—").trim() || "—";
+      const phone = (sampleAttempts.find((r) => r.phone)?.phone || "").trim();
+      const paidTotal = sorted.reduce((a, g) => a + (g.status === "paid" ? g.amount : 0), 0);
       const code = buyerCodes[phone] || "";
+      const txnCount = sampleAttempts.length;
+      const needsActionCount = sorted.filter((g) => g.needsAction).length;
+      const anyPaid = sorted.some((g) => g.status === "paid");
+      const anyDup = sorted.some((g) => g.duplicatePaid);
+      const latestAt = sorted.reduce((m, g) => Math.max(m, g.latestAt), 0);
 
-      const nodes = sorted.map((p) => ({
-        id: p.id,
-        dot: dotFor(p.status),
-        title: p.item || "—",
-        subtitle: [
-          p.payment_kind || p.item_type,
-          p.installment_no ? `installment #${p.installment_no}` : null,
-          p.reference_no || p.razorpay_payment_id || null,
-          p.gateway || (p.mode ? `Razorpay · ${p.mode}` : null),
-        ].filter(Boolean).join(" · "),
-        right: formatINR(p.amount),
-        datetime: p.created_at,
-        badge: (
-          <span className="flex items-center gap-1.5">
-            <span className={`pill ${statusPillClass(p.status)}`}>{statusLabel(p.status)}</span>
-            {isNonPaid(p.status) && p.reference_no && (
-              <button
-                onClick={(e) => { e.stopPropagation(); reverifyOne(p.reference_no); }}
-                disabled={reverifying}
-                title="Re-verify this payment with ICICI"
-                className="rounded-md border border-line px-1.5 py-0.5 text-xs text-ink2 transition hover:border-primary/50 hover:text-primary disabled:opacity-50"
-              >
-                ↻
-              </button>
-            )}
-            {proofs[p.id] && (
-              <button
-                onClick={(e) => { e.stopPropagation(); setProofModal({ payment: p, proof: proofs[p.id] }); }}
-                className={`pill ${PROOF_STATUS_META[proofs[p.id].status]?.cls || "pill-gray"} cursor-pointer`}
-                title="View submitted payment proof"
-              >
-                📎 {PROOF_STATUS_META[proofs[p.id].status]?.label || proofs[p.id].status}
-              </button>
-            )}
-            {canManage && (
-              <button
-                onClick={(e) => { e.stopPropagation(); setProofModal({ payment: p, proof: proofs[p.id] || null }); }}
-                title="Upload proof, approve, reverse or view full history"
-                className="rounded-md border border-line px-1.5 py-0.5 text-xs text-ink2 transition hover:border-primary/50 hover:text-primary"
-              >
-                Manage
-              </button>
-            )}
-          </span>
-        ),
-      }));
+      const nodes = sorted.map((g) => {
+        const meta = GROUP_STATUS_META[g.status];
+        const hasUnsupersededUnpaid =
+          g.status === "paid" && g.attempts.some((a) => !isPaid(a.status) && !g.supersededIds.has(a.id));
+        return {
+          id: g.key,
+          dot: meta.dot,
+          title: (
+            <span className="flex flex-wrap items-center gap-1.5">
+              <span className="font-medium text-ink">{g.primary.item || "—"}</span>
+              <span className="rounded bg-surface2 px-1.5 py-0.5 text-[10px] font-medium text-ink2">{purposeLabel(g.primary)}</span>
+              {g.duplicatePaid && (
+                <span className="pill pill-red" title="Two or more settled payments for the same item — review for a possible refund.">
+                  ⚠ Possible duplicate payment
+                </span>
+              )}
+            </span>
+          ),
+          subtitle: (
+            <GroupAttempts
+              group={g}
+              proofs={proofs}
+              canManage={canManage}
+              showSupersededGlobal={showSuperseded}
+              reverifying={reverifying}
+              onManage={(p, pr) => setProofModal({ payment: p, proof: pr })}
+              onReverify={reverifyOne}
+            />
+          ),
+          right: formatINR(g.amount),
+          badge: (
+            <span className="flex flex-wrap items-center justify-end gap-1.5">
+              <span className={`pill ${meta.pill}`}>{meta.label}</span>
+              {canManage && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); setProofModal({ payment: g.primary, proof: proofs[g.primary.id] || null }); }}
+                  title="Open this attempt to upload proof, approve, reverse, edit or view history"
+                  className="rounded-md border border-line px-1.5 py-0.5 text-xs text-ink2 transition hover:border-primary/50 hover:text-primary"
+                >
+                  Manage
+                </button>
+              )}
+              {canManage && hasUnsupersededUnpaid && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); markSuperseded(g.primary.id); }}
+                  title="Mark the other unpaid attempts in this paid group as superseded (soft, logged, reversible)"
+                  className="rounded-md border border-line px-1.5 py-0.5 text-xs text-ink2 transition hover:border-primary/50 hover:text-primary"
+                >
+                  Mark others superseded
+                </button>
+              )}
+            </span>
+          ),
+        };
+      });
 
-      return { key, name, phone, latestAt: new Date(latest.created_at).getTime(), paidTotal, count: sorted.length, latestStatus: latest.status, code, nodes };
+      return { key, name, phone, latestAt, paidTotal, groupCount: sorted.length, txnCount, needsActionCount, anyPaid, anyDup, code, nodes };
     });
 
     rows.sort((a, b) => {
       if (sort === "spent") return b.paidTotal - a.paidTotal || b.latestAt - a.latestAt;
-      if (sort === "count") return b.count - a.count || b.latestAt - a.latestAt;
+      if (sort === "count") return b.txnCount - a.txnCount || b.latestAt - a.latestAt;
       if (sort === "name") return a.name.localeCompare(b.name);
       return b.latestAt - a.latestAt; // recent
     });
@@ -250,14 +313,20 @@ export default function PaymentsAdmin() {
         <div className="flex flex-col items-end gap-1">
           <span className="text-sm font-bold text-ink">{formatINR(r.paidTotal)}</span>
           <span className="flex items-center gap-1.5">
-            <span className="text-[11px] text-muted">{r.count} txn{r.count === 1 ? "" : "s"}</span>
-            <span className={`pill ${statusPillClass(r.latestStatus)}`}>{statusLabel(r.latestStatus)}</span>
+            <span className="text-[11px] text-muted">{r.groupCount} item{r.groupCount === 1 ? "" : "s"} · {r.txnCount} txn{r.txnCount === 1 ? "" : "s"}</span>
+            {r.needsActionCount > 0 ? (
+              <span className="pill pill-amber">{r.needsActionCount} need action</span>
+            ) : r.anyDup ? (
+              <span className="pill pill-red">Review duplicate</span>
+            ) : r.anyPaid ? (
+              <span className="pill pill-green">All settled</span>
+            ) : null}
           </span>
         </div>
       ),
       nodes: r.nodes,
     }));
-  }, [filtered, sort, buyerCodes, proofs, reverifying, canManage]);
+  }, [visibleGroups, sort, buyerCodes, proofs, reverifying, canManage, showSuperseded]);
 
   const matchOpenIds = useMemo(
     () => (q.trim() ? new Set(userGroups.map((g) => g.id)) : undefined),
@@ -265,12 +334,13 @@ export default function PaymentsAdmin() {
   );
 
   // Non-paid rows in the current filtered view (targets for "Re-verify filtered").
+  // Superseded attempts are excluded — they are already settled on a sibling.
   const filteredNonPaidRefs = useMemo(
-    () => filtered.filter((p) => isNonPaid(p.status) && p.reference_no).map((p) => p.reference_no as string),
+    () => filtered.filter((p) => isNonPaid(p.status) && !p.is_superseded && p.reference_no).map((p) => p.reference_no as string),
     [filtered],
   );
-  const abandoned = useMemo(() => filtered.filter((p) => p.status === "ABANDONED"), [filtered]);
-  const abandonedAllCount = useMemo(() => payments.filter((p) => p.status === "ABANDONED").length, [payments]);
+  const abandoned = useMemo(() => filtered.filter((p) => p.status === "ABANDONED" && !p.is_superseded), [filtered]);
+  const abandonedAllCount = useMemo(() => payments.filter((p) => p.status === "ABANDONED" && !p.is_superseded).length, [payments]);
 
   // ---- Today's metrics (always TODAY in IST, independent of filters) ----
   const today = useMemo(() => {
@@ -376,11 +446,15 @@ export default function PaymentsAdmin() {
     callReverify({ referenceNos: [ref] });
   }
 
-  const hasFilters = types.size > 0 || statuses.size > 0 || onlyProof || dateMode !== "all";
+  const hasFilters = types.size > 0 || statuses.size > 0 || onlyProof || dateMode !== "all" || needsActionOnly || paidWithDup || proofPending || showSuperseded;
   function clearAll() {
     setTypes(new Set());
     setStatuses(new Set());
     setOnlyProof(false);
+    setNeedsActionOnly(false);
+    setPaidWithDup(false);
+    setProofPending(false);
+    setShowSuperseded(false);
     setDateMode("all");
     setDateVal(""); setMonthVal(""); setYearVal(""); setRangeFrom(""); setRangeTo("");
   }
@@ -453,6 +527,22 @@ export default function PaymentsAdmin() {
     } catch {
       toast("Reversal failed.", "error");
       return false;
+    }
+  }
+  async function markSuperseded(paymentId: string): Promise<void> {
+    if (!confirm("Mark the other unpaid attempts in this paid group as superseded? This is soft, logged and reversible — it never deletes anything.")) return;
+    try {
+      const res = await fetch("/api/admin/payments/supersede", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paymentId }),
+      });
+      const json = await res.json();
+      if (!json.ok) { toast(json.error || "Could not supersede attempts.", "error"); return; }
+      toast(json.superseded > 0 ? `${json.superseded} attempt(s) marked superseded.` : "Nothing to supersede — already clean.", "success");
+      full.reload();
+    } catch {
+      toast("Could not supersede attempts.", "error");
     }
   }
   async function viewProofFile(key: string) {
@@ -583,6 +673,22 @@ export default function PaymentsAdmin() {
               <span aria-hidden>📎</span>
               Proof uploaded{proofCount > 0 ? ` (${proofCount})` : ""}
             </button>
+          </div>
+
+          {/* Group-level toggles (canonical, paid-wins view) */}
+          <div className="mt-3 flex flex-wrap gap-2">
+            <ToggleChip active={needsActionOnly} onClick={() => setNeedsActionOnly((v) => !v)} title="Only groups with no paid attempt and a verifying/pending/proof-uploaded state">
+              ✅ Needs action only
+            </ToggleChip>
+            <ToggleChip active={paidWithDup} onClick={() => setPaidWithDup((v) => !v)} title="Paid groups that also have duplicate or superseded attempts">
+              💳 Paid but has duplicate attempts
+            </ToggleChip>
+            <ToggleChip active={proofPending} onClick={() => setProofPending((v) => !v)} title="Unpaid groups with a proof uploaded awaiting review">
+              📎 Proof uploaded — pending review
+            </ToggleChip>
+            <ToggleChip active={showSuperseded} onClick={() => setShowSuperseded((v) => !v)} title="Reveal superseded attempts inside every group by default">
+              👁 Show superseded
+            </ToggleChip>
           </div>
         </div>
 
@@ -741,7 +847,7 @@ export default function PaymentsAdmin() {
 
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2 px-1">
         <p className="text-xs text-muted">
-          Showing {filtered.length} of {payments.length} transactions · {userGroups.length} {userGroups.length === 1 ? "user" : "users"}
+          {visibleGroups.length} {visibleGroups.length === 1 ? "group" : "groups"} · {userGroups.length} {userGroups.length === 1 ? "user" : "users"} · {payments.length} transactions total
         </p>
         {reverifyMsg && <p className="text-xs font-medium text-primary">{reverifyMsg}</p>}
       </div>
@@ -1188,6 +1294,138 @@ function TrashModal({ onClose }: { onClose: () => void }) {
             ))}
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+function ToggleChip({ active, onClick, title, children }: { active: boolean; onClick: () => void; title?: string; children: ReactNode }) {
+  return (
+    <button
+      onClick={onClick}
+      title={title}
+      className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold transition ${active ? "border-primary bg-primary/10 text-primary" : "border-line text-ink2 hover:border-primary/50"}`}
+    >
+      {children}
+    </button>
+  );
+}
+
+/** One individual attempt row inside a group's timeline. Superseded unpaid
+ *  attempts are muted, clearly labelled, and have their retry/verify demoted. */
+function AttemptRow({
+  p, proof, canManage, superseded, reverifying, onManage, onReverify,
+}: {
+  p: Payment;
+  proof: ProofWithAccess | null;
+  canManage: boolean;
+  superseded: boolean;
+  reverifying: boolean;
+  onManage: (p: Payment, pr: ProofWithAccess | null) => void;
+  onReverify: (ref: string | null | undefined) => void;
+}) {
+  const sub = [
+    p.payment_kind || p.item_type,
+    p.installment_no ? `installment #${p.installment_no}` : null,
+    p.reference_no || p.razorpay_payment_id || null,
+    p.gateway || (p.mode ? `Razorpay · ${p.mode}` : null),
+  ].filter(Boolean).join(" · ");
+  return (
+    <div className={`flex flex-wrap items-start justify-between gap-2 rounded-lg px-2 py-1.5 ${superseded ? "opacity-60" : ""}`}>
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className={`pill ${statusPillClass(p.status)}`}>{statusLabel(p.status)}</span>
+          {superseded && (
+            <span className="pill pill-gray" title="Another attempt for this item was paid/approved, so this attempt is moot.">
+              Superseded — payment already completed
+            </span>
+          )}
+        </div>
+        <div className="mt-0.5 text-[11px] text-muted">{sub}</div>
+        <div className="text-[11px] text-muted">{formatISTDateTime(p.created_at)}</div>
+      </div>
+      <div className="flex shrink-0 flex-col items-end gap-1">
+        <span className="text-sm font-semibold text-ink">{formatINR(p.amount)}</span>
+        <span className="flex items-center gap-1.5">
+          {/* Retry/verify is hidden on superseded attempts (no action needed). */}
+          {!superseded && isNonPaid(p.status) && p.reference_no && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onReverify(p.reference_no); }}
+              disabled={reverifying}
+              title="Re-verify this payment with ICICI"
+              className="rounded-md border border-line px-1.5 py-0.5 text-xs text-ink2 transition hover:border-primary/50 hover:text-primary disabled:opacity-50"
+            >
+              ↻
+            </button>
+          )}
+          {proof && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onManage(p, proof); }}
+              className={`pill ${PROOF_STATUS_META[proof.status]?.cls || "pill-gray"} cursor-pointer`}
+              title="View submitted payment proof"
+            >
+              📎 {PROOF_STATUS_META[proof.status]?.label || proof.status}
+            </button>
+          )}
+          {canManage && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onManage(p, proof); }}
+              title="Manage this attempt"
+              className="rounded-md border border-line px-1.5 py-0.5 text-xs text-ink2 transition hover:border-primary/50 hover:text-primary"
+            >
+              Manage
+            </button>
+          )}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+/** Collapsible attempt history for one canonical group. Superseded unpaid
+ *  attempts are hidden by default behind a "Show all attempts" toggle. */
+function GroupAttempts({
+  group, proofs, canManage, showSupersededGlobal, reverifying, onManage, onReverify,
+}: {
+  group: PaymentGroup;
+  proofs: Record<string, ProofWithAccess>;
+  canManage: boolean;
+  showSupersededGlobal: boolean;
+  reverifying: boolean;
+  onManage: (p: Payment, pr: ProofWithAccess | null) => void;
+  onReverify: (ref: string | null | undefined) => void;
+}) {
+  const [showAll, setShowAll] = useState(false);
+  const revealSuperseded = showAll || showSupersededGlobal;
+  const supersededCount = group.supersededIds.size;
+  const visible = group.attempts.filter((a) => revealSuperseded || !group.supersededIds.has(a.id));
+
+  return (
+    <div className="mt-1">
+      <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted">
+        <span>{group.attempts.length} attempt{group.attempts.length === 1 ? "" : "s"} · latest {formatISTDateTime(group.attempts[0].created_at)}</span>
+        {supersededCount > 0 && !showSupersededGlobal && (
+          <button
+            onClick={(e) => { e.stopPropagation(); setShowAll((v) => !v); }}
+            className="font-semibold text-primary hover:underline"
+          >
+            {showAll ? "Hide superseded attempts" : `Show all attempts (${supersededCount} superseded)`}
+          </button>
+        )}
+      </div>
+      <div className="mt-1.5 space-y-1">
+        {visible.map((a) => (
+          <AttemptRow
+            key={a.id}
+            p={a}
+            proof={proofs[a.id] || null}
+            canManage={canManage}
+            superseded={group.supersededIds.has(a.id)}
+            reverifying={reverifying}
+            onManage={onManage}
+            onReverify={onReverify}
+          />
+        ))}
       </div>
     </div>
   );

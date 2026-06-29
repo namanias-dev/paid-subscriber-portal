@@ -121,10 +121,12 @@ export async function resolveAudience(spec: AudienceSpec): Promise<Recipient[]> 
   if (spec.type.startsWith("payment_")) {
     const payments = await getPayments();
     let rows: Payment[];
+    // Superseded attempts (another attempt for the same student+item was paid)
+    // must never be nudged — they are moot. Only un-superseded rows are eligible.
     if (spec.type === "payment_paid") rows = dedupePaidRows(payments.filter((p) => isPaidStatus(p.status)));
-    else if (spec.type === "payment_pending") rows = payments.filter((p) => p.status === "PENDING" || p.status === "VERIFYING" || p.status === "pending");
-    else if (spec.type === "payment_failed") rows = payments.filter((p) => p.status === "FAILED");
-    else if (spec.type === "payment_abandoned") rows = payments.filter((p) => p.status === "ABANDONED");
+    else if (spec.type === "payment_pending") rows = payments.filter((p) => !p.is_superseded && (p.status === "PENDING" || p.status === "VERIFYING" || p.status === "pending"));
+    else if (spec.type === "payment_failed") rows = payments.filter((p) => !p.is_superseded && p.status === "FAILED");
+    else if (spec.type === "payment_abandoned") rows = payments.filter((p) => !p.is_superseded && p.status === "ABANDONED");
     else rows = payments; // payment_all
     // keep the most recent row per phone for messaging context
     const byPhone = new Map<string, Payment>();

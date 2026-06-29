@@ -11,6 +11,7 @@ import {
   bumpBuyerSessionVersion,
 } from "./dataProvider";
 import { deriveEnrollment, enrollmentStatusFromSchedule } from "./installments";
+import { recomputeGroupSupersession } from "./paymentSupersede";
 import {
   getProofByPaymentId,
   acceptPaymentManually,
@@ -385,6 +386,13 @@ export async function reversePaymentAction(input: {
 
   // ---- Re-lock access everywhere; keep the buyer / login code intact ----
   if (payment.phone) await bumpBuyerSessionVersion(payment.phone).catch(() => null);
+
+  // ---- Self-correct supersession: this group may no longer have a paid attempt,
+  // so previously-superseded siblings must be un-flagged (recompute is idempotent).
+  await recomputeGroupSupersession(
+    { ...payment, status: prior },
+    { id: input.actor.id, name: input.actor.name, role: input.actor.role, isSuper: input.actor.isSuper },
+  ).catch(() => null);
 
   // ---- Re-open the proof for review (preserve files + history) ----
   const proof = await getProofByPaymentId(payment.id).catch(() => null);

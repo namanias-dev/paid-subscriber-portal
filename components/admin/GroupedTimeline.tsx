@@ -45,10 +45,10 @@ function NodeRow({ n, connected }: { n: TimelineNode; connected: boolean }) {
         <span className={`absolute -left-[1.45rem] top-1.5 h-2.5 w-2.5 rounded-full ring-4 ring-white ${n.dot || "bg-ink2"}`} />
       )}
       <div className="flex flex-wrap items-start justify-between gap-2">
-        <div className="min-w-0">
-          <p className="text-sm font-medium text-ink">{n.title}</p>
-          {n.subtitle && <p className="mt-0.5 text-xs text-muted">{n.subtitle}</p>}
-          {n.datetime && <p className="mt-0.5 text-[11px] text-muted">{formatISTDateTime(n.datetime)}</p>}
+        <div className="min-w-0 flex-1">
+          <div className="text-sm font-medium text-ink">{n.title}</div>
+          {n.subtitle && <div className="mt-0.5 text-xs text-muted">{n.subtitle}</div>}
+          {n.datetime && <div className="mt-0.5 text-[11px] text-muted">{formatISTDateTime(n.datetime)}</div>}
         </div>
         <div className="flex shrink-0 flex-col items-end gap-1">
           {n.right && <span className="text-sm font-semibold text-ink">{n.right}</span>}

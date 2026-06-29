@@ -14,6 +14,7 @@ import { flattenForStamp, type AttributionState } from "../attribution";
 import { sendMetaPurchase } from "./thirdParty";
 import { fireAutoSms } from "../sms/dispatch";
 import { TRIGGERS } from "../sms/templates";
+import { supersedeUnpaidSiblings } from "../paymentSupersede";
 import type { EventName } from "./events";
 import type { Payment, Buyer } from "../types";
 
@@ -196,6 +197,10 @@ export async function recordPaymentPaid(p: Payment, source = "system"): Promise<
   if (newlyPaid) {
     await backfillBuyerSource(phone, p.attribution_source ?? null, p.attribution_campaign ?? null);
     await sendMetaPurchase(p).catch(() => {});
+    // Paid wins: flag the other open unpaid attempts for this same student+item+
+    // purpose as superseded so a PAID group is never mislabelled "needs action".
+    // Idempotent; touches only this group; logged to payment_action_log.
+    void supersedeUnpaidSiblings(p).catch(() => {});
     // Auto-SMS (disabled by default) — fired ONLY from this verified-PAID
     // chokepoint, once per payment (dedupe_key), never off a click/intent.
     fireAutoSms({ trigger: TRIGGERS.payment_success, phone: p.phone, name: p.student_name, vars: { item_short: p.item, payment_status: "PAID", amount: p.amount }, entity: smsEntityForPayment(p), entityId: ref });

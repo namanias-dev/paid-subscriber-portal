@@ -23,7 +23,32 @@ This is the money screen. It shows every payment transaction (ICICI and older Ra
 
 > Only `PAID` (and the old `captured`) grant access. The system **never** downgrades a paid record.
 
-**Filter chips** at the top let you show: `Paid`, `Pending`, `Verifying`, `Abandoned`, `Failed`, `Needs verification`, and `Proof uploaded`.
+**Filter chips** at the top let you show: `Paid`, `Pending`, `Verifying`, `Abandoned`, `Failed`, `Needs verification`, and `Proof uploaded`. These now filter by the **group's final status** (see below), so a student who has already paid will **not** show up under `Verifying`/`Needs verification` just because they have a leftover attempt.
+
+There are also four **toggles**: `✅ Needs action only`, `💳 Paid but has duplicate attempts`, `📎 Proof uploaded — pending review`, and `👁 Show superseded` (reveal hidden attempts).
+
+## How payments are grouped (parent = final status, children = attempt history)
+
+Students often try to pay **more than once** for the **same thing** — they retry after a failed attempt, pay twice by mistake, or a slow bank confirmation makes them try again. To stop this from looking confusing, the page now **groups attempts together**.
+
+- A **group** is one student paying for **one item, for one purpose** (e.g. one webinar; or a course **seat booking** vs the course **full fee** vs a specific **installment** — these are always kept separate).
+- The **parent line** shows the group's **final (canonical) status** and the **correct amount** (the amount actually paid if paid; otherwise what's owed), the **number of attempts**, and the latest activity.
+- **Expand a person's card** to see each group, and the individual **attempts** inside it with their original status.
+
+**Paid always wins.** If **any** attempt in a group is `PAID`/approved, the parent shows **Paid** — even if a newer attempt is still `Verifying` or `Pending`. So the old confusion (e.g. *Aashish Kumar's webinar showing `VERIFYING` when one attempt was already `PAID`*) is gone.
+
+### Superseded attempts ("payment already completed")
+When one attempt is paid/approved, the **other unpaid attempts** in that same group are marked **Superseded — payment already completed**. They are:
+- **hidden by default** (click **`Show all attempts (N superseded)`** inside a group, or the `👁 Show superseded` toggle, to see them),
+- never counted as "needs action", never chased by payment-pending SMS, and never create a second enrollment or inflate the balance.
+
+Their real status (e.g. `VERIFYING`) is **never changed** — they're just flagged as no longer needing action. Nothing is ever deleted.
+
+### Possible duplicate payment (real money — review)
+If a student is **paid twice for the exact same thing**, the parent shows **Paid** plus a red **`⚠ Possible duplicate payment`** flag. The system **does not** auto-hide either paid attempt — this is real money, so a human must check whether a **refund** is due.
+
+### "Mark others superseded" (Manage payments)
+On a paid group that still has leftover unpaid attempts, staff with **Manage payments** see a **`Mark others superseded`** button. It flags the leftover unpaid attempts as completed (soft, logged, reversible — it un-flags itself if the paid attempt is later reversed). It never deletes anything and never touches a paid attempt.
 
 ## Verifying an online payment
 
@@ -140,5 +165,6 @@ Lists learners whose lecture access is blocked or expiring, so you can recover r
 ## Where the data comes from
 - All transactions → the `payments` table.
 - Student & staff screenshots → `payment_proofs` (files stored privately).
-- Every proof upload, approval, rejection and reversal → the immutable `payment_action_log` (this powers the per-payment history and the Super Admin accountability report). It is append-only — entries are never edited or deleted.
+- Every proof upload, approval, rejection, reversal **and supersession** → the immutable `payment_action_log` (this powers the per-payment history and the Super Admin accountability report). It is append-only — entries are never edited or deleted.
+- The group's **final status is calculated live** from the attempts (paid > verifying > pending > abandoned > failed), so it self-corrects the moment a late bank confirmation or a manual approval lands. "Superseded" is stored on the unpaid attempt (`is_superseded`) but the attempt's own status is left untouched.
 - Online payments are written by the **ICICI Eazypay** return/verify and the older **Razorpay** webhook. Offline ones are written when staff record them. (There is no Pabbly here.)

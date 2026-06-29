@@ -891,6 +891,13 @@ export interface Payment {
   deleted_at?: string | null;
   deleted_by?: string | null;
   deleted_reason?: string | null;
+  // --- Supersession (canonical group status; paid-wins). The attempt's own
+  // status is NEVER changed — these flag an unpaid attempt as moot because
+  // another attempt for the SAME student+item+purpose was paid/approved. ---
+  is_superseded?: boolean | null;
+  superseded_by_payment_id?: string | null;
+  superseded_at?: string | null;
+  superseded_reason?: string | null;
 }
 
 // ----------------------------- Payment proof (self-service recovery) -----------------------------
@@ -944,7 +951,9 @@ export type PaymentActionType =
   | "edit"
   | "soft_delete"
   | "restore"
-  | "permanent_delete";
+  | "permanent_delete"
+  | "supersede"
+  | "unsupersede";
 
 /**
  * One immutable, append-only entry in the payment action ledger. Captures who did

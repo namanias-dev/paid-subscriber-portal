@@ -74,6 +74,9 @@ async function run(req: Request) {
       const delayMs = (pendingRule.delay_minutes || 60) * 60000;
       let n = 0;
       for (const p of payments) {
+        // Skip superseded attempts: another attempt for this student+item was
+        // already paid/approved, so this one needs no payment-pending nudge.
+        if (p.is_superseded) continue;
         const isPending = p.status === "PENDING" || p.status === "VERIFYING" || p.status === "pending";
         const age = Date.now() - new Date(p.created_at).getTime();
         if (!isPending || age < delayMs || age > 36 * 3600 * 1000) continue;
@@ -94,7 +97,7 @@ async function run(req: Request) {
     if (abandRule?.enabled && abandRule.template_id) {
       let n = 0;
       for (const p of payments) {
-        if (p.status !== "ABANDONED") continue;
+        if (p.status !== "ABANDONED" || p.is_superseded) continue;
         const d = normalizeIndianMobile(p.phone).digits10;
         if (!d) continue;
         const res = await sendSms({
