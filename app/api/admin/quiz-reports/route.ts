@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getAllQuizzes, getAllAttempts, getAllAnswers, getAttemptsByQuiz, getAnswersByAttempt } from "@/lib/dataProvider";
+import { getAllQuizzes, getAllAttempts, getAllAnswers, getAttemptsByQuiz, getAnswersByAttempt, getStudents, getBuyers } from "@/lib/dataProvider";
 import { requirePermission } from "@/lib/adminGuard";
 
 export const dynamic = "force-dynamic";
@@ -15,22 +15,32 @@ export async function GET(req: Request) {
 
     // Per-quiz drilldown.
     if (quizId) {
-      const attempts = await getAttemptsByQuiz(quizId);
+      const [attempts, students, buyers] = await Promise.all([getAttemptsByQuiz(quizId), getStudents(), getBuyers()]);
       const finalized = attempts.filter((a) => a.status !== "IN_PROGRESS");
-      const rows = await Promise.all(
-        attempts.slice(0, 500).map(async (a) => ({
+      // Resolve each attempt to a real student (name/phone/login code) so admins
+      // see WHO took the test — not a raw id. Every new attempt is tied to a
+      // student; legacy guest attempts fall back to their captured lead details.
+      const studentById = new Map(students.map((s) => [s.id, s]));
+      const buyerByPhone = new Map(buyers.map((b) => [b.phone, b]));
+      const rows = attempts.slice(0, 500).map((a) => {
+        const st = a.user_id ? studentById.get(a.user_id) : undefined;
+        const phone = st?.phone || a.guest_mobile || null;
+        const buyer = phone ? buyerByPhone.get(phone) : undefined;
+        return {
           id: a.id,
-          name: a.guest_name || a.user_id || "Guest",
-          mobile: a.guest_mobile,
-          email: a.guest_email,
+          name: st?.name || a.guest_name || (a.user_id ? "Student" : "Guest"),
+          mobile: phone,
+          email: st?.email || a.guest_email || null,
+          loginCode: buyer?.login_code || st?.access_code || null,
+          isRegistered: !!a.user_id,
           status: a.status,
           score: a.score,
           max_score: a.max_score,
           accuracy: a.accuracy,
           time_taken_seconds: a.time_taken_seconds,
           submitted_at: a.submitted_at,
-        })),
-      );
+        };
+      });
       void getAnswersByAttempt; // referenced for potential future per-question drill
       return NextResponse.json({
         ok: true,
@@ -46,8 +56,8 @@ export async function GET(req: Request) {
     }
 
     // Global overview.
-    const attempts = await getAllAttempts();
-    const answers = await getAllAnswers();
+    const [attempts, answers, students] = await Promise.all([getAllAttempts(), getAllAnswers(), getStudents()]);
+    const studentNameById = new Map(students.map((s) => [s.id, s.name]));
     const finalized = attempts.filter((a) => a.status !== "IN_PROGRESS");
     const abandoned = attempts.filter((a) => a.status === "IN_PROGRESS" || a.status === "ABANDONED").length;
 
@@ -81,7 +91,7 @@ export async function GET(req: Request) {
 
     // Top / low performers.
     const performers = finalized
-      .map((a) => ({ name: a.guest_name || a.user_id || "Guest", score: a.score, max: a.max_score, accuracy: a.accuracy, quiz: quizMap.get(a.quiz_id)?.title || "" }))
+      .map((a) => ({ name: (a.user_id ? studentNameById.get(a.user_id) : null) || a.guest_name || "Student", score: a.score, max: a.max_score, accuracy: a.accuracy, quiz: quizMap.get(a.quiz_id)?.title || "" }))
       .sort((a, b) => b.accuracy - a.accuracy);
     const topPerformers = performers.slice(0, 8);
 

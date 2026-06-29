@@ -1,51 +1,31 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import AttemptEngine from "./AttemptEngine";
 
-const LEAD_KEY = "nsa_quiz_lead";
-
-type GuestLead = { name?: string; email?: string; mobile?: string; interest?: string };
 type Step = "form" | "code" | "quiz";
 
 export default function PublicQuizAttempt({
   slug,
   quizTitle,
-  captureLead,
   isLoggedIn,
 }: {
   slug: string;
   quizTitle?: string;
-  captureLead: boolean;
+  /** kept for API compatibility; the gate is driven purely by login state now. */
+  captureLead?: boolean;
   isLoggedIn: boolean;
 }) {
-  const needGate = captureLead && !isLoggedIn;
-  const [step, setStep] = useState<Step>(needGate ? "form" : "quiz");
-  const [guest, setGuest] = useState<GuestLead | null>(null);
+  // SECURITY: anonymous attempts are never allowed. A logged-out visitor MUST
+  // pass the lead form (which creates their account + logs them in) before the
+  // quiz starts. The server enforces this too — this is just the matching UX.
+  const [step, setStep] = useState<Step>(isLoggedIn ? "quiz" : "form");
   const [form, setForm] = useState({ name: "", mobile: "", email: "" });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loginCode, setLoginCode] = useState<string | null>(null);
   const [isNewCode, setIsNewCode] = useState(true);
   const [copied, setCopied] = useState(false);
-
-  // Remember a lead within the same browser session so we don't re-ask (or re-show
-  // the save-code screen) every quiz.
-  useEffect(() => {
-    if (!needGate) return;
-    try {
-      const raw = sessionStorage.getItem(LEAD_KEY);
-      if (!raw) return;
-      const saved = JSON.parse(raw) as { name?: string; mobile?: string; email?: string };
-      if (saved?.name && /^[6-9]\d{9}$/.test(saved.mobile || "")) {
-        setForm({ name: saved.name, mobile: saved.mobile || "", email: saved.email || "" });
-        setGuest({ ...saved, interest: quizTitle });
-        setStep("quiz");
-      }
-    } catch {
-      /* ignore */
-    }
-  }, [needGate, quizTitle]);
 
   const mobileValid = /^[6-9]\d{9}$/.test(form.mobile);
   const canStart = form.name.trim().length > 1 && mobileValid;
@@ -55,41 +35,34 @@ export default function PublicQuizAttempt({
     if (!canStart || submitting) return;
     setError(null);
     setSubmitting(true);
-    const lead: GuestLead = { name: form.name.trim(), mobile: form.mobile, email: form.email.trim() || undefined, interest: quizTitle };
 
-    // Create-or-reuse a re-loggable lead account and fetch the login code.
-    let code: string | null = null;
-    let fresh = true;
+    // Create-or-reuse a re-loggable account AND log in (server sets the session
+    // cookie), so the subsequent quiz start is authenticated and the attempt is
+    // tied to this student. We must NOT proceed if this fails.
     try {
       const res = await fetch("/api/public/quiz/lead", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: lead.name, mobile: lead.mobile, email: lead.email, slug }),
+        body: JSON.stringify({
+          name: form.name.trim(),
+          mobile: form.mobile,
+          email: form.email.trim() || undefined,
+          interest: quizTitle,
+          slug,
+        }),
       });
       const data = await res.json().catch(() => ({ ok: false }));
-      if (data.ok && data.loginCode) {
-        code = data.loginCode as string;
-        fresh = !!data.isNew;
+      setSubmitting(false);
+      if (!data.ok || !data.loginCode) {
+        setError(data.error || "Could not start. Please check your details and try again.");
+        return;
       }
-    } catch {
-      /* non-fatal — never block the quiz on account creation */
-    }
-    setSubmitting(false);
-    setGuest(lead);
-
-    try {
-      sessionStorage.setItem(LEAD_KEY, JSON.stringify({ name: lead.name, mobile: lead.mobile, email: lead.email, loginCode: code }));
-    } catch {
-      /* ignore */
-    }
-
-    if (code) {
-      setLoginCode(code);
-      setIsNewCode(fresh);
+      setLoginCode(data.loginCode as string);
+      setIsNewCode(!!data.isNew);
       setStep("code");
-    } else {
-      // Account creation failed silently — proceed to the quiz regardless.
-      setStep("quiz");
+    } catch {
+      setSubmitting(false);
+      setError("Network error. Please try again.");
     }
   }
 
@@ -145,6 +118,9 @@ export default function PublicQuizAttempt({
             <button type="submit" disabled={!canStart || submitting} className="btn btn-primary w-full py-3 disabled:opacity-50">
               {submitting ? "Preparing…" : "Continue →"}
             </button>
+            <p className="text-center text-xs text-muted">
+              Already have a login code? <a href={`/login?next=/quizzes/${slug}`} className="font-semibold text-primary underline">Log in</a>
+            </p>
             <p className="text-center text-xs text-muted">We respect your privacy. No spam — just your result and useful UPSC updates.</p>
           </form>
         </div>
@@ -160,7 +136,7 @@ export default function PublicQuizAttempt({
           <div className="bg-gradient-to-br from-primary to-primary-hover px-6 py-6 text-white">
             <p className="text-xs font-semibold uppercase tracking-wide text-white/80">{isNewCode ? "Your login is ready" : "Welcome back"}</p>
             <h1 className="mt-1 font-heading text-xl font-bold">Save your login code</h1>
-            <p className="mt-1 text-sm text-white/85">Use it to log back in anytime and retake quizzes or see your results.</p>
+            <p className="mt-1 text-sm text-white/85">You&apos;re logged in. Use it to log back in anytime and retake quizzes or see your results.</p>
           </div>
           <div className="space-y-5 p-6 text-center">
             <div className="rounded-2xl border-2 border-dashed border-primary/40 bg-primary-tint/40 p-5">
@@ -186,13 +162,12 @@ export default function PublicQuizAttempt({
     );
   }
 
-  // ---- Step 3: the quiz ----
+  // ---- Step 3: the quiz (authenticated — server ties the attempt to the student) ----
   return (
     <AttemptEngine
       apiBase="/api/public/quiz"
       slug={slug}
       resultBase={`/quizzes/${slug}/result`}
-      guest={guest}
     />
   );
 }

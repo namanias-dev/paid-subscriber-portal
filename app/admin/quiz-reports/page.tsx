@@ -13,11 +13,11 @@ interface Report {
   topicAverages: { label: string; accuracy: number; total: number }[];
   quizzes: { id: string; title: string }[];
 }
-interface AttemptRow { id: string; name: string; mobile: string | null; email: string | null; status: string; score: number; max_score: number; accuracy: number; time_taken_seconds: number | null; submitted_at: string | null }
+interface AttemptRow { id: string; name: string; mobile: string | null; email: string | null; loginCode?: string | null; isRegistered?: boolean; status: string; score: number; max_score: number; accuracy: number; time_taken_seconds: number | null; submitted_at: string | null }
 
 function toCsv(rows: AttemptRow[]) {
-  const head = ["Name", "Mobile", "Email", "Status", "Score", "Max", "Accuracy", "TimeSec", "SubmittedAt"];
-  const body = rows.map((r) => [r.name, r.mobile || "", r.email || "", r.status, r.score, r.max_score, r.accuracy, r.time_taken_seconds ?? "", r.submitted_at || ""]
+  const head = ["Name", "Mobile", "Email", "LoginCode", "Registered", "Status", "Score", "Max", "Accuracy", "TimeSec", "SubmittedAt"];
+  const body = rows.map((r) => [r.name, r.mobile || "", r.email || "", r.loginCode || "", r.isRegistered ? "Yes" : "No", r.status, r.score, r.max_score, r.accuracy, r.time_taken_seconds ?? "", r.submitted_at || ""]
     .map((v) => `"${String(v).replace(/"/g, '""')}"`).join(","));
   return [head.join(","), ...body].join("\n");
 }
@@ -143,11 +143,17 @@ export default function QuizReportsAdmin() {
               <span className="pill pill-blue">Acc {drill.analytics.avgAccuracy}%</span>
             </div>
             {drill.attempts.length === 0 ? <p className="text-sm text-muted">No attempts.</p> : (
-              <TableShell headers={["Name", "Mobile", "Status", "Score", "Accuracy", "When"]}>
+              <TableShell headers={["Name", "Mobile", "Login code", "Status", "Score", "Accuracy", "When"]}>
                 {drill.attempts.map((a) => (
                   <tr key={a.id} className="border-b border-line last:border-0">
-                    <td className="px-4 py-3">{a.name}</td>
+                    <td className="px-4 py-3">
+                      {a.name}
+                      {a.isRegistered
+                        ? <span className="pill pill-green ml-2 text-[10px]">Registered</span>
+                        : <span className="pill pill-gray ml-2 text-[10px]">Guest</span>}
+                    </td>
                     <td className="px-4 py-3">{a.mobile || "—"}</td>
+                    <td className="px-4 py-3 font-mono text-xs">{a.loginCode || "—"}</td>
                     <td className="px-4 py-3"><span className="pill pill-gray">{a.status}</span></td>
                     <td className="px-4 py-3">{a.score}/{a.max_score}</td>
                     <td className="px-4 py-3">{a.accuracy}%</td>

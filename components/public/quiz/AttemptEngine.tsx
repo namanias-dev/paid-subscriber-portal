@@ -31,12 +31,10 @@ export default function AttemptEngine({
   apiBase,
   slug,
   resultBase,
-  guest,
 }: {
   apiBase: string;
   slug: string;
   resultBase: string;
-  guest?: { name?: string; email?: string; mobile?: string } | null;
 }) {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
@@ -89,7 +87,7 @@ export default function AttemptEngine({
         const res = await fetch(`${apiBase}/start`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ slug, guest: guest || undefined }),
+          body: JSON.stringify({ slug }),
         });
         const data = await res.json();
         if (cancelled) return;
@@ -124,7 +122,7 @@ export default function AttemptEngine({
       }
     })();
     return () => { cancelled = true; };
-  }, [apiBase, slug, guest, storageKey]);
+  }, [apiBase, slug, storageKey]);
 
   // Timer tick.
   useEffect(() => {
@@ -179,6 +177,7 @@ export default function AttemptEngine({
           <h2 className="font-heading text-xl font-bold">Can&apos;t start this test</h2>
           <p className="mt-2 text-ink2">{error.message}</p>
           <div className="mt-5 flex flex-wrap justify-center gap-2">
+            {error.reason === "lead" && <Link href={`/quizzes/${slug}/attempt`} className="btn btn-primary">Enter your details to continue</Link>}
             {error.reason === "login" && <Link href={`/login?next=/quizzes/${slug}`} className="btn btn-primary">Login to continue</Link>}
             {error.reason === "payment" && <Link href="/courses" className="btn btn-primary">View Courses</Link>}
             <Link href="/quizzes" className="btn btn-secondary">Back to Quizzes</Link>

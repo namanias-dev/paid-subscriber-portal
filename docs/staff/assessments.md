@@ -18,6 +18,15 @@
 - KPIs: `Attempts`, `Completed`, `Completion`, `Abandoned`, `Avg score`, `Leads captured`.
 - Sections: `Most attempted quizzes`, `Hardest questions (most wrong)`, `Top performers`, `Topic-wise averages (weakest first)`, `Per-quiz attempts`.
 - Pick a quiz from `Select a quiz…` and download with **`⬇ CSV`**.
+- The per-quiz table shows each taker's **Name**, **Mobile** and **Login code**, with a **Registered** (real account) or **Guest** (older, pre-login) tag. Every new attempt is tied to a real student, so you can always see exactly who took which test. The CSV includes the login code and registered flag too.
+
+## How quiz access & first-time login works (important)
+A student can **never** take a quiz anonymously — access is checked on the server, not just hidden in the page.
+- **Logged-out / new visitor:** when they open a test they must first enter **Name + Mobile** (email optional). This instantly creates their account, generates a **login code**, and **logs them in** — then the test starts. Their lead is captured once in **Leads**. No duplicate accounts are made for a number that already exists.
+- **Returning visitor (same mobile):** they get their existing account + the same login code back (shown on the "save your code" screen), then go straight in. They can also log in at `/login` with mobile + code.
+- **Already logged in (any student or course buyer):** no form — the test starts immediately and the attempt is tracked to their profile.
+- **Logging out** fully clears the session on every device, so a logged-out phone cannot resume a test from a stale/cached login.
+- ⚠️ Because of this, the "capture lead before result" quiz toggle no longer changes whether the form appears — the lead/login step is always required for logged-out visitors. The toggle now only affects result-screen behaviour.
 
 ## Question Imports
 **Web address:** `/admin/quiz-imports` — heading `Question Imports`.
