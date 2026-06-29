@@ -276,6 +276,35 @@ export interface OrientationVideo {
   url: string;
 }
 
+/** Whether a linked library video plays first ("orientation") or as a "starter". */
+export type OrientationRole = "orientation" | "starter";
+
+/** What a library video can be attached to (course / webinar After-Registration). */
+export type OrientationTargetType = "course" | "webinar";
+
+/**
+ * Join row: one library video (content_items) assigned to the After-Registration
+ * section of ONE course/webinar, with a role + sort order. The SAME content_id
+ * can appear in many rows (many courses/webinars) — the video is never re-uploaded.
+ */
+export interface OrientationAssignment {
+  id: string;
+  content_id: string;
+  target_type: OrientationTargetType;
+  target_id: string;
+  role: OrientationRole;
+  sort_order: number;
+  created_at: string;
+}
+
+/** An assignment resolved with its underlying library video (for rendering). */
+export interface AssignedOrientationVideo {
+  assignment_id: string;
+  content: ContentItem;
+  role: OrientationRole;
+  sort_order: number;
+}
+
 /**
  * Per-course "After Registration" / Class Hub configuration. Shown only to
  * enrolled students (Phase 1 gating = active enrollment; Phase 2 = payment).

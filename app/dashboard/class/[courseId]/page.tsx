@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { ArrowLeft, Lock, ShieldCheck } from "lucide-react";
-import { getEnrollments, getAllCourses, getLibraryDocsByIds } from "@/lib/dataProvider";
+import { getEnrollments, getAllCourses, getLibraryDocsByIds, getOrientationVideosForTarget } from "@/lib/dataProvider";
 import { hasCourseAccess } from "@/lib/courseAccess";
 import { resolveLearner } from "@/lib/entitlements";
 import { getClassHubSectionsForCourse, getClassHubPerformance } from "@/lib/classHubServer";
@@ -43,8 +43,9 @@ export default async function ClassHubPage({ params }: { params: { courseId: str
   }
 
   const ar = course.after_registration || {};
-  const docs = await getLibraryDocsByIds([...(ar.doc_ids || []), ...(course.brochure_ids || [])]);
-  const [sections, performance] = await Promise.all([
+  const [docs, orientationVideos, sections, performance] = await Promise.all([
+    getLibraryDocsByIds([...(ar.doc_ids || []), ...(course.brochure_ids || [])]),
+    getOrientationVideosForTarget("course", course.id, { publishedOnly: true }),
     getClassHubSectionsForCourse(course.id, learner),
     getClassHubPerformance(course.id, learner, courses),
   ]);
@@ -71,7 +72,7 @@ export default async function ClassHubPage({ params }: { params: { courseId: str
         </div>
       </section>
 
-      <ClassHubContent course={course} docs={docs} />
+      <ClassHubContent course={course} docs={docs} orientationVideos={orientationVideos} />
 
       <ClassHubBatch courseId={course.id} sections={sections} performance={performance} />
     </div>

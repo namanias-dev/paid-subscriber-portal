@@ -1,18 +1,29 @@
-import { Video, FileText, PlayCircle, Clock } from "lucide-react";
-import { parseVideo } from "@/lib/videoEmbed";
+import { Video, FileText, Clock } from "lucide-react";
 import { formatISTDateTime } from "@/lib/dates";
 import RichContent from "@/components/public/RichContent";
 import BrochureCards from "@/components/public/BrochureCards";
 import BatchCountdown from "@/components/public/BatchCountdown";
-import type { Course, LibraryDoc } from "@/lib/types";
+import OrientationVideoGrid from "@/components/public/OrientationVideoGrid";
+import type { Course, LibraryDoc, AssignedOrientationVideo } from "@/lib/types";
 
 /**
  * Shared Class Hub body (welcome, live class, videos, materials, blocks).
  * Used by both the student dashboard and the buyer portal Class Hub pages.
+ *
+ * `orientationVideos` are reusable library videos linked via content_orientation_
+ * assignments; the legacy inline `after_registration.videos` are merged in (and
+ * de-duplicated) for courses not yet migrated.
  */
-export default function ClassHubContent({ course, docs }: { course: Course; docs: LibraryDoc[] }) {
+export default function ClassHubContent({
+  course,
+  docs,
+  orientationVideos = [],
+}: {
+  course: Course;
+  docs: LibraryDoc[];
+  orientationVideos?: AssignedOrientationVideo[];
+}) {
   const ar = course.after_registration || {};
-  const videos = (ar.videos || []).filter((v) => v.url?.trim());
   const blocks = (ar.blocks || []).filter((b) => b.visible !== false && b.title?.trim());
 
   return (
@@ -55,42 +66,8 @@ export default function ClassHubContent({ course, docs }: { course: Course; docs
         )}
       </section>
 
-      {/* Orientation videos */}
-      {videos.length > 0 && (
-        <section>
-          <h2 className="flex items-center gap-2 font-heading text-lg font-bold"><PlayCircle size={18} className="text-[var(--ca-gold)]" /> Orientation &amp; starter videos</h2>
-          <div className="mt-4 grid gap-5 sm:grid-cols-2">
-            {videos.map((v, i) => {
-              const parsed = parseVideo(v.url);
-              return (
-                <div key={i} className="overflow-hidden rounded-2xl border border-line bg-surface">
-                  {parsed?.kind === "youtube" && parsed.embedUrl ? (
-                    <div className="relative aspect-video w-full bg-black">
-                      <iframe
-                        src={parsed.embedUrl}
-                        title={v.title || `Video ${i + 1}`}
-                        loading="lazy"
-                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                        allowFullScreen
-                        referrerPolicy="strict-origin-when-cross-origin"
-                        className="absolute inset-0 h-full w-full"
-                      />
-                    </div>
-                  ) : (
-                    <a href={v.url} target="_blank" rel="noopener noreferrer" className="flex aspect-video w-full items-center justify-center bg-surface2 text-sm text-primary">Open video ↗</a>
-                  )}
-                  {(v.title || v.description) && (
-                    <div className="p-4">
-                      {v.title && <p className="font-semibold">{v.title}</p>}
-                      {v.description && <p className="mt-1 text-sm text-ink2">{v.description}</p>}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </section>
-      )}
+      {/* Orientation / starter videos (reusable library links + legacy inline) */}
+      <OrientationVideoGrid assigned={orientationVideos} inline={ar.videos || []} />
 
       {/* Study material / brochures */}
       {docs.length > 0 && (

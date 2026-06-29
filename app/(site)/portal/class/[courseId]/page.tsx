@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import type { Metadata } from "next";
 import { ArrowLeft, Lock } from "lucide-react";
 import { getBuyerSession } from "@/lib/session";
-import { getAllCourses, getLibraryDocsByIds, paidCourseIdsForPhone } from "@/lib/dataProvider";
+import { getAllCourses, getLibraryDocsByIds, paidCourseIdsForPhone, getOrientationVideosForTarget } from "@/lib/dataProvider";
 import { hasCourseAccess } from "@/lib/courseAccess";
 import { resolveLearner } from "@/lib/entitlements";
 import { getClassHubSectionsForCourse, getClassHubPerformance } from "@/lib/classHubServer";
@@ -41,8 +41,9 @@ export default async function PortalClassHubPage({ params }: { params: { courseI
   }
 
   const ar = course.after_registration || {};
-  const [docs, learner] = await Promise.all([
+  const [docs, orientationVideos, learner] = await Promise.all([
     getLibraryDocsByIds([...(ar.doc_ids || []), ...(course.brochure_ids || [])]),
+    getOrientationVideosForTarget("course", course.id, { publishedOnly: true }),
     resolveLearner(),
   ]);
 
@@ -71,7 +72,7 @@ export default async function PortalClassHubPage({ params }: { params: { courseI
         </div>
       </section>
 
-      <ClassHubContent course={course} docs={docs} />
+      <ClassHubContent course={course} docs={docs} orientationVideos={orientationVideos} />
 
       {accessExpired ? (
         <div className="rounded-2xl border border-amber-200 bg-amber-50 p-6 text-center">

@@ -8,7 +8,7 @@ import { useUploadManager } from "@/components/admin/upload/uploadManager";
 import { CONTENT_META } from "@/lib/contentMeta";
 import { SUBJECTS } from "@/lib/config";
 import { formatDate } from "@/lib/dates";
-import type { ContentItem, ContentType, Course } from "@/lib/types";
+import type { ContentItem, ContentType, Course, Webinar, OrientationRole } from "@/lib/types";
 
 /** Read duration + resolution from a video file (client-side; no processing). */
 function readVideoMeta(file: File): Promise<{ duration: number | null; resolution: string | null }> {
@@ -62,6 +62,7 @@ function itemCourseIds(c: ContentItem): string[] {
 export default function ContentAdmin() {
   const { data: content, loading, reload } = useAdminData<ContentItem[]>("/api/admin/content", "content");
   const { data: courses } = useAdminData<Course[]>("/api/admin/courses", "courses");
+  const { data: webinars } = useAdminData<Webinar[]>("/api/admin/webinars", "webinars");
   const { toast } = useToast();
   const { startUpload } = useUploadManager();
 
@@ -70,6 +71,12 @@ export default function ContentAdmin() {
   const [videoFile, setVideoFile] = useState<File | null>(null);
   const videoInput = useRef<HTMLInputElement>(null);
   const editing = !!form.id;
+
+  // Orientation / starter assignment (reuse this video in After-Registration of
+  // many courses/webinars). Keys are "course:<id>" / "webinar:<id>".
+  const [orientRole, setOrientRole] = useState<OrientationRole>("orientation");
+  const [orientTargets, setOrientTargets] = useState<Set<string>>(new Set());
+  const webinarList = useMemo(() => webinars || [], [webinars]);
 
   // Filters
   const [q, setQ] = useState("");
@@ -98,10 +105,12 @@ export default function ContentAdmin() {
   function openAdd() {
     setForm(EMPTY_FORM);
     setVideoFile(null);
+    setOrientRole("orientation");
+    setOrientTargets(new Set());
     setOpen(true);
   }
 
-  function openEdit(c: ContentItem) {
+  async function openEdit(c: ContentItem) {
     setForm({
       id: c.id,
       type: c.type,
@@ -121,7 +130,29 @@ export default function ContentAdmin() {
       visibility: c.visibility === "public" ? "public" : "enrolled",
     });
     setVideoFile(null);
+    setOrientRole("orientation");
+    setOrientTargets(new Set());
     setOpen(true);
+    // Load existing orientation/starter assignments for this video.
+    try {
+      const res = await fetch(`/api/admin/orientation?contentId=${c.id}`);
+      const data = await res.json().catch(() => ({}));
+      if (data?.ok && Array.isArray(data.assignments)) {
+        setOrientTargets(new Set(data.assignments.map((a: { target_type: string; target_id: string }) => `${a.target_type}:${a.target_id}`)));
+        if (data.assignments[0]?.role) setOrientRole(data.assignments[0].role as OrientationRole);
+      }
+    } catch {
+      /* non-fatal — the picker just starts empty */
+    }
+  }
+
+  function toggleOrient(key: string) {
+    setOrientTargets((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
   }
 
   function toggleCourse(id: string) {
@@ -168,6 +199,20 @@ export default function ContentAdmin() {
     const data = await res.json().catch(() => ({}));
     const recordingId: string | undefined = data?.content?.id || form.id;
 
+    // Sync orientation/starter assignments for video items (reconciles add/remove).
+    const isVideoType = form.type === "recording" || form.type === "live_link";
+    if (recordingId && isVideoType) {
+      const targets = [...orientTargets].map((k) => {
+        const idx = k.indexOf(":");
+        return { type: k.slice(0, idx), id: k.slice(idx + 1) };
+      });
+      await fetch("/api/admin/orientation", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "setTargets", contentId: recordingId, role: orientRole, targets }),
+      }).catch(() => null);
+    }
+
     // Hosted + a file chosen → kick off the resilient background upload.
     if (hosted && videoFile && recordingId) {
       const meta = await readVideoMeta(videoFile);
@@ -196,7 +241,18 @@ export default function ContentAdmin() {
   }
 
   async function remove(id: string) {
-    if (!confirm("Delete content?")) return;
+    let message = "Delete content?";
+    try {
+      const res = await fetch(`/api/admin/orientation?contentId=${id}`);
+      const data = await res.json().catch(() => ({}));
+      const n = data?.ok && Array.isArray(data.assignments) ? data.assignments.length : 0;
+      if (n > 0) {
+        message = `⚠️ This video is linked as an orientation/starter video in ${n} place${n === 1 ? "" : "s"} (course/webinar). Deleting it removes it from all of them. Continue?`;
+      }
+    } catch {
+      /* fall back to the plain confirm */
+    }
+    if (!confirm(message)) return;
     await fetch(`/api/admin/content/${id}`, { method: "DELETE" });
     reload();
   }
@@ -310,6 +366,50 @@ export default function ContentAdmin() {
             </div>
             <p className="mt-1 text-xs text-muted">One item can belong to multiple batches — it appears in each batch&apos;s Class Hub. Leave empty for a global library item.</p>
           </div>
+
+          {/* Reusable orientation / starter assignment (video items only) */}
+          {isRecording && (
+            <div className="rounded-xl border border-[rgba(212,175,55,0.4)] bg-[rgba(212,175,55,0.06)] p-3">
+              <div className="flex items-center justify-between gap-2">
+                <label className="label mb-0">Use as orientation / starter video</label>
+                <select className="input h-9 w-36 text-xs" value={orientRole} onChange={(e) => setOrientRole(e.target.value as OrientationRole)}>
+                  <option value="orientation">Orientation</option>
+                  <option value="starter">Starter</option>
+                </select>
+              </div>
+              <p className="mb-2 mt-1 text-xs text-muted">
+                Shows in the &quot;After Registration&quot; section of the selected courses/webinars — same video, no re-upload.
+              </p>
+              <div className="max-h-44 space-y-1 overflow-y-auto rounded-lg border border-line bg-surface p-2">
+                {courseList.length === 0 && webinarList.length === 0 ? (
+                  <p className="px-1 py-2 text-xs text-muted">No courses or webinars found.</p>
+                ) : (
+                  <>
+                    {courseList.map((c) => {
+                      const key = `course:${c.id}`;
+                      return (
+                        <label key={key} className="flex min-h-[34px] cursor-pointer items-center gap-2 rounded-lg px-2 py-1 text-sm hover:bg-surface2">
+                          <input type="checkbox" checked={orientTargets.has(key)} onChange={() => toggleOrient(key)} />
+                          <span className="flex-1">{c.title}</span>
+                          <span className="pill pill-blue text-[10px]">Course</span>
+                        </label>
+                      );
+                    })}
+                    {webinarList.map((w) => {
+                      const key = `webinar:${w.id}`;
+                      return (
+                        <label key={key} className="flex min-h-[34px] cursor-pointer items-center gap-2 rounded-lg px-2 py-1 text-sm hover:bg-surface2">
+                          <input type="checkbox" checked={orientTargets.has(key)} onChange={() => toggleOrient(key)} />
+                          <span className="flex-1">{w.title}</span>
+                          <span className="pill pill-gold text-[10px]">Webinar</span>
+                        </label>
+                      );
+                    })}
+                  </>
+                )}
+              </div>
+            </div>
+          )}
 
           <div className="grid grid-cols-3 gap-3">
             <div>

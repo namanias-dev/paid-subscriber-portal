@@ -6,6 +6,7 @@ import {
   getCourseBySlug,
   getWebinarBySlug,
   getSiteSettings,
+  getOrientationVideosForTarget,
 } from "@/lib/dataProvider";
 import { resolvePortalItemAccess } from "@/lib/portalItemAccess";
 import { formatINR, formatISTDateTime } from "@/lib/dates";
@@ -14,6 +15,7 @@ import { whatsappLink } from "@/lib/phone";
 import type { PdfResource, PageSection, Payment, Review } from "@/lib/types";
 import WebinarAccess from "@/components/portal/WebinarAccess";
 import WebinarJoinSteps from "@/components/portal/WebinarJoinSteps";
+import OrientationVideoGrid from "@/components/public/OrientationVideoGrid";
 
 export const dynamic = "force-dynamic";
 export const metadata = {
@@ -76,6 +78,7 @@ export default async function PortalItemPage({ params }: { params: { reference: 
   if (webinar) {
     const sessionType: "live" | "recorded" = webinar.session_type === "recorded" ? "recorded" : "live";
     const recording = parseRecording(webinar.recording_link);
+    const orientationVideos = await getOrientationVideosForTarget("webinar", webinar.id, { publishedOnly: true });
     const materials: PdfResource[] = (webinar.materials || []).filter((m) => m.url?.trim());
     const reviews: Review[] = (webinar.reviews || []).filter((r) => r.visible !== false && r.name?.trim());
     const sections: PageSection[] = (webinar.sections || []).filter((s) => s.visible !== false);
@@ -147,6 +150,13 @@ export default async function PortalItemPage({ params }: { params: { reference: 
               <section className="mt-8">
                 <h2 className="text-lg font-bold">About this session</h2>
                 <div className="quiz-rich prose-portal mt-3 max-w-none text-ink2" dangerouslySetInnerHTML={{ __html: aboutHtml }} />
+              </section>
+            )}
+
+            {/* Orientation / starter videos (reusable library links) */}
+            {orientationVideos.length > 0 && (
+              <section className="mt-8">
+                <OrientationVideoGrid assigned={orientationVideos} />
               </section>
             )}
 

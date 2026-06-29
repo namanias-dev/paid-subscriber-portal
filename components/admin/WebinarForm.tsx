@@ -22,6 +22,7 @@ import {
 } from "./FormFields";
 import RichTextEditor from "./RichTextEditor";
 import LibraryPicker from "./LibraryPicker";
+import OrientationVideoPicker from "./OrientationVideoPicker";
 import { useToast } from "@/components/ui/Toast";
 import { istInputToISO, isoToISTInput } from "@/lib/dates";
 import type {
@@ -309,12 +310,23 @@ export default function WebinarForm({ webinar }: { webinar?: Webinar }) {
             id: "materials",
             label: "After Registration",
             content: (
-              <Section
-                title="Materials & deliverables"
-                desc="Shown ONLY to students who have registered/paid (entitlement-gated) — on their portal card. Upload PDFs or paste a Google Drive link, each with a title."
-              >
-                <PdfResourcesEditor value={materials} onChange={setMaterials} folder="materials" />
-              </Section>
+              <>
+                <Section title="Orientation & starter videos" desc="Reuse videos from the Content library — uploaded once, assignable to many courses & webinars. Changes here save instantly.">
+                  {isNew ? (
+                    <p className="rounded-xl border border-dashed border-line bg-surface2/40 px-3 py-4 text-sm text-muted">
+                      Save the webinar first, then link library videos here.
+                    </p>
+                  ) : (
+                    <OrientationVideoPicker targetType="webinar" targetId={webinar!.id} />
+                  )}
+                </Section>
+                <Section
+                  title="Materials & deliverables"
+                  desc="Shown ONLY to students who have registered/paid (entitlement-gated) — on their portal card. Upload PDFs or paste a Google Drive link, each with a title."
+                >
+                  <PdfResourcesEditor value={materials} onChange={setMaterials} folder="materials" />
+                </Section>
+              </>
             ),
           },
           {

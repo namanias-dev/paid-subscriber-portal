@@ -22,6 +22,7 @@ import {
 } from "./FormFields";
 import RichTextEditor from "./RichTextEditor";
 import LibraryPicker from "./LibraryPicker";
+import OrientationVideoPicker from "./OrientationVideoPicker";
 import { useToast } from "@/components/ui/Toast";
 import { COURSE_CATEGORIES, LEARNING_MODES } from "@/lib/config";
 import { istInputToISO, isoToISTInput, formatINR, formatISTDate } from "@/lib/dates";
@@ -269,7 +270,16 @@ export default function CourseForm({ course }: { course?: Course }) {
                     <input type="datetime-local" className="input" value={isoToISTInput(ar.next_class_at)} onChange={(e) => setAR("next_class_at", e.target.value ? istInputToISO(e.target.value) : null)} />
                   </Field>
                 </Section>
-                <Section title="Orientation videos" desc="Paste YouTube URLs — responsive embeds in the Class Hub.">
+                <Section title="Orientation & starter videos" desc="Reuse videos from the Content library — uploaded once, assignable to many courses & webinars. Changes here save instantly.">
+                  {isNew ? (
+                    <p className="rounded-xl border border-dashed border-line bg-surface2/40 px-3 py-4 text-sm text-muted">
+                      Save the course first, then link library videos here.
+                    </p>
+                  ) : (
+                    <OrientationVideoPicker targetType="course" targetId={course!.id} />
+                  )}
+                </Section>
+                <Section title="One-off video URLs (legacy)" desc="Paste a YouTube URL that isn't in the library. Prefer the library picker above so a video can be reused across courses.">
                   <VideosEditor value={ar.videos || []} onChange={(v) => setAR("videos", v)} />
                 </Section>
                 <Section title="Study material" desc="Pick PDFs from the shared library (no re-upload).">

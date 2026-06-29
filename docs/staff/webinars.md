@@ -24,6 +24,7 @@ Most-used fields:
 - **Basic Details:** `Title`, `Slug (URL)`, `Status` (`Upcoming` / `Completed (show recording)`), `Short description`, `Start date & time (IST)`, `End date & time (IST, optional)`, `Session type` (`Live webinar` / `Recorded session`), `Zoom / live class link`, `Recording link`. There's also an `Active` / `Disabled` toggle (visible on public site or not).
 - **Pricing & Seats:** `Price (₹)` (`0 = free registration`), `Capacity (seats)`, optional `Show seats remaining` and a `Filling Fast` urgency badge.
 - **Media:** cover image, video, downloadable resources, shared brochures.
+- **After Registration:** `Orientation & starter videos` (pick reusable videos from the Content library — see [Content / LMS → Orientation / starter videos](content-lms.md)) and `Materials & deliverables` (PDFs/links). Both show only to registered/paid (or staff-comp) attendees on their portal card.
 
 Save with **`Create Webinar`** / **`Save Changes`**. You'll see `Title is required` if the title is empty, or `End time must be after the start time.` if the times are wrong.
 

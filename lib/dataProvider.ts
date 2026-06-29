@@ -14,6 +14,10 @@ import type {
   ContentItem,
   ContentType,
   ClassHubView,
+  OrientationAssignment,
+  OrientationRole,
+  OrientationTargetType,
+  AssignedOrientationVideo,
   LectureWatchProgress,
   CourseAccessOverride,
   Bookmark,
@@ -355,6 +359,175 @@ function contentAssignedTo(item: ContentItem, courseId: string): boolean {
 export async function getCourseContent(courseId: string): Promise<ContentItem[]> {
   const published = await getPublishedContent();
   return published.filter((c) => contentAssignedTo(c, courseId));
+}
+
+// ============ ORIENTATION / STARTER VIDEO ASSIGNMENTS (reusable) ============
+// A library video (content_items) linked to the "After Registration" section of
+// many courses/webinars via content_orientation_assignments. The media is never
+// duplicated — only the join row is per course/webinar. Service-role only.
+
+const ORIENTATION_TABLE = "content_orientation_assignments";
+
+/** Raw join rows for one course/webinar, ordered for display. */
+export async function getOrientationAssignmentsForTarget(
+  targetType: OrientationTargetType,
+  targetId: string,
+): Promise<OrientationAssignment[]> {
+  if (!targetId) return [];
+  const db = getSupabaseAdmin();
+  if (!db) return [];
+  const { data } = await db
+    .from(ORIENTATION_TABLE)
+    .select("*")
+    .eq("target_type", targetType)
+    .eq("target_id", targetId)
+    .order("sort_order", { ascending: true })
+    .order("created_at", { ascending: true });
+  return (data as OrientationAssignment[]) ?? [];
+}
+
+/** Every assignment for one library video (used to show "assigned to N places"). */
+export async function getOrientationAssignmentsForContent(contentId: string): Promise<OrientationAssignment[]> {
+  if (!contentId) return [];
+  const db = getSupabaseAdmin();
+  if (!db) return [];
+  const { data } = await db.from(ORIENTATION_TABLE).select("*").eq("content_id", contentId);
+  return (data as OrientationAssignment[]) ?? [];
+}
+
+/**
+ * Assignments for a course/webinar resolved with the underlying library video.
+ * `publishedOnly` (student-facing) drops unpublished / not-yet-ready videos so a
+ * draft library item never leaks into a Class Hub.
+ */
+export async function getOrientationVideosForTarget(
+  targetType: OrientationTargetType,
+  targetId: string,
+  opts?: { publishedOnly?: boolean },
+): Promise<AssignedOrientationVideo[]> {
+  const rows = await getOrientationAssignmentsForTarget(targetType, targetId);
+  if (rows.length === 0) return [];
+  const db = getSupabaseAdmin();
+  if (!db) return [];
+  const ids = Array.from(new Set(rows.map((r) => r.content_id)));
+  const { data } = await db.from("content_items").select("*").in("id", ids);
+  const byId = new Map<string, ContentItem>((data as ContentItem[] | null || []).map((c) => [c.id, c]));
+  const out: AssignedOrientationVideo[] = [];
+  for (const r of rows) {
+    const content = byId.get(r.content_id);
+    if (!content) continue;
+    if (opts?.publishedOnly) {
+      if (!content.is_published) continue;
+      // Hosted videos must have finished processing to be watchable.
+      if (content.source_type === "hosted" && content.upload_status && content.upload_status !== "completed") continue;
+    }
+    out.push({ assignment_id: r.id, content, role: r.role, sort_order: r.sort_order });
+  }
+  return out;
+}
+
+/** Create or update one assignment (idempotent on content+target). */
+export async function assignOrientationVideo(input: {
+  contentId: string;
+  targetType: OrientationTargetType;
+  targetId: string;
+  role?: OrientationRole;
+  sortOrder?: number;
+}): Promise<OrientationAssignment | null> {
+  const db = getSupabaseAdmin();
+  if (!db) return null;
+  // Append to the end by default so a new pick lands after existing ones.
+  let sortOrder = input.sortOrder;
+  if (sortOrder == null) {
+    const existing = await getOrientationAssignmentsForTarget(input.targetType, input.targetId);
+    sortOrder = existing.length;
+  }
+  const row = {
+    content_id: input.contentId,
+    target_type: input.targetType,
+    target_id: input.targetId,
+    role: input.role ?? "orientation",
+    sort_order: sortOrder,
+  };
+  const { data, error } = await db
+    .from(ORIENTATION_TABLE)
+    .upsert(row, { onConflict: "content_id,target_type,target_id" })
+    .select()
+    .single();
+  if (error) throw new Error(error.message);
+  return data as OrientationAssignment;
+}
+
+/** Remove one link. Never touches the library video or other courses/webinars. */
+export async function unassignOrientationVideo(input: {
+  contentId: string;
+  targetType: OrientationTargetType;
+  targetId: string;
+}): Promise<boolean> {
+  const db = getSupabaseAdmin();
+  if (!db) return false;
+  const { error } = await db
+    .from(ORIENTATION_TABLE)
+    .delete()
+    .eq("content_id", input.contentId)
+    .eq("target_type", input.targetType)
+    .eq("target_id", input.targetId);
+  if (error) throw new Error(error.message);
+  return true;
+}
+
+/** Persist a new display order for a course/webinar's orientation videos. */
+export async function reorderOrientationVideos(
+  targetType: OrientationTargetType,
+  targetId: string,
+  orderedContentIds: string[],
+): Promise<boolean> {
+  const db = getSupabaseAdmin();
+  if (!db) return false;
+  await Promise.all(
+    orderedContentIds.map((contentId, i) =>
+      db
+        .from(ORIENTATION_TABLE)
+        .update({ sort_order: i })
+        .eq("content_id", contentId)
+        .eq("target_type", targetType)
+        .eq("target_id", targetId),
+    ),
+  );
+  return true;
+}
+
+/**
+ * From the Content tab: make this library video's assignments exactly match the
+ * selected targets for the given role. Adds new links, removes de-selected ones,
+ * and leaves links to OTHER content untouched.
+ */
+export async function setOrientationTargetsForContent(
+  contentId: string,
+  role: OrientationRole,
+  targets: { type: OrientationTargetType; id: string }[],
+): Promise<boolean> {
+  const db = getSupabaseAdmin();
+  if (!db) return false;
+  const current = await getOrientationAssignmentsForContent(contentId);
+  const want = new Set(targets.map((t) => `${t.type}:${t.id}`));
+  const have = new Set(current.map((a) => `${a.target_type}:${a.target_id}`));
+
+  // Remove links that are no longer selected.
+  const toRemove = current.filter((a) => !want.has(`${a.target_type}:${a.target_id}`));
+  for (const a of toRemove) {
+    await db.from(ORIENTATION_TABLE).delete().eq("id", a.id);
+  }
+  // Add newly selected links (append to the end of each target's list).
+  for (const t of targets) {
+    if (have.has(`${t.type}:${t.id}`)) {
+      // Keep role in sync for an already-linked target.
+      await db.from(ORIENTATION_TABLE).update({ role }).eq("content_id", contentId).eq("target_type", t.type).eq("target_id", t.id);
+      continue;
+    }
+    await assignOrientationVideo({ contentId, targetType: t.type, targetId: t.id, role });
+  }
+  return true;
 }
 
 // ====================== CLASS HUB VIEWS (NEW badge) ======================
