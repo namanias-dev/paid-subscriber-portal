@@ -10,6 +10,7 @@ import LogoutFlow from "@/components/ui/LogoutFlow";
 import Tracker from "@/components/analytics/Tracker";
 import ConsentBanner from "@/components/analytics/ConsentBanner";
 import ThirdParty from "@/components/analytics/ThirdParty";
+import ClientHealth from "@/components/system/ClientHealth";
 
 const sora = Sora({
   subsets: ["latin"],
@@ -50,6 +51,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <Suspense fallback={null}><Tracker /></Suspense>
           <ConsentBanner />
           <ThirdParty />
+          <ClientHealth />
         </ToastProvider>
       </body>
     </html>

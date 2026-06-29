@@ -17,6 +17,10 @@ Sending is **off by default**. It only works when the kill switch is on (`SMS_EN
 ## "A payment shows pending but the student paid online"
 Click **`↻`** on that row (or `↻ Re-verify payments`) to re-check with ICICI. If it has no ICICI reference, it can't be auto-verified — ask the student for proof and accept it.
 
+## "A student says the site looks broken / old after an update (mobile)"
+This should now **fix itself automatically** — you no longer need to tell students to clear cache or use incognito. The app checks for a new version when it loads and when they return to the tab; if their phone is running an old version it quietly reloads to the latest one. If a student is **in the middle of a quiz**, it won't interrupt them — they'll see a small **"A new version of the app is available — Refresh"** bar they can tap when ready. Only out-of-date devices refresh; students already on the current version notice nothing.
+- If someone is *still* stuck on old behaviour, ask them to fully close and reopen the browser tab once. A normal valid login is preserved across updates — they will **not** be logged out by an update.
+
 ## "A student can't log into the portal"
 - Make sure you're giving them the **`Portal`** code (7 characters), not the `Access` code.
 - Confirm their access isn't `Revoked` (profile `Access control` → `Restore`).

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { formatQuestionHtml } from "@/lib/quizFormat";
+import { setAppBusy } from "@/lib/appBusy";
 
 interface ClientQuestion {
   question_id: string;
@@ -123,6 +124,14 @@ export default function AttemptEngine({
     })();
     return () => { cancelled = true; };
   }, [apiBase, slug, storageKey]);
+
+  // Mark the app "busy" while an attempt is live so a new-deploy auto-refresh
+  // never reloads the student mid-quiz (it shows a gentle banner instead).
+  useEffect(() => {
+    if (!attemptId) return;
+    setAppBusy(true);
+    return () => setAppBusy(false);
+  }, [attemptId]);
 
   // Timer tick.
   useEffect(() => {
