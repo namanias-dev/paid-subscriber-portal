@@ -539,6 +539,49 @@ export interface Course {
   emi_config?: CourseEmiConfig;
   /** "Mission Control": exactly what enrolling in this course unlocks. */
   entitlements?: CourseEntitlements;
+  // --- Batches / variants (Phase 1: data layer only, default-batch fallback) ---
+  /**
+   * Sellable variants of this course (mode + timing + own price/date/seats).
+   * PHASE 1: purely additive. The course-level fields above remain the canonical
+   * pricing source until a batch is explicitly chosen at checkout in a later phase.
+   * Every existing course is backfilled with exactly one "default batch" mirroring
+   * its current values, referenced by `default_batch_id`.
+   */
+  batches?: CourseBatch[];
+  /** Id of the batch used as the fallback/default (mirrors the course-level fields). */
+  default_batch_id?: string | null;
+}
+
+/**
+ * One sellable variant ("batch") of a course. A default batch mirrors the
+ * course-level price/date/mode fields exactly so behaviour is unchanged until a
+ * batch is explicitly selected. `mode`/`timing` are arrays (mirroring the course's
+ * `modes` / `batch_timings`) so a default batch is a lossless snapshot.
+ */
+export interface CourseBatch {
+  id: string;
+  /** Human label for staff/receipts, e.g. "Morning · Online". */
+  label: string | null;
+  /** Delivery modes for this batch (mirrors Course.modes). */
+  mode: LearningMode[];
+  /** Timing tags for this batch (mirrors Course.batch_timings). */
+  timing: string[];
+  /** Batch start date (UTC ISO; mirrors Course.batch_start). */
+  start_date: string | null;
+  /** Optional batch end date (UTC ISO). */
+  end_date: string | null;
+  /** Standard / total fee for this batch (mirrors Course.price). */
+  price: number;
+  /** Strikethrough anchor (mirrors Course.original_price). */
+  original_price: number | null;
+  /** One-shot pay-in-full price (mirrors Course.pay_in_full_price). */
+  pay_in_full_price: number | null;
+  /** Book-Your-Seat + EMI config for this batch (mirrors Course.emi_config). */
+  emi_config: CourseEmiConfig;
+  /** Total seats (mirrors Course.capacity). */
+  capacity: number | null;
+  /** Seats remaining (mirrors Course.seats_left). */
+  seats_left: number | null;
 }
 
 /**

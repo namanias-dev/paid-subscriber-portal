@@ -1458,6 +1458,8 @@ export async function addCourse(input: Partial<Course>): Promise<Course> {
     after_registration: input.after_registration ?? {},
     emi_config: input.emi_config ?? {},
     entitlements: input.entitlements ?? {},
+    batches: input.batches ?? [],
+    default_batch_id: input.default_batch_id ?? null,
     created_at: new Date().toISOString(),
   } as Course;
   if (demoMode()) {

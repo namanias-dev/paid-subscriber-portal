@@ -194,6 +194,39 @@ export interface PlanCourseInput {
   seatAmount?: number | null;
   installmentCount?: number | null;
   bookingISO?: string;
+  /**
+   * PHASE 1 (default-batch fallback): when omitted — as ALL current callers do —
+   * pricing/dates come from the course-level fields exactly as before. When a
+   * matching batch id is supplied, that batch's price/date/mode/seats override
+   * the course-level values for this plan only. An unknown id falls back to the
+   * course-level fields (never throws), so behaviour can only stay the same.
+   */
+  batchId?: string | null;
+}
+
+/**
+ * Resolve the effective course for planning. With no batchId (today's behaviour)
+ * this returns the course unchanged — guaranteeing identical output. With a known
+ * batchId it returns a shallow copy whose pricing/date/mode fields are overridden
+ * by that batch, so every downstream helper (resolveEmiConfig, payInFullTotal,
+ * buildBatchLabel) reads the batch's values without any other code change.
+ */
+function effectiveCourseForBatch(course: Course, batchId?: string | null): Course {
+  if (!batchId) return course;
+  const batch = (course.batches || []).find((b) => b.id === batchId);
+  if (!batch) return course;
+  return {
+    ...course,
+    modes: batch.mode ?? course.modes,
+    batch_start: batch.start_date ?? course.batch_start,
+    batch_timings: batch.timing ?? course.batch_timings,
+    price: batch.price,
+    original_price: batch.original_price ?? course.original_price,
+    pay_in_full_price: batch.pay_in_full_price ?? course.pay_in_full_price,
+    emi_config: batch.emi_config ?? course.emi_config,
+    capacity: batch.capacity ?? course.capacity,
+    seats_left: batch.seats_left ?? course.seats_left,
+  };
 }
 
 export interface PlannedEnrollment {
@@ -217,7 +250,9 @@ export interface PlannedEnrollment {
 export function planCourseEnrollment(
   input: PlanCourseInput
 ): { ok: true; plan: PlannedEnrollment } | { ok: false; error: string } {
-  const { course } = input;
+  // With no batchId (all current callers) this is the original `course`, so the
+  // entire computation below is byte-for-byte identical to the previous behaviour.
+  const course = effectiveCourseForBatch(input.course, input.batchId);
   const standardTotal = Math.max(0, Math.round(course.price));
   if (standardTotal <= 0) return { ok: false, error: "This course has no payable fee." };
 
