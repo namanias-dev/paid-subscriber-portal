@@ -23,10 +23,14 @@ export type UploadStatus =
 
 interface PartRef { partNumber: number; etag: string }
 
+export type UploadTarget = "lecture" | "webinar";
+
 export interface UploadItem {
   recordingId: string;
   title: string;
   courseId: string;
+  /** Which entity this upload populates. "lecture" (default) → content_items; "webinar" → webinars.recording_key. */
+  target?: UploadTarget;
   fileName: string;
   fileSize: number;
   chunkSize: number;
@@ -51,7 +55,7 @@ interface UploadManagerCtx {
   items: UploadItem[];
   minimized: boolean;
   setMinimized: (v: boolean) => void;
-  startUpload: (opts: { recordingId: string; title: string; courseId: string; file: File; durationSeconds?: number | null; resolution?: string | null; deletable?: boolean }) => void;
+  startUpload: (opts: { recordingId: string; title: string; courseId: string; file: File; durationSeconds?: number | null; resolution?: string | null; deletable?: boolean; target?: UploadTarget }) => void;
   pause: (id: string) => void;
   resume: (id: string) => void;
   cancel: (id: string) => Promise<void>;
@@ -182,14 +186,15 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
       if (!item) return;
 
       // 1) Ensure the R2 multipart exists (create on first run).
+      const target: UploadTarget = item.target === "webinar" ? "webinar" : "lecture";
       let key = ""; let uploadId = "";
-      const partsInfo = await fetch(`/api/admin/lectures/upload/parts?recordingId=${id}`).then((r) => r.json()).catch(() => null);
+      const partsInfo = await fetch(`/api/admin/lectures/upload/parts?recordingId=${id}&target=${target}`).then((r) => r.json()).catch(() => null);
       if (partsInfo?.uploadId && partsInfo?.key) {
         key = partsInfo.key; uploadId = partsInfo.uploadId;
       } else {
         const created = await api<{ uploadId: string; key: string }>("/api/admin/lectures/upload/create", {
           recordingId: id, totalParts: item.totalParts, chunkSize: item.chunkSize, fileSize: item.fileSize,
-          durationSeconds: item.durationSeconds, resolution: item.resolution,
+          durationSeconds: item.durationSeconds, resolution: item.resolution, target,
         });
         key = created.key; uploadId = created.uploadId;
       }
@@ -231,7 +236,7 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
       if (item && done.size >= item.totalParts) {
         await api("/api/admin/lectures/upload/complete", {
           recordingId: id, parts: [...done.values()],
-          durationSeconds: item.durationSeconds, resolution: item.resolution, fileSize: item.fileSize,
+          durationSeconds: item.durationSeconds, resolution: item.resolution, fileSize: item.fileSize, target,
         });
         update(id, { status: "completed", bytesUploaded: item.fileSize, speedBps: 0, etaSeconds: 0 });
         files.current.delete(id);
@@ -255,6 +260,7 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
       recordingId: opts.recordingId,
       title: opts.title,
       courseId: opts.courseId,
+      target: opts.target ?? "lecture",
       fileName: opts.file.name,
       fileSize: opts.file.size,
       chunkSize: CHUNK_SIZE,
@@ -305,8 +311,10 @@ export function UploadManagerProvider({ children }: { children: React.ReactNode 
   const cancel = useCallback(async (id: string) => {
     const c = ctrls.current.get(id);
     if (c) c.cancelled = true;
-    const deletable = itemsRef.current.find((i) => i.recordingId === id)?.deletable ?? false;
-    await api("/api/admin/lectures/upload/abort", { recordingId: id, deleteRecord: deletable }).catch(() => {});
+    const found = itemsRef.current.find((i) => i.recordingId === id);
+    const deletable = found?.deletable ?? false;
+    const target: UploadTarget = found?.target === "webinar" ? "webinar" : "lecture";
+    await api("/api/admin/lectures/upload/abort", { recordingId: id, deleteRecord: deletable, target }).catch(() => {});
     files.current.delete(id);
     ctrls.current.delete(id);
     setItems((prev) => {

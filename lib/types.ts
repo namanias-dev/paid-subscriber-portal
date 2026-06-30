@@ -901,6 +901,17 @@ export interface Webinar {
    */
   registrations: number;
   recording_link: string | null;
+  // --- Hosted recording (uploaded video FILE; reuses the lecture R2 pipeline) ---
+  /** Upload lifecycle for a hosted recording: null|uploading|completed|failed. */
+  recording_upload_status?: "uploading" | "completed" | "failed" | null;
+  /** Active R2 multipart upload id (for resume). */
+  recording_upload_id?: string | null;
+  /** R2 key being/was uploaded (multipart target). */
+  recording_multipart_key?: string | null;
+  /** Final playable R2 object key. Present + status "completed" => hosted recording ready. */
+  recording_key?: string | null;
+  recording_duration_seconds?: number | null;
+  recording_file_size?: number | null;
   /**
    * Public registration-count visibility (Problem 1). null/true => show
    * (threshold-gated honest count); false => hide the count entirely. Defaults to

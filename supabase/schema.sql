@@ -335,6 +335,13 @@ create table if not exists public.webinars (
   capacity int,
   registrations int default 0,
   recording_link text,
+  -- Hosted recording (uploaded video FILE) — reuses the R2 multipart pipeline.
+  recording_upload_status text,          -- null|uploading|completed|failed
+  recording_upload_id text,              -- active multipart upload id (resume)
+  recording_multipart_key text,          -- R2 key being/was uploaded
+  recording_key text,                    -- final playable R2 object key
+  recording_duration_seconds integer,
+  recording_file_size bigint,
   status text default 'upcoming',
   end_datetime timestamptz,
   long_description text,

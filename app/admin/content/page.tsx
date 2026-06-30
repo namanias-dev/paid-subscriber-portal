@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { PageHeader, useAdminData, LoadingBlock, TableShell } from "@/components/admin/ui";
 import Modal from "@/components/ui/Modal";
 import { useToast } from "@/components/ui/Toast";
@@ -557,18 +557,44 @@ export default function ContentAdmin() {
   );
 }
 
+const MAX_WEBINAR_VIDEO_BYTES = 5 * 1024 ** 3; // 5 GB safety cap
+
 /**
- * Webinar recordings manager (lives in the Content/LMS tab so staff manage ALL
- * recordings in one place). Lists every webinar with an inline link editor that
- * PATCHes webinars.recording_link. Once saved, a paid attendee (post date) sees
- * and can play the recording — the portal only shows "processing" when the link
- * is genuinely empty.
+ * Dedicated "Webinars" section (lives in the Content/LMS tab so staff manage ALL
+ * recordings in one place). Lists EVERY webinar with its recording status and,
+ * inline per row, BOTH ways to set a recording:
+ *   1) Upload an actual video FILE — reuses the exact R2 multipart pipeline used
+ *      for course lectures (resilient/resumable background upload). On success a
+ *      paid + post-date attendee plays it inline; "processing" disappears.
+ *   2) Paste an external link (YouTube / Drive / direct) — unchanged.
  */
 function WebinarRecordings({ webinars, reload }: { webinars: Webinar[]; reload: () => void }) {
   const { toast } = useToast();
+  const { startUpload, items: uploads, cancel } = useUploadManager();
   const [q, setQ] = useState("");
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [savingId, setSavingId] = useState<string | null>(null);
+  const [removingId, setRemovingId] = useState<string | null>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const pendingTarget = useRef<{ id: string; title: string } | null>(null);
+  const reloadedRef = useRef<Set<string>>(new Set());
+
+  // Webinar upload progress, keyed by webinar id (target === "webinar" only).
+  const uploadById = useMemo(() => {
+    const m = new Map<string, (typeof uploads)[number]>();
+    for (const u of uploads) if (u.target === "webinar") m.set(u.recordingId, u);
+    return m;
+  }, [uploads]);
+
+  // When a hosted upload completes, refresh the list ONCE so the status flips.
+  useEffect(() => {
+    for (const u of uploads) {
+      if (u.target === "webinar" && u.status === "completed" && !reloadedRef.current.has(u.recordingId)) {
+        reloadedRef.current.add(u.recordingId);
+        reload();
+      }
+    }
+  }, [uploads, reload]);
 
   const list = useMemo(() => {
     const arr = [...webinars];
@@ -608,47 +634,154 @@ function WebinarRecordings({ webinars, reload }: { webinars: Webinar[]; reload: 
     }
   }
 
+  function pickVideo(w: Webinar) {
+    pendingTarget.current = { id: w.id, title: w.title };
+    if (fileInput.current) {
+      fileInput.current.value = "";
+      fileInput.current.click();
+    }
+  }
+
+  async function onVideoChosen(file: File | null) {
+    const target = pendingTarget.current;
+    pendingTarget.current = null;
+    if (!file || !target) return;
+    if (!file.type.startsWith("video/")) {
+      toast("Please choose a video file (MP4 recommended).", "error");
+      return;
+    }
+    if (file.size > MAX_WEBINAR_VIDEO_BYTES) {
+      toast("That file is very large (>5 GB). Please compress it first.", "error");
+      return;
+    }
+    reloadedRef.current.delete(target.id); // allow a fresh reload for this (re)upload
+    const meta = await readVideoMeta(file);
+    startUpload({
+      recordingId: target.id,
+      title: target.title,
+      courseId: "_",
+      file,
+      durationSeconds: meta.duration,
+      resolution: meta.resolution,
+      deletable: false,
+      target: "webinar",
+    });
+    toast("Upload started — it continues in the background.", "success");
+  }
+
+  async function removeHosted(w: Webinar) {
+    if (!confirm("Remove the uploaded recording for this webinar? Attendees will see “available soon” until you add a new one.")) return;
+    setRemovingId(w.id);
+    try {
+      const res = await fetch("/api/admin/lectures/upload/abort", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ recordingId: w.id, target: "webinar", deleteRecord: true }),
+      });
+      if (!res.ok) {
+        toast("Could not remove recording", "error");
+        return;
+      }
+      toast("Recording removed", "success");
+      reload();
+    } catch {
+      toast("Could not remove recording", "error");
+    } finally {
+      setRemovingId(null);
+    }
+  }
+
   return (
     <div className="mt-10">
       <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h2 className="font-heading text-lg font-bold">Webinar recordings</h2>
+          <h2 className="font-heading text-lg font-bold">Webinars</h2>
           <p className="mt-0.5 text-sm text-muted">
-            Paste a YouTube / Google Drive / direct link. Paid attendees see it after the session date — no re-upload needed.
+            Every webinar and its recording. <b>Upload a video file</b> (hosted, plays inline) or <b>paste a link</b> (YouTube / Drive / direct).
+            Paid attendees see it after the session date — no re-upload needed.
           </p>
         </div>
         <input className="input max-w-xs" placeholder="Search webinars…" value={q} onChange={(e) => setQ(e.target.value)} />
       </div>
 
-      <TableShell headers={["Webinar", "Date", "Recording link", "Status", ""]}>
+      <input
+        ref={fileInput}
+        type="file"
+        accept="video/mp4,video/*"
+        className="hidden"
+        onChange={(e) => onVideoChosen(e.target.files?.[0] || null)}
+      />
+
+      <TableShell headers={["Webinar", "Date", "Recording", "Status", ""]}>
         {list.map((w) => {
           const value = linkFor(w);
           const dirty = drafts[w.id] !== undefined && (drafts[w.id] || "").trim() !== (w.recording_link || "").trim();
           const hasLink = !!(w.recording_link && w.recording_link.trim());
+          const hosted = w.recording_upload_status === "completed" && !!w.recording_key;
+          const up = uploadById.get(w.id);
+          const uploading = !!up && ["queued", "uploading", "retrying", "paused", "resumable"].includes(up.status);
+          const pct = up && up.fileSize ? Math.min(100, Math.floor((up.bytesUploaded / up.fileSize) * 100)) : 0;
+          const failed = up?.status === "failed";
+
           return (
             <tr key={w.id} className="border-b border-line last:border-0 align-top hover:bg-surface2">
               <td className="px-4 py-3 font-medium">🎥 {w.title}</td>
               <td className="px-4 py-3 text-xs text-muted">{w.datetime ? formatISTDateTime(w.datetime) : "—"}</td>
               <td className="px-4 py-3">
-                <input
-                  className="input min-w-[240px]"
-                  value={value}
-                  placeholder="https://youtu.be/… or https://drive.google.com/file/d/…/view"
-                  onChange={(e) => setDrafts((d) => ({ ...d, [w.id]: e.target.value }))}
-                />
+                <div className="space-y-2">
+                  {/* Upload a video file (hosted) */}
+                  <div className="flex flex-wrap items-center gap-2">
+                    {uploading ? (
+                      <div className="flex min-w-[220px] items-center gap-2">
+                        <div className="h-2 flex-1 overflow-hidden rounded-full bg-surface2">
+                          <div className="h-full rounded-full bg-[var(--ca-gold)] transition-all" style={{ width: `${pct}%` }} />
+                        </div>
+                        <span className="text-xs tabular-nums text-muted">{pct}%</span>
+                        <button onClick={() => cancel(w.id)} className="text-danger text-xs">Cancel</button>
+                      </div>
+                    ) : (
+                      <button onClick={() => pickVideo(w)} className="btn btn-secondary px-3 py-1.5 text-xs">
+                        {hosted ? "⬆️ Replace video" : "⬆️ Upload video file"}
+                      </button>
+                    )}
+                    {hosted && !uploading && (
+                      <button onClick={() => removeHosted(w)} disabled={removingId === w.id} className="text-danger text-xs disabled:opacity-50">
+                        {removingId === w.id ? "Removing…" : "Remove"}
+                      </button>
+                    )}
+                  </div>
+                  {/* Or paste an external link */}
+                  <div className="flex items-center gap-2">
+                    <input
+                      className="input min-w-[240px]"
+                      value={value}
+                      placeholder="…or paste https://youtu.be/… / Drive link"
+                      onChange={(e) => setDrafts((d) => ({ ...d, [w.id]: e.target.value }))}
+                    />
+                    <button
+                      onClick={() => save(w)}
+                      disabled={savingId === w.id || !dirty}
+                      className="btn btn-primary px-3 py-1.5 text-xs disabled:opacity-50"
+                    >
+                      {savingId === w.id ? "Saving…" : "Save link"}
+                    </button>
+                  </div>
+                </div>
               </td>
               <td className="px-4 py-3">
-                <span className={`pill ${hasLink ? "pill-green" : "pill-gray"}`}>{hasLink ? "Recording set" : "No recording"}</span>
+                {failed ? (
+                  <span className="pill pill-red">Upload failed</span>
+                ) : uploading ? (
+                  <span className="pill pill-amber">Uploading {pct}%</span>
+                ) : hosted ? (
+                  <span className="pill pill-green">Hosted ✓</span>
+                ) : hasLink ? (
+                  <span className="pill pill-blue">Link set</span>
+                ) : (
+                  <span className="pill pill-gray">No recording</span>
+                )}
               </td>
-              <td className="px-4 py-3">
-                <button
-                  onClick={() => save(w)}
-                  disabled={savingId === w.id || !dirty}
-                  className="btn btn-primary px-3 py-1.5 text-xs disabled:opacity-50"
-                >
-                  {savingId === w.id ? "Saving…" : "Save"}
-                </button>
-              </td>
+              <td className="px-4 py-3" />
             </tr>
           );
         })}

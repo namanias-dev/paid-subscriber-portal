@@ -16,6 +16,10 @@ interface Props {
    * then show it immediately, even if the datetime-based phase hasn't flipped to
    * "ended" yet (robust against missing/wrong end times). */
   adminCompleted?: boolean;
+  /** Webinar id when a HOSTED recording (uploaded video file) is ready. Played
+   * inline via a short-lived signed URL from /api/webinars/[id]/recording/play.
+   * Preferred over the embed link when both are present. */
+  hostedRecordingId?: string | null;
   /** Analytics context for the real "Join Zoom" show-up signal. */
   webinarId?: string | null;
   webinarSlug?: string | null;
@@ -57,6 +61,54 @@ function CountdownPills({ ms }: { ms: number }) {
   );
 }
 
+/** Inline player for an uploaded (hosted) recording — fetches a signed URL. */
+function HostedRecordingPlayer({ webinarId }: { webinarId: string }) {
+  const [url, setUrl] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/webinars/${webinarId}/recording/play`, { cache: "no-store" });
+        const json = await res.json();
+        if (cancelled) return;
+        if (json.ok && json.url) setUrl(json.url as string);
+        else setError(json.error || "Could not load the recording.");
+      } catch {
+        if (!cancelled) setError("Could not load the recording.");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [webinarId]);
+
+  if (error) {
+    return <div className="rounded-xl bg-surface p-4 text-sm text-ink2">{error}</div>;
+  }
+  if (!url) {
+    return <div className="aspect-video w-full animate-pulse rounded-2xl bg-ink/5" aria-label="Loading recording" />;
+  }
+  return (
+    <video
+      controls
+      controlsList="nodownload"
+      playsInline
+      preload="metadata"
+      src={url}
+      className="aspect-video w-full overflow-hidden rounded-2xl bg-black shadow-soft"
+    />
+  );
+}
+
+/** Renders the available recording — hosted (uploaded file) preferred, else embed/link. */
+function RecordingView({ recording, hostedRecordingId }: { recording: RecordingEmbed | null; hostedRecordingId?: string | null }) {
+  if (hostedRecordingId) return <HostedRecordingPlayer webinarId={hostedRecordingId} />;
+  if (recording) return <RecordingPlayer recording={recording} />;
+  return null;
+}
+
 function RecordingPlayer({ recording }: { recording: RecordingEmbed }) {
   if (recording.embedUrl) {
     return (
@@ -79,7 +131,8 @@ function RecordingPlayer({ recording }: { recording: RecordingEmbed }) {
   );
 }
 
-export default function WebinarAccess({ startISO, endISO, sessionType, zoomLink, recording, adminCompleted, webinarId, webinarSlug, registrationId }: Props) {
+export default function WebinarAccess({ startISO, endISO, sessionType, zoomLink, recording, adminCompleted, hostedRecordingId, webinarId, webinarSlug, registrationId }: Props) {
+  const hasRecording = !!recording || !!hostedRecordingId;
   const start = startISO ? new Date(startISO).getTime() : null;
   const end = endISO
     ? new Date(endISO).getTime()
@@ -97,11 +150,11 @@ export default function WebinarAccess({ startISO, endISO, sessionType, zoomLink,
 
   // Admin marked the session completed and a recording is available → show it
   // straight away, regardless of the datetime-derived phase.
-  if (adminCompleted && recording) {
+  if (adminCompleted && hasRecording) {
     return (
       <div className="space-y-4">
         <span className="pill pill-gray">Webinar ended</span>
-        <RecordingPlayer recording={recording} />
+        <RecordingView recording={recording} hostedRecordingId={hostedRecordingId} />
       </div>
     );
   }
@@ -122,8 +175,8 @@ export default function WebinarAccess({ startISO, endISO, sessionType, zoomLink,
     return (
       <div className="space-y-4">
         <span className="pill pill-blue">Recorded session</span>
-        {recording ? (
-          <RecordingPlayer recording={recording} />
+        {hasRecording ? (
+          <RecordingView recording={recording} hostedRecordingId={hostedRecordingId} />
         ) : (
           <div className="rounded-xl bg-surface p-4 text-sm text-ink2">The recording will be available here soon.</div>
         )}
@@ -173,8 +226,8 @@ export default function WebinarAccess({ startISO, endISO, sessionType, zoomLink,
   return (
     <div className="space-y-4">
       <span className="pill pill-gray">Webinar ended</span>
-      {recording ? (
-        <RecordingPlayer recording={recording} />
+      {hasRecording ? (
+        <RecordingView recording={recording} hostedRecordingId={hostedRecordingId} />
       ) : (
         <div className="rounded-xl bg-surface p-4 text-sm text-ink2">
           📼 Recording will be available soon. Check back shortly — we&apos;re processing it.

@@ -78,6 +78,9 @@ export default async function PortalItemPage({ params }: { params: { reference: 
   if (webinar) {
     const sessionType: "live" | "recorded" = webinar.session_type === "recorded" ? "recorded" : "live";
     const recording = parseRecording(webinar.recording_link);
+    // Hosted (uploaded video file) recording — preferred over the embed link.
+    const hostedRecordingId =
+      webinar.recording_upload_status === "completed" && webinar.recording_key ? webinar.id : null;
     const orientationVideos = await getOrientationVideosForTarget("webinar", webinar.id, { publishedOnly: true });
     const materials: PdfResource[] = (webinar.materials || []).filter((m) => m.url?.trim());
     const reviews: Review[] = (webinar.reviews || []).filter((r) => r.visible !== false && r.name?.trim());
@@ -139,6 +142,7 @@ export default async function PortalItemPage({ params }: { params: { reference: 
                 sessionType={sessionType}
                 zoomLink={webinar.link || null}
                 recording={recording}
+                hostedRecordingId={hostedRecordingId}
                 adminCompleted={webinar.status === "completed"}
                 webinarId={webinar.id}
                 webinarSlug={webinar.slug}

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { requirePermission } from "@/lib/adminGuard";
-import { getContentById } from "@/lib/dataProvider";
+import { requirePermission, requireAnyPermission } from "@/lib/adminGuard";
+import { getContentById, getWebinarById } from "@/lib/dataProvider";
 import { r2Configured, listUploadedParts } from "@/lib/r2";
 
 export const dynamic = "force-dynamic";
@@ -8,21 +8,37 @@ export const dynamic = "force-dynamic";
 /**
  * RESUME source of truth: which parts R2 already has for this upload. The client
  * uploads only the MISSING chunks — no restart from zero after a crash/network drop.
+ * Works for both lecture and webinar (target="webinar") uploads.
  */
 export async function GET(req: Request) {
-  if (!(await requirePermission("content_courses"))) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+  const url = new URL(req.url);
+  const target = url.searchParams.get("target") === "webinar" ? "webinar" : "lecture";
+  const allowed = target === "webinar"
+    ? await requireAnyPermission(["content_courses", "content_webinars"])
+    : await requirePermission("content_courses");
+  if (!allowed) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   if (!r2Configured()) return NextResponse.json({ ok: false, error: "Video hosting is not configured." }, { status: 503 });
 
-  const recordingId = new URL(req.url).searchParams.get("recordingId") || "";
+  const recordingId = url.searchParams.get("recordingId") || "";
   if (!recordingId) return NextResponse.json({ ok: false, error: "recordingId required" }, { status: 400 });
 
-  const rec = await getContentById(recordingId);
-  if (!rec || !rec.multipart_key || !rec.multipart_upload_id) {
+  let key: string | null = null;
+  let uploadId: string | null = null;
+  if (target === "webinar") {
+    const w = await getWebinarById(recordingId);
+    key = w?.recording_multipart_key ?? null;
+    uploadId = w?.recording_upload_id ?? null;
+  } else {
+    const rec = await getContentById(recordingId);
+    key = rec?.multipart_key ?? null;
+    uploadId = rec?.multipart_upload_id ?? null;
+  }
+  if (!key || !uploadId) {
     return NextResponse.json({ ok: true, uploadId: null, key: null, parts: [] });
   }
   try {
-    const parts = await listUploadedParts(rec.multipart_key, rec.multipart_upload_id);
-    return NextResponse.json({ ok: true, uploadId: rec.multipart_upload_id, key: rec.multipart_key, parts });
+    const parts = await listUploadedParts(key, uploadId);
+    return NextResponse.json({ ok: true, uploadId, key, parts });
   } catch (e) {
     return NextResponse.json({ ok: false, error: (e as Error).message || "Could not list parts" }, { status: 500 });
   }

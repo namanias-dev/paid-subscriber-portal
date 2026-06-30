@@ -92,6 +92,10 @@ function r2(): S3Client {
 export function lectureVideoKey(courseId: string, recordingId: string): string {
   return `processed/${courseId || "_"}/${recordingId}/lecture.mp4`;
 }
+/** Hosted webinar recording (uploaded video file). */
+export function webinarVideoKey(webinarId: string): string {
+  return `processed/webinars/${webinarId || "_"}/recording.mp4`;
+}
 export function lectureThumbnailKey(courseId: string, recordingId: string): string {
   return `thumbnails/${courseId || "_"}/${recordingId}/thumb.jpg`;
 }
