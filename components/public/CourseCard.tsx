@@ -15,15 +15,45 @@ export default function CourseCard({ course, purchase }: { course: Course; purch
   const cover = course.cover_image_url || course.image || course.mobile_image_url || null;
   const off = discountPct(course.price, course.original_price);
   const category = course.badge_label?.trim() || course.category;
-  const modes = course.modes?.length ? course.modes.join(" · ") : null;
   const cta = course.price === 0 ? "Start free" : "View course";
   // When the logged-in buyer already owns this course, the whole card becomes a
   // shortcut into the portal (no nested links) and shows their status, not a price.
   const href = purchase ? purchase.href : `/courses/${course.slug}`;
-  const timing = (course.batch_timings || []).filter(Boolean)[0];
-  const batchLine = [timing ? `${timing} batch` : null, course.batch_start ? `Starts ${formatISTDate(course.batch_start)}` : null]
-    .filter(Boolean)
-    .join(" · ");
+
+  // --- Batch-aware card (display only). A course with 2+ batches summarises ALL
+  // of them (combined timings/modes, shared-or-"multiple" start, "From" price) so
+  // the card no longer reflects just the default batch. With 0/1 batch every value
+  // falls back to the course-level fields, so single-batch cards are byte-for-byte
+  // unchanged. The per-batch choice still lives on the enroll-page selector. ---
+  const batches = course.batches || [];
+  const multiBatch = batches.length >= 2;
+
+  const modeList = multiBatch
+    ? Array.from(new Set(batches.flatMap((b) => b.mode || []).filter(Boolean)))
+    : course.modes || [];
+  const modes = modeList.length ? modeList.join(" · ") : null;
+
+  let batchLine: string;
+  if (multiBatch) {
+    const timings = Array.from(new Set(batches.flatMap((b) => b.timing || []).filter(Boolean)));
+    const starts = Array.from(new Set(batches.map((b) => b.start_date).filter((s): s is string => !!s)));
+    const timingPart = timings.length
+      ? `${timings.join(" & ")} ${timings.length > 1 ? "batches" : "batch"}`
+      : `${batches.length} batches`;
+    const datePart = starts.length === 1 ? `Starts ${formatISTDate(starts[0])}` : starts.length > 1 ? "Multiple start dates" : null;
+    batchLine = [timingPart, datePart].filter(Boolean).join(" · ");
+  } else {
+    const timing = (course.batch_timings || []).filter(Boolean)[0];
+    batchLine = [timing ? `${timing} batch` : null, course.batch_start ? `Starts ${formatISTDate(course.batch_start)}` : null]
+      .filter(Boolean)
+      .join(" · ");
+  }
+
+  // "From <lowest batch price>" only when batches actually differ in price; if every
+  // batch costs the same we keep the single price (and the usual strikethrough).
+  const batchPrices = multiBatch ? batches.map((b) => b.price).filter((n): n is number => typeof n === "number") : [];
+  const priceVaries = batchPrices.length > 1 && new Set(batchPrices).size > 1;
+  const displayPrice = priceVaries ? Math.min(...batchPrices) : course.price;
 
   return (
     <Link href={href} className="ca-focus group block h-full">
@@ -102,8 +132,9 @@ export default function CourseCard({ course, purchase }: { course: Course; purch
                     <span className="font-heading text-2xl font-extrabold text-[#16a34a]">Free</span>
                   ) : (
                     <div className="flex items-baseline gap-2">
-                      <span className="font-heading text-2xl font-extrabold text-[var(--ca-navy-900)]">{formatINR(course.price)}</span>
-                      {course.original_price && course.original_price > course.price && (
+                      {priceVaries && <span className="text-xs font-semibold text-[var(--ca-slate-400)]">From</span>}
+                      <span className="font-heading text-2xl font-extrabold text-[var(--ca-navy-900)]">{formatINR(displayPrice)}</span>
+                      {!priceVaries && course.original_price && course.original_price > course.price && (
                         <span className="text-sm text-[var(--ca-slate-400)] line-through">{formatINR(course.original_price)}</span>
                       )}
                     </div>
