@@ -51,10 +51,14 @@ export default function QuizForm({ quiz }: { quiz?: Quiz }) {
   const [status, setStatus] = useState<QuizStatus>(quiz?.status || "draft");
 
   // Scoring & timer
+  // NEW-QUIZ DEFAULTS ONLY: UPSC Prelims = 2 marks/question with a 1/3 penalty,
+  // i.e. a flat 0.6666 deducted per wrong answer. When `quiz` is undefined (a NEW
+  // quiz) these literals apply; an EXISTING quiz always loads its OWN stored value
+  // via `quiz?.…`, so saved quizzes are never overwritten by these defaults.
   const [marks, setMarks] = useState(quiz?.marks_per_question?.toString() || "2");
   const [negEnabled, setNegEnabled] = useState(quiz?.negative_marking_enabled ?? true);
-  const [negFraction, setNegFraction] = useState(quiz?.negative_fraction?.toString() || "0.3333");
-  const [negType, setNegType] = useState<"fraction" | "fixed">(quiz?.scoring_settings?.negative_marks_type || "fraction");
+  const [negFraction, setNegFraction] = useState(quiz?.negative_fraction?.toString() || "0.6666");
+  const [negType, setNegType] = useState<"fraction" | "fixed">(quiz?.scoring_settings?.negative_marks_type || "fixed");
   const [noPenaltyBlank, setNoPenaltyBlank] = useState(quiz?.scoring_settings?.no_penalty_for_blank ?? true);
   const [passingMarks, setPassingMarks] = useState(quiz?.scoring_settings?.passing_marks?.toString() || "");
   const [timeLimitEnabled, setTimeLimitEnabled] = useState(quiz?.timing_settings?.time_limit_enabled ?? true);
@@ -321,6 +325,19 @@ export default function QuizForm({ quiz }: { quiz?: Quiz }) {
     </Section>
   );
 
+  // Live, display-only deduction preview. Recomputes on every render as the admin
+  // edits mode / value / marks-per-question. Never writes or changes stored values.
+  const negPreview = (() => {
+    if (!negEnabled) return "No negative marking.";
+    const fmt = (n: number) => String(Math.round(n * 10000) / 10000);
+    const fraction = Number(negFraction) || 0;
+    const m = Number(marks) || 0;
+    if (negType === "fixed") {
+      return `Each wrong answer deducts ${fmt(fraction)} marks (flat — does not change with marks per question).`;
+    }
+    return `Each wrong answer deducts ${fmt(fraction * m)} marks (${fmt(fraction)} × ${fmt(m)} marks).`;
+  })();
+
   const scoringTab = (
     <>
       <Section title="Scoring">
@@ -333,9 +350,12 @@ export default function QuizForm({ quiz }: { quiz?: Quiz }) {
             <option value="fixed">Fixed marks</option>
           </select>
         </Field>
-        <Field label={negType === "fraction" ? "Negative fraction (e.g. 0.3333)" : "Negative marks (fixed)"}>
+        <Field label={negType === "fraction" ? "Negative fraction (e.g. 0.3333)" : "Negative marks (fixed, e.g. 0.6666)"}>
           <input type="number" step="0.0001" className="input" value={negFraction} onChange={(e) => setNegFraction(e.target.value)} />
         </Field>
+        <div className="sm:col-span-2 -mt-1 rounded-lg bg-surface2 px-3 py-2 text-xs text-ink2" aria-live="polite">
+          <b className="text-ink">Preview:</b> {negPreview}
+        </div>
         <Field label="Blanks"><Toggle label="No penalty for blank answers" checked={noPenaltyBlank} onChange={setNoPenaltyBlank} /></Field>
       </Section>
       <Section title="Timer">

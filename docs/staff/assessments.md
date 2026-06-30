@@ -13,6 +13,14 @@
 - Editor tabs: `Basic Info`, `Questions`, `Scoring & Timer`, `Access Rules`, `Result Settings`, `SEO`. Key fields: `Title`, `Slug`, `Status`, `Type`, `Exam type`, `Subject`, `Topic`, `Quiz date`, `Marks per question`, `Enable time limit`, `Minutes`, access (`Public`, `Requires login`, `Paid — unlock via course enrolment`), `Max attempts`.
 - In the `Questions` tab: `Search bank`, `⚡ Auto-generate`, or tick questions from the bank.
 
+### Negative marking (Scoring & Timer)
+- **New quizzes default to UPSC Prelims marking:** `Marks per question = 2`, `Negative type = Fixed marks`, `Negative marks = 0.6666` (= 1/3 of 2). So each wrong answer deducts a flat **0.6666** — no mental maths needed. You can still change any of these before saving.
+- **Two modes:**
+  - **`Fixed marks`** — the number you type is the **exact marks deducted** per wrong answer, the same for every question (does **not** multiply by marks per question). This is the new default.
+  - **`Fraction of marks`** — the number you type is a **fraction** that is multiplied by each question's marks. E.g. `0.3333 × 2 marks = 0.6666` deducted.
+- **Live preview:** directly under the negative-marking field a `Preview:` line updates as you type — e.g. *"Each wrong answer deducts 0.6666 marks (flat …)"* in Fixed mode, *"… deducts 1.3332 marks (0.3333 × 4 marks)"* in Fraction mode, or *"No negative marking."* when disabled. It's display-only and never changes saved values.
+- ⚠️ These defaults apply **only to brand-new quizzes**. Opening an existing quiz always shows that quiz's own saved values, exactly as before — nothing is migrated or recalculated.
+
 ## Attempts & Reports
 **Web address:** `/admin/quiz-reports` — heading `Attempts & Reports`.
 - KPIs: `Attempts`, `Completed`, `Completion`, `Abandoned`, `Avg score`, `Leads captured`.
