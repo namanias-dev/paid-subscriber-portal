@@ -27,7 +27,7 @@ import { useToast } from "@/components/ui/Toast";
 import { COURSE_CATEGORIES, LEARNING_MODES } from "@/lib/config";
 import { istInputToISO, isoToISTInput, formatINR, formatISTDate } from "@/lib/dates";
 import { resolveEmiConfig, buildSchedule, EMI_DEFAULTS } from "@/lib/installments";
-import type { Course, CourseCategory, LearningMode, CourseAfterRegistration, OrientationVideo, CourseEmiConfig, CourseEntitlements } from "@/lib/types";
+import type { Course, CourseCategory, LearningMode, CourseAfterRegistration, OrientationVideo, CourseEmiConfig, CourseEntitlements, CourseBatch } from "@/lib/types";
 
 const BACK = "/admin/courses";
 const BATCH_TIMINGS = ["Morning", "Afternoon", "Evening", "Weekend"];
@@ -189,6 +189,23 @@ export default function CourseForm({ course }: { course?: Course }) {
                   <CouponsEditor value={c.coupons || []} onChange={(v) => set("coupons", v)} />
                 </Section>
               </>
+            ),
+          },
+          {
+            id: "batches",
+            label: "Batches",
+            content: (
+              <Section
+                title="Batches / variants"
+                desc="Offer the same course as multiple sellable batches (Morning/Evening, Online/Offline) — each with its own price, dates and seats. The course-level price & dates above remain the default. Students still see today's behaviour; a public batch picker comes later."
+              >
+                <BatchesEditor
+                  course={c}
+                  value={c.batches || []}
+                  defaultId={c.default_batch_id ?? null}
+                  onChange={(batches, defaultId) => setC((p) => ({ ...p, batches, default_batch_id: defaultId }))}
+                />
+              </Section>
             ),
           },
           {
@@ -478,6 +495,170 @@ function VideosEditor({ value, onChange }: { value: OrientationVideo[]; onChange
         </div>
       ))}
       <button type="button" onClick={() => onChange([...items, { url: "", title: "", description: "" }])} className="btn btn-secondary text-sm">+ Add video</button>
+    </div>
+  );
+}
+
+function genBatchId(): string {
+  return `b-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+/**
+ * Repeatable batch editor. Each batch is a sellable variant (mode + timing +
+ * own price/dates/seats/EMI). The course-level fields remain the canonical
+ * fallback (Phase 1), so this NEVER writes back to course-level pricing — it only
+ * edits the `batches` array + which one is the default. New batches are prefilled
+ * from the current course fields for convenience; editing them is independent.
+ */
+function BatchesEditor({
+  course,
+  value,
+  defaultId,
+  onChange,
+}: {
+  course: Partial<Course>;
+  value: CourseBatch[];
+  defaultId: string | null;
+  onChange: (batches: CourseBatch[], defaultId: string | null) => void;
+}) {
+  const batches = value || [];
+
+  const fromCourse = (): CourseBatch => ({
+    id: genBatchId(),
+    label: null,
+    mode: (course.modes || []) as LearningMode[],
+    timing: course.batch_timings || [],
+    start_date: course.batch_start ?? null,
+    end_date: null,
+    price: course.price ?? 0,
+    original_price: course.original_price ?? null,
+    pay_in_full_price: course.pay_in_full_price ?? null,
+    emi_config: (course.emi_config || {}) as CourseEmiConfig,
+    capacity: course.capacity ?? null,
+    seats_left: course.seats_left ?? null,
+  });
+
+  const update = (i: number, patch: Partial<CourseBatch>) =>
+    onChange(batches.map((b, j) => (j === i ? { ...b, ...patch } : b)), defaultId);
+
+  const addNew = () => {
+    const b = fromCourse();
+    onChange([...batches, b], defaultId ?? b.id);
+  };
+
+  const duplicate = (i: number) => {
+    const src = batches[i];
+    const copy: CourseBatch = { ...src, id: genBatchId(), label: src.label ? `${src.label} (copy)` : null };
+    onChange([...batches.slice(0, i + 1), copy, ...batches.slice(i + 1)], defaultId);
+  };
+
+  const remove = (i: number) => {
+    const removed = batches[i];
+    const next = batches.filter((_, j) => j !== i);
+    const nextDefault = removed.id === defaultId ? (next[0]?.id ?? null) : defaultId;
+    onChange(next, nextDefault);
+  };
+
+  const toggleArr = (i: number, key: "mode" | "timing", val: string) => {
+    const cur = ((batches[i][key] as string[]) || []);
+    update(i, { [key]: cur.includes(val) ? cur.filter((x) => x !== val) : [...cur, val] } as Partial<CourseBatch>);
+  };
+
+  if (batches.length === 0) {
+    return (
+      <div className="sm:col-span-2 space-y-3">
+        <div className="rounded-xl border border-dashed border-line bg-surface2/40 p-4 text-sm text-muted">
+          No batches yet. This course sells using the <strong>course-level price &amp; dates</strong> (the default).
+          Add a batch to offer a variant (e.g. an Evening batch with a later start date or a different price).
+          Adding batches does <strong>not</strong> change the public page or checkout in this phase.
+        </div>
+        <button type="button" onClick={addNew} className="btn btn-secondary text-sm">+ Add batch (from course fields)</button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="sm:col-span-2 space-y-4">
+      {batches.map((b, i) => {
+        const isDefault = b.id === defaultId;
+        const pif = b.pay_in_full_price && b.pay_in_full_price > 0 ? Math.round(b.pay_in_full_price) : null;
+        return (
+          <div key={b.id} className={`rounded-2xl border p-4 ${isDefault ? "border-primary/50 bg-primary/5" : "border-line"}`}>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-3">
+                <label className="flex items-center gap-1.5 text-sm font-medium">
+                  <input type="radio" name="default-batch" checked={isDefault} onChange={() => onChange(batches, b.id)} />
+                  Default
+                </label>
+                {isDefault && <span className="pill pill-green">Used as fallback</span>}
+              </div>
+              <div className="flex items-center gap-2">
+                <button type="button" onClick={() => duplicate(i)} className="text-xs font-semibold text-primary">Duplicate</button>
+                <button type="button" onClick={() => remove(i)} className="text-xs font-semibold text-danger">Remove</button>
+              </div>
+            </div>
+
+            <div className="mt-3 grid gap-3 sm:grid-cols-2">
+              <Field label="Batch label" hint="Shown to staff (and later to students), e.g. “Evening · Offline”." full>
+                <input className="input" value={b.label || ""} onChange={(e) => update(i, { label: e.target.value || null })} placeholder="e.g. Morning · Online" />
+              </Field>
+
+              <Field label="Modes" full>
+                <div className="flex flex-wrap gap-2">
+                  {LEARNING_MODES.map((m) => (
+                    <button key={m} type="button" onClick={() => toggleArr(i, "mode", m)} className={`chip ${(b.mode || []).includes(m as LearningMode) ? "chip-active" : ""}`}>{m}</button>
+                  ))}
+                </div>
+              </Field>
+
+              <Field label="Batch timing" full>
+                <div className="flex flex-wrap gap-2">
+                  {BATCH_TIMINGS.map((t) => (
+                    <button key={t} type="button" onClick={() => toggleArr(i, "timing", t)} className={`chip ${(b.timing || []).includes(t) ? "chip-active" : ""}`}>{t}</button>
+                  ))}
+                </div>
+              </Field>
+
+              <Field label="Batch start date (IST)">
+                <input type="date" className="input" value={b.start_date ? isoToISTInput(b.start_date).slice(0, 10) : ""} onChange={(e) => update(i, { start_date: e.target.value ? istInputToISO(`${e.target.value}T00:00`) : null })} />
+              </Field>
+              <Field label="Batch end date (IST)" hint="Optional.">
+                <input type="date" className="input" value={b.end_date ? isoToISTInput(b.end_date).slice(0, 10) : ""} onChange={(e) => update(i, { end_date: e.target.value ? istInputToISO(`${e.target.value}T00:00`) : null })} />
+              </Field>
+
+              <Field label="Original price (₹)" hint="Strikethrough anchor. Optional.">
+                <input type="number" className="input" value={b.original_price ?? ""} onChange={(e) => update(i, { original_price: e.target.value ? Number(e.target.value) : null })} />
+              </Field>
+              <Field label="Price — standard / total fee (₹)" hint="Base for this batch's EMI / Book-Your-Seat.">
+                <input type="number" className="input" value={b.price ?? 0} onChange={(e) => update(i, { price: Number(e.target.value) })} />
+              </Field>
+              <Field label="Pay-in-Full price (₹)" hint="One-shot discount for this batch. Blank = charge standard price." full>
+                <input type="number" className="input" value={b.pay_in_full_price ?? ""} onChange={(e) => update(i, { pay_in_full_price: e.target.value ? Number(e.target.value) : null })} placeholder="e.g. 40000" />
+              </Field>
+
+              <Field label="Total seats (capacity)" hint="Optional.">
+                <input type="number" className="input" value={b.capacity ?? ""} onChange={(e) => update(i, { capacity: e.target.value ? Number(e.target.value) : null })} />
+              </Field>
+              <Field label="Seats remaining" hint="Optional.">
+                <input type="number" className="input" value={b.seats_left ?? ""} onChange={(e) => update(i, { seats_left: e.target.value ? Number(e.target.value) : null })} />
+              </Field>
+            </div>
+
+            <div className="mt-2 text-xs text-muted">
+              {formatINR(Math.max(0, Math.round(b.price || 0)))}
+              {pif != null && pif < Math.round(b.price || 0) ? ` · pay-in-full ${formatINR(pif)}` : ""}
+              {b.start_date ? ` · starts ${formatISTDate(b.start_date)}` : ""}
+            </div>
+
+            <div className="mt-3 rounded-xl border border-line p-3">
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Book Your Seat + EMI (this batch)</p>
+              <EmiConfigEditor total={b.price ?? 0} value={b.emi_config || {}} onChange={(v) => update(i, { emi_config: v })} />
+            </div>
+          </div>
+        );
+      })}
+
+      <button type="button" onClick={addNew} className="btn btn-secondary text-sm">+ Add batch (from course fields)</button>
     </div>
   );
 }
