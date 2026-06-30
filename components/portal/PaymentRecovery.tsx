@@ -7,6 +7,7 @@ interface RecoveryItem {
   paymentId: string;
   referenceNo: string | null;
   item: string;
+  itemWhen: string | null;
   itemType: string;
   itemSlug: string | null;
   paymentStatus: string;
@@ -140,7 +141,10 @@ export default function PaymentRecovery() {
               >
                 <span className="min-w-0">
                   <span className="block truncate text-sm font-semibold text-ink">{i.item}</span>
-                  <span className="block text-xs text-muted">{i.itemType === "webinar" ? "Webinar" : "Course"} · {labelForStatus(i.paymentStatus)}</span>
+                  <span className="block text-xs text-muted">
+                    {i.itemType === "webinar" ? "Webinar" : "Course"}
+                    {i.itemWhen ? ` · ${i.itemWhen}` : ""} · {labelForStatus(i.paymentStatus)}
+                  </span>
                 </span>
                 <span className="ml-3 shrink-0 text-sm font-semibold text-primary">Report →</span>
               </button>
@@ -224,7 +228,8 @@ function Banner({
       <div className="min-w-0 flex-1">
         <p className="text-sm font-semibold">{cfg.title}</p>
         <p className="mt-0.5 text-xs opacity-90">
-          <span className="font-medium">{item.item}</span> — {cfg.body}
+          <span className="font-medium">{item.item}</span>
+          {item.itemWhen ? <span className="opacity-80"> ({item.itemWhen})</span> : null} — {cfg.body}
         </p>
         {cfg.cta && (
           <button onClick={onReport} className="btn btn-primary mt-3 px-3 py-1.5 text-xs">{cfg.cta}</button>
@@ -333,7 +338,8 @@ function ReportPanel({
         <>
           <h3 className="text-lg font-bold text-[var(--navy)]">Report a payment</h3>
           <p className="mt-1 text-sm text-ink2">
-            <span className="font-semibold text-ink">{item.item}</span> · {labelForStatus(item.paymentStatus)}
+            <span className="font-semibold text-ink">{item.item}</span>
+            {item.itemWhen ? <span className="text-muted"> · {item.itemWhen}</span> : null} · {labelForStatus(item.paymentStatus)}
           </p>
           <p className="mt-2 rounded-lg bg-surface px-3 py-2 text-xs text-muted">
             Uploading a screenshot does <span className="font-semibold">not</span> grant access. We verify the payment, then confirm.

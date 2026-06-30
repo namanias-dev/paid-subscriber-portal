@@ -14,7 +14,7 @@ import {
   bumpBuyerSessionVersion,
   finalizeCoursePaymentByReference,
 } from "./dataProvider";
-import { expandPaidSlugsByLineage } from "./webinarLineage";
+import { formatISTDateTime } from "./dates";
 import type {
   Payment,
   PaymentProof,
@@ -120,17 +120,12 @@ export async function phoneHasAccessToItem(
 
   if (itemType === "webinar") {
     if (slug) {
-      const [map, webinars, regs] = await Promise.all([
-        getWebinarPaymentStatusMap(p),
-        getWebinars(),
-        getWebinarRegistrationIdsByPhone(p),
-      ]);
-      // STICKY PAID across the lineage: a PAID on any sibling slug (re-run /
-      // duplicate / rename) grants access to the whole lineage (Problem 3).
-      const paidSlugs = new Set<string>();
-      for (const [s, cls] of map) if (cls === "PAID") paidSlugs.add(s);
-      if (expandPaidSlugsByLineage(paidSlugs, webinars).has(slug)) return true;
+      // Access is strictly PER-EVENT: only a PAID for THIS exact slug counts.
+      // A duplicated re-run is a separate event and never inherits access.
+      const map = await getWebinarPaymentStatusMap(p);
+      if (map.get(slug) === "PAID") return true;
       // Free webinar with a registration row counts as access.
+      const [webinars, regs] = await Promise.all([getWebinars(), getWebinarRegistrationIdsByPhone(p)]);
       const w = webinars.find((x) => x.slug === slug);
       if (w && (w.price ?? 0) <= 0 && regs.has(w.id)) return true;
     }
@@ -153,6 +148,8 @@ export interface RecoveryItem {
   paymentId: string;
   referenceNo: string | null;
   item: string;
+  /** Formatted webinar date/time (IST) for unambiguous attribution; null for courses. */
+  itemWhen: string | null;
   itemType: string;
   itemSlug: string | null;
   paymentStatus: string;
@@ -194,16 +191,11 @@ export async function getRecoveryItemsForPhone(phone: string): Promise<RecoveryI
   ]);
   const paidCourseIdSet = new Set(paidCourseIds);
 
-  // Lineage-aware sticky paid (Problem 3): any PAID webinar marks its whole
-  // lineage (re-runs / duplicates / renames) as accessed, so a later FAILED
-  // attempt on a sibling slug never re-triggers the recovery popup.
-  const paidWebinarSlugs = new Set<string>();
-  for (const [s, cls] of webStatus) if (cls === "PAID") paidWebinarSlugs.add(s);
-  const paidLineageSlugs = expandPaidSlugsByLineage(paidWebinarSlugs, webinars);
-
-  // Live name resolution (Problem 4): prefer the CURRENT webinar/course title so
-  // a rename propagates to the recovery banner/popup, not the frozen snapshot.
-  const webinarTitleBySlug = new Map(webinars.map((w) => [w.slug, w.title]));
+  // Live name + date resolution (Problem 4 + correct attribution): prefer the
+  // CURRENT webinar/course title so a rename propagates to the banner/popup, and
+  // carry the webinar date so the prompt names the SPECIFIC event unambiguously.
+  // A re-run/duplicate is a separate event — access and recovery are per-slug.
+  const webinarBySlug = new Map(webinars.map((w) => [w.slug, w]));
   const courseTitleBySlug = new Map(courses.map((c) => [c.slug, c.title]));
 
   const items: RecoveryItem[] = [];
@@ -220,8 +212,9 @@ export async function getRecoveryItemsForPhone(phone: string): Promise<RecoveryI
       if (c && paidCourseIdSet.has(c.id)) hasAccess = true;
     }
     if (!hasAccess && itemType === "webinar" && slug) {
-      if (paidLineageSlugs.has(slug)) hasAccess = true;
-      const w = webinars.find((x) => x.slug === slug);
+      // PER-EVENT: only a PAID for THIS exact slug suppresses the popup.
+      if (webStatus.get(slug) === "PAID") hasAccess = true;
+      const w = webinarBySlug.get(slug);
       if (!hasAccess && w && (w.price ?? 0) <= 0 && webRegs.has(w.id)) hasAccess = true;
     }
     if (hasAccess) continue;
@@ -233,13 +226,15 @@ export async function getRecoveryItemsForPhone(phone: string): Promise<RecoveryI
     const proof = await getProofByPaymentId(rep.id);
     if (proof?.status === "accepted") continue; // resolved
 
-    const currentName =
-      (itemType === "webinar" ? webinarTitleBySlug.get(slug || "") : courseTitleBySlug.get(slug || "")) || null;
+    const webinar = itemType === "webinar" ? webinarBySlug.get(slug || "") : undefined;
+    const currentName = (itemType === "webinar" ? webinar?.title : courseTitleBySlug.get(slug || "")) || null;
+    const itemWhen = webinar?.datetime ? formatISTDateTime(webinar.datetime) : null;
 
     items.push({
       paymentId: rep.id,
       referenceNo: rep.reference_no ?? null,
       item: currentName || rep.item || (itemType === "webinar" ? "Webinar" : "Course"),
+      itemWhen,
       itemType,
       itemSlug: slug,
       paymentStatus: rep.status,
