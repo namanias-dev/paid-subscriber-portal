@@ -211,7 +211,7 @@ export interface PlanCourseInput {
  * by that batch, so every downstream helper (resolveEmiConfig, payInFullTotal,
  * buildBatchLabel) reads the batch's values without any other code change.
  */
-function effectiveCourseForBatch(course: Course, batchId?: string | null): Course {
+export function effectiveCourseForBatch(course: Course, batchId?: string | null): Course {
   if (!batchId) return course;
   const batch = (course.batches || []).find((b) => b.id === batchId);
   if (!batch) return course;

@@ -99,4 +99,48 @@ for (const base of COURSES) {
 }
 
 console.log(`\n${fail === 0 ? "ALL IDENTICAL" : "MISMATCH"} — ${pass} identical, ${fail} different.`);
-process.exit(fail === 0 ? 0 : 1);
+
+// ---------------------------------------------------------------------------
+// Phase 3: multi-batch course — a chosen batch prices/labels from THAT batch;
+// null/unknown batchId falls back to the course-level default (never throws).
+// ---------------------------------------------------------------------------
+console.log("\n--- Phase 3: multi-batch selection ---");
+let p3pass = 0;
+let p3fail = 0;
+const assert = (name: string, cond: boolean) => { if (cond) p3pass++; else p3fail++; console.log(`${cond ? "PASS" : "FAIL"}  ${name}`); };
+
+const multi = makeCourse({
+  id: "co-multi", slug: "multi-batch-demo", title: "Multi Batch Demo",
+  price: 20000, original_price: 30000, pay_in_full_price: 18000, batch_start: "2026-07-15T00:00:00.000Z",
+  batch_timings: ["Morning"], modes: ["Online"],
+});
+const morning: CourseBatch = { ...defaultBatch(multi), id: "co-multi-b1", label: "Online · Morning" };
+const evening: CourseBatch = {
+  id: "co-multi-b2", label: "Evening · Offline", mode: ["Offline"], timing: ["Evening"],
+  start_date: "2026-07-26T18:30:00.000Z", end_date: null, price: 22000, original_price: 35000,
+  pay_in_full_price: 20000, emi_config: {}, capacity: 40, seats_left: 40,
+};
+const multiCourse: Course = { ...multi, batches: [morning, evening], default_batch_id: "co-multi-b1" };
+
+const planFull = (batchId?: string | null) => planCourseEnrollment({ course: multiCourse, plan: "full", bookSeat: false, batchId, bookingISO });
+
+const rDefault = planFull(null);
+const rMorning = planFull("co-multi-b1");
+const rEvening = planFull("co-multi-b2");
+const rUnknown = planFull("does-not-exist");
+
+if (rDefault.ok && rMorning.ok && rEvening.ok && rUnknown.ok) {
+  // Default batch mirrors course-level → null and default id and course-level identical.
+  assert("null batchId === course-level (pay-in-full 18000)", rDefault.plan.totalFee === 18000);
+  assert("default-batch id === null (both 18000)", rMorning.plan.totalFee === rDefault.plan.totalFee);
+  assert("Evening batch prices from its own fields (pay-in-full 20000)", rEvening.plan.totalFee === 20000);
+  assert("Evening batch label reflects its start/timing", rEvening.plan.batchLabel === "Starts 27 Jul 2026 · Evening");
+  assert("Evening first charge = 20000", rEvening.plan.firstAmount === 20000);
+  assert("unknown batchId falls back to default (18000, no throw)", rUnknown.plan.totalFee === 18000);
+  assert("Morning label reflects its start/timing", rMorning.plan.batchLabel === "Starts 15 Jul 2026 · Morning");
+} else {
+  assert("all multi-batch plans payable", false);
+}
+console.log(`\n${p3fail === 0 ? "PHASE3 OK" : "PHASE3 FAIL"} — ${p3pass} pass, ${p3fail} fail.`);
+
+process.exit(fail === 0 && p3fail === 0 ? 0 : 1);

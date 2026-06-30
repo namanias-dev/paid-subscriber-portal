@@ -14,6 +14,7 @@ import {
   Sparkles,
   Lock,
   Tag,
+  Users,
 } from "lucide-react";
 import { formatINR, formatISTDate } from "@/lib/dates";
 import {
@@ -24,19 +25,37 @@ import {
   buildFullWithSeatSchedule,
   buildInstallmentOnlySchedule,
   payInFullTotal,
+  effectiveCourseForBatch,
 } from "@/lib/installments";
-import type { Course, InstallmentItem } from "@/lib/types";
+import type { Course, CourseBatch, InstallmentItem } from "@/lib/types";
 
 type Plan = "full" | "emi";
 
 export default function CheckoutClient({ course }: { course: Course }) {
+  // --- Batches (Phase 3): only a course with 2+ batches shows a selector. With
+  // 0/1 batch we use the course-level fields verbatim, so single-batch/default
+  // courses behave byte-for-byte exactly as before. ---
+  const batches = useMemo<CourseBatch[]>(() => course.batches || [], [course.batches]);
+  const multiBatch = batches.length >= 2;
+  const initialBatchId = multiBatch
+    ? (course.default_batch_id && batches.some((b) => b.id === course.default_batch_id) ? course.default_batch_id : batches[0].id)
+    : null;
+  const [batchId, setBatchId] = useState<string | null>(initialBatchId);
+
+  // Effective course = course-level fields overridden by the chosen batch. For
+  // single-batch courses (multiBatch=false) this is exactly `course`.
+  const ec = useMemo(
+    () => (multiBatch ? effectiveCourseForBatch(course, batchId) : course),
+    [course, batchId, multiBatch]
+  );
+
   useEffect(() => {
     trackClient("course_view", { course_id: course.id, course_slug: course.slug, course_title: course.title, price: course.price });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  const cfg = useMemo(() => resolveEmiConfig(course), [course]);
-  const standardTotal = Math.max(0, Math.round(course.price));
-  const payInFull = useMemo(() => payInFullTotal(course), [course]);
+  const cfg = useMemo(() => resolveEmiConfig(ec), [ec]);
+  const standardTotal = Math.max(0, Math.round(ec.price));
+  const payInFull = useMemo(() => payInFullTotal(ec), [ec]);
   const fullSavings = Math.max(0, standardTotal - payInFull);
 
   const emiAvailable = cfg.enabled && standardTotal > 1 && cfg.installmentCounts.length > 0;
@@ -52,6 +71,17 @@ export default function CheckoutClient({ course }: { course: Course }) {
   const base = plan === "full" ? payInFull : standardTotal;
   const seatFloor = cfg.allowCustomSeat ? (cfg.minSeatAmount ?? cfg.seatAmount ?? 1) : (cfg.seatAmount ?? 1);
   const [seatInput, setSeatInput] = useState<number>(cfg.seatAmount ?? seatFloor);
+
+  // When the chosen batch changes, reset the plan/seat/installment selections to
+  // that batch's defaults (its EMI config may differ). No-op for single-batch.
+  useEffect(() => {
+    if (!multiBatch) return;
+    setPlan(fullAvailable ? "full" : "emi");
+    setBookSeat(false);
+    setCount(cfg.installmentCounts[Math.min(1, cfg.installmentCounts.length - 1)] || cfg.installmentCounts[0] || 6);
+    setSeatInput(cfg.seatAmount ?? seatFloor);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [batchId]);
 
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
@@ -106,7 +136,7 @@ export default function CheckoutClient({ course }: { course: Course }) {
       return;
     }
     setLoading(true);
-    trackClient("click_enroll", { course_id: course.id, course_slug: course.slug, item_type: "course", price: course.price });
+    trackClient("click_enroll", { course_id: course.id, course_slug: course.slug, item_type: "course", price: ec.price });
     try {
       const res = await fetch("/api/v1/enroll/create-payment", {
         method: "POST",
@@ -120,6 +150,9 @@ export default function CheckoutClient({ course }: { course: Course }) {
           bookSeat: seatActive,
           installmentCount: plan === "emi" ? count : undefined,
           seatAmount: seatActive && cfg.allowCustomSeat ? seatInput : undefined,
+          // Phase 3: only sent for multi-batch courses. Server validates it belongs
+          // to the course and recomputes price server-side (client price ignored).
+          batchId: multiBatch ? batchId : undefined,
         }),
       });
       const json = await res.json();
@@ -162,15 +195,20 @@ export default function CheckoutClient({ course }: { course: Course }) {
                 <p className="ca-eyebrow">Secure enrollment</p>
                 <h1 className="mt-1 font-heading text-lg font-bold leading-snug text-[var(--ca-navy-900)] sm:text-xl">{course.title}</h1>
                 <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[var(--ca-slate-700)]">
-                  {course.batch_start && (
-                    <span className="inline-flex items-center gap-1"><CalendarClock size={13} /> Starts {formatISTDate(course.batch_start)}</span>
+                  {ec.batch_start && (
+                    <span className="inline-flex items-center gap-1"><CalendarClock size={13} /> Starts {formatISTDate(ec.batch_start)}</span>
                   )}
-                  {course.batch_timings?.length ? <span>{course.batch_timings.join(" · ")}</span> : null}
+                  {ec.batch_timings?.length ? <span>{ec.batch_timings.join(" · ")}</span> : null}
                   <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 font-semibold text-emerald-700">GST included</span>
                 </div>
               </div>
             </div>
           </div>
+
+          {/* Batch selector — only when the course offers multiple batches */}
+          {multiBatch && (
+            <BatchSelector batches={batches} selectedId={batchId} onSelect={setBatchId} />
+          )}
 
           {/* STEP A — Book your seat (modifier, works with both plans) */}
           {seatConfigured && (
@@ -359,6 +397,49 @@ export default function CheckoutClient({ course }: { course: Course }) {
           </button>
         </div>
         {error && <p className="px-4 pb-2 text-xs text-red-600">{error}</p>}
+      </div>
+    </div>
+  );
+}
+
+/** Multi-batch picker. Choosing a batch updates price/start/seats via the parent's effective course. */
+function BatchSelector({ batches, selectedId, onSelect }: { batches: CourseBatch[]; selectedId: string | null; onSelect: (id: string) => void }) {
+  return (
+    <div>
+      <h2 className="font-heading text-base font-bold text-[var(--ca-navy-900)]">Choose your batch</h2>
+      <p className="mt-1 text-xs text-[var(--ca-slate-700)]">Pick a batch — the price, start date and seats update to match your choice.</p>
+      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+        {batches.map((b) => {
+          const selected = b.id === selectedId;
+          const std = Math.max(0, Math.round(b.price || 0));
+          const pif = payInFullTotal({ price: b.price, pay_in_full_price: b.pay_in_full_price });
+          const anchor = b.original_price && b.original_price > std ? Math.round(b.original_price) : null;
+          const modeTiming = [(b.mode || []).join(" / "), (b.timing || []).join(" · ")].filter(Boolean).join(" · ");
+          const title = b.label || modeTiming || "Batch";
+          return (
+            <button
+              key={b.id}
+              type="button"
+              onClick={() => onSelect(b.id)}
+              aria-pressed={selected}
+              className={`ca-focus relative rounded-2xl border-2 p-4 text-left transition ${selected ? "border-[var(--ca-gold)] bg-white shadow-soft-lg" : "border-[var(--ca-slate-200)] bg-white hover:border-[var(--ca-slate-300)]"}`}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-bold text-[var(--ca-navy-900)]">{title}</span>
+                {selected && <CheckCircle2 size={18} className="text-[var(--ca-gold)]" />}
+              </div>
+              {b.label && modeTiming && <p className="mt-0.5 text-xs text-[var(--ca-slate-700)]">{modeTiming}</p>}
+              <div className="mt-2 flex items-baseline gap-2">
+                <span className="font-heading text-xl font-extrabold text-[var(--ca-navy-900)]">{formatINR(pif)}</span>
+                {anchor && <span className="text-sm text-[var(--ca-slate-400)] line-through">{formatINR(anchor)}</span>}
+              </div>
+              <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[var(--ca-slate-700)]">
+                {b.start_date && <span className="inline-flex items-center gap-1"><CalendarClock size={12} /> Starts {formatISTDate(b.start_date)}</span>}
+                {b.seats_left != null && <span className="inline-flex items-center gap-1"><Users size={12} /> {b.seats_left} seats left</span>}
+              </div>
+            </button>
+          );
+        })}
       </div>
     </div>
   );

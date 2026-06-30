@@ -40,6 +40,10 @@ export async function POST(req: Request) {
     const slug = String(body.courseSlug || body.slug || "");
     const plan = String(body.plan || body.mode || "full") as "full" | "emi";
     const bookSeat = body.bookSeat === true || body.bookSeat === "true";
+    // Phase 3: optional chosen batch. Pricing is recomputed server-side from the
+    // batch (planCourseEnrollment) — a client price is never accepted. An unknown
+    // id falls back to the course-level default inside planCourseEnrollment.
+    const batchId = body.batchId != null && String(body.batchId).trim() !== "" ? String(body.batchId) : null;
 
     if (!name) return NextResponse.json({ ok: false, error: "Please enter your full name." }, { status: 400 });
     if (mobile.length !== 10) return NextResponse.json({ ok: false, error: "Enter a valid 10-digit mobile number." }, { status: 400 });
@@ -60,6 +64,7 @@ export async function POST(req: Request) {
       bookSeat,
       seatAmount: body.seatAmount != null ? Number(body.seatAmount) : null,
       installmentCount: body.installmentCount != null ? Number(body.installmentCount) : null,
+      batchId,
     });
     if (!planned.ok) return NextResponse.json({ ok: false, error: planned.error }, { status: 400 });
     const { schedule, totalFee, planType, installmentCount, batchLabel } = planned.plan;
