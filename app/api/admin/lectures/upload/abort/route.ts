@@ -35,12 +35,17 @@ export async function POST(req: Request) {
       await abortMultipart(w.recording_multipart_key, w.recording_upload_id);
     }
     if (body.deleteRecord === true) {
-      if (r2Configured() && w.recording_key) await deleteObject(w.recording_key).catch(() => false);
+      // NEVER delete a SHARED object (reference to a course/lecture video) — only
+      // drop the webinar's OWN uploaded object.
+      if (r2Configured() && w.recording_key && !w.recording_is_reference) {
+        await deleteObject(w.recording_key).catch(() => false);
+      }
       await updateWebinar(recordingId, {
         recording_upload_status: null,
         recording_upload_id: null,
         recording_multipart_key: null,
         recording_key: null,
+        recording_is_reference: false,
         recording_file_size: null,
         recording_duration_seconds: null,
       });

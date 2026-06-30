@@ -92,6 +92,20 @@ export default function ContentAdmin() {
   const courseList = courses || [];
   const courseTitle = (id: string) => courseList.find((c) => c.id === id)?.title || "Unknown batch";
 
+  // Completed hosted videos available to REUSE as a webinar recording (by reference).
+  const libraryVideos = useMemo<LibraryVideo[]>(() => {
+    return (content || [])
+      .filter((c) => c.source_type === "hosted" && c.upload_status === "completed")
+      .map((c) => {
+        const cids = c.course_ids && c.course_ids.length ? c.course_ids : c.course_id ? [c.course_id] : [];
+        const where = cids.map((id) => courseList.find((x) => x.id === id)?.title || "").filter(Boolean).join(", ");
+        const subtitle = [c.class_no != null ? `C${c.class_no}` : null, c.subject || null, where || "Library"].filter(Boolean).join(" · ");
+        return { id: c.id, title: c.title, subtitle };
+      })
+      .sort((a, b) => a.title.localeCompare(b.title));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [content, courses]);
+
   const rows = useMemo(() => {
     let list = [...(content || [])];
     if (q.trim()) {
@@ -366,7 +380,7 @@ export default function ContentAdmin() {
 
       {/* Webinar recordings — set the post-session recording link in one place.
           Students (paid + post-date) see/play it automatically once saved. */}
-      <WebinarRecordings webinars={webinarList} reload={reloadWebinars} />
+      <WebinarRecordings webinars={webinarList} reload={reloadWebinars} libraryVideos={libraryVideos} />
 
 
       <Modal open={open} onClose={() => setOpen(false)} title={editing ? "Edit Content" : "Add Content"} maxWidth="max-w-lg">
@@ -559,6 +573,12 @@ export default function ContentAdmin() {
 
 const MAX_WEBINAR_VIDEO_BYTES = 5 * 1024 ** 3; // 5 GB safety cap
 
+interface LibraryVideo {
+  id: string;
+  title: string;
+  subtitle: string;
+}
+
 /**
  * Dedicated "Webinars" section (lives in the Content/LMS tab so staff manage ALL
  * recordings in one place). Lists EVERY webinar with its recording status and,
@@ -568,13 +588,16 @@ const MAX_WEBINAR_VIDEO_BYTES = 5 * 1024 ** 3; // 5 GB safety cap
  *      paid + post-date attendee plays it inline; "processing" disappears.
  *   2) Paste an external link (YouTube / Drive / direct) — unchanged.
  */
-function WebinarRecordings({ webinars, reload }: { webinars: Webinar[]; reload: () => void }) {
+function WebinarRecordings({ webinars, reload, libraryVideos }: { webinars: Webinar[]; reload: () => void; libraryVideos: LibraryVideo[] }) {
   const { toast } = useToast();
   const { startUpload, items: uploads, cancel } = useUploadManager();
   const [q, setQ] = useState("");
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [savingId, setSavingId] = useState<string | null>(null);
   const [removingId, setRemovingId] = useState<string | null>(null);
+  const [picker, setPicker] = useState<Webinar | null>(null);
+  const [pickerQ, setPickerQ] = useState("");
+  const [assigningId, setAssigningId] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const pendingTarget = useRef<{ id: string; title: string } | null>(null);
   const reloadedRef = useRef<Set<string>>(new Set());
@@ -691,14 +714,45 @@ function WebinarRecordings({ webinars, reload }: { webinars: Webinar[]; reload: 
     }
   }
 
+  async function assignLibrary(webinarId: string, contentId: string) {
+    setAssigningId(contentId);
+    try {
+      const res = await fetch(`/api/admin/webinars/${webinarId}/recording-from-library`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ contentId }),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        toast(d.error || "Could not use that video", "error");
+        return;
+      }
+      reloadedRef.current.delete(webinarId);
+      toast("Library video set as the recording", "success");
+      setPicker(null);
+      setPickerQ("");
+      reload();
+    } catch {
+      toast("Could not use that video", "error");
+    } finally {
+      setAssigningId(null);
+    }
+  }
+
+  const pickerList = useMemo(() => {
+    const needle = pickerQ.trim().toLowerCase();
+    if (!needle) return libraryVideos;
+    return libraryVideos.filter((v) => v.title.toLowerCase().includes(needle) || v.subtitle.toLowerCase().includes(needle));
+  }, [libraryVideos, pickerQ]);
+
   return (
     <div className="mt-10">
       <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
         <div>
           <h2 className="font-heading text-lg font-bold">Webinars</h2>
           <p className="mt-0.5 text-sm text-muted">
-            Every webinar and its recording. <b>Upload a video file</b> (hosted, plays inline) or <b>paste a link</b> (YouTube / Drive / direct).
-            Paid attendees see it after the session date — no re-upload needed.
+            Every webinar and its recording. <b>Upload a video file</b> (hosted, plays inline), <b>reuse a library video</b> (already-uploaded, no re-upload),
+            or <b>paste a link</b> (YouTube / Drive / direct). Paid attendees see it after the session date.
           </p>
         </div>
         <input className="input max-w-xs" placeholder="Search webinars…" value={q} onChange={(e) => setQ(e.target.value)} />
@@ -740,9 +794,17 @@ function WebinarRecordings({ webinars, reload }: { webinars: Webinar[]; reload: 
                         <button onClick={() => cancel(w.id)} className="text-danger text-xs">Cancel</button>
                       </div>
                     ) : (
-                      <button onClick={() => pickVideo(w)} className="btn btn-secondary px-3 py-1.5 text-xs">
-                        {hosted ? "⬆️ Replace video" : "⬆️ Upload video file"}
-                      </button>
+                      <>
+                        <button onClick={() => pickVideo(w)} className="btn btn-secondary px-3 py-1.5 text-xs">
+                          {hosted ? "⬆️ Replace video" : "⬆️ Upload video file"}
+                        </button>
+                        <button
+                          onClick={() => { setPicker(w); setPickerQ(""); }}
+                          className="btn btn-secondary px-3 py-1.5 text-xs"
+                        >
+                          📚 Choose from library
+                        </button>
+                      </>
                     )}
                     {hosted && !uploading && (
                       <button onClick={() => removeHosted(w)} disabled={removingId === w.id} className="text-danger text-xs disabled:opacity-50">
@@ -774,7 +836,7 @@ function WebinarRecordings({ webinars, reload }: { webinars: Webinar[]; reload: 
                 ) : uploading ? (
                   <span className="pill pill-amber">Uploading {pct}%</span>
                 ) : hosted ? (
-                  <span className="pill pill-green">Hosted ✓</span>
+                  <span className="pill pill-green">{w.recording_is_reference ? "Hosted ✓ (library)" : "Hosted ✓"}</span>
                 ) : hasLink ? (
                   <span className="pill pill-blue">Link set</span>
                 ) : (
@@ -789,6 +851,41 @@ function WebinarRecordings({ webinars, reload }: { webinars: Webinar[]; reload: 
           <tr><td colSpan={5} className="px-4 py-10 text-center text-sm text-muted">No webinars found.</td></tr>
         )}
       </TableShell>
+
+      <Modal
+        open={!!picker}
+        onClose={() => { setPicker(null); setPickerQ(""); }}
+        title={picker ? `Choose a library video — ${picker.title}` : "Choose a library video"}
+        maxWidth="max-w-lg"
+      >
+        <div className="space-y-3">
+          <p className="text-xs text-muted">
+            Reuses an already-uploaded video as this webinar&apos;s recording — no re-upload, no duplicate storage. Playback stays gated
+            to this webinar&apos;s paid attendees; the source course is unaffected.
+          </p>
+          <input className="input" placeholder="Search videos / course…" value={pickerQ} onChange={(e) => setPickerQ(e.target.value)} />
+          <div className="max-h-80 space-y-1 overflow-y-auto rounded-xl border border-line p-2">
+            {pickerList.length === 0 ? (
+              <p className="px-1 py-6 text-center text-sm text-muted">No completed hosted videos found.</p>
+            ) : (
+              pickerList.map((v) => (
+                <button
+                  key={v.id}
+                  onClick={() => picker && assignLibrary(picker.id, v.id)}
+                  disabled={assigningId === v.id}
+                  className="flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-left transition hover:bg-surface2 disabled:opacity-50"
+                >
+                  <span className="min-w-0">
+                    <span className="block truncate text-sm font-semibold text-ink">🎬 {v.title}</span>
+                    <span className="block truncate text-xs text-muted">{v.subtitle}</span>
+                  </span>
+                  <span className="shrink-0 text-xs font-semibold text-primary">{assigningId === v.id ? "Setting…" : "Use →"}</span>
+                </button>
+              ))
+            )}
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

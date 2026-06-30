@@ -910,6 +910,13 @@ export interface Webinar {
   recording_multipart_key?: string | null;
   /** Final playable R2 object key. Present + status "completed" => hosted recording ready. */
   recording_key?: string | null;
+  /**
+   * When true, recording_key REFERENCES an R2 object owned by another row (a
+   * course/lecture content_item reused as this webinar's recording). The shared
+   * object must never be deleted when the webinar's recording is removed/replaced.
+   * Webinar-owned uploads keep this false.
+   */
+  recording_is_reference?: boolean | null;
   recording_duration_seconds?: number | null;
   recording_file_size?: number | null;
   /**

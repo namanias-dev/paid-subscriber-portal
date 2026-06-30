@@ -340,6 +340,7 @@ create table if not exists public.webinars (
   recording_upload_id text,              -- active multipart upload id (resume)
   recording_multipart_key text,          -- R2 key being/was uploaded
   recording_key text,                    -- final playable R2 object key
+  recording_is_reference boolean default false, -- true => recording_key is a SHARED object owned by another row (never delete on remove)
   recording_duration_seconds integer,
   recording_file_size bigint,
   status text default 'upcoming',

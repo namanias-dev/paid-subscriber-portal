@@ -37,6 +37,7 @@ export async function POST(req: Request) {
       await updateWebinar(recordingId, {
         recording_upload_status: "completed",
         recording_key: w.recording_multipart_key,
+        recording_is_reference: false, // a fresh upload is webinar-owned, not a shared reference
         recording_upload_id: null,
         recording_file_size: body.fileSize ? Number(body.fileSize) : w.recording_file_size ?? null,
         recording_duration_seconds: body.durationSeconds ? Math.round(Number(body.durationSeconds)) : w.recording_duration_seconds ?? null,
