@@ -11,6 +11,8 @@ export interface AdminNavItem {
 
 export const ADMIN_NAV: AdminNavItem[] = [
   { href: "/admin", label: "Dashboard", icon: "📊", group: "Overview" },
+  // No `perm` → visible to every logged-in staff member (the in-portal help center).
+  { href: "/admin/learning", label: "Learning", icon: "📘", group: "Overview" },
   { href: "/admin/analytics", label: "Business Analytics", icon: "📈", group: "Overview", perm: "view_revenue" },
   { href: "/admin/home", label: "Home Page", icon: "🏠", group: "Overview", perm: "manage_settings" },
   { href: "/admin/toppers", label: "Toppers / Results", icon: "🏅", group: "Website", perm: "manage_settings" },
