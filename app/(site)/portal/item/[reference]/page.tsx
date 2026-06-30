@@ -139,6 +139,7 @@ export default async function PortalItemPage({ params }: { params: { reference: 
                 sessionType={sessionType}
                 zoomLink={webinar.link || null}
                 recording={recording}
+                adminCompleted={webinar.status === "completed"}
                 webinarId={webinar.id}
                 webinarSlug={webinar.slug}
                 registrationId={purchase?.reference_no ?? null}

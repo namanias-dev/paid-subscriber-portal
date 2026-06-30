@@ -14,6 +14,7 @@ import {
   bumpBuyerSessionVersion,
   finalizeCoursePaymentByReference,
 } from "./dataProvider";
+import { expandPaidSlugsByLineage } from "./webinarLineage";
 import type {
   Payment,
   PaymentProof,
@@ -119,10 +120,17 @@ export async function phoneHasAccessToItem(
 
   if (itemType === "webinar") {
     if (slug) {
-      const map = await getWebinarPaymentStatusMap(p);
-      if (map.get(slug) === "PAID") return true;
+      const [map, webinars, regs] = await Promise.all([
+        getWebinarPaymentStatusMap(p),
+        getWebinars(),
+        getWebinarRegistrationIdsByPhone(p),
+      ]);
+      // STICKY PAID across the lineage: a PAID on any sibling slug (re-run /
+      // duplicate / rename) grants access to the whole lineage (Problem 3).
+      const paidSlugs = new Set<string>();
+      for (const [s, cls] of map) if (cls === "PAID") paidSlugs.add(s);
+      if (expandPaidSlugsByLineage(paidSlugs, webinars).has(slug)) return true;
       // Free webinar with a registration row counts as access.
-      const [webinars, regs] = await Promise.all([getWebinars(), getWebinarRegistrationIdsByPhone(p)]);
       const w = webinars.find((x) => x.slug === slug);
       if (w && (w.price ?? 0) <= 0 && regs.has(w.id)) return true;
     }
@@ -186,6 +194,18 @@ export async function getRecoveryItemsForPhone(phone: string): Promise<RecoveryI
   ]);
   const paidCourseIdSet = new Set(paidCourseIds);
 
+  // Lineage-aware sticky paid (Problem 3): any PAID webinar marks its whole
+  // lineage (re-runs / duplicates / renames) as accessed, so a later FAILED
+  // attempt on a sibling slug never re-triggers the recovery popup.
+  const paidWebinarSlugs = new Set<string>();
+  for (const [s, cls] of webStatus) if (cls === "PAID") paidWebinarSlugs.add(s);
+  const paidLineageSlugs = expandPaidSlugsByLineage(paidWebinarSlugs, webinars);
+
+  // Live name resolution (Problem 4): prefer the CURRENT webinar/course title so
+  // a rename propagates to the recovery banner/popup, not the frozen snapshot.
+  const webinarTitleBySlug = new Map(webinars.map((w) => [w.slug, w.title]));
+  const courseTitleBySlug = new Map(courses.map((c) => [c.slug, c.title]));
+
   const items: RecoveryItem[] = [];
   for (const [, rows] of groups) {
     const sorted = [...rows].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
@@ -200,7 +220,7 @@ export async function getRecoveryItemsForPhone(phone: string): Promise<RecoveryI
       if (c && paidCourseIdSet.has(c.id)) hasAccess = true;
     }
     if (!hasAccess && itemType === "webinar" && slug) {
-      if (webStatus.get(slug) === "PAID") hasAccess = true;
+      if (paidLineageSlugs.has(slug)) hasAccess = true;
       const w = webinars.find((x) => x.slug === slug);
       if (!hasAccess && w && (w.price ?? 0) <= 0 && webRegs.has(w.id)) hasAccess = true;
     }
@@ -213,10 +233,13 @@ export async function getRecoveryItemsForPhone(phone: string): Promise<RecoveryI
     const proof = await getProofByPaymentId(rep.id);
     if (proof?.status === "accepted") continue; // resolved
 
+    const currentName =
+      (itemType === "webinar" ? webinarTitleBySlug.get(slug || "") : courseTitleBySlug.get(slug || "")) || null;
+
     items.push({
       paymentId: rep.id,
       referenceNo: rep.reference_no ?? null,
-      item: rep.item || (itemType === "webinar" ? "Webinar" : "Course"),
+      item: currentName || rep.item || (itemType === "webinar" ? "Webinar" : "Course"),
       itemType,
       itemSlug: slug,
       paymentStatus: rep.status,

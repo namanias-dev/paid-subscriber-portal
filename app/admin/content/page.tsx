@@ -7,7 +7,7 @@ import { useToast } from "@/components/ui/Toast";
 import { useUploadManager } from "@/components/admin/upload/uploadManager";
 import { CONTENT_META } from "@/lib/contentMeta";
 import { SUBJECTS } from "@/lib/config";
-import { formatDate } from "@/lib/dates";
+import { formatDate, formatISTDateTime } from "@/lib/dates";
 import type { ContentItem, ContentType, Course, Webinar, OrientationRole } from "@/lib/types";
 
 /** Read duration + resolution from a video file (client-side; no processing). */
@@ -64,7 +64,7 @@ function itemCourseIds(c: ContentItem): string[] {
 export default function ContentAdmin() {
   const { data: content, loading, reload } = useAdminData<ContentItem[]>("/api/admin/content", "content");
   const { data: courses } = useAdminData<Course[]>("/api/admin/courses", "courses");
-  const { data: webinars } = useAdminData<Webinar[]>("/api/admin/webinars", "webinars");
+  const { data: webinars, reload: reloadWebinars } = useAdminData<Webinar[]>("/api/admin/webinars", "webinars");
   const { toast } = useToast();
   const { startUpload } = useUploadManager();
 
@@ -364,6 +364,11 @@ export default function ContentAdmin() {
         )}
       </TableShell>
 
+      {/* Webinar recordings — set the post-session recording link in one place.
+          Students (paid + post-date) see/play it automatically once saved. */}
+      <WebinarRecordings webinars={webinarList} reload={reloadWebinars} />
+
+
       <Modal open={open} onClose={() => setOpen(false)} title={editing ? "Edit Content" : "Add Content"} maxWidth="max-w-lg">
         <div className="space-y-3">
           <div className="grid grid-cols-2 gap-3">
@@ -548,6 +553,109 @@ export default function ContentAdmin() {
           </button>
         </div>
       </Modal>
+    </div>
+  );
+}
+
+/**
+ * Webinar recordings manager (lives in the Content/LMS tab so staff manage ALL
+ * recordings in one place). Lists every webinar with an inline link editor that
+ * PATCHes webinars.recording_link. Once saved, a paid attendee (post date) sees
+ * and can play the recording — the portal only shows "processing" when the link
+ * is genuinely empty.
+ */
+function WebinarRecordings({ webinars, reload }: { webinars: Webinar[]; reload: () => void }) {
+  const { toast } = useToast();
+  const [q, setQ] = useState("");
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [savingId, setSavingId] = useState<string | null>(null);
+
+  const list = useMemo(() => {
+    const arr = [...webinars];
+    const needle = q.trim().toLowerCase();
+    const filtered = needle ? arr.filter((w) => w.title.toLowerCase().includes(needle)) : arr;
+    return filtered.sort((a, b) => new Date(b.datetime || 0).getTime() - new Date(a.datetime || 0).getTime());
+  }, [webinars, q]);
+
+  function linkFor(w: Webinar): string {
+    return drafts[w.id] ?? (w.recording_link || "");
+  }
+
+  async function save(w: Webinar) {
+    const value = linkFor(w).trim();
+    setSavingId(w.id);
+    try {
+      const res = await fetch(`/api/admin/webinars/${w.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ recording_link: value || null }),
+      });
+      if (!res.ok) {
+        toast("Could not save recording link", "error");
+        return;
+      }
+      toast(value ? "Recording link saved" : "Recording link cleared", "success");
+      setDrafts((d) => {
+        const next = { ...d };
+        delete next[w.id];
+        return next;
+      });
+      reload();
+    } catch {
+      toast("Could not save recording link", "error");
+    } finally {
+      setSavingId(null);
+    }
+  }
+
+  return (
+    <div className="mt-10">
+      <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h2 className="font-heading text-lg font-bold">Webinar recordings</h2>
+          <p className="mt-0.5 text-sm text-muted">
+            Paste a YouTube / Google Drive / direct link. Paid attendees see it after the session date — no re-upload needed.
+          </p>
+        </div>
+        <input className="input max-w-xs" placeholder="Search webinars…" value={q} onChange={(e) => setQ(e.target.value)} />
+      </div>
+
+      <TableShell headers={["Webinar", "Date", "Recording link", "Status", ""]}>
+        {list.map((w) => {
+          const value = linkFor(w);
+          const dirty = drafts[w.id] !== undefined && (drafts[w.id] || "").trim() !== (w.recording_link || "").trim();
+          const hasLink = !!(w.recording_link && w.recording_link.trim());
+          return (
+            <tr key={w.id} className="border-b border-line last:border-0 align-top hover:bg-surface2">
+              <td className="px-4 py-3 font-medium">🎥 {w.title}</td>
+              <td className="px-4 py-3 text-xs text-muted">{w.datetime ? formatISTDateTime(w.datetime) : "—"}</td>
+              <td className="px-4 py-3">
+                <input
+                  className="input min-w-[240px]"
+                  value={value}
+                  placeholder="https://youtu.be/… or https://drive.google.com/file/d/…/view"
+                  onChange={(e) => setDrafts((d) => ({ ...d, [w.id]: e.target.value }))}
+                />
+              </td>
+              <td className="px-4 py-3">
+                <span className={`pill ${hasLink ? "pill-green" : "pill-gray"}`}>{hasLink ? "Recording set" : "No recording"}</span>
+              </td>
+              <td className="px-4 py-3">
+                <button
+                  onClick={() => save(w)}
+                  disabled={savingId === w.id || !dirty}
+                  className="btn btn-primary px-3 py-1.5 text-xs disabled:opacity-50"
+                >
+                  {savingId === w.id ? "Saving…" : "Save"}
+                </button>
+              </td>
+            </tr>
+          );
+        })}
+        {list.length === 0 && (
+          <tr><td colSpan={5} className="px-4 py-10 text-center text-sm text-muted">No webinars found.</td></tr>
+        )}
+      </TableShell>
     </div>
   );
 }

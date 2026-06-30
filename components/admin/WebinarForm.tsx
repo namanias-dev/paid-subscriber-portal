@@ -72,6 +72,9 @@ export default function WebinarForm({ webinar }: { webinar?: Webinar }) {
     (webinar?.registration_status as NonNullable<Webinar["registration_status"]>) || "OPEN",
   );
   const [autoClose, setAutoClose] = useState<boolean>(webinar?.auto_close_registration !== false);
+  // Problem 1: show the (honest, threshold-gated) registration count publicly?
+  // null/true => show; false => hide. Default shown so existing webinars are unaffected.
+  const [showRegCount, setShowRegCount] = useState<boolean>(webinar?.show_registration_count !== false);
   const [registrationClosesAt, setRegistrationClosesAt] = useState(toLocalInput(webinar?.registration_closes_at));
   const [longDescription, setLongDescription] = useState(webinar?.long_description || "");
   const [coverImageUrl, setCoverImageUrl] = useState<string | null>(webinar?.cover_image_url || null);
@@ -122,6 +125,7 @@ export default function WebinarForm({ webinar }: { webinar?: Webinar }) {
       status,
       registration_status: registrationStatus,
       auto_close_registration: autoClose,
+      show_registration_count: showRegCount,
       registration_closes_at: registrationClosesAt ? istInputToISO(registrationClosesAt) : null,
       cover_image_url: coverImageUrl,
       mobile_image_url: mobileImageUrl,
@@ -225,6 +229,12 @@ export default function WebinarForm({ webinar }: { webinar?: Webinar }) {
                   </Field>
                   <Field label="Custom registration cutoff (IST, optional)" hint="Leave blank to close at the start time.">
                     <input type="datetime-local" className="input" value={registrationClosesAt} onChange={(e) => setRegistrationClosesAt(e.target.value)} />
+                  </Field>
+                  <Field label="Show registration count on public page" hint="When on, the public page shows the REAL count once it reaches 10+ (below that it shows encouraging copy instead of '0 registered'). Turn off to hide the count entirely. We never display a seeded/fake number.">
+                    <label className="flex items-center gap-2 text-sm">
+                      <input type="checkbox" checked={showRegCount} onChange={(e) => setShowRegCount(e.target.checked)} />
+                      Show how many people have registered
+                    </label>
                   </Field>
                 </Section>
 

@@ -1740,6 +1740,77 @@ export async function getWebinarBySlug(slug: string): Promise<Webinar | null> {
   const all = await getWebinars();
   return all.find((w) => w.slug === slug) ?? null;
 }
+
+/**
+ * HONEST public registration count for one webinar (Problem 1). NEVER uses the
+ * seeded `webinars.registrations` column. For a PAID webinar this is the number
+ * of distinct people who actually paid; for a FREE webinar it's the number of
+ * registration rows. Returns 0 (not a fabricated number) when there's nothing.
+ */
+export async function getWebinarRegisteredCount(w: Pick<Webinar, "id" | "slug" | "price">): Promise<number> {
+  const db = demoMode() ? null : getSupabaseAdmin();
+  if (!db) return 0;
+  if ((w.price ?? 0) > 0) {
+    const { data } = await db
+      .from("payments")
+      .select("phone")
+      .eq("item_type", "webinar")
+      .eq("item_slug", w.slug)
+      .in("status", ["PAID", "captured"]);
+    const phones = new Set<string>();
+    for (const r of (data as { phone: string | null }[]) ?? []) {
+      const p = (r.phone || "").trim();
+      if (p) phones.add(p);
+    }
+    return phones.size;
+  }
+  const { count } = await db
+    .from("webinar_registrations")
+    .select("id", { count: "exact", head: true })
+    .eq("webinar_id", w.id);
+  return count ?? 0;
+}
+
+/**
+ * Batch version of getWebinarRegisteredCount for listings/home — two queries
+ * total regardless of how many webinars. Returns a Map keyed by webinar id.
+ */
+export async function getWebinarRegisteredCounts(
+  webinars: Pick<Webinar, "id" | "slug" | "price">[],
+): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  for (const w of webinars) out.set(w.id, 0);
+  const db = demoMode() ? null : getSupabaseAdmin();
+  if (!db || webinars.length === 0) return out;
+
+  // Paid-distinct by slug (for paid webinars).
+  const { data: payRows } = await db
+    .from("payments")
+    .select("phone,item_slug")
+    .eq("item_type", "webinar")
+    .in("status", ["PAID", "captured"]);
+  const paidBySlug = new Map<string, Set<string>>();
+  for (const r of (payRows as { phone: string | null; item_slug: string | null }[]) ?? []) {
+    const slug = (r.item_slug || "").trim();
+    const phone = (r.phone || "").trim();
+    if (!slug || !phone) continue;
+    (paidBySlug.get(slug) || paidBySlug.set(slug, new Set()).get(slug)!).add(phone);
+  }
+
+  // Registration rows by webinar id (for free webinars).
+  const { data: regRows } = await db.from("webinar_registrations").select("webinar_id");
+  const regsById = new Map<string, number>();
+  for (const r of (regRows as { webinar_id: string | null }[]) ?? []) {
+    const id = (r.webinar_id || "").trim();
+    if (!id) continue;
+    regsById.set(id, (regsById.get(id) || 0) + 1);
+  }
+
+  for (const w of webinars) {
+    out.set(w.id, (w.price ?? 0) > 0 ? (paidBySlug.get(w.slug)?.size ?? 0) : (regsById.get(w.id) ?? 0));
+  }
+  return out;
+}
 export async function addWebinar(input: Partial<Webinar>): Promise<Webinar> {
   const row = {
     id: uuid(),

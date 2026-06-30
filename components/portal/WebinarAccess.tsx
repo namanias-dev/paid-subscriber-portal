@@ -12,6 +12,10 @@ interface Props {
   sessionType: "live" | "recorded";
   zoomLink: string | null;
   recording: RecordingEmbed | null;
+  /** Admin explicitly marked the webinar "completed". When a recording exists we
+   * then show it immediately, even if the datetime-based phase hasn't flipped to
+   * "ended" yet (robust against missing/wrong end times). */
+  adminCompleted?: boolean;
   /** Analytics context for the real "Join Zoom" show-up signal. */
   webinarId?: string | null;
   webinarSlug?: string | null;
@@ -75,7 +79,7 @@ function RecordingPlayer({ recording }: { recording: RecordingEmbed }) {
   );
 }
 
-export default function WebinarAccess({ startISO, endISO, sessionType, zoomLink, recording, webinarId, webinarSlug, registrationId }: Props) {
+export default function WebinarAccess({ startISO, endISO, sessionType, zoomLink, recording, adminCompleted, webinarId, webinarSlug, registrationId }: Props) {
   const start = startISO ? new Date(startISO).getTime() : null;
   const end = endISO
     ? new Date(endISO).getTime()
@@ -90,6 +94,17 @@ export default function WebinarAccess({ startISO, endISO, sessionType, zoomLink,
   }, []);
 
   const phase = computePhase(now, start, end, sessionType);
+
+  // Admin marked the session completed and a recording is available → show it
+  // straight away, regardless of the datetime-derived phase.
+  if (adminCompleted && recording) {
+    return (
+      <div className="space-y-4">
+        <span className="pill pill-gray">Webinar ended</span>
+        <RecordingPlayer recording={recording} />
+      </div>
+    );
+  }
 
   // Real show-up signal: fired on the ACTUAL Join-Zoom click. Fire-and-forget
   // (sendBeacon) — navigation to Zoom happens regardless, with zero added latency.

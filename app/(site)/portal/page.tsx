@@ -301,12 +301,15 @@ export default async function PortalDashboardPage() {
             const web = g.type === "webinar" ? (webinarBySlug.get(slug) || webinarByTitle.get(g.title)) : undefined;
             const crs = g.type === "course" ? (courseBySlug.get(slug) || courseByTitle.get(g.title)) : undefined;
             const variant = g.type === "webinar" ? "webinar" : g.type === "course" ? "course" : "generic";
+            // Prefer the CURRENT webinar/course title so a rename propagates here
+            // too (Problem 4); fall back to the frozen purchase snapshot name.
+            const liveTitle = web?.title || crs?.title || g.title;
             return (
               <EnrolledCard
                 key={g.key}
                 index={i}
                 variant={variant}
-                title={g.title}
+                title={liveTitle}
                 description={web?.description || crs?.description || null}
                 image={web ? webinarCover(web) : crs ? courseCover(crs) : null}
                 datetime={web?.datetime}

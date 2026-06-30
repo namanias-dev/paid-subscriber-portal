@@ -3,6 +3,7 @@ import Image from "next/image";
 import { Calendar, Users, ArrowRight, Video, CheckCircle2 } from "lucide-react";
 import SeatCounter from "./SeatCounter";
 import { formatINR, formatISTDateTime } from "@/lib/dates";
+import { webinarRegCountDisplay, WEBINAR_REGCOUNT_ENCOURAGE } from "@/lib/webinarLifecycle";
 import type { Webinar } from "@/lib/types";
 
 function statusBadge(status: Webinar["status"], badgeLabel?: string | null) {
@@ -18,11 +19,25 @@ function statusBadge(status: Webinar["status"], badgeLabel?: string | null) {
 }
 
 /** Premium webinar list card: cover image, glass depth, gold accents, IST meta. */
-export default function WebinarCard({ webinar: w, registered = false }: { webinar: Webinar; registered?: boolean }) {
+export default function WebinarCard({
+  webinar: w,
+  registered = false,
+  registeredCount = null,
+}: {
+  webinar: Webinar;
+  registered?: boolean;
+  /** REAL registration count (from getWebinarRegisteredCounts). null => hide the
+   * count entirely; we never fall back to the seeded webinars.registrations. */
+  registeredCount?: number | null;
+}) {
   const cover = w.cover_image_url || w.mobile_image_url || null;
   const badge = statusBadge(w.status, w.badge_label);
   const priceLabel = w.price === 0 ? "Free" : formatINR(w.price);
   const seat = w.seat_config?.show ? w.seat_config : null;
+  const regDisplay =
+    registeredCount == null
+      ? { mode: "hidden" as const, count: 0 }
+      : webinarRegCountDisplay({ count: registeredCount, showToggle: w.show_registration_count, completed: w.status === "completed" });
   const cta = registered
     ? (w.status === "completed" ? "Watch recording" : "View details")
     : w.status === "completed" ? "Watch recording" : w.price === 0 ? "Register free" : "View & register";
@@ -76,7 +91,11 @@ export default function WebinarCard({ webinar: w, registered = false }: { webina
 
             <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-[var(--ca-slate-400)]">
               <span className="inline-flex items-center gap-1.5"><Calendar size={14} aria-hidden="true" /> {formatISTDateTime(w.datetime)}</span>
-              <span className="inline-flex items-center gap-1.5"><Users size={14} aria-hidden="true" /> {w.registrations.toLocaleString("en-IN")} registered</span>
+              {regDisplay.mode === "count" ? (
+                <span className="inline-flex items-center gap-1.5"><Users size={14} aria-hidden="true" /> {regDisplay.count.toLocaleString("en-IN")} registered</span>
+              ) : regDisplay.mode === "encourage" ? (
+                <span className="inline-flex items-center gap-1.5"><Users size={14} aria-hidden="true" /> {WEBINAR_REGCOUNT_ENCOURAGE}</span>
+              ) : null}
             </div>
 
             {seat && <div className="mt-3"><SeatCounter seat={seat} compact /></div>}

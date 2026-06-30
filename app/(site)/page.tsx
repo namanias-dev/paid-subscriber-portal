@@ -9,7 +9,8 @@ import Accordion from "@/components/ui/Accordion";
 import LeadForm from "@/components/public/LeadForm";
 import LeadPopup from "@/components/public/LeadPopup";
 import CaArticleCard from "@/components/public/ca/CaArticleCard";
-import { getPublishedCourses, getPublicWebinars, getSiteSettings, getPublicCaArticles } from "@/lib/dataProvider";
+import { getPublishedCourses, getPublicWebinars, getSiteSettings, getPublicCaArticles, getWebinarRegisteredCounts } from "@/lib/dataProvider";
+import { webinarRegCountDisplay, WEBINAR_REGCOUNT_ENCOURAGE } from "@/lib/webinarLifecycle";
 import { getPurchaseSnapshot, coursePurchaseMap } from "@/lib/purchaseStatus";
 import { ACADEMY } from "@/lib/config";
 import { directionsUrl, mapEmbedUrl } from "@/lib/maps";
@@ -51,6 +52,7 @@ export default async function HomePage() {
   const purchaseMap = coursePurchaseMap(courses, snapshot);
   const homeCa = (caArticles.filter((a) => a.show_on_home).length ? caArticles.filter((a) => a.show_on_home) : caArticles).slice(0, 3);
   const upcoming = webinars.filter((w) => w.status === "upcoming").slice(0, 2);
+  const upcomingRegCounts = await getWebinarRegisteredCounts(upcoming);
   const c = settings.content;
   const trustBar = c.trust_bar?.length ? c.trust_bar : [];
 
@@ -193,12 +195,19 @@ export default async function HomePage() {
                 </div>
               </div>
               <div className="grid gap-3">
-                {upcoming.map((w) => (
-                  <Link key={w.id} href={`/webinars/${w.slug}`} className="rounded-xl bg-white/10 p-4 backdrop-blur hover:bg-white/15">
-                    <p className="font-semibold text-white">{w.title}</p>
-                    <p className="text-sm text-white/80">{w.registrations.toLocaleString("en-IN")} registered</p>
-                  </Link>
-                ))}
+                {upcoming.map((w) => {
+                  const rd = webinarRegCountDisplay({ count: upcomingRegCounts.get(w.id) ?? 0, showToggle: w.show_registration_count, completed: w.status === "completed" });
+                  return (
+                    <Link key={w.id} href={`/webinars/${w.slug}`} className="rounded-xl bg-white/10 p-4 backdrop-blur hover:bg-white/15">
+                      <p className="font-semibold text-white">{w.title}</p>
+                      {rd.mode === "count" ? (
+                        <p className="text-sm text-white/80">{rd.count.toLocaleString("en-IN")} registered</p>
+                      ) : rd.mode === "encourage" ? (
+                        <p className="text-sm text-white/80">{WEBINAR_REGCOUNT_ENCOURAGE}</p>
+                      ) : null}
+                    </Link>
+                  );
+                })}
               </div>
             </div>
           </div>

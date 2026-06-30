@@ -11,6 +11,7 @@ import {
   type WebinarPayClass,
 } from "./dataProvider";
 import { deriveEnrollment } from "./installments";
+import { expandPaidSlugsByLineage } from "./webinarLineage";
 import type { Course, CourseEnrollment, Webinar } from "./types";
 
 /**
@@ -96,6 +97,17 @@ export async function getPurchaseSnapshot(): Promise<PurchaseSnapshot | null> {
     for (const w of allWebinars) {
       if (webinarSet.has(w.id)) { webinarSlugs.add(w.slug); webinarIdSet.add(w.id); }
     }
+  }
+
+  // STICKY PAID across a webinar lineage (Problem 3): a re-run/duplicate is the
+  // same product (linked via previous/next). If the buyer paid for ANY webinar in
+  // a lineage, every sibling slug counts as registered — so a LATER failed attempt
+  // on a renamed/duplicated sibling slug never overrides the earlier success.
+  const paidWebinarSlugs = new Set<string>(webinarSlugs);
+  for (const [slug, cls] of webinarPaymentStatus) if (cls === "PAID") paidWebinarSlugs.add(slug);
+  if (paidWebinarSlugs.size) {
+    const allWebinars = await getWebinars();
+    for (const s of expandPaidSlugsByLineage(paidWebinarSlugs, allWebinars)) webinarSlugs.add(s);
   }
 
   return { phone, enrollmentBySlug, paidCourseSlugs, webinarSlugs, webinarIds: webinarIdSet, webinarPaymentStatus };

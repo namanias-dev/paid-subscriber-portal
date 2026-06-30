@@ -9,8 +9,8 @@ import TrustStrip from "@/components/public/TrustStrip";
 import StickyMobileCTA from "@/components/public/StickyMobileCTA";
 import LandingSections from "@/components/public/LandingSections";
 import BrochureCards from "@/components/public/BrochureCards";
-import { getWebinarBySlug, getWebinarById, getLibraryDocsByIds } from "@/lib/dataProvider";
-import { canRegisterForWebinar, EXPIRED_COPY } from "@/lib/webinarLifecycle";
+import { getWebinarBySlug, getWebinarById, getLibraryDocsByIds, getWebinarRegisteredCount } from "@/lib/dataProvider";
+import { canRegisterForWebinar, EXPIRED_COPY, webinarRegCountDisplay, WEBINAR_REGCOUNT_ENCOURAGE } from "@/lib/webinarLifecycle";
 import { getPurchaseSnapshot, webinarStatus } from "@/lib/purchaseStatus";
 import { buildLandingView } from "@/lib/landingView";
 import { formatINR, formatISTRange } from "@/lib/dates";
@@ -53,6 +53,10 @@ export default async function WebinarDetail({ params }: { params: { slug: string
   const completed = w.status === "completed";
   const priceLabel = w.price === 0 ? "Free" : formatINR(w.price);
   const startLabel = formatISTRange(w.datetime, w.end_datetime);
+
+  // Honest, threshold-gated registration count (never the seeded column).
+  const regCount = await getWebinarRegisteredCount(w);
+  const regDisplay = webinarRegCountDisplay({ count: regCount, showToggle: w.show_registration_count, completed });
 
   // Lifecycle: registration auto-closes once the session passes (unless it's a
   // recording sale). "closed" only matters for not-yet-registered visitors.
@@ -116,7 +120,11 @@ export default async function WebinarDetail({ params }: { params: { slug: string
           <p className="mt-4 text-sm text-muted">
             🗓 {startLabel}
           </p>
-          <p className="mt-1 text-sm text-muted">👥 {w.registrations.toLocaleString("en-IN")} registered</p>
+          {regDisplay.mode === "count" ? (
+            <p className="mt-1 text-sm text-muted">👥 {regDisplay.count.toLocaleString("en-IN")} registered</p>
+          ) : regDisplay.mode === "encourage" ? (
+            <p className="mt-1 text-sm text-muted">✨ {WEBINAR_REGCOUNT_ENCOURAGE}</p>
+          ) : null}
 
           <div className="mt-4">
             <SeatCounter seat={view.seat} />

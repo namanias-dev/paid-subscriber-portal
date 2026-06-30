@@ -40,6 +40,12 @@ const PROOF_STATUS_META: Record<string, { label: string; cls: string }> = {
 
 const isPaid = (s: Payment["status"]) => s === "captured" || s === "PAID";
 
+/** Current item name resolved by reference (Problem 4): a webinar/course rename
+ * propagates here automatically. Falls back to the frozen payment snapshot. */
+function resolveItemName(p: Payment, itemNames: Record<string, string>): string {
+  return itemNames[`${p.item_type}:${(p.item_slug || "").trim()}`] || p.item || "—";
+}
+
 // Payment-type filters mapped to EXISTING fields (item_type / payment_kind). OR semantics.
 type TypeKey = "webinar" | "course" | "seat" | "installment";
 const TYPE_DEFS: { key: TypeKey; label: string; match: (p: Payment) => boolean }[] = [
@@ -97,6 +103,7 @@ export default function PaymentsAdmin() {
   const enr = useAdminData<Enrollment[]>("/api/admin/payments", "enrollments");
   const codes = useAdminData<Record<string, string>>("/api/admin/payments", "buyerCodes");
   const proofsHook = useAdminData<Record<string, ProofWithAccess>>("/api/admin/payments", "proofs");
+  const itemNames = useAdminData<Record<string, string>>("/api/admin/payments", "itemNames").data || {};
   const canManage = useAdminData<boolean>("/api/admin/payments", "canManage").data || false;
   const isSuper = useAdminData<boolean>("/api/admin/payments", "isSuper").data || false;
   const { toast } = useToast();
@@ -181,12 +188,12 @@ export default function PaymentsAdmin() {
         if (!ymd || ymd < range.from || ymd > range.to) return false;
       }
       if (query) {
-        const hay = `${p.student_name || ""} ${p.phone || ""} ${p.item || ""} ${p.reference_no || ""}`.toLowerCase();
+        const hay = `${p.student_name || ""} ${p.phone || ""} ${p.item || ""} ${resolveItemName(p, itemNames)} ${p.reference_no || ""}`.toLowerCase();
         if (!hay.includes(query)) return false;
       }
       return true;
     };
-  }, [types, onlyProof, proofs, range, q]);
+  }, [types, onlyProof, proofs, range, q, itemNames]);
 
   // Flat list of attempts passing the per-attempt filters (used by CSV / re-verify
   // / abandoned hot-leads / counts). Status filtering is NOT applied here.
@@ -247,7 +254,7 @@ export default function PaymentsAdmin() {
           dot: meta.dot,
           title: (
             <span className="flex flex-wrap items-center gap-1.5">
-              <span className="font-medium text-ink">{g.primary.item || "—"}</span>
+              <span className="font-medium text-ink">{resolveItemName(g.primary, itemNames)}</span>
               <span className="rounded bg-surface2 px-1.5 py-0.5 text-[10px] font-medium text-ink2">{purposeLabel(g.primary)}</span>
               {g.duplicatePaid && (
                 <span className="pill pill-red" title="Two or more settled payments for the same item — review for a possible refund.">
@@ -326,7 +333,7 @@ export default function PaymentsAdmin() {
       ),
       nodes: r.nodes,
     }));
-  }, [visibleGroups, sort, buyerCodes, proofs, reverifying, canManage, showSuperseded]);
+  }, [visibleGroups, sort, buyerCodes, proofs, reverifying, canManage, showSuperseded, itemNames]);
 
   const matchOpenIds = useMemo(
     () => (q.trim() ? new Set(userGroups.map((g) => g.id)) : undefined),
@@ -573,7 +580,7 @@ export default function PaymentsAdmin() {
   function exportCsv() {
     const rows = [
       ["Student", "Phone", "Item", "Amount", "Login Code", "Status", "Date & Time (IST)"],
-      ...filtered.map((p) => [p.student_name, p.phone, p.item, String(p.amount), buyerCodes[(p.phone || "").trim()] || "", p.status, formatISTDateTime(p.created_at)]),
+      ...filtered.map((p) => [p.student_name, p.phone, resolveItemName(p, itemNames), String(p.amount), buyerCodes[(p.phone || "").trim()] || "", p.status, formatISTDateTime(p.created_at)]),
     ];
     const csv = rows.map((r) => r.map((c) => `"${c}"`).join(",")).join("\n");
     const url = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
@@ -817,7 +824,7 @@ export default function PaymentsAdmin() {
               return (
                 <div key={p.id} className="rounded-lg border border-orange-200 bg-white p-3 text-sm">
                   <p className="font-semibold text-ink">{p.student_name || "—"}</p>
-                  <p className="text-xs text-muted">{p.item}</p>
+                  <p className="text-xs text-muted">{resolveItemName(p, itemNames)}</p>
                   <p className="mt-1 font-mono text-xs">{p.phone || "—"}</p>
                   <p className="mt-0.5 text-[11px] text-muted">{p.created_at ? formatISTDateTime(p.created_at) : "—"}</p>
                   <div className="mt-2 flex gap-2">
@@ -862,6 +869,7 @@ export default function PaymentsAdmin() {
         <ProofModal
           payment={proofModal.payment}
           proof={proofModal.proof}
+          itemName={resolveItemName(proofModal.payment, itemNames)}
           buyerCode={buyerCodes[(proofModal.payment.phone || "").trim()]}
           isSuper={isSuper}
           onClose={() => setProofModal(null)}
@@ -892,6 +900,7 @@ const PROOF_MAX_FILES = 3;
 function ProofModal({
   payment,
   proof,
+  itemName,
   buyerCode,
   isSuper,
   onClose,
@@ -903,6 +912,7 @@ function ProofModal({
 }: {
   payment: Payment;
   proof: ProofWithAccess | null;
+  itemName: string;
   buyerCode?: string;
   isSuper: boolean;
   onClose: () => void;
@@ -996,7 +1006,7 @@ function ProofModal({
 
         {/* Payment metadata */}
         <div className="mt-4 grid grid-cols-2 gap-2 rounded-lg bg-surface2 p-3 text-xs">
-          <div><span className="text-muted">Item</span><div className="font-medium">{payment.item}</div></div>
+          <div><span className="text-muted">Item</span><div className="font-medium">{itemName}</div></div>
           <div><span className="text-muted">Amount</span><div className="font-medium">{formatINR(payment.amount)}</div></div>
           <div><span className="text-muted">Status</span><div className="font-medium">{statusLabel(payment.status)}</div></div>
           <div><span className="text-muted">Login code</span><div className="font-mono font-medium">{buyerCode || "—"}</div></div>

@@ -100,6 +100,38 @@ export function webinarBadge(w: LifecycleInput, now: number = Date.now()): Webin
   return { label: "Upcoming", cls: "pill-green" };
 }
 
+/**
+ * Honest public registration-count display (Problem 1).
+ *
+ * The number passed in MUST be the REAL count (see getWebinarRegisteredCount in
+ * dataProvider) — never the seeded `webinars.registrations` column. Below this
+ * threshold we never show "0 registered"; we show encouraging copy (or nothing
+ * on a past/completed session). At/above it we show the real count as social
+ * proof. A per-webinar admin toggle can hide the count entirely.
+ */
+export const WEBINAR_MIN_PUBLIC_REGISTRATIONS = 10;
+export const WEBINAR_REGCOUNT_ENCOURAGE = "Be among the first to register";
+
+export interface RegCountDisplay {
+  /** "count" → show "<n> registered"; "encourage" → first-mover copy; "hidden" → render nothing. */
+  mode: "count" | "encourage" | "hidden";
+  count: number;
+}
+
+export function webinarRegCountDisplay(opts: {
+  count: number;
+  showToggle?: boolean | null;
+  completed?: boolean;
+}): RegCountDisplay {
+  // Admin explicitly turned the public count OFF.
+  if (opts.showToggle === false) return { mode: "hidden", count: 0 };
+  const count = Math.max(0, Math.floor(opts.count || 0));
+  if (count >= WEBINAR_MIN_PUBLIC_REGISTRATIONS) return { mode: "count", count };
+  // Low/zero real count: encourage on live/upcoming, stay silent on past events
+  // (no "be the first" on something that already happened).
+  return { mode: opts.completed ? "hidden" : "encourage", count };
+}
+
 /** Expired public-page copy (FEATURE 1). CTA target depends on lineage. */
 export const EXPIRED_COPY = {
   title: "This webinar has ended",

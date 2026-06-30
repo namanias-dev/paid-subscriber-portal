@@ -893,8 +893,20 @@ export interface Webinar {
   /** Course cross-sell / promo block on the user's webinar card. */
   cross_sell?: CrossSell;
   capacity: number | null;
+  /**
+   * LEGACY/seeded display counter — NOT a reliable registration count (some rows
+   * were seeded for marketing). Never show this publicly. The honest public count
+   * is computed on-read via getWebinarRegisteredCount(s) (paid-distinct for paid
+   * webinars, registration rows for free ones).
+   */
   registrations: number;
   recording_link: string | null;
+  /**
+   * Public registration-count visibility (Problem 1). null/true => show
+   * (threshold-gated honest count); false => hide the count entirely. Defaults to
+   * showing so existing webinars are unaffected.
+   */
+  show_registration_count?: boolean | null;
   status: "upcoming" | "live" | "completed";
   created_at: string;
   /** Optional end time so admins can extend / set a window (Task 8). */
