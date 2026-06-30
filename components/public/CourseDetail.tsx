@@ -6,6 +6,7 @@ import {
 } from "lucide-react";
 import { formatINR } from "@/lib/dates";
 import { resolveEmiConfig, payInFullTotal } from "@/lib/installments";
+import { courseOfferingSummary } from "@/lib/courseView";
 import { discountPct } from "@/components/public/CourseCard";
 import CourseCard from "@/components/public/CourseCard";
 import SeatCounter from "@/components/public/SeatCounter";
@@ -33,7 +34,13 @@ export default function CourseDetail({ course, related, comparison, view, brochu
     : null;
   const faqs = (course.faqs || []).filter((f) => f.q?.trim());
   const faqItems = faqs.length ? faqs : COURSE_FAQ;
-  const priceLabel = course.price === 0 ? "Free" : formatINR(course.price);
+  // Batch-aware presentation (display-only), consistent with the listing card.
+  // For 0/1-batch courses summary.multiBatch is false → every value below falls
+  // back to the course-level fields, so single-batch detail pages are unchanged.
+  const summary = courseOfferingSummary(course);
+  const priceVaries = summary.priceVaries;
+  const displayPrice = summary.displayPrice;
+  const priceLabel = course.price === 0 ? "Free" : priceVaries ? `From ${formatINR(displayPrice)}` : formatINR(course.price);
   const cover = course.cover_image_url || course.image || course.mobile_image_url || null;
   const enrollHref = purchase ? purchase.href : course.price === 0 ? `/enroll/${course.slug}` : `/courses/${course.slug}/enroll`;
   const enrollLabel = purchase ? purchase.cta : course.price === 0 ? "Book Now" : "Enroll Now";
@@ -42,13 +49,28 @@ export default function CourseDetail({ course, related, comparison, view, brochu
   const curriculum = (course.curriculum || []).filter((m) => m?.title?.trim());
 
   const timings = (course.batch_timings || []).filter(Boolean);
+  // Multi-batch → union of timings/modes across ALL offerings; single-batch keeps
+  // the exact course-level labels as before.
+  const timingLabel = summary.multiBatch
+    ? (summary.timings.length ? `${summary.timings.join(" & ")} ${summary.timings.length > 1 ? "batches" : "batch"}` : null)
+    : (timings.length ? `${timings.join(" / ")} batch` : null);
+  const modesLabel = summary.multiBatch
+    ? (summary.modes.length ? summary.modes.join(" · ") : null)
+    : (course.modes?.length ? course.modes.join(" · ") : null);
+  const heroMode = summary.multiBatch ? (summary.modes.join(" · ") || null) : (course.modes?.[0] || null);
+  // For a single shared start (or single-batch) keep the countdown; hide it when
+  // batches genuinely start on different dates (the meta shows "Multiple start dates").
+  const countdownStart = summary.multiBatch ? summary.sharedStart : (course.batch_start ?? null);
   const meta: { icon: typeof Clock; label: string }[] = [
     ...(course.duration ? [{ icon: Clock, label: course.duration }] : []),
     { icon: GraduationCap, label: course.faculty },
     { icon: CalendarDays, label: `Target ${course.target_years}` },
-    ...(timings.length ? [{ icon: CalendarClock, label: `${timings.join(" / ")} batch` }] : []),
+    ...(timingLabel ? [{ icon: CalendarClock, label: timingLabel }] : []),
+    ...(summary.multiBatch && !summary.sharedStart && summary.starts.length > 1
+      ? [{ icon: CalendarClock, label: "Multiple start dates" }]
+      : []),
     ...(course.language ? [{ icon: Languages, label: course.language }] : []),
-    ...(course.modes?.length ? [{ icon: Video, label: course.modes.join(" · ") }] : []),
+    ...(modesLabel ? [{ icon: Video, label: modesLabel }] : []),
   ];
 
   return (
@@ -72,7 +94,7 @@ export default function CourseDetail({ course, related, comparison, view, brochu
             <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/60 via-black/0 to-black/10" aria-hidden="true" />
             <div className="absolute inset-x-4 top-4 flex flex-wrap items-center gap-2">
               <span className="inline-flex items-center rounded-full bg-white/90 px-2.5 py-1 text-[11px] font-bold text-[var(--ca-navy-900)] shadow-sm backdrop-blur-sm">{course.badge_label?.trim() || course.category}</span>
-              {course.modes?.[0] && <span className="inline-flex items-center rounded-full bg-black/35 px-2.5 py-1 text-[11px] font-semibold text-white shadow-sm backdrop-blur-sm">{course.modes[0]}</span>}
+              {heroMode && <span className="inline-flex items-center rounded-full bg-black/35 px-2.5 py-1 text-[11px] font-semibold text-white shadow-sm backdrop-blur-sm">{heroMode}</span>}
               {course.language && <span className="inline-flex items-center rounded-full bg-[rgba(212,175,55,0.95)] px-2.5 py-1 text-[11px] font-bold text-[#1a1304] shadow-sm backdrop-blur-sm">{course.language}</span>}
             </div>
           </div>
@@ -86,9 +108,9 @@ export default function CourseDetail({ course, related, comparison, view, brochu
             ))}
           </div>
 
-          {course.batch_start && (
+          {countdownStart && (
             <div className="mt-5 max-w-md">
-              <BatchCountdown startISO={course.batch_start} />
+              <BatchCountdown startISO={countdownStart} />
             </div>
           )}
         </section>
@@ -260,15 +282,22 @@ export default function CourseDetail({ course, related, comparison, view, brochu
                       <span className="font-heading text-3xl font-extrabold text-[#16a34a]">Free</span>
                     ) : (
                       <>
-                        <span className="font-heading text-3xl font-extrabold text-[var(--ca-navy-900)]">{formatINR(course.price)}</span>
-                        {course.original_price && course.original_price > course.price && (
+                        {priceVaries && <span className="text-sm font-semibold text-[var(--ca-slate-400)]">From</span>}
+                        <span className="font-heading text-3xl font-extrabold text-[var(--ca-navy-900)]">{formatINR(priceVaries ? displayPrice : course.price)}</span>
+                        {!priceVaries && course.original_price && course.original_price > course.price && (
                           <span className="text-[var(--ca-slate-400)] line-through">{formatINR(course.original_price)}</span>
                         )}
                       </>
                     )}
                   </div>
-                  {fullSavings > 0 && <p className="mt-1 text-sm font-semibold text-[#16a34a]">Pay in full {formatINR(payInFull)} — save {formatINR(fullSavings)}</p>}
-                  {emiCfg.enabled && emiCfg.installmentCounts.length > 0 && <p className="mt-1 text-sm text-[var(--ca-slate-700)]">or EMI / book your seat at checkout</p>}
+                  {priceVaries ? (
+                    <p className="mt-1 text-sm text-[var(--ca-slate-700)]">Multiple batches — choose your batch &amp; plan at checkout</p>
+                  ) : (
+                    <>
+                      {fullSavings > 0 && <p className="mt-1 text-sm font-semibold text-[#16a34a]">Pay in full {formatINR(payInFull)} — save {formatINR(fullSavings)}</p>}
+                      {emiCfg.enabled && emiCfg.installmentCounts.length > 0 && <p className="mt-1 text-sm text-[var(--ca-slate-700)]">or EMI / book your seat at checkout</p>}
+                    </>
+                  )}
                     </>
                   )}
 

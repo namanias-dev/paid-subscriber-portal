@@ -2,7 +2,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { GraduationCap, ArrowRight, Layers, Clock, CalendarDays, User, CalendarClock, CheckCircle2 } from "lucide-react";
 import { formatINR, formatISTDate } from "@/lib/dates";
-import { batchModes, batchTimings } from "@/lib/installments";
+import { courseOfferingSummary } from "@/lib/courseView";
 import type { Course } from "@/lib/types";
 import type { CoursePurchaseView } from "@/lib/purchaseStatus";
 
@@ -27,17 +27,16 @@ export default function CourseCard({ course, purchase }: { course: Course; purch
   // falls back to the course-level fields, so single-batch cards are byte-for-byte
   // unchanged. The per-batch choice still lives on the enroll-page selector. ---
   const batches = course.batches || [];
-  const multiBatch = batches.length >= 2;
+  const summary = courseOfferingSummary(course);
+  const multiBatch = summary.multiBatch;
 
-  const modeList = multiBatch
-    ? Array.from(new Set(batches.flatMap((b) => batchModes(b))))
-    : course.modes || [];
+  const modeList = multiBatch ? summary.modes : course.modes || [];
   const modes = modeList.length ? modeList.join(" · ") : null;
 
   let batchLine: string;
   if (multiBatch) {
-    const timings = Array.from(new Set(batches.flatMap((b) => batchTimings(b))));
-    const starts = Array.from(new Set(batches.map((b) => b.start_date).filter((s): s is string => !!s)));
+    const timings = summary.timings;
+    const starts = summary.starts;
     const timingPart = timings.length
       ? `${timings.join(" & ")} ${timings.length > 1 ? "batches" : "batch"}`
       : `${batches.length} batches`;
@@ -52,9 +51,8 @@ export default function CourseCard({ course, purchase }: { course: Course; purch
 
   // "From <lowest batch price>" only when batches actually differ in price; if every
   // batch costs the same we keep the single price (and the usual strikethrough).
-  const batchPrices = multiBatch ? batches.map((b) => b.price).filter((n): n is number => typeof n === "number") : [];
-  const priceVaries = batchPrices.length > 1 && new Set(batchPrices).size > 1;
-  const displayPrice = priceVaries ? Math.min(...batchPrices) : course.price;
+  const priceVaries = summary.priceVaries;
+  const displayPrice = summary.displayPrice;
 
   return (
     <Link href={href} className="ca-focus group block h-full">
