@@ -1005,6 +1005,13 @@ export interface Payment {
   /** Installment number this payment settles (0 = seat/full). */
   installment_no?: number | null;
   receipt_no?: string | null;
+  /**
+   * Chosen course batch id for this attempt (Phase 3 multi-batch). Null for
+   * single-batch / no-batch courses. Used to make the short-window enrollment
+   * dedup batch-aware so switching batch + re-clicking is a new, correctly-priced
+   * attempt rather than a reuse of the previous batch's amount.
+   */
+  batch_id?: string | null;
   // --- Attribution (analytics; normalized first-touch source snapshot) ---
   attribution_source?: string | null;
   attribution_campaign?: string | null;

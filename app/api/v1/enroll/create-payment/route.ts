@@ -70,6 +70,11 @@ export async function POST(req: Request) {
     const { schedule, totalFee, planType, installmentCount, batchLabel } = planned.plan;
     let { firstAmount, firstKind, firstInstallmentNo } = planned.plan;
 
+    // Batch-aware dedup key. Only multi-batch courses scope the dedup by batch, so
+    // every single-batch course keeps the exact pre-batch dedup behaviour (null key).
+    const multiBatch = (course.batches || []).length >= 2;
+    const dedupBatchId = multiBatch ? batchId : null;
+
     const subMerchantId = eazypaySubMerchantId("course", course.slug);
 
     // ---- GUARD 1: overpayment / already fully paid ----
@@ -84,7 +89,7 @@ export async function POST(req: Request) {
     // ---- GUARD 2: idempotency dedupe (double-click / refresh / back-button) ----
     // If an open payment attempt for this phone+course was just created, re-hand-back
     // the SAME payment instead of minting a duplicate enrollment + payment row.
-    const recent = await findRecentOpenCoursePayment(mobile, course.slug, 120000);
+    const recent = await findRecentOpenCoursePayment(mobile, course.slug, 120000, dedupBatchId);
     if (recent && recent.reference_no) {
       if (isEazypayConfigured()) {
         const url = buildPaymentUrl({ referenceNo: recent.reference_no, subMerchantId, amount: recent.amount, name, email: gatewayEmail, mobile });
@@ -172,6 +177,7 @@ export async function POST(req: Request) {
       enrollment_id: enrollment.id,
       payment_kind: firstKind,
       installment_no: firstInstallmentNo,
+      batch_id: dedupBatchId,
     });
 
     // Best-effort lead capture (don't block checkout on failure).

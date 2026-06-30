@@ -4175,20 +4175,26 @@ export async function isCourseFullyPaidForPhone(phone: string, courseId: string)
  * server re-hand-back the SAME payment instead of minting a new row on a double-click
  * / refresh / back-button.
  */
-export async function findRecentOpenCoursePayment(phone: string, courseSlug: string, withinMs = 120000): Promise<Payment | null> {
-  return findRecentOpenPaymentForItem(phone, "course", courseSlug, withinMs);
+export async function findRecentOpenCoursePayment(phone: string, courseSlug: string, withinMs = 120000, batchId: string | null = null): Promise<Payment | null> {
+  return findRecentOpenPaymentForItem(phone, "course", courseSlug, withinMs, batchId);
 }
 
 /**
  * Generic short-window idempotency for ANY item type (course/webinar/plan): the
  * most recent still-open (PENDING/VERIFYING) attempt for this phone+item within
  * `withinMs`. Lets a checkout re-hand-back the same payment on a double-submit.
+ *
+ * `batchId` (Phase 3, courses): when non-null the match is additionally scoped to
+ * that batch, so re-clicking a DIFFERENT batch is NOT deduped (it becomes a new,
+ * correctly-priced attempt). When null the query is unchanged — identical to the
+ * pre-batch behaviour for every single-batch / no-batch checkout.
  */
 export async function findRecentOpenPaymentForItem(
   phone: string,
   itemType: "course" | "webinar" | "plan",
   itemSlug: string,
   withinMs = 120000,
+  batchId: string | null = null,
 ): Promise<Payment | null> {
   const p = (phone || "").trim();
   const slug = (itemSlug || "").trim();
@@ -4196,7 +4202,7 @@ export async function findRecentOpenPaymentForItem(
   const db = getSupabaseAdmin();
   if (!db) return null;
   const since = new Date(Date.now() - withinMs).toISOString();
-  const { data } = await db
+  let q = db
     .from("payments")
     .select("*")
     .eq("phone", p)
@@ -4204,7 +4210,11 @@ export async function findRecentOpenPaymentForItem(
     .eq("item_slug", slug)
     .is("deleted_at", null)
     .in("status", ["PENDING", "VERIFYING"])
-    .gte("created_at", since)
+    .gte("created_at", since);
+  // Only constrain by batch when one is supplied; otherwise the query is byte-for-byte
+  // the same as before, preserving single-batch / no-batch dedup behaviour exactly.
+  if (batchId != null) q = q.eq("batch_id", batchId);
+  const { data } = await q
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
