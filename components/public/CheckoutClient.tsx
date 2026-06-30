@@ -26,6 +26,8 @@ import {
   buildInstallmentOnlySchedule,
   payInFullTotal,
   effectiveCourseForBatch,
+  batchModeLabel,
+  batchTimingLabel,
 } from "@/lib/installments";
 import type { Course, CourseBatch, InstallmentItem } from "@/lib/types";
 
@@ -414,7 +416,7 @@ function BatchSelector({ batches, selectedId, onSelect }: { batches: CourseBatch
           const std = Math.max(0, Math.round(b.price || 0));
           const pif = payInFullTotal({ price: b.price, pay_in_full_price: b.pay_in_full_price });
           const anchor = b.original_price && b.original_price > std ? Math.round(b.original_price) : null;
-          const modeTiming = [(b.mode || []).join(" / "), (b.timing || []).join(" · ")].filter(Boolean).join(" · ");
+          const modeTiming = [batchModeLabel(b), batchTimingLabel(b)].filter(Boolean).join(" · ");
           const title = b.label || modeTiming || "Batch";
           return (
             <button

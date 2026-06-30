@@ -2,6 +2,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { GraduationCap, ArrowRight, Layers, Clock, CalendarDays, User, CalendarClock, CheckCircle2 } from "lucide-react";
 import { formatINR, formatISTDate } from "@/lib/dates";
+import { batchModes, batchTimings } from "@/lib/installments";
 import type { Course } from "@/lib/types";
 import type { CoursePurchaseView } from "@/lib/purchaseStatus";
 
@@ -29,13 +30,13 @@ export default function CourseCard({ course, purchase }: { course: Course; purch
   const multiBatch = batches.length >= 2;
 
   const modeList = multiBatch
-    ? Array.from(new Set(batches.flatMap((b) => b.mode || []).filter(Boolean)))
+    ? Array.from(new Set(batches.flatMap((b) => batchModes(b))))
     : course.modes || [];
   const modes = modeList.length ? modeList.join(" · ") : null;
 
   let batchLine: string;
   if (multiBatch) {
-    const timings = Array.from(new Set(batches.flatMap((b) => b.timing || []).filter(Boolean)));
+    const timings = Array.from(new Set(batches.flatMap((b) => batchTimings(b))));
     const starts = Array.from(new Set(batches.map((b) => b.start_date).filter((s): s is string => !!s)));
     const timingPart = timings.length
       ? `${timings.join(" & ")} ${timings.length > 1 ? "batches" : "batch"}`

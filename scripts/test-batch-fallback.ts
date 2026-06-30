@@ -143,4 +143,57 @@ if (rDefault.ok && rMorning.ok && rEvening.ok && rUnknown.ok) {
 }
 console.log(`\n${p3fail === 0 ? "PHASE3 OK" : "PHASE3 FAIL"} — ${p3pass} pass, ${p3fail} fail.`);
 
-process.exit(fail === 0 && p3fail === 0 ? 0 : 1);
+// ---------------------------------------------------------------------------
+// Phase 4: single-VALUED batches (new model: one mode + one timing per batch).
+// Four real offerings (Online/Offline × Morning/Evening). Proves each batch
+// prices/labels from ITS OWN fields, mode/timing render via the helpers, and an
+// unknown/null batchId still falls back to the course-level default.
+// ---------------------------------------------------------------------------
+console.log("\n--- Phase 4: single-valued 4-offering course ---");
+let p4pass = 0;
+let p4fail = 0;
+const assert4 = (name: string, cond: boolean) => { if (cond) p4pass++; else p4fail++; console.log(`${cond ? "PASS" : "FAIL"}  ${name}`); };
+
+const sv = makeCourse({
+  id: "co-sv", slug: "single-valued-demo", title: "Single Valued Demo",
+  price: 45000, original_price: 50000, pay_in_full_price: 40000, batch_start: "2026-08-04T18:30:00.000Z",
+  batch_timings: ["Morning"], modes: ["Online"],
+});
+// Note: mode/timing are SINGLE strings here (the new model), not arrays.
+const mk = (id: string, mode: string, timing: string, price: number, orig: number, pif: number): CourseBatch => ({
+  id, label: `${mode} · ${timing}`, mode: mode as never, timing: timing as never,
+  start_date: "2026-08-04T18:30:00.000Z", end_date: null, price, original_price: orig, pay_in_full_price: pif,
+  emi_config: { enabled: true, seat_amount: 2000, interval_months: 2, installment_counts: [3] }, capacity: null, seats_left: null,
+});
+const svCourse: Course = {
+  ...sv,
+  default_batch_id: "co-sv-onm",
+  batches: [
+    mk("co-sv-onm", "Online", "Morning", 45000, 50000, 40000),
+    mk("co-sv-one", "Online", "Evening", 47000, 52000, 42000),
+    mk("co-sv-ofm", "Offline", "Morning", 55000, 60000, 50000),
+    mk("co-sv-ofe", "Offline", "Evening", 57000, 62000, 52000),
+  ],
+};
+const planSv = (batchId?: string | null) => planCourseEnrollment({ course: svCourse, plan: "full", bookSeat: false, batchId, bookingISO });
+const rOnM = planSv("co-sv-onm");
+const rOnE = planSv("co-sv-one");
+const rOfM = planSv("co-sv-ofm");
+const rOfE = planSv("co-sv-ofe");
+const rNull = planSv(null);
+const rBad = planSv("nope");
+if (rOnM.ok && rOnE.ok && rOfM.ok && rOfE.ok && rNull.ok && rBad.ok) {
+  assert4("Online·Morning pays its pay-in-full 40000", rOnM.plan.totalFee === 40000);
+  assert4("Online·Evening pays its pay-in-full 42000", rOnE.plan.totalFee === 42000);
+  assert4("Offline·Morning pays its pay-in-full 50000", rOfM.plan.totalFee === 50000);
+  assert4("Offline·Evening pays its pay-in-full 52000", rOfE.plan.totalFee === 52000);
+  assert4("Offline·Evening first charge = 52000 (not Online's 40000)", rOfE.plan.firstAmount === 52000);
+  assert4("single-valued timing renders in label", rOfM.plan.batchLabel === "Starts 5 Aug 2026 · Morning");
+  assert4("null batchId falls back to course-level default (40000)", rNull.plan.totalFee === 40000);
+  assert4("unknown batchId falls back to default (40000, no throw)", rBad.plan.totalFee === 40000);
+} else {
+  assert4("all single-valued plans payable", false);
+}
+console.log(`\n${p4fail === 0 ? "PHASE4 OK" : "PHASE4 FAIL"} — ${p4pass} pass, ${p4fail} fail.`);
+
+process.exit(fail === 0 && p3fail === 0 && p4fail === 0 ? 0 : 1);

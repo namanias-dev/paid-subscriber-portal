@@ -562,10 +562,18 @@ export interface CourseBatch {
   id: string;
   /** Human label for staff/receipts, e.g. "Morning · Online". */
   label: string | null;
-  /** Delivery modes for this batch (mirrors Course.modes). */
-  mode: LearningMode[];
-  /** Timing tags for this batch (mirrors Course.batch_timings). */
-  timing: string[];
+  /**
+   * Delivery mode for this batch. The current model is ONE mode per batch
+   * (one batch = one offering), but legacy/backfilled batches may still hold an
+   * ARRAY (mirroring the old Course.modes). Always read via batchModes()/
+   * batchModeLabel() in lib/installments so both shapes are handled safely.
+   */
+  mode: LearningMode | LearningMode[];
+  /**
+   * Timing for this batch. ONE timing per batch in the current model; legacy
+   * batches may hold an ARRAY. Always read via batchTimings()/batchTimingLabel().
+   */
+  timing: string | string[];
   /** Batch start date (UTC ISO; mirrors Course.batch_start). */
   start_date: string | null;
   /** Optional batch end date (UTC ISO). */

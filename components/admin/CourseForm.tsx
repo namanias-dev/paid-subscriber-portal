@@ -26,7 +26,7 @@ import OrientationVideoPicker from "./OrientationVideoPicker";
 import { useToast } from "@/components/ui/Toast";
 import { COURSE_CATEGORIES, LEARNING_MODES } from "@/lib/config";
 import { istInputToISO, isoToISTInput, formatINR, formatISTDate } from "@/lib/dates";
-import { resolveEmiConfig, buildSchedule, EMI_DEFAULTS } from "@/lib/installments";
+import { resolveEmiConfig, buildSchedule, EMI_DEFAULTS, batchModes, batchTimings, batchModeLabel, batchTimingLabel } from "@/lib/installments";
 import type { Course, CourseCategory, LearningMode, CourseAfterRegistration, OrientationVideo, CourseEmiConfig, CourseEntitlements, CourseBatch } from "@/lib/types";
 
 const BACK = "/admin/courses";
@@ -37,37 +37,61 @@ export default function CourseForm({ course }: { course?: Course }) {
   const { toast } = useToast();
   const isNew = !course?.id;
 
-  const [c, setC] = useState<Partial<Course>>(
-    course || {
+  const [c, setC] = useState<Partial<Course>>(() => {
+    if (course) return course;
+    // New course: seed exactly ONE starter batch so schedule + pricing have a
+    // single home from the very first save (one batch = one offering).
+    const starter = makeStarterBatch({ modes: ["Online"], price: 0 });
+    return {
       title: "", category: "Foundation", description: "", long_description: "", modes: ["Online"],
       price: 0, original_price: null, language: "Hinglish (Bilingual)", target_years: "2026/27",
       duration: "12 months", faculty: "Naman Sir", status: "draft", emi_amount: null, emi_months: null,
       brochure_link: "", razorpay_link: "", featured: false, included: [], not_included: [],
-    }
-  );
+      batches: [starter], default_batch_id: starter.id,
+    };
+  });
   const [saving, setSaving] = useState(false);
   const set = (k: keyof Course, v: unknown) => setC((p) => ({ ...p, [k]: v }));
 
   const ar: CourseAfterRegistration = c.after_registration || {};
   const setAR = (k: keyof CourseAfterRegistration, v: unknown) => set("after_registration", { ...ar, [k]: v });
 
-  function toggleMode(m: LearningMode) {
-    const cur = c.modes || [];
-    set("modes", cur.includes(m) ? cur.filter((x) => x !== m) : [...cur, m]);
-  }
+  // The default batch is the single source of truth for schedule + pricing. The
+  // course-level fields are auto-derived from it on save (below) so every existing
+  // downstream consumer (planCourseEnrollment fallback, cards, course detail) keeps
+  // working with no change. The Basic Details / Pricing tabs only SHOW these.
+  const batchesNow = c.batches || [];
+  const defaultBatchNow =
+    batchesNow.find((b) => b.id === c.default_batch_id) || batchesNow[0] || null;
 
-  function toggleTiming(t: string) {
-    const cur = c.batch_timings || [];
-    set("batch_timings", cur.includes(t) ? cur.filter((x) => x !== t) : [...cur, t]);
+  /** Course-level fields derived from the default batch (schedule + pricing). */
+  function deriveCourseFromDefault(course: Partial<Course>): Partial<Course> {
+    const list = course.batches || [];
+    const def = list.find((b) => b.id === course.default_batch_id) || list[0];
+    if (!def) return course; // no batches → leave course-level fields untouched
+    return {
+      ...course,
+      default_batch_id: def.id,
+      modes: batchModes(def),
+      batch_timings: batchTimings(def),
+      batch_start: def.start_date ?? null,
+      price: def.price ?? 0,
+      original_price: def.original_price ?? null,
+      pay_in_full_price: def.pay_in_full_price ?? null,
+      emi_config: def.emi_config ?? {},
+      capacity: def.capacity ?? null,
+      seats_left: def.seats_left ?? null,
+    };
   }
 
   async function save() {
     if (!c.title?.trim()) return toast("Title is required", "error");
+    const payload = deriveCourseFromDefault(c);
     setSaving(true);
     const res = await fetch(isNew ? "/api/admin/courses" : `/api/admin/courses/${course!.id}`, {
       method: isNew ? "POST" : "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(c),
+      body: JSON.stringify(payload),
     });
     const data = await res.json().catch(() => ({ ok: false }));
     setSaving(false);
@@ -115,13 +139,6 @@ export default function CourseForm({ course }: { course?: Course }) {
                   <Field label="Short description" full hint="One or two lines shown on cards.">
                     <textarea className="input" rows={2} value={c.description || ""} onChange={(e) => set("description", e.target.value)} />
                   </Field>
-                  <Field label="Modes" full>
-                    <div className="flex flex-wrap gap-2">
-                      {LEARNING_MODES.map((m) => (
-                        <button key={m} type="button" onClick={() => toggleMode(m as LearningMode)} className={`chip ${(c.modes || []).includes(m as LearningMode) ? "chip-active" : ""}`}>{m}</button>
-                      ))}
-                    </div>
-                  </Field>
                   <ActiveToggle active={c.active !== false} onChange={(v) => set("active", v)} />
                 </Section>
 
@@ -135,20 +152,13 @@ export default function CourseForm({ course }: { course?: Course }) {
                   </Field>
                 </Section>
 
-                <Section title="Schedule & dates" desc="All times are treated and displayed in IST. Reflects on the public course page after saving.">
-                  <Field label="Batch start date (IST)" hint="Drives the public countdown timer.">
-                    <input type="date" className="input" value={c.batch_start ? isoToISTInput(c.batch_start).slice(0, 10) : ""} onChange={(e) => set("batch_start", e.target.value ? istInputToISO(`${e.target.value}T00:00`) : null)} />
-                  </Field>
-                  <Field label="Schedule (text)" hint="e.g. Mon–Sat, 10:00 AM–1:00 PM IST.">
+                <Section title="Schedule, modes & dates" desc="Mode, timing, start date, price, EMI and seats are now set per BATCH — go to the Batches tab. The values below are auto-derived from the default batch on save (read-only here) so there's a single source of truth and no double entry.">
+                  <Field label="Schedule (text)" hint="Free-text shown on the public page, e.g. Mon–Sat, 10:00 AM–1:00 PM IST.">
                     <input className="input" value={c.schedule || ""} onChange={(e) => set("schedule", e.target.value)} />
                   </Field>
-                  <Field label="Batch timing" full hint="Structured tags shown on the course card (select any).">
-                    <div className="flex flex-wrap gap-2">
-                      {BATCH_TIMINGS.map((t) => (
-                        <button key={t} type="button" onClick={() => toggleTiming(t)} className={`chip ${(c.batch_timings || []).includes(t) ? "chip-active" : ""}`}>{t}</button>
-                      ))}
-                    </div>
-                  </Field>
+                  <div className="sm:col-span-2">
+                    <DerivedScheduleSummary batch={defaultBatchNow} />
+                  </div>
                 </Section>
 
                 <Section title="Brochures" desc="Pick from the shared Brochure Library — upload once, reuse across courses.">
@@ -171,19 +181,13 @@ export default function CourseForm({ course }: { course?: Course }) {
             label: "Pricing & Seats",
             content: (
               <>
-                <Section title="Pricing" desc="Three prices, three jobs. The standard Price is the base for EMI / Book-Your-Seat. Pay-in-Full is an extra one-shot discount. Original price is just a strikethrough anchor.">
-                  <Field label="Original price (₹)" hint="Marketing anchor — shown struck through. Optional."><input type="number" className="input" value={c.original_price ?? ""} onChange={(e) => set("original_price", e.target.value ? Number(e.target.value) : null)} /></Field>
-                  <Field label="Price — standard / total fee (₹)" hint="The full fee. Used as the base for EMI & Book-Your-Seat plans."><input type="number" className="input" value={c.price ?? 0} onChange={(e) => set("price", Number(e.target.value))} /></Field>
-                  <Field label="Pay-in-Full price (₹)" hint="Optional one-shot discount, applied ONLY when the student pays the whole fee at once. Leave blank to charge the standard Price." full>
-                    <input type="number" className="input" value={c.pay_in_full_price ?? ""} onChange={(e) => set("pay_in_full_price", e.target.value ? Number(e.target.value) : null)} placeholder="e.g. 35000" />
-                  </Field>
-                  <PricingPreview original={c.original_price ?? null} price={c.price ?? 0} payInFull={c.pay_in_full_price ?? null} />
+                <Section title="Price, EMI & seats — set per batch" desc="Each batch carries its own price, pay-in-full, EMI plan and seats in the Batches tab. The course-level price shown below is auto-derived from the default batch on save (single source of truth — no double entry).">
+                  <div className="sm:col-span-2">
+                    <DerivedPricingSummary batch={defaultBatchNow} />
+                  </div>
                 </Section>
-                <Section title="Seats remaining" desc="Admin-controlled. When off, no seats line appears on the public page.">
+                <Section title="Seats remaining (public display)" desc="Optional marketing display on the public page. Independent of per-batch seat counts. When off, no seats line appears.">
                   <SeatCounterEditor value={c.seat_config} onChange={(v) => set("seat_config", v)} />
-                </Section>
-                <Section title="Book Your Seat + EMI" desc="Let students secure a seat with a small amount and pay the rest in installments. The full fee above is used as the grand total.">
-                  <EmiConfigEditor total={c.price ?? 0} value={c.emi_config || {}} onChange={(v) => set("emi_config", v)} />
                 </Section>
                 <Section title="Coupons" desc="Discount codes students can apply at checkout.">
                   <CouponsEditor value={c.coupons || []} onChange={(v) => set("coupons", v)} />
@@ -196,8 +200,8 @@ export default function CourseForm({ course }: { course?: Course }) {
             label: "Batches",
             content: (
               <Section
-                title="Batches / variants"
-                desc="Offer the same course as multiple sellable batches (Morning/Evening, Online/Offline) — each with its own price, dates and seats. The course-level price & dates above remain the default. Students still see today's behaviour; a public batch picker comes later."
+                title="Batches — one batch = one offering"
+                desc="The single source of truth for schedule + pricing. Each batch = one mode + one timing + one start date + its own price / pay-in-full / EMI / seats. Students pick a batch on the enroll page. The DEFAULT batch fills the course-level price & dates used everywhere else. Even a simple course is just one batch."
               >
                 <BatchesEditor
                   course={c}
@@ -503,12 +507,78 @@ function genBatchId(): string {
   return `b-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+/** First/blank batch for a brand-new course, optionally seeded from course fields. */
+function makeStarterBatch(seed?: Partial<Course>): CourseBatch {
+  return {
+    id: genBatchId(),
+    label: null,
+    mode: ((seed?.modes?.[0] as LearningMode) || "Online") as LearningMode,
+    timing: seed?.batch_timings?.[0] ?? "",
+    start_date: seed?.batch_start ?? null,
+    end_date: null,
+    price: seed?.price ?? 0,
+    original_price: seed?.original_price ?? null,
+    pay_in_full_price: seed?.pay_in_full_price ?? null,
+    emi_config: (seed?.emi_config || {}) as CourseEmiConfig,
+    capacity: seed?.capacity ?? null,
+    seats_left: seed?.seats_left ?? null,
+  };
+}
+
+/** Read the single mode/timing off a batch (tolerates legacy array shape). */
+const oneMode = (b: CourseBatch): string => (Array.isArray(b.mode) ? b.mode[0] : b.mode) || "";
+const oneTiming = (b: CourseBatch): string => (Array.isArray(b.timing) ? b.timing[0] : b.timing) || "";
+const autoLabel = (m: string, t: string): string | null => [m, t].filter(Boolean).join(" · ") || null;
+
+/** Read-only summary of the default batch's schedule (shown in Basic Details). */
+function DerivedScheduleSummary({ batch }: { batch: CourseBatch | null }) {
+  if (!batch) {
+    return <p className="rounded-xl border border-dashed border-line bg-surface2/40 px-3 py-3 text-sm text-muted">No batch yet — add one in the <strong>Batches</strong> tab and it becomes the default.</p>;
+  }
+  return (
+    <div className="rounded-xl border border-line bg-surface2/40 p-4 text-sm">
+      <p className="text-xs font-semibold uppercase tracking-wide text-muted">Default batch (auto-derived on save)</p>
+      <div className="mt-2 flex flex-wrap gap-2">
+        <span className="pill">Mode: {batchModeLabel(batch) || "—"}</span>
+        <span className="pill">Timing: {batchTimingLabel(batch) || "—"}</span>
+        <span className="pill">Starts: {batch.start_date ? formatISTDate(batch.start_date) : "—"}</span>
+      </div>
+      <p className="mt-2 text-xs text-muted">Edit these in the <strong>Batches</strong> tab.</p>
+    </div>
+  );
+}
+
+/** Read-only summary of the default batch's pricing (shown in Pricing & Seats). */
+function DerivedPricingSummary({ batch }: { batch: CourseBatch | null }) {
+  if (!batch) {
+    return <p className="rounded-xl border border-dashed border-line bg-surface2/40 px-3 py-3 text-sm text-muted">No batch yet — add one in the <strong>Batches</strong> tab to set the price.</p>;
+  }
+  const price = Math.max(0, Math.round(batch.price || 0));
+  const pif = batch.pay_in_full_price && batch.pay_in_full_price > 0 ? Math.round(batch.pay_in_full_price) : null;
+  const orig = batch.original_price && batch.original_price > price ? Math.round(batch.original_price) : null;
+  const emi = resolveEmiConfig({ emi_config: batch.emi_config, price: batch.price });
+  return (
+    <div className="rounded-xl border border-line bg-surface2/40 p-4 text-sm">
+      <p className="text-xs font-semibold uppercase tracking-wide text-muted">Default batch pricing (auto-derived on save)</p>
+      <div className="mt-2 flex flex-wrap gap-2">
+        <span className="pill">Price: {formatINR(price)}</span>
+        {pif != null && pif < price && <span className="pill">Pay-in-full: {formatINR(pif)}</span>}
+        {orig != null && <span className="pill">Original: {formatINR(orig)}</span>}
+        <span className="pill">{emi.enabled ? `EMI: ${emi.installmentCounts.join("/")}×` : "EMI: off"}</span>
+      </div>
+      <p className="mt-2 text-xs text-muted">Edit pricing per batch in the <strong>Batches</strong> tab.</p>
+    </div>
+  );
+}
+
 /**
- * Repeatable batch editor. Each batch is a sellable variant (mode + timing +
- * own price/dates/seats/EMI). The course-level fields remain the canonical
- * fallback (Phase 1), so this NEVER writes back to course-level pricing — it only
- * edits the `batches` array + which one is the default. New batches are prefilled
- * from the current course fields for convenience; editing them is independent.
+ * Batch editor — the single source of truth for schedule + pricing. ONE batch =
+ * ONE mode + ONE timing + ONE start date + its own price/EMI/seats + a label.
+ * What the admin builds here is exactly what the student picks in the enroll
+ * selector. The default batch fills the course-level fields on save. Legacy
+ * batches that still hold mode/timing arrays are read via oneMode/oneTiming and
+ * are only normalised to single values when the admin actually edits them (so
+ * existing data is never silently migrated).
  */
 function BatchesEditor({
   course,
@@ -522,12 +592,14 @@ function BatchesEditor({
   onChange: (batches: CourseBatch[], defaultId: string | null) => void;
 }) {
   const batches = value || [];
+  const [qaModes, setQaModes] = useState<string[]>(["Online"]);
+  const [qaTimings, setQaTimings] = useState<string[]>(["Morning", "Evening"]);
 
-  const fromCourse = (): CourseBatch => ({
+  const blank = (mode?: string, timing?: string): CourseBatch => ({
     id: genBatchId(),
-    label: null,
-    mode: (course.modes || []) as LearningMode[],
-    timing: course.batch_timings || [],
+    label: autoLabel(mode || "", timing || ""),
+    mode: ((mode ?? (course.modes?.[0] as string) ?? "Online")) as LearningMode,
+    timing: timing ?? (course.batch_timings?.[0] ?? ""),
     start_date: course.batch_start ?? null,
     end_date: null,
     price: course.price ?? 0,
@@ -541,8 +613,22 @@ function BatchesEditor({
   const update = (i: number, patch: Partial<CourseBatch>) =>
     onChange(batches.map((b, j) => (j === i ? { ...b, ...patch } : b)), defaultId);
 
+  // Changing mode/timing also refreshes the label when it was still auto-generated
+  // (never clobbers a label the admin typed manually).
+  const changeMode = (i: number, m: string) => {
+    const b = batches[i];
+    const wasAuto = !b.label || b.label === autoLabel(oneMode(b), oneTiming(b));
+    update(i, { mode: m as LearningMode, ...(wasAuto ? { label: autoLabel(m, oneTiming(b)) } : {}) });
+  };
+  const changeTiming = (i: number, t: string) => {
+    const b = batches[i];
+    const next = oneTiming(b) === t ? "" : t; // click active timing to clear
+    const wasAuto = !b.label || b.label === autoLabel(oneMode(b), oneTiming(b));
+    update(i, { timing: next, ...(wasAuto ? { label: autoLabel(oneMode(b), next) } : {}) });
+  };
+
   const addNew = () => {
-    const b = fromCourse();
+    const b = blank();
     onChange([...batches, b], defaultId ?? b.id);
   };
 
@@ -553,32 +639,75 @@ function BatchesEditor({
   };
 
   const remove = (i: number) => {
+    if (batches.length <= 1) return; // every course keeps at least one batch
     const removed = batches[i];
     const next = batches.filter((_, j) => j !== i);
     const nextDefault = removed.id === defaultId ? (next[0]?.id ?? null) : defaultId;
     onChange(next, nextDefault);
   };
 
-  const toggleArr = (i: number, key: "mode" | "timing", val: string) => {
-    const cur = ((batches[i][key] as string[]) || []);
-    update(i, { [key]: cur.includes(val) ? cur.filter((x) => x !== val) : [...cur, val] } as Partial<CourseBatch>);
+  const toggleQa = (setter: React.Dispatch<React.SetStateAction<string[]>>, val: string) =>
+    setter((cur) => (cur.includes(val) ? cur.filter((x) => x !== val) : [...cur, val]));
+
+  const quickAdd = () => {
+    const existing = new Set(batches.map((b) => `${oneMode(b)}|${oneTiming(b)}`));
+    const toAdd: CourseBatch[] = [];
+    for (const m of qaModes) {
+      for (const t of qaTimings) {
+        const key = `${m}|${t}`;
+        if (existing.has(key)) continue;
+        existing.add(key);
+        toAdd.push(blank(m, t));
+      }
+    }
+    if (!toAdd.length) return;
+    const next = [...batches, ...toAdd];
+    onChange(next, defaultId ?? next[0].id);
   };
+
+  const qaCount = qaModes.length * qaTimings.length;
+
+  const quickAddPanel = (
+    <div className="rounded-2xl border border-dashed border-primary/40 bg-primary/5 p-4">
+      <p className="font-semibold text-ink">Quick add combinations</p>
+      <p className="text-xs text-muted">Pick the modes and timings you offer — we generate one batch per combination (skipping any that already exist), prefilled and ready to price.</p>
+      <div className="mt-3 space-y-2">
+        <div>
+          <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted">Modes</p>
+          <div className="flex flex-wrap gap-2">
+            {LEARNING_MODES.map((m) => (
+              <button key={m} type="button" onClick={() => toggleQa(setQaModes, m)} className={`chip ${qaModes.includes(m) ? "chip-active" : ""}`}>{m}</button>
+            ))}
+          </div>
+        </div>
+        <div>
+          <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted">Timings</p>
+          <div className="flex flex-wrap gap-2">
+            {BATCH_TIMINGS.map((t) => (
+              <button key={t} type="button" onClick={() => toggleQa(setQaTimings, t)} className={`chip ${qaTimings.includes(t) ? "chip-active" : ""}`}>{t}</button>
+            ))}
+          </div>
+        </div>
+      </div>
+      <button type="button" onClick={quickAdd} disabled={qaCount === 0} className="btn btn-secondary mt-3 text-sm disabled:opacity-50">
+        + Generate {qaCount} batch{qaCount === 1 ? "" : "es"}
+      </button>
+    </div>
+  );
 
   if (batches.length === 0) {
     return (
       <div className="sm:col-span-2 space-y-3">
-        <div className="rounded-xl border border-dashed border-line bg-surface2/40 p-4 text-sm text-muted">
-          No batches yet. This course sells using the <strong>course-level price &amp; dates</strong> (the default).
-          Add a batch to offer a variant (e.g. an Evening batch with a later start date or a different price).
-          Adding batches does <strong>not</strong> change the public page or checkout in this phase.
-        </div>
-        <button type="button" onClick={addNew} className="btn btn-secondary text-sm">+ Add batch (from course fields)</button>
+        {quickAddPanel}
+        <button type="button" onClick={addNew} className="btn btn-secondary text-sm">+ Add one batch</button>
       </div>
     );
   }
 
   return (
     <div className="sm:col-span-2 space-y-4">
+      {quickAddPanel}
+
       {batches.map((b, i) => {
         const isDefault = b.id === defaultId;
         const pif = b.pay_in_full_price && b.pay_in_full_price > 0 ? Math.round(b.pay_in_full_price) : null;
@@ -590,31 +719,31 @@ function BatchesEditor({
                   <input type="radio" name="default-batch" checked={isDefault} onChange={() => onChange(batches, b.id)} />
                   Default
                 </label>
-                {isDefault && <span className="pill pill-green">Used as fallback</span>}
+                {isDefault && <span className="pill pill-green">Fills course-level fields</span>}
               </div>
               <div className="flex items-center gap-2">
                 <button type="button" onClick={() => duplicate(i)} className="text-xs font-semibold text-primary">Duplicate</button>
-                <button type="button" onClick={() => remove(i)} className="text-xs font-semibold text-danger">Remove</button>
+                <button type="button" onClick={() => remove(i)} disabled={batches.length <= 1} className="text-xs font-semibold text-danger disabled:opacity-40">Remove</button>
               </div>
             </div>
 
             <div className="mt-3 grid gap-3 sm:grid-cols-2">
-              <Field label="Batch label" hint="Shown to staff (and later to students), e.g. “Evening · Offline”." full>
-                <input className="input" value={b.label || ""} onChange={(e) => update(i, { label: e.target.value || null })} placeholder="e.g. Morning · Online" />
+              <Field label="Batch label" hint="Shown to students in the picker, e.g. “Online · Morning”. Auto-fills from mode + timing." full>
+                <input className="input" value={b.label || ""} onChange={(e) => update(i, { label: e.target.value || null })} placeholder="e.g. Online · Morning" />
               </Field>
 
-              <Field label="Modes" full>
+              <Field label="Mode" hint="One mode per batch.">
                 <div className="flex flex-wrap gap-2">
                   {LEARNING_MODES.map((m) => (
-                    <button key={m} type="button" onClick={() => toggleArr(i, "mode", m)} className={`chip ${(b.mode || []).includes(m as LearningMode) ? "chip-active" : ""}`}>{m}</button>
+                    <button key={m} type="button" onClick={() => changeMode(i, m)} className={`chip ${oneMode(b) === m ? "chip-active" : ""}`}>{m}</button>
                   ))}
                 </div>
               </Field>
 
-              <Field label="Batch timing" full>
+              <Field label="Timing" hint="One timing per batch. Click again to clear.">
                 <div className="flex flex-wrap gap-2">
                   {BATCH_TIMINGS.map((t) => (
-                    <button key={t} type="button" onClick={() => toggleArr(i, "timing", t)} className={`chip ${(b.timing || []).includes(t) ? "chip-active" : ""}`}>{t}</button>
+                    <button key={t} type="button" onClick={() => changeTiming(i, t)} className={`chip ${oneTiming(b) === t ? "chip-active" : ""}`}>{t}</button>
                   ))}
                 </div>
               </Field>
@@ -658,7 +787,7 @@ function BatchesEditor({
         );
       })}
 
-      <button type="button" onClick={addNew} className="btn btn-secondary text-sm">+ Add batch (from course fields)</button>
+      <button type="button" onClick={addNew} className="btn btn-secondary text-sm">+ Add one batch</button>
     </div>
   );
 }

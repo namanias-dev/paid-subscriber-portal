@@ -180,6 +180,32 @@ export function buildInstallmentOnlySchedule(opts: {
   return items;
 }
 
+/**
+ * Read a batch's mode(s) as an array regardless of shape. The current model is one
+ * mode per batch (string), but legacy/backfilled batches may still hold an array;
+ * both are normalised here so no consumer has to care. Returns [] when unset.
+ */
+export function batchModes(b: { mode?: import("./types").LearningMode | import("./types").LearningMode[] | null } | null | undefined): import("./types").LearningMode[] {
+  if (!b || b.mode == null) return [];
+  return (Array.isArray(b.mode) ? b.mode : [b.mode]).filter(Boolean) as import("./types").LearningMode[];
+}
+
+/** Read a batch's timing(s) as an array regardless of shape (string or legacy array). */
+export function batchTimings(b: { timing?: string | string[] | null } | null | undefined): string[] {
+  if (!b || b.timing == null) return [];
+  return (Array.isArray(b.timing) ? b.timing : [b.timing]).filter(Boolean) as string[];
+}
+
+/** Display label for a batch's mode(s), e.g. "Online" or legacy "Online / Hybrid". */
+export function batchModeLabel(b: { mode?: import("./types").LearningMode | import("./types").LearningMode[] | null } | null | undefined): string {
+  return batchModes(b).join(" / ");
+}
+
+/** Display label for a batch's timing(s), e.g. "Morning" or legacy "Morning · Evening". */
+export function batchTimingLabel(b: { timing?: string | string[] | null } | null | undefined): string {
+  return batchTimings(b).join(" · ");
+}
+
 function buildBatchLabel(batchStart: string | null, timings?: string[] | null): string | null {
   const parts: string[] = [];
   if (batchStart) parts.push(`Starts ${formatISTDate(batchStart)}`);
@@ -215,11 +241,14 @@ export function effectiveCourseForBatch(course: Course, batchId?: string | null)
   if (!batchId) return course;
   const batch = (course.batches || []).find((b) => b.id === batchId);
   if (!batch) return course;
+  // mode/timing may be a single value (new model) or an array (legacy/backfill).
+  // batchModes/batchTimings normalise both into the array shape course-level fields
+  // expect, so a legacy array batch yields the SAME arrays as before (byte-for-byte).
   return {
     ...course,
-    modes: batch.mode ?? course.modes,
+    modes: batch.mode == null ? course.modes : batchModes(batch),
     batch_start: batch.start_date ?? course.batch_start,
-    batch_timings: batch.timing ?? course.batch_timings,
+    batch_timings: batch.timing == null ? course.batch_timings : batchTimings(batch),
     price: batch.price,
     original_price: batch.original_price ?? course.original_price,
     pay_in_full_price: batch.pay_in_full_price ?? course.pay_in_full_price,
