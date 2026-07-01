@@ -197,7 +197,8 @@ export async function POST(req: Request) {
       item_type: itemType,
       item_slug: resolved.itemSlug,
       amount,
-      status: "PENDING",
+      // Checkout opened — a click, not money in flight (see enroll/create-payment).
+      status: "INITIATED",
       gateway: PAYMENT_GATEWAY,
       reference_no: referenceNo,
       sub_merchant_id: subMerchantId,

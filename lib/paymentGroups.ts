@@ -27,7 +27,7 @@ import { isPaidStatus, itemKey } from "./paymentsAgg";
  * ============================================================================
  */
 
-export type GroupStatus = "paid" | "verifying" | "pending" | "abandoned" | "failed" | "refunded" | "unknown";
+export type GroupStatus = "paid" | "verifying" | "pending" | "initiated" | "abandoned" | "failed" | "refunded" | "unknown";
 
 /** seat-booking vs full-fee vs a specific installment — never merge across these. */
 export function purposeOf(p: Payment): string {
@@ -51,6 +51,7 @@ export function purposeLabel(p: Payment): string {
 const isRefunded = (s: Payment["status"]) => s === "refunded";
 const isVerifying = (s: Payment["status"]) => s === "VERIFYING";
 const isPending = (s: Payment["status"]) => s === "PENDING" || s === "pending";
+const isInitiated = (s: Payment["status"]) => s === "INITIATED";
 const isAbandoned = (s: Payment["status"]) => s === "ABANDONED";
 const isFailed = (s: Payment["status"]) => s === "FAILED";
 
@@ -78,6 +79,9 @@ export function deriveGroupStatus(
   if (anyVerifying) return "verifying";
 
   if (attempts.some((p) => isPending(p.status))) return "pending";
+  // A live checkout that was opened but never confirmed. Not actionable by staff
+  // (no money in flight) and never a false "needs verification".
+  if (attempts.some((p) => isInitiated(p.status))) return "initiated";
   if (attempts.some((p) => isAbandoned(p.status))) return "abandoned";
   if (attempts.some((p) => isFailed(p.status))) return "failed";
   if (attempts.every((p) => isRefunded(p.status))) return "refunded";
@@ -173,6 +177,7 @@ export const GROUP_STATUS_META: Record<GroupStatus, { label: string; pill: strin
   paid: { label: "Paid", pill: "pill-green", dot: "bg-success" },
   verifying: { label: "Verifying", pill: "pill-blue", dot: "bg-blue-500" },
   pending: { label: "Pending", pill: "pill-amber", dot: "bg-amber-500" },
+  initiated: { label: "Checkout opened", pill: "pill-gray", dot: "bg-slate-400" },
   abandoned: { label: "Abandoned", pill: "pill-saffron", dot: "bg-orange-500" },
   failed: { label: "Failed", pill: "pill-red", dot: "bg-danger" },
   refunded: { label: "Refunded", pill: "pill-gray", dot: "bg-ink2" },

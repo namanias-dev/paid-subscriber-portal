@@ -276,6 +276,16 @@ export async function submitPaymentProof(
   const incoming = (input.files || []).filter((f) => f && f.key);
   if (!incoming.length) return { ok: false, error: "Please attach at least one screenshot or PDF." };
 
+  // Uploading proof moves an unconfirmed attempt into VERIFYING so it (a) reads as
+  // "under review" for the student, (b) becomes an actionable item for staff, and
+  // (c) is protected from the abandoned-checkout sweep. Never touches a PAID row;
+  // never downgrades VERIFYING.
+  const bumpToVerifying = async () => {
+    if (isPaidStatus(payment.status) || payment.status === "VERIFYING") return;
+    await db.from("payments").update({ status: "VERIFYING" }).eq("id", payment.id)
+      .not("status", "in", "(PAID,captured)");
+  };
+
   const existing = await getProofByPaymentId(input.paymentId);
   const mergedFiles = [...(existing?.files ?? []), ...incoming].slice(0, PROOF_MAX_FILES);
   const audit: PaymentProofAudit[] = [
@@ -302,13 +312,19 @@ export async function submitPaymentProof(
     const { data, error } = await db.from("payment_proofs").update(patch).eq("id", existing.id).select().maybeSingle();
     if (error) return { ok: false, error: error.message };
     const proof = data ? mapProof(data as Record<string, unknown>) : undefined;
-    if (proof) void recordProofUploaded(payment, proof.id).catch(() => {});
+    if (proof) {
+      await bumpToVerifying().catch(() => {});
+      void recordProofUploaded(payment, proof.id).catch(() => {});
+    }
     return { ok: true, proof };
   }
   const { data, error } = await db.from("payment_proofs").insert(patch).select().maybeSingle();
   if (error) return { ok: false, error: error.message };
   const proof = data ? mapProof(data as Record<string, unknown>) : undefined;
-  if (proof) void recordProofUploaded(payment, proof.id).catch(() => {});
+  if (proof) {
+    await bumpToVerifying().catch(() => {});
+    void recordProofUploaded(payment, proof.id).catch(() => {});
+  }
   return { ok: true, proof };
 }
 

@@ -207,8 +207,9 @@ export default function StatusClient({ contact }: { contact: Contact }) {
               </h1>
               {notPaid && (
                 <p className="mt-2 text-sm text-muted">
-                  If money was deducted, please wait a few minutes while we confirm it with the bank — UPI/netbanking can
-                  take a little time. If you didn&apos;t finish paying, you can retry below.
+                  Payment not completed. If money <b>was</b> deducted, tap &quot;I have paid — Check status&quot; (it can take a
+                  few minutes for UPI/netbanking to confirm) or upload your payment proof. If you didn&apos;t finish paying,
+                  you can safely retry below — nothing was charged.
                 </p>
               )}
 
@@ -297,9 +298,12 @@ export default function StatusClient({ contact }: { contact: Contact }) {
                 <Link href={retryHref} className="btn btn-secondary">
                   Retry payment
                 </Link>
+                <Link href="/portal/login" className="btn btn-secondary">
+                  Upload payment proof
+                </Link>
                 {whatsappHref && (
                   <a href={whatsappHref} target="_blank" rel="noopener noreferrer" className="btn btn-secondary">
-                    WhatsApp support
+                    Contact support
                   </a>
                 )}
               </>

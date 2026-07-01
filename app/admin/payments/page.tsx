@@ -62,6 +62,7 @@ const isNonPaid = (s: Payment["status"]) => !isPaid(s) && s !== "refunded";
 function statusPillClass(s: Payment["status"]): string {
   if (isPaid(s)) return "pill-green";
   if (s === "VERIFYING") return "pill-blue";
+  if (s === "INITIATED") return "pill-gray";
   if (s === "ABANDONED") return "pill-saffron";
   if (s === "FAILED") return "pill-red";
   if (s === "refunded") return "pill-gray";
@@ -70,16 +71,18 @@ function statusPillClass(s: Payment["status"]): string {
 function statusLabel(s: Payment["status"]): string {
   if (s === "captured") return "PAID";
   if (s === "pending") return "PENDING";
+  if (s === "INITIATED") return "CHECKOUT OPENED";
   return s;
 }
 
 // Status chips now filter by the CANONICAL GROUP status (paid-wins), so a group
 // with a paid attempt never shows up under Verifying/Pending/Needs-verification.
-type StatusKey = "paid" | "pending" | "verifying" | "abandoned" | "failed" | "needs";
+type StatusKey = "paid" | "pending" | "verifying" | "initiated" | "abandoned" | "failed" | "needs";
 const STATUS_DEFS: { key: StatusKey; label: string }[] = [
   { key: "paid", label: "Paid" },
   { key: "pending", label: "Pending" },
   { key: "verifying", label: "Verifying" },
+  { key: "initiated", label: "Checkout opened" },
   { key: "abandoned", label: "Abandoned" },
   { key: "failed", label: "Failed" },
   { key: "needs", label: "Needs verification" },
@@ -436,7 +439,7 @@ export default function PaymentsAdmin() {
       setReverifying(false);
     }
   }
-  const NONPAID_STATUSES = ["PENDING", "pending", "VERIFYING", "ABANDONED", "FAILED"];
+  const NONPAID_STATUSES = ["INITIATED", "PENDING", "pending", "VERIFYING", "ABANDONED", "FAILED"];
   function reverifyAll() {
     callReverify({ statuses: NONPAID_STATUSES });
   }

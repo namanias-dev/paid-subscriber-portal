@@ -97,7 +97,8 @@ export async function POST(req: Request) {
       item_type: "course",
       item_slug: enrollment.course_slug,
       amount,
-      status: "PENDING",
+      // Checkout opened — a click, not money in flight (see create-payment).
+      status: "INITIATED",
       gateway: PAYMENT_GATEWAY,
       reference_no: referenceNo,
       sub_merchant_id: subMerchantId,

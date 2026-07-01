@@ -1009,6 +1009,11 @@ export type PaymentStatus =
   | "captured"
   | "pending"
   | "refunded"
+  /** Checkout opened / "Pay" clicked — a mere intent, NOT money in flight. Created
+   *  on button click; promoted to PAID/FAILED by the gateway callback, or expired
+   *  to ABANDONED when no confirmation ever arrives. Never counts as paid or as
+   *  "needs verification". */
+  | "INITIATED"
   | "PENDING"
   | "VERIFYING"
   | "ABANDONED"

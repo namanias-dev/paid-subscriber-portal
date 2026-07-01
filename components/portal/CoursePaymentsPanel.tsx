@@ -34,13 +34,24 @@ export default function CoursePaymentsPanel({
 }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Pre-redirect caution: an intent captured on button click, confirmed in a modal
+  // before we hand the student off to the ICICI gateway.
+  const [caution, setCaution] = useState<
+    { action: "installment" | "full"; installmentNo?: number; key: string; label: string; amount: number } | null
+  >(null);
 
   const d = deriveEnrollment(enrollment);
   const receiptByRef = new Map(receipts.map((r) => [r.reference_no, r]));
 
+  function askPay(action: "installment" | "full", amount: number, label: string, installmentNo?: number, key?: string) {
+    setError(null);
+    setCaution({ action, installmentNo, key: key || action, label, amount });
+  }
+
   async function pay(action: "installment" | "full", installmentNo?: number, key?: string) {
     setError(null);
     setBusy(key || action);
+    setCaution(null);
     try {
       const res = await fetch("/api/v1/enroll/pay", {
         method: "POST",
@@ -118,7 +129,7 @@ export default function CoursePaymentsPanel({
           <div className="mt-3 grid gap-2 sm:grid-cols-2">
             {d.nextPayable && (
               <button
-                onClick={() => pay("installment", d.nextPayable!.no, "next")}
+                onClick={() => askPay("installment", d.nextPayable!.amount, d.nextPayable!.label.replace(/ of \d+/, ""), d.nextPayable!.no, "next")}
                 disabled={!!busy}
                 className="ca-btn ca-btn-gold ca-focus justify-center disabled:opacity-60"
               >
@@ -126,7 +137,7 @@ export default function CoursePaymentsPanel({
               </button>
             )}
             <button
-              onClick={() => pay("full", undefined, "full")}
+              onClick={() => askPay("full", d.remaining, "Full remaining balance", undefined, "full")}
               disabled={!!busy}
               className="ca-btn ca-btn-outline ca-focus justify-center disabled:opacity-60"
             >
@@ -173,7 +184,7 @@ export default function CoursePaymentsPanel({
                     </Link>
                   ) : !item.paid && !waived && item.kind === "installment" && d.nextPayable?.no !== item.no ? (
                     <button
-                      onClick={() => pay("installment", item.no, `i${item.no}`)}
+                      onClick={() => askPay("installment", item.amount, item.label, item.no, `i${item.no}`)}
                       disabled={!!busy}
                       className="ca-focus rounded-lg border border-[var(--ca-slate-300)] px-2.5 py-1 text-xs font-semibold text-[var(--ca-navy-600)] hover:bg-[var(--ca-slate-50)] disabled:opacity-60"
                     >
@@ -206,6 +217,37 @@ export default function CoursePaymentsPanel({
                 </div>
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {/* Pre-redirect caution modal — sets expectations before the gateway opens.
+          We cannot technically block the browser Back button or actions on the
+          gateway's own page; this reassures the student that an abandoned attempt
+          is harmless and a real deduction can be recovered. */}
+      {caution && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 backdrop-blur-sm sm:items-center sm:p-4" onClick={() => setCaution(null)}>
+          <div className="w-full max-w-md rounded-t-2xl bg-white p-6 shadow-2xl sm:rounded-2xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-start gap-3">
+              <span className="mt-0.5 grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[var(--ca-gold-soft)] text-[var(--ca-navy-900)]"><CreditCard size={18} /></span>
+              <div>
+                <h4 className="font-heading text-base font-bold text-[var(--ca-navy-900)]">Before you pay {formatINR(caution.amount)}</h4>
+                <p className="mt-1 text-sm text-[var(--ca-slate-700)]">{caution.label}</p>
+              </div>
+            </div>
+            <ul className="mt-4 space-y-2 rounded-xl bg-[var(--ca-slate-50)] p-3 text-sm text-[var(--ca-slate-700)]">
+              <li className="flex gap-2"><AlertTriangle size={16} className="mt-0.5 shrink-0 text-amber-600" /> Please <b>don&apos;t press Back, refresh, or close</b> this page while payment is in progress.</li>
+              <li className="flex gap-2"><CheckCircle2 size={16} className="mt-0.5 shrink-0 text-emerald-600" /> If money is deducted, wait for confirmation — or upload proof from your portal. An unfinished attempt is <b>never</b> charged.</li>
+            </ul>
+            <div className="mt-5 flex gap-2">
+              <button onClick={() => setCaution(null)} className="ca-btn ca-btn-outline ca-focus flex-1 justify-center">Cancel</button>
+              <button
+                onClick={() => pay(caution.action, caution.installmentNo, caution.key)}
+                className="ca-btn ca-btn-gold ca-focus flex-1 justify-center"
+              >
+                Continue to payment
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -2024,8 +2024,10 @@ export async function getDeletedPayments(): Promise<Payment[]> {
 
 /** Statuses that already grant access — never re-verified, never downgraded. */
 const PAID_STATUSES = ["PAID", "captured"];
-/** Non-paid statuses eligible for (re)verification against ICICI. */
-const NONPAID_STATUSES = ["PENDING", "pending", "VERIFYING", "ABANDONED", "FAILED"];
+/** Non-paid statuses eligible for (re)verification against ICICI. INITIATED
+ *  (checkout opened) is included so a real payment whose callback was lost can
+ *  still be recovered to PAID by a later verify. */
+const NONPAID_STATUSES = ["INITIATED", "PENDING", "pending", "VERIFYING", "ABANDONED", "FAILED"];
 
 /**
  * Window (minutes) a fresh PENDING waits before we move it to VERIFYING.
@@ -2394,6 +2396,13 @@ export async function maybeReconcilePendingPayments(minIntervalMs = 60_000): Pro
   } catch (e) {
     console.error("[reconcile] lazy sweep failed (non-fatal):", (e as Error).message);
   }
+  // Expire evidence-less abandoned checkouts (INITIATED / spurious PENDING) so a
+  // pressed-Back attempt never lingers as "pending" for the student or staff.
+  try {
+    await abandonEvidencelessOpenPayments();
+  } catch (e) {
+    console.error("[reconcile] abandon sweep failed (non-fatal):", (e as Error).message);
+  }
 }
 
 export type CreatePaymentInput = Omit<Payment, "id" | "created_at"> & {
@@ -2425,7 +2434,7 @@ export async function createPayment(input: CreatePaymentInput): Promise<Payment>
     // Analytics (best-effort, idempotent, never throws): a brand-new PAID row is a
     // completed purchase; a PENDING row is an initiated checkout.
     if (isPaidStatus(saved.status)) void recordPaymentPaid(saved, "checkout").catch(() => {});
-    else if (saved.status === "PENDING") void recordPaymentInitiated(saved).catch(() => {});
+    else if (saved.status === "INITIATED" || saved.status === "PENDING") void recordPaymentInitiated(saved).catch(() => {});
     return saved;
   } catch {
     // Best-effort: fall back to in-memory so the flow still works pre-migration.
@@ -2538,6 +2547,9 @@ export async function getWebinarPaymentStatusMap(phone: string): Promise<Map<str
   const add = (slug: string | null | undefined, status: string | null | undefined) => {
     const s = (slug || "").trim();
     if (!s) return;
+    // INITIATED (checkout opened, no attempt) is not a payment class — treat as
+    // "not started" so a mere click never shows a webinar as pending/failed.
+    if ((status || "").toUpperCase() === "INITIATED") return;
     const cls = webinarPayClass(status);
     const prev = out.get(s);
     if (!prev || PAY_RANK[cls] > PAY_RANK[prev]) out.set(s, cls);
@@ -2560,6 +2572,7 @@ export async function getWebinarPaymentStatusesForSlug(slug: string): Promise<Ma
   const add = (phone: string | null | undefined, status: string | null | undefined) => {
     const ph = (phone || "").trim();
     if (!ph) return;
+    if ((status || "").toUpperCase() === "INITIATED") return;
     const cls = webinarPayClass(status);
     const prev = out.get(ph);
     if (!prev || PAY_RANK[cls] > PAY_RANK[prev]) out.set(ph, cls);
@@ -3935,7 +3948,7 @@ export async function cancelStalePendingPayments(enrollmentId: string): Promise<
   if (demoMode()) {
     let n = 0;
     for (const p of demoPayments()) {
-      if (p.enrollment_id === id && (p.status === "PENDING" || p.status === "VERIFYING")) { p.status = "ABANDONED"; n++; }
+      if (p.enrollment_id === id && (p.status === "INITIATED" || p.status === "PENDING" || p.status === "VERIFYING")) { p.status = "ABANDONED"; n++; }
     }
     return n;
   }
@@ -3946,7 +3959,7 @@ export async function cancelStalePendingPayments(enrollmentId: string): Promise<
       .from("payments")
       .update({ status: "ABANDONED" })
       .eq("enrollment_id", id)
-      .in("status", ["PENDING", "VERIFYING"])
+      .in("status", ["INITIATED", "PENDING", "VERIFYING"])
       .select("id");
     return (data || []).length;
   } catch { return 0; }
@@ -4004,6 +4017,246 @@ export async function recomputeCourseEnrollment(enrollmentId: string): Promise<C
   const updated = await updateCourseEnrollment(enrollmentId, { schedule, amount_paid: derived.paid, status });
   if (enr.phone) await bumpBuyerSessionVersion(enr.phone).catch(() => null);
   return updated || { ...enr, schedule, amount_paid: derived.paid, status };
+}
+
+// ==================== IMPORTED / LEGACY PAYMENT LEDGER BACKFILL ====================
+//
+// The admin "Total Paid" tile, the payments ledger, and the finance dashboard all
+// aggregate the `payments` table (via getBuyerPurchases). A manually-imported or
+// otherwise schedule-only enrollment (paid lines set on course_enrollments.schedule
+// with NO matching payment row) therefore shows the money on the enrollment/card +
+// student portal (schedule-derived) but ₹0 on the payments-table surfaces.
+//
+// This backfill creates ONE PAID payment ledger row per already-PAID schedule line
+// so those surfaces agree with the schedule — WITHOUT any live side effects (no
+// SMS, no Meta pixel, no analytics "checkout", no schedule mutation, no finalize).
+// It is recompute-safe: each row carries the line's payment_kind + installment_no,
+// so recomputeCourseEnrollment() reproduces the exact same schedule from it.
+//
+// Idempotent: keyed by a deterministic reference_no per (enrollment, line). Re-runs
+// skip lines that already have a backfilled row.
+
+export interface LedgerBackfillResult {
+  enrollmentId: string;
+  created: number;
+  skippedExisting: number;
+  amount: number;
+}
+
+/**
+ * Backfill missing PAID ledger rows for an enrollment's already-paid schedule
+ * lines. Reuses the same low-level insert path as createPayment but deliberately
+ * omits the live PAID side effects (this is historical money, not a fresh
+ * checkout). `source` tags the rows for audit (default "legacy-import").
+ */
+export async function backfillEnrollmentPaymentLedger(
+  enrollmentId: string,
+  opts: { source?: string; dryRun?: boolean } = {},
+): Promise<LedgerBackfillResult> {
+  const source = opts.source || "legacy-import";
+  const dryRun = opts.dryRun ?? false;
+  const out: LedgerBackfillResult = { enrollmentId, created: 0, skippedExisting: 0, amount: 0 };
+
+  const enr = await getCourseEnrollmentById(enrollmentId);
+  if (!enr) return out;
+  const schedule = enr.schedule || [];
+  const paidLines = schedule.filter((s) => s.paid && !isLineCancelledOrWaived(s) && (s.amount || 0) > 0);
+  if (!paidLines.length) return out;
+
+  const existing = await getAllPaymentRowsByEnrollmentId(enrollmentId);
+  const existingRefs = new Set(existing.map((p) => p.reference_no).filter(Boolean) as string[]);
+
+  const db = getSupabaseAdmin();
+  const paidAtBase = enr.created_at || new Date().toISOString();
+
+  for (const line of paidLines) {
+    const ref = `LEGACY-IMPORT-${enrollmentId}-${line.no}`;
+    if (existingRefs.has(ref)) { out.skippedExisting += 1; continue; }
+    // Belt-and-braces: also skip if a real paid row already settles this exact line.
+    const alreadyPaidLine = existing.some(
+      (p) => isPaidStatus(p.status) && (p.payment_kind || "full") === (line.kind || "installment") && (p.installment_no ?? 0) === line.no,
+    );
+    if (alreadyPaidLine) { out.skippedExisting += 1; continue; }
+
+    out.amount += line.amount;
+    if (dryRun) { out.created += 1; continue; }
+
+    const paidAt = line.paid_at || paidAtBase;
+    const row: Payment = {
+      id: uuid(),
+      student_name: enr.student_name,
+      phone: enr.phone,
+      email: enr.email ?? null,
+      item: `${enr.course_title} — ${line.label || "Legacy payment"}`,
+      item_type: "course",
+      item_slug: enr.course_slug,
+      amount: line.amount,
+      status: "PAID",
+      gateway: source,
+      reference_no: ref,
+      gateway_ref: "Legacy import (pre-portal collection)",
+      payment_mode: "Legacy import",
+      mode: "Legacy import",
+      transaction_amount: line.amount,
+      transaction_date: paidAt,
+      created_at: paidAt,
+      razorpay_payment_id: null,
+      enrollment_id: enr.id,
+      payment_kind: (line.kind || "installment") as Payment["payment_kind"],
+      installment_no: line.no,
+      settlement_status: "settled",
+    } as Payment;
+
+    if (db) {
+      await dbInsert<Payment>("payments", row as unknown as Record<string, unknown>);
+    } else {
+      demoPayments().unshift(row);
+    }
+    existingRefs.add(ref);
+    out.created += 1;
+  }
+  return out;
+}
+
+/**
+ * Backfill the payment ledger for EVERY active enrollment of a course (by slug).
+ * Idempotent + safe to re-run. Used by the one-time legacy-import reconcile.
+ */
+export async function backfillCoursePaymentLedgerBySlug(
+  courseSlug: string,
+  opts: { source?: string; dryRun?: boolean } = {},
+): Promise<{ enrollments: number; created: number; skippedExisting: number; amount: number; perEnrollment: LedgerBackfillResult[] }> {
+  const agg = { enrollments: 0, created: 0, skippedExisting: 0, amount: 0, perEnrollment: [] as LedgerBackfillResult[] };
+  const course = await getCourseBySlug(courseSlug);
+  if (!course) return agg;
+  const all = await getAllCourseEnrollments();
+  const mine = all.filter((e) => e.course_id === course.id && e.status !== "cancelled");
+  for (const e of mine) {
+    const r = await backfillEnrollmentPaymentLedger(e.id, opts);
+    agg.enrollments += 1;
+    agg.created += r.created;
+    agg.skippedExisting += r.skippedExisting;
+    agg.amount += r.amount;
+    agg.perEnrollment.push(r);
+  }
+  return agg;
+}
+
+// ==================== EVIDENCE-LESS OPEN-ATTEMPT EXPIRY (abandoned checkout) ====================
+//
+// A checkout attempt is created as INITIATED (or, for legacy rows, PENDING) the
+// moment the student clicks "Pay" — before any gateway interaction. If they press
+// Back / close the tab without paying, the gateway callback never fires, so the row
+// would otherwise linger forever and mislead both the student (portal "payment
+// pending" popup) and staff (admin "needs verification").
+//
+// The ICICI re-verify engine deliberately never TIMER-fails a row (to protect a
+// real slow payment). But an attempt with ZERO gateway evidence — no gateway_ref,
+// no response_code, no verify_status, no verified signature — and NO uploaded proof
+// is provably an abandoned click, so after a short window it is safe to mark
+// ABANDONED (which is non-terminal for re-verify: a late gateway "paid" still
+// recovers it to PAID). Groups that already have a PAID sibling are left untouched.
+
+/** Minutes an INITIATED/evidence-less attempt waits before it is deemed abandoned. */
+function initiatedExpiryMinutes(): number {
+  const v = Number(process.env.CHECKOUT_ABANDON_MINUTES);
+  return Number.isFinite(v) && v > 0 ? v : 30;
+}
+
+export interface AbandonSweepResult {
+  scanned: number;
+  abandoned: number;
+  keptEvidence: number;
+  keptProof: number;
+  keptPaidSibling: number;
+  dryRun: boolean;
+  referenceNos: string[];
+}
+
+/**
+ * Expire evidence-less open attempts (INITIATED / PENDING / legacy "pending") for
+ * courses + webinars to ABANDONED. Idempotent and safe to re-run — used by the
+ * lazy on-read sweep and by the one-time cleanup of pre-fix spurious PENDING rows.
+ */
+export async function abandonEvidencelessOpenPayments(
+  opts: { olderThanMinutes?: number; dryRun?: boolean; phones?: string[] } = {},
+): Promise<AbandonSweepResult> {
+  const res: AbandonSweepResult = { scanned: 0, abandoned: 0, keptEvidence: 0, keptProof: 0, keptPaidSibling: 0, dryRun: opts.dryRun ?? false, referenceNos: [] };
+  if (demoMode()) return res;
+  const db = getSupabaseAdmin();
+  if (!db) return res;
+
+  const olderThanMs = (opts.olderThanMinutes ?? initiatedExpiryMinutes()) * 60_000;
+  const cutoff = new Date(Date.now() - olderThanMs).toISOString();
+
+  let q = db
+    .from("payments")
+    .select("*")
+    .in("status", ["INITIATED", "PENDING", "pending"])
+    .in("item_type", ["course", "webinar"])
+    .is("deleted_at", null)
+    .lt("created_at", cutoff);
+  if (opts.phones?.length) q = q.in("phone", opts.phones);
+  const { data } = await q.limit(1000);
+  const rows = (data as Payment[] | null) ?? [];
+  if (!rows.length) return res;
+
+  // Evidence guard: any gateway/verify signal means we must NOT timer-abandon it.
+  const hasEvidence = (p: Payment): boolean =>
+    !!(p.gateway_ref || p.response_code || p.verify_status || p.verified_signature || (p.verify_attempts ?? 0) > 0);
+
+  const candidates = rows.filter((p) => {
+    res.scanned += 1;
+    if (hasEvidence(p)) { res.keptEvidence += 1; return false; }
+    return true;
+  });
+  if (!candidates.length) return res;
+
+  // Proof guard: an uploaded proof means the student claims a real payment — keep
+  // it in the verification flow, never silently abandon.
+  const ids = candidates.map((p) => p.id);
+  const proofIds = new Set<string>();
+  for (let i = 0; i < ids.length; i += 200) {
+    const chunk = ids.slice(i, i + 200);
+    const { data: proofs } = await db.from("payment_proofs").select("payment_id").in("payment_id", chunk);
+    for (const r of (proofs as { payment_id: string }[] | null) ?? []) proofIds.add(r.payment_id);
+  }
+
+  // Paid-sibling guard: never abandon an attempt whose obligation is already paid.
+  const phones = [...new Set(candidates.map((p) => (p.phone || "").trim()).filter(Boolean))];
+  const paidKeys = new Set<string>();
+  const groupKey = (p: Payment): string => {
+    const purpose = p.payment_kind === "seat" ? "seat" : p.payment_kind === "installment" ? `inst:${p.installment_no ?? 0}` : "full";
+    return [(p.phone || "").trim(), p.item_type, (p.item_slug || p.item || "").trim().toLowerCase(), purpose].join("|");
+  };
+  for (let i = 0; i < phones.length; i += 50) {
+    const chunk = phones.slice(i, i + 50);
+    const { data: sib } = await db.from("payments").select("*").in("phone", chunk).is("deleted_at", null);
+    for (const p of (sib as Payment[] | null) ?? []) if (isPaidStatus(p.status)) paidKeys.add(groupKey(p));
+  }
+
+  const toAbandon = candidates.filter((p) => {
+    if (proofIds.has(p.id)) { res.keptProof += 1; return false; }
+    if (paidKeys.has(groupKey(p))) { res.keptPaidSibling += 1; return false; }
+    return true;
+  });
+  if (!toAbandon.length) return res;
+
+  res.referenceNos = toAbandon.map((p) => p.reference_no).filter(Boolean) as string[];
+  if (opts.dryRun) { res.abandoned = toAbandon.length; return res; }
+
+  const abandonIds = toAbandon.map((p) => p.id);
+  for (let i = 0; i < abandonIds.length; i += 200) {
+    const chunk = abandonIds.slice(i, i + 200);
+    const { data: upd } = await db
+      .from("payments")
+      .update({ status: "ABANDONED" })
+      .in("id", chunk)
+      .not("status", "in", `(${PAID_STATUSES.join(",")})`)
+      .select("id");
+    res.abandoned += ((upd as { id: string }[] | null) ?? []).length;
+  }
+  return res;
 }
 
 // ==================== DUPLICATE-ENROLLMENT DETECTION + MERGE (super-admin) ====================
@@ -4387,7 +4640,7 @@ export async function findRecentOpenPaymentForItem(
     .eq("item_type", itemType)
     .eq("item_slug", slug)
     .is("deleted_at", null)
-    .in("status", ["PENDING", "VERIFYING"])
+    .in("status", ["INITIATED", "PENDING", "VERIFYING"])
     .gte("created_at", since);
   // Only constrain by batch when one is supplied; otherwise the query is byte-for-byte
   // the same as before, preserving single-batch / no-batch dedup behaviour exactly.
@@ -4416,7 +4669,7 @@ export async function findRecentOpenInstallmentPayment(
     .eq("enrollment_id", id)
     .eq("installment_no", installmentNo)
     .is("deleted_at", null)
-    .in("status", ["PENDING", "VERIFYING"])
+    .in("status", ["INITIATED", "PENDING", "VERIFYING"])
     .gte("created_at", since)
     .order("created_at", { ascending: false })
     .limit(1)

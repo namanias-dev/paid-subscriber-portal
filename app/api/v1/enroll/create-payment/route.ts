@@ -167,7 +167,9 @@ export async function POST(req: Request) {
       item_type: "course",
       item_slug: course.slug,
       amount: firstAmount,
-      status: "PENDING",
+      // Checkout opened — a click, not money in flight. The gateway callback
+      // promotes this to PAID/FAILED; an abandoned click expires to ABANDONED.
+      status: "INITIATED",
       gateway: PAYMENT_GATEWAY,
       reference_no: referenceNo,
       sub_merchant_id: subMerchantId,

@@ -98,7 +98,7 @@ export async function GET(req: Request, { params }: { params: { referenceNo: str
           demo: true,
         });
       }
-      if (payment.status === "PENDING") {
+      if (payment.status !== "PAID" && payment.status !== "captured") {
         payment =
           (await updatePaymentByReference(referenceNo, {
             status: "PAID",
