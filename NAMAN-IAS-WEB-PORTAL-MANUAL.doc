@@ -1,0 +1,1116 @@
+<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
+<head>
+<meta charset="utf-8" />
+<meta name="ProgId" content="Word.Document" />
+<title>NAMANIAS.COM — Web Portal Staff Operations Manual</title>
+<!--[if gte mso 9]><xml><w:WordDocument><w:View>Print</w:View><w:Zoom>100</w:Zoom></w:WordDocument></xml><![endif]-->
+<style>
+@page { size: A4; margin: 2.0cm 2.0cm 2.0cm 2.0cm; }
+body { font-family: "Calibri","Segoe UI",Arial,sans-serif; font-size: 11.0pt; color: #14110f; line-height: 1.45; }
+h1 { mso-style-name:"Heading 1"; font-family:"Georgia","Cambria",serif; font-size: 22pt; color:#0a1a3f; border-bottom: 3px solid #d4af37; padding-bottom:6px; margin-top: 26pt; }
+h2 { mso-style-name:"Heading 2"; font-family:"Georgia","Cambria",serif; font-size: 16pt; color:#15326b; margin-top: 20pt; border-bottom:1px solid #d9dee8; padding-bottom:3px; }
+h3 { mso-style-name:"Heading 3"; font-size: 12.5pt; color:#0a1a3f; margin-top: 14pt; }
+h4 { mso-style-name:"Heading 4"; font-size: 11pt; color:#15326b; margin-top: 10pt; }
+table { border-collapse: collapse; width: 100%; margin: 8pt 0; font-size: 10pt; }
+th { background:#0a1a3f; color:#fff; text-align:left; padding:6px 8px; border:1px solid #0a1a3f; }
+td { padding:6px 8px; border:1px solid #c9d0dd; vertical-align: top; }
+tr:nth-child(even) td { background:#f4f6fa; }
+.cover { text-align:center; padding-top: 120pt; }
+.cover .kicker { letter-spacing: 4px; color:#d4af37; font-weight:bold; font-size: 12pt; }
+.cover .title { font-family:"Georgia",serif; font-size: 34pt; color:#0a1a3f; margin: 14pt 0; }
+.cover .sub { font-size: 15pt; color:#15326b; }
+.cover .meta { margin-top: 40pt; color:#5b6472; font-size: 11pt; }
+code, .lab { font-family:"Consolas","Courier New",monospace; }
+.lab { font-weight:bold; }
+.url { font-family:"Consolas","Courier New",monospace; color:#15326b; }
+.check { border:1px solid #1f9d55; background:#eafaf0; padding:8px 10px; margin:8px 0; border-radius:6px; }
+.warn { border:1px solid #d97706; background:#fff7ec; padding:8px 10px; margin:8px 0; border-radius:6px; }
+.who { border:1px solid #15326b; background:#eef2fb; padding:6px 10px; margin:8px 0; border-radius:6px; font-size:10pt; }
+.intro { color:#3b4452; font-style: italic; margin: 4pt 0 8pt 0; }
+.quick { background:#fbf6e7; border:1px solid #d4af37; padding:6px 10px; margin:6px 0; border-radius:6px; font-size:10.5pt; }
+.shot { color:#7a6a2a; background:#fcfaf0; border:1px dashed #c9b458; padding:4px 8px; margin:4px 0; font-size:9.5pt; display:block; }
+ol, ul { margin-top: 4pt; }
+li { margin: 2pt 0; }
+.toc a { color:#15326b; text-decoration:none; }
+.small { font-size: 9.5pt; color:#5b6472; }
+.pagebreak { page-break-before: always; }
+.tag { display:inline-block; background:#eef2fb; border:1px solid #c9d0dd; border-radius:4px; padding:0 5px; font-size:9pt; }
+</style>
+</head>
+<body>
+
+<!-- ================= COVER ================= -->
+<div class="cover">
+<div class="kicker">NAMAN SHARMA IAS ACADEMY</div>
+<div class="title">NAMANIAS.COM</div>
+<div class="sub">Web Portal — Staff Operations Manual</div>
+<p style="margin-top:24pt; color:#3b4452; font-size:12pt;">The official, complete, role-by-role handbook for running the admin portal.<br/>Written so any team member with basic computer skills can follow every step with confidence.</p>
+<div class="meta">
+<b>Document:</b> NAMAN-IAS-WEB-PORTAL-MANUAL.doc<br/>
+<b>Audience:</b> All portal staff (Course, Content, Webinar, Payment, Finance, Support, Admin)<br/>
+<b>Base address:</b> https://namanias.com<br/>
+<b>Last updated:</b> 17 June 2026<br/>
+<b>Source of truth:</b> Built directly from the live codebase — no invented features.
+</div>
+</div>
+
+<!-- ================= HOW TO USE ================= -->
+<div class="pagebreak"></div>
+<h1 id="howto">How to use this manual</h1>
+<p class="intro">This is your day-to-day reference. Read your team's section fully once, then keep this open while you work.</p>
+<ul>
+<li><b>Find your job.</b> Use the Table of Contents to jump to your team's section (Courses, Content/LMS, Webinars, Payments, Finance, Students).</li>
+<li><b>Follow steps in order.</b> Every procedure is a numbered list — do <b>one action per step</b>. On-screen words are shown <b>in bold</b> so you can match them to the screen.</li>
+<li><b>Use the direct links.</b> Each procedure starts with a <span class="quick">🔗 Quick link</span> line. Copy that web address into your browser to land on the right page. Some links contain a placeholder like <span class="url">[COURSE-ID]</span> — that means "the long code in the address bar for that specific item" (you get there by clicking the item, explained in each step).</li>
+<li><b>Check your work.</b> Every procedure ends with a green <span class="check">✅ How to check it worked</span> box. Don't skip it.</li>
+<li><b>Avoid mistakes.</b> Orange <span class="warn">⚠️ Common mistakes</span> boxes warn you before something goes wrong.</li>
+<li><b>Know your limits.</b> Blue <span class="who">WHO can do this</span> boxes state exactly which staff role is allowed. If a button is missing for you, your role does not have that permission — that is normal and safe.</li>
+<li><b>Screenshots.</b> Where you see <span class="shot">[SCREENSHOT: …]</span>, that's a placeholder for a picture to be pasted in later.</li>
+</ul>
+<p class="small">Note on roles: the portal's real roles are <b>Super Admin, Admin, Content Admin, Content Editor, Current Affairs Editor, Support / Operations, Finance / Revenue,</b> and <b>Viewer / Analyst</b>. Throughout this manual, "Course team / Content team / Webinar team" map to <b>Content Editor</b> or <b>Content Admin</b>; "Payment team / Finance team" map to <b>Finance / Revenue</b> (or Admin); "Support" maps to <b>Support / Operations</b>.</p>
+
+<!-- ================= TOC ================= -->
+<div class="pagebreak"></div>
+<h1 id="toc">Table of Contents</h1>
+<div class="toc">
+<p><b><a href="#links">🔗 All Portal Links (master reference table)</a></b></p>
+<p><b><a href="#whocan">Who Can Do What (roles &amp; permissions overview)</a></b></p>
+<p><b><a href="#s1">1. Access &amp; Accounts</a></b><br/>
+&nbsp;&nbsp;<a href="#s1-1">1.1 How to log in to the admin portal</a><br/>
+&nbsp;&nbsp;<a href="#s1-2">1.2 If you can't log in / forgot password / got logged out</a><br/>
+&nbsp;&nbsp;<a href="#s1-3">1.3 How to change your own password</a><br/>
+&nbsp;&nbsp;<a href="#s1-4">1.4 Tour of every main tab and section</a><br/>
+&nbsp;&nbsp;<a href="#s1-5">1.5 How to add a new staff member</a><br/>
+&nbsp;&nbsp;<a href="#s1-6">1.6 How to change someone's role / status</a><br/>
+&nbsp;&nbsp;<a href="#s1-7">1.7 How to reset a staff password / remove access</a><br/>
+&nbsp;&nbsp;<a href="#s1-8">1.8 How to create or edit a role</a><br/>
+&nbsp;&nbsp;<a href="#s1-9">1.9 Internal "comp" access &amp; staff portal test login</a></p>
+<p><b><a href="#s2">2. Courses (Course Creation team)</a></b><br/>
+&nbsp;&nbsp;<a href="#s2-1">2.1 "One batch = one combination" explained</a><br/>
+&nbsp;&nbsp;<a href="#s2-2">2.2 How to create a new course</a><br/>
+&nbsp;&nbsp;<a href="#s2-3">2.3 How to create a course with multiple batches (Quick add)</a><br/>
+&nbsp;&nbsp;<a href="#s2-4">2.4 Price, Pay-in-Full, EMI, seats per batch</a><br/>
+&nbsp;&nbsp;<a href="#s2-5">2.5 Coupons (discount codes)</a><br/>
+&nbsp;&nbsp;<a href="#s2-6">2.6 Images, description, category, duration, SEO</a><br/>
+&nbsp;&nbsp;<a href="#s2-7">2.7 How to edit a live course safely</a><br/>
+&nbsp;&nbsp;<a href="#s2-8">2.8 How to reorder courses</a><br/>
+&nbsp;&nbsp;<a href="#s2-9">2.9 Publish / unpublish / disable / delete a course</a><br/>
+&nbsp;&nbsp;<a href="#s2-10">2.10 Verify on the student side</a></p>
+<p><b><a href="#s3">3. Content / LMS (Content team)</a></b><br/>
+&nbsp;&nbsp;<a href="#s3-1">3.1 How to add content &amp; assign it to batches</a><br/>
+&nbsp;&nbsp;<a href="#s3-2">3.2 How to upload a lecture video file (hosted)</a><br/>
+&nbsp;&nbsp;<a href="#s3-3">3.3 Add a recording by external link</a><br/>
+&nbsp;&nbsp;<a href="#s3-4">3.4 Upload study material / notes / PDFs</a><br/>
+&nbsp;&nbsp;<a href="#s3-5">3.5 Orientation &amp; starter videos (reuse one video)</a><br/>
+&nbsp;&nbsp;<a href="#s3-6">3.6 Drip release &amp; public (free) visibility</a><br/>
+&nbsp;&nbsp;<a href="#s3-7">3.7 Manage a WEBINAR recording (Webinars section)</a><br/>
+&nbsp;&nbsp;<a href="#s3-8">3.8 File size / type limits &amp; fixing upload errors</a></p>
+<p><b><a href="#s4">4. Webinars (Webinar team)</a></b><br/>
+&nbsp;&nbsp;<a href="#s4-1">4.1 How to create and edit a webinar</a><br/>
+&nbsp;&nbsp;<a href="#s4-2">4.2 The registration-count show/hide toggle</a><br/>
+&nbsp;&nbsp;<a href="#s4-3">4.3 How to add a recording</a><br/>
+&nbsp;&nbsp;<a href="#s4-4">4.4 How to rename a webinar (auto-propagates)</a><br/>
+&nbsp;&nbsp;<a href="#s4-5">4.5 Re-runs (separate paid events) via Duplicate</a><br/>
+&nbsp;&nbsp;<a href="#s4-6">4.6 Share the link &amp; manage registrants</a><br/>
+&nbsp;&nbsp;<a href="#s4-7">4.7 Move late registrations</a><br/>
+&nbsp;&nbsp;<a href="#s4-8">4.8 Verify on the student side</a></p>
+<p><b><a href="#s5">5. Payments (Payment team)</a></b><br/>
+&nbsp;&nbsp;<a href="#s5-1">5.1 How to manually enroll a student (one screen)</a><br/>
+&nbsp;&nbsp;<a href="#s5-2">5.2 Generate &amp; share a login code</a><br/>
+&nbsp;&nbsp;<a href="#s5-3">5.3 Upload a proof-of-payment screenshot</a><br/>
+&nbsp;&nbsp;<a href="#s5-4">5.4 The approval workflow (approve / reject / reupload)</a><br/>
+&nbsp;&nbsp;<a href="#s5-5">5.5 Partial payments / EMI / record a payment</a><br/>
+&nbsp;&nbsp;<a href="#s5-6">5.6 Find a payment &amp; read the timeline</a><br/>
+&nbsp;&nbsp;<a href="#s5-7">5.7 "Says payment failed but they paid" playbook</a><br/>
+&nbsp;&nbsp;<a href="#s5-8">5.8 Fix a misapplied payment</a></p>
+<p><b><a href="#s6">6. Finance (Finance team)</a></b><br/>
+&nbsp;&nbsp;<a href="#s6-1">6.1 How to read the Payments &amp; Finance dashboard</a><br/>
+&nbsp;&nbsp;<a href="#s6-2">6.2 Full statuses glossary</a><br/>
+&nbsp;&nbsp;<a href="#s6-3">6.3 Handle abandoned / failed payments (recovery)</a><br/>
+&nbsp;&nbsp;<a href="#s6-4">6.4 Refunds</a><br/>
+&nbsp;&nbsp;<a href="#s6-5">6.5 Export CSV, search &amp; filter</a><br/>
+&nbsp;&nbsp;<a href="#s6-6">6.6 Reconciliation, Trash &amp; reporting</a><br/>
+&nbsp;&nbsp;<a href="#s6-7">6.7 Course EMI &amp; Seats; Access at Risk; Duplicates</a></p>
+<p><b><a href="#s7">7. Students / Users</a></b><br/>
+&nbsp;&nbsp;<a href="#s7-1">7.1 Find a student &amp; view their access</a><br/>
+&nbsp;&nbsp;<a href="#s7-2">7.2 Resend / reset a login code</a><br/>
+&nbsp;&nbsp;<a href="#s7-3">7.3 Fix, revoke, restore or extend access</a><br/>
+&nbsp;&nbsp;<a href="#s7-4">7.4 Deactivate a student</a></p>
+<p><b><a href="#s8">8. Daily Operations &amp; Safety</a></b><br/>
+&nbsp;&nbsp;<a href="#s8-1">8.1 Start-of-day / end-of-day checklists</a><br/>
+&nbsp;&nbsp;<a href="#s8-2">8.2 Escalation matrix</a><br/>
+&nbsp;&nbsp;<a href="#s8-3">8.3 Golden data-safety rules</a></p>
+<p><b><a href="#s9">9. Quick Help / Troubleshooting</a></b></p>
+<p><b><a href="#s10">10. Glossary</a></b></p>
+<p><b><a href="#appendix">Appendix — Reporting (code basis, gaps, extra capabilities)</a></b></p>
+</div>
+
+<!-- ================= ALL PORTAL LINKS ================= -->
+<div class="pagebreak"></div>
+<h1 id="links">🔗 All Portal Links</h1>
+<p class="intro">Every admin page and its exact web address. Base address is <span class="url">https://namanias.com</span>. The "Who sees it" column is the permission that makes the menu item appear; if you don't have it, the page is hidden for you. Square-bracket parts like <span class="url">[COURSE-ID]</span> are placeholders for the item's own code in the address bar.</p>
+<table>
+<tr><th>Page name (in left menu)</th><th>Direct URL</th><th>Who sees it (permission)</th></tr>
+<tr><td>Admin login</td><td class="url">https://namanias.com/admin</td><td>Anyone with a staff login</td></tr>
+<tr><td>Dashboard</td><td class="url">https://namanias.com/admin</td><td>All staff</td></tr>
+<tr><td>Business Analytics</td><td class="url">https://namanias.com/admin/analytics</td><td>View revenue</td></tr>
+<tr><td>Home Page</td><td class="url">https://namanias.com/admin/home</td><td>Manage settings</td></tr>
+<tr><td>Toppers / Results</td><td class="url">https://namanias.com/admin/toppers</td><td>Manage settings</td></tr>
+<tr><td>Navigation / Header</td><td class="url">https://namanias.com/admin/navigation</td><td>Manage settings</td></tr>
+<tr><td>About Page</td><td class="url">https://namanias.com/admin/about</td><td>Manage settings</td></tr>
+<tr><td>Lead CRM</td><td class="url">https://namanias.com/admin/leads</td><td>Manage students, leads &amp; enrollments</td></tr>
+<tr><td>Lead Forms</td><td class="url">https://namanias.com/admin/forms</td><td>Manage students, leads &amp; enrollments</td></tr>
+<tr><td>Landing Pages</td><td class="url">https://namanias.com/admin/registrations</td><td>Manage students, leads &amp; enrollments</td></tr>
+<tr><td>Marketing</td><td class="url">https://namanias.com/admin/marketing</td><td>Manage students, leads &amp; enrollments</td></tr>
+<tr><td>Referrals</td><td class="url">https://namanias.com/admin/referrals</td><td>Manage students, leads &amp; enrollments</td></tr>
+<tr><td>SMS Mission Control</td><td class="url">https://namanias.com/admin/communications/sms</td><td>Send SMS</td></tr>
+<tr><td>Courses</td><td class="url">https://namanias.com/admin/courses</td><td>Manage course content</td></tr>
+<tr><td>— New Course</td><td class="url">https://namanias.com/admin/courses/new</td><td>Manage course content</td></tr>
+<tr><td>— Edit a course</td><td class="url">https://namanias.com/admin/courses/[COURSE-ID]/edit</td><td>Manage course content</td></tr>
+<tr><td>Brochure Library</td><td class="url">https://namanias.com/admin/library</td><td>Manage PDFs &amp; media</td></tr>
+<tr><td>Webinars &amp; Events</td><td class="url">https://namanias.com/admin/webinars</td><td>Manage webinars &amp; events</td></tr>
+<tr><td>— New Webinar</td><td class="url">https://namanias.com/admin/webinars/new</td><td>Manage webinars &amp; events</td></tr>
+<tr><td>— Edit a webinar</td><td class="url">https://namanias.com/admin/webinars/[WEBINAR-ID]/edit</td><td>Manage webinars &amp; events</td></tr>
+<tr><td>— Webinar registrants</td><td class="url">https://namanias.com/admin/webinars/[WEBINAR-ID]/registrations</td><td>Manage webinars &amp; events</td></tr>
+<tr><td>Content / LMS</td><td class="url">https://namanias.com/admin/content</td><td>Manage course content</td></tr>
+<tr><td>Lecture Q&amp;A</td><td class="url">https://namanias.com/admin/lecture-comments</td><td>Manage course content</td></tr>
+<tr><td>Subscription Plans</td><td class="url">https://namanias.com/admin/plans</td><td>Edit pricing &amp; plans</td></tr>
+<tr><td>CA Articles</td><td class="url">https://namanias.com/admin/current-affairs</td><td>Manage Current Affairs</td></tr>
+<tr><td>— New CA Article</td><td class="url">https://namanias.com/admin/current-affairs/new</td><td>Manage Current Affairs</td></tr>
+<tr><td>— Edit CA Article</td><td class="url">https://namanias.com/admin/current-affairs/[ID]/edit</td><td>Manage Current Affairs</td></tr>
+<tr><td>— CA Daily / Categories / Tags</td><td class="url">https://namanias.com/admin/current-affairs/daily · /categories · /tags</td><td>Manage Current Affairs</td></tr>
+<tr><td>PDF Library (Current Affairs)</td><td class="url">https://namanias.com/admin/current-affairs/pdfs</td><td>Manage Current Affairs</td></tr>
+<tr><td>CA Analytics</td><td class="url">https://namanias.com/admin/current-affairs/analytics</td><td>Manage Current Affairs</td></tr>
+<tr><td>Question Bank</td><td class="url">https://namanias.com/admin/questions</td><td>Manage quizzes &amp; question bank</td></tr>
+<tr><td>Quizzes / Tests</td><td class="url">https://namanias.com/admin/quizzes</td><td>Manage quizzes &amp; question bank</td></tr>
+<tr><td>Attempts &amp; Reports</td><td class="url">https://namanias.com/admin/quiz-reports</td><td>Manage quizzes &amp; question bank</td></tr>
+<tr><td>Question Imports</td><td class="url">https://namanias.com/admin/quiz-imports</td><td>Manage quizzes &amp; question bank</td></tr>
+<tr><td>Students &amp; Enrollments</td><td class="url">https://namanias.com/admin/students</td><td>Manage students, leads &amp; enrollments</td></tr>
+<tr><td>— Add Student</td><td class="url">https://namanias.com/admin/students/new</td><td>Manage students, leads &amp; enrollments</td></tr>
+<tr><td>— Student profile</td><td class="url">https://namanias.com/admin/students/[STUDENT-ID]</td><td>Manage students, leads &amp; enrollments</td></tr>
+<tr><td>Duplicate Enrollments</td><td class="url">https://namanias.com/admin/enrollments/duplicates</td><td>View revenue</td></tr>
+<tr><td>Payments &amp; Finance</td><td class="url">https://namanias.com/admin/payments</td><td>View revenue (manage actions need Manage payments)</td></tr>
+<tr><td>Course EMI &amp; Seats</td><td class="url">https://namanias.com/admin/course-payments</td><td>View revenue</td></tr>
+<tr><td>Access at Risk</td><td class="url">https://namanias.com/admin/access-risk</td><td>View revenue</td></tr>
+<tr><td>Staff &amp; Roles</td><td class="url">https://namanias.com/admin/staff</td><td>Manage staff accounts</td></tr>
+<tr><td>Settings</td><td class="url">https://namanias.com/admin/settings</td><td>Manage settings</td></tr>
+</table>
+<p class="warn">⚠️ How to get an ID for a bracketed link: open the page normally (e.g. Courses), click <b>Edit</b> on the item you want, and look at your browser's address bar — the long code between the slashes is that item's ID. You can also just click into items rather than typing the ID by hand.</p>
+
+<!-- ================= WHO CAN DO WHAT ================= -->
+<div class="pagebreak"></div>
+<h1 id="whocan">Who Can Do What</h1>
+<p class="intro">The portal uses fixed permissions bundled into roles. A staff member only sees menus and buttons their role allows. This is enforced both in the screen (hidden) and on the server (rejected), so it is safe.</p>
+
+<h3>The eight built-in roles</h3>
+<table>
+<tr><th>Role</th><th>What they can do</th><th>What they cannot do</th></tr>
+<tr><td><b>Super Admin</b></td><td>Everything — content, revenue, payments, settings, staff and roles. Only role that can reverse/edit/delete payments and empty Payment Trash.</td><td>Cannot be deleted (at least one must always exist).</td></tr>
+<tr><td><b>Admin</b></td><td>Full operations including revenue &amp; payments, content, settings and managing staff.</td><td>Cannot edit the roles &amp; permission matrix; cannot manage Super Admins.</td></tr>
+<tr><td><b>Content Admin</b></td><td>All content (Courses, Webinars, Quizzes, Current Affairs, PDFs), SEO, publishing, settings, students &amp; leads, non-revenue analytics, SMS.</td><td>No revenue, payments or pricing; no staff/roles.</td></tr>
+<tr><td><b>Content Editor</b></td><td>Create, edit and publish all content; manage SEO.</td><td>No revenue/payments; no settings, staff or roles.</td></tr>
+<tr><td><b>Current Affairs Editor</b></td><td>Only Current Affairs — articles, daily/monthly, PDFs, CA categories &amp; tags; publish CA.</td><td>No other content modules; no revenue, settings or staff.</td></tr>
+<tr><td><b>Support / Operations</b></td><td>View &amp; manage students, leads and enrollments; non-revenue analytics; send SMS.</td><td>No publishing; no revenue; no staff.</td></tr>
+<tr><td><b>Finance / Revenue</b></td><td>Revenue dashboards, manage payments/invoices/payouts, edit pricing &amp; plans.</td><td>No content; no staff, roles or settings.</td></tr>
+<tr><td><b>Viewer / Analyst</b></td><td>Read-only across allowed modules; non-revenue analytics.</td><td>No edits; no revenue; no staff/settings.</td></tr>
+</table>
+
+<h3>Task-by-permission map</h3>
+<table>
+<tr><th>Task area</th><th>Permission required</th><th>Roles that have it</th></tr>
+<tr><td>Create / edit Courses &amp; Content/LMS</td><td>Manage course content</td><td>Super Admin, Admin, Content Admin, Content Editor</td></tr>
+<tr><td>Create / edit Webinars</td><td>Manage webinars &amp; events</td><td>Super Admin, Admin, Content Admin, Content Editor</td></tr>
+<tr><td>Brochure / PDF library</td><td>Manage PDFs &amp; media</td><td>Super Admin, Admin, Content Admin, Content Editor, Current Affairs Editor</td></tr>
+<tr><td>Publish / unpublish content</td><td>Publish / unpublish content</td><td>Super Admin, Admin, Content Admin, Content Editor, Current Affairs Editor</td></tr>
+<tr><td>View Payments &amp; Finance, Course EMI &amp; Seats, Access at Risk, Duplicate Enrollments</td><td>View revenue dashboards</td><td>Super Admin, Admin, Finance / Revenue</td></tr>
+<tr><td>Approve / reject payments, upload proof, re-verify</td><td>Manage payments</td><td>Super Admin, Admin, Finance / Revenue</td></tr>
+<tr><td>Reverse / edit / delete a payment, Payment Trash</td><td>Super Admin only</td><td>Super Admin</td></tr>
+<tr><td>Edit pricing &amp; Subscription Plans</td><td>Edit pricing &amp; plans</td><td>Super Admin, Admin, Finance / Revenue</td></tr>
+<tr><td>Add / edit students, manual enroll, login codes</td><td>Manage students, leads &amp; enrollments</td><td>Super Admin, Admin, Content Admin, Support / Operations</td></tr>
+<tr><td>Add / manage staff &amp; grant comp access</td><td>Manage staff accounts</td><td>Super Admin, Admin</td></tr>
+<tr><td>Create / edit roles &amp; permission matrix</td><td>Manage roles &amp; permissions</td><td>Super Admin</td></tr>
+<tr><td>Website settings, Home, Toppers, Navigation, About</td><td>Manage settings</td><td>Super Admin, Admin, Content Admin</td></tr>
+<tr><td>Send SMS &amp; view SMS logs</td><td>Send SMS</td><td>Super Admin, Admin, Content Admin, Support / Operations</td></tr>
+</table>
+<p class="small">Anti-escalation rule: when creating roles or staff, you can only grant permissions you yourself hold. You can never give someone more power than you have.</p>
+
+<!-- ================= SECTION 1 ================= -->
+<div class="pagebreak"></div>
+<h1 id="s1">1. Access &amp; Accounts</h1>
+<p class="intro">This section covers signing in, what every menu does, and (for managers) creating and controlling staff logins. Get comfortable here first — everything else builds on it.</p>
+<div class="quick">🔗 Quick link — Admin portal: <span class="url">https://namanias.com/admin</span> &nbsp;|&nbsp; Staff &amp; Roles: <span class="url">https://namanias.com/admin/staff</span></div>
+
+<h2 id="s1-1">1.1 How to log in to the admin portal</h2>
+<div class="who"><b>WHO:</b> Any staff member who has been given an admin username and password.</div>
+<ol>
+<li>Open your browser and go to <span class="url">https://namanias.com/admin</span>.</li>
+<li>On the <b>Admin Panel</b> sign-in card, type your <b>Username</b>.</li>
+<li>Type your <b>Password</b>.</li>
+<li>Click <b>Sign in →</b>.</li>
+<li>Wait for the dashboard to load. The left menu shows only the sections your role allows.</li>
+</ol>
+<span class="shot">[SCREENSHOT: the Admin Panel login card showing the Username field, Password field, and the "Sign in →" button.]</span>
+<div class="check">✅ How to check it worked: you see the left-hand menu (Dashboard, etc.) and, in the top-right corner, your username with a coloured role badge (e.g. "Admin").</div>
+<div class="warn">⚠️ Common mistakes: usernames are all lowercase; extra spaces fail. If you just got a temporary password, you'll see an orange "please change your temporary password" banner — change it (see 1.3).</div>
+
+<h2 id="s1-2">1.2 If you can't log in / forgot password / got logged out</h2>
+<div class="who"><b>WHO:</b> Any staff member. Password resets are done by a manager (Super Admin / Admin).</div>
+<h4>You were logged out automatically</h4>
+<p>Sessions stay signed in for <b>7 days</b> of inactivity and roll forward while you work. After 7 idle days you're signed out gracefully. Just sign in again (1.1).</p>
+<h4>Wrong username or password</h4>
+<ol>
+<li>Re-type carefully (lowercase username, no spaces).</li>
+<li>If it still says <b>"Invalid credentials."</b>, your password may have changed or your account may be <b>Disabled</b>.</li>
+<li>Ask a manager to check your account and, if needed, reset your password (1.7). <b>There is no self-service "Forgot password" link</b> — a manager must reset it for you.</li>
+</ol>
+<div class="check">✅ How to check it worked: after a manager resets you, sign in with the new temporary password, then set your own (1.3).</div>
+<div class="warn">⚠️ Common mistakes: don't keep retrying the same wrong password — contact a manager. If your role was changed, some menus may disappear; that is expected, not an error.</div>
+
+<h2 id="s1-3">1.3 How to change your own password</h2>
+<div class="who"><b>WHO:</b> Any signed-in staff member.</div>
+<ol>
+<li>Sign in at <span class="url">https://namanias.com/admin</span>.</li>
+<li>In the top bar, click <b>Password</b>.</li>
+<li>Enter your current and new password in the <b>Change password</b> box and confirm.</li>
+<li>If you logged in with a temporary password, also use the orange banner's <b>Change password</b> button.</li>
+</ol>
+<div class="check">✅ How to check it worked: the orange "temporary password" banner disappears; next sign-in uses your new password.</div>
+
+<h2 id="s1-4">1.4 Tour of every main tab and section</h2>
+<div class="intro">The left menu is grouped. Below is every item, exactly as it appears, grouped as on screen, with what it's for. Items you can't see are hidden by your role.</div>
+<table>
+<tr><th>Group</th><th>Menu item</th><th>What it's for</th></tr>
+<tr><td>Overview</td><td>📊 <b>Dashboard</b></td><td>Home screen with the day's snapshot.</td></tr>
+<tr><td>Overview</td><td>📈 <b>Business Analytics</b></td><td>Revenue and business trends.</td></tr>
+<tr><td>Overview</td><td>🏠 <b>Home Page</b></td><td>Edit the public website home page.</td></tr>
+<tr><td>Website</td><td>🏅 <b>Toppers / Results</b></td><td>Manage topper/result showcases.</td></tr>
+<tr><td>Website</td><td>🧭 <b>Navigation / Header</b></td><td>Edit the public site menu/header.</td></tr>
+<tr><td>Website</td><td>📖 <b>About Page</b></td><td>Edit the public About page.</td></tr>
+<tr><td>Sales</td><td>🎯 <b>Lead CRM</b></td><td>Track and respond to enquiries/leads.</td></tr>
+<tr><td>Sales</td><td>📋 <b>Lead Forms</b></td><td>Build the forms that capture leads.</td></tr>
+<tr><td>Sales</td><td>🚀 <b>Landing Pages</b></td><td>Campaign/registration landing pages.</td></tr>
+<tr><td>Sales</td><td>📣 <b>Marketing</b></td><td>Marketing tools/campaigns.</td></tr>
+<tr><td>Sales</td><td>🎁 <b>Referrals</b></td><td>Referral programme management.</td></tr>
+<tr><td>Sales</td><td>📱 <b>SMS Mission Control</b></td><td>Send approved-template SMS &amp; view logs.</td></tr>
+<tr><td>Academics</td><td>🎓 <b>Courses</b></td><td>Create/manage courses &amp; batches.</td></tr>
+<tr><td>Academics</td><td>🗂️ <b>Brochure Library</b></td><td>Shared PDF/brochure library.</td></tr>
+<tr><td>Academics</td><td>🎥 <b>Webinars &amp; Events</b></td><td>Create/manage webinars.</td></tr>
+<tr><td>Academics</td><td>📚 <b>Content / LMS</b></td><td>Lectures, notes, tests &amp; webinar recordings.</td></tr>
+<tr><td>Academics</td><td>💬 <b>Lecture Q&amp;A</b></td><td>Student questions on lectures.</td></tr>
+<tr><td>Academics</td><td>💎 <b>Subscription Plans</b></td><td>Edit subscription plans/pricing.</td></tr>
+<tr><td>Current Affairs</td><td>📰 <b>CA Articles</b></td><td>Current Affairs articles.</td></tr>
+<tr><td>Current Affairs</td><td>📄 <b>PDF Library</b></td><td>CA daily/monthly PDF compilations.</td></tr>
+<tr><td>Current Affairs</td><td>📈 <b>CA Analytics</b></td><td>Current Affairs usage stats.</td></tr>
+<tr><td>Assessments</td><td>❓ <b>Question Bank</b></td><td>Master question repository.</td></tr>
+<tr><td>Assessments</td><td>📝 <b>Quizzes / Tests</b></td><td>Build quizzes/test series.</td></tr>
+<tr><td>Assessments</td><td>📈 <b>Attempts &amp; Reports</b></td><td>Student attempt results.</td></tr>
+<tr><td>Assessments</td><td>🗂️ <b>Question Imports</b></td><td>Bulk-import questions.</td></tr>
+<tr><td>People</td><td>👨‍🎓 <b>Students &amp; Enrollments</b></td><td>All students, access &amp; money.</td></tr>
+<tr><td>People</td><td>🔀 <b>Duplicate Enrollments</b></td><td>Spot duplicate enrollments.</td></tr>
+<tr><td>People</td><td>💰 <b>Payments &amp; Finance</b></td><td>All transactions &amp; collections.</td></tr>
+<tr><td>People</td><td>🪑 <b>Course EMI &amp; Seats</b></td><td>EMI schedules &amp; seat counts.</td></tr>
+<tr><td>People</td><td>⏳ <b>Access at Risk</b></td><td>Blocked/expiring learners to recover.</td></tr>
+<tr><td>People</td><td>🧑‍💼 <b>Staff &amp; Roles</b></td><td>Staff logins &amp; permissions.</td></tr>
+<tr><td>People</td><td>⚙️ <b>Settings</b></td><td>Portal/website configuration.</td></tr>
+</table>
+
+<h2 id="s1-5">1.5 How to add a new staff member</h2>
+<div class="who"><b>WHO:</b> Super Admin or Admin (needs "Manage staff accounts"). You can only assign roles whose powers you also hold.</div>
+<div class="quick">🔗 Quick link: <span class="url">https://namanias.com/admin/staff</span></div>
+<ol>
+<li>Go to <span class="url">https://namanias.com/admin/staff</span>.</li>
+<li>Make sure the <b>Staff</b> tab is selected (top-left toggle: <b>Staff</b> / <b>Roles &amp; permissions</b>).</li>
+<li>Click <b>+ Add Staff</b> (top-right).</li>
+<li>Type the <b>Full name</b>. A <b>Username</b> is suggested automatically — keep it or edit it (use <b>Regenerate</b> for a new suggestion).</li>
+<li>Optionally enter <b>Email</b>.</li>
+<li>Optionally enter a <b>Portal test login phone</b> only if this person should also test student content (see 1.9). Leave blank otherwise.</li>
+<li>Pick the <b>Role</b> from the dropdown. Read the green "Can do" / red "Cannot do" preview that appears.</li>
+<li>Choose <b>Auto-generate password</b> (recommended) or <b>Set manually</b>. Keep <b>Require password change on first login</b> ticked.</li>
+<li>Click <b>Create staff login</b>.</li>
+<li>On the <b>"Share these credentials now"</b> box, click <b>Copy</b> next to <b>Username</b> and <b>Temporary password</b> and send them to the staff member securely.</li>
+</ol>
+<span class="shot">[SCREENSHOT: the "Add staff member" modal showing Full name, Username, Role dropdown with the Can/Cannot preview, and the password options.]</span>
+<div class="check">✅ How to check it worked: the new person appears in the staff table with their role badge and a green <b>active</b> status.</div>
+<div class="warn">⚠️ Common mistakes: the temporary password is shown <b>only once</b> — copy it before closing. If you can't see a role in the list, it's because it has powers you don't hold.</div>
+
+<h2 id="s1-6">1.6 How to change someone's role or status</h2>
+<div class="who"><b>WHO:</b> Super Admin or Admin.</div>
+<ol>
+<li>Go to <span class="url">https://namanias.com/admin/staff</span> (<b>Staff</b> tab).</li>
+<li>Find the person (use the <b>Search name / username / email</b> box or the role/status filters).</li>
+<li>Click <b>Manage</b> in their row.</li>
+<li>Change the <b>Role</b> dropdown and/or set <b>Status</b> to <b>Active</b> or <b>Disabled</b>.</li>
+<li>Click <b>Save changes</b>.</li>
+</ol>
+<div class="check">✅ How to check it worked: the row shows the new role badge / status. A <b>Disabled</b> person can no longer sign in.</div>
+
+<h2 id="s1-7">1.7 How to reset a staff password / remove access</h2>
+<div class="who"><b>WHO:</b> Super Admin or Admin.</div>
+<ol>
+<li>Go to <span class="url">https://namanias.com/admin/staff</span> → click <b>Manage</b> on the person.</li>
+<li>To reset their password: click <b>Reset password</b>, then on the credentials box click <b>Copy</b> and share the new temporary password securely.</li>
+<li>To temporarily block them: set <b>Status</b> → <b>Disabled</b> → <b>Save changes</b>.</li>
+<li>To remove them permanently: click <b>Remove</b> and confirm.</li>
+</ol>
+<div class="check">✅ How to check it worked: after reset, they can log in with the new temporary password; after Remove, they vanish from the staff list and cannot sign in.</div>
+<div class="warn">⚠️ Common mistakes: <b>Remove</b> cannot be undone. Prefer <b>Disabled</b> if the person might return.</div>
+
+<h2 id="s1-8">1.8 How to create or edit a role</h2>
+<div class="who"><b>WHO:</b> Super Admin only (needs "Manage roles &amp; permissions").</div>
+<ol>
+<li>Go to <span class="url">https://namanias.com/admin/staff</span> and click the <b>Roles &amp; permissions</b> tab.</li>
+<li>Click <b>+ New role</b> (or <b>Edit</b> on a non-system role).</li>
+<li>Type a <b>Role name</b> and a <b>Short description</b>.</li>
+<li>Tick the permissions to grant, grouped under <b>Administration / Finance / Content / Operations</b>. Greyed-out permissions are ones you don't hold and cannot grant. A <b>$</b> marks financial permissions.</li>
+<li>Watch the <b>Live preview</b> "Can do / Cannot do" update.</li>
+<li>Click <b>Create role</b> / <b>Save role</b>.</li>
+</ol>
+<div class="check">✅ How to check it worked: the role card appears with the right permission ticks under <b>View permission matrix</b>.</div>
+<div class="warn">⚠️ Common mistakes: system roles (e.g. Super Admin) can't be deleted; the Super Admin role can't be edited.</div>
+
+<h2 id="s1-9">1.9 Internal "comp" access &amp; staff portal test login</h2>
+<div class="who"><b>WHO:</b> Super Admin or Admin.</div>
+<p class="intro">This lets staff view paid courses/webinars for QA, training or support — through the normal student experience. It is <b>not a purchase</b>: it never creates payment, revenue or seat records.</p>
+<h4>Grant a single staff member access to specific content</h4>
+<ol>
+<li>Go to <span class="url">https://namanias.com/admin/staff</span> (<b>Staff</b> tab).</li>
+<li>In the person's row, click <b>Grant access</b>.</li>
+<li>Tick the <b>Courses</b> and/or <b>Webinars</b> to give them (use the search and <b>Select all</b> / <b>Deselect all</b>).</li>
+<li>Click <b>Save access</b>. To remove everything, click <b>Revoke all</b>.</li>
+</ol>
+<h4>Grant the same content to many staff at once</h4>
+<ol>
+<li>On the Staff tab, click <b>Bulk enroll</b>.</li>
+<li>Select <b>Staff</b>, then the <b>Courses</b> / <b>Webinars</b>.</li>
+<li>Click <b>Grant to selected staff</b>.</li>
+</ol>
+<h4>Give a staff member a student-portal test login</h4>
+<ol>
+<li>Click <b>Manage</b> on the person → in <b>Student-portal test login</b>, enter a valid 10-digit <b>Portal phone</b>.</li>
+<li>Click <b>Create login</b> to generate a <b>Login code</b>, then <b>Copy</b> it and share it.</li>
+<li>Use <b>Regenerate code</b> later to issue a fresh one.</li>
+</ol>
+<div class="check">✅ How to check it worked: the staff row shows a 🛡 badge with the count of comped courses/webinars, and a 🔑 portal badge if a test login exists.</div>
+
+<!-- ================= SECTION 2 ================= -->
+<div class="pagebreak"></div>
+<h1 id="s2">2. Courses (Course Creation team)</h1>
+<p class="intro">Courses are what students enrol and pay for. The model is simple once you learn one idea: a course is a list of <b>batches</b>, and each batch is one sellable option.</p>
+<div class="quick">🔗 Quick link — Courses: <span class="url">https://namanias.com/admin/courses</span> &nbsp;|&nbsp; New Course: <span class="url">https://namanias.com/admin/courses/new</span></div>
+<div class="who"><b>WHO (whole section):</b> Super Admin, Admin, Content Admin, Content Editor (need "Manage course content"). Publishing a course needs "Publish / unpublish content" (the same four roles, plus Current Affairs Editor for CA only).</div>
+
+<h2 id="s2-1">2.1 "One batch = one combination" explained</h2>
+<p>A <b>batch</b> is exactly one combination of <b>mode + timing + start date + its own price</b>. For example:</p>
+<ul>
+<li>Online · Morning · starts 1 Aug · ₹40,000</li>
+<li>Online · Evening · starts 1 Aug · ₹40,000</li>
+<li>Offline · Morning · starts 1 Aug · ₹55,000</li>
+</ul>
+<p><b>Why it works this way:</b> students pick a batch on the enrol page, and that single choice decides their schedule and the exact price they pay. There's no guessing. The batch you mark as <b>Default</b> fills the course-level price and dates shown on cards and the public page. Even a simple course is just <b>one</b> batch.</p>
+
+<h2 id="s2-2">2.2 How to create a new course</h2>
+<ol>
+<li>Go to <span class="url">https://namanias.com/admin/courses</span> and click <b>+ New Course</b> (or open <span class="url">https://namanias.com/admin/courses/new</span>).</li>
+<li>On the <b>Basic Details</b> tab, fill the <b>Basics</b> section:
+  <ul>
+  <li><b>Title</b> — the course name students see (e.g. "GS Foundation 2027").</li>
+  <li><b>Category</b> — pick from Foundation, Optional, Test Series, Mains, Specialist, Mentorship, Entry, PCS.</li>
+  <li><b>Status</b> — <b>Draft (hidden)</b> while building; <b>Published (live)</b> to go public; <b>Closed</b> to stop sales.</li>
+  <li><b>Hero badge label (optional)</b> — small badge text; falls back to the category.</li>
+  <li><b>Short description</b> — one or two lines shown on cards.</li>
+  <li><b>Active</b> toggle — leave on so it can show publicly.</li>
+  </ul>
+</li>
+<li>Fill the <b>Details</b> section: <b>Language, Target years, Duration, Faculty,</b> and <b>What's included</b> (comma separated).</li>
+<li>Open the <b>Batches</b> tab and set up at least one batch (see 2.3 and 2.4). This is where price and schedule actually live.</li>
+<li>Add a cover image on the <b>Media</b> tab (see 2.6).</li>
+<li>Click <b>Create Course</b> (bottom of the form).</li>
+</ol>
+<span class="shot">[SCREENSHOT: the Create New Course form on the Basic Details tab, showing the tab row: Basic Details, Pricing &amp; Seats, Batches, Media, Rich Content, Reviews, After Registration, Access &amp; Entitlements, SEO, Contact / WhatsApp.]</span>
+<div class="check">✅ How to check it worked: a "Course created" message appears and the course shows in the Course Manager list. A public page is generated at <span class="url">https://namanias.com/courses/&lt;slug&gt;</span>.</div>
+<div class="warn">⚠️ Common mistakes: a course needs a <b>Title</b> to save. Price/schedule are set in <b>Batches</b>, not Basic Details — the Schedule and Pricing summaries there are read-only and fill in from the default batch when you save.</div>
+
+<h2 id="s2-3">2.3 How to create a course with multiple batches (Quick add)</h2>
+<ol>
+<li>Open the course (Edit) and click the <b>Batches</b> tab.</li>
+<li>In the <b>Quick add combinations</b> panel, under <b>Modes</b> click the modes you offer (<b>Online, Offline, Hybrid, Recorded</b>).</li>
+<li>Under <b>Timings</b> click the timings (<b>Morning, Afternoon, Evening, Weekend</b>).</li>
+<li>Click <b>+ Generate N batches</b>. One batch is created per combination (existing ones are skipped).</li>
+<li>For each generated batch card, set the <b>Batch start date</b>, prices and EMI/seats (see 2.4). Edit the <b>Batch label</b> if you want different wording.</li>
+<li>Pick which batch is the <b>Default</b> (radio button) — it fills the course-level price/dates.</li>
+<li>Use <b>+ Add one batch</b> for a manual extra, or <b>Duplicate</b> on a card to copy it.</li>
+<li>Click <b>Save Changes</b>.</li>
+</ol>
+<span class="shot">[SCREENSHOT: the Batches tab showing the "Quick add combinations" panel with Modes/Timings chips and the "+ Generate" button, plus one batch card with the Default radio.]</span>
+<div class="check">✅ How to check it worked: each combination shows as its own card; the Default card shows a green "Fills course-level fields" tag. On the public enrol page each option appears.</div>
+<div class="warn">⚠️ Common mistakes: every course keeps at least one batch — you can't remove the last one. Clicking an already-selected timing clears it.</div>
+
+<h2 id="s2-4">2.4 Price, Pay-in-Full, EMI &amp; seats — per batch</h2>
+<p>Inside each batch card on the <b>Batches</b> tab:</p>
+<ul>
+<li><b>Original price (₹)</b> — optional strikethrough "anchor" price.</li>
+<li><b>Price — standard / total fee (₹)</b> — the base price; EMI and Book-Your-Seat are calculated from this.</li>
+<li><b>Pay-in-Full price (₹)</b> — optional one-shot discounted price (leave blank to charge the standard price).</li>
+<li><b>Total seats (capacity)</b> and <b>Seats remaining</b> — optional.</li>
+</ul>
+<h4>Turn on EMI / Book Your Seat for a batch</h4>
+<ol>
+<li>In the batch's <b>Book Your Seat + EMI (this batch)</b> box, tick <b>Enable "Book Your Seat + EMI" for this course</b>.</li>
+<li>Optionally tick <b>Also allow one-time "Pay Full" option</b>.</li>
+<li>Set <b>Seat amount (₹)</b> (the deposit that secures a seat).</li>
+<li>Optionally tick <b>Let students enter a custom seat amount</b> and set a <b>Minimum seat amount</b>.</li>
+<li>Set <b>Installment counts</b> (comma separated, e.g. 3, 6, 10), <b>First installment after (days)</b> and <b>Then every (months)</b>.</li>
+<li>Read the <b>Student preview</b> schedule; the <b>Grand total</b> must equal the fee (shows a green ✓).</li>
+</ol>
+<div class="check">✅ How to check it worked: the batch's footer shows the price and "pay-in-full" line; the EMI preview totals match the fee.</div>
+<div class="warn">⚠️ Common mistakes: the Pay-in-Full price should be <b>lower</b> than the standard Price (an amber warning appears if not). If EMI preview total ≠ fee, fix the seat amount or counts.</div>
+
+<h2 id="s2-5">2.5 Coupons (discount codes)</h2>
+<ol>
+<li>Open the course → <b>Pricing &amp; Seats</b> tab → <b>Coupons</b> section.</li>
+<li>Add a code, its discount, and any limits using the coupon editor.</li>
+<li>Click <b>Save Changes</b>.</li>
+</ol>
+<div class="check">✅ How to check it worked: applying the code at checkout reduces the price.</div>
+
+<h2 id="s2-6">2.6 Images, description, category, duration &amp; SEO</h2>
+<ul>
+<li><b>Cover image</b> — <b>Media</b> tab → <b>Primary cover image</b> (recommended 1200×630). Optional <b>Mobile image</b>.</li>
+<li><b>Video</b> — Media tab → embed a YouTube video or Instagram reel.</li>
+<li><b>Downloadable resources</b> — Media tab → attach bonus PDFs.</li>
+<li><b>Brochures</b> — Basic Details → <b>Attached brochures</b> (pick from the shared Brochure Library; see 3.4).</li>
+<li><b>Rich description</b> — <b>Rich Content</b> tab → <b>About (rich text)</b>, plus "What you'll learn", "Who should join", FAQs, mentor.</li>
+<li><b>Duration / Language / Faculty / Target years</b> — Basic Details → Details section.</li>
+<li><b>SEO</b> — <b>SEO</b> tab → controls Google title, description and share preview. (Needs "Manage SEO &amp; metadata", held by content roles.)</li>
+<li><b>Access &amp; Entitlements</b> — the <b>Access &amp; Entitlements</b> tab ("Mission Control") decides exactly what enrolling unlocks: Class Hub, recorded lectures, quizzes/test series, Current Affairs compilations, study PDFs, and the access validity (<b>Lifetime</b> or <b>Limited (expires after N days)</b>).</li>
+</ul>
+<div class="check">✅ How to check it worked: open the public course page (<b>View ↗</b> on the course row) and confirm the image, text and unlocked items look right.</div>
+
+<h2 id="s2-7">2.7 How to edit a live course safely</h2>
+<div class="intro">You can edit a published course at any time; changes go live on save. The key safety idea: don't change what students have already bought.</div>
+<ol>
+<li>Go to <span class="url">https://namanias.com/admin/courses</span> and click <b>Edit</b> on the course (the address becomes <span class="url">https://namanias.com/admin/courses/[COURSE-ID]/edit</span>).</li>
+<li>Safe to change anytime: description, images, rich content, FAQs, SEO, contact links, what's included.</li>
+<li>For pricing/schedule, prefer <b>adding a new batch</b> over rewriting an existing one that students already bought.</li>
+<li>Click <b>Save Changes</b>.</li>
+</ol>
+<div class="check">✅ How to check it worked: open the public page and confirm enrolled students' batch still exists with the same price.</div>
+<div class="warn">⚠️ Common mistakes: don't delete or repurpose a batch that has paying students — create a new batch for new pricing instead. Never delete a live course with enrolled students (see 2.9 and the Golden Rules).</div>
+
+<h2 id="s2-8">2.8 How to reorder courses</h2>
+<ol>
+<li>Go to <span class="url">https://namanias.com/admin/courses</span>.</li>
+<li>Drag a row by its grip handle (⠿) to a new position — this sets the order on the public Courses page.</li>
+<li>Or type a number in the small position box on a row and press Enter.</li>
+<li>Watch the top-right status show <b>Saving… → Saved</b>.</li>
+</ol>
+<div class="check">✅ How to check it worked: the status reads <b>Saved</b>; the public Courses page shows the new order.</div>
+<div class="warn">⚠️ Common mistakes: if it says <b>Not saved</b>, your order was reverted — try again.</div>
+
+<h2 id="s2-9">2.9 Publish / unpublish / disable / delete a course</h2>
+<ul>
+<li><b>Publish / unpublish:</b> open the course (Edit) and set <b>Status</b> to <b>Published (live)</b>, <b>Draft (hidden)</b> or <b>Closed</b>, then <b>Save Changes</b>.</li>
+<li><b>Disable (hide) without editing:</b> on the Courses list, click <b>Disable</b> in the row (toggles to <b>Enable</b>). Disabled courses are hidden from the public.</li>
+<li><b>Delete:</b> on the Courses list, click <b>Delete</b> and confirm.</li>
+</ul>
+<div class="check">✅ How to check it worked: a Draft/Disabled/Deleted course no longer appears on the public Courses page.</div>
+<div class="warn">⚠️ Common mistakes: <b>Delete is permanent.</b> If students are enrolled, use <b>Closed</b> or <b>Disable</b> instead, so their access and history are preserved.</div>
+
+<h2 id="s2-10">2.10 Verify on the student side</h2>
+<ol>
+<li>On the Courses list, click <b>View ↗</b> on the course (opens <span class="url">https://namanias.com/courses/&lt;slug&gt;</span> in a new tab).</li>
+<li>Check every batch option (Online/Offline, Morning/Evening) shows with the correct price and start date.</li>
+<li>Confirm the EMI / Book-Your-Seat options appear if you enabled them.</li>
+</ol>
+<div class="check">✅ How to check it worked: each batch you created is selectable on the enrol page with the right price.</div>
+
+<!-- ================= SECTION 3 ================= -->
+<div class="pagebreak"></div>
+<h1 id="s3">3. Content / LMS (Content team)</h1>
+<p class="intro">This is where you put lectures, notes, tests and other material into batches so students see them in their Class Hub. The dedicated <b>Webinars</b> section at the bottom of this page is also where webinar recordings are managed.</p>
+<div class="quick">🔗 Quick link — Content / LMS: <span class="url">https://namanias.com/admin/content</span></div>
+<div class="who"><b>WHO (whole section):</b> Super Admin, Admin, Content Admin, Content Editor (need "Manage course content"). Webinar recordings also accept Webinar content roles.</div>
+
+<h2 id="s3-1">3.1 How to add content &amp; assign it to batches</h2>
+<ol>
+<li>Go to <span class="url">https://namanias.com/admin/content</span> and click <b>+ Add Content</b>.</li>
+<li>Pick the content <b>type</b> from the dropdown. Available types: <b>Current Affairs, Prelims MCQs, Booklet, Recording, Live Class, PYQ Bank, Test Series, Answer Writing, Notes, Maps</b>.</li>
+<li>Choose a <b>Subject</b> (Polity, Economy, Geography, History, Environment, S&amp;T, IR, Ethics, CSAT, Optional).</li>
+<li>Type a <b>Title</b> and optional <b>Description</b>.</li>
+<li>Under <b>Assign to course(s) / batch(es)</b>, tick every batch this item belongs to (an item can be in many; leave empty for a global library item).</li>
+<li>Fill <b>Class / Session #</b>, <b>Topic / Paper</b>, <b>Duration</b> and <b>Lecture date</b> as relevant.</li>
+<li>Add the material itself (a video — see 3.2/3.3 — or a link — see 3.4).</li>
+<li>Optionally set a <b>Drip release date</b> (see 3.6). Tick <b>Publish now</b> to make it live.</li>
+<li>Click <b>Add Content</b>.</li>
+</ol>
+<span class="shot">[SCREENSHOT: the "Add Content" modal showing type/subject dropdowns, Title, "Assign to course(s) / batch(es)" checklist, and the Recording source toggle.]</span>
+<div class="check">✅ How to check it worked: the item appears in the content table; its <b>Published</b> column shows <b>Live</b>. Students in the assigned batch see it in Class Hub.</div>
+<div class="warn">⚠️ Common mistakes: leaving all batches unticked makes it a global library item (no batch shows it). Reorder/filter using the top filters (search, batch, type, subject, status).</div>
+
+<h2 id="s3-2">3.2 How to upload a lecture video file (hosted)</h2>
+<div class="intro">"Hosted" means the actual video file lives on our own storage and plays inline for students. It uploads in the background, so you can keep working.</div>
+<ol>
+<li>Click <b>+ Add Content</b> and set the type to <b>Recording</b> (or <b>Live Class</b>).</li>
+<li>Fill Title and assign batches (3.1).</li>
+<li>Under <b>Recording source</b>, click <b>⬆️ Upload video (hosted)</b>.</li>
+<li>Click <b>Choose video file</b> and select an already-compressed MP4 (≈300–500 MB is ideal).</li>
+<li>Set <b>Visibility</b>: <b>Enrolled only (entitlement-gated)</b> for paid students, or <b>Public (free / marketing — no login)</b> for an open preview.</li>
+<li>Click <b>Save &amp; start upload</b>. The upload continues in the background (a progress widget shows it).</li>
+</ol>
+<span class="shot">[SCREENSHOT: the hosted upload area with "Choose video file" and the Visibility dropdown, plus the background upload progress widget.]</span>
+<div class="check">✅ How to check it worked: the item's <b>Type</b> column shows a green <b>Hosted</b> pill once the upload finishes (it shows <b>Uploading</b> while in progress).</div>
+<div class="warn">⚠️ Common mistakes: don't close your browser until the progress widget shows the upload finished. If it shows <b>Upload failed</b>, see 3.8.</div>
+
+<h2 id="s3-3">3.3 Add a recording by external link</h2>
+<ol>
+<li>Click <b>+ Add Content</b>, type <b>Recording</b>, fill Title and batches.</li>
+<li>Under <b>Recording source</b>, click <b>🔗 External link</b>.</li>
+<li>Paste any one (or a combination) of <b>YouTube link</b>, <b>Google Drive link</b>, <b>Telegram link</b>.</li>
+<li>Tick <b>Publish now</b> and click <b>Add Content</b>.</li>
+</ol>
+<div class="check">✅ How to check it worked: the item is listed; the assigned batch's Class Hub shows a "Watch Recording" action.</div>
+
+<h2 id="s3-4">3.4 Upload study material / notes / PDFs &amp; brochures</h2>
+<h4>Notes / study material inside Content/LMS</h4>
+<ol>
+<li>Click <b>+ Add Content</b>; choose type <b>Notes</b>, <b>Booklet</b>, <b>PYQ Bank</b> etc.</li>
+<li>Assign batches, then paste the <b>Google Drive / PDF link</b> (and optional Telegram / YouTube link).</li>
+<li>Tick <b>Publish now</b> → <b>Add Content</b>.</li>
+</ol>
+<h4>Brochure / shared PDF library (upload once, reuse everywhere)</h4>
+<div class="quick">🔗 Quick link: <span class="url">https://namanias.com/admin/library</span></div>
+<ol>
+<li>Go to <span class="url">https://namanias.com/admin/library</span> (<b>Brochure / Resources Library</b>).</li>
+<li>Type a <b>Title</b> and optional <b>Category</b>.</li>
+<li>Click <b>Upload PDF</b> and pick the file (or paste a PDF URL in <b>Or paste PDF URL</b>).</li>
+<li>Click <b>Add to library</b>.</li>
+<li>Attach it to a course (Basic Details → <b>Attached brochures</b>) or webinar (Media → Brochures).</li>
+</ol>
+<div class="check">✅ How to check it worked: the PDF appears in the library table and can be picked when editing a course/webinar.</div>
+<div class="warn">⚠️ Common mistakes: deleting a library file that's in use breaks those references — the system warns you and lists where it's used.</div>
+
+<h2 id="s3-5">3.5 Orientation &amp; starter videos (reuse one video)</h2>
+<ol>
+<li>Add or edit a <b>Recording</b> in Content/LMS.</li>
+<li>In the gold <b>Use as orientation / starter video</b> box, choose role <b>Orientation</b> or <b>Starter</b>.</li>
+<li>Tick the courses and/or webinars where this same video should appear in their "After Registration" area.</li>
+<li>Save. The one video now shows in all chosen places without re-uploading.</li>
+</ol>
+<div class="check">✅ How to check it worked: the video shows in each selected course/webinar's After-Registration section for enrolled students.</div>
+
+<h2 id="s3-6">3.6 Drip release &amp; public (free) visibility</h2>
+<ul>
+<li><b>Drip release:</b> in Add/Edit Content, set a <b>Drip release date</b> so the item unlocks for students on that date.</li>
+<li><b>Free / public preview:</b> for a hosted video, set <b>Visibility</b> → <b>Public (free / marketing — no login)</b>. This is how you make a lecture watchable without enrolment. (There is no separate "free preview" tick — Public visibility is the way.)</li>
+</ul>
+<div class="check">✅ How to check it worked: a dripped item stays locked until its date; a Public video plays without logging in.</div>
+
+<h2 id="s3-7">3.7 How to manage a WEBINAR recording (Webinars section)</h2>
+<div class="warn">⚠️ Important: webinar recordings are managed in <b>Content / LMS → Webinars section</b> (scroll to the bottom of the Content/LMS page), <b>NOT</b> in the webinar edit form. The link field in the webinar form still works, but this section is the one place that handles uploads, library reuse and links together.</div>
+<div class="quick">🔗 Quick link: <span class="url">https://namanias.com/admin/content</span> (scroll down to the <b>Webinars</b> heading)</div>
+<p>Each webinar row gives you three ways to set a recording:</p>
+<h4>Option A — Upload a video file</h4>
+<ol>
+<li>Find the webinar (use the <b>Search webinars…</b> box).</li>
+<li>Click <b>⬆️ Upload video file</b> (or <b>⬆️ Replace video</b> if one exists).</li>
+<li>Pick an MP4 (max 5 GB; compress larger files first). It uploads in the background with a progress bar and a <b>Cancel</b> option.</li>
+</ol>
+<h4>Option B — Reuse a video from the library</h4>
+<ol>
+<li>Click <b>📚 Choose from library</b>.</li>
+<li>Search and click a completed hosted video, then <b>Use →</b>. It is referenced (no re-upload, no duplicate storage); playback stays gated to this webinar's paid attendees.</li>
+</ol>
+<h4>Option C — Paste an external link</h4>
+<ol>
+<li>In the row's link box, paste a <b>YouTube / Drive / direct</b> URL.</li>
+<li>Click <b>Save link</b>.</li>
+</ol>
+<h4>Read the recording status</h4>
+<table>
+<tr><th>Status pill</th><th>Meaning</th></tr>
+<tr><td><b>No recording</b> (grey)</td><td>Nothing set yet.</td></tr>
+<tr><td><b>Uploading N%</b> (amber)</td><td>A file upload is in progress.</td></tr>
+<tr><td><b>Hosted ✓</b> (green)</td><td>An uploaded file is ready and plays inline.</td></tr>
+<tr><td><b>Hosted ✓ (library)</b> (green)</td><td>Reusing a library video as the recording.</td></tr>
+<tr><td><b>Link set</b> (blue)</td><td>An external link is set.</td></tr>
+<tr><td><b>Upload failed</b> (red)</td><td>The upload didn't finish — try again (3.8).</td></tr>
+</table>
+<p>To remove an uploaded recording, click <b>Remove</b> on the row.</p>
+<div class="check">✅ How to check it worked: the row's <b>Status</b> shows Hosted ✓ / Link set; a paid attendee sees/plays the recording after the session date (no more "processing").</div>
+<div class="warn">⚠️ Common mistakes: removing a recording that was reused from the library only detaches it from the webinar — the original library/course video is never deleted. Access is per-webinar; a recording never leaks course-gated content.</div>
+
+<h2 id="s3-8">3.8 File size / type limits &amp; fixing upload errors</h2>
+<table>
+<tr><th>Where</th><th>Allowed</th><th>Limit</th></tr>
+<tr><td>Course lecture video (hosted)</td><td>MP4 / video</td><td>≈300–500 MB recommended (compress first)</td></tr>
+<tr><td>Webinar recording (hosted)</td><td>MP4 / video</td><td>5 GB hard cap (compress larger files)</td></tr>
+<tr><td>Brochure / library</td><td>PDF</td><td>Single PDF</td></tr>
+<tr><td>Payment proof (Payments page)</td><td>JPG, PNG, WEBP, PDF</td><td>8 MB per file, up to 3 files</td></tr>
+</table>
+<p><b>If an upload fails or stalls:</b></p>
+<ol>
+<li>Check your internet connection.</li>
+<li>The upload is resumable — re-open the same item and use <b>Replace video</b> / <b>Upload video file</b> to retry; it picks up safely.</li>
+<li>If the file is very large, compress it to MP4 first, then upload.</li>
+<li>If a video won't play for students, confirm the status pill shows <b>Hosted ✓</b> (not Uploading/Failed) or that the external link is public.</li>
+</ol>
+<div class="check">✅ How to check it worked: status flips to <b>Hosted ✓</b> and the video plays inline.</div>
+
+<!-- ================= SECTION 4 ================= -->
+<div class="pagebreak"></div>
+<h1 id="s4">4. Webinars (Webinar team)</h1>
+<p class="intro">Webinars are single events with their own public registration page. Each one is a separate sellable event.</p>
+<div class="quick">🔗 Quick link — Webinars: <span class="url">https://namanias.com/admin/webinars</span> &nbsp;|&nbsp; New Webinar: <span class="url">https://namanias.com/admin/webinars/new</span></div>
+<div class="who"><b>WHO (whole section):</b> Super Admin, Admin, Content Admin, Content Editor (need "Manage webinars &amp; events").</div>
+
+<h2 id="s4-1">4.1 How to create and edit a webinar</h2>
+<ol>
+<li>Go to <span class="url">https://namanias.com/admin/webinars</span> and click <b>+ New Webinar</b>.</li>
+<li>On <b>Basic Details</b> → <b>Basics</b>: type the <b>Title</b>, an optional <b>Slug (URL)</b> (auto-made if blank), pick <b>Status</b> (<b>Upcoming</b> or <b>Completed (show recording)</b>), an optional <b>Hero badge label</b>, and a <b>Short description</b>.</li>
+<li>In <b>Schedule</b>: set <b>Start date &amp; time (IST)</b> and optional <b>End date &amp; time (IST)</b>. All times are IST.</li>
+<li>In <b>Registration window</b>: set <b>Registration</b> (<b>Open / Closed / Disabled / Draft</b>), the <b>Auto-close at start</b> toggle, an optional <b>Custom registration cutoff</b>, and the <b>Show registration count</b> toggle (see 4.2).</li>
+<li>In <b>Session type &amp; links</b>: choose <b>Live webinar</b> or <b>Recorded session</b>, paste the <b>Zoom / live class link</b>, an optional <b>Recording link</b>, and an optional <b>Join note</b>.</li>
+<li>On <b>Pricing &amp; Seats</b>: set <b>Price (₹)</b> (0 = free) and optional <b>Capacity</b>; add coupons if needed.</li>
+<li>Add a cover image (Media), rich content, materials, and cross-sell as needed.</li>
+<li>Click <b>Create Webinar</b> (or <b>Save Changes</b> when editing).</li>
+</ol>
+<span class="shot">[SCREENSHOT: the webinar Basic Details tab showing Schedule, Registration window (with the Show registration count toggle), and Session type &amp; links.]</span>
+<div class="check">✅ How to check it worked: a public registration page is generated at <span class="url">https://namanias.com/webinars/&lt;slug&gt;</span>.</div>
+<div class="warn">⚠️ Common mistakes: the end time must be after the start time. Once registration closes, the public Register/Pay button hides and the server rejects new payments.</div>
+
+<h2 id="s4-2">4.2 The registration-count show/hide toggle</h2>
+<p>In the webinar's <b>Registration window</b> section, the <b>Show registration count on public page</b> field (checkbox: "Show how many people have registered") is the admin's choice:</p>
+<ul>
+<li><b>On</b>: the public page shows the <b>real</b> count once it reaches 10 or more. Below 10 it shows encouraging copy instead of "0 registered".</li>
+<li><b>Off</b>: no count is shown at all.</li>
+</ul>
+<p>The portal <b>never</b> shows a fake or seeded number.</p>
+<div class="check">✅ How to check it worked: open the public webinar page and confirm the count shows (10+), shows encouragement (under 10), or is hidden (toggle off) as you set it.</div>
+
+<h2 id="s4-3">4.3 How to add a recording</h2>
+<p>Use the dedicated Webinars section in Content/LMS — see <a href="#s3-7">3.7</a>. (The webinar form also has a single <b>Recording link</b> field, but 3.7 is the full toolkit: upload a file, reuse a library video, or paste a link.)</p>
+<div class="quick">🔗 Quick link: <span class="url">https://namanias.com/admin/content</span> → scroll to <b>Webinars</b>.</div>
+
+<h2 id="s4-4">4.4 How to rename a webinar (auto-propagates)</h2>
+<ol>
+<li>Go to <span class="url">https://namanias.com/admin/webinars</span> → <b>Edit</b> the webinar.</li>
+<li>Change the <b>Title</b> and click <b>Save Changes</b>.</li>
+</ol>
+<div class="check">✅ How to check it worked: the new name appears in <b>Payments &amp; Finance</b>, the student portal and other displays automatically — the name is read live, so a rename updates everywhere.</div>
+<div class="warn">⚠️ Common mistakes: changing the <b>Slug</b> changes the public web address; avoid changing the slug after you've shared the link.</div>
+
+<h2 id="s4-5">4.5 Re-runs (separate paid events) via Duplicate</h2>
+<p class="intro">Each re-run of a webinar is its own separate paid event. Paying for one date never unlocks a sibling date. Use Duplicate to set one up quickly.</p>
+<ol>
+<li>On <span class="url">https://namanias.com/admin/webinars</span>, click <b>Duplicate</b> on the source webinar.</li>
+<li>In <b>Duplicate webinar</b>, set the <b>New date &amp; time (IST)</b> (required) and optional <b>End time</b>.</li>
+<li>Optionally set a <b>Slug</b> (auto-generated if blank).</li>
+<li>Choose <b>Publish state</b>: <b>Draft</b> (hidden, finish editing first) or <b>Live</b> (public &amp; accepting registrations).</li>
+<li>Tick <b>Copy the Zoom / joining link</b> if reusing the same link.</li>
+<li>Keep <b>Mark the original as ended (stops new payments) &amp; link it to this one</b> ticked (recommended).</li>
+<li>Click <b>Duplicate webinar</b>.</li>
+</ol>
+<div class="check">✅ How to check it worked: a new webinar appears with the new date; all content/media is copied (no files re-uploaded). The original stops taking new payments if you ticked that box.</div>
+<div class="warn">⚠️ Common mistakes: don't expect a buyer of the old date to get the new date free — they're separate events by design.</div>
+
+<h2 id="s4-6">4.6 Share the link &amp; manage registrants</h2>
+<ol>
+<li>On the Webinars list, click <b>Copy link</b> to copy the registration URL, or <b>WhatsApp</b> to share it.</li>
+<li>Click <b>View registrants</b> to open <span class="url">https://namanias.com/admin/webinars/[WEBINAR-ID]/registrations</span>.</li>
+<li>Read the count cards: <b>Confirmed</b> (paid + free), and for paid webinars <b>Pending</b>, <b>Failed</b>, <b>Unpaid (lead only)</b>, plus <b>Total rows</b>.</li>
+<li>Each registrant row shows name, phone, registered time, status, attended, and an <b>SMS</b> action.</li>
+</ol>
+<div class="check">✅ How to check it worked: the registrants table loads and "Confirmed" matches paid + free registrations.</div>
+
+<h2 id="s4-7">4.7 Move late registrations</h2>
+<div class="intro">Use this when people registered/paid for an old date but should attend a newer re-run.</div>
+<ol>
+<li>Open the source webinar's registrants page (<b>View registrants</b>).</li>
+<li>Click <b>Move late registrations</b>.</li>
+<li>Follow the modal to move the chosen registrations to the target webinar.</li>
+</ol>
+<div class="check">✅ How to check it worked: the moved people now appear under the target webinar's registrants.</div>
+
+<h2 id="s4-8">4.8 Verify on the student side</h2>
+<ol>
+<li>Copy the link (<b>Copy link</b>) and open it in a private browser window.</li>
+<li>Confirm the schedule (IST), price, and the registration count behaviour you chose (4.2).</li>
+<li>For a completed webinar with a recording, confirm a paid attendee can play it after the date.</li>
+</ol>
+<div class="check">✅ How to check it worked: the public page matches your settings and the recording plays for paid attendees.</div>
+
+<!-- ================= SECTION 5 ================= -->
+<div class="pagebreak"></div>
+<h1 id="s5">5. Payments (Payment team)</h1>
+<p class="intro">This team records manual enrolments, handles proof-of-payment, and approves/rejects payments. Most work happens on the student profile and the Payments &amp; Finance page.</p>
+<div class="quick">🔗 Quick link — Payments &amp; Finance: <span class="url">https://namanias.com/admin/payments</span> &nbsp;|&nbsp; Students: <span class="url">https://namanias.com/admin/students</span></div>
+<div class="who"><b>WHO:</b> Manual enrolment &amp; student records need "Manage students, leads &amp; enrollments" (Super Admin, Admin, Content Admin, Support / Operations). Approving/rejecting payments, uploading proof and re-verifying need "Manage payments" (Super Admin, Admin, Finance / Revenue). Reverse/edit/delete are Super Admin only.</div>
+
+<h2 id="s5-1">5.1 How to manually enroll a student (one screen)</h2>
+<div class="quick">🔗 Quick link: <span class="url">https://namanias.com/admin/students/new</span></div>
+<ol>
+<li>Go to <span class="url">https://namanias.com/admin/students</span> and click <b>+ Add Student</b>.</li>
+<li>In <b>Profile</b>, fill <b>Full name</b> and <b>Phone (10-digit)</b> (required); optional <b>Email</b>, <b>Target year</b>.</li>
+<li>Set <b>Access validity</b> — pick a plan (1m/3m/6m/12m/Lifetime) or <b>Custom date</b>.</li>
+<li>In <b>Enroll into courses</b>, tick each course. For each, choose <b>Pay in full</b>, <b>EMI / Installments</b>, or <b>Complimentary</b> (free at ₹0). For EMI pick the installment count; tick <b>Book seat first</b> if offered.</li>
+<li>In <b>Register for webinars</b>, tick any webinars.</li>
+<li>(Optional) In <b>Record initial payment</b>, choose the course, <b>Method</b> (Cash / Bank Transfer / Offline UPI), date and a note. This records the first payable line and generates a receipt.</li>
+<li>Click <b>Create student</b>.</li>
+</ol>
+<span class="shot">[SCREENSHOT: the "Add student" page showing Profile, "Enroll into courses" with plan buttons, and the "Record initial payment" box.]</span>
+<div class="check">✅ How to check it worked: a "Student created" confirmation shows the <b>login code</b>. The student appears in Students &amp; Enrollments with the right course/webinar.</div>
+<div class="warn">⚠️ Common mistakes: phone must be exactly 10 digits. <b>Complimentary</b> records no payment; use it only for genuinely free access.</div>
+
+<h2 id="s5-2">5.2 Generate &amp; share a login code</h2>
+<p>A login code is created automatically when you add a student (5.1). To share it:</p>
+<ol>
+<li>On the success screen, click <b>Copy</b> next to the code, or <b>Send on WhatsApp</b>.</li>
+<li>Later, open the student's profile (<span class="url">https://namanias.com/admin/students/[STUDENT-ID]</span>) and copy the <b>Access</b> code (and the <b>Portal</b> login code if shown) from the header chips.</li>
+</ol>
+<div class="check">✅ How to check it worked: the student can sign in to the portal with their phone + login code.</div>
+<div class="warn">⚠️ Common mistakes: share codes privately (WhatsApp/SMS to the student), never in public channels.</div>
+
+<h2 id="s5-3">5.3 Upload a proof-of-payment screenshot</h2>
+<div class="who"><b>WHO:</b> Manage payments (Super Admin, Admin, Finance / Revenue). Students can also upload their own proof from their side; here you do it on their behalf.</div>
+<ol>
+<li>Go to <span class="url">https://namanias.com/admin/payments</span>.</li>
+<li>Find the person/transaction (search by name/phone/item/reference).</li>
+<li>Click <b>Manage</b> on the attempt to open the <b>Manage payment</b> box.</li>
+<li>Under <b>Upload payment proof (on student's behalf)</b>, click the file picker and select the screenshot(s) — images or PDF, up to <b>3 files, 8 MB each</b>.</li>
+<li>Optionally type an internal note.</li>
+</ol>
+<div class="check">✅ How to check it worked: the file shows under <b>Uploaded files</b>, and the attempt shows a <b>Proof uploaded</b> tag.</div>
+<div class="warn">⚠️ Common mistakes: uploading proof <b>does not</b> grant access — you still have to <b>Approve</b> (5.4). Only images/PDF up to 8 MB are accepted.</div>
+
+<h2 id="s5-4">5.4 The approval workflow (approve / reject / request reupload)</h2>
+<div class="who"><b>WHO:</b> Approve / reject / request reupload — Manage payments. Reverse an approval — Super Admin only.</div>
+<ol>
+<li>On <span class="url">https://namanias.com/admin/payments</span>, click <b>Manage</b> on the attempt.</li>
+<li>Review the metadata (Item, Amount, Status, Login code, Reference) and any uploaded files (<b>View (signed) →</b>).</li>
+<li>To approve: click <b>✓ Approve payment &amp; grant access</b> and confirm. This marks it <b>PAID</b> and unlocks access.</li>
+<li>To ask the student for a clearer file: type a <b>Reason</b> and click <b>Request reupload</b>.</li>
+<li>To decline: type a <b>Reason</b> and click <b>Reject proof</b>.</li>
+<li>To add a private note: type it and click <b>Add note</b>.</li>
+<li>(Super Admin) To undo an approval: in the red box, type a <b>Reason for reversal</b> and click <b>↩ Reverse approval</b> — access is re-locked and the receipt/schedule rolled back. The record is never deleted.</li>
+</ol>
+<span class="shot">[SCREENSHOT: the Manage payment modal showing Uploaded files, the Approve button, and the Request reupload / Reject buttons.]</span>
+<table>
+<tr><th>Proof status</th><th>Meaning</th></tr>
+<tr><td><b>Proof uploaded</b> (blue)</td><td>Student/staff submitted a file; awaiting review.</td></tr>
+<tr><td><b>Reupload requested</b> (amber)</td><td>You asked for a clearer/correct file.</td></tr>
+<tr><td><b>Proof accepted</b> (green)</td><td>Proof approved.</td></tr>
+<tr><td><b>Proof rejected</b> (red)</td><td>Proof declined.</td></tr>
+</table>
+<div class="check">✅ How to check it worked: after Approve, the attempt shows <b>PAID</b> and the student gains access. A green "already has access" note appears if they were already unlocked elsewhere.</div>
+<div class="warn">⚠️ Common mistakes: if the box shows the student already has access, approving again is usually unnecessary. Reversal needs a written reason.</div>
+
+<h2 id="s5-5">5.5 Partial payments / EMI / record a payment</h2>
+<div class="who"><b>WHO:</b> Manage students, leads &amp; enrollments.</div>
+<ol>
+<li>Open the student profile (<span class="url">https://namanias.com/admin/students/[STUDENT-ID]</span>).</li>
+<li>On a course card under <b>Active enrolled courses</b>, click <b>Record payment</b>.</li>
+<li>Choose what to settle: a specific seat/installment line, or <b>Pay full remaining balance</b>.</li>
+<li>Pick <b>Method</b> (Cash / Bank Transfer / Offline UPI), date and an optional reference/note.</li>
+<li>Click <b>Record …</b>. A branded receipt is generated.</li>
+</ol>
+<h4>Change a plan or adjust installments</h4>
+<ul>
+<li><b>Change plan</b> (Full ↔ EMI ↔ Custom installments): on the course card click <b>Change plan</b>; paid amounts are kept, only the future outstanding is converted.</li>
+<li><b>Manage installments</b>: click <b>Manage installments</b> to edit due dates, waive or cancel unpaid installments.</li>
+</ul>
+<div class="check">✅ How to check it worked: the course card's "paid / outstanding" updates and a receipt appears in the Payments ledger (downloadable as PDF).</div>
+<div class="warn">⚠️ Common mistakes: a backdated due date more than 15 days in the past will immediately revoke access — only do it intentionally (you must tick the confirmation).</div>
+
+<h2 id="s5-6">5.6 Find a payment &amp; read the timeline</h2>
+<ol>
+<li>Go to <span class="url">https://namanias.com/admin/payments</span>.</li>
+<li>Search by name / phone / item / reference, or use the status/type/date filters.</li>
+<li>Click a user card to expand their grouped payments; each <b>group</b> is one item (e.g. a course) and shows its attempts.</li>
+<li>Click <b>Manage</b> on an attempt; (Super Admin) click <b>View full lifecycle history →</b> to see every action with who did it and when.</li>
+</ol>
+<div class="check">✅ How to check it worked: you can see each attempt's status, amount, reference and time, and the canonical group status (paid-wins).</div>
+
+<h2 id="s5-7">5.7 "Says payment failed but they paid" playbook</h2>
+<div class="intro">A later failed attempt never overrides an earlier successful one — "paid is sticky". A failed-payment popup the student saw refers only to that specific item/event, and never to a different, already-paid event.</div>
+<ol>
+<li>Go to <span class="url">https://namanias.com/admin/payments</span> and search the student's phone.</li>
+<li>Look at the <b>group</b> for the item in question. If it shows <b>Paid</b> (green) — they're fine; the failed attempt inside is just a retry.</li>
+<li>If unsure it actually settled, click <b>↻</b> on the non-paid attempt (or use <b>Re-verify payments</b>) to re-check with the bank (ICICI). Re-verify never downgrades a PAID record.</li>
+<li>If they truly paid but the row is still non-paid and you have proof, upload it (5.3) and <b>Approve</b> (5.4).</li>
+<li>For webinars: remember each date is a separate event — confirm the exact event (the popup names the webinar + date). A failed attempt for one date never affects a paid registration for another.</li>
+</ol>
+<div class="check">✅ How to check it worked: the item's group reads <b>Paid</b> / <b>All settled</b> and the student has access.</div>
+<div class="warn">⚠️ Common mistakes: don't approve a second time if the group is already Paid — that can create a duplicate. Use Re-verify before manual action.</div>
+
+<h2 id="s5-8">5.8 Fix a misapplied payment</h2>
+<div class="who"><b>WHO:</b> Super Admin (edit/delete/reverse). Others should escalate.</div>
+<ol>
+<li>On <span class="url">https://namanias.com/admin/payments</span>, click <b>Manage</b> on the attempt.</li>
+<li>(Super Admin) In <b>Edit / delete payment</b>, click <b>Edit fields</b> to correct <b>Amount</b>, <b>Status</b>, <b>Reference no.</b> or <b>Student name</b>; type a required <b>Reason</b> and <b>Save changes</b>.</li>
+<li>If an approval was wrong, use <b>↩ Reverse approval</b> (re-locks access, rolls back receipt).</li>
+<li>If a row is junk/duplicate, use <b>🗑 Move to Trash (recoverable)</b> with a reason.</li>
+<li>To tidy a paid group with leftover unpaid retries, click <b>Mark others superseded</b> (soft, logged, reversible).</li>
+</ol>
+<div class="check">✅ How to check it worked: the corrected values show, the action is recorded in lifecycle history, and access reflects the change.</div>
+<div class="warn">⚠️ Common mistakes: never silently edit money values without a clear reason — everything is logged. If you're not Super Admin, escalate (see 8.2).</div>
+
+<!-- ================= SECTION 6 ================= -->
+<div class="pagebreak"></div>
+<h1 id="s6">6. Finance (Finance team)</h1>
+<p class="intro">Finance reads collections, chases recovery, and keeps the ledger clean. Most of this lives on the Payments &amp; Finance dashboard plus three companion pages.</p>
+<div class="quick">🔗 Quick link — Payments &amp; Finance: <span class="url">https://namanias.com/admin/payments</span></div>
+<div class="who"><b>WHO:</b> Viewing needs "View revenue" (Super Admin, Admin, Finance / Revenue). Acting on payments needs "Manage payments". Trash / permanent delete / reverse / edit are Super Admin only.</div>
+
+<h2 id="s6-1">6.1 How to read the Payments &amp; Finance dashboard</h2>
+<ul>
+<li><b>Today cards</b> (always today, IST): <b>Webinar Registrations Today</b>, <b>Course Payments Today</b> (with amount), plus a registrations trend.</li>
+<li><b>KPI cards</b>: <b>Captured</b> (collected, de-duplicated), <b>Pending Collections</b>, <b>Refunded</b>, <b>Transactions</b>.</li>
+<li><b>Status chips</b>: Paid, Pending, Verifying, Abandoned, Failed, Needs verification, plus <b>Proof uploaded</b>.</li>
+<li><b>Group toggles</b>: "Needs action only", "Paid but has duplicate attempts", "Proof uploaded — pending review", "Show superseded".</li>
+<li><b>Payment type chips</b>: Webinar registrations, Course payments, Book seat, Installments.</li>
+<li><b>Date (IST)</b>: All time / Today / Yesterday / This month / This year, or a specific date / month / year / custom range.</li>
+<li><b>User cards</b>: payments are grouped per person, then per item, with a paid-wins status.</li>
+</ul>
+<span class="shot">[SCREENSHOT: the Payments &amp; Finance page showing the Today cards, KPI cards, and the Status / Type / Date filter bar.]</span>
+<div class="check">✅ How to check it worked: the counts respond when you click filters; "Captured" reflects real collected revenue.</div>
+
+<h2 id="s6-2">6.2 Full statuses glossary</h2>
+<table>
+<tr><th>Status</th><th>Meaning</th></tr>
+<tr><td><b>Paid</b> (PAID / captured)</td><td>Money received and access granted.</td></tr>
+<tr><td><b>Pending</b></td><td>Started but not yet confirmed.</td></tr>
+<tr><td><b>Verifying</b></td><td>Being checked against the bank.</td></tr>
+<tr><td><b>Abandoned</b></td><td>Clicked Pay but never completed — a hot lead to call.</td></tr>
+<tr><td><b>Failed</b></td><td>The payment attempt failed.</td></tr>
+<tr><td><b>Refunded</b></td><td>Marked as refunded (status only — see 6.4).</td></tr>
+<tr><td><b>Needs verification</b></td><td>A group with no paid attempt but a verifying/pending/proof-uploaded state.</td></tr>
+<tr><td><b>Superseded</b></td><td>A moot attempt because another attempt for the same item was paid/approved.</td></tr>
+<tr><td><b>Proof uploaded</b></td><td>A screenshot/PDF is attached for review.</td></tr>
+</table>
+<p>On the <b>webinar registrants</b> page statuses are: <b>Paid, Free, Pending, Failed, Unpaid</b> (lead only). "Confirmed" counts paid + free only.</p>
+
+<h2 id="s6-3">6.3 Handle abandoned / failed payments (recovery)</h2>
+<ol>
+<li>On <span class="url">https://namanias.com/admin/payments</span>, click the orange "abandoned checkouts — hot leads to call" banner, or the <b>Abandoned</b> status chip.</li>
+<li>Use each hot-lead card's <b>Call</b>, <b>WhatsApp</b>, <b>SMS</b>, or <b>↻ Verify</b> buttons.</li>
+<li>To re-check many at once, click <b>↻ Re-verify payments</b> (all non-paid) or <b>Re-verify filtered</b> (just the current view). Re-verify never downgrades a PAID record.</li>
+</ol>
+<div class="check">✅ How to check it worked: re-verify shows a summary (e.g. "X → PAID"); recovered rows flip to Paid.</div>
+
+<h2 id="s6-4">6.4 Refunds</h2>
+<div class="who"><b>WHO:</b> Super Admin (status change). Others escalate.</div>
+<p>The portal records a <b>Refunded</b> status but does <b>not</b> process money back through the gateway. To mark a refund:</p>
+<ol>
+<li>Open the payment's <b>Manage</b> box → <b>Edit / delete payment</b> → <b>Edit fields</b>.</li>
+<li>Set <b>Status</b> → <b>refunded</b>, type a <b>Reason</b>, and <b>Save changes</b>.</li>
+<li>Action the actual money refund in your payment gateway/bank separately, outside this portal.</li>
+</ol>
+<div class="check">✅ How to check it worked: the row shows <b>Refunded</b> and the KPI "Refunded" total updates.</div>
+<div class="warn">⚠️ Common mistakes: marking "refunded" here is only a record — you must still issue the real refund in the gateway.</div>
+
+<h2 id="s6-5">6.5 Export CSV, search &amp; filter</h2>
+<ol>
+<li>Apply any filters you want (status/type/date/search).</li>
+<li>Click <b>⬇ Export</b> (it reads "Export (filtered)" when filters are on).</li>
+<li>A <b>payments.csv</b> file downloads with Student, Phone, Item, Amount, Login Code, Status, Date &amp; Time (IST).</li>
+</ol>
+<div class="check">✅ How to check it worked: payments.csv opens in Excel/Sheets with the expected rows.</div>
+
+<h2 id="s6-6">6.6 Reconciliation, Trash &amp; reporting</h2>
+<ul>
+<li><b>Daily reconciliation:</b> set Date → <b>Today</b>, compare <b>Captured</b> with your gateway/bank for the day; investigate any <b>Verifying</b>/<b>Pending</b> with <b>Re-verify</b>.</li>
+<li><b>Duplicates:</b> use the <b>Paid but has duplicate attempts</b> toggle and the "⚠ Possible duplicate payment" flag to spot double settlements (review for refund).</li>
+<li><b>Trash (Super Admin):</b> click <b>🗑 Trash</b> to see soft-deleted payments; <b>Restore</b> re-applies the ledger effect, or <b>Delete forever</b> (irreversible, audit-logged).</li>
+<li><b>History:</b> open any payment's lifecycle history (Super Admin) for an audit trail.</li>
+</ul>
+<div class="check">✅ How to check it worked: today's Captured matches the bank; no unexpected duplicates remain.</div>
+
+<h2 id="s6-7">6.7 Course EMI &amp; Seats; Access at Risk; Duplicate Enrollments</h2>
+<table>
+<tr><th>Page</th><th>URL</th><th>Use it to…</th></tr>
+<tr><td>Course EMI &amp; Seats</td><td class="url">https://namanias.com/admin/course-payments</td><td>Review EMI schedules and seat counts across courses.</td></tr>
+<tr><td>Access at Risk</td><td class="url">https://namanias.com/admin/access-risk</td><td>See learners whose access is <b>Blocked</b>, <b>In grace</b> or <b>Expiring ≤7d</b>, with pending dues; recover proactively.</td></tr>
+<tr><td>Duplicate Enrollments</td><td class="url">https://namanias.com/admin/enrollments/duplicates</td><td>Find and clean up duplicate enrollments.</td></tr>
+</table>
+<h4>Recover access from "Access at Risk"</h4>
+<ol>
+<li>Go to <span class="url">https://namanias.com/admin/access-risk</span>; filter by <b>All / Blocked / Grace / Expiring</b>.</li>
+<li>On a learner's row use <b>+1 month</b>, <b>Lifetime</b> (grant), or <b>Revoke</b>; or <b>Call</b> them.</li>
+</ol>
+<div class="check">✅ How to check it worked: the learner's status pill changes (e.g. from Blocked) after you grant access.</div>
+
+<!-- ================= SECTION 7 ================= -->
+<div class="pagebreak"></div>
+<h1 id="s7">7. Students / Users</h1>
+<p class="intro">Everything about a student — courses, money, access and activity — lives on their profile.</p>
+<div class="quick">🔗 Quick link — Students &amp; Enrollments: <span class="url">https://namanias.com/admin/students</span></div>
+<div class="who"><b>WHO:</b> "Manage students, leads &amp; enrollments" (Super Admin, Admin, Content Admin, Support / Operations).</div>
+
+<h2 id="s7-1">7.1 Find a student &amp; view their access</h2>
+<ol>
+<li>Go to <span class="url">https://namanias.com/admin/students</span>.</li>
+<li>Search by name, phone or login code; refine with <b>All enrollments</b>, <b>Any payment</b>, <b>Any access</b>, and the sort dropdown.</li>
+<li>Click the student's name to open their profile (<span class="url">https://namanias.com/admin/students/[STUDENT-ID]</span>).</li>
+<li>Read the header (status pill, phone, plan, Access code, Portal code, Valid till), the KPI tiles, <b>Active enrolled courses</b>, <b>Webinars</b>, and <b>Payments ledger</b>.</li>
+</ol>
+<div class="check">✅ How to check it worked: the profile shows the student's courses, money paid/outstanding and access validity.</div>
+<div class="warn">⚠️ Common mistakes: if a paying student is missing from the list, click <b>Sync paying students</b> on the Students page to pull them in.</div>
+
+<h2 id="s7-2">7.2 Resend / reset a login code</h2>
+<ol>
+<li>Open the student profile.</li>
+<li>In the header, click the <b>Access</b> code chip (or <b>Portal</b> code chip) to copy it, then send it to the student (use the <b>SMS</b> button next to their name to message them).</li>
+</ol>
+<div class="check">✅ How to check it worked: the code copies (the chip shows a tick); the student can log in with phone + code.</div>
+
+<h2 id="s7-3">7.3 Fix, revoke, restore or extend access</h2>
+<ol>
+<li>Open the student profile.</li>
+<li>Use the header quick actions: <b>Revoke</b> (block) or <b>Restore</b>, and <b>+30 days</b>.</li>
+<li>In <b>Access control</b>, click a validity preset (<b>1M / 3M / 6M / 12M</b>), <b>Lifetime ∞</b>, or set a <b>Custom valid-till date</b> and click <b>Set date</b>.</li>
+<li>Edit name/email/notes with <b>Edit</b>.</li>
+</ol>
+<div class="check">✅ How to check it worked: the status pill and "Valid till" update; the <b>Access history</b> list records the change.</div>
+<div class="warn">⚠️ Common mistakes: <b>Revoke</b> blocks login and gated content but keeps the student's data — it is reversible with <b>Restore</b>.</div>
+
+<h2 id="s7-4">7.4 Deactivate a student</h2>
+<p>To deactivate, use <b>Revoke</b> (on the profile header or the Students list row). This is the portal's "deactivate" — it blocks access while retaining all records. Use <b>Restore</b> to reactivate.</p>
+<div class="check">✅ How to check it worked: the student shows a <b>Revoked</b> status and cannot access content.</div>
+
+<!-- ================= SECTION 8 ================= -->
+<div class="pagebreak"></div>
+<h1 id="s8">8. Daily Operations &amp; Safety</h1>
+
+<h2 id="s8-1">8.1 Start-of-day / end-of-day checklists</h2>
+<table>
+<tr><th>Team</th><th>Start of day</th><th>End of day</th></tr>
+<tr><td>Payments</td><td>Open Payments &amp; Finance → check <b>Proof uploaded — pending review</b> and <b>Needs action only</b>.</td><td>Clear pending proofs (approve/reject); confirm no group is stuck in Verifying without a re-verify.</td></tr>
+<tr><td>Finance</td><td>Set Date → Today; note <b>Captured</b> vs bank; review the abandoned hot-leads banner.</td><td>Run <b>Re-verify payments</b>; reconcile Captured with the gateway; export CSV if needed.</td></tr>
+<tr><td>Webinar</td><td>Check upcoming webinars' registration windows and links.</td><td>For finished sessions, add the recording (3.7) and verify it plays.</td></tr>
+<tr><td>Content</td><td>Check yesterday's uploads show <b>Hosted ✓</b>; publish anything in Draft that's ready.</td><td>Confirm no upload is stuck on <b>Uploading</b>/<b>Upload failed</b>.</td></tr>
+<tr><td>Course</td><td>Review any new course requests; confirm Default batch &amp; pricing.</td><td>Verify new courses on the public side (2.10).</td></tr>
+<tr><td>Support</td><td>Check Access at Risk (Blocked/Expiring) and Lead CRM.</td><td>Follow up at-risk learners; resend login codes as needed.</td></tr>
+</table>
+
+<h2 id="s8-2">8.2 Escalation matrix</h2>
+<table>
+<tr><th>Issue</th><th>First responder</th><th>Escalate to</th></tr>
+<tr><td>Reverse/edit/delete a payment, empty Trash</td><td>Finance / Admin</td><td>Super Admin (only they can)</td></tr>
+<tr><td>Create/edit a role or permission</td><td>Admin</td><td>Super Admin (only they can)</td></tr>
+<tr><td>Add/remove staff, reset staff password</td><td>—</td><td>Super Admin / Admin</td></tr>
+<tr><td>Student paid but no access</td><td>Payments team (re-verify, approve)</td><td>Super Admin (if a reverse/edit is needed)</td></tr>
+<tr><td>Refund (actual money back)</td><td>Finance (mark refunded)</td><td>Super Admin + your payment gateway</td></tr>
+<tr><td>Video won't upload/play</td><td>Content team (retry, compress)</td><td>Technical/Admin if storage error persists</td></tr>
+<tr><td>Pricing/plan change on a live course</td><td>Course team (add a new batch)</td><td>Finance/Admin for fee disputes</td></tr>
+</table>
+
+<h2 id="s8-3">8.3 Golden data-safety rules</h2>
+<ul>
+<li><b>Never</b> edit a payment's money fields without a written reason — every change is logged.</li>
+<li><b>Never</b> delete a live course or batch that has enrolled/paying students — use <b>Closed</b> or <b>Disable</b>.</li>
+<li><b>Never</b> approve a payment that already shows <b>Paid</b> for that item — it can create a duplicate. Re-verify first.</li>
+<li><b>Always</b> use <b>Revoke</b> (not delete) to stop a student's access — it's reversible and keeps records.</li>
+<li><b>Always</b> share login codes and staff passwords privately, never in public channels.</li>
+<li><b>Remember</b> each webinar date is a separate paid event — never grant a sibling date for free.</li>
+<li><b>Prefer</b> Disable over Remove for staff who may return; <b>Remove</b> is permanent.</li>
+<li><b>Don't</b> change a course/webinar <b>slug</b> after sharing its link.</li>
+</ul>
+
+<!-- ================= SECTION 9 ================= -->
+<div class="pagebreak"></div>
+<h1 id="s9">9. Quick Help / Troubleshooting</h1>
+<table>
+<tr><th>Problem</th><th>Likely cause</th><th>Fix / who to escalate to</th></tr>
+<tr><td>"Student can't see the Offline option"</td><td>No Offline batch exists, or it's not the published batch.</td><td>Courses → Edit → Batches → add an Offline batch (2.3); ensure course Status = Published. Verify on the public page (2.10).</td></tr>
+<tr><td>"Recording stuck on processing"</td><td>No recording set yet, or upload not finished.</td><td>Content/LMS → Webinars (3.7): confirm status is <b>Hosted ✓</b> / <b>Link set</b>. If <b>Uploading</b>/<b>Upload failed</b>, re-upload (3.8).</td></tr>
+<tr><td>"Registration count looks wrong"</td><td>Below the 10 threshold, or toggle off.</td><td>This is by design — real count only shows at 10+; under that it's encouraging copy or hidden (4.2). No fake numbers are ever shown.</td></tr>
+<tr><td>"Student says payment failed but they paid"</td><td>A later failed retry over an earlier success, or unverified row.</td><td>Payments → search phone; if the item group is <b>Paid</b>, they're fine. Else <b>↻ Re-verify</b>; upload proof + Approve if truly paid (5.7).</td></tr>
+<tr><td>"Login code not working"</td><td>Wrong code, revoked access, or expired validity.</td><td>Students → profile: re-copy the Access/Portal code (7.2); check status isn't <b>Revoked</b>/<b>Expired</b> (7.3).</td></tr>
+<tr><td>"Video upload failed midway"</td><td>Connection drop or oversized file.</td><td>Retry the upload (it resumes); compress to MP4 if very large; respect the 5 GB webinar / ≈500 MB lecture guidance (3.8).</td></tr>
+<tr><td>"Renamed webinar still shows old name somewhere"</td><td>Cached page in your browser.</td><td>Names propagate automatically (4.4). Refresh the page; the new name reads live in Payments and the portal.</td></tr>
+<tr><td>"Student enrolled but can't see course"</td><td>Access revoked/expired, or entitlements don't include the content.</td><td>Students → profile: check status &amp; validity (7.3); Courses → <b>Access &amp; Entitlements</b> to confirm what's unlocked (2.6).</td></tr>
+<tr><td>"Can't see Payments / Staff menu"</td><td>Your role lacks the permission.</td><td>Expected — ask a Super Admin/Admin if you need it (1.6). Finance needs View revenue; Staff needs Manage staff.</td></tr>
+<tr><td>"Duplicate / double payment"</td><td>Student paid twice.</td><td>Payments → "Paid but has duplicate attempts" toggle; review the ⚠ flag; Super Admin handles refund/edit (6.6, 5.8).</td></tr>
+<tr><td>"New paying student missing from the list"</td><td>Not yet synced into the Students list.</td><td>Students → <b>Sync paying students</b> (7.1).</td></tr>
+<tr><td>"Forgot admin password"</td><td>No self-service reset exists.</td><td>A Super Admin/Admin resets it via Staff &amp; Roles → Manage → Reset password (1.7).</td></tr>
+</table>
+
+<!-- ================= SECTION 10 ================= -->
+<div class="pagebreak"></div>
+<h1 id="s10">10. Glossary</h1>
+<table>
+<tr><th>Term</th><th>Plain meaning</th></tr>
+<tr><td><b>Batch</b></td><td>One sellable option of a course = mode + timing + start date + its own price.</td></tr>
+<tr><td><b>Default batch</b></td><td>The batch whose price/dates fill the course-level fields shown on cards.</td></tr>
+<tr><td><b>Mode</b></td><td>How a course runs: Online, Offline, Hybrid, Recorded.</td></tr>
+<tr><td><b>Class Hub</b></td><td>The enrolled student's area showing live classes, recordings and materials.</td></tr>
+<tr><td><b>Entitlements</b></td><td>Exactly what enrolling in a course unlocks (Class Hub, recordings, quizzes, CA, PDFs).</td></tr>
+<tr><td><b>Hosted recording</b></td><td>A video file uploaded to our own storage that plays inline.</td></tr>
+<tr><td><b>Library video (reused)</b></td><td>An existing hosted video pointed to as a webinar's recording — no re-upload.</td></tr>
+<tr><td><b>Drip</b></td><td>Content scheduled to unlock on a future date.</td></tr>
+<tr><td><b>EMI / Book Your Seat</b></td><td>Pay a seat deposit then the rest in installments.</td></tr>
+<tr><td><b>Pay-in-Full</b></td><td>A discounted one-shot price.</td></tr>
+<tr><td><b>Login / Access code</b></td><td>The code a student uses (with their phone) to sign in to the portal.</td></tr>
+<tr><td><b>Proof</b></td><td>A screenshot/PDF of a payment, uploaded for review.</td></tr>
+<tr><td><b>Approve</b></td><td>Marking a payment PAID and granting access.</td></tr>
+<tr><td><b>Reverse</b></td><td>Undoing an approval (re-locks access); Super Admin only.</td></tr>
+<tr><td><b>Superseded</b></td><td>An attempt made moot because another attempt for the same item was paid.</td></tr>
+<tr><td><b>Captured</b></td><td>Total real money collected (duplicates removed).</td></tr>
+<tr><td><b>Abandoned</b></td><td>Clicked Pay but never finished — a hot lead.</td></tr>
+<tr><td><b>Re-verify</b></td><td>Re-check a payment's status with the bank (ICICI); never downgrades a PAID.</td></tr>
+<tr><td><b>Trash</b></td><td>Recoverable bin for soft-deleted payments (Super Admin).</td></tr>
+<tr><td><b>Revoke / Restore</b></td><td>Block / re-enable a student's access while keeping their data.</td></tr>
+<tr><td><b>Comp access</b></td><td>Internal staff access for QA/training — not a purchase, no revenue.</td></tr>
+<tr><td><b>IST</b></td><td>Indian Standard Time — all schedule times use it.</td></tr>
+<tr><td><b>Slug</b></td><td>The text in a page's web address (e.g. /courses/gs-foundation-2027).</td></tr>
+</table>
+
+<!-- ================= APPENDIX ================= -->
+<div class="pagebreak"></div>
+<h1 id="appendix">Appendix — Reporting</h1>
+
+<h2>(a) Which code files/areas each section is based on</h2>
+<table>
+<tr><th>Manual section</th><th>Code files / areas</th></tr>
+<tr><td>Links &amp; menu, login, password, logout</td><td><code>components/admin/adminNav.ts</code>, <code>components/admin/AdminShell.tsx</code>, <code>components/admin/AdminLogin.tsx</code>, <code>app/admin/**/page.tsx</code> (route paths)</td></tr>
+<tr><td>Roles &amp; permissions, Who-can-do-what</td><td><code>lib/permissions.ts</code>, <code>lib/adminGuard.ts</code></td></tr>
+<tr><td>1. Access &amp; Accounts (staff)</td><td><code>app/admin/staff/page.tsx</code> (Add/Manage staff, roles, grant access, bulk enroll, portal test login)</td></tr>
+<tr><td>2. Courses</td><td><code>app/admin/courses/page.tsx</code> (list, reorder, enable/disable, delete), <code>components/admin/CourseForm.tsx</code> (tabs, batches, EMI, coupons, entitlements), <code>lib/config.ts</code> (categories, modes, plans)</td></tr>
+<tr><td>3. Content / LMS</td><td><code>app/admin/content/page.tsx</code> (Add Content, hosted upload, Webinars section), <code>lib/contentMeta.ts</code> (types), <code>components/admin/upload/uploadManager.tsx</code>, <code>app/admin/library/page.tsx</code> (brochures)</td></tr>
+<tr><td>4. Webinars</td><td><code>app/admin/webinars/page.tsx</code>, <code>components/admin/WebinarForm.tsx</code>, <code>components/admin/DuplicateWebinarModal.tsx</code>, <code>app/admin/webinars/[id]/registrations/page.tsx</code>, <code>components/admin/MoveRegistrationsModal.tsx</code></td></tr>
+<tr><td>5. Payments</td><td><code>app/admin/payments/page.tsx</code> (proof, approve/reject/reverse/edit/delete, re-verify, trash), <code>components/admin/StudentForm.tsx</code> (manual enroll), <code>app/admin/students/[id]/page.tsx</code> (record payment, change plan)</td></tr>
+<tr><td>6. Finance</td><td><code>app/admin/payments/page.tsx</code>, <code>app/admin/course-payments/page.tsx</code>, <code>app/admin/access-risk/page.tsx</code>, <code>app/admin/enrollments/duplicates/page.tsx</code></td></tr>
+<tr><td>7. Students</td><td><code>app/admin/students/page.tsx</code>, <code>app/admin/students/[id]/page.tsx</code></td></tr>
+</table>
+
+<h2>(b) Topics requested but NOT in the codebase (real gaps)</h2>
+<ul>
+<li><b>Self-service "Forgot password" for admins</b> — not implemented. Reset is manager-driven via Staff &amp; Roles → Manage → Reset password.</li>
+<li><b>Clone/duplicate a whole COURSE</b> — not implemented at course level. You can <b>Duplicate</b> a <b>batch</b> within a course and use <b>Quick add combinations</b>; webinars (not courses) have a full Duplicate.</li>
+<li><b>Reorder webinars</b> — not implemented (only courses can be drag-reordered).</li>
+<li><b>Named "free preview" toggle per lecture</b> — not a separate toggle. The equivalent is a hosted video's <b>Visibility = Public</b>.</li>
+<li><b>Gateway refund processing</b> — not implemented. Only a <b>Refunded</b> status can be set (Super Admin); the actual money refund is done in the payment gateway.</li>
+<li><b>Per-course SEO is present</b>, but a standalone global SEO manager beyond per-item SEO tabs is not part of these procedures.</li>
+</ul>
+
+<h2>(c) Capabilities found in the code that staff should know (not originally listed)</h2>
+<ul>
+<li><b>Re-verify payments with the bank (ICICI)</b> — all/filtered/single, never downgrades PAID.</li>
+<li><b>Payment Trash</b> with Restore and permanent delete (Super Admin), plus full lifecycle history per payment.</li>
+<li><b>Duplicate-payment detection</b> and <b>Mark others superseded</b> for clean paid groups.</li>
+<li><b>Abandoned-checkout "hot leads"</b> with Call / WhatsApp / SMS / Verify.</li>
+<li><b>Move late registrations</b> between webinars; <b>Duplicate webinar</b> ("mark old ended" + link).</li>
+<li><b>Staff comp access</b> (Grant access / Bulk enroll) and a <b>student-portal test login</b> (phone + login code) — never counted as revenue.</li>
+<li><b>Orientation/starter video reuse</b> across many courses/webinars from one upload.</li>
+<li><b>Access at Risk</b> recovery (grant +1 month / Lifetime / Revoke) and per-student <b>Access control</b> (validity presets, custom date, +30 days, revoke/restore, access history).</li>
+<li><b>Student profile analytics</b>: customer journey timeline, test performance, receipts (PDF download), payments ledger.</li>
+<li><b>Sync paying students</b> button to pull online/offline payers into the list.</li>
+<li><b>Change plan / Manage installments</b> (waive, cancel, edit due dates) on a student's course.</li>
+<li><b>CSV export</b> of payments (respects filters).</li>
+<li><b>Whole modules</b> also available to the right roles: Lead CRM, Lead Forms, Landing Pages, Marketing, Referrals, SMS Mission Control, Quizzes/Question Bank/Imports, Current Affairs (articles, daily, PDFs, analytics), Toppers, Home/About/Navigation, Subscription Plans, Lecture Q&amp;A.</li>
+</ul>
+
+<p class="small" style="margin-top:24pt;">End of manual. Built directly from the live codebase on 17 June 2026 — every tab, button and permission named here exists in the portal. Paste screenshots into the marked placeholders and update the "Last updated" date whenever the portal changes.</p>
+
+</body>
+</html>
