@@ -474,6 +474,11 @@ create table if not exists public.course_enrollments (
   installment_count int not null default 0,
   status text not null default 'pending',
   schedule jsonb not null default '[]'::jsonb,
+  discount_amount int not null default 0,
+  original_total_fee int,
+  discount_reason text,
+  discount_applied_by text,
+  discount_applied_at timestamptz,
   created_at timestamptz default now(),
   updated_at timestamptz default now()
 );

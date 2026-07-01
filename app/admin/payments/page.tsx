@@ -1348,23 +1348,23 @@ function AttemptRow({
     p.gateway || (p.mode ? `Razorpay · ${p.mode}` : null),
   ].filter(Boolean).join(" · ");
   return (
-    <div className={`flex flex-wrap items-start justify-between gap-2 rounded-lg px-2 py-1.5 ${superseded ? "opacity-60" : ""}`}>
-      <div className="min-w-0">
+    <div className={`flex flex-wrap items-start justify-between gap-x-3 gap-y-1.5 rounded-lg px-2 py-1.5 ${superseded ? "opacity-60" : ""}`}>
+      <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-1.5">
-          <span className={`pill ${statusPillClass(p.status)}`}>{statusLabel(p.status)}</span>
+          <span className={`pill shrink-0 ${statusPillClass(p.status)}`}>{statusLabel(p.status)}</span>
           {/* Money received but not yet settled to our account (ICICI RIP/SIP). */}
           {isPaid(p.status) && p.settlement_status === "in_progress" && (
-            <span className="pill pill-amber" title="ICICI reports RIP/SIP: money received and access granted, but settlement to our account is still pending.">
+            <span className="pill pill-amber shrink-0 whitespace-nowrap" title="ICICI reports RIP/SIP: money received and access granted, but settlement to our account is still pending.">
               Settlement pending
             </span>
           )}
           {superseded && (
-            <span className="pill pill-gray" title="Another attempt for this item was paid/approved, so this attempt is moot.">
+            <span className="pill pill-gray shrink-0 whitespace-nowrap" title="Another attempt for this item was paid/approved, so this attempt is moot.">
               Superseded — payment already completed
             </span>
           )}
         </div>
-        <div className="mt-0.5 text-[11px] text-muted">{sub}</div>
+        <div className="mt-0.5 break-words text-[11px] text-muted">{sub}</div>
         <div className="text-[11px] text-muted">{formatISTDateTime(p.created_at)}</div>
         {/* Last ICICI verification: when + the raw status token it returned. */}
         {p.last_verify_at && (

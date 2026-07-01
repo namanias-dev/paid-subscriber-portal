@@ -95,6 +95,12 @@ export default function CoursePaymentsPanel({
           ) : (
             <p className="mt-2 inline-flex items-center gap-1.5 text-sm font-semibold text-emerald-700"><CheckCircle2 size={15} /> Course fully paid</p>
           )}
+          {(enrollment.discount_amount ?? 0) > 0 && (
+            <p className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">
+              🎉 {formatINR(enrollment.discount_amount!)} discount applied
+              {enrollment.original_total_fee ? <span className="font-normal text-[var(--ca-slate-700)]">· was {formatINR(enrollment.original_total_fee)}</span> : null}
+            </p>
+          )}
         </div>
 
         {classHubHref && (

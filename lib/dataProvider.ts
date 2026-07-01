@@ -61,7 +61,7 @@ import type {
   EnrollmentMergeLog,
   InstallmentItem,
 } from "./types";
-import { deriveEnrollment, enrollmentStatusFromSchedule, installmentsSummary, planCourseEnrollment, resolveEmiConfig, isLineCancelledOrWaived, isActiveEnrollment, isAttemptEnrollment } from "./installments";
+import { deriveEnrollment, enrollmentStatusFromSchedule, installmentsSummary, planCourseEnrollment, resolveEmiConfig, isLineCancelledOrWaived, isLineOutstanding, isActiveEnrollment, isAttemptEnrollment } from "./installments";
 import { changePlan, type ChangePlanTarget, type ConvertOptions } from "./paymentPlanChange";
 import { mergeSiteSettings } from "./homeDefaults";
 import { DEFAULT_ROLES, resolvePermissions, type PermissionSet } from "./permissions";
@@ -4753,6 +4753,117 @@ export async function updateInstallmentLine(
   const derived = deriveEnrollment({ total_fee: totalFee, schedule });
   const updated = await updateCourseEnrollment(e.id, { schedule, total_fee: totalFee, amount_paid: derived.paid, status });
   return { ok: true, enrollment: updated || { ...e, schedule, total_fee: totalFee, amount_paid: derived.paid, status } };
+}
+
+export interface ApplyDiscountInput {
+  enrollmentId: string;
+  /** Rupee discount to apply to the TOTAL fee (positive integer). */
+  discount: number;
+  reason?: string | null;
+  appliedBy?: string | null;
+}
+
+/**
+ * Apply a rupee discount to an enrollment's TOTAL fee. Safe & additive:
+ *  • never drops the total below the amount already paid (and never negative),
+ *  • never touches paid / cancelled / waived lines,
+ *  • rebuilds ONLY the outstanding lines so they sum EXACTLY to the new remaining
+ *    (the last outstanding line absorbs any rounding remainder — no rupee lost),
+ *  • records the discount (cumulative), original total, who/when/why + an audit row.
+ */
+export async function applyEnrollmentDiscount(
+  input: ApplyDiscountInput,
+): Promise<{ ok: true; enrollment: CourseEnrollment } | { ok: false; error: string }> {
+  const e = await getCourseEnrollmentById(input.enrollmentId);
+  if (!e) return { ok: false, error: "Enrollment not found." };
+  if (e.status === "cancelled") return { ok: false, error: "This enrollment is cancelled." };
+
+  const discount = Math.round(Number(input.discount) || 0);
+  if (!Number.isFinite(discount) || discount <= 0) {
+    return { ok: false, error: "Enter a discount amount greater than ₹0." };
+  }
+
+  const before = deriveEnrollment(e);
+  const paid = before.paid;
+  const newTotal = e.total_fee - discount;
+  if (newTotal < 0) {
+    return { ok: false, error: `Discount (${formatINR(discount)}) cannot exceed the total fee (${formatINR(e.total_fee)}).` };
+  }
+  if (newTotal < paid) {
+    return { ok: false, error: `Discount would drop the total below the ${formatINR(paid)} already paid. Maximum discount is ${formatINR(e.total_fee - paid)}.` };
+  }
+  const newRemaining = newTotal - paid;
+
+  // Rebuild only the outstanding lines (keep their order); paid/cancelled/waived untouched.
+  const schedule = (e.schedule || []).map((s) => ({ ...s }));
+  const outstandingIdx = schedule
+    .map((s, i) => (isLineOutstanding(s) ? i : -1))
+    .filter((i) => i >= 0);
+
+  const now = new Date().toISOString();
+  if (outstandingIdx.length > 0) {
+    const k = outstandingIdx.length;
+    const base = Math.floor(newRemaining / k);
+    const remainder = newRemaining - base * k;
+    outstandingIdx.forEach((idx, j) => {
+      const isLast = j === k - 1;
+      schedule[idx] = { ...schedule[idx], amount: base + (isLast ? remainder : 0), updated_at: now };
+    });
+  }
+
+  const derived = deriveEnrollment({ total_fee: newTotal, schedule });
+  const status = enrollmentStatusFromSchedule({ total_fee: newTotal, schedule, plan_type: e.plan_type });
+
+  const updated = await updateCourseEnrollment(e.id, {
+    total_fee: newTotal,
+    schedule,
+    amount_paid: derived.paid,
+    status,
+    discount_amount: (e.discount_amount || 0) + discount,
+    original_total_fee: e.original_total_fee ?? e.total_fee,
+    discount_reason: input.reason ?? null,
+    discount_applied_by: input.appliedBy ?? null,
+    discount_applied_at: now,
+  });
+  const finalEnrollment = updated || {
+    ...e,
+    total_fee: newTotal,
+    schedule,
+    amount_paid: derived.paid,
+    status,
+    discount_amount: (e.discount_amount || 0) + discount,
+    original_total_fee: e.original_total_fee ?? e.total_fee,
+    discount_reason: input.reason ?? null,
+    discount_applied_by: input.appliedBy ?? null,
+    discount_applied_at: now,
+  };
+
+  // Audit (best-effort) — reuse the enrollment change log with a discount marker.
+  const student = await findStudentByPhone(e.phone).catch(() => null);
+  const plan = e.payment_plan || (e.plan_type === "emi" ? "EMI" : "FULL");
+  await addEnrollmentPlanChangeLog({
+    enrollment_id: e.id,
+    student_id: student?.id ?? null,
+    phone: e.phone,
+    course_id: e.course_id,
+    old_plan: plan,
+    new_plan: plan,
+    old_outstanding: before.remaining,
+    new_outstanding: derived.remaining,
+    reason: input.reason ?? null,
+    changed_by: input.appliedBy ?? null,
+    metadata: {
+      type: "discount",
+      discount_amount: discount,
+      cumulative_discount: (e.discount_amount || 0) + discount,
+      total_fee_before: e.total_fee,
+      total_fee_after: newTotal,
+      previous_schedule: e.schedule,
+      new_schedule: schedule,
+    },
+  }).catch(() => null);
+
+  return { ok: true, enrollment: finalEnrollment };
 }
 
 /** Enrollments for a phone with an unacknowledged plan-change notice. */

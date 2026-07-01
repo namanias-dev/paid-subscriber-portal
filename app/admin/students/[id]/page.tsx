@@ -26,6 +26,7 @@ import {
   CalendarClock,
   Ban,
   XCircle,
+  TicketPercent,
 } from "lucide-react";
 import { LoadingBlock } from "@/components/admin/ui";
 import JourneyTimeline from "@/components/admin/JourneyTimeline";
@@ -70,6 +71,8 @@ interface CourseCard {
   previousPlan?: PaymentPlan | null;
   planChangedAt?: string | null;
   planChangedReason?: string | null;
+  discount?: number;
+  originalTotal?: number | null;
   planHistory?: { id: string; oldPlan: string | null; newPlan: string | null; oldOutstanding: number; newOutstanding: number; reason: string | null; changedBy: string | null; createdAt: string }[];
 }
 interface AttemptCard {
@@ -176,7 +179,7 @@ export default function StudentProfilePage({ params }: { params: { id: string } 
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [customDate, setCustomDate] = useState("");
-  const [modal, setModal] = useState<null | "edit" | "enroll" | "webinar" | "pay" | "changePlan" | "managePlan">(null);
+  const [modal, setModal] = useState<null | "edit" | "enroll" | "webinar" | "pay" | "changePlan" | "managePlan" | "discount">(null);
   const [showJourney, setShowJourney] = useState(false);
   const [payCourse, setPayCourse] = useState<CourseCard | null>(null);
   const [planCourse, setPlanCourse] = useState<CourseCard | null>(null);
@@ -450,6 +453,11 @@ export default function StudentProfilePage({ params }: { params: { id: string } 
                   <span className="text-ink2">{formatINR(c.paid)} <span className="text-muted">of {formatINR(c.total)}</span></span>
                   {c.remaining > 0 ? <span className="font-semibold text-warning">{formatINR(c.remaining)} due</span> : <span className="font-semibold text-success">Paid in full</span>}
                 </div>
+                {(c.discount ?? 0) > 0 && (
+                  <p className="mt-1.5 inline-flex items-center gap-1 rounded-md bg-success/10 px-2 py-0.5 text-[11px] font-semibold text-success">
+                    <TicketPercent size={12} /> {formatINR(c.discount!)} discount{c.originalTotal ? ` · was ${formatINR(c.originalTotal)}` : ""}
+                  </p>
+                )}
                 {c.nextDue && c.remaining > 0 && (
                   <p className="mt-2 text-xs text-muted">Next: {c.nextDue.label} · {formatINR(c.nextDue.amount)}{c.nextDue.due ? ` · ${formatISTDate(c.nextDue.due)}` : ""}</p>
                 )}
@@ -462,6 +470,9 @@ export default function StudentProfilePage({ params }: { params: { id: string } 
                   )}
                   {c.source === "course" && (c.schedule?.length ?? 0) > 0 && (
                     <button onClick={() => { setPlanCourse(c); setModal("managePlan"); }} className="inline-flex items-center gap-1 text-xs font-semibold text-muted hover:text-primary"><SlidersHorizontal size={13} /> Manage installments</button>
+                  )}
+                  {c.source === "course" && (
+                    <button onClick={() => { setPlanCourse(c); setModal("discount"); }} className="inline-flex items-center gap-1 text-xs font-semibold text-muted hover:text-success"><TicketPercent size={13} /> Discount</button>
                   )}
                   {c.slug && (
                     <Link href={`/courses/${c.slug}`} className="text-xs font-semibold text-muted hover:text-primary">View course →</Link>
@@ -604,6 +615,14 @@ export default function StudentProfilePage({ params }: { params: { id: string } 
           request={(body) => rawPost("/installment", body)}
           onPay={() => { setPayCourse(planCourse); setModal("pay"); }}
           onDone={(msg) => { toast(msg, "success"); load(); }}
+        />
+      )}
+      {modal === "discount" && planCourse && (
+        <DiscountModal
+          course={planCourse}
+          busy={busy}
+          onClose={() => setModal(null)}
+          onSave={(body) => postAction("/discount", body, "Discount applied")}
         />
       )}
     </div>
@@ -764,6 +783,76 @@ function PayModal({ course, busy, onClose, onSave }: { course: CourseCard; busy:
             )}
             className="btn btn-primary text-sm"
           >Record {formatINR(amount)}</button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function DiscountModal({ course, busy, onClose, onSave }: { course: CourseCard; busy: boolean; onClose: () => void; onSave: (b: Record<string, unknown>) => Promise<boolean> }) {
+  const [amount, setAmount] = useState("");
+  const [reason, setReason] = useState("");
+  const discount = Math.max(0, Math.round(Number(amount) || 0));
+  const maxDiscount = Math.max(0, course.total - course.paid);
+  const newTotal = course.total - discount;
+  const newRemaining = Math.max(0, newTotal - course.paid);
+  const outstandingCount = (course.schedule || []).filter((s) => !s.paid && s.status !== "cancelled" && s.status !== "waived").length;
+  const perLine = outstandingCount > 0 ? Math.floor(newRemaining / outstandingCount) : 0;
+  const tooBig = discount > maxDiscount;
+  const valid = discount > 0 && !tooBig;
+
+  return (
+    <Modal open onClose={onClose} title={`Apply discount · ${course.title}`}>
+      <div className="space-y-3">
+        <div className="rounded-xl border border-success/30 bg-success/5 p-3 text-xs text-ink2">
+          Reduces the <strong>total fee</strong> by a rupee amount. Payments already made are untouched; the remaining balance is spread across the unpaid installments. Paid installments are never changed.
+        </div>
+        <div className="rounded-xl bg-surface2 p-3 text-sm">
+          <div className="flex justify-between"><span className="text-muted">Current total</span><span className="font-semibold">{formatINR(course.total)}</span></div>
+          <div className="flex justify-between"><span className="text-muted">Paid so far</span><span className="font-semibold">{formatINR(course.paid)}</span></div>
+          <div className="flex justify-between"><span className="text-muted">Outstanding</span><span className="font-semibold text-warning">{formatINR(course.remaining)}</span></div>
+          {(course.discount ?? 0) > 0 && (
+            <div className="flex justify-between"><span className="text-muted">Discount already applied</span><span className="font-semibold text-success">{formatINR(course.discount!)}</span></div>
+          )}
+        </div>
+
+        <label className="block">
+          <span className="mb-1 block text-xs font-medium text-muted">Discount amount (₹)</span>
+          <input type="number" min={1} max={maxDiscount} value={amount} onChange={(e) => setAmount(e.target.value)} className={inputCls} placeholder="e.g. 15000" />
+          <span className="mt-1 block text-[11px] text-muted">Maximum {formatINR(maxDiscount)} (can&apos;t drop below the amount already paid).</span>
+        </label>
+
+        <label className="block">
+          <span className="mb-1 block text-xs font-medium text-muted">Reason / note (recommended)</span>
+          <input value={reason} onChange={(e) => setReason(e.target.value)} className={inputCls} placeholder="e.g. Scholarship concession approved by director" />
+        </label>
+
+        {discount > 0 && (
+          <div className={`rounded-xl border p-3 text-sm ${tooBig ? "border-danger/40 bg-danger/5" : "border-primary/30 bg-primary/5"}`}>
+            {tooBig ? (
+              <p className="text-xs font-semibold text-danger">Discount exceeds the maximum of {formatINR(maxDiscount)}.</p>
+            ) : (
+              <>
+                <div className="flex justify-between"><span className="text-muted">New total</span><span className="font-semibold">{formatINR(newTotal)}</span></div>
+                <div className="flex justify-between"><span className="text-muted">New remaining</span><span className="font-semibold text-warning">{formatINR(newRemaining)}</span></div>
+                {outstandingCount > 0 && newRemaining > 0 && (
+                  <p className="mt-1 text-[11px] text-muted">{formatINR(newRemaining)} across {outstandingCount} unpaid installment{outstandingCount === 1 ? "" : "s"} ≈ <strong>{formatINR(perLine)}</strong> each (last absorbs the remainder).</p>
+                )}
+                {newRemaining <= 0 && <p className="mt-1 text-[11px] font-semibold text-success">This clears the balance — the course becomes fully paid.</p>}
+              </>
+            )}
+          </div>
+        )}
+
+        <div className="flex justify-end gap-2 pt-1">
+          <button onClick={onClose} className="btn btn-secondary text-sm">Cancel</button>
+          <button
+            disabled={busy || !valid}
+            onClick={() => onSave({ enrollmentId: course.id, discount, reason: reason || null })}
+            className="btn btn-primary text-sm disabled:opacity-60"
+          >
+            Apply {discount > 0 ? formatINR(discount) : ""} discount
+          </button>
         </div>
       </div>
     </Modal>

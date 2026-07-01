@@ -752,6 +752,15 @@ export interface CourseEnrollment {
   plan_change_notice_seen_at?: string | null;
   /** Set on a cancelled duplicate → points at the canonical enrollment it was merged into. */
   superseded_by?: string | null;
+  // --- Total-fee discount (additive; staff-applied concession on the total) ---
+  /** Cumulative rupee discount applied to the total fee (0/absent = none). */
+  discount_amount?: number | null;
+  /** The list/original total fee before any discount (captured on first discount). */
+  original_total_fee?: number | null;
+  /** Latest discount reason/note (audit convenience; full trail in the change log). */
+  discount_reason?: string | null;
+  discount_applied_by?: string | null;
+  discount_applied_at?: string | null;
 }
 
 /** Immutable audit record of a single payment-plan change. */

@@ -118,6 +118,9 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
       previousPlan?: PaymentPlan | null;
       planChangedAt?: string | null;
       planChangedReason?: string | null;
+      /** Total-fee discount (cumulative rupees) + the pre-discount total, when applied. */
+      discount?: number;
+      originalTotal?: number | null;
       /** Plan-change audit history for this enrollment. */
       planHistory?: { id: string; oldPlan: string | null; newPlan: string | null; oldOutstanding: number; newOutstanding: number; reason: string | null; changedBy: string | null; createdAt: string }[];
     };
@@ -161,6 +164,8 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
         previousPlan: e.previous_payment_plan ?? null,
         planChangedAt: e.payment_plan_changed_at ?? null,
         planChangedReason: e.payment_plan_change_reason ?? null,
+        discount: e.discount_amount || 0,
+        originalTotal: e.original_total_fee ?? null,
         planHistory: (planLogsLists[i] || []).map((l) => ({
           id: l.id,
           oldPlan: l.old_plan,

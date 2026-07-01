@@ -108,6 +108,18 @@ export function paymentProofKey(paymentId: string, fileId: string, ext: string):
   return `payment-proofs/${paymentId || "_"}/${fileId}.${safeExt}`;
 }
 
+/**
+ * Public media asset (images, PDFs, brochures, covers, logos …). These replace
+ * the old Supabase `media` bucket. Keys live under `media/` and are served via
+ * the public CDN (if configured) or the `/api/media/[...]` proxy route.
+ */
+export function mediaAssetKey(folder: string, ext: string): string {
+  const safeFolder = (folder || "uploads").replace(/[^a-z0-9/_-]/gi, "").replace(/^\/+|\/+$/g, "") || "uploads";
+  const safeExt = (ext || "bin").replace(/[^a-z0-9]/gi, "").toLowerCase() || "bin";
+  const rand = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  return `media/${safeFolder}/${rand}.${safeExt}`;
+}
+
 // ----------------------------- Multipart -----------------------------
 export async function createMultipart(key: string, contentType = "video/mp4"): Promise<string> {
   const out = await r2().send(
@@ -167,6 +179,18 @@ export function signPutUrl(key: string, contentType: string, ttl = 600): Promise
   return getSignedUrl(r2(), new PutObjectCommand({ Bucket: bucket(), Key: key, ContentType: contentType }), {
     expiresIn: ttl,
   });
+}
+
+/** Server-side upload of a small object (images/PDFs). Bytes go server→R2. */
+export async function putObject(key: string, body: Buffer | Uint8Array, contentType?: string): Promise<void> {
+  await r2().send(
+    new PutObjectCommand({
+      Bucket: bucket(),
+      Key: key,
+      Body: body,
+      ContentType: contentType || "application/octet-stream",
+    }),
+  );
 }
 
 /** Public CDN URL (only used for public lectures explicitly opted into CDN caching). */
