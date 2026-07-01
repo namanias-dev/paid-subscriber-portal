@@ -406,12 +406,18 @@ async function fetchVerify(targetUrl: string, timeoutMs: number): Promise<Respon
   const mode = (process.env.EAZYPAY_VERIFY_PROXY_MODE || "").trim().toLowerCase();
   const controller = new AbortController();
   const t = setTimeout(() => controller.abort(), timeoutMs);
+  // ICICI's Verify endpoint sits behind a WAF that serves a generic HTML error
+  // page (no `status=` token) to the default Node/undici User-Agent — which is
+  // exactly what runs on the server. A curl-style UA gets the real plaintext
+  // packet. Send curl-like headers so serverless calls behave like the CLI.
+  // (Verified empirically: `User-Agent: node` -> HTML error; `curl/*` -> status.)
+  const headers = { "User-Agent": "curl/8.4.0", Accept: "*/*" } as const;
   try {
     if (proxy && mode === "relay") {
       const relay = proxy.includes("{target}")
         ? proxy.replace("{target}", encodeURIComponent(targetUrl))
         : `${proxy}${proxy.includes("?") ? "&" : "?"}target=${encodeURIComponent(targetUrl)}`;
-      return await fetch(relay, { signal: controller.signal, cache: "no-store" });
+      return await fetch(relay, { signal: controller.signal, cache: "no-store", headers });
     }
     if (proxy) {
       // HTTP forward proxy (QuotaGuard/Fixie). undici ships with Node/Next at
@@ -424,11 +430,12 @@ async function fetchVerify(targetUrl: string, timeoutMs: number): Promise<Respon
       return await fetch(targetUrl, {
         signal: controller.signal,
         cache: "no-store",
+        headers,
         // @ts-expect-error undici dispatcher is accepted by the runtime fetch
         dispatcher,
       });
     }
-    return await fetch(targetUrl, { signal: controller.signal, cache: "no-store" });
+    return await fetch(targetUrl, { signal: controller.signal, cache: "no-store", headers });
   } finally {
     clearTimeout(t);
   }
