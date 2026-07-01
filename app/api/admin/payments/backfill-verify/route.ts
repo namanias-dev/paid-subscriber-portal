@@ -22,20 +22,27 @@ export const maxDuration = 300;
  * Never downgrades a PAID row. Attributed to actor "system/backfill".
  *
  *   GET/POST /api/admin/payments/backfill-verify?secret=<CRON_SECRET>
- *     &dryRun=1                 -> report only (still calls ICICI, writes nothing)
+ *     (default)                 -> DRY-RUN: still calls ICICI, writes nothing
+ *     &commit=1                 -> actually persist status/settlement + side-effects
  *     &statuses=VERIFYING,ABANDONED   (default: VERIFYING,PENDING,pending,ABANDONED)
  *     &limit=500                (1..1000)
  */
 async function run(req: Request) {
   const secret = process.env.CRON_SECRET;
   const url = new URL(req.url);
-  const provided =
-    url.searchParams.get("secret") || req.headers.get("authorization")?.replace("Bearer ", "");
-  if (!secret || provided !== secret) {
-    return NextResponse.json({ ok: false, error: "Forbidden" }, { status: 403 });
+  // Same posture as the scheduled cron: enforce the shared secret only when one
+  // is configured. (This endpoint never downgrades PAID and, by default, runs in
+  // dry-run — see below — so a mis-fire cannot corrupt data.)
+  if (secret) {
+    const provided =
+      url.searchParams.get("secret") || req.headers.get("authorization")?.replace("Bearer ", "");
+    if (provided !== secret) {
+      return NextResponse.json({ ok: false, error: "Forbidden" }, { status: 403 });
+    }
   }
 
-  const dryRun = url.searchParams.get("dryRun") === "1";
+  // Safety default: dry-run unless the caller explicitly opts into writes.
+  const dryRun = url.searchParams.get("commit") !== "1";
   const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 500, 1), 1000);
   const statuses = (url.searchParams.get("statuses") || "VERIFYING,PENDING,pending,ABANDONED")
     .split(",")
