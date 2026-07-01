@@ -418,6 +418,10 @@ create table if not exists public.payments (
   response_code text,
   transaction_date text,
   verified_signature boolean,
+  -- ICICI Verify URL settlement state for a PAID row: 'settled' (money in our
+  -- account, status Success) | 'in_progress' (money confirmed, still settling —
+  -- status RIP/SIP; access granted, settlement pending). See migrations.
+  settlement_status text,
   -- Phase 2: Book-Your-Seat + EMI ledger links (nullable; one-time payments leave these null)
   enrollment_id text,
   payment_kind text,

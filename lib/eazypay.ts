@@ -29,6 +29,18 @@ export function getReturnUrl(): string {
   );
 }
 
+/**
+ * Optional `dstatus` flag for the Verify URL. When ICICI is asked with
+ * `dstatus=Y`, a transaction that has money confirmed but is still
+ * reconciling/settling is reported as `Success` instead of `RIP`/`SIP`.
+ * Off by default so we can see the true settlement state (RIP/SIP) and record
+ * it. Set env ICICI_EAZYPAY_VERIFY_DSTATUS=Y to opt in.
+ */
+export function getVerifyDstatus(): string | null {
+  const v = (process.env.ICICI_EAZYPAY_VERIFY_DSTATUS || "").trim();
+  return v ? v : null;
+}
+
 function getAesKey(): string | null {
   const key = process.env.ICICI_EAZYPAY_AES_KEY;
   return key && key.trim() !== "" ? key.trim() : null;
@@ -276,35 +288,56 @@ export function verifyFromStoredCallback(row: {
  *
  *   GET https://eazypay.icicibank.com/EazyPGVerify?merchantid=<MID>&pgreferenceno=<ref>
  *
- * Status values (8.1.5):
- *   RIP (Reconciliation in Progress), SIP (Settlement in Progress), Success
- *       -> money received from the payer's bank -> PAID
- *   FAILED / TIMEOUT / Transaction Expired / Cheque-DD Returned
- *       -> ICICI-reported non-success -> FAILED
- *   Transaction Initiated / Challan Generated / Cheque-DD In Clearance
- *       -> payer never completed -> ABANDONED (hot lead)
- *   (empty / unreachable / parse error) -> "unknown" (do NOT change the row)
+ * Status values (per ICICI Eazypay PG integration doc, pp. 42–46):
+ *   Success                    -> settled to merchant account -> PAID (settled)
+ *   RIP (Reconciliation In Progress) / SIP (Settlement In Progress)
+ *       -> money GENUINELY received (settling to us) -> PAID (settlement pending)
+ *   Failed / Timeout / Transaction Expired / Cancelled / Cheque-DD Returned
+ *       -> ICICI-reported non-success -> FAILED (never grant access)
+ *   Any other / unrecognized (e.g. Initiated, Challan Generated, In Clearance)
+ *       -> do NOT change status; flag for manual review; log raw response
+ *   (empty / unreachable / parse error) -> "unknown" (leave the row unchanged)
  *
- * IMPORTANT — ICICI firewalls this endpoint by source IP. It only answers from a
- * server IP whitelisted with ICICI for the merchant. On Vercel (dynamic egress)
- * route the call through a fixed-IP proxy whose IP ICICI has whitelisted, via
- * EAZYPAY_VERIFY_PROXY_URL (QuotaGuard/Fixie HTTP proxy, or a relay — see env).
+ * Business rule: RIP & SIP mean the money is real (just not yet settled to our
+ * account), so they UNBLOCK course access exactly like Success. Only Failed /
+ * Timeout stay blocked. The settlement flag (settled | in_progress) is recorded
+ * separately so Finance can see settlement is still pending.
+ *
+ * No IP whitelisting is required (per ICICI): this is a plain server-side GET
+ * that returns a plaintext `key=value&…` packet. An optional fixed-IP proxy is
+ * still supported via EAZYPAY_VERIFY_PROXY_URL but is NOT needed.
  */
 export const EAZYPAY_VERIFY_URL = "https://eazypay.icicibank.com/EazyPGVerify";
 
 export type VerifyOutcome = "paid" | "failed" | "abandoned" | "unknown";
+/** Whether the money has settled to our account yet. */
+export type SettlementStatus = "settled" | "in_progress";
+
+/** Optional lookup hints sent to ICICI's Verify URL (all blank-tolerant). */
+export interface EazypayVerifyHints {
+  /** ICICI's eazypay transaction id, when we already have it. */
+  ezpaytranid?: string | null;
+  amount?: number | string | null;
+  paymentmode?: string | null;
+  trandate?: string | null;
+  timeoutMs?: number;
+}
 
 export interface EazypayVerifyResult {
   /** Did we get a parseable response from ICICI at all? */
   reachable: boolean;
   /** Mapped lifecycle outcome. */
   outcome: VerifyOutcome;
+  /** Settlement state when outcome is "paid" (settled vs still settling). */
+  settlement: SettlementStatus | null;
   /** Raw `status=` token from ICICI, for audit/debugging. */
   rawStatus: string | null;
   /** ICICI's eazypay transaction id, when present. */
   gatewayRef: string | null;
   /** Amount echoed back by ICICI, when present. */
   amount: number | null;
+  /** HTTP status of the verify response, when a call was made. */
+  httpStatus?: number | null;
   /** Populated when reachable=false. */
   error?: string;
 }
@@ -313,36 +346,44 @@ export interface EazypayVerifyResult {
 export function mapVerifyStatus(rawStatus: string | null | undefined): VerifyOutcome {
   const s = (rawStatus || "").trim().toUpperCase();
   if (!s) return "unknown";
-  // Money received from the bank (reconciling / settling / settled).
-  if (s === "RIP" || s === "SIP" || s === "SUCCESS" || s === "PAID") return "paid";
+  // Money received from the bank: settled (Success) or settling (RIP/SIP).
+  if (s === "SUCCESS" || s === "PAID" || s === "RIP" || s === "SIP") return "paid";
   // ICICI explicitly reported a non-success terminal outcome.
   if (
     s === "FAILED" ||
+    s === "FAILURE" ||
     s === "TIMEOUT" ||
     s.includes("EXPIRED") ||
     s.includes("RETURNED") ||
     s.includes("CANCEL") ||
-    s.includes("REJECT")
+    s.includes("REJECT") ||
+    s.includes("DECLINE")
   )
     return "failed";
-  // Payer started but never completed (or non-card challan awaiting payment).
-  if (
-    s.includes("INITIATED") ||
-    s.includes("CHALLAN") ||
-    s.includes("CLEARANCE") ||
-    s.includes("PENDING")
-  )
-    return "abandoned";
+  // Anything else (Initiated / Challan / In Clearance / unrecognized) is NOT a
+  // definitive answer — never change the row; the caller flags it for review.
   return "unknown";
 }
 
-/** Parse the plaintext `key=value&key=value` packet ICICI returns. */
+/** Settlement state implied by an ICICI status token (only meaningful when PAID). */
+export function settlementForVerifyStatus(rawStatus: string | null | undefined): SettlementStatus | null {
+  const s = (rawStatus || "").trim().toUpperCase();
+  if (s === "SUCCESS" || s === "PAID") return "settled";
+  if (s === "RIP" || s === "SIP") return "in_progress";
+  return null;
+}
+
+/**
+ * Parse the plaintext `key=value&key=value` packet ICICI returns. Tolerant of
+ * `&`- or newline-separated pairs, surrounding whitespace and key casing (all
+ * keys are lower-cased so callers can read `status`, `ezpaytranid`, etc.).
+ */
 function parseVerifyPacket(body: string): Record<string, string> {
   const out: Record<string, string> = {};
-  for (const part of (body || "").split("&")) {
+  for (const part of (body || "").split(/[&\r\n]+/)) {
     const eq = part.indexOf("=");
     if (eq === -1) continue;
-    const k = part.slice(0, eq).trim();
+    const k = part.slice(0, eq).trim().toLowerCase();
     const v = part.slice(eq + 1).trim();
     if (k) out[k] = v;
   }
@@ -400,47 +441,69 @@ async function fetchVerify(targetUrl: string, timeoutMs: number): Promise<Respon
  */
 export async function eazypayVerify(
   referenceNo: string,
-  opts?: { timeoutMs?: number }
+  opts?: EazypayVerifyHints
 ): Promise<EazypayVerifyResult> {
-  const unreachable = (error: string): EazypayVerifyResult => ({
+  const unreachable = (error: string, httpStatus?: number | null): EazypayVerifyResult => ({
     reachable: false,
     outcome: "unknown",
+    settlement: null,
     rawStatus: null,
     gatewayRef: null,
     amount: null,
+    httpStatus: httpStatus ?? null,
     error,
   });
   const ref = (referenceNo || "").trim();
   if (!ref) return unreachable("missing reference");
 
+  // Full parameter set per the ICICI doc. Primary lookup is by our own
+  // pgreferenceno; the rest are sent when known and left blank otherwise (the
+  // doc allows blanks for a reference-based lookup). dstatus is optional.
+  const blankOr = (v: unknown) => (v === null || v === undefined || v === "" ? "" : String(v).trim());
   const qs = new URLSearchParams({
-    ezpaytranid: "",
-    amount: "",
-    paymentmode: "",
     merchantid: getMerchantId(),
-    trandate: "",
     pgreferenceno: ref,
+    ezpaytranid: blankOr(opts?.ezpaytranid),
+    amount: blankOr(opts?.amount),
+    paymentmode: blankOr(opts?.paymentmode),
+    trandate: blankOr(opts?.trandate),
   });
+  const dstatus = getVerifyDstatus();
+  if (dstatus) qs.set("dstatus", dstatus);
   const target = `${EAZYPAY_VERIFY_URL}?${qs.toString()}`;
 
   try {
     const res = await fetchVerify(target, opts?.timeoutMs ?? 12_000);
-    if (!res.ok) return unreachable(`HTTP ${res.status}`);
-    const body = await res.text();
+    const body = await res.text().catch(() => "");
+    // Log the raw response (truncated) for debugging — server-side only. Never
+    // logs the AES key or any request encryption; the Verify URL carries none.
+    console.info(
+      `[eazypayVerify] ref=${ref} http=${res.status} raw=${(body || "").slice(0, 300).replace(/\s+/g, " ")}`,
+    );
+    if (!res.ok) return unreachable(`HTTP ${res.status}`, res.status);
     const packet = parseVerifyPacket(body);
-    const rawStatus = packet["status"] ?? packet["Status"] ?? null;
+    const rawStatus = packet["status"] ?? null;
     // ICICI returns a body but with no status token for an unknown reference.
     if (rawStatus === null && Object.keys(packet).length === 0) {
-      return { reachable: true, outcome: "unknown", rawStatus: null, gatewayRef: null, amount: null };
+      return { reachable: true, outcome: "unknown", settlement: null, rawStatus: null, gatewayRef: null, amount: null, httpStatus: res.status };
     }
-    const amtRaw = packet["amount"] ?? packet["Amount"] ?? "";
+    // ICICI uses literal "NA"/"null" placeholders for empty fields (e.g. on an
+    // expired bill) — treat those as absent so we never store junk.
+    const clean = (v: string | undefined) => {
+      const t = (v ?? "").trim();
+      return t && t.toUpperCase() !== "NA" && t.toLowerCase() !== "null" ? t : "";
+    };
+    const amtRaw = clean(packet["amount"]);
     const amt = amtRaw !== "" && !Number.isNaN(Number(amtRaw)) ? Number(amtRaw) : null;
+    const outcome = mapVerifyStatus(rawStatus);
     return {
       reachable: true,
-      outcome: mapVerifyStatus(rawStatus),
+      outcome,
+      settlement: outcome === "paid" ? settlementForVerifyStatus(rawStatus) : null,
       rawStatus,
-      gatewayRef: packet["ezpaytranid"] || null,
+      gatewayRef: clean(packet["ezpaytranid"]) || null,
       amount: amt,
+      httpStatus: res.status,
     };
   } catch (e) {
     return unreachable((e as Error).message || "verify request failed");

@@ -4,7 +4,7 @@ import { computeExpiry, isExpired, isExpiringSoon, yesterdayISODate, todayISODat
 import { generateAccessCode } from "./codeGenerator";
 import { generateLoginCode } from "./buyerCode";
 import { normalizeIndianMobile } from "./phone";
-import { verifyFromStoredCallback, eazypayVerify, type VerifyOutcome } from "./eazypay";
+import { verifyFromStoredCallback, eazypayVerify, type VerifyOutcome, type SettlementStatus } from "./eazypay";
 import { recordPaymentPaid, recordPaymentInitiated, recordPaymentStatusChanged, recordRegistrationCreated } from "./analytics/server";
 import { fireAutoSms } from "./sms/dispatch";
 import { TRIGGERS } from "./sms/templates";
@@ -2076,9 +2076,13 @@ export interface ReverifyResult {
   /** Rows we could not get a definitive ICICI answer for. */
   unreachable: number;
   toPaid: number;
+  /** Of toPaid, how many are confirmed-but-settling (RIP/SIP) — access granted, settlement pending. */
+  toPaidSettling: number;
   toFailed: number;
   toAbandoned: number;
   toVerifying: number;
+  /** ICICI answered but with an unrecognized status — flagged for manual review, status unchanged. */
+  needsReview: number;
   unchanged: number;
   /** Optional per-row detail (dry-run / small batches). */
   details?: {
@@ -2087,7 +2091,16 @@ export interface ReverifyResult {
     to: string;
     source: "callback" | "verify" | "none";
     rawStatus: string | null;
+    settlement?: SettlementStatus | null;
   }[];
+}
+
+/** Minimal actor identity for attributing a verify run in the audit ledger. */
+export interface ReverifyActor {
+  id: string;
+  name: string | null;
+  role: string | null;
+  isSuper: boolean;
 }
 
 export interface ReverifyOptions {
@@ -2109,6 +2122,8 @@ export interface ReverifyOptions {
   storedOnly?: boolean;
   /** Collect per-row details (for dry-run / recovery report). */
   withDetails?: boolean;
+  /** Who triggered this run (admin button). Attributed in payment_action_log. */
+  actor?: ReverifyActor | null;
 }
 
 /**
@@ -2118,17 +2133,79 @@ export interface ReverifyOptions {
 async function decidePaymentOutcome(
   row: Payment,
   storedOnly: boolean,
-): Promise<{ outcome: VerifyOutcome; source: "callback" | "verify" | "none"; rawStatus: string | null; gatewayRef: string | null }> {
+): Promise<{ outcome: VerifyOutcome; source: "callback" | "verify" | "none"; rawStatus: string | null; gatewayRef: string | null; settlement: SettlementStatus | null }> {
   const stored = verifyFromStoredCallback(row);
-  if (stored === "paid") return { outcome: "paid", source: "callback", rawStatus: row.response_code ?? null, gatewayRef: row.gateway_ref ?? null };
+  // A verified E000 callback means the money settled to us -> "settled".
+  if (stored === "paid") return { outcome: "paid", source: "callback", rawStatus: row.response_code ?? null, gatewayRef: row.gateway_ref ?? null, settlement: "settled" };
 
   if (!storedOnly && row.reference_no) {
-    const live = await eazypayVerify(row.reference_no);
-    if (live.reachable) return { outcome: live.outcome, source: "verify", rawStatus: live.rawStatus, gatewayRef: live.gatewayRef };
+    // Pass everything we know so ICICI can match by ref and, when available,
+    // by its own transaction id / amount / mode / date (doc pp. 42–46).
+    const live = await eazypayVerify(row.reference_no, {
+      ezpaytranid: row.gateway_ref,
+      amount: row.amount,
+      paymentmode: row.payment_mode,
+      trandate: row.transaction_date,
+    });
+    if (live.reachable) return { outcome: live.outcome, source: "verify", rawStatus: live.rawStatus, gatewayRef: live.gatewayRef, settlement: live.settlement };
   }
   // No live answer — fall back to stored evidence (callback failure IS ICICI).
-  if (stored === "failed") return { outcome: "failed", source: "callback", rawStatus: row.response_code ?? null, gatewayRef: null };
-  return { outcome: "unknown", source: "none", rawStatus: null, gatewayRef: null };
+  if (stored === "failed") return { outcome: "failed", source: "callback", rawStatus: row.response_code ?? null, gatewayRef: null, settlement: null };
+  return { outcome: "unknown", source: "none", rawStatus: null, gatewayRef: null, settlement: null };
+}
+
+/**
+ * Append one immutable verify entry to the shared payment_action_log ledger.
+ * Best-effort, never throws. Kept inline (not via lib/paymentActions) to avoid a
+ * dataProvider <-> paymentActions import cycle. Records who/when/raw ICICI
+ * response/old->new status + settlement, exactly like the proof/approve actions.
+ */
+async function logVerifyAudit(input: {
+  row: Payment;
+  actor?: ReverifyActor | null;
+  oldStatus: string;
+  newStatus: string;
+  source: "callback" | "verify" | "none";
+  rawStatus: string | null;
+  settlement: SettlementStatus | null;
+  reachable: boolean;
+  needsReview: boolean;
+}): Promise<void> {
+  const db = getSupabaseAdmin();
+  if (!db) return;
+  const actor = input.actor;
+  try {
+    await db.from("payment_action_log").insert({
+      id: uuid(),
+      action: "verify",
+      payment_id: input.row.id,
+      reference_no: input.row.reference_no ?? null,
+      enrollment_id: input.row.enrollment_id ?? null,
+      phone: input.row.phone ?? null,
+      actor_id: actor?.id ?? "system",
+      actor_name: actor?.name ?? (actor ? null : "system"),
+      actor_role: actor?.role ?? null,
+      actor_is_super: actor?.isSuper === true,
+      old_status: input.oldStatus,
+      new_status: input.newStatus,
+      reason:
+        input.source === "verify"
+          ? `ICICI Verify URL: ${input.rawStatus ?? "(no status)"}`
+          : input.source === "callback"
+            ? "Stored ICICI callback evidence"
+            : "No ICICI answer",
+      metadata: {
+        source: input.source,
+        raw_status: input.rawStatus,
+        settlement: input.settlement,
+        reachable: input.reachable,
+        needs_review: input.needsReview,
+      },
+      created_at: new Date().toISOString(),
+    });
+  } catch {
+    /* best-effort audit — never blocks verification */
+  }
 }
 
 /**
@@ -2141,7 +2218,7 @@ async function decidePaymentOutcome(
  */
 export async function reverifyPayments(opts: ReverifyOptions = {}): Promise<ReverifyResult> {
   const result: ReverifyResult = {
-    scanned: 0, reachable: 0, unreachable: 0, toPaid: 0, toFailed: 0, toAbandoned: 0, toVerifying: 0, unchanged: 0,
+    scanned: 0, reachable: 0, unreachable: 0, toPaid: 0, toPaidSettling: 0, toFailed: 0, toAbandoned: 0, toVerifying: 0, needsReview: 0, unchanged: 0,
     details: opts.withDetails ? [] : undefined,
   };
   if (demoMode()) return result;
@@ -2170,14 +2247,18 @@ export async function reverifyPayments(opts: ReverifyOptions = {}): Promise<Reve
 
   for (const row of rows) {
     result.scanned += 1;
-    const { outcome, source, rawStatus, gatewayRef } = await decidePaymentOutcome(row, storedOnly);
+    const { outcome, source, rawStatus, gatewayRef, settlement } = await decidePaymentOutcome(row, storedOnly);
     if (source === "verify") await sleep(rateLimitMs);
 
     let target = statusForOutcome(outcome);
+    // ICICI answered with an unrecognized status (Initiated/Challan/etc.): a real
+    // answer but NOT terminal — never change the row; flag it for manual review.
+    const needsReview = source === "verify" && outcome === "unknown" && !!rawStatus;
     // Unknown: never terminal. Promote a past-window PENDING to VERIFYING so the
     // UI/admin reflect "we're actively checking" — but a timer never FAILs it.
     if (target === null) {
       result.unreachable += 1;
+      if (needsReview) result.needsReview += 1;
       const ageMs = Date.now() - new Date(row.created_at).getTime();
       const pastWindow = ageMs >= pendingWindowMinutes() * 60_000;
       const isPending = row.status === "PENDING" || row.status === "pending";
@@ -2189,12 +2270,14 @@ export async function reverifyPayments(opts: ReverifyOptions = {}): Promise<Reve
     // Tally the intended transition for the report.
     const willChange = !!target && target !== row.status;
     if (willChange) {
-      if (target === "PAID") result.toPaid += 1;
-      else if (target === "FAILED") result.toFailed += 1;
+      if (target === "PAID") {
+        result.toPaid += 1;
+        if (settlement === "in_progress") result.toPaidSettling += 1;
+      } else if (target === "FAILED") result.toFailed += 1;
       else if (target === "ABANDONED") result.toAbandoned += 1;
       else if (target === "VERIFYING") result.toVerifying += 1;
     }
-    result.details?.push({ reference_no: row.reference_no ?? null, from: row.status, to: target ?? row.status, source, rawStatus });
+    result.details?.push({ reference_no: row.reference_no ?? null, from: row.status, to: target ?? row.status, source, rawStatus, settlement });
 
     if (dryRun) continue;
 
@@ -2209,7 +2292,15 @@ export async function reverifyPayments(opts: ReverifyOptions = {}): Promise<Reve
     }
     if (gatewayRef && !row.gateway_ref) patch.gateway_ref = gatewayRef;
     if (willChange && target) patch.status = target;
-    if (Object.keys(patch).length === 0) continue; // nothing to write
+    // Record settlement state alongside a PAID transition (settled vs settling).
+    if (willChange && target === "PAID" && settlement) patch.settlement_status = settlement;
+    if (Object.keys(patch).length === 0) {
+      // No DB change, but if ICICI gave a real answer we still audit the attempt.
+      if (source === "verify") {
+        await logVerifyAudit({ row, actor: opts.actor, oldStatus: row.status, newStatus: row.status, source, rawStatus, settlement, reachable: true, needsReview });
+      }
+      continue;
+    }
 
     const { data: upd } = await db
       .from("payments")
@@ -2224,6 +2315,22 @@ export async function reverifyPayments(opts: ReverifyOptions = {}): Promise<Reve
       const r = upd as Pick<Payment, "phone" | "student_name" | "reference_no" | "item_type">;
       await ensureBuyer(r.phone, r.student_name).catch(() => null);
       if (r.item_type === "course" && r.reference_no) await finalizeCoursePaymentByReference(r.reference_no).catch(() => null);
+    }
+
+    // Immutable audit trail: every verify attempt + every status change (who,
+    // when, raw ICICI response, old -> new, settlement). Best-effort.
+    if (source === "verify" || willChange) {
+      await logVerifyAudit({
+        row,
+        actor: opts.actor,
+        oldStatus: row.status,
+        newStatus: (willChange && target) ? target : row.status,
+        source,
+        rawStatus,
+        settlement,
+        reachable: source !== "none",
+        needsReview,
+      });
     }
   }
 

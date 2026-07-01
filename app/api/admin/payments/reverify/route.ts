@@ -1,10 +1,12 @@
 import { NextResponse } from "next/server";
 import { reverifyPayments, type ReverifyOptions } from "@/lib/dataProvider";
-import { requireAdmin, requireAnyPermission } from "@/lib/adminGuard";
+import { requireAdmin, requireAnyPermission, getActionActor } from "@/lib/adminGuard";
 
 export const dynamic = "force-dynamic";
-// ICICI Verify calls are rate-limited and batched; give the function room to run.
-export const maxDuration = 60;
+// ICICI Verify calls are ~1s each and rate-limited/batched; a full backlog sweep
+// needs headroom. 300s is the Vercel Pro ceiling (clamped down automatically on
+// smaller plans). Per-row / filtered runs finish in a second or two.
+export const maxDuration = 300;
 
 /**
  * Admin "Re-verify payments" — re-checks NON-paid payments against ICICI's
@@ -26,6 +28,9 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, error: "Forbidden — payments access required." }, { status: 403 });
   }
 
+  // Attribute this manual run to the logged-in admin in the audit ledger.
+  const actor = await getActionActor();
+
   const body = (await req.json().catch(() => ({}))) as Partial<ReverifyOptions>;
   const opts: ReverifyOptions = {
     dryRun: body.dryRun === true,
@@ -35,6 +40,7 @@ export async function POST(req: Request) {
     limit: typeof body.limit === "number" ? Math.min(Math.max(body.limit, 1), 1000) : 500,
     storedOnly: body.storedOnly === true,
     withDetails: body.withDetails === true,
+    actor: actor ? { id: actor.id, name: actor.name, role: actor.role, isSuper: actor.isSuper } : null,
   };
 
   try {

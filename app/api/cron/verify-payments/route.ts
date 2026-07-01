@@ -2,7 +2,9 @@ import { NextResponse } from "next/server";
 import { reverifyPayments } from "@/lib/dataProvider";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+// Live ICICI Verify calls are ~1s each; a due-row sweep needs headroom. 300s is
+// the Vercel Pro ceiling (auto-clamped on smaller plans).
+export const maxDuration = 300;
 
 /**
  * Background payment re-verification sweep.

@@ -1037,6 +1037,13 @@ export interface Payment {
   last_verify_at?: string | null;
   /** Last raw `status=` token ICICI returned, for audit. */
   verify_status?: string | null;
+  /**
+   * Settlement state for a PAID row (ICICI Verify URL): "settled" = money in our
+   * merchant account (Success); "in_progress" = money confirmed but still
+   * reconciling/settling (RIP/SIP) — access is granted, settlement is pending.
+   * Null for non-paid rows or when unknown.
+   */
+  settlement_status?: "settled" | "in_progress" | null;
   // --- Phase 2: Book-Your-Seat + EMI ledger links (nullable; one-time payments leave these null) ---
   enrollment_id?: string | null;
   payment_kind?: "one_time" | "seat" | "installment" | "full" | null;
@@ -1128,7 +1135,8 @@ export type PaymentActionType =
   | "restore"
   | "permanent_delete"
   | "supersede"
-  | "unsupersede";
+  | "unsupersede"
+  | "verify";
 
 /**
  * One immutable, append-only entry in the payment action ledger. Captures who did

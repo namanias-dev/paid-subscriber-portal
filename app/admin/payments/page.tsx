@@ -415,14 +415,16 @@ export default function PaymentsAdmin() {
         setReverifyMsg(null);
         return false;
       }
-      const r = json.result as { scanned: number; toPaid: number; toFailed: number; toAbandoned: number; toVerifying: number; unreachable: number };
+      const r = json.result as { scanned: number; toPaid: number; toPaidSettling?: number; toFailed: number; toAbandoned: number; toVerifying: number; needsReview?: number; unreachable: number };
+      const settling = r.toPaidSettling || 0;
       const parts = [
-        `${r.toPaid} → PAID`,
+        r.toPaid ? `${r.toPaid} → PAID${settling ? ` (${settling} settling)` : ""}` : null,
         r.toFailed ? `${r.toFailed} → failed` : null,
         r.toAbandoned ? `${r.toAbandoned} → abandoned` : null,
         r.toVerifying ? `${r.toVerifying} → verifying` : null,
+        r.needsReview ? `${r.needsReview} need review` : null,
       ].filter(Boolean);
-      toast(`Re-verified ${r.scanned}: ${parts.join(", ") || "no changes"}${r.unreachable ? ` · ${r.unreachable} unreachable` : ""}`, "success");
+      toast(`Re-verified ${r.scanned}: ${parts.join(", ") || "no changes"}${r.unreachable ? ` · ${r.unreachable} no answer` : ""}`, "success");
       setReverifyMsg(null);
       full.reload();
       return true;
@@ -604,7 +606,7 @@ export default function PaymentsAdmin() {
         subtitle="Razorpay & ICICI transactions, revenue & collections"
         action={
           <div className="flex flex-wrap items-center gap-2">
-            <button onClick={reverifyAll} disabled={reverifying} className="btn btn-primary text-sm disabled:opacity-60" title="Re-check every non-paid payment against ICICI's status API">
+            <button onClick={reverifyAll} disabled={reverifying} className="btn btn-primary text-sm disabled:opacity-60" title="Re-check every non-paid payment against ICICI's status API. RIP/SIP count as paid (money received, settlement pending).">
               {reverifying ? "Re-verifying…" : "↻ Re-verify payments"}
             </button>
             {hasFilters && (
@@ -619,6 +621,11 @@ export default function PaymentsAdmin() {
           </div>
         }
       />
+
+      {/* ICICI verify timing guidance (surfaced near the Re-verify button) */}
+      <div className="mb-4 rounded-lg border border-line bg-[var(--primary-tint)] px-3 py-2 text-[12.5px] leading-relaxed text-ink2">
+        ⏱️ <b>Re-verifying pending payments:</b> ICICI can re-confirm a transaction up to <b>~1 hour</b> after payment, and a small number flip to <b>Success</b> up to <b>3 days (T+3)</b> later. So a <b>Failed / Timeout / pending</b> result isn&apos;t always final — re-verify older pending payments before writing them off. <b>RIP / SIP</b> mean the money was genuinely received (course access is granted), but settlement to our account is still pending.
+      </div>
 
       {/* Premium "today" summary cards (always IST today) */}
       <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -1345,6 +1352,12 @@ function AttemptRow({
       <div className="min-w-0">
         <div className="flex flex-wrap items-center gap-1.5">
           <span className={`pill ${statusPillClass(p.status)}`}>{statusLabel(p.status)}</span>
+          {/* Money received but not yet settled to our account (ICICI RIP/SIP). */}
+          {isPaid(p.status) && p.settlement_status === "in_progress" && (
+            <span className="pill pill-amber" title="ICICI reports RIP/SIP: money received and access granted, but settlement to our account is still pending.">
+              Settlement pending
+            </span>
+          )}
           {superseded && (
             <span className="pill pill-gray" title="Another attempt for this item was paid/approved, so this attempt is moot.">
               Superseded — payment already completed
@@ -1353,6 +1366,13 @@ function AttemptRow({
         </div>
         <div className="mt-0.5 text-[11px] text-muted">{sub}</div>
         <div className="text-[11px] text-muted">{formatISTDateTime(p.created_at)}</div>
+        {/* Last ICICI verification: when + the raw status token it returned. */}
+        {p.last_verify_at && (
+          <div className="text-[11px] text-muted" title="Last time this payment was checked against ICICI's Verify URL">
+            Last checked {formatISTDateTime(p.last_verify_at)}
+            {p.verify_status ? ` · ICICI said: ${p.verify_status}` : ""}
+          </div>
+        )}
       </div>
       <div className="flex shrink-0 flex-col items-end gap-1">
         <span className="text-sm font-semibold text-ink">{formatINR(p.amount)}</span>
