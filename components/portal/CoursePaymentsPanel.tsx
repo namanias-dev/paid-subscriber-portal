@@ -14,6 +14,7 @@ import {
 import { formatINR, formatISTDate } from "@/lib/dates";
 import { deriveEnrollment, installmentStatus } from "@/lib/installments";
 import type { CourseEnrollment, PaymentReceipt } from "@/lib/types";
+import PaymentCautionModal from "@/components/public/PaymentCautionModal";
 
 const STATUS_LABEL: Record<string, string> = {
   pending: "Pending",
@@ -221,36 +222,17 @@ export default function CoursePaymentsPanel({
         </div>
       )}
 
-      {/* Pre-redirect caution modal — sets expectations before the gateway opens.
-          We cannot technically block the browser Back button or actions on the
-          gateway's own page; this reassures the student that an abandoned attempt
-          is harmless and a real deduction can be recovered. */}
-      {caution && (
-        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 backdrop-blur-sm sm:items-center sm:p-4" onClick={() => setCaution(null)}>
-          <div className="w-full max-w-md rounded-t-2xl bg-white p-6 shadow-2xl sm:rounded-2xl" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-start gap-3">
-              <span className="mt-0.5 grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[var(--ca-gold-soft)] text-[var(--ca-navy-900)]"><CreditCard size={18} /></span>
-              <div>
-                <h4 className="font-heading text-base font-bold text-[var(--ca-navy-900)]">Before you pay {formatINR(caution.amount)}</h4>
-                <p className="mt-1 text-sm text-[var(--ca-slate-700)]">{caution.label}</p>
-              </div>
-            </div>
-            <ul className="mt-4 space-y-2 rounded-xl bg-[var(--ca-slate-50)] p-3 text-sm text-[var(--ca-slate-700)]">
-              <li className="flex gap-2"><AlertTriangle size={16} className="mt-0.5 shrink-0 text-amber-600" /> Please <b>don&apos;t press Back, refresh, or close</b> this page while payment is in progress.</li>
-              <li className="flex gap-2"><CheckCircle2 size={16} className="mt-0.5 shrink-0 text-emerald-600" /> If money is deducted, wait for confirmation — or upload proof from your portal. An unfinished attempt is <b>never</b> charged.</li>
-            </ul>
-            <div className="mt-5 flex gap-2">
-              <button onClick={() => setCaution(null)} className="ca-btn ca-btn-outline ca-focus flex-1 justify-center">Cancel</button>
-              <button
-                onClick={() => pay(caution.action, caution.installmentNo, caution.key)}
-                className="ca-btn ca-btn-gold ca-focus flex-1 justify-center"
-              >
-                Continue to payment
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Pre-redirect caution modal (shared with the webinar + plan flows). */}
+      <PaymentCautionModal
+        open={!!caution}
+        amount={caution?.amount ?? 0}
+        itemLabel={caution?.label ?? ""}
+        busy={!!busy}
+        onConfirm={() => caution && pay(caution.action, caution.installmentNo, caution.key)}
+        onCancel={() => setCaution(null)}
+        confirmClassName="ca-btn ca-btn-gold ca-focus flex-1 justify-center disabled:opacity-60"
+        cancelClassName="ca-btn ca-btn-outline ca-focus flex-1 justify-center"
+      />
     </div>
   );
 }

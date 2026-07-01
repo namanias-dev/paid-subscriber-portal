@@ -5,6 +5,7 @@ import { useToast } from "@/components/ui/Toast";
 import { startPayment } from "@/lib/startPayment";
 import { formatINR } from "@/lib/dates";
 import { trackClient } from "@/lib/analytics/client";
+import PaymentCautionModal from "@/components/public/PaymentCautionModal";
 
 export default function WebinarRegister({
   webinarId,
@@ -26,6 +27,8 @@ export default function WebinarRegister({
   const [coupon, setCoupon] = useState("");
   const [applied, setApplied] = useState<{ code: string; finalAmount: number; discount: number } | null>(null);
   const [couponMsg, setCouponMsg] = useState<string | null>(null);
+  // Pre-redirect caution gate for PAID webinars (free registrations skip it).
+  const [caution, setCaution] = useState(false);
 
   const isPaid = price > 0;
   const payable = applied ? applied.finalAmount : price;
@@ -53,7 +56,7 @@ export default function WebinarRegister({
     }
   }
 
-  async function submit(e: React.FormEvent) {
+  function submit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
     if (!name.trim() || !/^\d{10}$/.test(phone)) {
@@ -64,6 +67,18 @@ export default function WebinarRegister({
       setError("Enter a valid email address, or leave it blank.");
       return;
     }
+    // PAID webinars redirect to the gateway — surface the caution first. Free
+    // registrations have no hand-off, so proceed straight away.
+    if (isPaid) {
+      setCaution(true);
+      return;
+    }
+    void proceed();
+  }
+
+  async function proceed() {
+    setCaution(false);
+    setError(null);
     setLoading(true);
     try {
       const res = await fetch("/api/public/webinar-register", {
@@ -127,6 +142,16 @@ export default function WebinarRegister({
   }
 
   return (
+    <>
+    <PaymentCautionModal
+      open={caution}
+      amount={payable}
+      itemLabel="You'll be redirected to ICICI Eazypay to complete your webinar registration."
+      confirmLabel={`Continue to pay ${formatINR(payable)}`}
+      busy={loading}
+      onConfirm={proceed}
+      onCancel={() => setCaution(false)}
+    />
     <form onSubmit={submit} className="space-y-3">
       <input className="input" placeholder="Your name" value={name} onChange={(e) => setName(e.target.value)} />
       <input
@@ -161,5 +186,6 @@ export default function WebinarRegister({
         {loading ? "Processing..." : isPaid ? `Register & Pay ${formatINR(payable)} →` : "Register Now"}
       </button>
     </form>
+    </>
   );
 }
