@@ -11,6 +11,7 @@ import {
   getWebinarRegistrationsByWebinar,
 } from "../dataProvider";
 import { isPaidStatus, dedupePaidRows, itemKey } from "../paymentsAgg";
+import { firstNamesMatch } from "./store";
 import type { RelatedEntity } from "./service";
 import type { Payment } from "../types";
 
@@ -59,13 +60,20 @@ function norm(phone: string | null | undefined): string | null {
   return n.ok && n.digits10 ? n.digits10 : null;
 }
 
-/** phone(10) -> { name, login_code } from buyers (for login_code + names). */
-async function buyerMap(): Promise<Map<string, { name: string | null; login_code: string | null }>> {
-  const map = new Map<string, { name: string | null; login_code: string | null }>();
+/**
+ * phone(10) -> { name, login_code, ambiguous } from buyers. When two buyers share
+ * a number the entry is flagged `ambiguous` and its login_code is dropped, so we
+ * never attach a code we can't attribute to one person (Issue 2).
+ */
+async function buyerMap(): Promise<Map<string, { name: string | null; login_code: string | null; ambiguous: boolean }>> {
+  const map = new Map<string, { name: string | null; login_code: string | null; ambiguous: boolean }>();
   try {
     for (const b of await getBuyers()) {
       const d = norm(b.phone);
-      if (d) map.set(d, { name: b.name, login_code: b.login_code });
+      if (!d) continue;
+      const existing = map.get(d);
+      if (existing) { existing.ambiguous = true; existing.login_code = null; }
+      else map.set(d, { name: b.name, login_code: b.login_code, ambiguous: false });
     }
   } catch { /* ignore */ }
   return map;
@@ -102,11 +110,20 @@ export async function resolveAudience(spec: AudienceSpec): Promise<Recipient[]> 
   const bm = await buyerMap();
   const attach = (digits: string, name: string | null, vars: Record<string, string | number | null | undefined>, entity: RelatedEntity): Recipient => {
     const b = bm.get(digits);
+    const finalName = name || b?.name || null;
+    // Only attach a login_code we can attribute to THIS recipient: exactly one
+    // buyer on the number AND (when an intended name is known) the names agree.
+    // Otherwise leave it empty so code-bearing templates fail-closed rather than
+    // sending the wrong person's code (Issue 2).
+    let login_code = "";
+    if (b && !b.ambiguous && b.login_code && (!name || firstNamesMatch(name, b.name))) {
+      login_code = b.login_code;
+    }
     return {
       mobile: digits, normalized: digits,
-      name: name || b?.name || null,
-      vars: { name: name || b?.name || "", login_code: b?.login_code || "", ...vars },
-      entity: { student_name: name || b?.name || null, ...entity },
+      name: finalName,
+      vars: { name: finalName || "", login_code, ...vars },
+      entity: { student_name: finalName, ...entity },
     };
   };
 

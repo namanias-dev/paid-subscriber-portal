@@ -8,10 +8,10 @@
  */
 import { normalizeIndianMobile } from "../phone";
 import { renderTemplate, validateBody } from "./templates";
-import { getTemplate, getSettings, insertQueuedLog, updateLog, countSentSince, recentSameTemplate } from "./store";
-import { sendViaGateway } from "./gateway";
+import { getTemplate, getSettings, insertQueuedLog, updateLog, countSentSince, recentSameTemplate, listLogs } from "./store";
+import { sendViaGateway, fetchDeliveryStatus } from "./gateway";
 import { gatewayConfigured, smsEnvEnabled, loginUrlForTemplate, SMS_DEFAULT_SENDER_ID, SMS_DEFAULT_ROUTE } from "./config";
-import type { SmsLogStatus } from "./types";
+import type { SmsLog, SmsLogStatus } from "./types";
 
 const SAME_TRIGGER_WINDOW_MIN = 30;
 
@@ -176,6 +176,54 @@ export async function sendSms(input: SendSmsInput): Promise<SendSmsResult> {
     sent_at: new Date().toISOString(),
   });
   return { ok: res.ok, logId: inserted.id, status: res.status, error: res.ok ? undefined : (res.response.error || "send_failed") };
+}
+
+export interface PollDlrResult {
+  scanned: number;
+  delivered: number;
+  failed: number;
+  pending: number;
+  unknown: number;
+  checked: { messageId: string; statusText: string | null; mapped: SmsLogStatus }[];
+}
+
+/**
+ * PULL delivery reports for open (SENT) logs via http-dlr.php and promote each
+ * log to DELIVERED/FAILED using JustGoSMS's REAL status. Terminal statuses set
+ * the log status; "Submitted"/"Other" are recorded raw but leave the log SENT so
+ * we never overclaim. Reuses updateLog — no parallel write path. Idempotent.
+ */
+export async function pollDeliveryStatuses(opts: { sinceDays?: number; limit?: number; messageIds?: string[] } = {}): Promise<PollDlrResult> {
+  const out: PollDlrResult = { scanned: 0, delivered: 0, failed: 0, pending: 0, unknown: 0, checked: [] };
+  if (!gatewayConfigured()) return out;
+
+  let logs: SmsLog[];
+  if (opts.messageIds?.length) {
+    const { findLogsByMessageIds } = await import("./store");
+    logs = await findLogsByMessageIds(opts.messageIds);
+  } else {
+    const since = new Date(Date.now() - (opts.sinceDays ?? 3) * 86400000).toISOString();
+    logs = (await listLogs({ from: since, status: "SENT", limit: opts.limit ?? 500 })).filter((l) => l.gateway_message_id);
+  }
+
+  for (const l of logs) {
+    if (!l.gateway_message_id) continue;
+    out.scanned++;
+    const dlr = await fetchDeliveryStatus(l.gateway_message_id);
+    out.checked.push({ messageId: l.gateway_message_id, statusText: dlr.statusText, mapped: dlr.mapped });
+    // Lookup error (invalid/not-found id) — leave the log untouched, don't guess.
+    if (!dlr.ok) { out.unknown++; continue; }
+    const prior = (l.gateway_response && typeof l.gateway_response === "object") ? (l.gateway_response as Record<string, unknown>) : {};
+    const patch: Partial<SmsLog> = {
+      gateway_response: { ...prior, dlr: { statusText: dlr.statusText, mapped: dlr.mapped, number: dlr.number, at: new Date().toISOString(), source: "pull" } },
+    };
+    // Truth comes from the DLR status, never from the send's "Submitted Successfully".
+    if (dlr.mapped === "DELIVERED") { patch.status = "DELIVERED"; out.delivered++; }
+    else if (dlr.mapped === "SENT") { out.pending++; } // still in-flight ("Submitted") — keep SENT
+    else { patch.status = "FAILED"; patch.error_message = l.error_message || `dlr:${dlr.statusText}`; out.failed++; } // "Other"/undeliv/etc = not delivered
+    await updateLog(l.id, patch);
+  }
+  return out;
 }
 
 /** Retry a previously-failed log by re-sending its stored body (new attempt). */

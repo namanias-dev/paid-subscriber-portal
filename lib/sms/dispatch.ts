@@ -6,19 +6,9 @@
  *
  * Every auto-rule defaults OFF; this no-ops unless a Super Admin enabled it.
  */
-import { getSupabaseAdmin } from "../supabase";
 import { normalizeIndianMobile } from "../phone";
-import { getRule } from "./store";
+import { getRule, getBuyerById, resolveBuyerByPhone, firstNamesMatch } from "./store";
 import { sendSms, type RelatedEntity } from "./service";
-
-async function loginByPhone(digits10: string): Promise<{ name: string | null; login_code: string | null }> {
-  const db = getSupabaseAdmin();
-  if (!db) return { name: null, login_code: null };
-  try {
-    const { data } = await db.from("buyers").select("name,login_code").eq("phone", digits10).maybeSingle();
-    return { name: (data?.name as string) ?? null, login_code: (data?.login_code as string) ?? null };
-  } catch { return { name: null, login_code: null }; }
-}
 
 export interface AutoCtx {
   trigger: string;
@@ -40,10 +30,26 @@ async function dispatch(ctx: AutoCtx): Promise<void> {
 
   const vars = { ...(ctx.vars || {}) };
   if (vars.name === undefined && ctx.name) vars.name = ctx.name;
+
+  // Identity-safe login_code (Issue 2): resolve by BUYER ID when we have it (exact
+  // person — safe even on shared numbers), else by phone but ONLY when exactly one
+  // buyer holds that number. If the number is ambiguous, or the resolved buyer's
+  // name disagrees with the intended recipient, we leave login_code empty so any
+  // code-bearing template fails-closed via the existing missing_vars gate rather
+  // than delivering the WRONG person's code.
   if (vars.login_code === undefined || vars.login_code === null || vars.login_code === "") {
-    const b = await loginByPhone(digits);
-    vars.login_code = b.login_code || "";
-    if ((vars.name === undefined || vars.name === "") && b.name) vars.name = b.name;
+    let resolved: { name: string | null; login_code: string | null } | null = null;
+    if (ctx.entity?.user_id) resolved = await getBuyerById(ctx.entity.user_id);
+    if (!resolved) {
+      const r = await resolveBuyerByPhone(digits);
+      if (r.status === "ok") resolved = { name: r.name, login_code: r.login_code };
+    }
+    const intended = (vars.name as string) || ctx.name || null;
+    if (resolved && intended && !firstNamesMatch(intended, resolved.name)) resolved = null;
+    if (resolved) {
+      vars.login_code = resolved.login_code || "";
+      if ((vars.name === undefined || vars.name === "") && resolved.name) vars.name = resolved.name;
+    }
   }
 
   const entityId = ctx.entityId || ctx.entity?.payment_id || ctx.entity?.registration_id || ctx.entity?.webinar_id || ctx.entity?.user_id || digits;

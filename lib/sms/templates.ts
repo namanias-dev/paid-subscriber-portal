@@ -1,12 +1,17 @@
 /**
- * The 19 DLT templates (seed) + rendering + GSM/length/segment validation.
+ * The DLT templates (seed) + rendering + GSM/length/segment validation.
+ *
+ * SOURCE OF TRUTH for the DLT-approved template IDs + bodies. The 13 templates
+ * that carry a `gateway_template_id` below are the ones DLT-approved by the
+ * provider ("APPROVED SMS TEMPLATES.xlsx"): the body text is byte-exact with the
+ * approved DLT content and the id is the exact approved DLT template id, so the
+ * gateway `message` + `templateid` pair always matches (a mismatch = rejection /
+ * garbled delivery). The remaining seeds have `gateway_template_id: null` — they
+ * are NOT DLT-approved yet and can never be sent (blocked by `no_dlt_id`).
  *
  * RULES enforced here:
- *  - Every body ends with the brand line "Naman Sharma IAS Academy" (except the
- *    Welcome template, where the brand name is in the sentence itself).
  *  - "Rs" not "₹"; no emoji; GSM-7 charset only (warn + block on save).
  *  - Live char + segment counting; worst-case (max-length fill) flagged > 155.
- *  - Seed bodies BYTE-MATCH /docs/sms-dlt-templates.md.
  */
 import type { SmsMessageType, SmsUseCase } from "./types";
 
@@ -40,62 +45,94 @@ export interface SeedTemplate {
   use_case: SmsUseCase;
   message_type: SmsMessageType;
   body: string;
+  /**
+   * Approved DLT gateway template id. NON-null => DLT-approved (body byte-exact
+   * with the approved content); null => not approved yet, can never be sent.
+   */
+  gateway_template_id: string | null;
   /** Auto trigger key, if this template is auto-sendable. */
   trigger_event: string | null;
   /** Default audience tag (informational / used by crons). */
   audience_type: string | null;
 }
 
-/** Bodies are byte-exact with the DLT doc. */
+/**
+ * Bodies + ids of the DLT-approved rows are byte-exact with "APPROVED SMS
+ * TEMPLATES.xlsx". Placeholder ORDER in each body matches the approved
+ * {#var#} order left-to-right (first_name, item_short, login_url, login_code, …).
+ */
 export const SEED_TEMPLATES: SeedTemplate[] = [
   // ---------------- PAYMENT ----------------
   { id: "payment_pending", name: "Payment Pending", use_case: "PAYMENT", message_type: "service", trigger_event: TRIGGERS.payment_pending, audience_type: "payment_pending",
-    body: "Hi {first_name}, payment for {item_short} is pending. Login {login_url} code {login_code} & upload proof for approval. Naman Sharma IAS Academy" },
+    gateway_template_id: "1707178279936988815",
+    body: "Hi {first_name}, your course fee for {item_short} is pending. Login: {login_url} Code: {login_code}. Upload payment proof. Naman Sharma IAS Academy." },
   { id: "proof_received", name: "Proof Received", use_case: "PAYMENT", message_type: "service", trigger_event: TRIGGERS.proof_uploaded, audience_type: "proof_uploaded",
-    body: "Hi {first_name}, we got your payment proof for {item_short}. Our team will verify & approve access shortly. Naman Sharma IAS Academy" },
+    gateway_template_id: "1707178280668003424",
+    body: "Hi {first_name}, we received your payment proof for the course fee of {item_short}. Our team will verify it shortly. Naman Sharma IAS Academy." },
   { id: "access_approved", name: "Access Approved", use_case: "PAYMENT", message_type: "service", trigger_event: TRIGGERS.admin_approval, audience_type: "approved",
-    body: "Hi {first_name}, payment verified! Access for {item_short} is approved. Login {login_url} code {login_code}. Naman Sharma IAS Academy" },
+    gateway_template_id: "1707178280694450910",
+    body: "Hi {first_name}, your payment for the course fee of {item_short} has been verified. Thank you. Naman Sharma IAS Academy." },
   { id: "payment_successful", name: "Payment Successful", use_case: "PAYMENT", message_type: "service", trigger_event: TRIGGERS.payment_success, audience_type: "paid",
-    body: "Hi {first_name}, you are registered for {item_short}. Login {login_url} code {login_code} to view details. Naman Sharma IAS Academy" },
-  { id: "payment_failed", name: "Payment Failed", use_case: "PAYMENT", message_type: "service", trigger_event: TRIGGERS.payment_failed, audience_type: "failed",
-    body: "Hi {first_name}, payment for {item_short} did not complete. Login {login_url} code {login_code} to retry. Naman Sharma IAS Academy" },
-  { id: "abandoned_nudge", name: "Abandoned Nudge", use_case: "PAYMENT", message_type: "service", trigger_event: TRIGGERS.payment_abandoned, audience_type: "abandoned",
-    body: "Hi {first_name}, you are almost enrolled in {item_short}! Finish payment: {login_url} code {login_code}. Naman Sharma IAS Academy" },
+    gateway_template_id: "1707178280720029430",
+    body: "Hi {first_name}, your registration for the course {item_short} is confirmed. Login: {login_url} Code: {login_code}. Naman Sharma IAS Academy" },
+  { id: "payment_failed", name: "Payment Failed / Retry", use_case: "PAYMENT", message_type: "service", trigger_event: TRIGGERS.payment_failed, audience_type: "failed",
+    gateway_template_id: "1707178280000340281",
+    body: "Hi {first_name}, your course fee for {item_short} was not received. Login: {login_url} Code: {login_code} to complete payment. Naman Sharma IAS Academy." },
+  { id: "abandoned_nudge", name: "Payment Abandoned Nudge", use_case: "PAYMENT", message_type: "service", trigger_event: TRIGGERS.payment_abandoned, audience_type: "abandoned",
+    gateway_template_id: "1707178281225847541",
+    body: "Hi {first_name}, your payment for the course fee of {item_short} is pending. Login: {login_url} Code: {login_code} to complete payment. Naman Sharma IAS Academy." },
 
   // ---------------- WEBINAR ----------------
-  { id: "webinar_registered", name: "Webinar Registered", use_case: "WEBINAR", message_type: "service", trigger_event: TRIGGERS.registration_created, audience_type: "webinar_registered",
-    body: "Hi {first_name}, your seat for {item_short} is booked! Login {login_url} code {login_code} for details. Naman Sharma IAS Academy" },
+  { id: "webinar_registered", name: "Webinar Registration Confirmed", use_case: "WEBINAR", message_type: "service", trigger_event: TRIGGERS.registration_created, audience_type: "webinar_registered",
+    gateway_template_id: "1707178280743194991",
+    body: "Hi {first_name}, your webinar registration is confirmed. Login: {login_url} Code: {login_code}. Naman Sharma IAS Academy." },
+  { id: "starting_soon_1hr", name: "Starting Soon", use_case: "WEBINAR", message_type: "service", trigger_event: TRIGGERS.webinar_starting_soon, audience_type: "webinar_registered",
+    gateway_template_id: "1707178280774391989",
+    body: "Hi {first_name}, your webinar {item_short} starts in 1 hour. Login: {login_url} to join the live session. Naman Sharma IAS Academy." },
+  { id: "zoom_ready", name: "Zoom / Joining Details Ready", use_case: "WEBINAR", message_type: "service", trigger_event: TRIGGERS.zoom_published, audience_type: "webinar_registered",
+    gateway_template_id: "1707178280787635098",
+    body: "Hi {first_name}, your webinar registration is confirmed. Login: {login_url} Code: {login_code}. Naman Sharma IAS Academy." },
+  { id: "general_webinar_invite", name: "General Webinar Invite / Sign-Up", use_case: "WEBINAR", message_type: "promotional", trigger_event: null, audience_type: null,
+    gateway_template_id: "1707178272502168903",
+    body: "Hi {first_name}, our next UPSC webinar is open! View list and enroll: {login_url}. Naman Sharma IAS Academy" },
+  // --- NOT DLT-approved (no id in approved sheet) — cannot send until approved ---
   { id: "reminder_day_before", name: "Reminder Day Before", use_case: "WEBINAR", message_type: "service", trigger_event: TRIGGERS.webinar_day_before, audience_type: "webinar_registered",
+    gateway_template_id: null,
     body: "Hi {first_name}, {item_short} is tomorrow at {webinar_time}. Login {login_url} for the joining link. Naman Sharma IAS Academy" },
   { id: "sameday_10am_registered", name: "Same-Day 10AM Reminder (Registered)", use_case: "WEBINAR", message_type: "service", trigger_event: TRIGGERS.webinar_sameday_registered, audience_type: "webinar_registered",
+    gateway_template_id: null,
     body: "Hi {first_name}, {item_short} is TODAY at {webinar_time}! Login {login_url} code {login_code} to join. Naman Sharma IAS Academy" },
-  { id: "starting_soon_1hr", name: "Starting Soon (1 hr)", use_case: "WEBINAR", message_type: "service", trigger_event: TRIGGERS.webinar_starting_soon, audience_type: "webinar_registered",
-    body: "Hi {first_name}, {item_short} starts in 1 hour! Login now {login_url} for the live link. Naman Sharma IAS Academy" },
-  { id: "zoom_ready", name: "Zoom / Joining Ready", use_case: "WEBINAR", message_type: "service", trigger_event: TRIGGERS.zoom_published, audience_type: "webinar_registered",
-    body: "Hi {first_name}, joining details for {item_short} are ready. Login {login_url} code {login_code}. Naman Sharma IAS Academy" },
   { id: "sameday_10am_invite", name: "Same-Day 10AM Invite (Not Registered)", use_case: "WEBINAR", message_type: "promotional", trigger_event: TRIGGERS.webinar_sameday_invite, audience_type: "webinar_not_registered",
+    gateway_template_id: null,
     body: "Hi {first_name}, free UPSC webinar {item_short} is TODAY at {webinar_time}. Register now: {login_url}. Naman Sharma IAS Academy" },
-  { id: "general_webinar_invite", name: "General Webinar Invite", use_case: "WEBINAR", message_type: "promotional", trigger_event: null, audience_type: null,
-    body: "Hi {first_name}, our next UPSC webinar is open! View list & enroll: {login_url}. Naman Sharma IAS Academy" },
   { id: "missed_webinar_followup", name: "Missed Webinar Follow-up", use_case: "WEBINAR", message_type: "service", trigger_event: null, audience_type: "webinar_no_show",
+    gateway_template_id: null,
     body: "Hi {first_name}, sorry we missed you at {item_short}. Catch our upcoming sessions: {login_url}. Naman Sharma IAS Academy" },
   { id: "webinar_moved", name: "Webinar Moved", use_case: "WEBINAR", message_type: "service", trigger_event: TRIGGERS.webinar_moved, audience_type: "webinar_registered",
+    gateway_template_id: null,
     body: "Hi {first_name}, your registration is moved to {item_short} on {date}. Your access stays valid. Login {login_url}. Naman Sharma IAS Academy" },
 
   // ---------------- POST-WEBINAR -> ADMISSIONS ----------------
   { id: "post_webinar_thankyou", name: "Post-Webinar Thank You", use_case: "POST_WEBINAR", message_type: "service", trigger_event: TRIGGERS.post_webinar_thankyou, audience_type: "webinar_attendees",
-    body: "Hi {first_name}, thanks for attending {item_short}! Ready for the full course? Explore & enroll: {login_url}. Naman Sharma IAS Academy" },
+    gateway_template_id: "1707178272635372891",
+    body: "Hi {first_name}, thanks for attending {item_short}! Ready for the full course? Explore and enroll: {login_url}. Naman Sharma IAS Academy" },
 
   // ---------------- ONBOARDING / RETENTION ----------------
   { id: "welcome_first_login", name: "Welcome / First Login", use_case: "ONBOARDING", message_type: "service", trigger_event: TRIGGERS.first_login, audience_type: "first_login",
-    body: "Hi {first_name}, welcome to Naman Sharma IAS Academy! Open your dashboard: {login_url} code {login_code}." },
+    gateway_template_id: "1707178280799637109",
+    body: "Hi {first_name}, welcome to Naman Sharma IAS Academy. Your account has been created. Login: {login_url} Code: {login_code}." },
+  { id: "course_enrolled", name: "Course Enrollment Confirmed", use_case: "ONBOARDING", message_type: "service", trigger_event: TRIGGERS.course_enrolled, audience_type: "paid",
+    gateway_template_id: "1707178280828196940",
+    body: "Hi {first_name}, your enrollment for the course {item_short} is confirmed. Login: {login_url} Code: {login_code}. Naman Sharma IAS Academy." },
+  // --- NOT DLT-approved (no id in approved sheet) — cannot send until approved ---
   { id: "login_code_resend", name: "Login Code Resend", use_case: "ONBOARDING", message_type: "service", trigger_event: null, audience_type: null,
+    gateway_template_id: null,
     body: "Hi {first_name}, your login code is {login_code}. Login: {login_url}. Naman Sharma IAS Academy" },
-  { id: "course_enrolled", name: "Course Enrolled", use_case: "ONBOARDING", message_type: "service", trigger_event: TRIGGERS.course_enrolled, audience_type: "paid",
-    body: "Hi {first_name}, you are enrolled in {item_short}! Login {login_url} code {login_code} to start. Naman Sharma IAS Academy" },
   { id: "payment_plan_changed", name: "Payment Plan Changed", use_case: "PAYMENT", message_type: "service", trigger_event: TRIGGERS.payment_plan_changed, audience_type: "paid",
+    gateway_template_id: null,
     body: "Hi {first_name}, payment plan for {item_short} updated. Login {login_url} code {login_code} to view installments. Naman Sharma IAS Academy" },
   { id: "reengagement_inactive", name: "Re-Engagement Inactive", use_case: "ONBOARDING", message_type: "service", trigger_event: null, audience_type: "inactive",
+    gateway_template_id: null,
     body: "Hi {first_name}, new UPSC sessions are live! Login {login_url} to continue learning. Naman Sharma IAS Academy" },
 ];
 

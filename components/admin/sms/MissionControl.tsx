@@ -106,12 +106,17 @@ function OverviewTab() {
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-        <Kpi label="Sent today" value={data.today.sent + data.today.delivered} />
+        <Kpi label="Submitted to gateway" value={data.today.submitted} />
+        <Kpi label="Delivered (confirmed)" value={data.deliveryKnown ? data.today.delivered : "—"} />
         <Kpi label="Failed" value={data.today.failed} tone="red" />
-        <Kpi label="Queued" value={data.today.queued} />
-        <Kpi label="Auto / Manual" value={`${data.byTrigger.auto} / ${data.byTrigger.manual}`} />
+        <Kpi label="Pending" value={data.today.queued} />
         <Kpi label="Daily cap" value={data.dailyCap.cap ? `${data.dailyCap.used} / ${data.dailyCap.cap}` : `${data.dailyCap.used} / ∞`} />
       </div>
+      {!data.deliveryKnown && (
+        <p className="-mt-2 text-xs text-muted">
+          “Submitted” = accepted by JustGoSMS. Handset delivery shows once delivery receipts (DLR) are configured on the gateway — until then “Delivered” reads “—”, not 0.
+        </p>
+      )}
 
       <div className="card p-4">
         <p className="mb-3 text-sm font-semibold">Last 24 hours</p>
@@ -501,8 +506,9 @@ function AnalyticsTab() {
       </div>
       <div className="grid gap-4 lg:grid-cols-2">
         <div className="card p-4">
-          <p className="mb-2 text-sm font-semibold">Delivery rate by template</p>
-          <ul className="space-y-1.5 text-sm">{data.deliveryByTemplate.map((t: any) => (<li key={t.template} className="flex justify-between"><span className="text-ink2">{t.name}</span><span className="tabular-nums">{t.sent}/{t.total} · {t.rate}%</span></li>))}{data.deliveryByTemplate.length === 0 && <li className="text-muted">No sends yet.</li>}</ul>
+          <p className="mb-2 text-sm font-semibold">Submitted &amp; delivered by template</p>
+          <ul className="space-y-1.5 text-sm">{data.deliveryByTemplate.map((t: any) => (<li key={t.template} className="flex justify-between gap-2"><span className="truncate text-ink2">{t.name}</span><span className="shrink-0 tabular-nums">{t.submitted}/{t.total} submitted{data.deliveryKnown ? ` · ${t.delivered} delivered (${t.deliveryRate}%)` : ""}</span></li>))}{data.deliveryByTemplate.length === 0 && <li className="text-muted">No sends yet.</li>}</ul>
+          {!data.deliveryKnown && <p className="mt-2 text-xs text-muted">Delivery % appears once DLR receipts are enabled on the gateway.</p>}
         </div>
         <div className="card p-4">
           <p className="mb-2 text-sm font-semibold">Conversion-adjacent <span className="font-normal text-muted">(correlation, not attribution)</span></p>

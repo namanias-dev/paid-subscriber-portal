@@ -26,7 +26,13 @@ const isSent = (s: string) => s === "SENT" || s === "DELIVERED";
 
 export interface SmsOverview {
   killSwitch: { enabledByEnv: boolean; enabledBySettings: boolean; effectiveOn: boolean };
-  today: { sent: number; delivered: number; failed: number; queued: number; total: number };
+  /**
+   * submitted = accepted by the gateway (SENT + DELIVERED). delivered = handset-
+   * confirmed via DLR only. deliveryKnown = whether ANY DLR has ever landed, so
+   * the UI can honestly say "awaiting delivery receipts" instead of showing 0.
+   */
+  today: { submitted: number; delivered: number; failed: number; queued: number; total: number };
+  deliveryKnown: boolean;
   dailyCap: { used: number; cap: number };
   byTemplate: { template: string; name: string; count: number }[];
   byTrigger: { auto: number; manual: number };
@@ -38,10 +44,16 @@ export async function getOverview(): Promise<SmsOverview> {
   const settings = await getSettings();
   const since = istMidnightISO();
   const today = await listLogs({ from: since, limit: 5000 });
-  const sent = today.filter((l) => l.status === "SENT").length;
   const delivered = today.filter((l) => l.status === "DELIVERED").length;
+  // "submitted" = everything the gateway accepted (SENT stays counted even after a
+  // DLR promotes it to DELIVERED, so the tile never drops as receipts arrive).
+  const submitted = today.filter((l) => isSent(l.status)).length;
   const failed = today.filter((l) => l.status === "FAILED").length;
   const queued = today.filter((l) => l.status === "QUEUED").length;
+  // Do we have ANY delivery receipts at all (recently)? If not, we show delivered
+  // as "—" rather than a misleading 0.
+  const recentForDlr = await listLogs({ from: new Date(Date.now() - 7 * 86400000).toISOString(), limit: 5000 });
+  const deliveryKnown = recentForDlr.some((l) => l.status === "DELIVERED");
 
   const tMap = new Map<string, { name: string; count: number }>();
   for (const l of today) {
@@ -70,8 +82,9 @@ export async function getOverview(): Promise<SmsOverview> {
 
   return {
     killSwitch: { enabledByEnv: smsEnvEnabled(), enabledBySettings: settings.enabled, effectiveOn: smsEnvEnabled() && settings.enabled },
-    today: { sent, delivered, failed, queued, total: today.length },
-    dailyCap: { used: sent + delivered, cap: settings.dailyCap },
+    today: { submitted, delivered, failed, queued, total: today.length },
+    deliveryKnown,
+    dailyCap: { used: submitted, cap: settings.dailyCap },
     byTemplate,
     byTrigger: { auto, manual },
     trend24h: hours,
@@ -81,8 +94,10 @@ export async function getOverview(): Promise<SmsOverview> {
 
 export interface SmsAnalytics {
   days: number;
+  /** True once ANY delivery receipt exists in the window (else delivery = unknown). */
+  deliveryKnown: boolean;
   sendsOverTime: { day: string; sent: number; failed: number }[];
-  deliveryByTemplate: { template: string; name: string; total: number; sent: number; rate: number }[];
+  deliveryByTemplate: { template: string; name: string; total: number; submitted: number; delivered: number; submittedRate: number; deliveryRate: number }[];
   correlation: { inviteSent: number; inviteThenRegistered: number; t19Sent: number; t19ThenEnrolled: number };
   cost: { segments: number; ratePerSegment: number; estimate: number };
 }
@@ -95,19 +110,29 @@ export async function getSmsAnalytics(days = 30, ratePerSegment = 0.2): Promise<
 
   const dayMap = new Map<string, { sent: number; failed: number }>();
   let segments = 0;
-  const tMap = new Map<string, { name: string; total: number; sent: number }>();
+  const tMap = new Map<string, { name: string; total: number; submitted: number; delivered: number }>();
+  let deliveryKnown = false;
   for (const l of logs) {
     const day = dayKeyIST(l.created_at);
     const e = dayMap.get(day) || { sent: 0, failed: 0 };
     if (isSent(l.status)) e.sent++; else if (l.status === "FAILED") e.failed++;
     dayMap.set(day, e);
     if (isSent(l.status)) segments += l.segments || 1;
+    if (l.status === "DELIVERED") deliveryKnown = true;
     const k = l.template_id || "—";
-    const t = tMap.get(k) || { name: l.template_name || k, total: 0, sent: 0 };
-    t.total++; if (isSent(l.status)) t.sent++; tMap.set(k, t);
+    const t = tMap.get(k) || { name: l.template_name || k, total: 0, submitted: 0, delivered: 0 };
+    t.total++;
+    if (isSent(l.status)) t.submitted++;
+    if (l.status === "DELIVERED") t.delivered++;
+    tMap.set(k, t);
   }
   const sendsOverTime = [...dayMap.entries()].map(([day, v]) => ({ day, ...v })).sort((a, b) => a.day.localeCompare(b.day));
-  const deliveryByTemplate = [...tMap.entries()].map(([template, v]) => ({ template, name: v.name, total: v.total, sent: v.sent, rate: v.total ? Math.round((v.sent / v.total) * 100) : 0 })).sort((a, b) => b.total - a.total);
+  const deliveryByTemplate = [...tMap.entries()].map(([template, v]) => ({
+    template, name: v.name, total: v.total, submitted: v.submitted, delivered: v.delivered,
+    submittedRate: v.total ? Math.round((v.submitted / v.total) * 100) : 0,
+    // Real delivery rate is only meaningful against what the gateway accepted.
+    deliveryRate: v.submitted ? Math.round((v.delivered / v.submitted) * 100) : 0,
+  })).sort((a, b) => b.total - a.total);
 
   // correlation (NOT attribution): phone-join SMS -> later conversion
   const payments = await getPayments();
@@ -137,6 +162,7 @@ export async function getSmsAnalytics(days = 30, ratePerSegment = 0.2): Promise<
 
   return {
     days,
+    deliveryKnown,
     sendsOverTime,
     deliveryByTemplate,
     correlation: { inviteSent, inviteThenRegistered, t19Sent, t19ThenEnrolled },

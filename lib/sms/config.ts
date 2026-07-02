@@ -9,7 +9,17 @@ function env(key: string): string | undefined {
   return v && v.trim() !== "" ? v : undefined;
 }
 
-export const SMS_API_BASE_URL = env("SMS_API_BASE_URL") || "https://justgosms.com/http-api.php";
+/**
+ * JustGoSMS endpoints are HTTP-only: the host (Apache 2.4.6 / PHP 5.4) accepts a
+ * TCP connection on 443 but kills the TLS handshake (SSL_ERROR_SYSCALL), so HTTPS
+ * fails from every egress incl. Vercel. We therefore default to http:// on
+ * purpose (overridable via env). Credentials travel in the query string either
+ * way — this is the gateway's own design; DLT-templated content is non-sensitive.
+ */
+export const SMS_API_BASE_URL = env("SMS_API_BASE_URL") || "http://justgosms.com/http-api.php";
+/** Delivery-report PULL API (http-dlr.php?username&password&msg_id=). */
+export const SMS_DLR_BASE_URL = env("SMS_DLR_BASE_URL") || "http://justgosms.com/http-dlr.php";
+/** Route 12 is the provisioned domestic route for this account (verified via http-credit.php). */
 export const SMS_DEFAULT_ROUTE = env("SMS_API_DEFAULT_ROUTE") || "12";
 export const SMS_DEFAULT_SENDER_ID = env("SMS_API_DEFAULT_SENDER_ID") || "NAMIAS";
 

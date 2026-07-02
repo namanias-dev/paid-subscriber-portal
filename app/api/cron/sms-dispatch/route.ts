@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getPayments, getWebinars } from "@/lib/dataProvider";
 import { resolveAudience, type AudienceSpec } from "@/lib/sms/audiences";
 import { getRule, getSettings } from "@/lib/sms/store";
-import { sendSms, istMinutesOfDay } from "@/lib/sms/service";
+import { sendSms, istMinutesOfDay, pollDeliveryStatuses } from "@/lib/sms/service";
 import { normalizeIndianMobile } from "@/lib/phone";
 import type { SmsAutoRule } from "@/lib/sms/types";
 
@@ -160,6 +160,14 @@ async function run(req: Request) {
         }
       }
     }
+
+    // ---- delivery-report PULL: promote open SENT logs via JustGoSMS http-dlr.php ----
+    try {
+      const dlr = await pollDeliveryStatuses({ sinceDays: 3, limit: 500 });
+      result.dlr_scanned = dlr.scanned;
+      result.dlr_delivered = dlr.delivered;
+      result.dlr_failed = dlr.failed;
+    } catch { /* non-fatal */ }
 
     return NextResponse.json({ ok: true, istHour, result, ts: Date.now() });
   } catch (e) {

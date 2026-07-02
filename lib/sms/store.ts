@@ -63,11 +63,13 @@ function demo(): DemoStore {
 function nowISO() { return new Date().toISOString(); }
 
 function seedToTemplate(s: (typeof SEED_TEMPLATES)[number]): SmsTemplate {
+  const approved = !!s.gateway_template_id;
   return {
-    id: s.id, name: s.name, use_case: s.use_case, gateway_template_id: null,
+    id: s.id, name: s.name, use_case: s.use_case, gateway_template_id: s.gateway_template_id ?? null,
     sender_id: "NAMIAS", route: "12", message_type: s.message_type,
     body_template: s.body, variables: uniqueVariables(s.body),
-    status: "draft", is_active: false, auto_send_enabled: false,
+    // A seed that carries an approved DLT id is send-ready; the rest stay draft.
+    status: approved ? "approved" : "draft", is_active: approved, auto_send_enabled: false,
     trigger_event: s.trigger_event, audience_type: s.audience_type,
     created_at: nowISO(), updated_at: nowISO(),
   };
@@ -101,24 +103,52 @@ function rowToTemplate(r: Row): SmsTemplate {
 // ---------------------------------------------------------------------------
 // TEMPLATES
 // ---------------------------------------------------------------------------
-/** Insert any seed templates missing from the DB (idempotent), as DRAFT. */
+/**
+ * Insert missing seed templates AND reconcile the DLT-approved ones so code stays
+ * the single source of truth for the approved id + body (a drifted id/body means
+ * provider rejection). Idempotent:
+ *   • Missing rows are inserted (approved seeds land send-ready, the rest draft).
+ *   • Existing rows whose gateway_template_id / body_template drift from an
+ *     approved seed are healed back to the seed values (variables recomputed).
+ *     On FIRST wiring (row had no id) we also flip status→approved + is_active,
+ *     but we never force those flags again afterwards so admins can still toggle.
+ */
 export async function ensureSeeded(): Promise<void> {
   const db = getSupabaseAdmin();
   if (!db) return;
   try {
-    const { data } = await db.from("sms_templates").select("id");
-    const have = new Set((data || []).map((r: Row) => String(r.id)));
+    const { data } = await db.from("sms_templates").select("id, gateway_template_id, body_template");
+    const byId = new Map((data || []).map((r: Row) => [String(r.id), r]));
+    const have = new Set(byId.keys());
     const missing = SEED_TEMPLATES.filter((s) => !have.has(s.id)).map((s) => {
       const t = seedToTemplate(s);
       return {
-        id: t.id, name: t.name, use_case: t.use_case, gateway_template_id: null,
+        id: t.id, name: t.name, use_case: t.use_case, gateway_template_id: t.gateway_template_id,
         sender_id: t.sender_id, route: t.route, message_type: t.message_type,
-        body_template: t.body_template, variables: t.variables, status: "draft",
-        is_active: false, auto_send_enabled: false, trigger_event: t.trigger_event,
+        body_template: t.body_template, variables: t.variables, status: t.status,
+        is_active: t.is_active, auto_send_enabled: false, trigger_event: t.trigger_event,
         audience_type: t.audience_type,
       };
     });
     if (missing.length) await db.from("sms_templates").insert(missing);
+    // Heal existing rows for DLT-approved seeds whose id/body have drifted.
+    for (const s of SEED_TEMPLATES) {
+      if (!s.gateway_template_id) continue;
+      const row = byId.get(s.id);
+      if (!row) continue;
+      const idDrift = String(row.gateway_template_id ?? "") !== s.gateway_template_id;
+      const bodyDrift = String(row.body_template ?? "") !== s.body;
+      if (!idDrift && !bodyDrift) continue;
+      const patch: Record<string, unknown> = {
+        gateway_template_id: s.gateway_template_id,
+        body_template: s.body,
+        variables: uniqueVariables(s.body),
+        updated_at: nowISO(),
+      };
+      // First-time wiring (no id yet) → make it send-ready.
+      if (!row.gateway_template_id) { patch.status = "approved"; patch.is_active = true; }
+      await db.from("sms_templates").update(patch).eq("id", s.id);
+    }
     // seed rules too
     const { data: rd } = await db.from("sms_auto_rules").select("trigger");
     const haveR = new Set((rd || []).map((r: Row) => String(r.trigger)));
@@ -168,7 +198,7 @@ export async function upsertTemplate(id: string, patch: TemplatePatch, createIfM
     let t = d.templates.find((x) => x.id === id);
     if (!t) {
       if (!createIfMissing) return null;
-      t = seedToTemplate(SEED_TEMPLATES.find((s) => s.id === id) || { id, name: id, use_case: "ONBOARDING", message_type: "service", body: patch.body_template || "", trigger_event: null, audience_type: null });
+      t = seedToTemplate(SEED_TEMPLATES.find((s) => s.id === id) || { id, name: id, use_case: "ONBOARDING", message_type: "service", body: patch.body_template || "", gateway_template_id: patch.gateway_template_id ?? null, trigger_event: null, audience_type: null });
       d.templates.push(t);
     }
     Object.assign(t, clean);
@@ -184,6 +214,74 @@ export async function upsertTemplate(id: string, patch: TemplatePatch, createIfM
     }
     return getTemplate(id);
   } catch { return null; }
+}
+
+// ---------------------------------------------------------------------------
+// IDENTITY-SAFE BUYER RESOLUTION (Issue 2)
+// Never bind a login_code we cannot attribute to exactly ONE person on a number.
+// ---------------------------------------------------------------------------
+export interface BuyerResolution {
+  status: "ok" | "none" | "ambiguous";
+  id: string | null;
+  name: string | null;
+  login_code: string | null;
+}
+
+/** Resolve a buyer by phone, returning `ambiguous` when >1 buyer shares it. */
+export async function resolveBuyerByPhone(digits10: string): Promise<BuyerResolution> {
+  const db = getSupabaseAdmin();
+  if (!db) return { status: "none", id: null, name: null, login_code: null };
+  try {
+    const { data } = await db.from("buyers").select("id,name,login_code").eq("phone", digits10).limit(2);
+    const rows = (data || []) as { id: string; name: string | null; login_code: string | null }[];
+    if (rows.length === 0) return { status: "none", id: null, name: null, login_code: null };
+    if (rows.length > 1) return { status: "ambiguous", id: null, name: null, login_code: null };
+    return { status: "ok", id: rows[0].id, name: rows[0].name, login_code: rows[0].login_code };
+  } catch {
+    return { status: "none", id: null, name: null, login_code: null };
+  }
+}
+
+/** Resolve a buyer by its stable id (exact person — safe for shared numbers). */
+export async function getBuyerById(id: string): Promise<{ id: string; name: string | null; login_code: string | null } | null> {
+  const db = getSupabaseAdmin();
+  if (!db) return null;
+  try {
+    const { data } = await db.from("buyers").select("id,name,login_code").eq("id", id).maybeSingle();
+    return data ? (data as { id: string; name: string | null; login_code: string | null }) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** First-name key for a safe recipient↔code match (case/space/punct-insensitive). */
+export function firstNameKey(name: string | null | undefined): string {
+  return String(name || "").trim().toLowerCase().split(/\s+/)[0]?.replace(/[^a-z0-9]/g, "") || "";
+}
+
+/** True unless we can PROVE two names disagree (missing name ⇒ don't block). */
+export function firstNamesMatch(a: string | null | undefined, b: string | null | undefined): boolean {
+  const ka = firstNameKey(a);
+  const kb = firstNameKey(b);
+  if (!ka || !kb) return true;
+  return ka === kb;
+}
+
+// ---------------------------------------------------------------------------
+// DELIVERY RECEIPTS (Issue 3) — promote SENT -> DELIVERED/FAILED by gateway id
+// ---------------------------------------------------------------------------
+/** Logs whose gateway_message_id matches any of the provided id variants. */
+export async function findLogsByMessageIds(variants: string[]): Promise<SmsLog[]> {
+  const clean = [...new Set(variants.filter(Boolean))];
+  if (!clean.length) return [];
+  const db = getSupabaseAdmin();
+  if (!db) return demo().logs.filter((l) => l.gateway_message_id && clean.includes(l.gateway_message_id));
+  try {
+    const { data } = await db.from("sms_logs").select("*").in("gateway_message_id", clean).limit(50);
+    return (data || []) as SmsLog[];
+  } catch {
+    return [];
+  }
 }
 
 // ---------------------------------------------------------------------------
