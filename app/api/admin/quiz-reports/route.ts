@@ -65,18 +65,30 @@ export async function GET(req: Request) {
     const avgScore = finalized.length ? finalized.reduce((s, a) => s + a.score, 0) / finalized.length : 0;
     const completionRate = totalAttempts ? Math.round((finalized.length / totalAttempts) * 100) : 0;
 
-    // Most attempted quizzes.
+    // Most attempted quizzes (full list; the card slices to a summary).
     const byQuiz = new Map<string, number>();
     for (const a of attempts) byQuiz.set(a.quiz_id, (byQuiz.get(a.quiz_id) || 0) + 1);
     const mostAttempted = [...byQuiz.entries()]
       .map(([id, count]) => ({ id, title: quizMap.get(id)?.title || "Deleted quiz", slug: quizMap.get(id)?.slug || "", count }))
-      .sort((a, b) => b.count - a.count)
-      .slice(0, 10);
+      .sort((a, b) => b.count - a.count);
 
-    // Hardest / most-wrong questions.
-    const qStats = new Map<string, { wrong: number; total: number; text: string }>();
+    // Hardest / most-wrong questions — capture full question detail from the
+    // frozen answer_snapshot so the detail view can show text/options/correct
+    // answer without any extra query. Full list returned; card slices a summary.
+    const qStats = new Map<string, {
+      wrong: number; total: number; text: string;
+      options: Record<string, string | null> | null; correct_option: string | null; subject: string | null; topic: string | null;
+    }>();
     for (const ans of answers) {
-      const cur = qStats.get(ans.question_id) || { wrong: 0, total: 0, text: (ans.answer_snapshot?.question_html || "").replace(/<[^>]*>/g, " ").trim().slice(0, 120) };
+      const snap = ans.answer_snapshot || {};
+      const cur = qStats.get(ans.question_id) || {
+        wrong: 0, total: 0,
+        text: (snap.question_html || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim(),
+        options: (snap.options as unknown as Record<string, string | null>) || null,
+        correct_option: (snap.correct_option as string) || null,
+        subject: (snap.subject as string) || null,
+        topic: (snap.topic as string) || null,
+      };
       if (!ans.is_unattempted) {
         cur.total += 1;
         if (!ans.is_correct) cur.wrong += 1;
@@ -85,15 +97,18 @@ export async function GET(req: Request) {
     }
     const hardestQuestions = [...qStats.entries()]
       .filter(([, v]) => v.total >= 3)
-      .map(([id, v]) => ({ id, text: v.text, wrongRate: Math.round((v.wrong / v.total) * 100), total: v.total }))
-      .sort((a, b) => b.wrongRate - a.wrongRate)
-      .slice(0, 10);
+      .map(([id, v]) => ({
+        id, text: v.text, wrongRate: Math.round((v.wrong / v.total) * 100),
+        wrong: v.wrong, total: v.total, options: v.options, correct_option: v.correct_option,
+        subject: v.subject, topic: v.topic,
+      }))
+      .sort((a, b) => b.wrongRate - a.wrongRate || b.total - a.total);
 
-    // Top / low performers.
-    const performers = finalized
+    // Top / low performers (full ranked list; card slices a summary).
+    const topPerformers = finalized
       .map((a) => ({ name: (a.user_id ? studentNameById.get(a.user_id) : null) || a.guest_name || "Student", score: a.score, max: a.max_score, accuracy: a.accuracy, quiz: quizMap.get(a.quiz_id)?.title || "" }))
-      .sort((a, b) => b.accuracy - a.accuracy);
-    const topPerformers = performers.slice(0, 8);
+      .sort((a, b) => b.accuracy - a.accuracy)
+      .slice(0, 500);
 
     // Topic-wise averages.
     const topicMap = new Map<string, { correct: number; total: number }>();

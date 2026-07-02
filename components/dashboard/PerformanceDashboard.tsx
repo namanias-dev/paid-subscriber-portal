@@ -9,6 +9,7 @@ import {
 import { formatISTDate } from "@/lib/dates";
 import type { PerformanceData, PerfHistoryRow } from "@/lib/performance";
 import QuizAttemptActions from "@/components/public/quiz/QuizAttemptActions";
+import QuizPerformanceReport from "@/components/dashboard/QuizPerformanceReport";
 
 /**
  * Student "My Performance" command center inside Class Hub. Renders server-
@@ -190,6 +191,7 @@ function AttemptHistory({ history }: { history: PerfHistoryRow[] }) {
   const [subject, setSubject] = useState("");
   const [category, setCategory] = useState("");
   const [sort, setSort] = useState<SortKey>("latest");
+  const [report, setReport] = useState<{ attemptId: string; slug: string | null; title: string } | null>(null);
 
   const subjects = useMemo(() => [...new Set(history.map((h) => h.subject).filter(Boolean))] as string[], [history]);
   const categories = useMemo(() => [...new Set(history.map((h) => h.category))], [history]);
@@ -258,10 +260,18 @@ function AttemptHistory({ history }: { history: PerfHistoryRow[] }) {
                 </div>
               </div>
               <div className="mt-3">
-                {h.reviewable && h.slug ? (
+                {h.reviewable ? (
                   <div className="flex flex-wrap gap-2">
-                    <Link href={`/quizzes/${h.slug}/result/${h.attemptId}`} className="btn btn-secondary text-sm"><FileText size={14} /> View report</Link>
-                    <a href={`/quiz-print/${h.attemptId}`} target="_blank" rel="noopener noreferrer" className="btn btn-secondary text-sm"><Download size={14} /> Download PDF</a>
+                    <button
+                      type="button"
+                      onClick={() => setReport({ attemptId: h.attemptId, slug: h.slug ?? null, title: h.title })}
+                      className="btn btn-primary text-sm"
+                    >
+                      <BarChart3 size={14} /> Performance report
+                    </button>
+                    {h.slug && (
+                      <a href={`/quiz-print/${h.attemptId}`} target="_blank" rel="noopener noreferrer" className="btn btn-secondary text-sm"><Download size={14} /> Download PDF</a>
+                    )}
                   </div>
                 ) : (
                   <p className="text-xs text-muted">Full question-wise review isn&apos;t available for this older attempt — score is saved above.</p>
@@ -270,6 +280,16 @@ function AttemptHistory({ history }: { history: PerfHistoryRow[] }) {
             </li>
           ))}
         </ul>
+      )}
+
+      {report && (
+        <QuizPerformanceReport
+          attemptId={report.attemptId}
+          slug={report.slug}
+          fallbackTitle={report.title}
+          open={!!report}
+          onClose={() => setReport(null)}
+        />
       )}
     </section>
   );

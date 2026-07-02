@@ -185,6 +185,8 @@ export default function StudentProfilePage({ params }: { params: { id: string } 
   const [planCourse, setPlanCourse] = useState<CourseCard | null>(null);
   const [catalog, setCatalog] = useState<{ courses: Course[]; webinars: Webinar[] } | null>(null);
 
+  const [highlightEnrollment, setHighlightEnrollment] = useState<string | null>(null);
+
   const load = useCallback(() => {
     setLoading(true);
     fetch(`/api/admin/students/${params.id}`)
@@ -195,6 +197,22 @@ export default function StudentProfilePage({ params }: { params: { id: string } 
   }, [params.id]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Deep-link support: ?enrollmentId=<id> (e.g. from Course EMI & Seats) scrolls
+  // to and highlights the matching course card. Read from the URL client-side to
+  // avoid a useSearchParams Suspense boundary on this dynamic route.
+  useEffect(() => {
+    const id = new URLSearchParams(window.location.search).get("enrollmentId");
+    if (id) setHighlightEnrollment(id);
+  }, []);
+
+  useEffect(() => {
+    if (!highlightEnrollment || loading || !profile) return;
+    const el = document.getElementById(`enr-${highlightEnrollment}`);
+    if (!el) return;
+    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    el.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "center" });
+  }, [highlightEnrollment, loading, profile]);
 
   function ensureCatalog() {
     if (catalog) return;
@@ -428,7 +446,11 @@ export default function StudentProfilePage({ params }: { params: { id: string } 
         ) : (
           <div className="grid gap-3 sm:grid-cols-2">
             {profile.courses.map((c) => (
-              <div key={`${c.source}-${c.id}`} className="rounded-xl border border-line p-4">
+              <div
+                key={`${c.source}-${c.id}`}
+                id={`enr-${c.id}`}
+                className={`rounded-xl border p-4 transition-colors duration-500 motion-reduce:transition-none ${highlightEnrollment === c.id ? "border-primary bg-primary/5 ring-2 ring-primary/40" : "border-line"}`}
+              >
                 <div className="flex items-start justify-between gap-2">
                   <h3 className="font-semibold leading-snug">{c.title}</h3>
                   <span className={`pill ${c.remaining <= 0 ? "pill-green" : c.hasOverdue ? "pill-red" : "pill-amber"}`}>{c.status}</span>

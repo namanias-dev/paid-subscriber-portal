@@ -725,6 +725,12 @@ export interface CourseEnrollment {
   phone: string;
   student_name: string;
   email: string | null;
+  /**
+   * Resolved students.id for this enrollment's phone (unique). Not stored on the
+   * enrollment row — attached by admin APIs so the UI can deep-link to the right
+   * student profile by id (never by name). Null when no students row exists yet.
+   */
+  student_id?: string | null;
   course_id: string;
   course_slug: string;
   course_title: string;

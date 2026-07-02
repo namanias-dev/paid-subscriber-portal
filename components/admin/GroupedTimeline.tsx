@@ -44,13 +44,13 @@ function NodeRow({ n, connected }: { n: TimelineNode; connected: boolean }) {
       {connected && (
         <span className={`absolute -left-[1.45rem] top-1.5 h-2.5 w-2.5 rounded-full ring-4 ring-white ${n.dot || "bg-ink2"}`} />
       )}
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <div className="min-w-0 flex-1">
-          <div className="text-sm font-medium text-ink">{n.title}</div>
-          {n.subtitle && <div className="mt-0.5 text-xs text-muted">{n.subtitle}</div>}
+      <div className="flex flex-col gap-1.5 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between sm:gap-2">
+        <div className="min-w-0 sm:flex-1">
+          <div className="min-w-0 text-sm font-medium text-ink">{n.title}</div>
+          {n.subtitle && <div className="mt-0.5 min-w-0 text-xs text-muted">{n.subtitle}</div>}
           {n.datetime && <div className="mt-0.5 text-[11px] text-muted">{formatISTDateTime(n.datetime)}</div>}
         </div>
-        <div className="flex shrink-0 flex-col items-end gap-1">
+        <div className="flex flex-wrap items-center justify-between gap-2 sm:shrink-0 sm:flex-col sm:items-end sm:justify-normal sm:gap-1">
           {n.right && <span className="text-sm font-semibold text-ink">{n.right}</span>}
           {n.badge}
         </div>

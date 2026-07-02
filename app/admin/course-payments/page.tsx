@@ -1,5 +1,7 @@
 "use client";
 
+import { useRouter } from "next/navigation";
+import { ChevronRight } from "lucide-react";
 import { PageHeader, useAdminData, LoadingBlock, TableShell, KpiCard } from "@/components/admin/ui";
 import { formatINR, formatISTDate } from "@/lib/dates";
 import { deriveEnrollment } from "@/lib/installments";
@@ -45,6 +47,7 @@ function courseCapacity(course: Course | undefined): number | null {
 }
 
 export default function CoursePaymentsAdmin() {
+  const router = useRouter();
   const enr = useAdminData<CourseEnrollment[]>("/api/admin/course-enrollments", "enrollments");
   const courses = useAdminData<Course[]>("/api/admin/courses", "courses");
   if (enr.loading) return <LoadingBlock />;
@@ -114,9 +117,24 @@ export default function CoursePaymentsAdmin() {
         {all.map((e) => {
           const d = deriveEnrollment(e);
           const nextDue = e.schedule.find((s) => !s.paid && s.due);
+          const canOpen = !!e.student_id;
+          const open = () => { if (e.student_id) router.push(`/admin/students/${e.student_id}?enrollmentId=${e.id}`); };
           return (
-            <tr key={e.id} className="border-b border-line last:border-0 hover:bg-surface2">
-              <td className="px-4 py-3 font-medium">{e.student_name}</td>
+            <tr
+              key={e.id}
+              onClick={canOpen ? open : undefined}
+              onKeyDown={canOpen ? (ev) => { if (ev.key === "Enter") open(); } : undefined}
+              tabIndex={canOpen ? 0 : undefined}
+              role={canOpen ? "link" : undefined}
+              title={canOpen ? `Open ${e.student_name}'s profile` : "No student profile linked to this phone yet"}
+              className={`group border-b border-line last:border-0 ${canOpen ? "cursor-pointer hover:bg-surface2 focus:bg-surface2 focus:outline-none" : ""}`}
+            >
+              <td className="px-4 py-3 font-medium">
+                <span className="inline-flex items-center gap-1">
+                  <span className={canOpen ? "group-hover:text-primary group-hover:underline" : ""}>{e.student_name}</span>
+                  {canOpen && <ChevronRight size={13} className="text-muted opacity-0 transition group-hover:opacity-100" />}
+                </span>
+              </td>
               <td className="px-4 py-3">{e.phone}</td>
               <td className="px-4 py-3 text-xs">{e.course_title}</td>
               <td className="px-4 py-3 text-xs uppercase">{e.plan_type === "emi" ? `EMI ×${e.installment_count}` : "Full"}</td>

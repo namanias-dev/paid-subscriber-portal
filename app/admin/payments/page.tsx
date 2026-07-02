@@ -256,9 +256,9 @@ export default function PaymentsAdmin() {
           id: g.key,
           dot: meta.dot,
           title: (
-            <span className="flex flex-wrap items-center gap-1.5">
-              <span className="font-medium text-ink">{resolveItemName(g.primary, itemNames)}</span>
-              <span className="rounded bg-surface2 px-1.5 py-0.5 text-[10px] font-medium text-ink2">{purposeLabel(g.primary)}</span>
+            <span className="flex min-w-0 flex-wrap items-center gap-1.5">
+              <span className="break-words font-medium text-ink">{resolveItemName(g.primary, itemNames)}</span>
+              <span className="shrink-0 rounded bg-surface2 px-1.5 py-0.5 text-[10px] font-medium text-ink2">{purposeLabel(g.primary)}</span>
               {g.duplicatePaid && (
                 <span className="pill pill-red" title="Two or more settled payments for the same item — review for a possible refund.">
                   ⚠ Possible duplicate payment
@@ -280,7 +280,7 @@ export default function PaymentsAdmin() {
           right: formatINR(g.amount),
           badge: (
             <span className="flex flex-wrap items-center justify-end gap-1.5">
-              <span className={`pill ${meta.pill}`}>{meta.label}</span>
+              <span className={`pill shrink-0 whitespace-nowrap ${meta.pill}`}>{meta.label}</span>
               {canManage && (
                 <button
                   onClick={(e) => { e.stopPropagation(); setProofModal({ payment: g.primary, proof: proofs[g.primary.id] || null }); }}
@@ -1344,15 +1344,18 @@ function AttemptRow({
   onManage: (p: Payment, pr: ProofWithAccess | null) => void;
   onReverify: (ref: string | null | undefined) => void;
 }) {
-  const sub = [
+  // Meta (kind/installment/gateway) is a short label line; the transaction
+  // reference is rendered on its OWN line so a long unbroken NAMAN-… string
+  // truncates with an ellipsis instead of wrapping letter-by-letter on mobile.
+  const meta = [
     p.payment_kind || p.item_type,
     p.installment_no ? `installment #${p.installment_no}` : null,
-    p.reference_no || p.razorpay_payment_id || null,
     p.gateway || (p.mode ? `Razorpay · ${p.mode}` : null),
   ].filter(Boolean).join(" · ");
+  const ref = p.reference_no || p.razorpay_payment_id || null;
   return (
-    <div className={`flex flex-wrap items-start justify-between gap-x-3 gap-y-1.5 rounded-lg px-2 py-1.5 ${superseded ? "opacity-60" : ""}`}>
-      <div className="min-w-0 flex-1">
+    <div className={`flex flex-col gap-1.5 rounded-lg px-2 py-1.5 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between sm:gap-x-3 ${superseded ? "opacity-60" : ""}`}>
+      <div className="min-w-0 sm:flex-1">
         <div className="flex flex-wrap items-center gap-1.5">
           <span className={`pill shrink-0 ${statusPillClass(p.status)}`}>{statusLabel(p.status)}</span>
           {/* Money received but not yet settled to our account (ICICI RIP/SIP). */}
@@ -1367,7 +1370,8 @@ function AttemptRow({
             </span>
           )}
         </div>
-        <div className="mt-0.5 break-words text-[11px] text-muted">{sub}</div>
+        {meta && <div className="mt-0.5 truncate text-[11px] text-muted" title={meta}>{meta}</div>}
+        {ref && <div className="truncate font-mono text-[11px] text-muted" title={ref}>{ref}</div>}
         <div className="text-[11px] text-muted">{formatISTDateTime(p.created_at)}</div>
         {/* Last ICICI verification: when + the raw status token it returned. */}
         {p.last_verify_at && (
@@ -1377,7 +1381,7 @@ function AttemptRow({
           </div>
         )}
       </div>
-      <div className="flex shrink-0 flex-col items-end gap-1">
+      <div className="flex items-center justify-between gap-2 sm:shrink-0 sm:flex-col sm:items-end sm:justify-normal sm:gap-1">
         <span className="text-sm font-semibold text-ink">{formatINR(p.amount)}</span>
         <span className="flex items-center gap-1.5">
           {/* Retry/verify is hidden on superseded attempts (no action needed). */}
