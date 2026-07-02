@@ -5803,6 +5803,26 @@ export async function getAttemptsByUser(userId: string): Promise<QuizAttempt[]> 
   return (data as QuizAttempt[]) ?? [];
 }
 
+/**
+ * Attempts for MANY students in one batched query — the batch leaderboard's
+ * bulk aggregation source (grouped in memory by user_id, NOT N+1 per student).
+ * Chunked IN() lists keep the request well within URL/row limits for big batches.
+ */
+export async function getAttemptsByUserIds(userIds: string[]): Promise<QuizAttempt[]> {
+  const ids = [...new Set(userIds.filter(Boolean))];
+  if (ids.length === 0) return [];
+  if (demoMode()) return mock.quizAttempts.filter((a) => a.user_id && ids.includes(a.user_id));
+  const db = getSupabaseAdmin();
+  if (!db) return [];
+  const out: QuizAttempt[] = [];
+  for (let i = 0; i < ids.length; i += 200) {
+    const chunk = ids.slice(i, i + 200);
+    const { data } = await db.from("quiz_attempts").select("*").in("user_id", chunk);
+    if (data) out.push(...(data as QuizAttempt[]));
+  }
+  return out;
+}
+
 /** All attempts a guest made with this mobile number (pre-login lead history). */
 export async function getAttemptsByGuestMobile(phone: string): Promise<QuizAttempt[]> {
   const p = (phone || "").trim();

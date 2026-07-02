@@ -37,6 +37,7 @@ export const ADMIN_NAV: AdminNavItem[] = [
   { href: "/admin/quizzes", label: "Quizzes / Tests", icon: "📝", group: "Assessments", perm: "content_quizzes" },
   { href: "/admin/quiz-reports", label: "Attempts & Reports", icon: "📈", group: "Assessments", perm: "content_quizzes" },
   { href: "/admin/quiz-imports", label: "Question Imports", icon: "🗂️", group: "Assessments", perm: "content_quizzes" },
+  { href: "/admin/leaderboard", label: "Performance Leaderboard", icon: "🏆", group: "Assessments", perm: "manage_students_leads" },
   { href: "/admin/students", label: "Students & Enrollments", icon: "👨‍🎓", group: "People", perm: "manage_students_leads" },
   { href: "/admin/enrollments/duplicates", label: "Duplicate Enrollments", icon: "🔀", group: "People", perm: "view_revenue" },
   { href: "/admin/payments", label: "Payments & Finance", icon: "💰", group: "People", perm: "view_revenue" },

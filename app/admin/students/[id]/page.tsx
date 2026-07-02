@@ -344,6 +344,9 @@ export default function StudentProfilePage({ params }: { params: { id: string } 
             <button disabled={busy} onClick={() => setModal("edit")} className="btn btn-secondary text-sm">
               <Pencil size={15} /> Edit
             </button>
+            <Link href={`/admin/students/${s.id}/performance`} className="btn btn-secondary text-sm">
+              <Activity size={15} /> Overall Performance
+            </Link>
           </div>
         </div>
       </div>

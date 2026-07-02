@@ -4,13 +4,14 @@ import { useEffect, useMemo, useState } from "react";
 import {
   Target, CheckCircle2, XCircle, MinusCircle, TrendingUp, TrendingDown, Minus,
   Award, AlertTriangle, Sparkles, BarChart3, Trophy, Flame, CalendarDays,
-  ArrowUpDown, GraduationCap, Compass,
+  ArrowUpDown, GraduationCap, Compass, Download,
 } from "lucide-react";
 import {
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid,
 } from "recharts";
 import Skeleton from "@/components/ui/Skeleton";
 import QuizPerformanceReport from "@/components/dashboard/QuizPerformanceReport";
+import { downloadOverallPerformancePdf } from "@/lib/performancePdf";
 import type {
   OverallPerformance as OverallData, MasteryRow, QuizRankRow, TrendDirection,
 } from "@/lib/overallPerformance";
@@ -24,16 +25,33 @@ import type {
  * whole board is screenshot-friendly: student + batch + date are always visible
  * and no key number hides behind hover. Zero changes to quiz taking/scoring.
  */
-export default function OverallPerformance({ courseId }: { courseId: string }) {
+/**
+ * Dual-context: student-front passes `courseId` (fetches /api/public/quiz/overall);
+ * the admin per-student view passes an explicit `endpoint` (the role-gated admin
+ * API). Both endpoints return the SAME { ok, overall } shape from the SAME
+ * buildOverallPerformance aggregation, so numbers are identical in both contexts.
+ * `enablePdfExport` shows a Download-PDF action (used in the faculty view).
+ */
+export default function OverallPerformance({
+  courseId,
+  endpoint,
+  enablePdfExport = false,
+}: {
+  courseId?: string;
+  endpoint?: string;
+  enablePdfExport?: boolean;
+}) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<OverallData | null>(null);
+
+  const url = endpoint ?? `/api/public/quiz/overall?courseId=${encodeURIComponent(courseId ?? "")}`;
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setError(null);
-    fetch(`/api/public/quiz/overall?courseId=${encodeURIComponent(courseId)}`, { cache: "no-store" })
+    fetch(url, { cache: "no-store" })
       .then((r) => r.json())
       .then((d) => {
         if (cancelled) return;
@@ -43,7 +61,7 @@ export default function OverallPerformance({ courseId }: { courseId: string }) {
       .catch(() => !cancelled && setError("Could not load your performance."))
       .finally(() => !cancelled && setLoading(false));
     return () => { cancelled = true; };
-  }, [courseId]);
+  }, [url]);
 
   if (loading) return <OverallSkeleton />;
 
@@ -71,7 +89,7 @@ export default function OverallPerformance({ courseId }: { courseId: string }) {
 
   return (
     <div id="overall-performance-board" className="animate-fade-up space-y-8 motion-reduce:animate-none">
-      <SnapshotHeader data={data} />
+      <SnapshotHeader data={data} enablePdfExport={enablePdfExport} />
       <HeroSummary data={data} />
       <MasterySection subjects={data.subjects} topics={data.topics} />
       <QuizRanking quizzes={data.quizzes} />
@@ -82,7 +100,7 @@ export default function OverallPerformance({ courseId }: { courseId: string }) {
 }
 
 /* ----------------------------- SNAPSHOT HEADER ----------------------------- */
-function SnapshotHeader({ data }: { data: OverallData }) {
+function SnapshotHeader({ data, enablePdfExport }: { data: OverallData; enablePdfExport?: boolean }) {
   const date = new Date(data.snapshotISO).toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" });
   return (
     <div className="rounded-2xl border border-[rgba(212,175,55,0.3)] bg-gradient-to-br from-[rgba(212,175,55,0.1)] to-transparent p-5">
@@ -94,9 +112,20 @@ function SnapshotHeader({ data }: { data: OverallData }) {
           <h3 className="mt-1 truncate font-heading text-2xl font-extrabold text-ink">{data.studentName}</h3>
           {data.batchLabel && <p className="mt-0.5 truncate text-sm text-ink2">{data.batchLabel}</p>}
         </div>
-        <p className="flex shrink-0 items-center gap-1.5 rounded-full border border-line bg-surface px-3 py-1.5 text-xs font-semibold text-ink2">
-          <CalendarDays size={13} aria-hidden="true" /> {date}
-        </p>
+        <div className="flex shrink-0 items-center gap-2">
+          {enablePdfExport && (
+            <button
+              type="button"
+              onClick={() => downloadOverallPerformancePdf(data)}
+              className="ca-focus inline-flex items-center gap-1.5 rounded-full border border-line bg-surface px-3 py-1.5 text-xs font-semibold text-ink2 hover:text-ink"
+            >
+              <Download size={13} aria-hidden="true" /> Download PDF
+            </button>
+          )}
+          <p className="flex items-center gap-1.5 rounded-full border border-line bg-surface px-3 py-1.5 text-xs font-semibold text-ink2">
+            <CalendarDays size={13} aria-hidden="true" /> {date}
+          </p>
+        </div>
       </div>
     </div>
   );
