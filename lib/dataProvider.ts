@@ -5901,6 +5901,26 @@ export async function getAllAnswers(): Promise<QuizAnswer[]> {
   const { data } = await db.from("quiz_answers").select("*");
   return (data as QuizAnswer[]) ?? [];
 }
+/**
+ * Answers for a set of attempts in one query — used to aggregate a single
+ * learner's per-question history (e.g. the Overall Performance dashboard).
+ * Bounded to the caller's own attempt ids; batched to avoid N round-trips.
+ */
+export async function getAnswersByAttemptIds(attemptIds: string[]): Promise<QuizAnswer[]> {
+  const ids = [...new Set(attemptIds.filter(Boolean))];
+  if (ids.length === 0) return [];
+  if (demoMode()) return mock.quizAnswers.filter((a) => ids.includes(a.attempt_id));
+  const db = getSupabaseAdmin();
+  if (!db) return [];
+  const out: QuizAnswer[] = [];
+  // Chunk the IN() list so very active learners never blow past URL limits.
+  for (let i = 0; i < ids.length; i += 200) {
+    const chunk = ids.slice(i, i + 200);
+    const { data } = await db.from("quiz_answers").select("*").in("attempt_id", chunk);
+    if (data) out.push(...(data as QuizAnswer[]));
+  }
+  return out;
+}
 /** Insert or update the answer for a given (attempt, question). */
 export async function saveAnswer(input: Partial<QuizAnswer> & { attempt_id: string; question_id: string }): Promise<QuizAnswer> {
   const ts = new Date().toISOString();

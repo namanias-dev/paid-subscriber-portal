@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { Video, FileText, BarChart3, Newspaper, Search, Lock, PlayCircle, ExternalLink, Sparkles, ChevronRight, ChevronLeft } from "lucide-react";
+import { Video, FileText, BarChart3, Newspaper, Search, Lock, PlayCircle, ExternalLink, Sparkles, ChevronRight, ChevronLeft, LineChart } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { formatISTDate } from "@/lib/dates";
 import { groupContentBySubject, GENERAL_SUBJECT } from "@/lib/classHub";
@@ -10,16 +10,19 @@ import type { ClassHubSection, ClassHubSectionId, ClassHubItem } from "@/lib/cla
 import type { PerformanceData } from "@/lib/performance";
 import { PERFORMANCE_SECTION } from "@/lib/performance";
 import PerformanceDashboard from "./PerformanceDashboard";
+import OverallPerformance from "./OverallPerformance";
 import PremiumVideoCard from "@/components/public/PremiumVideoCard";
 import SubjectFolderCard from "@/components/public/SubjectFolderCard";
 
-type TabId = ClassHubSectionId | typeof PERFORMANCE_SECTION;
+const OVERALL_SECTION = "overall";
+type TabId = ClassHubSectionId | typeof PERFORMANCE_SECTION | typeof OVERALL_SECTION;
 
 const SECTION_ICON: Record<string, LucideIcon> = {
   recordings: Video,
   notes: FileText,
   ca: Newspaper,
   [PERFORMANCE_SECTION]: BarChart3,
+  [OVERALL_SECTION]: LineChart,
 };
 
 /**
@@ -78,6 +81,7 @@ export default function ClassHubBatch({
 
   const activeSection = sections.find((s) => s.id === active);
   const onPerformance = active === PERFORMANCE_SECTION;
+  const onOverall = active === OVERALL_SECTION;
   // Recordings + Notes get subject folders; Current Affairs stays a flat list.
   const folderable = active === "recordings" || active === "notes";
 
@@ -110,9 +114,10 @@ export default function ClassHubBatch({
   const tabs: { id: TabId; label: string }[] = [
     ...sections.map((s) => ({ id: s.id as TabId, label: s.label })),
     { id: PERFORMANCE_SECTION, label: "Quizzes" },
+    { id: OVERALL_SECTION, label: "Overall Performance" },
   ];
 
-  const showSearch = !onPerformance && activeSection && sectionItems.length > 0 && !showFolders;
+  const showSearch = !onPerformance && !onOverall && activeSection && sectionItems.length > 0 && !showFolders;
 
   return (
     <section>
@@ -176,7 +181,9 @@ export default function ClassHubBatch({
       )}
 
       <div className="mt-5">
-        {onPerformance ? (
+        {onOverall ? (
+          <OverallPerformance courseId={courseId} />
+        ) : onPerformance ? (
           <PerformanceDashboard data={performance} />
         ) : !activeSection || sectionItems.length === 0 ? (
           <EmptyHub message={activeSection?.empty ?? "Nothing here yet."} />
