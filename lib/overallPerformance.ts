@@ -1,4 +1,4 @@
-import type { Quiz, QuizAttempt, QuizAnswer } from "./types";
+import type { Quiz, QuizAttempt, QuizAnswer, QuizOptionKey } from "./types";
 import type { TopicStat } from "./quizScoring";
 
 /**
@@ -66,13 +66,29 @@ export interface TrendPoint {
 
 export type TrendDirection = "improving" | "steady" | "declining" | "insufficient";
 
+export interface MissedOption {
+  key: QuizOptionKey;
+  html: string;
+}
+
 export interface MissedQuestion {
   questionId: string;
-  text: string;
+  text: string;                    // plain-text stem for the collapsed row
   subject: string | null;
   topic: string | null;
   wrong: number; // times answered incorrectly
   seen: number;  // times this question appeared in the learner's attempts
+  // ---- Rich review payload for the expanded accordion panel (mini per-attempt
+  // card). Sourced from a representative wrong answer's snapshot; correct option
+  // and explanation are reveal-gated per the owning quiz's result_settings,
+  // mirroring the per-attempt report (buildResultPayload). Never fabricated —
+  // fields stay null/empty when the snapshot or reveal settings withhold them.
+  questionHtml: string;
+  questionImage: string | null;
+  options: MissedOption[];
+  yourOption: QuizOptionKey | null;   // the learner's (wrong) pick
+  correctOption: QuizOptionKey | null; // null when the quiz hides answers
+  explanationHtml: string | null;      // null when the quiz hides explanations
 }
 
 export interface OverallPerformance {
@@ -90,7 +106,13 @@ export interface OverallPerformance {
   mostMissed: MissedQuestion[];
 }
 
-type QuizMeta = Pick<Quiz, "id" | "slug" | "title" | "subject">;
+// `result_settings` is optional so callers that only have basic quiz metadata
+// still satisfy the type; it's used to reveal-gate the most-missed review panel.
+export type QuizMeta = Pick<Quiz, "id" | "slug" | "title" | "subject"> & {
+  result_settings?: Quiz["result_settings"];
+};
+
+const OPTION_KEYS: QuizOptionKey[] = ["A", "B", "C", "D", "E"];
 
 const round = (n: number) => Math.round(n);
 const attemptTime = (a: QuizAttempt) => Date.parse(a.submitted_at || a.created_at) || 0;
@@ -262,18 +284,49 @@ export function buildOverallPerformance(opts: {
   const missMap = new Map<string, MissedQuestion>();
   for (const ans of answers) {
     const snap = ans.answer_snapshot || {};
-    const cur = missMap.get(ans.question_id) || {
-      questionId: ans.question_id,
-      text: toPlainText(snap.question_html) || "Question",
-      subject: snap.subject ?? null,
-      topic: snap.topic ?? null,
-      wrong: 0,
-      seen: 0,
-    };
+    let cur = missMap.get(ans.question_id);
+    if (!cur) {
+      cur = {
+        questionId: ans.question_id,
+        text: toPlainText(snap.question_html) || "Question",
+        subject: snap.subject ?? null,
+        topic: snap.topic ?? null,
+        wrong: 0,
+        seen: 0,
+        questionHtml: snap.question_html || "",
+        questionImage: snap.question_image ?? null,
+        options: [],
+        yourOption: null,
+        correctOption: null,
+        explanationHtml: null,
+      };
+      missMap.set(ans.question_id, cur);
+    }
     cur.seen += 1;
-    if (!ans.is_unattempted && !ans.is_correct) cur.wrong += 1;
     if (!cur.text || cur.text === "Question") cur.text = toPlainText(snap.question_html) || cur.text;
-    missMap.set(ans.question_id, cur);
+
+    const isWrong = !ans.is_unattempted && !ans.is_correct;
+    if (isWrong) {
+      cur.wrong += 1;
+      // Capture the full review payload from the FIRST wrong answer we see for
+      // this question (representative). Correct option + explanation are gated by
+      // the owning quiz's reveal settings, exactly like the per-attempt report.
+      if (cur.options.length === 0) {
+        const quiz = quizById.get(ans.quiz_id);
+        const rs = quiz?.result_settings || {};
+        const revealAfter = rs.reveal_explanations_after
+          ? Date.parse(rs.reveal_explanations_after) > now
+          : false;
+        const reveal = !revealAfter;
+        const opts = (snap.options || {}) as Record<string, string | null>;
+        cur.options = OPTION_KEYS.filter((k) => opts[k]).map((k) => ({ key: k, html: opts[k] || "" }));
+        cur.questionHtml = snap.question_html || cur.questionHtml;
+        cur.questionImage = snap.question_image ?? cur.questionImage;
+        cur.yourOption = (ans.selected_option as QuizOptionKey) || null;
+        cur.correctOption = rs.show_correct_answers !== false && reveal ? (snap.correct_option as QuizOptionKey) || null : null;
+        cur.explanationHtml = rs.show_explanations !== false && reveal ? snap.explanation_html || null : null;
+      }
+    }
   }
   const mostMissed = [...missMap.values()]
     .filter((m) => m.wrong > 0)

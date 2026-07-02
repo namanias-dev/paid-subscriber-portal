@@ -1,5 +1,5 @@
-import type { Quiz, QuizAttempt, Student, CourseEnrollment } from "./types";
-import { buildOverallPerformance, type MasteryRow } from "./overallPerformance";
+import type { QuizAttempt, Student, CourseEnrollment } from "./types";
+import { buildOverallPerformance, type MasteryRow, type QuizMeta } from "./overallPerformance";
 
 /**
  * ============================================================================
@@ -68,7 +68,7 @@ export function buildLeaderboard(opts: {
   students: Student[];
   enrollments: CourseEnrollment[];
   attempts: QuizAttempt[];
-  quizById: Map<string, Pick<Quiz, "id" | "slug" | "title" | "subject">>;
+  quizById: Map<string, QuizMeta>;
   courseId?: string | null;
   now?: number;
 }): LeaderboardResult {

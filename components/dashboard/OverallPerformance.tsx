@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Target, CheckCircle2, XCircle, MinusCircle, TrendingUp, TrendingDown, Minus,
   Award, AlertTriangle, Sparkles, BarChart3, Trophy, Flame, CalendarDays,
-  ArrowUpDown, GraduationCap, Compass, Download,
+  ArrowUpDown, GraduationCap, Compass, Download, ChevronDown,
 } from "lucide-react";
 import {
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid,
@@ -13,8 +13,10 @@ import Skeleton from "@/components/ui/Skeleton";
 import QuizPerformanceReport from "@/components/dashboard/QuizPerformanceReport";
 import { downloadOverallPerformancePdf } from "@/lib/performancePdf";
 import type {
-  OverallPerformance as OverallData, MasteryRow, QuizRankRow, TrendDirection,
+  OverallPerformance as OverallData, MasteryRow, QuizRankRow, TrendDirection, MissedQuestion,
 } from "@/lib/overallPerformance";
+
+type ReportTarget = { attemptId: string; slug: string | null; title: string };
 
 /**
  * Class Hub "Overall Performance" tab (read-only). Aggregate self-assessment
@@ -44,6 +46,9 @@ export default function OverallPerformance({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<OverallData | null>(null);
+  // Per-attempt report modal state lives here (top level) so the modal renders
+  // OUTSIDE #overall-performance-board — see the render note at the bottom.
+  const [report, setReport] = useState<ReportTarget | null>(null);
 
   const url = endpoint ?? `/api/public/quiz/overall?courseId=${encodeURIComponent(courseId ?? "")}`;
 
@@ -88,14 +93,36 @@ export default function OverallPerformance({
   }
 
   return (
-    <div id="overall-performance-board" className="animate-fade-up space-y-8 motion-reduce:animate-none">
-      <SnapshotHeader data={data} enablePdfExport={enablePdfExport} />
-      <HeroSummary data={data} />
-      <MasterySection subjects={data.subjects} topics={data.topics} />
-      <QuizRanking quizzes={data.quizzes} />
-      <AccuracyTrend data={data} />
-      <FocusAreas data={data} />
-    </div>
+    <>
+      <div id="overall-performance-board" className="animate-fade-up space-y-8 motion-reduce:animate-none">
+        <SnapshotHeader data={data} enablePdfExport={enablePdfExport} />
+        <HeroSummary data={data} />
+        <MasterySection subjects={data.subjects} topics={data.topics} />
+        <QuizRanking quizzes={data.quizzes} onOpenReport={setReport} />
+        <AccuracyTrend data={data} />
+        <FocusAreas data={data} />
+      </div>
+
+      {/*
+        Root-cause fix (Bug 1): #overall-performance-board uses `animate-fade-up`,
+        whose keyframe runs with `animation-fill-mode: both` and leaves the board
+        with a retained `transform: translateY(0)`. Any non-`none` transform on an
+        ancestor turns it into the containing block for `position: fixed`
+        descendants — so the shared Modal's `fixed inset-0` overlay was being
+        clipped/offset into the board's box and read as a "blank black box".
+        Rendering the report as a SIBLING of the board (not a descendant) keeps the
+        modal viewport-anchored, exactly like the working Quizzes-tab report.
+      */}
+      {report && (
+        <QuizPerformanceReport
+          attemptId={report.attemptId}
+          slug={report.slug}
+          fallbackTitle={report.title}
+          open={!!report}
+          onClose={() => setReport(null)}
+        />
+      )}
+    </>
   );
 }
 
@@ -269,15 +296,16 @@ function MasteryBar({ row }: { row: MasteryRow }) {
 }
 
 /* ----------------------------- QUIZ RANKING ----------------------------- */
-function QuizRanking({ quizzes }: { quizzes: QuizRankRow[] }) {
-  const [report, setReport] = useState<{ attemptId: string; slug: string | null; title: string } | null>(null);
+function QuizRanking({ quizzes, onOpenReport }: { quizzes: QuizRankRow[]; onOpenReport: (r: ReportTarget) => void }) {
   if (quizzes.length === 0) return null;
 
   const small = quizzes.length <= 3;
   const best = quizzes.slice(0, 3);
   const weakest = small ? [] : quizzes.slice(-3).reverse();
 
-  const open = (q: QuizRankRow) => q.reviewable && setReport({ attemptId: q.attemptId, slug: q.slug, title: q.title });
+  const open = (q: QuizRankRow) => {
+    if (q.reviewable) onOpenReport({ attemptId: q.attemptId, slug: q.slug, title: q.title });
+  };
 
   return (
     <section>
@@ -288,16 +316,6 @@ function QuizRanking({ quizzes }: { quizzes: QuizRankRow[] }) {
         <RankList title="Top performers" icon={<Trophy size={14} className="text-success" />} rows={best} onOpen={open} />
         {!small && <RankList title="Needs work" icon={<Flame size={14} className="text-danger" />} rows={weakest} onOpen={open} />}
       </div>
-
-      {report && (
-        <QuizPerformanceReport
-          attemptId={report.attemptId}
-          slug={report.slug}
-          fallbackTitle={report.title}
-          open={!!report}
-          onClose={() => setReport(null)}
-        />
-      )}
     </section>
   );
 }
@@ -317,8 +335,8 @@ function RankList({ title, icon, rows, onOpen }: { title: string; icon: React.Re
                 type="button"
                 onClick={() => onOpen(q)}
                 disabled={!clickable}
-                className={`ca-focus flex w-full items-center justify-between gap-3 rounded-2xl border border-line bg-surface p-3.5 text-left transition ${clickable ? "hover:-translate-y-0.5 hover:border-[rgba(212,175,55,0.5)] hover:shadow-soft motion-reduce:transform-none" : "cursor-default"}`}
-                title={clickable ? "Open per-attempt report" : "No question-wise report for this attempt"}
+                className={`ca-focus flex w-full items-center justify-between gap-3 rounded-2xl border border-line bg-surface p-3.5 text-left transition ${clickable ? "hover:-translate-y-0.5 hover:border-[rgba(212,175,55,0.5)] hover:shadow-soft motion-reduce:transform-none" : "cursor-not-allowed opacity-60"}`}
+                title={clickable ? "Open per-attempt report" : "No question-wise report available for this attempt"}
               >
                 <div className="min-w-0">
                   <p className="truncate font-semibold text-ink">{q.title}</p>
@@ -434,24 +452,168 @@ function FocusAreas({ data }: { data: OverallData }) {
         {mostMissed.length > 0 && (
           <div>
             <p className="mb-2 text-xs font-bold uppercase tracking-wide text-muted">Most-missed questions</p>
-            <ul className="space-y-2">
-              {mostMissed.map((m) => (
-                <li key={m.questionId} className="rounded-2xl border border-line bg-surface p-3.5">
-                  <p className="line-clamp-2 text-sm font-medium text-ink">{m.text}</p>
-                  <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px]">
-                    {m.topic && <span className="pill pill-blue">{m.topic}</span>}
-                    {m.subject && m.subject !== m.topic && <span className="pill pill-gray">{m.subject}</span>}
-                    <span className="pill pill-red">
-                      {m.wrong > 1 ? `Missed ${m.wrong}× of ${m.seen}` : "Incorrect"}
-                    </span>
-                  </div>
-                </li>
-              ))}
-            </ul>
+            <MostMissedAccordion items={mostMissed} />
           </div>
         )}
       </div>
     </section>
+  );
+}
+
+/* --------------------- MOST-MISSED QUESTIONS (ACCORDION) --------------------- */
+/**
+ * Single-open accordion for the learner's most-missed questions. Collapsed rows
+ * show a truncated stem + chips; expanding one smoothly collapses any other so
+ * only one question is open at a time. The expanded panel is a mini per-attempt
+ * card (full stem, option chips with your ✕ / correct ✓, explanation callout)
+ * mirroring the Feature-1 report. Height/opacity animate with an eased grid-rows
+ * transition; `motion-reduce` renders instantly. Rows are keyboard-operable.
+ */
+function MostMissedAccordion({ items }: { items: MissedQuestion[] }) {
+  const [openId, setOpenId] = useState<string | null>(null);
+  return (
+    <ul className="space-y-2">
+      {items.map((m) => (
+        <MissedRow
+          key={m.questionId}
+          m={m}
+          open={openId === m.questionId}
+          onToggle={() => setOpenId((cur) => (cur === m.questionId ? null : m.questionId))}
+        />
+      ))}
+    </ul>
+  );
+}
+
+function MissedRow({ m, open, onToggle }: { m: MissedQuestion; open: boolean; onToggle: () => void }) {
+  const ref = useRef<HTMLLIElement>(null);
+  const panelId = `most-missed-${m.questionId}`;
+
+  useEffect(() => {
+    if (!open || !ref.current) return;
+    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    // Let the expand transition begin, then nudge the row into view if it sits
+    // below the fold. `block: "nearest"` keeps the tapped row anchored (no jump).
+    const t = window.setTimeout(
+      () => ref.current?.scrollIntoView({ block: "nearest", behavior: reduce ? "auto" : "smooth" }),
+      reduce ? 0 : 90,
+    );
+    return () => window.clearTimeout(t);
+  }, [open]);
+
+  return (
+    <li
+      ref={ref}
+      className={`overflow-hidden rounded-2xl border bg-surface transition-colors duration-200 ${
+        open ? "border-l-[3px] border-danger/50 border-l-danger shadow-soft" : "border-line hover:border-[rgba(212,175,55,0.4)]"
+      }`}
+    >
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={open}
+        aria-controls={panelId}
+        className="ca-focus flex w-full items-center gap-3 p-3.5 text-left transition hover:bg-surface2/40"
+      >
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-medium text-ink">{m.text}</p>
+          <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px]">
+            <span className="pill pill-red"><XCircle size={11} aria-hidden="true" /> Incorrect</span>
+            {m.topic && <span className="pill pill-blue">{m.topic}</span>}
+            {m.subject && m.subject !== m.topic && <span className="pill pill-gray">{m.subject}</span>}
+            {m.wrong > 1 && <span className="pill pill-amber">Missed {m.wrong}× of {m.seen}</span>}
+          </div>
+        </div>
+        <ChevronDown
+          size={18}
+          aria-hidden="true"
+          className={`shrink-0 text-muted transition-transform duration-300 motion-reduce:transition-none ${open ? "rotate-180" : ""}`}
+        />
+      </button>
+
+      <div
+        id={panelId}
+        role="region"
+        className={`grid transition-[grid-template-rows] duration-300 ease-out motion-reduce:transition-none ${open ? "grid-rows-[1fr]" : "grid-rows-[0fr]"}`}
+      >
+        <div className="min-h-0 overflow-hidden">
+          <div
+            className={`border-t border-line px-3.5 pb-4 pt-3 transition-opacity duration-300 motion-reduce:transition-none ${open ? "opacity-100" : "opacity-0"}`}
+          >
+            {open && <MissedPanel m={m} />}
+          </div>
+        </div>
+      </div>
+    </li>
+  );
+}
+
+function MissedPanel({ m }: { m: MissedQuestion }) {
+  const answersHidden = m.correctOption == null && m.explanationHtml == null && m.options.length > 0;
+  return (
+    <div className="animate-fade-up space-y-3 motion-reduce:animate-none">
+      {m.questionHtml ? (
+        <div className="prose-quiz text-sm leading-relaxed text-ink [&_img]:max-w-full" dangerouslySetInnerHTML={{ __html: m.questionHtml }} />
+      ) : (
+        <p className="text-sm leading-relaxed text-ink">{m.text}</p>
+      )}
+      {m.questionImage && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={m.questionImage} alt="" className="max-h-64 rounded-lg border border-line" />
+      )}
+
+      {m.options.length > 0 && (
+        <ul className="space-y-1.5">
+          {m.options.map((opt) => {
+            const isCorrect = m.correctOption === opt.key;
+            const isYours = m.yourOption === opt.key;
+            const wrongPick = isYours && !isCorrect;
+            const cls = isCorrect
+              ? "border-success/50 bg-success/10"
+              : wrongPick
+              ? "border-danger/50 bg-danger/10"
+              : "border-line bg-surface2/40";
+            return (
+              <li key={opt.key} className={`flex items-start gap-2 rounded-xl border px-3 py-2 text-sm ${cls}`}>
+                {isCorrect ? (
+                  <CheckCircle2 size={15} className="mt-0.5 shrink-0 text-success" aria-hidden="true" />
+                ) : wrongPick ? (
+                  <XCircle size={15} className="mt-0.5 shrink-0 text-danger" aria-hidden="true" />
+                ) : (
+                  <span className="mt-0.5 shrink-0 text-xs font-bold text-muted">{opt.key}.</span>
+                )}
+                <span className="min-w-0 flex-1 text-ink [&_img]:max-w-full" dangerouslySetInnerHTML={{ __html: opt.html }} />
+                {(isYours || isCorrect) && (
+                  <span
+                    className={`ml-auto shrink-0 whitespace-nowrap text-[10px] font-bold uppercase tracking-wide ${
+                      isCorrect ? "text-success" : "text-danger"
+                    }`}
+                  >
+                    {isCorrect ? "Correct" : "Your answer"}
+                  </span>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+
+      {m.explanationHtml && (
+        <div className="rounded-xl border border-[rgba(0,87,255,0.18)] bg-[rgba(0,87,255,0.05)] p-3">
+          <p className="mb-1 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-primary">
+            <Sparkles size={12} aria-hidden="true" /> Explanation
+          </p>
+          <div className="prose-quiz text-sm leading-relaxed text-ink2 [&_img]:max-w-full" dangerouslySetInnerHTML={{ __html: m.explanationHtml }} />
+        </div>
+      )}
+
+      {answersHidden && (
+        <p className="text-xs italic text-muted">The answer key for this quiz isn’t revealed yet — your selected option is marked above.</p>
+      )}
+      {m.options.length === 0 && (
+        <p className="text-xs italic text-muted">Detailed review isn’t available for this question.</p>
+      )}
+    </div>
   );
 }
 
