@@ -19,6 +19,21 @@ import type {
 type ReportTarget = { attemptId: string; slug: string | null; title: string };
 
 /**
+ * Containment utilities for user-authored HTML injected via dangerouslySetInnerHTML
+ * (question stems, options, explanations). Unlike the per-attempt report — which
+ * lives inside a position:fixed Modal that can't widen the document — the
+ * most-missed accordion renders this HTML INLINE in page flow, so unconstrained
+ * content (long unbroken tokens, <table>, <pre>, inline widths, big images) would
+ * force horizontal page overflow on mobile. This forces wrapping and keeps tables/
+ * pre/images scrolling or shrinking WITHIN their own box, never past the viewport.
+ */
+const RICH_HTML =
+  "min-w-0 max-w-full break-words [overflow-wrap:anywhere] " +
+  "[&_img]:h-auto [&_img]:max-w-full " +
+  "[&_pre]:max-w-full [&_pre]:overflow-x-auto [&_pre]:whitespace-pre-wrap " +
+  "[&_table]:block [&_table]:max-w-full [&_table]:overflow-x-auto";
+
+/**
  * Class Hub "Overall Performance" tab (read-only). Aggregate self-assessment
  * across ALL of a learner's quizzes — a UPSC aspirant's study-decision board.
  * Data is server-aggregated (GET /api/public/quiz/overall) and fetched lazily
@@ -518,10 +533,10 @@ function MissedRow({ m, open, onToggle }: { m: MissedQuestion; open: boolean; on
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-medium text-ink">{m.text}</p>
           <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px]">
-            <span className="pill pill-red"><XCircle size={11} aria-hidden="true" /> Incorrect</span>
-            {m.topic && <span className="pill pill-blue">{m.topic}</span>}
-            {m.subject && m.subject !== m.topic && <span className="pill pill-gray">{m.subject}</span>}
-            {m.wrong > 1 && <span className="pill pill-amber">Missed {m.wrong}× of {m.seen}</span>}
+            <span className="pill pill-red shrink-0"><XCircle size={11} aria-hidden="true" /> Incorrect</span>
+            {m.topic && <span className="pill pill-blue max-w-full break-words">{m.topic}</span>}
+            {m.subject && m.subject !== m.topic && <span className="pill pill-gray max-w-full break-words">{m.subject}</span>}
+            {m.wrong > 1 && <span className="pill pill-amber shrink-0">Missed {m.wrong}× of {m.seen}</span>}
           </div>
         </div>
         <ChevronDown
@@ -551,15 +566,15 @@ function MissedRow({ m, open, onToggle }: { m: MissedQuestion; open: boolean; on
 function MissedPanel({ m }: { m: MissedQuestion }) {
   const answersHidden = m.correctOption == null && m.explanationHtml == null && m.options.length > 0;
   return (
-    <div className="animate-fade-up space-y-3 motion-reduce:animate-none">
+    <div className="animate-fade-up max-w-full space-y-3 motion-reduce:animate-none">
       {m.questionHtml ? (
-        <div className="prose-quiz text-sm leading-relaxed text-ink [&_img]:max-w-full" dangerouslySetInnerHTML={{ __html: m.questionHtml }} />
+        <div className={`prose-quiz text-sm leading-relaxed text-ink ${RICH_HTML}`} dangerouslySetInnerHTML={{ __html: m.questionHtml }} />
       ) : (
-        <p className="text-sm leading-relaxed text-ink">{m.text}</p>
+        <p className="max-w-full break-words text-sm leading-relaxed text-ink [overflow-wrap:anywhere]">{m.text}</p>
       )}
       {m.questionImage && (
         // eslint-disable-next-line @next/next/no-img-element
-        <img src={m.questionImage} alt="" className="max-h-64 rounded-lg border border-line" />
+        <img src={m.questionImage} alt="" className="h-auto max-h-64 max-w-full rounded-lg border border-line" />
       )}
 
       {m.options.length > 0 && (
@@ -582,7 +597,7 @@ function MissedPanel({ m }: { m: MissedQuestion }) {
                 ) : (
                   <span className="mt-0.5 shrink-0 text-xs font-bold text-muted">{opt.key}.</span>
                 )}
-                <span className="min-w-0 flex-1 text-ink [&_img]:max-w-full" dangerouslySetInnerHTML={{ __html: opt.html }} />
+                <span className={`flex-1 text-ink ${RICH_HTML}`} dangerouslySetInnerHTML={{ __html: opt.html }} />
                 {(isYours || isCorrect) && (
                   <span
                     className={`ml-auto shrink-0 whitespace-nowrap text-[10px] font-bold uppercase tracking-wide ${
@@ -599,11 +614,11 @@ function MissedPanel({ m }: { m: MissedQuestion }) {
       )}
 
       {m.explanationHtml && (
-        <div className="rounded-xl border border-[rgba(0,87,255,0.18)] bg-[rgba(0,87,255,0.05)] p-3">
+        <div className="max-w-full overflow-hidden rounded-xl border border-[rgba(0,87,255,0.18)] bg-[rgba(0,87,255,0.05)] p-3">
           <p className="mb-1 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-primary">
             <Sparkles size={12} aria-hidden="true" /> Explanation
           </p>
-          <div className="prose-quiz text-sm leading-relaxed text-ink2 [&_img]:max-w-full" dangerouslySetInnerHTML={{ __html: m.explanationHtml }} />
+          <div className={`prose-quiz text-sm leading-relaxed text-ink2 ${RICH_HTML}`} dangerouslySetInnerHTML={{ __html: m.explanationHtml }} />
         </div>
       )}
 
