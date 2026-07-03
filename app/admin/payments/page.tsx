@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { PageHeader, useAdminData, LoadingBlock, KpiCard } from "@/components/admin/ui";
 import WebinarRegistrationsTrend from "@/components/admin/WebinarRegistrationsTrend";
+import WebinarRegistrationsByWebinarTrend from "@/components/admin/WebinarRegistrationsByWebinarTrend";
 import GroupedTimeline, { type TimelineGroup } from "@/components/admin/GroupedTimeline";
 import SendSmsButton from "@/components/admin/sms/SendSmsButton";
 import PaymentAccountability from "@/components/admin/payments/PaymentAccountability";
@@ -646,6 +647,12 @@ export default function PaymentsAdmin() {
           delta={today.crsDelta}
         />
         <WebinarRegistrationsTrend payments={payments} />
+      </div>
+
+      {/* Per-webinar registrations trend — directly below the all-webinars card,
+          same styling/interaction, with an added webinar selector. */}
+      <div className="mb-4">
+        <WebinarRegistrationsByWebinarTrend payments={payments} />
       </div>
 
       {isSuper && <PaymentAccountability />}
