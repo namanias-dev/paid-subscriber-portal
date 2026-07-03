@@ -76,6 +76,36 @@ a {
   }
 }
 
+/* ============================================================
+   Payments & Finance — premium staggered entrance.
+   GPU-composited only (transform + opacity → no layout/paint/reflow,
+   no CLS since layout boxes are unchanged). Top-level sections cascade
+   in on mount with a short ~50ms stagger. Content stays interactive
+   throughout. Fully disabled under prefers-reduced-motion (content
+   simply appears, no delay, no transform).
+   ============================================================ */
+@keyframes payEnter {
+  from { opacity: 0; transform: translateY(14px) scale(0.985); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.pay-stagger > * {
+  animation: payEnter 0.34s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.pay-stagger > *:nth-child(1) { animation-delay: 0ms; }
+.pay-stagger > *:nth-child(2) { animation-delay: 50ms; }
+.pay-stagger > *:nth-child(3) { animation-delay: 100ms; }
+.pay-stagger > *:nth-child(4) { animation-delay: 150ms; }
+.pay-stagger > *:nth-child(5) { animation-delay: 200ms; }
+.pay-stagger > *:nth-child(6) { animation-delay: 250ms; }
+.pay-stagger > *:nth-child(7) { animation-delay: 300ms; }
+.pay-stagger > *:nth-child(8) { animation-delay: 350ms; }
+.pay-stagger > *:nth-child(9) { animation-delay: 400ms; }
+/* Cap later (mostly below-the-fold) sections so the last never feels like a wait. */
+.pay-stagger > *:nth-child(n+10) { animation-delay: 440ms; }
+@media (prefers-reduced-motion: reduce) {
+  .pay-stagger > * { animation: none !important; }
+}
+
 @layer components {
   .container-x {
     @apply mx-auto w-full max-w-6xl px-4 sm:px-6;

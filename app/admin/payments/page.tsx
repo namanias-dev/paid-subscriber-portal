@@ -605,6 +605,9 @@ export default function PaymentsAdmin() {
 
   return (
     <div>
+      {/* Premium staggered entrance (transform+opacity only; reduced-motion safe).
+          Modals stay OUTSIDE this wrapper so they keep their own open transition. */}
+      <div className="pay-stagger">
       <PageHeader
         title="Payments & Finance"
         subtitle="Razorpay & ICICI transactions, revenue & collections"
@@ -881,6 +884,7 @@ export default function PaymentsAdmin() {
         forceOpenIds={matchOpenIds}
         emptyText={payments.length === 0 ? "No payments yet." : "No payments match these filters."}
       />
+      </div>
 
       {proofModal && (
         <ProofModal
