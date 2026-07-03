@@ -1900,12 +1900,21 @@ export async function registerWebinar(webinarId: string, name: string, phone: st
       /* ignore */
     }
   }
-  // Analytics (best-effort, idempotent): a webinar registration milestone.
-  void recordRegistrationCreated({ webinar_id: webinarId, phone, is_free: true }).catch(() => {});
-  // Auto-SMS (disabled by default): webinar registered. Title fetched cheaply.
+  // Title + price fetched cheaply (price decides the confirmation-SMS timing).
   let webinarTitle: string | null = null;
-  if (db) { try { const { data } = await db.from("webinars").select("title").eq("id", webinarId).maybeSingle(); webinarTitle = (data?.title as string) ?? null; } catch { /* ignore */ } }
-  fireAutoSms({ trigger: TRIGGERS.registration_created, phone, name, vars: { item_short: webinarTitle || "your webinar" }, entity: { webinar_id: webinarId }, entityId: webinarId });
+  let webinarPrice = 0;
+  if (db) { try { const { data } = await db.from("webinars").select("title, price").eq("id", webinarId).maybeSingle(); webinarTitle = (data?.title as string) ?? null; webinarPrice = Number((data as { price?: number } | null)?.price ?? 0) || 0; } catch { /* ignore */ } }
+  const isFreeWebinar = webinarPrice <= 0;
+  // Analytics (best-effort, idempotent): a webinar registration milestone.
+  void recordRegistrationCreated({ webinar_id: webinarId, phone, price: webinarPrice, is_free: isFreeWebinar }).catch(() => {});
+  // Auto-SMS (disabled by default): "Webinar Registered". FREE webinars confirm at
+  // registration (registration == confirmation). PAID webinars must NOT confirm here —
+  // payment is unresolved at registration time; the confirmation fires only after a
+  // verified PAID payment (recordPaymentPaid → registration_created), so unpaid /
+  // failed / abandoned checkouts are never texted.
+  if (isFreeWebinar) {
+    fireAutoSms({ trigger: TRIGGERS.registration_created, phone, name, vars: { item_short: webinarTitle || "your webinar" }, entity: { webinar_id: webinarId }, entityId: webinarId });
+  }
   await addLead({ name, phone, source: "Webinar", webinar_registered: true });
   // UNIFIED IDENTITY: a webinar registrant (free or paid) becomes a first-class
   // student + buyer so they appear in Students & Enrollments and can open their

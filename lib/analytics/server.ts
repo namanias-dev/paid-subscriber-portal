@@ -206,6 +206,13 @@ export async function recordPaymentPaid(p: Payment, source = "system"): Promise<
     fireAutoSms({ trigger: TRIGGERS.payment_success, phone: p.phone, name: p.student_name, vars: { item_short: p.item, payment_status: "PAID", amount: p.amount }, entity: smsEntityForPayment(p), entityId: ref });
     if (p.item_type === "course") {
       fireAutoSms({ trigger: TRIGGERS.course_enrolled, phone: p.phone, name: p.student_name, vars: { item_short: p.item }, entity: smsEntityForPayment(p), entityId: ref });
+    } else if (p.item_type === "webinar") {
+      // PAID-WEBINAR confirmation fires HERE, from the verified-PAID chokepoint —
+      // never at registration time (payment is unresolved then). registerWebinar
+      // suppresses the registration-time send for paid webinars so this is the one
+      // and only "Webinar Registered" for a paid seat. Free webinars still confirm
+      // at registration (registration == confirmation). Once per payment (dedupe).
+      fireAutoSms({ trigger: TRIGGERS.registration_created, phone: p.phone, name: p.student_name, vars: { item_short: p.item }, entity: smsEntityForPayment(p), entityId: ref });
     }
   }
 }

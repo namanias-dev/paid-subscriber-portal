@@ -8,7 +8,7 @@ import { normalizeIndianMobile } from "../phone";
 import { formatISTTime } from "../dates";
 import {
   getPayments, getLeads, getBuyers, getWebinars, getWebinarBySlug,
-  getWebinarRegistrationsByWebinar,
+  getWebinarRegistrationsByWebinar, getWebinarPaymentStatusesForSlug,
 } from "../dataProvider";
 import { isPaidStatus, dedupePaidRows, itemKey } from "../paymentsAgg";
 import { firstNamesMatch } from "./store";
@@ -167,8 +167,17 @@ export async function resolveAudience(spec: AudienceSpec): Promise<Recipient[]> 
     for (const r of regs) { const d = norm(r.phone); if (d) regByPhone.set(d, { name: r.name, id: r.id, attended: !!r.attended }); }
     const zoom = await zoomClickedPhones(webinar.slug);
 
+    // PAID webinars: a bare webinar_registrations lead row is NOT a confirmed seat.
+    // Gate "Registered" to phones with a verified PAID payment for this slug (same
+    // source of truth as the admin registrant list). Fail closed — PENDING / FAILED
+    // / no-payment are excluded. FREE webinars (price<=0): registration == seat, so
+    // no gating. This mirrors the paid-only confirmation rule (webinarStatus).
     if (spec.type === "webinar_registered") {
-      return dedupeRecipients([...regByPhone.entries()].map(([d, r]) => attach(d, r.name, vars, { registration_id: r.id, webinar_id: webinar.id })));
+      const isPaidWebinar = (webinar.price ?? 0) > 0;
+      const payByPhone = isPaidWebinar ? await getWebinarPaymentStatusesForSlug(webinar.slug) : null;
+      return dedupeRecipients([...regByPhone.entries()]
+        .filter(([d]) => !isPaidWebinar || payByPhone!.get(d) === "PAID")
+        .map(([d, r]) => attach(d, r.name, vars, { registration_id: r.id, webinar_id: webinar.id })));
     }
     if (spec.type === "webinar_attendees") {
       return dedupeRecipients([...regByPhone.entries()].filter(([d, r]) => r.attended || zoom.has(d)).map(([d, r]) => attach(d, r.name, vars, { registration_id: r.id, webinar_id: webinar.id })));
