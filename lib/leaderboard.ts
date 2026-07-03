@@ -1,5 +1,6 @@
 import type { QuizAttempt, Student, CourseEnrollment } from "./types";
 import { buildOverallPerformance, type MasteryRow, type QuizMeta } from "./overallPerformance";
+import { LEADERBOARD_EXCLUDED_STUDENT_IDS } from "./leaderboardExclusions";
 
 /**
  * ============================================================================
@@ -44,12 +45,40 @@ export interface LeaderboardResult {
   batchLabel: string;        // "All batches" or the selected course title
   courseId: string | null;   // null for All batches
   snapshotISO: string;
-  studentCount: number;
+  studentCount: number;      // roster total (paidCount + nonPayingCount)
+  paidCount: number;         // roster students who have paid (see isPayingStudent)
+  nonPayingCount: number;    // roster students with no payment (leads / free regs)
   batches: BatchOption[];
   rows: LeaderboardRow[];
 }
 
 const norm = (p: string | null | undefined) => (p || "").trim();
+
+/**
+ * Source of truth for "paid": real money received, mirroring the app's own
+ * access gate (paidCourseIdsForPhone) + the LMS-subscription signal.
+ *   • LMS subscriber  → students.plan != null (plan tiers are all paid; expired
+ *     plans still count — they DID pay, expiry only affects access, not billing).
+ *   • Paid course     → any course_enrollment for the phone with
+ *     (amount_paid > 0 OR status = 'fully_paid') AND status != 'cancelled'
+ *     (matches paidCourseIdsForPhone: covers seats/EMI/full + ₹0 comps, drops
+ *     cancelled/refunded).
+ * Everything else is non-paying (quiz/marketing leads, free-webinar-only regs).
+ */
+function buildPaidPhoneSet(enrollments: CourseEnrollment[]): Set<string> {
+  const paid = new Set<string>();
+  for (const e of enrollments) {
+    if ((e.amount_paid > 0 || e.status === "fully_paid") && e.status !== "cancelled") {
+      const p = norm(e.phone);
+      if (p) paid.add(p);
+    }
+  }
+  return paid;
+}
+
+function isPayingStudent(s: Student, paidPhones: Set<string>): boolean {
+  return s.plan != null || paidPhones.has(norm(s.phone));
+}
 
 /** Strongest / weakest subject among buckets the student actually attempted. */
 function edges(subjects: MasteryRow[]): { top: SubjectTag | null; weak: SubjectTag | null } {
@@ -72,7 +101,13 @@ export function buildLeaderboard(opts: {
   courseId?: string | null;
   now?: number;
 }): LeaderboardResult {
-  const { students, enrollments, attempts, quizById, courseId = null, now = Date.now() } = opts;
+  const { students: allStudents, enrollments, attempts, quizById, courseId = null, now = Date.now() } = opts;
+
+  // Feature B — drop excluded staff/internal accounts by stable id BEFORE any
+  // counting/ranking, so batch counts, the paid/non-paying split, the roster and
+  // ranks all reflect real students only (ranks derive from row position → no
+  // gaps/off-by-one). Purely a view filter; the accounts are untouched elsewhere.
+  const students = allStudents.filter((s) => !LEADERBOARD_EXCLUDED_STUDENT_IDS.has(s.id));
 
   // phone → set of {courseId,title} (a student can be in multiple batches).
   const batchesByPhone = new Map<string, Map<string, string>>();
@@ -105,6 +140,12 @@ export function buildLeaderboard(opts: {
     const m = batchesByPhone.get(norm(s.phone));
     return !!m && m.has(courseId);
   });
+
+  // Feature A — paid vs non-paying over the (excluded-free) roster. Two buckets
+  // that always sum to roster.length: paid + non-paying = studentCount.
+  const paidPhones = buildPaidPhoneSet(enrollments);
+  const paidCount = roster.reduce((n, s) => n + (isPayingStudent(s, paidPhones) ? 1 : 0), 0);
+  const nonPayingCount = roster.length - paidCount;
 
   // Group the single batched attempt pull by user_id.
   const attemptsByUser = new Map<string, QuizAttempt[]>();
@@ -157,6 +198,8 @@ export function buildLeaderboard(opts: {
     courseId,
     snapshotISO: new Date(now).toISOString(),
     studentCount: roster.length,
+    paidCount,
+    nonPayingCount,
     batches,
     rows,
   };

@@ -19,6 +19,8 @@ interface ApiResult {
   courseId: string | null;
   snapshotISO: string;
   studentCount: number;
+  paidCount: number;
+  nonPayingCount: number;
   batches: BatchOption[];
   rows: LeaderboardRow[];
 }
@@ -136,8 +138,12 @@ export default function LeaderboardPage() {
               <Trophy size={14} aria-hidden="true" /> Performance Leaderboard
             </p>
             <h1 className="mt-1 font-heading text-2xl font-extrabold leading-tight">{data?.batchLabel || "All batches"}</h1>
-            <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-ink2">
+            <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-ink2">
               <span className="inline-flex items-center gap-1.5"><Users size={14} className="opacity-60" /> {data?.studentCount ?? 0} students</span>
+              <span className="inline-flex flex-wrap items-center gap-1.5">
+                <span className="pill pill-green tabular-nums">{data?.paidCount ?? 0} paid</span>
+                <span className="pill pill-gray tabular-nums">{data?.nonPayingCount ?? 0} non-paying</span>
+              </span>
               {snapshotDate && <span className="inline-flex items-center gap-1.5"><CalendarDays size={14} className="opacity-60" /> {snapshotDate}</span>}
             </div>
           </div>
