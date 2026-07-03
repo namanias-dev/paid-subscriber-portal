@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, BarChart, Bar } from "recharts";
-import { Activity, Send, Workflow, FileText, ScrollText, BarChart3, Settings as SettingsIcon, RefreshCw, Download, AlertTriangle, CheckCircle2, Power, Braces, Link2, RotateCcw, Users, Search, SlidersHorizontal } from "lucide-react";
+import { Activity, Send, Workflow, FileText, ScrollText, BarChart3, Settings as SettingsIcon, RefreshCw, Download, AlertTriangle, CheckCircle2, Power, Braces, Link2, RotateCcw, Users, Search, SlidersHorizontal, Bookmark, Save, Trash2 } from "lucide-react";
 import { LoadingBlock } from "@/components/admin/ui";
 import { useToast } from "@/components/ui/Toast";
 import { formatISTDateTime } from "@/lib/dates";
@@ -174,6 +174,8 @@ function OverviewTab() {
 // ============================ SEND ============================
 type Recip = { mobile: string; name: string | null };
 type Timeframe = "7d" | "30d" | "6mo" | "all" | "month";
+type FilterShape = { courseSlug?: string | null; webinarSlug?: string | null; paymentStatus?: string | null; timeframe?: Timeframe | null; month?: string | null };
+type SavedAud = { id: string; name: string; spec: FilterShape };
 const TIMEFRAME_LABEL: Record<Timeframe, string> = { "7d": "Last 7 days", "30d": "Last 30 days", "6mo": "Last 6 months", all: "All time", month: "Specific month" };
 // Which date each time frame filters on, per the active dimension (shown in UI).
 function dateFieldNote(courseSlug: string, webinarSlug: string): string {
@@ -186,7 +188,9 @@ function SendTab({ meta }: { meta: Meta | null }) {
   const { toast } = useToast();
   const [templates, setTemplates] = useState<TemplateRow[]>([]);
   const [templateId, setTemplateId] = useState("");
-  const [audType, setAudType] = useState("person");
+  // Filter builder is the first-class default; presets/person are secondary modes.
+  const [audType, setAudType] = useState("filtered");
+  const [lastPreset, setLastPreset] = useState("payment_paid");
   const [mobile, setMobile] = useState("");
   const [name, setName] = useState("");
   const [webinarSlug, setWebinarSlug] = useState("");
@@ -198,6 +202,9 @@ function SendTab({ meta }: { meta: Meta | null }) {
   const [fStatus, setFStatus] = useState("");
   const [fTimeframe, setFTimeframe] = useState<Timeframe>("all");
   const [fMonth, setFMonth] = useState("");
+  // saved audiences (reusable filter combinations)
+  const [saved, setSaved] = useState<SavedAud[]>([]);
+  const [savedId, setSavedId] = useState("");
   const [preview, setPreview] = useState<any>(null);
   const [recipients, setRecipients] = useState<Recip[] | null>(null);
   const [search, setSearch] = useState("");
@@ -210,9 +217,40 @@ function SendTab({ meta }: { meta: Meta | null }) {
   useEffect(() => { fetch("/api/admin/sms/templates").then((r) => r.json()).then((d) => d.ok && setTemplates(d.templates)).catch(() => {}); }, []);
   useEffect(() => { fetch("/api/admin/sms/balance").then((r) => r.json()).then((d) => (d.ok || d.configured === false) && setBalance(d)).catch(() => {}); }, []);
 
+  const loadSaved = useCallback(() => { fetch("/api/admin/sms/saved-audiences").then((r) => r.json()).then((d) => d.ok && setSaved(d.saved)).catch(() => {}); }, []);
+  useEffect(() => { loadSaved(); }, [loadSaved]);
+
   const sendable = templates.filter((t) => (t.status === "active" || t.status === "approved") && t.gateway_template_id);
   const needsWebinar = audType.startsWith("webinar_");
   const isFiltered = audType === "filtered";
+  const panel: "filtered" | "preset" | "person" = audType === "filtered" ? "filtered" : audType === "person" ? "person" : "preset";
+  const filtersDirty = !!(fCourse || fWebinar || fStatus || fTimeframe !== "all");
+
+  function applySaved(id: string) {
+    setSavedId(id);
+    const s = saved.find((x) => x.id === id);
+    if (!s) return;
+    setAudType("filtered");
+    setFCourse(s.spec.courseSlug || "");
+    setFWebinar(s.spec.webinarSlug || "");
+    setFStatus(s.spec.paymentStatus || "");
+    setFTimeframe((s.spec.timeframe as Timeframe) || "all");
+    setFMonth(s.spec.month || "");
+  }
+  async function saveCurrent() {
+    const nm = window.prompt("Name this audience (e.g. \"Paid — Foundation 2027, last 30 days\")");
+    if (!nm || !nm.trim()) return;
+    const spec: FilterShape = { courseSlug: fCourse || null, webinarSlug: fWebinar || null, paymentStatus: fStatus || null, timeframe: fTimeframe, month: fTimeframe === "month" ? fMonth || null : null };
+    const r = await fetch("/api/admin/sms/saved-audiences", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: nm.trim(), spec }) }).then((x) => x.json()).catch(() => null);
+    if (r?.ok) { toast("Audience saved.", "success"); setSaved((s) => [r.saved, ...s]); setSavedId(r.saved.id); }
+    else toast(r?.error || "Could not save audience", "error");
+  }
+  async function deleteSaved(id: string) {
+    if (!confirm("Delete this saved audience?")) return;
+    const r = await fetch(`/api/admin/sms/saved-audiences?id=${encodeURIComponent(id)}`, { method: "DELETE" }).then((x) => x.json()).catch(() => null);
+    if (r?.ok) { setSaved((s) => s.filter((x) => x.id !== id)); if (savedId === id) setSavedId(""); toast("Deleted.", "success"); }
+    else toast("Delete failed", "error");
+  }
   const selectedTpl = templates.find((t) => t.id === templateId);
   const isPromo = selectedTpl?.message_type === "promotional";
   useEffect(() => { if (isPromo && audType === "all") { setAudType("person"); setPreview(null); } }, [isPromo, audType]);
@@ -288,35 +326,42 @@ function SendTab({ meta }: { meta: Meta | null }) {
           {sendable.length === 0 && <p className="mt-1 text-xs text-amber-700">No Approved/Active templates yet — set a DLT ID and activate one in the Templates tab.</p>}
         </Field>
 
-        <Field label="Audience">
-          <select className="input" value={audType} onChange={(e) => { setAudType(e.target.value); setPreview(null); setRecipients(null); }}>
-            <optgroup label="Direct"><option value="person">A specific person</option></optgroup>
-            <optgroup label="Filtered"><option value="filtered">Filtered — course / webinar / status / time frame</option></optgroup>
-            <optgroup label="Payments"><option value="payment_pending">Pending</option><option value="payment_failed">Failed</option><option value="payment_paid">Paid</option><option value="payment_abandoned">Abandoned</option><option value="payment_all">All payments</option></optgroup>
-            <optgroup label="Webinar"><option value="webinar_registered">Registered</option><option value="webinar_not_registered">NOT registered</option><option value="webinar_attendees">Attended</option><option value="webinar_no_show">No-show</option></optgroup>
-            <optgroup label="People"><option value="leads">Leads</option><option value="users_with_mobile">All users with mobile</option>{!isPromo && <option value="all">Everyone (guarded)</option>}</optgroup>
-          </select>
-          {isPromo && <p className="mt-1 text-xs text-amber-700">Promotional template — warm audiences only (leads / users / webinar). The All audience is disabled (no promo route).</p>}
-        </Field>
+        <div>
+          <p className="mb-1 block text-xs font-medium text-muted">Audience</p>
+          <div className="flex flex-wrap gap-1.5">
+            <ModePill active={panel === "filtered"} onClick={() => { setAudType("filtered"); setPreview(null); setRecipients(null); }} icon={SlidersHorizontal} label="Filter builder" />
+            <ModePill active={panel === "preset"} onClick={() => { setAudType(lastPreset); setPreview(null); setRecipients(null); }} icon={Users} label="Preset segment" />
+            <ModePill active={panel === "person"} onClick={() => { setAudType("person"); setPreview(null); setRecipients(null); }} icon={Send} label="Specific person" />
+          </div>
+        </div>
 
-        {isFiltered && (
-          <div className="space-y-2 rounded-xl border border-line bg-surface p-3">
+        {panel === "filtered" && (
+          <div className="space-y-3 rounded-xl border border-line bg-surface p-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <Bookmark size={13} className="shrink-0 text-muted" />
+              <select className="input h-9 max-w-[220px] py-1 text-sm" value={savedId} onChange={(e) => applySaved(e.target.value)}>
+                <option value="">Saved audiences…</option>
+                {saved.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+              {savedId && <button onClick={() => deleteSaved(savedId)} className="btn btn-secondary text-xs" title="Delete saved audience"><Trash2 size={13} /></button>}
+              <button onClick={saveCurrent} disabled={!filtersDirty} className="btn btn-secondary ml-auto text-xs" title="Save this filter combination"><Save size={13} /> Save current</button>
+            </div>
             <p className="flex items-center gap-1.5 text-xs font-semibold text-ink2"><SlidersHorizontal size={13} /> Filters (combine freely — each narrows the list)</p>
             <div className="grid gap-2 sm:grid-cols-2">
               <Field label="Course">
-                <select className="input" value={fCourse} onChange={(e) => setFCourse(e.target.value)}>
+                <select className="input" value={fCourse} onChange={(e) => { setFCourse(e.target.value); setSavedId(""); }}>
                   <option value="">Any course</option>
                   {(meta?.courses || []).map((c) => <option key={c.id} value={c.slug}>{c.title}</option>)}
                 </select>
               </Field>
               <Field label="Webinar">
-                <select className="input" value={fWebinar} onChange={(e) => setFWebinar(e.target.value)}>
+                <select className="input" value={fWebinar} onChange={(e) => { setFWebinar(e.target.value); setSavedId(""); }}>
                   <option value="">Any webinar</option>
                   {(meta?.webinars || []).map((w) => <option key={w.id} value={w.slug}>{w.title}</option>)}
                 </select>
               </Field>
               <Field label="Payment status">
-                <select className="input" value={fStatus} onChange={(e) => setFStatus(e.target.value)}>
+                <select className="input" value={fStatus} onChange={(e) => { setFStatus(e.target.value); setSavedId(""); }}>
                   <option value="">Any status</option>
                   <option value="paid">Paid</option>
                   <option value="pending">Pending</option>
@@ -325,19 +370,31 @@ function SendTab({ meta }: { meta: Meta | null }) {
                 </select>
               </Field>
               <Field label="Time frame">
-                <select className="input" value={fTimeframe} onChange={(e) => setFTimeframe(e.target.value as Timeframe)}>
+                <select className="input" value={fTimeframe} onChange={(e) => { setFTimeframe(e.target.value as Timeframe); setSavedId(""); }}>
                   {(Object.keys(TIMEFRAME_LABEL) as Timeframe[]).map((t) => <option key={t} value={t}>{TIMEFRAME_LABEL[t]}</option>)}
                 </select>
               </Field>
             </div>
             {fTimeframe === "month" && (
-              <Field label="Month (IST)"><input type="month" className="input" value={fMonth} onChange={(e) => setFMonth(e.target.value)} /></Field>
+              <Field label="Month (IST)"><input type="month" className="input" value={fMonth} onChange={(e) => { setFMonth(e.target.value); setSavedId(""); }} /></Field>
             )}
             {fTimeframe !== "all" && <p className="text-xs text-muted">Time frame filters on {dateFieldNote(fCourse, fWebinar)}.</p>}
+            {isPromo && <p className="text-xs text-amber-700">Promotional template — this filter targets warm contacts (buyers / registrants), never a cold blast.</p>}
           </div>
         )}
 
-        {audType === "person" && (
+        {panel === "preset" && (
+          <Field label="Preset segment">
+            <select className="input" value={audType} onChange={(e) => { setAudType(e.target.value); setLastPreset(e.target.value); setPreview(null); setRecipients(null); }}>
+              <optgroup label="Payments"><option value="payment_pending">Pending</option><option value="payment_failed">Failed</option><option value="payment_paid">Paid</option><option value="payment_abandoned">Abandoned</option><option value="payment_all">All payments</option></optgroup>
+              <optgroup label="Webinar"><option value="webinar_registered">Registered</option><option value="webinar_not_registered">NOT registered</option><option value="webinar_attendees">Attended</option><option value="webinar_no_show">No-show</option></optgroup>
+              <optgroup label="People"><option value="leads">Leads</option><option value="users_with_mobile">All users with mobile</option>{!isPromo && <option value="all">Everyone (guarded)</option>}</optgroup>
+            </select>
+            {isPromo && <p className="mt-1 text-xs text-amber-700">Promotional template — warm audiences only (leads / users / webinar). The All audience is disabled (no promo route).</p>}
+          </Field>
+        )}
+
+        {panel === "person" && (
           <div className="grid grid-cols-2 gap-2">
             <Field label="Mobile"><input className="input" value={mobile} onChange={(e) => setMobile(e.target.value)} placeholder="10-digit" /></Field>
             <Field label="Name (optional)"><input className="input" value={name} onChange={(e) => setName(e.target.value)} /></Field>
@@ -971,6 +1028,14 @@ function Kpi({ label, value, tone }: { label: string; value: string | number; to
 }
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return <label className="block text-sm"><span className="mb-1 block text-xs font-medium text-muted">{label}</span>{children}</label>;
+}
+function ModePill({ active, onClick, icon: Icon, label }: { active: boolean; onClick: () => void; icon: React.ComponentType<{ size?: number | string }>; label: string }) {
+  return (
+    <button type="button" onClick={onClick}
+      className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold transition ${active ? "border-primary bg-primary/10 text-primary" : "border-line text-muted hover:text-ink"}`}>
+      <Icon size={13} /> {label}
+    </button>
+  );
 }
 function EnvRow({ label, ok, text }: { label: string; ok: boolean; text: string }) {
   return <div className="flex items-center justify-between text-sm"><span className="text-ink2">{label}</span><span className={`inline-flex items-center gap-1 text-xs ${ok ? "text-success" : "text-amber-700"}`}>{ok ? <CheckCircle2 size={13} /> : <AlertTriangle size={13} />}{text}</span></div>;
