@@ -14,7 +14,13 @@ import ClassHubBatch from "@/components/dashboard/ClassHubBatch";
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: "Class Hub", robots: { index: false, follow: false } };
 
-export default async function PortalClassHubPage({ params }: { params: { courseId: string } }) {
+export default async function PortalClassHubPage({
+  params,
+  searchParams,
+}: {
+  params: { courseId: string };
+  searchParams?: { tab?: string };
+}) {
   const session = await getBuyerSession();
   if (!session) redirect(`/portal/login?next=${encodeURIComponent(`/portal/class/${params.courseId}`)}`);
 
@@ -80,7 +86,7 @@ export default async function PortalClassHubPage({ params }: { params: { courseI
           <p className="mt-1 text-sm text-amber-800">Renew to regain recordings, notes, tests and current affairs. Your progress is saved.</p>
         </div>
       ) : (
-        <ClassHubBatch courseId={course.id} sections={sections} performance={performance} />
+        <ClassHubBatch courseId={course.id} sections={sections} performance={performance} initialTab={searchParams?.tab} />
       )}
     </div>
   );

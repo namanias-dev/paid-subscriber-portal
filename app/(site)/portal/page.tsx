@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { LineChart } from "lucide-react";
 import { getBuyerSession } from "@/lib/session";
 import { getBuyerByPhone, getBuyerPurchases, getCourseEnrollmentsByPhone, getActiveStaffGrantsByPhone, getAllCourses, getWebinars, getWebinarRegistrationIdsByPhone } from "@/lib/dataProvider";
 import { resolveLearner } from "@/lib/entitlements";
@@ -103,6 +104,18 @@ export default async function PortalDashboardPage() {
   const otherPurchases = purchases.filter((p) => !(p.enrollment_id && enrolledIds.has(p.enrollment_id)));
   const groups = groupPurchases(otherPurchases);
 
+  // Overall Performance lives inside Class Hub (course-scoped). Deep-link to the
+  // aggregate tab of the first course the user can actually open; hide the entry
+  // point entirely when there's no Class Hub access (e.g. a lead with no course),
+  // so we never route to a locked/blank tab.
+  const classHubCourseIds = [
+    ...enrolledCourses.map((e) => e.course_id),
+    ...compCourses.map((c) => c.id),
+  ];
+  const overallPerformanceHref = classHubCourseIds.length
+    ? `/portal/class/${classHubCourseIds[0]}?tab=overall`
+    : null;
+
   // Lookups to surface the existing cover image (and webinar timing) on the
   // enrolled cards — display-only join, no new queries.
   const serverNow = Date.now();
@@ -165,11 +178,18 @@ export default async function PortalDashboardPage() {
       {/* My Tests & Results — available to every logged-in user (leads + students). */}
       <section className="mt-8">
         <div className="card flex flex-wrap items-center justify-between gap-4 p-5">
-          <div>
+          <div className="min-w-0">
             <h2 className="font-heading text-lg font-bold">My Tests &amp; Results</h2>
             <p className="mt-1 text-sm text-ink2">Track every quiz you&apos;ve taken, review your results, resume or retake anytime.</p>
           </div>
-          <Link href="/portal/quizzes" className="btn btn-primary text-sm">Open my tests →</Link>
+          <div className="flex flex-wrap items-center gap-2">
+            {overallPerformanceHref && (
+              <Link href={overallPerformanceHref} className="btn btn-secondary text-sm">
+                <LineChart size={15} aria-hidden="true" /> View Overall Performance
+              </Link>
+            )}
+            <Link href="/portal/quizzes" className="btn btn-primary text-sm">Open my tests →</Link>
+          </div>
         </div>
       </section>
 

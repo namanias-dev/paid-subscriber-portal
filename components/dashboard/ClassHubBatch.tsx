@@ -35,18 +35,30 @@ export default function ClassHubBatch({
   courseId,
   sections,
   performance,
+  initialTab,
 }: {
   courseId: string;
   sections: ClassHubSection[];
   performance: PerformanceData;
+  /** Optional deep-link target (e.g. "overall") to open a specific tab on load. */
+  initialTab?: string;
 }) {
   const hasContent = sections.some((s) => s.items.length > 0);
   const hasPerformance = performance.quizzes.length > 0 || performance.history.length > 0;
-  const initial: TabId = hasContent
+  const contentInitial: TabId = hasContent
     ? sections.find((s) => s.items.length > 0)!.id
     : hasPerformance
       ? PERFORMANCE_SECTION
       : sections[0]?.id ?? "recordings";
+  // Honor a valid ?tab deep-link (Overall/Quizzes/section) else fall back to the
+  // content-driven default — existing behavior is unchanged when no param.
+  const requestedTab: TabId | null =
+    initialTab === OVERALL_SECTION || initialTab === PERFORMANCE_SECTION
+      ? initialTab
+      : sections.some((s) => s.id === initialTab)
+        ? (initialTab as TabId)
+        : null;
+  const initial: TabId = requestedTab ?? contentInitial;
   const [active, setActive] = useState<TabId>(initial);
   const [query, setQuery] = useState("");
   const [openSubject, setOpenSubject] = useState<string | null>(null);
