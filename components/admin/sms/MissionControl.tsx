@@ -199,10 +199,16 @@ function SendTab({ meta }: { meta: Meta | null }) {
 
   async function doPreview() {
     setBusy(true);
-    const r = await fetch("/api/admin/sms/audience", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ audience: buildAudience(), templateId }) }).then((x) => x.json());
-    setPreview(r.ok ? r : null);
-    setBusy(false);
-    if (!r.ok) toast(r.error || "Preview failed", "error");
+    try {
+      const r = await fetch("/api/admin/sms/audience", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ audience: buildAudience(), templateId }) }).then((x) => x.json());
+      setPreview(r.ok ? r : null);
+      if (!r.ok) toast(r.error || "Preview failed", "error");
+    } catch (e) {
+      setPreview(null);
+      toast(e instanceof Error ? e.message : "Preview failed — please retry.", "error");
+    } finally {
+      setBusy(false);
+    }
   }
   async function doSend() {
     if (!templateId) return toast("Pick a template.", "error");
@@ -210,15 +216,24 @@ function SendTab({ meta }: { meta: Meta | null }) {
     const when = scheduleAt ? ` (scheduled ${scheduleAt.replace("T", " ")} IST)` : "";
     if (!confirm(`Send "${templates.find((t) => t.id === templateId)?.name}" to ${preview.count} recipient(s)${when}?`)) return;
     setBusy(true);
-    const r = await fetch("/api/admin/sms/send", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ audience: buildAudience(), templateId, allowRecentOverride: allowOverride, scheduleAt: scheduleAt || undefined }) }).then((x) => x.json());
-    setBusy(false);
-    if (r.ok) {
-      const skipTxt = Object.keys(r.skipped || {}).length ? " Skipped: " + Object.entries(r.skipped).map(([k, v]) => `${k}:${v}`).join(", ") : "";
-      const modeTxt = r.mode && r.mode !== "single" ? ` [${r.mode}${r.batches ? ` ×${r.batches}` : ""}]` : "";
-      const schedTxt = r.scheduledFor ? ` Scheduled for ${r.scheduledFor}.` : "";
-      toast(`Sent ${r.sent}/${r.requested}${modeTxt}.${schedTxt}${skipTxt}`, r.sent > 0 ? "success" : "error");
-      setPreview(null);
-    } else toast(r.error || "Send failed", "error");
+    try {
+      const res = await fetch("/api/admin/sms/send", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ audience: buildAudience(), templateId, allowRecentOverride: allowOverride, scheduleAt: scheduleAt || undefined }) });
+      // A serverless timeout / 5xx returns HTML, not JSON — surface it instead of
+      // letting .json() throw silently and leaving the button stuck.
+      if (!res.ok) throw new Error(`Send failed (HTTP ${res.status}). ${res.status === 504 ? "The batch took too long — try a smaller audience or retry." : "Please retry."}`);
+      const r = await res.json();
+      if (r.ok) {
+        const skipTxt = Object.keys(r.skipped || {}).length ? " Skipped: " + Object.entries(r.skipped).map(([k, v]) => `${k}:${v}`).join(", ") : "";
+        const modeTxt = r.mode && r.mode !== "single" ? ` [${r.mode}${r.batches ? ` ×${r.batches}` : ""}]` : "";
+        const schedTxt = r.scheduledFor ? ` Scheduled for ${r.scheduledFor}.` : "";
+        toast(`Sent ${r.sent}/${r.requested}${modeTxt}.${schedTxt}${skipTxt}`, r.sent > 0 ? "success" : "error");
+        setPreview(null);
+      } else toast(r.error || "Send failed", "error");
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Send failed — please retry.", "error");
+    } finally {
+      setBusy(false);
+    }
   }
 
   const lowCredits = balance?.configured && balance.balance != null && preview?.count != null && balance.balance < preview.count;
