@@ -9,8 +9,8 @@
 import { normalizeIndianMobile } from "../phone";
 import { renderTemplate, validateBody } from "./templates";
 import { getTemplate, getSettings, insertQueuedLog, updateLog, countSentSince, recentSameTemplate, listLogs } from "./store";
-import { sendViaGateway, fetchDeliveryStatus } from "./gateway";
-import { gatewayConfigured, smsEnvEnabled, loginUrlForTemplate, SMS_DEFAULT_SENDER_ID, SMS_DEFAULT_ROUTE } from "./config";
+import { sendViaGateway, sendBulkViaGateway, fetchDeliveryStatuses, checkBalance, type DeliveryLine } from "./gateway";
+import { gatewayConfigured, smsEnvEnabled, loginUrlForTemplate, bulkChunkSize, SMS_DEFAULT_SENDER_ID, SMS_DEFAULT_ROUTE } from "./config";
 import { getResolvedDefaults } from "./variables";
 import type { SmsLog, SmsLogStatus } from "./types";
 
@@ -35,6 +35,8 @@ export interface SendSmsInput {
   enforceWindow?: boolean;
   /** Manual override of the 30-min same-trigger anti-spam guard. */
   allowRecentOverride?: boolean;
+  /** Deferred send: gateway "time" format "YYYY-MM-DD HH:MMam/pm" (IST). */
+  scheduleTime?: string | null;
 }
 
 export interface SendSmsResult {
@@ -61,6 +63,23 @@ export function istMinutesOfDay(d = new Date()): number {
 function hmToMin(hm: string): number {
   const [h, m] = (hm || "0:0").split(":").map((x) => Number(x) || 0);
   return h * 60 + m;
+}
+
+/**
+ * Convert a datetime-local / ISO string (a bare "YYYY-MM-DDTHH:MM" is read as
+ * IST wall-clock) into the gateway "time" format "YYYY-MM-DD HH:MMam/pm" (IST).
+ * Returns null when unparseable or in the past (fail-closed → immediate send).
+ */
+export function toGatewayScheduleTime(input: string | null | undefined): string | null {
+  if (!input) return null;
+  let s = String(input).trim();
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(s)) s += ":00+05:30"; // treat bare local as IST
+  const d = new Date(s);
+  if (isNaN(d.getTime()) || d.getTime() < Date.now() - 60000) return null;
+  const parts = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: true }).formatToParts(d);
+  const g = (t: string) => parts.find((p) => p.type === t)?.value || "";
+  const ap = g("dayPeriod").toLowerCase().includes("p") ? "pm" : "am";
+  return `${g("year")}-${g("month")}-${g("day")} ${g("hour")}:${g("minute")}${ap}`;
 }
 
 /** Fill in safe defaults (first_name from name; login_url from template). */
@@ -185,6 +204,7 @@ export async function sendSms(input: SendSmsInput): Promise<SendSmsResult> {
     templateId: t.gateway_template_id,
     senderId: t.sender_id || SMS_DEFAULT_SENDER_ID,
     route: t.route || SMS_DEFAULT_ROUTE,
+    scheduleTime: input.scheduleTime || undefined,
   });
   await updateLog(inserted.id, {
     status: res.status,
@@ -194,6 +214,174 @@ export async function sendSms(input: SendSmsInput): Promise<SendSmsResult> {
     sent_at: new Date().toISOString(),
   });
   return { ok: res.ok, logId: inserted.id, status: res.status, error: res.ok ? undefined : (res.response.error || "send_failed") };
+}
+
+// ---------------------------------------------------------------------------
+// BATCH ORCHESTRATOR — auto-selects the correct gateway endpoint per send.
+//   • 0/1 eligible                 → single http-api.php (via sendSms)
+//   • >1 eligible, IDENTICAL body  → PUSH-BULK http-api.php (chunked, shared id)
+//   • >1 eligible, DIFFERING body  → per-recipient single sends (via sendSms)
+//     (Customized-SMS endpoint is unavailable on this host — 404 — so personalized
+//      content NEVER goes through bulk; it fans out one-per-number instead.)
+// ALL safeguards (kill-switch, template gate, caps, per-mobile cap, 30-min guard,
+// window) are enforced BEFORE any batching. A pre-batch balance check refuses the
+// send when known credits < eligible recipients.
+// ---------------------------------------------------------------------------
+export interface BatchRecipientInput {
+  mobile: string;
+  variables?: Record<string, string | number | null | undefined>;
+  relatedEntity?: RelatedEntity;
+}
+export interface BatchResult {
+  requested: number;
+  sent: number;
+  failed: number;
+  skipped: Record<string, number>;
+  mode: "single" | "bulk" | "per-recipient" | "none";
+  batches: number;
+  balance: number | null;
+}
+
+interface ScreenedRecipient {
+  mobile: string;
+  normalized: string;
+  text: string;
+  chars: number;
+  segments: number;
+  variables: Record<string, string | number | null | undefined>;
+  relatedEntity?: RelatedEntity;
+}
+
+export async function sendBatch(input: {
+  recipients: BatchRecipientInput[];
+  templateId: string;
+  sentBy: { userId?: string | null; type: "ADMIN" | "SYSTEM" };
+  audienceType?: string | null;
+  allowRecentOverride?: boolean;
+  enforceWindow?: boolean;
+  scheduleTime?: string | null;
+}): Promise<BatchResult> {
+  const out: BatchResult = { requested: input.recipients.length, sent: 0, failed: 0, skipped: {}, mode: "none", batches: 0, balance: null };
+  const skip = (k: string, n = 1) => { out.skipped[k] = (out.skipped[k] || 0) + n; };
+
+  // ---- global gates (reject whole batch) ----
+  const settings = await getSettings();
+  if (!smsEnvEnabled() || !settings.enabled) { skip("disabled", input.recipients.length); return out; }
+  const t = await getTemplate(input.templateId);
+  if (!t) { skip("template_missing", input.recipients.length); return out; }
+  if (!(t.status === "active" || t.status === "approved")) { skip("not_approved", input.recipients.length); return out; }
+  if (!t.gateway_template_id) { skip("no_dlt_id", input.recipients.length); return out; }
+  if (t.message_type === "promotional" && input.audienceType === "all") { skip("promotional_all_blocked", input.recipients.length); return out; }
+
+  // ---- per-recipient screening (all safeguards BEFORE batching) ----
+  const since = istMidnightISO();
+  let usedToday = settings.dailyCap > 0 ? await countSentSince(since) : 0;
+  const nowMin = istMinutesOfDay();
+  const seen = new Set<string>();
+  const eligible: ScreenedRecipient[] = [];
+  for (const r of input.recipients) {
+    const n = normalizeIndianMobile(r.mobile);
+    if (!n.ok || !n.digits10) { skip("invalid_mobile"); continue; }
+    const normalized = n.digits10;
+    if (seen.has(normalized)) { skip("duplicate_in_batch"); continue; }
+    const filled = await resolveSendVars(input.templateId, r.variables || {});
+    const { text, missing } = renderTemplate(t.body_template, filled);
+    if (missing.length) { skip("missing_vars"); continue; }
+    const v = validateBody(text);
+    if (!v.ok) { skip("invalid_body"); continue; }
+    if (input.enforceWindow && (nowMin < hmToMin(settings.windowStart) || nowMin > hmToMin(settings.windowEnd))) { skip("outside_window"); continue; }
+    if (settings.dailyCap > 0 && usedToday >= settings.dailyCap) { skip("daily_cap"); continue; }
+    if (settings.perMobileDailyCap > 0 && (await countSentSince(since, normalized)) >= settings.perMobileDailyCap) { skip("per_mobile_cap"); continue; }
+    if (!input.allowRecentOverride && (await recentSameTemplate(normalized, input.templateId, SAME_TRIGGER_WINDOW_MIN))) { skip("recent_duplicate"); continue; }
+    seen.add(normalized);
+    usedToday++;
+    eligible.push({ mobile: r.mobile, normalized, text, chars: v.analysis.length, segments: v.analysis.segments, variables: r.variables || {}, relatedEntity: r.relatedEntity });
+  }
+  if (eligible.length === 0) return out;
+
+  // ---- pre-batch balance guard (refuse if known credits < recipients) ----
+  if (gatewayConfigured()) {
+    const bal = await checkBalance(t.route || SMS_DEFAULT_ROUTE);
+    if (bal.ok && bal.balance != null) {
+      out.balance = bal.balance;
+      if (bal.balance < eligible.length) { skip("insufficient_credits", eligible.length); return out; }
+    }
+  }
+
+  // ---- route: identical body → BULK; else per-recipient ----
+  const allIdentical = eligible.length > 1 && eligible.every((e) => e.text === eligible[0].text);
+
+  if (!allIdentical) {
+    // single (1) OR personalized fan-out (customized endpoint unavailable → per-recipient)
+    out.mode = eligible.length > 1 ? "per-recipient" : "single";
+    for (const e of eligible) {
+      const res = await sendSms({
+        mobile: e.mobile, templateId: input.templateId, variables: e.variables,
+        relatedEntity: e.relatedEntity, sentBy: input.sentBy, audienceType: input.audienceType,
+        allowRecentOverride: true, // already screened above; don't re-trip the guard
+        scheduleTime: input.scheduleTime,
+      });
+      if (res.ok) out.sent++;
+      else if (res.skipped) skip(res.skipped);
+      else out.failed++;
+    }
+    return out;
+  }
+
+  // ---- PUSH-BULK (identical), chunked; shared msg-id per chunk ----
+  out.mode = "bulk";
+  const message = eligible[0].text;
+  const chunkSize = bulkChunkSize();
+  for (let i = 0; i < eligible.length; i += chunkSize) {
+    const chunk = eligible.slice(i, i + chunkSize);
+    // insert QUEUED logs FIRST (double-send guard) before the gateway call
+    const rows: { e: ScreenedRecipient; logId: string }[] = [];
+    for (const e of chunk) {
+      const inserted = await insertQueuedLog({
+        mobile: e.mobile, normalized_mobile: e.normalized,
+        student_name: e.relatedEntity?.student_name ?? null,
+        user_id: e.relatedEntity?.user_id ?? null, lead_id: e.relatedEntity?.lead_id ?? null,
+        registration_id: e.relatedEntity?.registration_id ?? null, payment_id: e.relatedEntity?.payment_id ?? null,
+        course_id: e.relatedEntity?.course_id ?? null, webinar_id: e.relatedEntity?.webinar_id ?? null,
+        template_id: t.id, template_name: t.name, gateway_template_id: t.gateway_template_id,
+        sender_id: t.sender_id || SMS_DEFAULT_SENDER_ID, route: t.route || SMS_DEFAULT_ROUTE,
+        message_body: e.text, character_count: e.chars, segments: e.segments,
+        sent_by_user_id: input.sentBy.userId ?? null, sent_by_type: input.sentBy.type,
+        trigger_event: null, audience_type: input.audienceType ?? null, dedupe_key: null, status: "QUEUED",
+      });
+      if (!inserted) { skip("duplicate"); continue; }
+      rows.push({ e, logId: inserted.id });
+    }
+    if (rows.length === 0) continue;
+    out.batches++;
+
+    if (!gatewayConfigured()) {
+      for (const r of rows) { await updateLog(r.logId, { status: "FAILED", error_message: "gateway_not_configured" }); out.failed++; }
+      continue;
+    }
+
+    const bulk = await sendBulkViaGateway({
+      digits10List: rows.map((r) => r.e.normalized),
+      message,
+      templateId: t.gateway_template_id,
+      senderId: t.sender_id || SMS_DEFAULT_SENDER_ID,
+      route: t.route || SMS_DEFAULT_ROUTE,
+      scheduleTime: input.scheduleTime || undefined,
+    });
+    // One HTTP response for the chunk: shared msg-id stored on every row so
+    // per-number DLR (fetchDeliveryStatuses) can settle each recipient later.
+    for (const r of rows) {
+      await updateLog(r.logId, {
+        status: bulk.status,
+        gateway_response: bulk.response as unknown,
+        gateway_message_id: bulk.messageId,
+        error_message: bulk.ok ? null : (bulk.response.error || "send_failed"),
+        sent_at: new Date().toISOString(),
+      });
+      if (bulk.ok) out.sent++; else out.failed++;
+    }
+  }
+  return out;
 }
 
 export interface PollDlrResult {
@@ -224,22 +412,41 @@ export async function pollDeliveryStatuses(opts: { sinceDays?: number; limit?: n
     logs = (await listLogs({ from: since, status: "SENT", limit: opts.limit ?? 500 })).filter((l) => l.gateway_message_id);
   }
 
+  // Group logs by gateway_message_id: a BULK send shares ONE id across many
+  // recipients, and its DLR returns one line PER number — so we fetch once per
+  // id and settle each recipient by matching its own number line.
+  const byMsg = new Map<string, SmsLog[]>();
   for (const l of logs) {
     if (!l.gateway_message_id) continue;
-    out.scanned++;
-    const dlr = await fetchDeliveryStatus(l.gateway_message_id);
-    out.checked.push({ messageId: l.gateway_message_id, statusText: dlr.statusText, mapped: dlr.mapped });
-    // Lookup error (invalid/not-found id) — leave the log untouched, don't guess.
-    if (!dlr.ok) { out.unknown++; continue; }
-    const prior = (l.gateway_response && typeof l.gateway_response === "object") ? (l.gateway_response as Record<string, unknown>) : {};
-    const patch: Partial<SmsLog> = {
-      gateway_response: { ...prior, dlr: { statusText: dlr.statusText, mapped: dlr.mapped, number: dlr.number, at: new Date().toISOString(), source: "pull" } },
-    };
-    // Truth comes from the DLR status, never from the send's "Submitted Successfully".
-    if (dlr.mapped === "DELIVERED") { patch.status = "DELIVERED"; out.delivered++; }
-    else if (dlr.mapped === "SENT") { out.pending++; } // still in-flight ("Submitted") — keep SENT
-    else { patch.status = "FAILED"; patch.error_message = l.error_message || `dlr:${dlr.statusText}`; out.failed++; } // "Other"/undeliv/etc = not delivered
-    await updateLog(l.id, patch);
+    const arr = byMsg.get(l.gateway_message_id);
+    if (arr) arr.push(l); else byMsg.set(l.gateway_message_id, [l]);
+  }
+
+  for (const [msgId, group] of byMsg) {
+    const dlr = await fetchDeliveryStatuses(msgId);
+    out.checked.push({
+      messageId: msgId,
+      statusText: dlr.lines.map((x) => `${x.number}:${x.statusText}`).join("; ") || null,
+      mapped: dlr.lines[0]?.mapped ?? "UNKNOWN",
+    });
+    // Lookup error (invalid/not-found id) — leave the logs untouched, don't guess.
+    if (!dlr.ok) { out.scanned += group.length; out.unknown += group.length; continue; }
+    const lineByNum = new Map<string, DeliveryLine>();
+    for (const ln of dlr.lines) lineByNum.set(ln.number.slice(-10), ln);
+    for (const l of group) {
+      out.scanned++;
+      const ln = lineByNum.get(l.normalized_mobile.slice(-10)) || (dlr.lines.length === 1 ? dlr.lines[0] : undefined);
+      if (!ln) { out.unknown++; continue; } // this recipient not (yet) in the DLR
+      const prior = (l.gateway_response && typeof l.gateway_response === "object") ? (l.gateway_response as Record<string, unknown>) : {};
+      const patch: Partial<SmsLog> = {
+        gateway_response: { ...prior, dlr: { statusText: ln.statusText, mapped: ln.mapped, number: ln.number, at: new Date().toISOString(), source: "pull" } },
+      };
+      // Truth comes from the DLR status, never from the send's "Submitted Successfully".
+      if (ln.mapped === "DELIVERED") { patch.status = "DELIVERED"; out.delivered++; }
+      else if (ln.mapped === "SENT") { out.pending++; } // still in-flight ("Submitted") — keep SENT
+      else { patch.status = "FAILED"; patch.error_message = l.error_message || `dlr:${ln.statusText}`; out.failed++; } // "Other"/undeliv/etc
+      await updateLog(l.id, patch);
+    }
   }
   return out;
 }

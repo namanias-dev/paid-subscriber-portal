@@ -19,6 +19,18 @@ function env(key: string): string | undefined {
 export const SMS_API_BASE_URL = env("SMS_API_BASE_URL") || "http://justgosms.com/http-api.php";
 /** Delivery-report PULL API (http-dlr.php?username&password&msg_id=). */
 export const SMS_DLR_BASE_URL = env("SMS_DLR_BASE_URL") || "http://justgosms.com/http-dlr.php";
+/** Balance/credit API (http-credit.php?username&password&route_id=). */
+export const SMS_CREDIT_BASE_URL = env("SMS_API_CREDIT_URL") || "http://justgosms.com/http-credit.php";
+/**
+ * Max recipients per PUSH-BULK call. Everything travels in the GET query string,
+ * so the binding limit is the server's request-line ceiling (Apache default
+ * LimitRequestLine ~8190 bytes). ~12 bytes/number ⇒ 100 numbers ≈ 1.2 KB + the
+ * message stays well under it. Conservative + overridable; the provider does not
+ * publish a hard per-call max.
+ */
+export function bulkChunkSize(): number {
+  return Math.max(1, Number(env("SMS_BULK_CHUNK")) || 100);
+}
 /** Route 12 is the provisioned domestic route for this account (verified via http-credit.php). */
 export const SMS_DEFAULT_ROUTE = env("SMS_API_DEFAULT_ROUTE") || "12";
 export const SMS_DEFAULT_SENDER_ID = env("SMS_API_DEFAULT_SENDER_ID") || "NAMIAS";

@@ -84,9 +84,11 @@ function OverviewTab() {
   const { toast } = useToast();
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [balance, setBalance] = useState<{ configured: boolean; balance: number | null } | null>(null);
   const load = useCallback(() => {
     setLoading(true);
     fetch("/api/admin/sms/overview").then((r) => r.json()).then((d) => setData(d.ok ? d.overview : null)).catch(() => setData(null)).finally(() => setLoading(false));
+    fetch("/api/admin/sms/balance").then((r) => r.json()).then((d) => setBalance(d.ok || d.configured === false ? d : null)).catch(() => setBalance(null));
   }, []);
   useEffect(() => { load(); }, [load]);
 
@@ -112,8 +114,9 @@ function OverviewTab() {
         <Kpi label="Delivered (confirmed)" value={data.deliveryKnown ? data.today.delivered : "—"} />
         <Kpi label="Failed" value={data.today.failed} tone="red" />
         <Kpi label="Pending" value={data.today.queued} />
-        <Kpi label="Daily cap" value={data.dailyCap.cap ? `${data.dailyCap.used} / ${data.dailyCap.cap}` : `${data.dailyCap.used} / ∞`} />
+        <Kpi label="Credits (gateway)" value={balance ? (balance.configured ? (balance.balance ?? "—") : "not configured") : "…"} />
       </div>
+      <p className="-mt-2 text-xs text-muted">Daily cap: {data.dailyCap.cap ? `${data.dailyCap.used} / ${data.dailyCap.cap}` : `${data.dailyCap.used} / ∞`}</p>
       {!data.deliveryKnown && (
         <p className="-mt-2 text-xs text-muted">
           “Submitted” = accepted by JustGoSMS. Handset delivery shows once delivery receipts (DLR) are configured on the gateway — until then “Delivered” reads “—”, not 0.
@@ -177,8 +180,11 @@ function SendTab({ meta }: { meta: Meta | null }) {
   const [preview, setPreview] = useState<any>(null);
   const [busy, setBusy] = useState(false);
   const [allowOverride, setAllowOverride] = useState(false);
+  const [scheduleAt, setScheduleAt] = useState("");
+  const [balance, setBalance] = useState<{ configured: boolean; balance: number | null } | null>(null);
 
   useEffect(() => { fetch("/api/admin/sms/templates").then((r) => r.json()).then((d) => d.ok && setTemplates(d.templates)).catch(() => {}); }, []);
+  useEffect(() => { fetch("/api/admin/sms/balance").then((r) => r.json()).then((d) => (d.ok || d.configured === false) && setBalance(d)).catch(() => {}); }, []);
 
   const sendable = templates.filter((t) => (t.status === "active" || t.status === "approved") && t.gateway_template_id);
   const needsWebinar = audType.startsWith("webinar_");
@@ -201,13 +207,21 @@ function SendTab({ meta }: { meta: Meta | null }) {
   async function doSend() {
     if (!templateId) return toast("Pick a template.", "error");
     if (!preview) { await doPreview(); return; }
-    if (!confirm(`Send "${templates.find((t) => t.id === templateId)?.name}" to ${preview.count} recipient(s)?`)) return;
+    const when = scheduleAt ? ` (scheduled ${scheduleAt.replace("T", " ")} IST)` : "";
+    if (!confirm(`Send "${templates.find((t) => t.id === templateId)?.name}" to ${preview.count} recipient(s)${when}?`)) return;
     setBusy(true);
-    const r = await fetch("/api/admin/sms/send", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ audience: buildAudience(), templateId, allowRecentOverride: allowOverride }) }).then((x) => x.json());
+    const r = await fetch("/api/admin/sms/send", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ audience: buildAudience(), templateId, allowRecentOverride: allowOverride, scheduleAt: scheduleAt || undefined }) }).then((x) => x.json());
     setBusy(false);
-    if (r.ok) { toast(`Sent ${r.sent}/${r.requested}. ${Object.keys(r.skipped || {}).length ? "Skipped: " + Object.entries(r.skipped).map(([k, v]) => `${k}:${v}`).join(", ") : ""}`, "success"); setPreview(null); }
-    else toast(r.error || "Send failed", "error");
+    if (r.ok) {
+      const skipTxt = Object.keys(r.skipped || {}).length ? " Skipped: " + Object.entries(r.skipped).map(([k, v]) => `${k}:${v}`).join(", ") : "";
+      const modeTxt = r.mode && r.mode !== "single" ? ` [${r.mode}${r.batches ? ` ×${r.batches}` : ""}]` : "";
+      const schedTxt = r.scheduledFor ? ` Scheduled for ${r.scheduledFor}.` : "";
+      toast(`Sent ${r.sent}/${r.requested}${modeTxt}.${schedTxt}${skipTxt}`, r.sent > 0 ? "success" : "error");
+      setPreview(null);
+    } else toast(r.error || "Send failed", "error");
   }
+
+  const lowCredits = balance?.configured && balance.balance != null && preview?.count != null && balance.balance < preview.count;
 
   return (
     <div className="grid gap-5 lg:grid-cols-2">
@@ -251,7 +265,14 @@ function SendTab({ meta }: { meta: Meta | null }) {
           </div>
         )}
 
+        <Field label="Schedule (optional, IST) — leave blank to send now">
+          <input type="datetime-local" className="input" value={scheduleAt} onChange={(e) => setScheduleAt(e.target.value)} />
+        </Field>
+
         <label className="flex items-center gap-2 text-xs text-muted"><input type="checkbox" checked={allowOverride} onChange={(e) => setAllowOverride(e.target.checked)} /> Override 30-min re-send guard (only if you really mean to re-send)</label>
+
+        {balance?.configured && <p className="text-xs text-muted">Gateway credits: <span className="font-semibold tabular-nums">{balance.balance ?? "—"}</span></p>}
+        {lowCredits && <p className="text-xs text-danger">Not enough credits ({balance?.balance}) for {preview?.count} recipients — the send will be refused.</p>}
 
         <div className="flex gap-2 pt-1">
           <button onClick={doPreview} disabled={busy} className="btn btn-secondary">{busy ? "…" : "Preview"}</button>

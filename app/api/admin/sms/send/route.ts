@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requirePermission, requireSuperAdmin, currentAdminId } from "@/lib/adminGuard";
 import { resolveAudience, type AudienceSpec } from "@/lib/sms/audiences";
-import { sendSms } from "@/lib/sms/service";
+import { sendBatch, toGatewayScheduleTime } from "@/lib/sms/service";
 import { getTemplate } from "@/lib/sms/store";
 
 export const dynamic = "force-dynamic";
@@ -36,15 +36,24 @@ export async function POST(req: Request) {
   }
 
   const userId = await currentAdminId();
-  const tally = { requested: recipients.length, sent: 0, failed: 0, skipped: {} as Record<string, number> };
-  for (const r of recipients) {
-    const res = await sendSms({
-      mobile: r.mobile, templateId, variables: r.vars, relatedEntity: r.entity,
-      sentBy: { userId, type: "ADMIN" }, audienceType: spec.type, allowRecentOverride,
-    });
-    if (res.ok) tally.sent++;
-    else if (res.skipped) tally.skipped[res.skipped] = (tally.skipped[res.skipped] || 0) + 1;
-    else tally.failed++;
-  }
-  return NextResponse.json({ ok: true, ...tally });
+  // Optional deferred send (IST). Invalid/past → null → immediate send.
+  const scheduleTime = toGatewayScheduleTime(body.scheduleAt as string | undefined);
+
+  // sendBatch auto-routes to the correct endpoint (single / PUSH-BULK for
+  // identical bodies / per-recipient fan-out for personalized) and enforces every
+  // safeguard + the pre-batch balance guard before sending.
+  const res = await sendBatch({
+    recipients: recipients.map((r) => ({ mobile: r.mobile, variables: r.vars, relatedEntity: r.entity })),
+    templateId,
+    sentBy: { userId, type: "ADMIN" },
+    audienceType: spec.type,
+    allowRecentOverride,
+    scheduleTime,
+  });
+  return NextResponse.json({
+    ok: true,
+    requested: res.requested, sent: res.sent, failed: res.failed, skipped: res.skipped,
+    mode: res.mode, batches: res.batches, balance: res.balance,
+    scheduledFor: scheduleTime,
+  });
 }
