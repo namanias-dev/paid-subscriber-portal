@@ -6,12 +6,15 @@ import { istYMD } from "@/lib/dates";
 import { isPaidStatus as isPaid, itemKey } from "@/lib/paymentsAgg";
 import type { Payment } from "@/lib/types";
 
+/** Route for the full-page all-webinars registrations trend view. */
+export const REGISTRATIONS_ROUTE = "/admin/payments/registrations";
+
 /**
  * Read-only registrations trend. Counts PAID webinar payments by IST day — the
  * SAME source as the "Webinar Registrations Today" card, so the latest bar always
- * matches that number. Never mutates any data. Rendering (mini card + modal chart
- * + timeframe controls) is delegated to the shared RegistrationsTrendChart so the
- * look/feel stays identical to the per-webinar card.
+ * matches that number. Never mutates any data. The mini card keeps its single-number
+ * sparkline look; clicking opens the FULL-PAGE view (shared RegistrationsTrendChart
+ * + RegistrationsTrendPanel), matching the other cards' full-page behavior.
  */
 export default function WebinarRegistrationsTrend({ payments }: { payments: Payment[] }) {
   // Paid webinar registrations bucketed by IST day — counted DISTINCT by
@@ -37,7 +40,7 @@ export default function WebinarRegistrationsTrend({ payments }: { payments: Paym
       byDay={byDay}
       label="Registrations · last 7 days"
       modalTitle="Webinar registrations trend"
-      footNote="Counts paid webinar registrations by day (IST). Read-only analytics."
+      href={REGISTRATIONS_ROUTE}
     />
   );
 }
