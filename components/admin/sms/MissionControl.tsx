@@ -207,6 +207,8 @@ function SendTab({ meta }: { meta: Meta | null }) {
   const [savedId, setSavedId] = useState("");
   const [preview, setPreview] = useState<any>(null);
   const [recipients, setRecipients] = useState<Recip[] | null>(null);
+  const [rich, setRich] = useState<any>(null);
+  const [richBusy, setRichBusy] = useState(false);
   const [search, setSearch] = useState("");
   const [busy, setBusy] = useState(false);
   const [allowOverride, setAllowOverride] = useState(false);
@@ -286,6 +288,21 @@ function SendTab({ meta }: { meta: Meta | null }) {
     const t = setTimeout(() => { runPreview(true); }, 400);
     return () => clearTimeout(t);
   }, [isFiltered, fCourse, fWebinar, fStatus, fTimeframe, fMonth, templateId, runPreview]);
+
+  // Rich template preview (per-recipient message, real-vs-sample vars, coverage).
+  const runRich = useCallback(async (idx: number) => {
+    if (!templateId) { toast("Pick a template to preview the message.", "error"); return; }
+    setRichBusy(true);
+    try {
+      const r = await fetch("/api/admin/sms/preview", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ audience: buildAudience(), templateId, index: Math.max(0, idx) }) }).then((x) => x.json());
+      if (r.ok) setRich(r); else { setRich(null); toast(r.error || "Preview failed", "error"); }
+    } catch (e) {
+      setRich(null); toast(e instanceof Error ? e.message : "Preview failed — please retry.", "error");
+    } finally { setRichBusy(false); }
+  }, [buildAudience, templateId, toast]);
+
+  // Any audience/template change invalidates the rich preview so it's never stale.
+  useEffect(() => { setRich(null); }, [audType, templateId, fCourse, fWebinar, fStatus, fTimeframe, fMonth, mobile, webinarSlug, source, stage]);
 
   async function doSend(restrictTo?: string[], label?: string) {
     if (!templateId) return toast("Pick a template.", "error");
@@ -425,7 +442,7 @@ function SendTab({ meta }: { meta: Meta | null }) {
         {lowCredits && <p className="text-xs text-danger">Not enough credits ({balance?.balance}) for {preview?.count} recipients — the send will be refused.</p>}
 
         <div className="flex gap-2 pt-1">
-          <button onClick={() => runPreview()} disabled={busy} className="btn btn-secondary">{busy ? "…" : "Preview"}</button>
+          <button onClick={() => { runPreview(); runRich(0); }} disabled={busy} className="btn btn-secondary">{busy ? "…" : "Preview"}</button>
           <button onClick={() => doSend()} disabled={busy || !templateId || !!preview?.blocked || (preview?.count ?? 0) === 0} className="btn btn-primary"><Send size={15} /> {preview ? `Send to ${preview.count}` : "Preview & send"}</button>
         </div>
       </div>
@@ -442,14 +459,19 @@ function SendTab({ meta }: { meta: Meta | null }) {
             </div>
             {preview.blocked && <p className="text-xs text-danger">{preview.blockedReason}</p>}
             {recipients && <RecipientList recipients={recipients} search={search} setSearch={setSearch} />}
-            {preview.preview ? (
+            {rich ? (
+              <TemplatePreview data={rich} busy={richBusy} onNav={(i) => runRich(i)} />
+            ) : preview.preview ? (
               <div className="rounded-xl bg-surface p-3 text-sm">
                 <p className="whitespace-pre-wrap">{preview.preview.text}</p>
                 <p className="mt-2 text-xs text-muted">{preview.preview.length} chars · {preview.preview.segments} segment(s)</p>
                 {preview.preview.errors?.length > 0 && <p className="mt-1 text-xs text-danger">{preview.preview.errors.join("; ")}</p>}
                 {preview.preview.missing?.length > 0 && <p className="mt-1 text-xs text-amber-700">Missing: {preview.preview.missing.join(", ")}</p>}
                 {preview.preview.warnings?.length > 0 && <p className="mt-1 text-xs text-amber-700">{preview.preview.warnings.join("; ")}</p>}
+                {templateId && <button onClick={() => runRich(0)} disabled={richBusy} className="btn btn-secondary mt-2 text-xs">{richBusy ? "…" : "Preview message & coverage"}</button>}
               </div>
+            ) : templateId ? (
+              <button onClick={() => runRich(0)} disabled={richBusy} className="btn btn-secondary text-xs">{richBusy ? "…" : "Preview message & coverage"}</button>
             ) : <p className="text-sm text-muted">Select a template to see the filled message.</p>}
             {preview.dailyCap && <p className="text-xs text-muted">Daily cap {preview.dailyCap}; remaining today {preview.remainingDaily}. Per-mobile cap {preview.perMobileCap || "∞"}.</p>}
           </>
@@ -491,6 +513,89 @@ function RecipientList({ recipients, search, setSearch }: { recipients: Recip[];
           </ul>
         )}
         {filtered.length > 500 && <p className="px-3 py-2 text-xs text-muted">Showing first 500 of {filtered.length}. Refine with search.</p>}
+      </div>
+    </div>
+  );
+}
+
+// rich template preview: exact per-recipient message, real-vs-sample variable
+// provenance, delivery coverage, DLT status + segment/credit cost.
+const VAR_SOURCE_STYLE: Record<string, { cls: string; label: string }> = {
+  real: { cls: "pill-green", label: "real" },
+  store: { cls: "pill-blue", label: "global" },
+  sample: { cls: "pill-amber", label: "sample" },
+  missing: { cls: "pill-red", label: "missing" },
+};
+function TemplatePreview({ data, busy, onNav }: { data: any; busy: boolean; onNav: (index: number) => void }) {
+  const cov = data.coverage || { total: 0, deliverable: 0, skipped: 0, reasons: {} };
+  const idx = data.index ?? 0;
+  const total = data.total ?? 0;
+  const reasons = Object.entries(cov.reasons || {}) as [string, number][];
+  return (
+    <div className="space-y-3 rounded-xl border border-line bg-surface p-3">
+      {/* DLT status */}
+      <div className="flex flex-wrap items-center gap-2 text-xs">
+        {data.dlt?.approved
+          ? <span className="pill pill-green">DLT approved</span>
+          : <span className="pill pill-amber">DLT not send-ready ({data.dlt?.status || "—"})</span>}
+        {data.dlt?.id && <span className="font-mono text-muted">DLT {data.dlt.id}</span>}
+        {data.dlt?.messageType === "promotional" && <span className="pill pill-amber">promotional</span>}
+      </div>
+
+      {/* recipient navigator */}
+      <div className="flex items-center gap-2">
+        <button onClick={() => onNav(idx - 1)} disabled={busy || idx <= 0} className="btn btn-secondary px-2 py-1 text-xs disabled:opacity-40">‹</button>
+        <div className="min-w-0 flex-1 text-center text-xs">
+          <span className="font-semibold">{data.recipient?.name || "—"}</span>
+          <span className="ml-1 font-mono text-muted">{data.recipient?.mobile}</span>
+          <span className="ml-2 text-muted">{total ? `${idx + 1} / ${total}` : ""}</span>
+        </div>
+        <button onClick={() => onNav(idx + 1)} disabled={busy || idx >= total - 1} className="btn btn-secondary px-2 py-1 text-xs disabled:opacity-40">›</button>
+      </div>
+
+      {/* rendered message as this recipient sees it */}
+      <div className="rounded-lg bg-canvas p-3 text-sm">
+        <p className="whitespace-pre-wrap">{data.text}</p>
+        <p className="mt-2 text-xs text-muted">{data.chars} chars · {data.segments} segment{data.segments === 1 ? "" : "s"} · {data.segments} credit{data.segments === 1 ? "" : "s"}/recipient{data.gsm === false ? " · non-GSM (UCS-2)" : ""}</p>
+      </div>
+
+      {/* not-deliverable flag for this specific recipient */}
+      {data.deliverable === false && (
+        <p className="text-xs text-danger">This recipient would be <b>skipped</b> in a real send — missing: {(data.missingForRecipient || []).join(", ")}. Sample values above are shown for preview only.</p>
+      )}
+
+      {/* per-variable provenance */}
+      {data.vars?.length > 0 && (
+        <div className="space-y-1">
+          <p className="text-xs font-semibold text-ink2">Variables</p>
+          <div className="flex flex-wrap gap-1.5">
+            {data.vars.map((v: any) => {
+              const st = VAR_SOURCE_STYLE[v.source] || VAR_SOURCE_STYLE.missing;
+              return (
+                <span key={v.key} className={`pill ${st.cls} text-[10px]`} title={`${v.key}: ${v.source}`}>
+                  <span className="font-mono">{v.key}</span>
+                  {v.source !== "missing" && <span className="ml-1 opacity-80">= {v.value.length > 22 ? v.value.slice(0, 22) + "…" : v.value}</span>}
+                  <span className="ml-1 font-semibold uppercase opacity-70">{st.label}</span>
+                </span>
+              );
+            })}
+          </div>
+          <p className="text-[11px] text-muted"><span className="font-semibold text-success">real</span> = recipient data · <span className="font-semibold text-primary">global</span> = variable store · <span className="font-semibold text-amber-700">sample</span> = filler for preview (would skip if required) · <span className="font-semibold text-danger">missing</span></p>
+        </div>
+      )}
+
+      {/* coverage */}
+      <div className="space-y-1">
+        <div className="flex items-center justify-between text-xs">
+          <span className="font-semibold text-ink2">Delivery coverage</span>
+          <span className="tabular-nums text-muted">{cov.deliverable} of {cov.total} will receive</span>
+        </div>
+        <div className="h-2 overflow-hidden rounded-full bg-surface2">
+          <div className="h-full bg-success" style={{ width: `${cov.total ? Math.round((cov.deliverable / cov.total) * 100) : 0}%` }} />
+        </div>
+        {cov.skipped > 0 && (
+          <p className="text-xs text-amber-700">{cov.skipped} would be skipped{reasons.length ? ` — ${reasons.map(([k, n]) => `${k.replace(/_/g, " ")}: ${n}`).join(", ")}` : ""}. They never send (safeguards), so you don't pay for them.</p>
+        )}
       </div>
     </div>
   );
