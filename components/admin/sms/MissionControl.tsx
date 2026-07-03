@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, BarChart, Bar } from "recharts";
-import { Activity, Send, Workflow, FileText, ScrollText, BarChart3, Settings as SettingsIcon, RefreshCw, Download, AlertTriangle, CheckCircle2, Power, Braces, Link2, RotateCcw, Users, Search, SlidersHorizontal, Bookmark, Save, Trash2 } from "lucide-react";
+import { Activity, Send, Workflow, FileText, ScrollText, BarChart3, Settings as SettingsIcon, RefreshCw, Download, AlertTriangle, CheckCircle2, Power, Braces, Link2, RotateCcw, Users, Search, SlidersHorizontal, Bookmark, Save, Trash2, History } from "lucide-react";
 import { LoadingBlock } from "@/components/admin/ui";
 import { useToast } from "@/components/ui/Toast";
 import { formatISTDateTime } from "@/lib/dates";
@@ -34,6 +34,7 @@ interface Meta {
 const TABS = [
   { id: "overview", label: "Overview", icon: Activity },
   { id: "send", label: "Send SMS", icon: Send },
+  { id: "campaigns", label: "Campaigns", icon: History },
   { id: "automations", label: "Automations", icon: Workflow },
   { id: "templates", label: "Templates", icon: FileText },
   { id: "variables", label: "Variables", icon: Braces },
@@ -74,6 +75,7 @@ export default function MissionControl() {
 
       {tab === "overview" && <OverviewTab />}
       {tab === "send" && <SendTab meta={meta} />}
+      {tab === "campaigns" && <CampaignsTab canResend={!!meta?.isSuperAdmin} />}
       {tab === "automations" && <AutomationsTab canEdit={!!meta?.isSuperAdmin} />}
       {tab === "templates" && <TemplatesTab canEdit={!!meta?.isSuperAdmin} />}
       {tab === "variables" && <VariablesTab canEdit={!!meta?.isSuperAdmin} />}
@@ -643,7 +645,7 @@ function TemplatePreview({ data, busy, onNav, balance }: { data: any; busy: bool
 
 // live per-recipient send status (Queued → Sent → Delivered / Failed) + resend-to-failed
 type CampaignStatus = { total: number; totals: { queued: number; sent: number; delivered: number; failed: number; unknown: number }; settled: boolean; recipients: { mobile: string; name: string | null; status: string; error: string | null }[] };
-function LiveStatusPanel({ campaignId, onClose, onResend, busy }: { campaignId: string; onClose: () => void; onResend: (failed: string[]) => void; busy: boolean }) {
+function LiveStatusPanel({ campaignId, onClose, onResend, busy }: { campaignId: string; onClose: () => void; onResend?: (failed: string[]) => void; busy: boolean }) {
   const [data, setData] = useState<CampaignStatus | null>(null);
   const [onlyFailed, setOnlyFailed] = useState(false);
   const startRef = useState(() => Date.now())[0];
@@ -690,7 +692,7 @@ function LiveStatusPanel({ campaignId, onClose, onResend, busy }: { campaignId: 
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <label className="flex items-center gap-1.5 text-xs text-muted"><input type="checkbox" checked={onlyFailed} onChange={(e) => setOnlyFailed(e.target.checked)} /> Show only failed</label>
-            {failedNums.length > 0 && (
+            {onResend && failedNums.length > 0 && (
               <button onClick={() => onResend(failedNums)} disabled={busy} className="btn btn-secondary ml-auto text-xs"><RotateCcw size={12} /> Resend to {failedNums.length} failed</button>
             )}
           </div>
@@ -710,6 +712,65 @@ function LiveStatusPanel({ campaignId, onClose, onResend, busy }: { campaignId: 
           </div>
           <p className="text-xs text-muted">Resend-to-failed re-runs the same audience for just the failed numbers — all caps, the DLT/approved-template gate, the kill-switch, the balance guard and in-batch dedupe still apply (a delivered number is never re-texted).</p>
         </>
+      )}
+    </div>
+  );
+}
+
+// ============================ CAMPAIGNS ============================
+type CampaignRow = { campaign_id: string; template_name: string | null; audience_type: string | null; created_at: string; total: number; queued: number; sent: number; delivered: number; failed: number; unknown: number; deliveryRate: number };
+function CampaignsTab({ canResend }: { canResend: boolean }) {
+  const { toast } = useToast();
+  const [rows, setRows] = useState<CampaignRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [remount, setRemount] = useState(0);
+  const [busy, setBusy] = useState(false);
+  const load = useCallback(() => { setLoading(true); fetch("/api/admin/sms/campaigns").then((r) => r.json()).then((d) => setRows(d.ok ? d.campaigns : [])).finally(() => setLoading(false)); }, []);
+  useEffect(() => { load(); }, [load]);
+
+  async function resend(id: string) {
+    if (!confirm("Resend this campaign's message to every FAILED number? Delivered/sent numbers are never re-texted; opt-outs, kill-switch and the daily cap still apply.")) return;
+    setBusy(true);
+    try {
+      const r = await fetch("/api/admin/sms/campaign", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, action: "resend_failed" }) }).then((x) => x.json());
+      if (r.ok) { const skip = Object.keys(r.skipped || {}).length ? " Skipped: " + Object.entries(r.skipped).map(([k, v]) => `${k}:${v}`).join(", ") : ""; toast(`Resent ${r.resent}.${skip}`, r.resent > 0 ? "success" : "error"); setRemount((n) => n + 1); load(); }
+      else toast(r.error || "Resend failed", "error");
+    } catch (e) { toast(e instanceof Error ? e.message : "Resend failed", "error"); } finally { setBusy(false); }
+  }
+
+  if (loading) return <LoadingBlock />;
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-2">
+        <p className="text-sm text-muted">Every manual / bulk send is a campaign. Delivery updates as receipts (DLR) settle.</p>
+        <button onClick={load} className="btn btn-secondary ml-auto text-xs"><RefreshCw size={13} /> Refresh</button>
+      </div>
+      {rows.length === 0 ? <p className="text-sm text-muted">No campaigns yet. Send from the Send tab and they'll appear here.</p> : (
+        <div className="card overflow-x-auto p-0">
+          <table className="w-full min-w-[820px] text-left text-sm">
+            <thead><tr className="border-b border-line text-xs uppercase tracking-wide text-muted">
+              <th className="px-4 py-3">When</th><th className="px-4 py-3">Template</th><th className="px-4 py-3">Audience</th><th className="px-4 py-3 text-right">Total</th><th className="px-4 py-3 text-right">Delivered</th><th className="px-4 py-3 text-right">Failed</th><th className="px-4 py-3 text-right">Rate</th><th className="px-4 py-3 text-right">View</th>
+            </tr></thead>
+            <tbody>
+              {rows.map((c) => (
+                <tr key={c.campaign_id} className="border-b border-line/60 last:border-0 hover:bg-surface2/50">
+                  <td className="px-4 py-2.5 text-xs text-muted">{formatISTDateTime(c.created_at)}</td>
+                  <td className="px-4 py-2.5">{c.template_name || "—"}</td>
+                  <td className="px-4 py-2.5 text-xs text-ink2">{c.audience_type || "—"}</td>
+                  <td className="px-4 py-2.5 text-right tabular-nums">{c.total}</td>
+                  <td className="px-4 py-2.5 text-right tabular-nums text-success">{c.delivered}</td>
+                  <td className="px-4 py-2.5 text-right tabular-nums text-danger">{c.failed}</td>
+                  <td className="px-4 py-2.5 text-right tabular-nums">{c.deliveryRate}%</td>
+                  <td className="px-4 py-2.5 text-right"><button onClick={() => { setOpenId(c.campaign_id); setRemount((n) => n + 1); }} className="btn btn-secondary text-xs">View</button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {openId && (
+        <LiveStatusPanel key={`${openId}-${remount}`} campaignId={openId} onClose={() => setOpenId(null)} onResend={canResend ? () => resend(openId) : undefined} busy={busy} />
       )}
     </div>
   );
