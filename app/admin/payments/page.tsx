@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { PageHeader, useAdminData, LoadingBlock, KpiCard } from "@/components/admin/ui";
 import WebinarRegistrationsTrend from "@/components/admin/WebinarRegistrationsTrend";
 import WebinarRegistrationsByWebinarTrend from "@/components/admin/WebinarRegistrationsByWebinarTrend";
+import WebinarSourceBreakdown from "@/components/admin/WebinarSourceBreakdown";
 import GroupedTimeline, { type TimelineGroup } from "@/components/admin/GroupedTimeline";
 import SendSmsButton from "@/components/admin/sms/SendSmsButton";
 import PaymentAccountability from "@/components/admin/payments/PaymentAccountability";
@@ -656,6 +657,11 @@ export default function PaymentsAdmin() {
           same styling/interaction, with an added webinar selector. */}
       <div className="mb-4">
         <WebinarRegistrationsByWebinarTrend payments={payments} />
+      </div>
+
+      {/* Paid registrations broken down by acquisition source, per webinar. */}
+      <div className="mb-4">
+        <WebinarSourceBreakdown payments={payments} />
       </div>
 
       {isSuper && <PaymentAccountability />}
