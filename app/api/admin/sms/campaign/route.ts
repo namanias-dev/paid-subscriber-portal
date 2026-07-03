@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { requirePermission } from "@/lib/adminGuard";
+import { requirePermission, requireSuperAdmin } from "@/lib/adminGuard";
 import { listLogsByCampaign } from "@/lib/sms/store";
-import { pollDeliveryStatuses } from "@/lib/sms/service";
+import { pollDeliveryStatuses, resendCampaignFailed } from "@/lib/sms/service";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -45,4 +45,14 @@ export async function GET(req: Request) {
   // "Settled" = nothing left in a transient state (QUEUED/SENT), so the UI can stop polling.
   const settled = totals.queued === 0 && totals.sent === 0;
   return NextResponse.json({ ok: true, campaignId: id, total: recipients.length, totals, settled, recipients });
+}
+
+/** Resend a campaign's FAILED messages (from history or the live panel). Super Admin. */
+export async function POST(req: Request) {
+  if (!(await requireSuperAdmin())) return NextResponse.json({ ok: false, error: "Super Admin only" }, { status: 403 });
+  const body = await req.json().catch(() => ({}));
+  const id = typeof body.id === "string" ? body.id : "";
+  if (!id || body.action !== "resend_failed") return NextResponse.json({ ok: false, error: "Missing id or unsupported action" }, { status: 400 });
+  const res = await resendCampaignFailed(id);
+  return NextResponse.json({ ok: true, ...res });
 }

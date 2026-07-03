@@ -299,6 +299,54 @@ export async function findLogsByMessageIds(variants: string[]): Promise<SmsLog[]
   }
 }
 
+export interface CampaignSummary {
+  campaign_id: string;
+  template_name: string | null;
+  audience_type: string | null;
+  created_at: string;
+  total: number;
+  queued: number; sent: number; delivered: number; failed: number; unknown: number;
+  deliveryRate: number; // delivered / total, %
+}
+
+/**
+ * Recent campaigns (manual/bulk sends), aggregated from campaign-tagged logs.
+ * Groups the last `scan` campaign rows by campaign_id in memory (Supabase JS has
+ * no group-by), newest first. Delivery rate = delivered / total. Cheap enough for
+ * a marketing team's history; add server-side rollup later if volume explodes.
+ */
+export async function listCampaigns(limit = 50, scan = 8000): Promise<CampaignSummary[]> {
+  const db = getSupabaseAdmin();
+  const rows: Pick<SmsLog, "campaign_id" | "template_name" | "audience_type" | "status" | "created_at">[] = [];
+  if (!db) {
+    for (const l of demo().logs) if (l.campaign_id) rows.push(l);
+  } else {
+    try {
+      const { data } = await db.from("sms_logs").select("campaign_id, template_name, audience_type, status, created_at")
+        .not("campaign_id", "is", null).order("created_at", { ascending: false }).limit(scan);
+      for (const r of (data || []) as Row[]) rows.push({ campaign_id: String(r.campaign_id), template_name: (r.template_name as string) ?? null, audience_type: (r.audience_type as string) ?? null, status: r.status as SmsLog["status"], created_at: String(r.created_at) });
+    } catch { return []; }
+  }
+  const map = new Map<string, CampaignSummary>();
+  for (const r of rows) {
+    if (!r.campaign_id) continue;
+    let c = map.get(r.campaign_id);
+    if (!c) { c = { campaign_id: r.campaign_id, template_name: r.template_name, audience_type: r.audience_type, created_at: r.created_at, total: 0, queued: 0, sent: 0, delivered: 0, failed: 0, unknown: 0, deliveryRate: 0 }; map.set(r.campaign_id, c); }
+    c.total++;
+    if (r.status === "QUEUED") c.queued++;
+    else if (r.status === "SENT") c.sent++;
+    else if (r.status === "DELIVERED") c.delivered++;
+    else if (r.status === "FAILED") c.failed++;
+    else c.unknown++;
+    if (r.created_at > c.created_at) c.created_at = r.created_at;
+    if (!c.template_name && r.template_name) c.template_name = r.template_name;
+    if (!c.audience_type && r.audience_type) c.audience_type = r.audience_type;
+  }
+  const out = [...map.values()].map((c) => ({ ...c, deliveryRate: c.total ? Math.round((c.delivered / c.total) * 1000) / 10 : 0 }));
+  out.sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
+  return out.slice(0, limit);
+}
+
 /** All logs for one campaign (live send-status view + resend-to-failed). Newest first. */
 export async function listLogsByCampaign(campaignId: string): Promise<SmsLog[]> {
   const id = (campaignId || "").trim();

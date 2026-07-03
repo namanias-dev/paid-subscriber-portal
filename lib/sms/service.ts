@@ -529,6 +529,67 @@ export async function pollDeliveryStatuses(opts: { sinceDays?: number; limit?: n
   return out;
 }
 
+/**
+ * Resend a campaign's FAILED messages (from live status OR campaign history).
+ * Re-sends each failed recipient's STORED body (faithful, personalized) to a new
+ * campaign-tagged QUEUED log so the live panel updates. Honours kill-switch,
+ * opt-out/DND and the daily cap; intentionally bypasses the 30-min guard (that's
+ * the whole point of a resend). Deduped by number; delivered/sent are never
+ * re-touched. Runs bounded-parallel.
+ */
+export async function resendCampaignFailed(campaignId: string): Promise<{ resent: number; failed: number; skipped: Record<string, number> }> {
+  const out = { resent: 0, failed: 0, skipped: {} as Record<string, number> };
+  const bump = (k: string) => { out.skipped[k] = (out.skipped[k] || 0) + 1; };
+  const settings = await getSettings();
+  if (!smsEnvEnabled() || !settings.enabled) { out.skipped.disabled = 1; return out; }
+  if (!gatewayConfigured()) { out.skipped.gateway_not_configured = 1; return out; }
+
+  const { listLogsByCampaign } = await import("./store");
+  const logs = await listLogsByCampaign(campaignId);
+  // one row per failed number (latest wins) — never resend to already delivered/sent
+  const delivered = new Set(logs.filter((l) => l.status === "DELIVERED" || l.status === "SENT").map((l) => l.normalized_mobile));
+  const failedByNum = new Map<string, SmsLog>();
+  for (const l of logs) {
+    if (l.status !== "FAILED" || delivered.has(l.normalized_mobile)) continue;
+    const prev = failedByNum.get(l.normalized_mobile);
+    if (!prev || l.created_at > prev.created_at) failedByNum.set(l.normalized_mobile, l);
+  }
+  const targets = [...failedByNum.values()];
+  if (!targets.length) return out;
+
+  const numbers = targets.map((l) => l.normalized_mobile);
+  const [optedOut, usedBase] = await Promise.all([
+    optedOutSet(numbers),
+    settings.dailyCap > 0 ? countSentSince(istMidnightISO()) : Promise.resolve(0),
+  ]);
+  let used = usedBase;
+
+  await mapPool(targets, SEND_CONCURRENCY, async (l) => {
+    if (optedOut.has(l.normalized_mobile)) { bump("opted_out"); return; }
+    if (settings.dailyCap > 0 && used >= settings.dailyCap) { bump("daily_cap"); return; }
+    used++;
+    const inserted = await insertQueuedLog({
+      mobile: l.mobile, normalized_mobile: l.normalized_mobile, student_name: l.student_name,
+      user_id: l.user_id, lead_id: l.lead_id, registration_id: l.registration_id, payment_id: l.payment_id,
+      course_id: l.course_id, webinar_id: l.webinar_id, template_id: l.template_id || "", template_name: l.template_name || "",
+      gateway_template_id: l.gateway_template_id, sender_id: l.sender_id || SMS_DEFAULT_SENDER_ID, route: l.route || SMS_DEFAULT_ROUTE,
+      message_body: l.message_body, character_count: l.character_count || l.message_body.length, segments: l.segments || 1,
+      sent_by_type: "ADMIN", audience_type: l.audience_type, campaign_id: campaignId, status: "QUEUED",
+    });
+    if (!inserted) { bump("duplicate"); return; }
+    const res = await sendViaGateway({
+      digits10: l.normalized_mobile, message: l.message_body, templateId: l.gateway_template_id || "",
+      senderId: l.sender_id || SMS_DEFAULT_SENDER_ID, route: l.route || SMS_DEFAULT_ROUTE,
+    });
+    await updateLog(inserted.id, {
+      status: res.status, gateway_response: res.response as unknown, gateway_message_id: res.messageId,
+      error_message: res.ok ? null : (res.response.error || "send_failed"), sent_at: new Date().toISOString(),
+    });
+    if (res.ok) out.resent++; else out.failed++;
+  });
+  return out;
+}
+
 /** Retry a previously-failed log by re-sending its stored body (new attempt). */
 export async function retryLog(logId: string): Promise<SendSmsResult> {
   const { getLog } = await import("./store");
