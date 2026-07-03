@@ -21,8 +21,11 @@ export async function GET(req: Request) {
   let logs = await listLogsByCampaign(id);
 
   // Refresh delivery for this campaign's message ids (skippable with poll=0).
+  // Only poll ids of logs still in a transient SENT state — DELIVERED/FAILED are
+  // terminal (no need to re-pull) and QUEUED has no message id yet. This keeps
+  // each poll cheap as recipients settle, instead of re-pulling the whole batch.
   if (url.searchParams.get("poll") !== "0") {
-    const messageIds = [...new Set(logs.map((l) => l.gateway_message_id).filter((x): x is string => !!x))];
+    const messageIds = [...new Set(logs.filter((l) => l.status === "SENT").map((l) => l.gateway_message_id).filter((x): x is string => !!x))];
     if (messageIds.length) {
       try { await pollDeliveryStatuses({ messageIds }); logs = await listLogsByCampaign(id); } catch { /* non-fatal */ }
     }

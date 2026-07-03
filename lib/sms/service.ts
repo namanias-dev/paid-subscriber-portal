@@ -17,6 +17,8 @@ import type { SmsLog, SmsLogStatus } from "./types";
 const SAME_TRIGGER_WINDOW_MIN = 30;
 /** Parallel gateway calls in the per-recipient fan-out (keeps 170+ under the 60s function limit). */
 const SEND_CONCURRENCY = 10;
+/** Parallel DLR pulls when settling delivery (one msg-id per number in a personalized send). */
+const DLR_CONCURRENCY = 10;
 
 /** Run `fn` over `items` with bounded concurrency, preserving result order. */
 async function mapPool<T, R>(items: T[], limit: number, fn: (item: T, index: number) => Promise<R>): Promise<R[]> {
@@ -487,7 +489,12 @@ export async function pollDeliveryStatuses(opts: { sinceDays?: number; limit?: n
     if (arr) arr.push(l); else byMsg.set(l.gateway_message_id, [l]);
   }
 
-  for (const [msgId, group] of byMsg) {
+  // Fetch each message id's DLR with bounded concurrency: a large per-recipient
+  // fan-out produces ONE gateway_message_id per number, so a 190-recipient
+  // campaign would otherwise fetch 190 DLRs sequentially and blow the 60s
+  // function limit (the live-status endpoint calls this on every poll). Parallel
+  // (bounded) keeps it well inside the limit; DLR fetches are independent.
+  await mapPool([...byMsg.entries()], DLR_CONCURRENCY, async ([msgId, group]) => {
     const dlr = await fetchDeliveryStatuses(msgId);
     out.checked.push({
       messageId: msgId,
@@ -495,13 +502,13 @@ export async function pollDeliveryStatuses(opts: { sinceDays?: number; limit?: n
       mapped: dlr.lines[0]?.mapped ?? "UNKNOWN",
     });
     // Lookup error (invalid/not-found id) — leave the logs untouched, don't guess.
-    if (!dlr.ok) { out.scanned += group.length; out.unknown += group.length; continue; }
+    if (!dlr.ok) { out.scanned += group.length; out.unknown += group.length; return; }
     const lineByNum = new Map<string, DeliveryLine>();
     for (const ln of dlr.lines) lineByNum.set(ln.number.slice(-10), ln);
-    for (const l of group) {
+    await mapPool(group, DLR_CONCURRENCY, async (l) => {
       out.scanned++;
       const ln = lineByNum.get(l.normalized_mobile.slice(-10)) || (dlr.lines.length === 1 ? dlr.lines[0] : undefined);
-      if (!ln) { out.unknown++; continue; } // this recipient not (yet) in the DLR
+      if (!ln) { out.unknown++; return; } // this recipient not (yet) in the DLR
       const prior = (l.gateway_response && typeof l.gateway_response === "object") ? (l.gateway_response as Record<string, unknown>) : {};
       const patch: Partial<SmsLog> = {
         gateway_response: { ...prior, dlr: { statusText: ln.statusText, mapped: ln.mapped, number: ln.number, at: new Date().toISOString(), source: "pull" } },
@@ -511,8 +518,8 @@ export async function pollDeliveryStatuses(opts: { sinceDays?: number; limit?: n
       else if (ln.mapped === "SENT") { out.pending++; } // still in-flight ("Submitted") — keep SENT
       else { patch.status = "FAILED"; patch.error_message = l.error_message || `dlr:${ln.statusText}`; out.failed++; } // "Other"/undeliv/etc
       await updateLog(l.id, patch);
-    }
-  }
+    });
+  });
   return out;
 }
 
