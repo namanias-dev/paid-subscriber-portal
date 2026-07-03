@@ -215,6 +215,8 @@ function SendTab({ meta }: { meta: Meta | null }) {
   const [scheduleAt, setScheduleAt] = useState("");
   const [balance, setBalance] = useState<{ configured: boolean; balance: number | null } | null>(null);
   const [campaignId, setCampaignId] = useState<string | null>(null);
+  const [testMobile, setTestMobile] = useState("");
+  const [testBusy, setTestBusy] = useState(false);
 
   useEffect(() => { fetch("/api/admin/sms/templates").then((r) => r.json()).then((d) => d.ok && setTemplates(d.templates)).catch(() => {}); }, []);
   useEffect(() => { fetch("/api/admin/sms/balance").then((r) => r.json()).then((d) => (d.ok || d.configured === false) && setBalance(d)).catch(() => {}); }, []);
@@ -330,6 +332,18 @@ function SendTab({ meta }: { meta: Meta | null }) {
     }
   }
 
+  async function doTestSend() {
+    if (!templateId) return toast("Pick a template first.", "error");
+    if (!testMobile.trim()) return toast("Enter a mobile to test to.", "error");
+    setTestBusy(true);
+    try {
+      const r = await fetch("/api/admin/sms/test-send", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mobile: testMobile.trim(), templateId }) }).then((x) => x.json());
+      toast(r.ok ? `Test sent to ${testMobile.trim()}.` : (r.error || "Test send failed"), r.ok ? "success" : "error");
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Test send failed — please retry.", "error");
+    } finally { setTestBusy(false); }
+  }
+
   const lowCredits = balance?.configured && balance.balance != null && preview?.count != null && balance.balance < preview.count;
 
   return (
@@ -441,6 +455,15 @@ function SendTab({ meta }: { meta: Meta | null }) {
         {balance?.configured && <p className="text-xs text-muted">Gateway credits: <span className="font-semibold tabular-nums">{balance.balance ?? "—"}</span></p>}
         {lowCredits && <p className="text-xs text-danger">Not enough credits ({balance?.balance}) for {preview?.count} recipients — the send will be refused.</p>}
 
+        <div className="space-y-1.5 rounded-xl border border-line p-2.5">
+          <p className="text-xs font-medium text-muted">Test send to yourself first</p>
+          <div className="flex gap-2">
+            <input className="input" placeholder="your 10-digit mobile" value={testMobile} onChange={(e) => setTestMobile(e.target.value)} />
+            <button onClick={doTestSend} disabled={testBusy || !templateId || !testMobile.trim()} className="btn btn-secondary shrink-0">{testBusy ? "…" : "Send test"}</button>
+          </div>
+          <p className="text-[11px] text-muted">One message to this number, sample values fill any blanks (real login link). All safeguards apply.</p>
+        </div>
+
         <div className="flex gap-2 pt-1">
           <button onClick={() => { runPreview(); runRich(0); }} disabled={busy} className="btn btn-secondary">{busy ? "…" : "Preview"}</button>
           <button onClick={() => doSend()} disabled={busy || !templateId || !!preview?.blocked || (preview?.count ?? 0) === 0} className="btn btn-primary"><Send size={15} /> {preview ? `Send to ${preview.count}` : "Preview & send"}</button>
@@ -460,7 +483,7 @@ function SendTab({ meta }: { meta: Meta | null }) {
             {preview.blocked && <p className="text-xs text-danger">{preview.blockedReason}</p>}
             {recipients && <RecipientList recipients={recipients} search={search} setSearch={setSearch} />}
             {rich ? (
-              <TemplatePreview data={rich} busy={richBusy} onNav={(i) => runRich(i)} />
+              <TemplatePreview data={rich} busy={richBusy} onNav={(i) => runRich(i)} balance={balance?.configured ? balance.balance : null} />
             ) : preview.preview ? (
               <div className="rounded-xl bg-surface p-3 text-sm">
                 <p className="whitespace-pre-wrap">{preview.preview.text}</p>
@@ -526,7 +549,7 @@ const VAR_SOURCE_STYLE: Record<string, { cls: string; label: string }> = {
   sample: { cls: "pill-amber", label: "sample" },
   missing: { cls: "pill-red", label: "missing" },
 };
-function TemplatePreview({ data, busy, onNav }: { data: any; busy: boolean; onNav: (index: number) => void }) {
+function TemplatePreview({ data, busy, onNav, balance }: { data: any; busy: boolean; onNav: (index: number) => void; balance: number | null }) {
   const cov = data.coverage || { total: 0, deliverable: 0, skipped: 0, reasons: {} };
   const idx = data.index ?? 0;
   const total = data.total ?? 0;
@@ -597,6 +620,23 @@ function TemplatePreview({ data, busy, onNav }: { data: any; busy: boolean; onNa
           <p className="text-xs text-amber-700">{cov.skipped} would be skipped{reasons.length ? ` — ${reasons.map(([k, n]) => `${k.replace(/_/g, " ")}: ${n}`).join(", ")}` : ""}. They never send (safeguards), so you don't pay for them.</p>
         )}
       </div>
+
+      {/* cost estimate */}
+      {data.cost && (
+        <div className="space-y-0.5 rounded-lg border border-line p-2 text-xs">
+          <div className="flex items-center justify-between">
+            <span className="text-muted">Estimated cost</span>
+            <span className="font-semibold tabular-nums">Rs {data.cost.estimate} <span className="font-normal text-muted">· {data.cost.credits} credit{data.cost.credits === 1 ? "" : "s"} @ Rs {data.cost.costPerSms}/SMS</span></span>
+          </div>
+          {balance != null && (
+            <div className="flex items-center justify-between">
+              <span className="text-muted">Balance after send</span>
+              <span className={`font-semibold tabular-nums ${balance - data.cost.credits < 0 ? "text-danger" : ""}`}>{balance - data.cost.credits} <span className="font-normal text-muted">(now {balance})</span></span>
+            </div>
+          )}
+          {balance != null && balance < data.cost.credits && <p className="text-danger">Not enough credits ({balance}) for {data.cost.credits} — the send will be refused by the balance guard.</p>}
+        </div>
+      )}
     </div>
   );
 }
@@ -1120,9 +1160,71 @@ function SettingsTab({ canEdit }: { canEdit: boolean }) {
           <Field label="Window end (IST)"><input className="input" value={form.windowEnd} onChange={(e) => setForm({ ...form, windowEnd: e.target.value })} disabled={!canEdit} /></Field>
           <Field label="T19 offset (min)"><input type="number" className="input" value={form.t19OffsetMinutes} onChange={(e) => setForm({ ...form, t19OffsetMinutes: Number(e.target.value) })} disabled={!canEdit} /></Field>
           <Field label="T19 fallback all-registered"><select className="input" value={form.t19FallbackAllRegistered ? "1" : "0"} onChange={(e) => setForm({ ...form, t19FallbackAllRegistered: e.target.value === "1" })} disabled={!canEdit}><option value="1">Yes</option><option value="0">No</option></select></Field>
+          <Field label="Cost per SMS (Rs / segment)"><input type="number" step="0.01" className="input" value={form.costPerSms ?? 0.13} onChange={(e) => setForm({ ...form, costPerSms: Number(e.target.value) })} disabled={!canEdit} /></Field>
         </div>
         {canEdit ? <button onClick={save} disabled={busy} className="btn btn-primary">{busy ? "…" : "Save settings"}</button> : <p className="text-xs text-muted">Only a Super Admin can change settings.</p>}
       </div>
+
+      <div className="lg:col-span-2"><OptOutsCard canEdit={canEdit} /></div>
+    </div>
+  );
+}
+
+// Opt-out / DND suppression manager (compliance). Suppressed numbers are skipped
+// on EVERY send path (service-enforced) — this is the admin surface for it.
+function OptOutsCard({ canEdit }: { canEdit: boolean }) {
+  const { toast } = useToast();
+  const [rows, setRows] = useState<{ normalized_mobile: string; reason: string | null; source: string; created_at: string }[]>([]);
+  const [mobile, setMobile] = useState("");
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  const load = useCallback(() => { fetch("/api/admin/sms/opt-outs").then((r) => r.json()).then((d) => d.ok && setRows(d.optOuts)).catch(() => {}); }, []);
+  useEffect(() => { load(); }, [load]);
+
+  async function add() {
+    if (!mobile.trim()) return;
+    setBusy(true);
+    const r = await fetch("/api/admin/sms/opt-outs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mobile: mobile.trim(), reason: reason.trim() || null }) }).then((x) => x.json()).catch(() => null);
+    setBusy(false);
+    if (r?.ok) { setRows(r.optOuts); setMobile(""); setReason(""); toast("Added to opt-out list.", "success"); } else toast(r?.error || "Add failed", "error");
+  }
+  async function remove(m: string) {
+    if (!confirm(`Remove ${m} from the opt-out list? They can be messaged again.`)) return;
+    const r = await fetch(`/api/admin/sms/opt-outs?mobile=${encodeURIComponent(m)}`, { method: "DELETE" }).then((x) => x.json()).catch(() => null);
+    if (r?.ok) { setRows(r.optOuts); toast("Removed.", "success"); } else toast("Remove failed", "error");
+  }
+
+  return (
+    <div className="card space-y-3 p-4">
+      <div>
+        <p className="text-sm font-semibold">Opt-out / DND suppression <span className="pill pill-gray ml-1 text-[10px]">{rows.length}</span></p>
+        <p className="mt-0.5 text-xs text-muted">These numbers are skipped on <b>every</b> send — manual, bulk, automation and resend. An inbound STOP-keyword webhook would add here automatically (source <code className="font-mono">sms_stop</code>).</p>
+      </div>
+      {canEdit && (
+        <div className="flex flex-wrap gap-2">
+          <input className="input w-40" placeholder="10-digit mobile" value={mobile} onChange={(e) => setMobile(e.target.value)} />
+          <input className="input flex-1" placeholder="reason (optional)" value={reason} onChange={(e) => setReason(e.target.value)} />
+          <button onClick={add} disabled={busy || !mobile.trim()} className="btn btn-primary shrink-0">{busy ? "…" : "Add opt-out"}</button>
+        </div>
+      )}
+      {rows.length === 0 ? <p className="text-sm text-muted">No opt-outs. 🎉</p> : (
+        <div className="max-h-64 overflow-y-auto rounded-xl border border-line">
+          <table className="w-full text-left text-sm">
+            <thead><tr className="border-b border-line text-xs uppercase tracking-wide text-muted"><th className="px-3 py-2">Mobile</th><th className="px-3 py-2">Reason</th><th className="px-3 py-2">Source</th><th className="px-3 py-2">Since</th><th className="px-3 py-2 text-right">Action</th></tr></thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.normalized_mobile} className="border-b border-line/60 last:border-0">
+                  <td className="px-3 py-1.5 font-mono text-xs">{r.normalized_mobile}</td>
+                  <td className="px-3 py-1.5 text-xs text-ink2">{r.reason || "—"}</td>
+                  <td className="px-3 py-1.5 text-xs text-muted">{r.source}</td>
+                  <td className="px-3 py-1.5 text-xs text-muted">{formatISTDateTime(r.created_at)}</td>
+                  <td className="px-3 py-1.5 text-right">{canEdit && <button onClick={() => remove(r.normalized_mobile)} className="btn btn-secondary text-xs"><Trash2 size={12} /></button>}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
