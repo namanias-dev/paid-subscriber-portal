@@ -126,7 +126,7 @@ export function withDerivedVars(templateId: string, vars: Record<string, string 
  * out so a batch can resolve the store defaults ONCE and merge each recipient
  * locally, instead of one DB round-trip per recipient (the bulk-timeout fix).
  */
-function mergeSendVars(templateId: string, defaults: Record<string, string>, vars: Record<string, string | number | null | undefined> = {}): Record<string, string | number | null | undefined> {
+export function mergeSendVars(templateId: string, defaults: Record<string, string>, vars: Record<string, string | number | null | undefined> = {}): Record<string, string | number | null | undefined> {
   const merged: Record<string, string | number | null | undefined> = { ...defaults };
   for (const [k, val] of Object.entries(vars)) {
     if (val !== undefined && val !== null && String(val).trim() !== "") merged[k] = val;
