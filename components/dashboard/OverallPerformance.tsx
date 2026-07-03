@@ -109,7 +109,10 @@ export default function OverallPerformance({
 
   return (
     <>
-      <div id="overall-performance-board" className="animate-fade-up space-y-8 motion-reduce:animate-none">
+      {/* overflow-x-clip is a defensive net only — the real fix is [&>*]:min-w-0
+          on the grids below. `clip` (not `hidden`) avoids creating a scroll
+          container, so it has no side effects on the sections or the chart. */}
+      <div id="overall-performance-board" className="animate-fade-up space-y-8 overflow-x-clip motion-reduce:animate-none">
         <SnapshotHeader data={data} enablePdfExport={enablePdfExport} />
         <HeroSummary data={data} />
         <MasterySection subjects={data.subjects} topics={data.topics} />
@@ -177,7 +180,7 @@ function SnapshotHeader({ data, enablePdfExport }: { data: OverallData; enablePd
 function HeroSummary({ data }: { data: OverallData }) {
   const { hero } = data;
   return (
-    <section className="grid gap-3 lg:grid-cols-[auto,1fr]">
+    <section className="grid gap-3 [&>*]:min-w-0 lg:grid-cols-[auto,1fr]">
       <div className="flex items-center gap-4 rounded-2xl border border-line bg-surface p-5">
         <ScoreRing accuracy={hero.accuracy} />
         <div className="min-w-0">
@@ -187,7 +190,7 @@ function HeroSummary({ data }: { data: OverallData }) {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-3">
+      <div className="grid grid-cols-2 gap-3 [&>*]:min-w-0 sm:grid-cols-3 lg:grid-cols-3">
         <Stat icon={<Award size={15} />} label="Quizzes" value={hero.totalQuizzes} tone="text-ink" hint={`${hero.totalAttempts} attempt${hero.totalAttempts !== 1 ? "s" : ""}`} />
         <Stat icon={<Target size={15} />} label="Questions" value={hero.totalQuestions} tone="text-ink" hint="faced overall" />
         <Stat icon={<TrendingUp size={15} />} label="Attempt rate" value={`${hero.attemptRate}%`} tone={hero.attemptRate >= 80 ? "text-success" : hero.attemptRate >= 60 ? "text-amber-600" : "text-danger"} hint={`${hero.unattemptedRate}% left blank`} />
@@ -269,7 +272,7 @@ function MasterySection({ subjects, topics }: { subjects: MasteryRow[]; topics: 
         </div>
       </div>
 
-      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+      <div className="mt-3 grid gap-3 [&>*]:min-w-0 sm:grid-cols-2">
         {sorted.map((r) => <MasteryBar key={`${view}-${r.label}`} row={r} />)}
       </div>
       <p className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-muted">
@@ -327,7 +330,7 @@ function QuizRanking({ quizzes, onOpenReport }: { quizzes: QuizRankRow[]; onOpen
       <h3 className="flex items-center gap-2 font-heading text-base font-bold">
         <Trophy size={17} className="text-[var(--ca-gold)]" /> Best &amp; weakest quizzes
       </h3>
-      <div className={`mt-3 grid gap-4 ${small ? "" : "lg:grid-cols-2"}`}>
+      <div className={`mt-3 grid gap-4 [&>*]:min-w-0 ${small ? "" : "lg:grid-cols-2"}`}>
         <RankList title="Top performers" icon={<Trophy size={14} className="text-success" />} rows={best} onOpen={open} />
         {!small && <RankList title="Needs work" icon={<Flame size={14} className="text-danger" />} rows={weakest} onOpen={open} />}
       </div>
@@ -446,7 +449,10 @@ function FocusAreas({ data }: { data: OverallData }) {
         </p>
       )}
 
-      <div className="mt-3 grid gap-4 lg:grid-cols-2">
+      {/* [&>*]:min-w-0 — grid items must be allowed to shrink below their
+          content's min-content, else a single-column `auto` track on mobile
+          sizes to the nowrap `truncate` stem's full width and overflows the page. */}
+      <div className="mt-3 grid gap-4 [&>*]:min-w-0 lg:grid-cols-2">
         {focusTopics.length > 0 && (
           <div>
             <p className="mb-2 text-xs font-bold uppercase tracking-wide text-muted">Weakest topics</p>
