@@ -270,17 +270,30 @@ export function firstNamesMatch(a: string | null | undefined, b: string | null |
 // ---------------------------------------------------------------------------
 // DELIVERY RECEIPTS (Issue 3) — promote SENT -> DELIVERED/FAILED by gateway id
 // ---------------------------------------------------------------------------
-/** Logs whose gateway_message_id matches any of the provided id variants. */
+/**
+ * Logs whose gateway_message_id matches any of the provided id variants. Returns
+ * the FULL set (paginated past PostgREST's ~1000-row response ceiling) so DLR
+ * polling covers every recipient of a bulk send — a shared bulk id can map to
+ * hundreds of rows, so the old .limit(50) silently dropped most of them.
+ */
 export async function findLogsByMessageIds(variants: string[]): Promise<SmsLog[]> {
   const clean = [...new Set(variants.filter(Boolean))];
   if (!clean.length) return [];
   const db = getSupabaseAdmin();
   if (!db) return demo().logs.filter((l) => l.gateway_message_id && clean.includes(l.gateway_message_id));
+  const out: SmsLog[] = [];
+  const PAGE = 1000;
   try {
-    const { data } = await db.from("sms_logs").select("*").in("gateway_message_id", clean).limit(50);
-    return (data || []) as SmsLog[];
+    for (let from = 0; ; from += PAGE) {
+      const { data, error } = await db.from("sms_logs").select("*").in("gateway_message_id", clean).range(from, from + PAGE - 1);
+      if (error) break;
+      const rows = (data || []) as SmsLog[];
+      out.push(...rows);
+      if (rows.length < PAGE) break; // last page
+    }
+    return out;
   } catch {
-    return [];
+    return out;
   }
 }
 
@@ -393,6 +406,54 @@ export async function recentSameTemplate(normalizedMobile: string, templateId: s
       .gte("created_at", sinceISO).in("status", ["SENT", "DELIVERED", "QUEUED"]);
     return (count || 0) > 0;
   } catch { return false; }
+}
+
+/**
+ * BATCH form of {@link recentSameTemplate}: in ONE query, return the subset of
+ * `normalizedMobiles` that already received `templateId` within N minutes. Used by
+ * the bulk orchestrator so a 170-recipient screen costs one round-trip, not 170.
+ */
+export async function recentTemplateHits(normalizedMobiles: string[], templateId: string, withinMinutes: number): Promise<Set<string>> {
+  const nums = [...new Set(normalizedMobiles.filter(Boolean))];
+  const hits = new Set<string>();
+  if (!nums.length) return hits;
+  const sinceISO = new Date(Date.now() - withinMinutes * 60000).toISOString();
+  const db = getSupabaseAdmin();
+  if (!db) {
+    for (const l of demo().logs) {
+      if (l.template_id === templateId && nums.includes(l.normalized_mobile) && ["SENT", "DELIVERED", "QUEUED"].includes(l.status) && l.created_at >= sinceISO) hits.add(l.normalized_mobile);
+    }
+    return hits;
+  }
+  try {
+    const { data } = await db.from("sms_logs").select("normalized_mobile")
+      .eq("template_id", templateId).gte("created_at", sinceISO)
+      .in("status", ["SENT", "DELIVERED", "QUEUED"]).in("normalized_mobile", nums);
+    for (const r of (data || []) as Row[]) hits.add(String(r.normalized_mobile));
+    return hits;
+  } catch { return hits; }
+}
+
+/**
+ * BATCH per-mobile daily count: in ONE query, tally today's SENT/DELIVERED logs
+ * per number for the given list. Only used when a per-mobile cap is configured.
+ */
+export async function countsByMobileSince(sinceISO: string, normalizedMobiles: string[]): Promise<Map<string, number>> {
+  const nums = [...new Set(normalizedMobiles.filter(Boolean))];
+  const map = new Map<string, number>();
+  if (!nums.length) return map;
+  const db = getSupabaseAdmin();
+  if (!db) {
+    for (const l of demo().logs) {
+      if (["SENT", "DELIVERED"].includes(l.status) && l.created_at >= sinceISO && nums.includes(l.normalized_mobile)) map.set(l.normalized_mobile, (map.get(l.normalized_mobile) || 0) + 1);
+    }
+    return map;
+  }
+  try {
+    const { data } = await db.from("sms_logs").select("normalized_mobile").gte("created_at", sinceISO).in("status", ["SENT", "DELIVERED"]).in("normalized_mobile", nums);
+    for (const r of (data || []) as Row[]) { const k = String(r.normalized_mobile); map.set(k, (map.get(k) || 0) + 1); }
+    return map;
+  } catch { return map; }
 }
 
 // ---------------------------------------------------------------------------

@@ -8,13 +8,30 @@
  */
 import { normalizeIndianMobile } from "../phone";
 import { renderTemplate, validateBody } from "./templates";
-import { getTemplate, getSettings, insertQueuedLog, updateLog, countSentSince, recentSameTemplate, listLogs } from "./store";
+import { getTemplate, getSettings, insertQueuedLog, updateLog, countSentSince, recentSameTemplate, recentTemplateHits, countsByMobileSince, listLogs } from "./store";
 import { sendViaGateway, sendBulkViaGateway, fetchDeliveryStatuses, checkBalance, type DeliveryLine } from "./gateway";
 import { gatewayConfigured, smsEnvEnabled, loginUrlForTemplate, bulkChunkSize, SMS_DEFAULT_SENDER_ID, SMS_DEFAULT_ROUTE } from "./config";
 import { getResolvedDefaults } from "./variables";
 import type { SmsLog, SmsLogStatus } from "./types";
 
 const SAME_TRIGGER_WINDOW_MIN = 30;
+/** Parallel gateway calls in the per-recipient fan-out (keeps 170+ under the 60s function limit). */
+const SEND_CONCURRENCY = 10;
+
+/** Run `fn` over `items` with bounded concurrency, preserving result order. */
+async function mapPool<T, R>(items: T[], limit: number, fn: (item: T, index: number) => Promise<R>): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (true) {
+      const i = next++;
+      if (i >= items.length) return;
+      results[i] = await fn(items[i], i);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
 
 export interface RelatedEntity {
   user_id?: string | null; lead_id?: string | null; registration_id?: string | null;
@@ -102,13 +119,21 @@ export function withDerivedVars(templateId: string, vars: Record<string, string 
  * This is what makes a rotated login_url take effect on the next send/preview
  * with no code change. Absent/empty explicit values never clobber the store.
  */
-async function resolveSendVars(templateId: string, vars: Record<string, string | number | null | undefined> = {}): Promise<Record<string, string | number | null | undefined>> {
-  const defaults = await getResolvedDefaults(templateId);
+/**
+ * In-memory merge of caller vars OVER precomputed store defaults (no DB). Split
+ * out so a batch can resolve the store defaults ONCE and merge each recipient
+ * locally, instead of one DB round-trip per recipient (the bulk-timeout fix).
+ */
+function mergeSendVars(templateId: string, defaults: Record<string, string>, vars: Record<string, string | number | null | undefined> = {}): Record<string, string | number | null | undefined> {
   const merged: Record<string, string | number | null | undefined> = { ...defaults };
   for (const [k, val] of Object.entries(vars)) {
     if (val !== undefined && val !== null && String(val).trim() !== "") merged[k] = val;
   }
   return withDerivedVars(templateId, merged);
+}
+
+async function resolveSendVars(templateId: string, vars: Record<string, string | number | null | undefined> = {}): Promise<Record<string, string | number | null | undefined>> {
+  return mergeSendVars(templateId, await getResolvedDefaults(templateId), vars);
 }
 
 /** Render + validate without sending (preview / dispatch dry-run). */
@@ -274,28 +299,46 @@ export async function sendBatch(input: {
   if (t.message_type === "promotional" && input.audienceType === "all") { skip("promotional_all_blocked", input.recipients.length); return out; }
 
   // ---- per-recipient screening (all safeguards BEFORE batching) ----
+  // ALL shared lookups are hoisted to ONE query each (variable store defaults,
+  // 30-min anti-spam hits, per-mobile daily counts) so screening 170 recipients
+  // costs a handful of round-trips, not ~3×170. This is the bulk-timeout fix:
+  // the old loop did 2+ sequential DB calls PER recipient (~110s for 170) and the
+  // serverless function was killed before any gateway call ever fired.
   const since = istMidnightISO();
   let usedToday = settings.dailyCap > 0 ? await countSentSince(since) : 0;
   const nowMin = istMinutesOfDay();
+
+  // Normalize + in-batch dedupe first so batched lookups only query real targets.
+  const normList: { mobile: string; normalized: string; variables: Record<string, string | number | null | undefined>; relatedEntity?: RelatedEntity }[] = [];
   const seen = new Set<string>();
-  const eligible: ScreenedRecipient[] = [];
   for (const r of input.recipients) {
     const n = normalizeIndianMobile(r.mobile);
     if (!n.ok || !n.digits10) { skip("invalid_mobile"); continue; }
-    const normalized = n.digits10;
-    if (seen.has(normalized)) { skip("duplicate_in_batch"); continue; }
-    const filled = await resolveSendVars(input.templateId, r.variables || {});
+    if (seen.has(n.digits10)) { skip("duplicate_in_batch"); continue; }
+    seen.add(n.digits10);
+    normList.push({ mobile: r.mobile, normalized: n.digits10, variables: r.variables || {}, relatedEntity: r.relatedEntity });
+  }
+
+  const numbers = normList.map((r) => r.normalized);
+  const [varDefaults, recentHits, perMobileCounts] = await Promise.all([
+    getResolvedDefaults(input.templateId),
+    input.allowRecentOverride ? Promise.resolve(new Set<string>()) : recentTemplateHits(numbers, input.templateId, SAME_TRIGGER_WINDOW_MIN),
+    settings.perMobileDailyCap > 0 ? countsByMobileSince(since, numbers) : Promise.resolve(new Map<string, number>()),
+  ]);
+
+  const eligible: ScreenedRecipient[] = [];
+  for (const r of normList) {
+    const filled = mergeSendVars(input.templateId, varDefaults, r.variables);
     const { text, missing } = renderTemplate(t.body_template, filled);
     if (missing.length) { skip("missing_vars"); continue; }
     const v = validateBody(text);
     if (!v.ok) { skip("invalid_body"); continue; }
     if (input.enforceWindow && (nowMin < hmToMin(settings.windowStart) || nowMin > hmToMin(settings.windowEnd))) { skip("outside_window"); continue; }
     if (settings.dailyCap > 0 && usedToday >= settings.dailyCap) { skip("daily_cap"); continue; }
-    if (settings.perMobileDailyCap > 0 && (await countSentSince(since, normalized)) >= settings.perMobileDailyCap) { skip("per_mobile_cap"); continue; }
-    if (!input.allowRecentOverride && (await recentSameTemplate(normalized, input.templateId, SAME_TRIGGER_WINDOW_MIN))) { skip("recent_duplicate"); continue; }
-    seen.add(normalized);
+    if (settings.perMobileDailyCap > 0 && (perMobileCounts.get(r.normalized) || 0) >= settings.perMobileDailyCap) { skip("per_mobile_cap"); continue; }
+    if (recentHits.has(r.normalized)) { skip("recent_duplicate"); continue; }
     usedToday++;
-    eligible.push({ mobile: r.mobile, normalized, text, chars: v.analysis.length, segments: v.analysis.segments, variables: r.variables || {}, relatedEntity: r.relatedEntity });
+    eligible.push({ mobile: r.mobile, normalized: r.normalized, text, chars: v.analysis.length, segments: v.analysis.segments, variables: r.variables, relatedEntity: r.relatedEntity });
   }
   if (eligible.length === 0) return out;
 
@@ -308,23 +351,55 @@ export async function sendBatch(input: {
     }
   }
 
-  // ---- route: identical body → BULK; else per-recipient ----
+  // Build the QUEUED log row for a screened recipient (shared by both branches).
+  const queuedLogFor = (e: ScreenedRecipient) => ({
+    mobile: e.mobile, normalized_mobile: e.normalized,
+    student_name: e.relatedEntity?.student_name ?? null,
+    user_id: e.relatedEntity?.user_id ?? null, lead_id: e.relatedEntity?.lead_id ?? null,
+    registration_id: e.relatedEntity?.registration_id ?? null, payment_id: e.relatedEntity?.payment_id ?? null,
+    course_id: e.relatedEntity?.course_id ?? null, webinar_id: e.relatedEntity?.webinar_id ?? null,
+    template_id: t.id, template_name: t.name, gateway_template_id: t.gateway_template_id,
+    sender_id: t.sender_id || SMS_DEFAULT_SENDER_ID, route: t.route || SMS_DEFAULT_ROUTE,
+    message_body: e.text, character_count: e.chars, segments: e.segments,
+    sent_by_user_id: input.sentBy.userId ?? null, sent_by_type: input.sentBy.type,
+    trigger_event: null, audience_type: input.audienceType ?? null, dedupe_key: null, status: "QUEUED" as const,
+  });
+
+  // ---- route: identical body → BULK; else per-recipient fan-out ----
   const allIdentical = eligible.length > 1 && eligible.every((e) => e.text === eligible[0].text);
 
   if (!allIdentical) {
-    // single (1) OR personalized fan-out (customized endpoint unavailable → per-recipient)
+    // single (1) OR personalized fan-out (customized endpoint unavailable → one
+    // http-api.php call per number). Runs with bounded concurrency so 170+
+    // recipients complete well within the function limit instead of ~1 call at a
+    // time. Screening already enforced every safeguard, so each worker only does
+    // INSERT(QUEUED) → send → update for its own recipient (no re-screen / re-read).
     out.mode = eligible.length > 1 ? "per-recipient" : "single";
-    for (const e of eligible) {
-      const res = await sendSms({
-        mobile: e.mobile, templateId: input.templateId, variables: e.variables,
-        relatedEntity: e.relatedEntity, sentBy: input.sentBy, audienceType: input.audienceType,
-        allowRecentOverride: true, // already screened above; don't re-trip the guard
-        scheduleTime: input.scheduleTime,
+    out.batches = eligible.length;
+    if (!gatewayConfigured()) {
+      // Keep the attempt visible: queue + mark FAILED, still bounded-parallel.
+      await mapPool(eligible, SEND_CONCURRENCY, async (e) => {
+        const inserted = await insertQueuedLog(queuedLogFor(e));
+        if (!inserted) { skip("duplicate"); return; }
+        await updateLog(inserted.id, { status: "FAILED", error_message: "gateway_not_configured" });
+        out.failed++;
       });
-      if (res.ok) out.sent++;
-      else if (res.skipped) skip(res.skipped);
-      else out.failed++;
+      return out;
     }
+    await mapPool(eligible, SEND_CONCURRENCY, async (e) => {
+      const inserted = await insertQueuedLog(queuedLogFor(e));
+      if (!inserted) { skip("duplicate"); return; }
+      const res = await sendViaGateway({
+        digits10: e.normalized, message: e.text, templateId: t.gateway_template_id!,
+        senderId: t.sender_id || SMS_DEFAULT_SENDER_ID, route: t.route || SMS_DEFAULT_ROUTE,
+        scheduleTime: input.scheduleTime || undefined,
+      });
+      await updateLog(inserted.id, {
+        status: res.status, gateway_response: res.response as unknown, gateway_message_id: res.messageId,
+        error_message: res.ok ? null : (res.response.error || "send_failed"), sent_at: new Date().toISOString(),
+      });
+      if (res.ok) out.sent++; else out.failed++;
+    });
     return out;
   }
 
@@ -334,29 +409,16 @@ export async function sendBatch(input: {
   const chunkSize = bulkChunkSize();
   for (let i = 0; i < eligible.length; i += chunkSize) {
     const chunk = eligible.slice(i, i + chunkSize);
-    // insert QUEUED logs FIRST (double-send guard) before the gateway call
+    // insert QUEUED logs FIRST (double-send guard) before the gateway call —
+    // bounded-parallel so a 100-row chunk is ~1s of inserts, not ~30s.
+    const inserts = await mapPool(chunk, SEND_CONCURRENCY, (e) => insertQueuedLog(queuedLogFor(e)));
     const rows: { e: ScreenedRecipient; logId: string }[] = [];
-    for (const e of chunk) {
-      const inserted = await insertQueuedLog({
-        mobile: e.mobile, normalized_mobile: e.normalized,
-        student_name: e.relatedEntity?.student_name ?? null,
-        user_id: e.relatedEntity?.user_id ?? null, lead_id: e.relatedEntity?.lead_id ?? null,
-        registration_id: e.relatedEntity?.registration_id ?? null, payment_id: e.relatedEntity?.payment_id ?? null,
-        course_id: e.relatedEntity?.course_id ?? null, webinar_id: e.relatedEntity?.webinar_id ?? null,
-        template_id: t.id, template_name: t.name, gateway_template_id: t.gateway_template_id,
-        sender_id: t.sender_id || SMS_DEFAULT_SENDER_ID, route: t.route || SMS_DEFAULT_ROUTE,
-        message_body: e.text, character_count: e.chars, segments: e.segments,
-        sent_by_user_id: input.sentBy.userId ?? null, sent_by_type: input.sentBy.type,
-        trigger_event: null, audience_type: input.audienceType ?? null, dedupe_key: null, status: "QUEUED",
-      });
-      if (!inserted) { skip("duplicate"); continue; }
-      rows.push({ e, logId: inserted.id });
-    }
+    inserts.forEach((inserted, idx) => { if (inserted) rows.push({ e: chunk[idx], logId: inserted.id }); else skip("duplicate"); });
     if (rows.length === 0) continue;
     out.batches++;
 
     if (!gatewayConfigured()) {
-      for (const r of rows) { await updateLog(r.logId, { status: "FAILED", error_message: "gateway_not_configured" }); out.failed++; }
+      await mapPool(rows, SEND_CONCURRENCY, async (r) => { await updateLog(r.logId, { status: "FAILED", error_message: "gateway_not_configured" }); out.failed++; });
       continue;
     }
 
@@ -370,7 +432,7 @@ export async function sendBatch(input: {
     });
     // One HTTP response for the chunk: shared msg-id stored on every row so
     // per-number DLR (fetchDeliveryStatuses) can settle each recipient later.
-    for (const r of rows) {
+    await mapPool(rows, SEND_CONCURRENCY, async (r) => {
       await updateLog(r.logId, {
         status: bulk.status,
         gateway_response: bulk.response as unknown,
@@ -379,7 +441,7 @@ export async function sendBatch(input: {
         sent_at: new Date().toISOString(),
       });
       if (bulk.ok) out.sent++; else out.failed++;
-    }
+    });
   }
   return out;
 }
