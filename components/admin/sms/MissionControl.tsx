@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, BarChart, Bar } from "recharts";
-import { Activity, Send, Workflow, FileText, ScrollText, BarChart3, Settings as SettingsIcon, RefreshCw, Download, AlertTriangle, CheckCircle2, Power, Braces, Link2, RotateCcw } from "lucide-react";
+import { Activity, Send, Workflow, FileText, ScrollText, BarChart3, Settings as SettingsIcon, RefreshCw, Download, AlertTriangle, CheckCircle2, Power, Braces, Link2, RotateCcw, Users, Search, SlidersHorizontal } from "lucide-react";
 import { LoadingBlock } from "@/components/admin/ui";
 import { useToast } from "@/components/ui/Toast";
 import { formatISTDateTime } from "@/lib/dates";
@@ -24,7 +24,12 @@ interface LogRow {
   status: string; segments: number | null; trigger_event: string | null; sent_by_type: string;
   message_body: string; error_message: string | null; gateway_response: unknown; audience_type: string | null;
 }
-interface Meta { isSuperAdmin: boolean; webinars: { id: string; slug: string; title: string; datetime: string }[]; leadSources: string[]; leadStages: string[] }
+interface Meta {
+  isSuperAdmin: boolean;
+  webinars: { id: string; slug: string; title: string; datetime: string }[];
+  courses: { id: string; slug: string; title: string; price: number }[];
+  leadSources: string[]; leadStages: string[];
+}
 
 const TABS = [
   { id: "overview", label: "Overview", icon: Activity },
@@ -167,6 +172,16 @@ function OverviewTab() {
 }
 
 // ============================ SEND ============================
+type Recip = { mobile: string; name: string | null };
+type Timeframe = "7d" | "30d" | "6mo" | "all" | "month";
+const TIMEFRAME_LABEL: Record<Timeframe, string> = { "7d": "Last 7 days", "30d": "Last 30 days", "6mo": "Last 6 months", all: "All time", month: "Specific month" };
+// Which date each time frame filters on, per the active dimension (shown in UI).
+function dateFieldNote(courseSlug: string, webinarSlug: string): string {
+  if (courseSlug) return "enrolment date (course_enrollments.created_at / course payment date)";
+  if (webinarSlug) return "paid date for paid webinars (else registration date)";
+  return "payment date (payments.created_at)";
+}
+
 function SendTab({ meta }: { meta: Meta | null }) {
   const { toast } = useToast();
   const [templates, setTemplates] = useState<TemplateRow[]>([]);
@@ -177,49 +192,72 @@ function SendTab({ meta }: { meta: Meta | null }) {
   const [webinarSlug, setWebinarSlug] = useState("");
   const [source, setSource] = useState("");
   const [stage, setStage] = useState("");
+  // composable filters (audType === "filtered")
+  const [fCourse, setFCourse] = useState("");
+  const [fWebinar, setFWebinar] = useState("");
+  const [fStatus, setFStatus] = useState("");
+  const [fTimeframe, setFTimeframe] = useState<Timeframe>("all");
+  const [fMonth, setFMonth] = useState("");
   const [preview, setPreview] = useState<any>(null);
+  const [recipients, setRecipients] = useState<Recip[] | null>(null);
+  const [search, setSearch] = useState("");
   const [busy, setBusy] = useState(false);
   const [allowOverride, setAllowOverride] = useState(false);
   const [scheduleAt, setScheduleAt] = useState("");
   const [balance, setBalance] = useState<{ configured: boolean; balance: number | null } | null>(null);
+  const [campaignId, setCampaignId] = useState<string | null>(null);
 
   useEffect(() => { fetch("/api/admin/sms/templates").then((r) => r.json()).then((d) => d.ok && setTemplates(d.templates)).catch(() => {}); }, []);
   useEffect(() => { fetch("/api/admin/sms/balance").then((r) => r.json()).then((d) => (d.ok || d.configured === false) && setBalance(d)).catch(() => {}); }, []);
 
   const sendable = templates.filter((t) => (t.status === "active" || t.status === "approved") && t.gateway_template_id);
   const needsWebinar = audType.startsWith("webinar_");
+  const isFiltered = audType === "filtered";
   const selectedTpl = templates.find((t) => t.id === templateId);
   const isPromo = selectedTpl?.message_type === "promotional";
-  // Promotional templates have no promo route -> warm audiences only, never "all".
   useEffect(() => { if (isPromo && audType === "all") { setAudType("person"); setPreview(null); } }, [isPromo, audType]);
 
-  function buildAudience() {
-    return { type: audType, mobile, name, webinarSlug: needsWebinar ? webinarSlug : null, source: audType === "leads" ? source : null, stage: audType === "leads" ? stage : null };
-  }
-
-  async function doPreview() {
-    setBusy(true);
-    try {
-      const r = await fetch("/api/admin/sms/audience", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ audience: buildAudience(), templateId }) }).then((x) => x.json());
-      setPreview(r.ok ? r : null);
-      if (!r.ok) toast(r.error || "Preview failed", "error");
-    } catch (e) {
-      setPreview(null);
-      toast(e instanceof Error ? e.message : "Preview failed — please retry.", "error");
-    } finally {
-      setBusy(false);
+  const buildAudience = useCallback((restrictTo?: string[]) => {
+    if (isFiltered) {
+      return {
+        type: "filtered",
+        filters: { courseSlug: fCourse || null, webinarSlug: fWebinar || null, paymentStatus: fStatus || null, timeframe: fTimeframe, month: fTimeframe === "month" ? fMonth || null : null },
+        restrictTo,
+      };
     }
-  }
-  async function doSend() {
+    return { type: audType, mobile, name, webinarSlug: needsWebinar ? webinarSlug : null, source: audType === "leads" ? source : null, stage: audType === "leads" ? stage : null, restrictTo };
+  }, [isFiltered, fCourse, fWebinar, fStatus, fTimeframe, fMonth, audType, mobile, name, needsWebinar, webinarSlug, source, stage]);
+
+  const runPreview = useCallback(async (silent = false) => {
+    if (!silent) setBusy(true);
+    try {
+      const r = await fetch("/api/admin/sms/audience", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ audience: buildAudience(), templateId, includeList: true }) }).then((x) => x.json());
+      setPreview(r.ok ? r : null);
+      setRecipients(r.ok && Array.isArray(r.recipients) ? r.recipients : null);
+      if (!r.ok && !silent) toast(r.error || "Preview failed", "error");
+    } catch (e) {
+      if (!silent) { setPreview(null); toast(e instanceof Error ? e.message : "Preview failed — please retry.", "error"); }
+    } finally {
+      if (!silent) setBusy(false);
+    }
+  }, [buildAudience, templateId, toast]);
+
+  // Live count for the filtered audience: debounced auto-preview as filters change.
+  useEffect(() => {
+    if (!isFiltered) return;
+    const t = setTimeout(() => { runPreview(true); }, 400);
+    return () => clearTimeout(t);
+  }, [isFiltered, fCourse, fWebinar, fStatus, fTimeframe, fMonth, templateId, runPreview]);
+
+  async function doSend(restrictTo?: string[], label?: string) {
     if (!templateId) return toast("Pick a template.", "error");
-    if (!preview) { await doPreview(); return; }
-    const when = scheduleAt ? ` (scheduled ${scheduleAt.replace("T", " ")} IST)` : "";
-    if (!confirm(`Send "${templates.find((t) => t.id === templateId)?.name}" to ${preview.count} recipient(s)${when}?`)) return;
+    if (!preview && !restrictTo) { await runPreview(); return; }
+    const n = restrictTo ? restrictTo.length : preview?.count;
+    const when = scheduleAt && !restrictTo ? ` (scheduled ${scheduleAt.replace("T", " ")} IST)` : "";
+    if (!confirm(`Send "${templates.find((t) => t.id === templateId)?.name}" to ${n} ${label || "recipient(s)"}${when}?`)) return;
     setBusy(true);
     try {
-      const res = await fetch("/api/admin/sms/send", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ audience: buildAudience(), templateId, allowRecentOverride: allowOverride, scheduleAt: scheduleAt || undefined }) });
-      // A serverless timeout / 5xx returns HTML, not JSON — surface it instead of
-      // letting .json() throw silently and leaving the button stuck.
+      const res = await fetch("/api/admin/sms/send", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ audience: buildAudience(restrictTo), templateId, allowRecentOverride: allowOverride, scheduleAt: restrictTo ? undefined : (scheduleAt || undefined) }) });
       if (!res.ok) throw new Error(`Send failed (HTTP ${res.status}). ${res.status === 504 ? "The batch took too long — try a smaller audience or retry." : "Please retry."}`);
       const r = await res.json();
       if (r.ok) {
@@ -227,7 +265,8 @@ function SendTab({ meta }: { meta: Meta | null }) {
         const modeTxt = r.mode && r.mode !== "single" ? ` [${r.mode}${r.batches ? ` ×${r.batches}` : ""}]` : "";
         const schedTxt = r.scheduledFor ? ` Scheduled for ${r.scheduledFor}.` : "";
         toast(`Sent ${r.sent}/${r.requested}${modeTxt}.${schedTxt}${skipTxt}`, r.sent > 0 ? "success" : "error");
-        setPreview(null);
+        if (r.campaignId && !r.scheduledFor) setCampaignId(r.campaignId);
+        if (!restrictTo) setPreview(null);
       } else toast(r.error || "Send failed", "error");
     } catch (e) {
       toast(e instanceof Error ? e.message : "Send failed — please retry.", "error");
@@ -242,7 +281,7 @@ function SendTab({ meta }: { meta: Meta | null }) {
     <div className="grid gap-5 lg:grid-cols-2">
       <div className="card space-y-3 p-4">
         <Field label="Template (Approved / Active only)">
-          <select className="input" value={templateId} onChange={(e) => { setTemplateId(e.target.value); setPreview(null); }}>
+          <select className="input" value={templateId} onChange={(e) => { setTemplateId(e.target.value); if (!isFiltered) setPreview(null); }}>
             <option value="">Select a template…</option>
             {sendable.map((t) => <option key={t.id} value={t.id}>{t.name}{t.message_type === "promotional" ? " · promo" : ""}</option>)}
           </select>
@@ -250,14 +289,53 @@ function SendTab({ meta }: { meta: Meta | null }) {
         </Field>
 
         <Field label="Audience">
-          <select className="input" value={audType} onChange={(e) => { setAudType(e.target.value); setPreview(null); }}>
+          <select className="input" value={audType} onChange={(e) => { setAudType(e.target.value); setPreview(null); setRecipients(null); }}>
             <optgroup label="Direct"><option value="person">A specific person</option></optgroup>
+            <optgroup label="Filtered"><option value="filtered">Filtered — course / webinar / status / time frame</option></optgroup>
             <optgroup label="Payments"><option value="payment_pending">Pending</option><option value="payment_failed">Failed</option><option value="payment_paid">Paid</option><option value="payment_abandoned">Abandoned</option><option value="payment_all">All payments</option></optgroup>
             <optgroup label="Webinar"><option value="webinar_registered">Registered</option><option value="webinar_not_registered">NOT registered</option><option value="webinar_attendees">Attended</option><option value="webinar_no_show">No-show</option></optgroup>
             <optgroup label="People"><option value="leads">Leads</option><option value="users_with_mobile">All users with mobile</option>{!isPromo && <option value="all">Everyone (guarded)</option>}</optgroup>
           </select>
           {isPromo && <p className="mt-1 text-xs text-amber-700">Promotional template — warm audiences only (leads / users / webinar). The All audience is disabled (no promo route).</p>}
         </Field>
+
+        {isFiltered && (
+          <div className="space-y-2 rounded-xl border border-line bg-surface p-3">
+            <p className="flex items-center gap-1.5 text-xs font-semibold text-ink2"><SlidersHorizontal size={13} /> Filters (combine freely — each narrows the list)</p>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <Field label="Course">
+                <select className="input" value={fCourse} onChange={(e) => setFCourse(e.target.value)}>
+                  <option value="">Any course</option>
+                  {(meta?.courses || []).map((c) => <option key={c.id} value={c.slug}>{c.title}</option>)}
+                </select>
+              </Field>
+              <Field label="Webinar">
+                <select className="input" value={fWebinar} onChange={(e) => setFWebinar(e.target.value)}>
+                  <option value="">Any webinar</option>
+                  {(meta?.webinars || []).map((w) => <option key={w.id} value={w.slug}>{w.title}</option>)}
+                </select>
+              </Field>
+              <Field label="Payment status">
+                <select className="input" value={fStatus} onChange={(e) => setFStatus(e.target.value)}>
+                  <option value="">Any status</option>
+                  <option value="paid">Paid</option>
+                  <option value="pending">Pending</option>
+                  <option value="failed">Failed</option>
+                  <option value="abandoned">Abandoned</option>
+                </select>
+              </Field>
+              <Field label="Time frame">
+                <select className="input" value={fTimeframe} onChange={(e) => setFTimeframe(e.target.value as Timeframe)}>
+                  {(Object.keys(TIMEFRAME_LABEL) as Timeframe[]).map((t) => <option key={t} value={t}>{TIMEFRAME_LABEL[t]}</option>)}
+                </select>
+              </Field>
+            </div>
+            {fTimeframe === "month" && (
+              <Field label="Month (IST)"><input type="month" className="input" value={fMonth} onChange={(e) => setFMonth(e.target.value)} /></Field>
+            )}
+            {fTimeframe !== "all" && <p className="text-xs text-muted">Time frame filters on {dateFieldNote(fCourse, fWebinar)}.</p>}
+          </div>
+        )}
 
         {audType === "person" && (
           <div className="grid grid-cols-2 gap-2">
@@ -290,14 +368,14 @@ function SendTab({ meta }: { meta: Meta | null }) {
         {lowCredits && <p className="text-xs text-danger">Not enough credits ({balance?.balance}) for {preview?.count} recipients — the send will be refused.</p>}
 
         <div className="flex gap-2 pt-1">
-          <button onClick={doPreview} disabled={busy} className="btn btn-secondary">{busy ? "…" : "Preview"}</button>
-          <button onClick={doSend} disabled={busy || !templateId || !!preview?.blocked} className="btn btn-primary"><Send size={15} /> {preview ? `Send to ${preview.count}` : "Preview & send"}</button>
+          <button onClick={() => runPreview()} disabled={busy} className="btn btn-secondary">{busy ? "…" : "Preview"}</button>
+          <button onClick={() => doSend()} disabled={busy || !templateId || !!preview?.blocked || (preview?.count ?? 0) === 0} className="btn btn-primary"><Send size={15} /> {preview ? `Send to ${preview.count}` : "Preview & send"}</button>
         </div>
       </div>
 
       <div className="card space-y-3 p-4">
         <p className="text-sm font-semibold">Preview</p>
-        {!preview ? <p className="text-sm text-muted">Run a preview to see recipient count, the filled message and cap impact.</p> : (
+        {!preview ? <p className="text-sm text-muted">Run a preview to see recipient count, WHO will receive it, the filled message and cap impact.</p> : (
           <>
             <div className="flex flex-wrap gap-2 text-xs">
               <span className="pill pill-blue">{preview.count} recipients</span>
@@ -306,6 +384,7 @@ function SendTab({ meta }: { meta: Meta | null }) {
               {preview.willExceedDaily && <span className="pill pill-amber">Exceeds remaining daily cap ({preview.remainingDaily})</span>}
             </div>
             {preview.blocked && <p className="text-xs text-danger">{preview.blockedReason}</p>}
+            {recipients && <RecipientList recipients={recipients} search={search} setSearch={setSearch} />}
             {preview.preview ? (
               <div className="rounded-xl bg-surface p-3 text-sm">
                 <p className="whitespace-pre-wrap">{preview.preview.text}</p>
@@ -319,6 +398,117 @@ function SendTab({ meta }: { meta: Meta | null }) {
           </>
         )}
       </div>
+
+      {campaignId && (
+        <div className="lg:col-span-2">
+          <LiveStatusPanel campaignId={campaignId} onClose={() => setCampaignId(null)} onResend={(failed) => doSend(failed, "failed number(s)")} busy={busy} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// searchable / scrollable recipient list (handles 190+)
+function RecipientList({ recipients, search, setSearch }: { recipients: Recip[]; search: string; setSearch: (s: string) => void }) {
+  const q = search.trim().toLowerCase();
+  const filtered = q ? recipients.filter((r) => (r.name || "").toLowerCase().includes(q) || r.mobile.includes(q.replace(/\D/g, ""))) : recipients;
+  return (
+    <div className="rounded-xl border border-line">
+      <div className="flex items-center gap-2 border-b border-line px-3 py-2">
+        <Users size={14} className="text-muted" />
+        <span className="text-xs font-semibold">{filtered.length}{q ? ` / ${recipients.length}` : ""} recipient{filtered.length === 1 ? "" : "s"}</span>
+        <div className="ml-auto flex items-center gap-1.5 rounded-lg bg-surface px-2 py-1">
+          <Search size={12} className="text-muted" />
+          <input className="w-32 bg-transparent text-xs outline-none" placeholder="search name / number" value={search} onChange={(e) => setSearch(e.target.value)} />
+        </div>
+      </div>
+      <div className="max-h-56 overflow-y-auto">
+        {filtered.length === 0 ? <p className="p-3 text-xs text-muted">No matches.</p> : (
+          <ul className="divide-y divide-line/60 text-sm">
+            {filtered.slice(0, 500).map((r, i) => (
+              <li key={`${r.mobile}-${i}`} className="flex items-center justify-between px-3 py-1.5">
+                <span className="truncate text-ink2">{r.name || <span className="text-muted">—</span>}</span>
+                <span className="ml-2 shrink-0 font-mono text-xs text-muted">{r.mobile}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+        {filtered.length > 500 && <p className="px-3 py-2 text-xs text-muted">Showing first 500 of {filtered.length}. Refine with search.</p>}
+      </div>
+    </div>
+  );
+}
+
+// live per-recipient send status (Queued → Sent → Delivered / Failed) + resend-to-failed
+type CampaignStatus = { total: number; totals: { queued: number; sent: number; delivered: number; failed: number; unknown: number }; settled: boolean; recipients: { mobile: string; name: string | null; status: string; error: string | null }[] };
+function LiveStatusPanel({ campaignId, onClose, onResend, busy }: { campaignId: string; onClose: () => void; onResend: (failed: string[]) => void; busy: boolean }) {
+  const [data, setData] = useState<CampaignStatus | null>(null);
+  const [onlyFailed, setOnlyFailed] = useState(false);
+  const startRef = useState(() => Date.now())[0];
+
+  useEffect(() => {
+    let stop = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const tick = async () => {
+      try {
+        const r = await fetch(`/api/admin/sms/campaign?id=${encodeURIComponent(campaignId)}`).then((x) => x.json());
+        if (stop) return;
+        if (r.ok) setData(r);
+        // Stop when everything settled or after ~5 minutes.
+        const expired = Date.now() - startRef > 5 * 60000;
+        if (!stop && !(r.ok && r.settled) && !expired) timer = setTimeout(tick, 5000);
+      } catch {
+        if (!stop) timer = setTimeout(tick, 5000);
+      }
+    };
+    tick();
+    return () => { stop = true; clearTimeout(timer); };
+  }, [campaignId, startRef]);
+
+  const t = data?.totals;
+  const failedNums = (data?.recipients || []).filter((r) => r.status === "FAILED").map((r) => r.mobile);
+  const shown = onlyFailed ? (data?.recipients || []).filter((r) => r.status === "FAILED") : (data?.recipients || []);
+
+  return (
+    <div className="card space-y-3 p-4">
+      <div className="flex items-center gap-2">
+        <p className="text-sm font-semibold">Live send status</p>
+        {data && !data.settled && <span className="inline-flex items-center gap-1 text-xs text-muted"><RefreshCw size={12} className="animate-spin" /> updating…</span>}
+        {data?.settled && <span className="pill pill-green text-[10px]">settled</span>}
+        <button onClick={onClose} className="btn btn-secondary ml-auto text-xs">Close</button>
+      </div>
+      {!data ? <LoadingBlock /> : (
+        <>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+            <Kpi label="Queued" value={t!.queued} />
+            <Kpi label="Sent" value={t!.sent} />
+            <Kpi label="Delivered" value={t!.delivered} />
+            <Kpi label="Failed" value={t!.failed} tone="red" />
+            <Kpi label="Total" value={data.total} />
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <label className="flex items-center gap-1.5 text-xs text-muted"><input type="checkbox" checked={onlyFailed} onChange={(e) => setOnlyFailed(e.target.checked)} /> Show only failed</label>
+            {failedNums.length > 0 && (
+              <button onClick={() => onResend(failedNums)} disabled={busy} className="btn btn-secondary ml-auto text-xs"><RotateCcw size={12} /> Resend to {failedNums.length} failed</button>
+            )}
+          </div>
+          <div className="max-h-72 overflow-y-auto rounded-xl border border-line">
+            <table className="w-full text-left text-sm">
+              <thead><tr className="border-b border-line text-xs uppercase tracking-wide text-muted"><th className="px-3 py-2">Name</th><th className="px-3 py-2">Mobile</th><th className="px-3 py-2">Status</th></tr></thead>
+              <tbody>
+                {shown.length === 0 ? <tr><td colSpan={3} className="p-4 text-center text-xs text-muted">No recipients.</td></tr> : shown.slice(0, 800).map((r, i) => (
+                  <tr key={`${r.mobile}-${i}`} className="border-b border-line/60 last:border-0">
+                    <td className="px-3 py-1.5 truncate text-ink2">{r.name || "—"}</td>
+                    <td className="px-3 py-1.5 font-mono text-xs text-muted">{r.mobile}</td>
+                    <td className={`px-3 py-1.5 font-semibold ${STATUS_TONE[r.status] || ""}`}>{r.status}{r.error && r.status === "FAILED" ? <span className="ml-1 font-normal text-xs text-muted">({r.error})</span> : ""}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="text-xs text-muted">Resend-to-failed re-runs the same audience for just the failed numbers — all caps, the DLT/approved-template gate, the kill-switch, the balance guard and in-batch dedupe still apply (a delivered number is never re-texted).</p>
+        </>
+      )}
     </div>
   );
 }
