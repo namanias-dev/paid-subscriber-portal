@@ -12,7 +12,7 @@ import {
   getAllCourses, getAllCourseEnrollments,
 } from "../dataProvider";
 import { isPaidStatus, dedupePaidRows, itemKey } from "../paymentsAgg";
-import { firstNamesMatch } from "./store";
+import { firstNamesMatch, optedOutSet } from "./store";
 import type { RelatedEntity } from "./service";
 import type { Payment } from "../types";
 
@@ -151,13 +151,17 @@ export async function resolveAudience(spec: AudienceSpec): Promise<Recipient[]> 
 }
 
 /**
- * FUTURE opt-out / DND suppression list slots in HERE — one central hook applied
- * to EVERY resolved audience (manual, filtered, cron, resend) right before send.
- * Today it's a no-op pass-through so behavior is unchanged; when a suppression
- * table exists, drop the filter in here and it covers all send paths at once.
+ * Opt-out / DND suppression, applied centrally to EVERY resolved audience
+ * (manual, filtered, cron, resend) so previews and counts reflect the real
+ * deliverable set. The service layer (sendSms / sendBatch) re-checks the same
+ * list at send time — this is defence-in-depth, not the only gate. Fail-open on
+ * infra error (optedOutSet returns empty), never fail-closed on legitimate sends.
  */
 async function applySuppression(recips: Recipient[]): Promise<Recipient[]> {
-  return recips;
+  if (!recips.length) return recips;
+  const blocked = await optedOutSet(recips.map((r) => r.normalized));
+  if (!blocked.size) return recips;
+  return recips.filter((r) => !blocked.has(r.normalized));
 }
 
 type BuyerMap = Map<string, { name: string | null; login_code: string | null; ambiguous: boolean }>;

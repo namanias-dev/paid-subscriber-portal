@@ -94,6 +94,8 @@ export interface SmsSettings {
   t19OffsetMinutes: number;
   /** When attendance is unknown, fall back to ALL registered for T19. */
   t19FallbackAllRegistered: boolean;
+  /** Rupee cost per SMS segment (1 credit). Manually set in Mission Control; used for cost estimates. */
+  costPerSms: number;
   updated_at?: string;
   updated_by?: string | null;
 }

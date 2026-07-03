@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { requirePermission } from "@/lib/adminGuard";
 import { resolveAudience, type AudienceSpec } from "@/lib/sms/audiences";
 import { mergeSendVars, withDerivedVars } from "@/lib/sms/service";
-import { getTemplate } from "@/lib/sms/store";
+import { getTemplate, getSettings } from "@/lib/sms/store";
 import { getResolvedDefaults } from "@/lib/sms/variables";
 import { renderTemplate, validateBody, WORST_SAMPLE } from "@/lib/sms/templates";
 
@@ -31,8 +31,9 @@ export async function POST(req: Request) {
   const tpl = await getTemplate(templateId);
   if (!tpl) return NextResponse.json({ ok: false, error: "Template not found" }, { status: 404 });
 
-  const [recipients, storeDefaults] = await Promise.all([resolveAudience(spec), getResolvedDefaults(templateId)]);
+  const [recipients, storeDefaults, settings] = await Promise.all([resolveAudience(spec), getResolvedDefaults(templateId), getSettings()]);
   const total = recipients.length;
+  const costPerSms = settings.costPerSms ?? 0.13;
 
   const dlt = {
     id: tpl.gateway_template_id,
@@ -41,20 +42,29 @@ export async function POST(req: Request) {
     messageType: tpl.message_type,
   };
 
-  // Audience-wide coverage: render each recipient with REAL + store (no sample)
-  // and count who would actually send. CPU-only — store defaults fetched once.
+  // Audience-wide coverage + cost: render each recipient with REAL + store (no
+  // sample), count who would actually send and sum their segments (=credits).
+  // CPU-only — store defaults fetched once.
   let deliverable = 0;
+  let totalSegments = 0;
   const reasons: Record<string, number> = {};
   for (const r of recipients) {
     const merged = mergeSendVars(templateId, storeDefaults, r.vars);
-    const { missing } = renderTemplate(tpl.body_template, merged);
-    if (missing.length) { reasons.missing_vars = (reasons.missing_vars || 0) + 1; continue; }
-    if (!validateBody(renderTemplate(tpl.body_template, merged).text).ok) { reasons.invalid_body = (reasons.invalid_body || 0) + 1; continue; }
+    const rendered = renderTemplate(tpl.body_template, merged);
+    if (rendered.missing.length) { reasons.missing_vars = (reasons.missing_vars || 0) + 1; continue; }
+    const v = validateBody(rendered.text);
+    if (!v.ok) { reasons.invalid_body = (reasons.invalid_body || 0) + 1; continue; }
     deliverable++;
+    totalSegments += v.analysis.segments;
   }
+  const cost = {
+    costPerSms,
+    credits: totalSegments,
+    estimate: Math.round(totalSegments * costPerSms * 100) / 100,
+  };
 
   if (total === 0) {
-    return NextResponse.json({ ok: true, total: 0, index: 0, dlt, recipient: null, vars: [], text: "", chars: 0, segments: 0, deliverable: 0, coverage: { total: 0, deliverable: 0, skipped: 0, reasons } });
+    return NextResponse.json({ ok: true, total: 0, index: 0, dlt, recipient: null, vars: [], text: "", chars: 0, segments: 0, deliverable: 0, cost, coverage: { total: 0, deliverable: 0, skipped: 0, reasons } });
   }
 
   const idx = Math.min(index, total - 1);
@@ -99,6 +109,7 @@ export async function POST(req: Request) {
     gsm: analysis.gsm,
     deliverable: realMissing.length === 0,
     missingForRecipient: realMissing,
+    cost,
     coverage: { total, deliverable, skipped: total - deliverable, reasons },
   });
 }

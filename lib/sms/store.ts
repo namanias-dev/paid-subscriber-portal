@@ -41,6 +41,8 @@ export const DEFAULT_SETTINGS = (): SmsSettings => ({
   // Attendees-only by default: if attendance is unknown for a webinar, T19 sends
   // to NOBODY rather than blasting all registered. Flip on per preference.
   t19FallbackAllRegistered: false,
+  // Rupee cost per SMS segment (current JustGoSMS rate). Editable in Settings.
+  costPerSms: 0.13,
 });
 
 // ---------------------------------------------------------------------------
@@ -372,6 +374,70 @@ export async function deleteSavedAudience(id: string): Promise<boolean> {
   const db = getSupabaseAdmin();
   if (!db) { const d = demoSaved(); const n = d.rows.length; d.rows = d.rows.filter((r) => r.id !== clean); return d.rows.length < n; }
   try { await db.from("sms_saved_audiences").delete().eq("id", clean); return true; } catch { return false; }
+}
+
+// ---------------------------------------------------------------------------
+// OPT-OUT / DND SUPPRESSION (compliance) — enforced on EVERY send path.
+// Fail-open on infra error (never block a legitimate send because the table is
+// unreachable); the suppression is a filter, not a gate.
+// ---------------------------------------------------------------------------
+export interface OptOut { normalized_mobile: string; reason: string | null; source: string; created_by: string | null; created_at: string }
+
+interface DemoOpt { rows: OptOut[] }
+function demoOpt(): DemoOpt {
+  const g = globalThis as unknown as { __smsOptOuts?: DemoOpt };
+  if (!g.__smsOptOuts) g.__smsOptOuts = { rows: [] };
+  return g.__smsOptOuts;
+}
+const norm10 = (m: string) => (m || "").replace(/\D/g, "").slice(-10);
+
+export async function listOptOuts(): Promise<OptOut[]> {
+  const db = getSupabaseAdmin();
+  if (!db) return [...demoOpt().rows];
+  try {
+    const { data } = await db.from("sms_opt_outs").select("*").order("created_at", { ascending: false });
+    return (data || []).map((r: Row) => ({ normalized_mobile: String(r.normalized_mobile), reason: (r.reason as string) ?? null, source: String(r.source || "manual"), created_by: (r.created_by as string) ?? null, created_at: String(r.created_at || nowISO()) }));
+  } catch { return []; }
+}
+
+/** Upsert an opt-out. An inbound STOP webhook calls this with source='sms_stop'. */
+export async function addOptOut(mobile: string, reason?: string | null, source = "manual", createdBy?: string | null): Promise<boolean> {
+  const n = norm10(mobile);
+  if (n.length !== 10) return false;
+  const db = getSupabaseAdmin();
+  if (!db) { const d = demoOpt(); if (!d.rows.some((r) => r.normalized_mobile === n)) d.rows.unshift({ normalized_mobile: n, reason: reason ?? null, source, created_by: createdBy ?? null, created_at: nowISO() }); return true; }
+  try { await db.from("sms_opt_outs").upsert({ normalized_mobile: n, reason: reason ?? null, source, created_by: createdBy ?? null }); return true; } catch { return false; }
+}
+
+export async function removeOptOut(mobile: string): Promise<boolean> {
+  const n = norm10(mobile);
+  if (n.length !== 10) return false;
+  const db = getSupabaseAdmin();
+  if (!db) { const d = demoOpt(); d.rows = d.rows.filter((r) => r.normalized_mobile !== n); return true; }
+  try { await db.from("sms_opt_outs").delete().eq("normalized_mobile", n); return true; } catch { return false; }
+}
+
+/** Is ONE number opted out? Fail-open (false) on error. */
+export async function isOptedOut(mobile: string): Promise<boolean> {
+  const n = norm10(mobile);
+  if (n.length !== 10) return false;
+  const db = getSupabaseAdmin();
+  if (!db) return demoOpt().rows.some((r) => r.normalized_mobile === n);
+  try { const { count } = await db.from("sms_opt_outs").select("normalized_mobile", { count: "exact", head: true }).eq("normalized_mobile", n); return (count || 0) > 0; } catch { return false; }
+}
+
+/** Subset of `numbers` that are opted out, in ONE query (batch screening). Fail-open (empty). */
+export async function optedOutSet(numbers: string[]): Promise<Set<string>> {
+  const nums = [...new Set(numbers.map(norm10).filter((x) => x.length === 10))];
+  const out = new Set<string>();
+  if (!nums.length) return out;
+  const db = getSupabaseAdmin();
+  if (!db) { for (const r of demoOpt().rows) if (nums.includes(r.normalized_mobile)) out.add(r.normalized_mobile); return out; }
+  try {
+    const { data } = await db.from("sms_opt_outs").select("normalized_mobile").in("normalized_mobile", nums);
+    for (const r of (data || []) as Row[]) out.add(String(r.normalized_mobile));
+    return out;
+  } catch { return out; }
 }
 
 // ---------------------------------------------------------------------------

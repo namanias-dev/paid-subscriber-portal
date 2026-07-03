@@ -23,6 +23,7 @@ export async function PATCH(req: Request) {
   if (typeof body.windowEnd === "string") patch.windowEnd = body.windowEnd;
   if (body.t19OffsetMinutes !== undefined) patch.t19OffsetMinutes = Math.max(0, Number(body.t19OffsetMinutes) || 0);
   if (body.t19FallbackAllRegistered !== undefined) patch.t19FallbackAllRegistered = !!body.t19FallbackAllRegistered;
+  if (body.costPerSms !== undefined) patch.costPerSms = Math.max(0, Number(body.costPerSms) || 0);
   const settings = await updateSettings(patch, await currentAdminId());
   return NextResponse.json({ ok: true, settings });
 }

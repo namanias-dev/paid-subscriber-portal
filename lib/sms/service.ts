@@ -8,7 +8,7 @@
  */
 import { normalizeIndianMobile } from "../phone";
 import { renderTemplate, validateBody } from "./templates";
-import { getTemplate, getSettings, insertQueuedLog, updateLog, countSentSince, recentSameTemplate, recentTemplateHits, countsByMobileSince, listLogs } from "./store";
+import { getTemplate, getSettings, insertQueuedLog, updateLog, countSentSince, recentSameTemplate, recentTemplateHits, countsByMobileSince, listLogs, isOptedOut, optedOutSet } from "./store";
 import { sendViaGateway, sendBulkViaGateway, fetchDeliveryStatuses, checkBalance, type DeliveryLine } from "./gateway";
 import { gatewayConfigured, smsEnvEnabled, loginUrlForTemplate, bulkChunkSize, SMS_DEFAULT_SENDER_ID, SMS_DEFAULT_ROUTE } from "./config";
 import { getResolvedDefaults } from "./variables";
@@ -165,6 +165,9 @@ export async function sendSms(input: SendSmsInput): Promise<SendSmsResult> {
   const n = normalizeIndianMobile(input.mobile);
   if (!n.ok || !n.digits10) return { ok: false, skipped: "invalid_mobile", error: n.error };
   const normalized = n.digits10;
+
+  // 3b. opt-out / DND suppression — compliance, enforced on EVERY send path.
+  if (await isOptedOut(normalized)) return { ok: false, skipped: "opted_out" };
 
   // 4. render + validate (variable store: global + per-template overrides)
   const filled = await resolveSendVars(input.templateId, input.variables || {});
@@ -324,14 +327,17 @@ export async function sendBatch(input: {
   }
 
   const numbers = normList.map((r) => r.normalized);
-  const [varDefaults, recentHits, perMobileCounts] = await Promise.all([
+  const [varDefaults, recentHits, perMobileCounts, optedOut] = await Promise.all([
     getResolvedDefaults(input.templateId),
     input.allowRecentOverride ? Promise.resolve(new Set<string>()) : recentTemplateHits(numbers, input.templateId, SAME_TRIGGER_WINDOW_MIN),
     settings.perMobileDailyCap > 0 ? countsByMobileSince(since, numbers) : Promise.resolve(new Map<string, number>()),
+    optedOutSet(numbers),
   ]);
 
   const eligible: ScreenedRecipient[] = [];
   for (const r of normList) {
+    // Opt-out / DND suppression — compliance, checked before anything else sends.
+    if (optedOut.has(r.normalized)) { skip("opted_out"); continue; }
     const filled = mergeSendVars(input.templateId, varDefaults, r.variables);
     const { text, missing } = renderTemplate(t.body_template, filled);
     if (missing.length) { skip("missing_vars"); continue; }
