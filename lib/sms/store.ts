@@ -319,6 +319,62 @@ export async function listLogsByCampaign(campaignId: string): Promise<SmsLog[]> 
 }
 
 // ---------------------------------------------------------------------------
+// SAVED AUDIENCES (composable filter combinations a marketer can reload)
+// Stores only the FilterSpec — never a frozen recipient list — so a reloaded
+// audience always re-resolves against live data. Service-role only.
+// ---------------------------------------------------------------------------
+export interface SavedAudience {
+  id: string;
+  name: string;
+  spec: Record<string, unknown>;
+  created_by: string | null;
+  created_at: string;
+}
+
+interface DemoSaved { rows: SavedAudience[] }
+function demoSaved(): DemoSaved {
+  const g = globalThis as unknown as { __smsSaved?: DemoSaved };
+  if (!g.__smsSaved) g.__smsSaved = { rows: [] };
+  return g.__smsSaved;
+}
+
+export async function listSavedAudiences(): Promise<SavedAudience[]> {
+  const db = getSupabaseAdmin();
+  if (!db) return [...demoSaved().rows];
+  try {
+    const { data } = await db.from("sms_saved_audiences").select("*").order("created_at", { ascending: false });
+    return (data || []).map((r: Row) => ({
+      id: String(r.id), name: String(r.name), spec: (r.spec as Record<string, unknown>) || {},
+      created_by: (r.created_by as string) ?? null, created_at: String(r.created_at || nowISO()),
+    }));
+  } catch { return []; }
+}
+
+export async function createSavedAudience(name: string, spec: Record<string, unknown>, createdBy?: string | null): Promise<SavedAudience | null> {
+  const clean = (name || "").trim().slice(0, 80);
+  if (!clean) return null;
+  const db = getSupabaseAdmin();
+  if (!db) {
+    const row: SavedAudience = { id: `demo-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, name: clean, spec, created_by: createdBy ?? null, created_at: nowISO() };
+    demoSaved().rows.unshift(row);
+    return row;
+  }
+  try {
+    const { data, error } = await db.from("sms_saved_audiences").insert({ name: clean, spec, created_by: createdBy ?? null }).select("*").single();
+    if (error || !data) return null;
+    return { id: String(data.id), name: String(data.name), spec: (data.spec as Record<string, unknown>) || {}, created_by: (data.created_by as string) ?? null, created_at: String(data.created_at) };
+  } catch { return null; }
+}
+
+export async function deleteSavedAudience(id: string): Promise<boolean> {
+  const clean = (id || "").trim();
+  if (!clean) return false;
+  const db = getSupabaseAdmin();
+  if (!db) { const d = demoSaved(); const n = d.rows.length; d.rows = d.rows.filter((r) => r.id !== clean); return d.rows.length < n; }
+  try { await db.from("sms_saved_audiences").delete().eq("id", clean); return true; } catch { return false; }
+}
+
+// ---------------------------------------------------------------------------
 // LOGS
 // ---------------------------------------------------------------------------
 export interface NewLog {
