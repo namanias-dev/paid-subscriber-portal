@@ -77,19 +77,28 @@ a {
 }
 
 /* ============================================================
-   Payments & Finance — premium staggered entrance.
+   Payments & Finance — premium staggered 3D entrance.
    GPU-composited only (transform + opacity → no layout/paint/reflow,
-   no CLS since layout boxes are unchanged). Top-level sections cascade
-   in on mount with a short ~50ms stagger. Content stays interactive
-   throughout. Fully disabled under prefers-reduced-motion (content
-   simply appears, no delay, no transform).
+   no CLS since layout boxes are unchanged). Top-level sections settle
+   in on mount with a subtle perspective tilt (rotateX/translateZ) and a
+   short ~50ms stagger — restrained depth, no spins/flips. The wrapper's
+   `perspective` makes the children's translateZ/rotateX read as real depth.
+   Fires ONCE on mount: children persist across filter/timeframe changes,
+   so re-renders never replay it. Content stays interactive throughout.
+   Fully disabled under prefers-reduced-motion (content simply appears).
    ============================================================ */
+.pay-stagger {
+  perspective: 1200px;
+  perspective-origin: 50% 0%;
+}
 @keyframes payEnter {
-  from { opacity: 0; transform: translateY(14px) scale(0.985); }
-  to { opacity: 1; transform: translateY(0) scale(1); }
+  from { opacity: 0; transform: translateY(16px) translateZ(-42px) rotateX(7deg) scale(0.985); }
+  to   { opacity: 1; transform: translateY(0) translateZ(0) rotateX(0deg) scale(1); }
 }
 .pay-stagger > * {
-  animation: payEnter 0.34s cubic-bezier(0.22, 1, 0.36, 1) both;
+  transform-origin: 50% 100%;
+  backface-visibility: hidden;
+  animation: payEnter 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 .pay-stagger > *:nth-child(1) { animation-delay: 0ms; }
 .pay-stagger > *:nth-child(2) { animation-delay: 50ms; }
@@ -103,7 +112,8 @@ a {
 /* Cap later (mostly below-the-fold) sections so the last never feels like a wait. */
 .pay-stagger > *:nth-child(n+10) { animation-delay: 440ms; }
 @media (prefers-reduced-motion: reduce) {
-  .pay-stagger > * { animation: none !important; }
+  .pay-stagger { perspective: none; }
+  .pay-stagger > * { animation: none !important; transform: none !important; }
 }
 
 @layer components {

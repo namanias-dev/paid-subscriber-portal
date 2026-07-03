@@ -122,7 +122,7 @@ export default function WebinarSourceBreakdown({ payments }: { payments: Payment
       <button
         type="button"
         onClick={() => { setFrame("7d"); setOpen(true); }}
-        className="card flex w-full items-center gap-4 p-4 text-left transition hover:shadow-md"
+        className="card flex w-full items-center gap-4 p-4 text-left transition-[transform,box-shadow] duration-200 ease-out hover:-translate-y-0.5 hover:shadow-lg motion-reduce:transform-none motion-reduce:transition-none"
         title="View paid registrations by source"
       >
         <div className="min-w-0">
