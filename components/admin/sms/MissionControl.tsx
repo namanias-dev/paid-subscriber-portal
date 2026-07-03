@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, BarChart, Bar } from "recharts";
-import { Activity, Send, Workflow, FileText, ScrollText, BarChart3, Settings as SettingsIcon, RefreshCw, Download, AlertTriangle, CheckCircle2, Power } from "lucide-react";
+import { Activity, Send, Workflow, FileText, ScrollText, BarChart3, Settings as SettingsIcon, RefreshCw, Download, AlertTriangle, CheckCircle2, Power, Braces, Link2, RotateCcw } from "lucide-react";
 import { LoadingBlock } from "@/components/admin/ui";
 import { useToast } from "@/components/ui/Toast";
 import { formatISTDateTime } from "@/lib/dates";
@@ -31,6 +31,7 @@ const TABS = [
   { id: "send", label: "Send SMS", icon: Send },
   { id: "automations", label: "Automations", icon: Workflow },
   { id: "templates", label: "Templates", icon: FileText },
+  { id: "variables", label: "Variables", icon: Braces },
   { id: "logs", label: "Logs", icon: ScrollText },
   { id: "analytics", label: "Analytics", icon: BarChart3 },
   { id: "settings", label: "Settings", icon: SettingsIcon },
@@ -70,6 +71,7 @@ export default function MissionControl() {
       {tab === "send" && <SendTab meta={meta} />}
       {tab === "automations" && <AutomationsTab canEdit={!!meta?.isSuperAdmin} />}
       {tab === "templates" && <TemplatesTab canEdit={!!meta?.isSuperAdmin} />}
+      {tab === "variables" && <VariablesTab canEdit={!!meta?.isSuperAdmin} />}
       {tab === "logs" && <LogsTab />}
       {tab === "analytics" && <AnalyticsTab />}
       {tab === "settings" && <SettingsTab canEdit={!!meta?.isSuperAdmin} />}
@@ -414,6 +416,166 @@ function TemplateEditor({ t, canEdit, onClose, onSaved }: { t: TemplateRow; canE
           {canEdit && <button onClick={save} disabled={busy} className="btn btn-primary">{busy ? "…" : "Save"}</button>}
         </div>
       </div>
+    </div>
+  );
+}
+
+// ============================ VARIABLES ============================
+interface GlobalVar {
+  key: string; label: string; kind: string; description: string;
+  value: string; effective: string; isDefault: boolean;
+  updated_by: string | null; updated_at: string | null;
+  usedBy: { id: string; name: string }[];
+}
+interface TplVars {
+  id: string; name: string; use_case: string; variables: string[];
+  overrides: Record<string, string>; updated_by: string | null; updated_at: string | null;
+}
+
+function isHttpUrl(v: string): boolean {
+  try { const u = new URL(v); return u.protocol === "http:" || u.protocol === "https:"; } catch { return false; }
+}
+
+function VariablesTab({ canEdit }: { canEdit: boolean }) {
+  const { toast } = useToast();
+  const [globals, setGlobals] = useState<GlobalVar[]>([]);
+  const [templates, setTemplates] = useState<TplVars[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const load = useCallback(() => {
+    setLoading(true);
+    fetch("/api/admin/sms/variables").then((r) => r.json())
+      .then((d) => { if (d.ok) { setGlobals(d.globals); setTemplates(d.templates); } })
+      .finally(() => setLoading(false));
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const save = useCallback(async (scope: string, key: string, value: string) => {
+    const r = await fetch("/api/admin/sms/variables", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ scope, key, value }) }).then((x) => x.json());
+    if (r.ok) { toast("Saved — new sends and previews use this value immediately.", "success"); load(); }
+    else toast(r.error || "Save failed", "error");
+    return !!r.ok;
+  }, [toast, load]);
+
+  if (loading) return <LoadingBlock />;
+
+  return (
+    <div className="space-y-6">
+      <div className="rounded-xl border border-line bg-surface p-3 text-xs text-muted">
+        Variables fill the <code className="font-mono">{"{token}"}</code> slots inside template bodies at send time. Change a value here and it applies to the next send and to Send&nbsp;→&nbsp;Preview — no code change or redeploy. <span className="text-ink2">Global</span> values are shared across templates; <span className="text-ink2">per-template</span> overrides win over the global.
+      </div>
+      {!canEdit && <p className="text-xs text-amber-700">Only a Super Admin can edit variables. Values below are read-only.</p>}
+
+      <section className="space-y-3">
+        <h2 className="font-heading text-xs font-bold uppercase tracking-wide text-muted">Global variables</h2>
+        {globals.length === 0 ? <p className="text-sm text-muted">No global variables.</p> : globals.map((g) => (
+          <GlobalVarRow key={g.key} g={g} canEdit={canEdit} onSave={save} />
+        ))}
+      </section>
+
+      <PerTemplateOverrides templates={templates} canEdit={canEdit} onSave={save} />
+    </div>
+  );
+}
+
+function GlobalVarRow({ g, canEdit, onSave }: { g: GlobalVar; canEdit: boolean; onSave: (scope: string, key: string, value: string) => Promise<boolean>; }) {
+  const [val, setVal] = useState(g.value || "");
+  const [busy, setBusy] = useState(false);
+  const [showUsers, setShowUsers] = useState(false);
+  useEffect(() => { setVal(g.value || ""); }, [g.value]);
+
+  const dirty = val.trim() !== (g.value || "").trim();
+  const invalid = g.kind === "url" && val.trim() !== "" && !isHttpUrl(val.trim());
+
+  async function commit(value: string) { setBusy(true); await onSave("global", g.key, value); setBusy(false); }
+
+  return (
+    <div className="card space-y-3 p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="flex items-center gap-1.5 text-sm font-semibold">
+            {g.kind === "url" && <Link2 size={14} className="text-muted" />}{g.label}
+            <code className="rounded bg-surface2 px-1 py-0.5 font-mono text-[11px] text-ink2">{`{${g.key}}`}</code>
+          </p>
+          <p className="mt-0.5 text-xs text-muted">{g.description}</p>
+        </div>
+        <span className={`pill shrink-0 text-[10px] ${g.isDefault ? "pill-gray" : "pill-green"}`}>{g.isDefault ? "using default" : "custom"}</span>
+      </div>
+
+      <div className="flex flex-col gap-2 sm:flex-row">
+        <input className="input font-mono text-sm" value={val} onChange={(e) => setVal(e.target.value)} disabled={!canEdit || busy} placeholder={g.effective} />
+        <div className="flex gap-2">
+          <button onClick={() => commit(val.trim())} disabled={!canEdit || busy || !dirty || invalid} className="btn btn-primary shrink-0">{busy ? "…" : "Save"}</button>
+          {!g.isDefault && <button onClick={() => commit("")} disabled={!canEdit || busy} className="btn btn-secondary shrink-0" title="Revert to default"><RotateCcw size={14} /></button>}
+        </div>
+      </div>
+      {invalid && <p className="text-xs text-danger">Enter a well-formed http(s) URL.</p>}
+
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted">
+        <span>Effective now: <code className="font-mono text-ink2">{g.effective}</code></span>
+        {g.updated_at && <span>· Updated {g.updated_by ? `by ${g.updated_by} ` : ""}{formatISTDateTime(g.updated_at)}</span>}
+      </div>
+
+      <div>
+        <button onClick={() => setShowUsers((s) => !s)} className="text-xs font-medium text-primary">
+          Used by {g.usedBy.length} template{g.usedBy.length === 1 ? "" : "s"} {showUsers ? "▲" : "▼"}
+        </button>
+        {showUsers && (
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {g.usedBy.length === 0 ? <span className="text-xs text-muted">None.</span> : g.usedBy.map((t) => <span key={t.id} className="pill pill-blue text-[10px]">{t.name}</span>)}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function PerTemplateOverrides({ templates, canEdit, onSave }: { templates: TplVars[]; canEdit: boolean; onSave: (scope: string, key: string, value: string) => Promise<boolean>; }) {
+  const withVars = templates.filter((t) => t.variables.length > 0);
+  const [tid, setTid] = useState("");
+  const sel = withVars.find((t) => t.id === tid);
+
+  return (
+    <section className="space-y-3">
+      <h2 className="font-heading text-xs font-bold uppercase tracking-wide text-muted">Per-template overrides</h2>
+      <p className="text-xs text-muted">Optional. Override a variable for ONE template (wins over the global). Leave blank to inherit the global / default.</p>
+      <select className="input max-w-sm" value={tid} onChange={(e) => setTid(e.target.value)}>
+        <option value="">Select a template…</option>
+        {withVars.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+      </select>
+      {sel && (
+        <div className="card space-y-3 p-4">
+          <p className="text-xs text-muted">{sel.name} · variables: {sel.variables.join(", ")}</p>
+          {sel.variables.map((k) => (
+            <TplVarRow key={`${sel.id}:${k}`} tid={sel.id} k={k} value={sel.overrides[k] || ""} canEdit={canEdit} onSave={onSave} />
+          ))}
+          {sel.updated_at && <p className="text-xs text-muted">Overrides updated {sel.updated_by ? `by ${sel.updated_by} ` : ""}{formatISTDateTime(sel.updated_at)}</p>}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function TplVarRow({ tid, k, value, canEdit, onSave }: { tid: string; k: string; value: string; canEdit: boolean; onSave: (scope: string, key: string, value: string) => Promise<boolean>; }) {
+  const [val, setVal] = useState(value);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { setVal(value); }, [value, tid]);
+
+  const dirty = val.trim() !== value.trim();
+  const looksUrl = k === "login_url" || k.endsWith("_url");
+  const invalid = looksUrl && val.trim() !== "" && !isHttpUrl(val.trim());
+
+  async function commit(v: string) { setBusy(true); await onSave(tid, k, v); setBusy(false); }
+
+  return (
+    <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+      <code className="shrink-0 font-mono text-xs text-ink2 sm:w-36">{`{${k}}`}</code>
+      <input className="input font-mono text-sm" value={val} onChange={(e) => setVal(e.target.value)} disabled={!canEdit || busy} placeholder="inherit global / default" />
+      <div className="flex gap-2">
+        <button onClick={() => commit(val.trim())} disabled={!canEdit || busy || !dirty || invalid} className="btn btn-primary shrink-0">{busy ? "…" : "Save"}</button>
+        {value && <button onClick={() => commit("")} disabled={!canEdit || busy} className="btn btn-secondary shrink-0" title="Clear override"><RotateCcw size={14} /></button>}
+      </div>
+      {invalid && <p className="text-xs text-danger">Well-formed http(s) URL required.</p>}
     </div>
   );
 }

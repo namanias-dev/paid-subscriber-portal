@@ -11,6 +11,7 @@ import { renderTemplate, validateBody } from "./templates";
 import { getTemplate, getSettings, insertQueuedLog, updateLog, countSentSince, recentSameTemplate, listLogs } from "./store";
 import { sendViaGateway, fetchDeliveryStatus } from "./gateway";
 import { gatewayConfigured, smsEnvEnabled, loginUrlForTemplate, SMS_DEFAULT_SENDER_ID, SMS_DEFAULT_ROUTE } from "./config";
+import { getResolvedDefaults } from "./variables";
 import type { SmsLog, SmsLogStatus } from "./types";
 
 const SAME_TRIGGER_WINDOW_MIN = 30;
@@ -74,11 +75,28 @@ export function withDerivedVars(templateId: string, vars: Record<string, string 
   return out;
 }
 
+/**
+ * Merge the editable variable store (global + per-template) UNDER the caller's
+ * explicit variables, then apply the derived defaults. Precedence, high→low:
+ *   1 explicit recipient data (non-empty)  2 per-template override  3 global
+ *   4 config/env default (via getResolvedDefaults + withDerivedVars).
+ * This is what makes a rotated login_url take effect on the next send/preview
+ * with no code change. Absent/empty explicit values never clobber the store.
+ */
+async function resolveSendVars(templateId: string, vars: Record<string, string | number | null | undefined> = {}): Promise<Record<string, string | number | null | undefined>> {
+  const defaults = await getResolvedDefaults(templateId);
+  const merged: Record<string, string | number | null | undefined> = { ...defaults };
+  for (const [k, val] of Object.entries(vars)) {
+    if (val !== undefined && val !== null && String(val).trim() !== "") merged[k] = val;
+  }
+  return withDerivedVars(templateId, merged);
+}
+
 /** Render + validate without sending (preview / dispatch dry-run). */
 export async function previewSms(templateId: string, vars: Record<string, string | number | null | undefined>): Promise<{ ok: boolean; text: string; missing: string[]; errors: string[]; warnings: string[]; length: number; segments: number } | null> {
   const t = await getTemplate(templateId);
   if (!t) return null;
-  const filled = withDerivedVars(templateId, vars);
+  const filled = await resolveSendVars(templateId, vars);
   const { text, missing } = renderTemplate(t.body_template, filled);
   const v = validateBody(text);
   return { ok: v.ok && missing.length === 0, text, missing, errors: v.errors, warnings: v.warnings, length: v.analysis.length, segments: v.analysis.segments };
@@ -102,8 +120,8 @@ export async function sendSms(input: SendSmsInput): Promise<SendSmsResult> {
   if (!n.ok || !n.digits10) return { ok: false, skipped: "invalid_mobile", error: n.error };
   const normalized = n.digits10;
 
-  // 4. render + validate
-  const filled = withDerivedVars(input.templateId, input.variables || {});
+  // 4. render + validate (variable store: global + per-template overrides)
+  const filled = await resolveSendVars(input.templateId, input.variables || {});
   const { text, missing } = renderTemplate(t.body_template, filled);
   if (missing.length) return { ok: false, skipped: "missing_vars", error: missing.join(", ") };
   const v = validateBody(text);
