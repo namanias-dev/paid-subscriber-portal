@@ -36,6 +36,12 @@ export async function POST(req: Request) {
   const usedToday = await countSentSince(since);
   const remainingDaily = settings.dailyCap > 0 ? Math.max(0, settings.dailyCap - usedToday) : null;
 
+  // WHO: optional recipient list (name + number) for the searchable/scrollable
+  // preview. Off by default to keep count-only previews light.
+  const list = body.includeList
+    ? recipients.map((r) => ({ mobile: r.normalized, name: r.name }))
+    : undefined;
+
   return NextResponse.json({
     ok: true,
     count: blocked ? 0 : recipients.length,
@@ -48,6 +54,7 @@ export async function POST(req: Request) {
     remainingDaily,
     willExceedDaily: remainingDaily !== null && recipients.length > remainingDaily,
     preview,
+    recipients: blocked ? [] : list,
   });
 }
 

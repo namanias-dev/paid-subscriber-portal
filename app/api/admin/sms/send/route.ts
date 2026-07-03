@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { randomUUID } from "crypto";
 import { requirePermission, requireSuperAdmin, currentAdminId } from "@/lib/adminGuard";
 import { resolveAudience, type AudienceSpec } from "@/lib/sms/audiences";
 import { sendBatch, toGatewayScheduleTime } from "@/lib/sms/service";
@@ -39,6 +40,11 @@ export async function POST(req: Request) {
   // Optional deferred send (IST). Invalid/past → null → immediate send.
   const scheduleTime = toGatewayScheduleTime(body.scheduleAt as string | undefined);
 
+  // One campaign id groups every log from this send so the UI can show live
+  // per-recipient status and resend-to-failed. A caller may pass its own (used by
+  // resend to keep the retry on its own campaign); otherwise we mint one.
+  const campaignId = (typeof body.campaignId === "string" && body.campaignId) || randomUUID();
+
   // sendBatch auto-routes to the correct endpoint (single / PUSH-BULK for
   // identical bodies / per-recipient fan-out for personalized) and enforces every
   // safeguard + the pre-batch balance guard before sending.
@@ -49,9 +55,11 @@ export async function POST(req: Request) {
     audienceType: spec.type,
     allowRecentOverride,
     scheduleTime,
+    campaignId,
   });
   return NextResponse.json({
     ok: true,
+    campaignId,
     requested: res.requested, sent: res.sent, failed: res.failed, skipped: res.skipped,
     mode: res.mode, batches: res.batches, balance: res.balance,
     scheduledFor: scheduleTime,

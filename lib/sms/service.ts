@@ -285,6 +285,8 @@ export async function sendBatch(input: {
   allowRecentOverride?: boolean;
   enforceWindow?: boolean;
   scheduleTime?: string | null;
+  /** Stamps every log in this send so the UI can track per-recipient status + resend-to-failed. */
+  campaignId?: string | null;
 }): Promise<BatchResult> {
   const out: BatchResult = { requested: input.recipients.length, sent: 0, failed: 0, skipped: {}, mode: "none", batches: 0, balance: null };
   const skip = (k: string, n = 1) => { out.skipped[k] = (out.skipped[k] || 0) + n; };
@@ -362,7 +364,8 @@ export async function sendBatch(input: {
     sender_id: t.sender_id || SMS_DEFAULT_SENDER_ID, route: t.route || SMS_DEFAULT_ROUTE,
     message_body: e.text, character_count: e.chars, segments: e.segments,
     sent_by_user_id: input.sentBy.userId ?? null, sent_by_type: input.sentBy.type,
-    trigger_event: null, audience_type: input.audienceType ?? null, dedupe_key: null, status: "QUEUED" as const,
+    trigger_event: null, audience_type: input.audienceType ?? null, dedupe_key: null,
+    campaign_id: input.campaignId ?? null, status: "QUEUED" as const,
   });
 
   // ---- route: identical body → BULK; else per-recipient fan-out ----

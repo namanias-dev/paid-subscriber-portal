@@ -297,6 +297,27 @@ export async function findLogsByMessageIds(variants: string[]): Promise<SmsLog[]
   }
 }
 
+/** All logs for one campaign (live send-status view + resend-to-failed). Newest first. */
+export async function listLogsByCampaign(campaignId: string): Promise<SmsLog[]> {
+  const id = (campaignId || "").trim();
+  if (!id) return [];
+  const db = getSupabaseAdmin();
+  if (!db) return demo().logs.filter((l) => l.campaign_id === id);
+  const out: SmsLog[] = [];
+  const PAGE = 1000;
+  try {
+    for (let from = 0; ; from += PAGE) {
+      const { data, error } = await db.from("sms_logs").select("*").eq("campaign_id", id)
+        .order("created_at", { ascending: true }).range(from, from + PAGE - 1);
+      if (error) break;
+      const rows = (data || []) as SmsLog[];
+      out.push(...rows);
+      if (rows.length < PAGE) break;
+    }
+    return out;
+  } catch { return out; }
+}
+
 // ---------------------------------------------------------------------------
 // LOGS
 // ---------------------------------------------------------------------------
@@ -308,6 +329,7 @@ export interface NewLog {
   sender_id: string; route: string; message_body: string; character_count: number; segments: number;
   sent_by_user_id?: string | null; sent_by_type: SmsLog["sent_by_type"];
   trigger_event?: string | null; audience_type?: string | null; dedupe_key?: string | null;
+  campaign_id?: string | null;
   status?: SmsLog["status"];
 }
 

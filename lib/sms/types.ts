@@ -60,6 +60,8 @@ export interface SmsLog {
   trigger_event: string | null;
   audience_type: string | null;
   dedupe_key: string | null;
+  /** Groups all logs from one manual/bulk send (live status + resend-to-failed). Null for auto-SMS. */
+  campaign_id: string | null;
   error_message: string | null;
   created_at: string;
   sent_at: string | null;
