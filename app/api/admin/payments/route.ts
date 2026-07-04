@@ -37,13 +37,20 @@ export async function GET() {
 
     // payment_id -> proof, plus a per-proof "already has access" flag so admins
     // don't accept a duplicate/already-paid attempt unnecessarily.
+    // Perf: the access check is pure w.r.t. (phone,item_type,item_slug), so resolve
+    // it ONCE per distinct target instead of once per proof (avoids repeating the
+    // same entitlement lookups when a phone has several proofs for one item).
     const proofs: Record<string, PaymentProof & { hasAccess: boolean }> = {};
+    const accessKey = (pr: PaymentProof) => `${pr.phone}|${pr.item_type ?? ""}|${pr.item_slug ?? ""}`;
+    const uniqueTargets = new Map<string, { phone: string; item_type: string | null; item_slug: string | null }>();
+    for (const pr of proofList) if (!uniqueTargets.has(accessKey(pr))) uniqueTargets.set(accessKey(pr), { phone: pr.phone, item_type: pr.item_type, item_slug: pr.item_slug });
+    const accessByKey = new Map<string, boolean>();
     await Promise.all(
-      proofList.map(async (pr) => {
-        const hasAccess = await phoneHasAccessToItem(pr.phone, pr.item_type, pr.item_slug).catch(() => false);
-        proofs[pr.payment_id] = { ...pr, hasAccess };
+      [...uniqueTargets].map(async ([k, t]) => {
+        accessByKey.set(k, await phoneHasAccessToItem(t.phone, t.item_type, t.item_slug).catch(() => false));
       }),
     );
+    for (const pr of proofList) proofs[pr.payment_id] = { ...pr, hasAccess: accessByKey.get(accessKey(pr)) ?? false };
 
     // UI capability flags: who can take staff write actions (manage_payments) and
     // who can see super-admin-only controls (reverse, accountability, history).
