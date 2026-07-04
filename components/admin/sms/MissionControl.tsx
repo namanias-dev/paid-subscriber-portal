@@ -778,11 +778,50 @@ function CampaignsTab({ canResend }: { canResend: boolean }) {
 }
 
 // ============================ AUTOMATIONS ============================
+// Triggers whose recipients are resolved from an audience segment (the hourly
+// webinar scheduler). Only these expose the audience selector — event-driven,
+// per-person triggers (payment_failed, first_login, …) have no segment to scope.
+const AUDIENCE_TRIGGERS = new Set([
+  "webinar_day_before", "webinar_sameday_registered", "webinar_sameday_invite",
+  "webinar_starting_soon", "post_webinar_thankyou",
+]);
+const AUTOMATION_AUDIENCES: { value: string; label: string }[] = [
+  { value: "webinar_registered", label: "Webinar — Registered" },
+  { value: "webinar_not_registered", label: "Webinar — NOT registered" },
+  { value: "webinar_attendees", label: "Webinar — Attended" },
+  { value: "webinar_no_show", label: "Webinar — No-show" },
+  { value: "payment_paid", label: "Paid (PAID-wins)" },
+  { value: "payment_not_paid", label: "Not paid (PAID-wins)" },
+];
+
+/** Clear, unambiguous on/off switch (Item 3). */
+function ToggleSwitch({ on, disabled, onChange }: { on: boolean; disabled?: boolean; onChange: () => void }) {
+  return (
+    <button
+      type="button" role="switch" aria-checked={on} disabled={disabled} onClick={onChange}
+      title={on ? "Enabled — click to turn off" : "Disabled — click to turn on"}
+      className={`inline-flex items-center gap-2 rounded-full py-1 pl-1 pr-2.5 text-xs font-bold uppercase tracking-wide transition disabled:cursor-not-allowed disabled:opacity-40 ${on ? "bg-success/15 text-success" : "bg-surface2 text-muted"}`}
+    >
+      <span className={`relative inline-block h-5 w-9 rounded-full transition-colors ${on ? "bg-success" : "bg-line"}`}>
+        <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all ${on ? "left-[18px]" : "left-0.5"}`} />
+      </span>
+      {on ? "On" : "Off"}
+    </button>
+  );
+}
+
 function AutomationsTab({ canEdit }: { canEdit: boolean }) {
   const { toast } = useToast();
   const [rules, setRules] = useState<RuleRow[]>([]);
+  const [templates, setTemplates] = useState<TemplateRow[]>([]);
   const [loading, setLoading] = useState(true);
-  const load = useCallback(() => { setLoading(true); fetch("/api/admin/sms/automations").then((r) => r.json()).then((d) => setRules(d.ok ? d.rules : [])).finally(() => setLoading(false)); }, []);
+  const load = useCallback(() => {
+    setLoading(true);
+    Promise.all([
+      fetch("/api/admin/sms/automations").then((r) => r.json()),
+      fetch("/api/admin/sms/templates").then((r) => r.json()),
+    ]).then(([a, t]) => { setRules(a.ok ? a.rules : []); setTemplates(t.ok ? t.templates : []); }).finally(() => setLoading(false));
+  }, []);
   useEffect(() => { load(); }, [load]);
 
   async function patch(trigger: string, body: Record<string, unknown>) {
@@ -793,28 +832,42 @@ function AutomationsTab({ canEdit }: { canEdit: boolean }) {
   if (loading) return <LoadingBlock />;
   return (
     <div className="card overflow-x-auto p-0">
-      <table className="w-full min-w-[760px] text-left text-sm">
+      <table className="w-full min-w-[860px] text-left text-sm">
         <thead><tr className="border-b border-line text-xs uppercase tracking-wide text-muted">
           <th className="px-4 py-3">Trigger</th><th className="px-4 py-3">Template</th><th className="px-4 py-3">Schedule</th><th className="px-4 py-3">Audience</th><th className="px-4 py-3">Last run</th><th className="px-4 py-3 text-right">Enabled</th>
         </tr></thead>
         <tbody>
           {rules.map((r) => (
-            <tr key={r.trigger} className="border-b border-line/60 last:border-0">
+            <tr key={r.trigger} className="border-b border-line/60 last:border-0 align-top">
               <td className="px-4 py-3 font-medium text-ink">{r.trigger}</td>
-              <td className="px-4 py-3">{r.template_name || "—"} {!r.template_ready && <span className="pill pill-amber text-[10px]">no DLT/active</span>}</td>
+              <td className="px-4 py-3">
+                {/* ITEM 1: editable trigger → template mapping */}
+                {canEdit ? (
+                  <select className="input h-9 py-1 text-xs" value={r.template_id || ""} onChange={(e) => patch(r.trigger, { template_id: e.target.value })}>
+                    {!r.template_id && <option value="">— select —</option>}
+                    {templates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                  </select>
+                ) : (r.template_name || "—")}
+                {!r.template_ready && <span className="pill pill-amber ml-1 text-[10px]">no DLT/active</span>}
+              </td>
               <td className="px-4 py-3 text-xs text-ink2">
                 {r.schedule_time && <>at {r.schedule_time} IST</>}
                 {r.delay_minutes != null && <>+{r.delay_minutes}m delay</>}
                 {r.offset_minutes != null && <>end +{r.offset_minutes}m</>}
                 {!r.schedule_time && r.delay_minutes == null && r.offset_minutes == null && "on event"}
               </td>
-              <td className="px-4 py-3 text-xs">{r.audience_type || "—"}</td>
+              <td className="px-4 py-3 text-xs">
+                {/* ITEM 2: paid / not-paid (PAID-wins) + segment scoping for webinar jobs */}
+                {AUDIENCE_TRIGGERS.has(r.trigger) && canEdit ? (
+                  <select className="input h-9 py-1 text-xs" value={r.audience_type || ""} onChange={(e) => patch(r.trigger, { audience_type: e.target.value })}>
+                    {AUTOMATION_AUDIENCES.map((a) => <option key={a.value} value={a.value}>{a.label}</option>)}
+                  </select>
+                ) : (r.audience_type || "—")}
+              </td>
               <td className="px-4 py-3 text-xs text-muted">{r.last_run_at ? formatISTDateTime(r.last_run_at) : "—"}</td>
               <td className="px-4 py-3 text-right">
-                <button disabled={!canEdit || !r.template_ready} onClick={() => patch(r.trigger, { enabled: !r.enabled })}
-                  className={`rounded-full px-3 py-1 text-xs font-semibold transition disabled:opacity-40 ${r.enabled ? "bg-success/15 text-success" : "bg-surface2 text-muted"}`}>
-                  {r.enabled ? "ON" : "OFF"}
-                </button>
+                {/* ITEM 3: unambiguous toggle */}
+                <ToggleSwitch on={r.enabled} disabled={!canEdit || !r.template_ready} onChange={() => patch(r.trigger, { enabled: !r.enabled })} />
               </td>
             </tr>
           ))}

@@ -28,6 +28,25 @@ function istDateKey(d = new Date()): string {
 }
 function istDateKeyOf(iso: string): string { return istDateKey(new Date(iso)); }
 
+/**
+ * Resolve a webinar automation's recipient spec from its (optional) audience_type
+ * override, falling back to the job's default when unset/unknown. The paid /
+ * not-paid options reuse the SAME PAID-wins primitive as Mission Control
+ * (resolveFilteredAudience → getWebinarPaymentStatusesForSlug), so an automation
+ * can target only-paid or only-not-paid registrants without any parallel logic.
+ */
+function webinarSpecForRule(rule: SmsAutoRule, w: { id: string; slug: string }, fallback: AudienceSpec): AudienceSpec {
+  switch (rule.audience_type) {
+    case "webinar_registered": return { type: "webinar_registered", webinarId: w.id, webinarSlug: w.slug };
+    case "webinar_not_registered": return { type: "webinar_not_registered", webinarId: w.id, webinarSlug: w.slug };
+    case "webinar_attendees": return { type: "webinar_attendees", webinarId: w.id, webinarSlug: w.slug };
+    case "webinar_no_show": return { type: "webinar_no_show", webinarId: w.id, webinarSlug: w.slug };
+    case "payment_paid": return { type: "filtered", filters: { webinarSlug: w.slug, paymentStatus: "paid" } };
+    case "payment_not_paid": return { type: "filtered", filters: { webinarSlug: w.slug, paymentStatus: "notpaid" } };
+    default: return fallback;
+  }
+}
+
 async function sendToAudience(rule: SmsAutoRule, spec: AudienceSpec, webinarId: string | null, dateKey: string): Promise<number> {
   if (!rule.enabled || !rule.template_id) return 0;
   const recipients = await resolveAudience(spec);
@@ -126,22 +145,24 @@ async function run(req: Request) {
         const tomorrow = istDateKey(new Date(Date.now() + 24 * 3600 * 1000));
         const targetHour = Number((dayBefore.schedule_time || "18:00").split(":")[0]);
         if (startDay === tomorrow && istHour === targetHour) {
-          result.webinar_day_before = (result.webinar_day_before || 0) + await sendToAudience(dayBefore, { type: "webinar_registered", webinarId: w.id, webinarSlug: w.slug }, w.id, today);
+          const spec = webinarSpecForRule(dayBefore, w, { type: "webinar_registered", webinarId: w.id, webinarSlug: w.slug });
+          result.webinar_day_before = (result.webinar_day_before || 0) + await sendToAudience(dayBefore, spec, w.id, today);
         }
       }
 
       // same-day 10:00 IST dual job (registered T9 vs not-registered T12)
       if (startDay === today && istHour === 10) {
         const reg = await getRule("webinar_sameday_registered");
-        if (reg?.enabled) result.sameday_registered = (result.sameday_registered || 0) + await sendToAudience(reg, { type: "webinar_registered", webinarId: w.id, webinarSlug: w.slug }, w.id, today);
+        if (reg?.enabled) result.sameday_registered = (result.sameday_registered || 0) + await sendToAudience(reg, webinarSpecForRule(reg, w, { type: "webinar_registered", webinarId: w.id, webinarSlug: w.slug }), w.id, today);
         const inv = await getRule("webinar_sameday_invite");
-        if (inv?.enabled) result.sameday_invite = (result.sameday_invite || 0) + await sendToAudience(inv, { type: "webinar_not_registered", webinarId: w.id, webinarSlug: w.slug }, w.id, today);
+        if (inv?.enabled) result.sameday_invite = (result.sameday_invite || 0) + await sendToAudience(inv, webinarSpecForRule(inv, w, { type: "webinar_not_registered", webinarId: w.id, webinarSlug: w.slug }), w.id, today);
       }
 
       // ~1 hour before
       const soon = await getRule("webinar_starting_soon");
       if (soon?.enabled && minsToStart <= 60 && minsToStart > 0) {
-        result.starting_soon = (result.starting_soon || 0) + await sendToAudience(soon, { type: "webinar_registered", webinarId: w.id, webinarSlug: w.slug }, w.id, today);
+        const spec = webinarSpecForRule(soon, w, { type: "webinar_registered", webinarId: w.id, webinarSlug: w.slug });
+        result.starting_soon = (result.starting_soon || 0) + await sendToAudience(soon, spec, w.id, today);
       }
 
       // post-webinar T19: end + offset elapsed (within window via enforceWindow).
@@ -151,8 +172,9 @@ async function run(req: Request) {
       if (t19?.enabled) {
         const offsetMs = (t19.offset_minutes ?? settings.t19OffsetMinutes ?? 240) * 60000;
         if (Date.now() >= endMs + offsetMs && Date.now() < endMs + offsetMs + 24 * 3600 * 1000) {
-          let spec: AudienceSpec = { type: "webinar_attendees", webinarId: w.id, webinarSlug: w.slug };
-          if (settings.t19FallbackAllRegistered) {
+          let spec = webinarSpecForRule(t19, w, { type: "webinar_attendees", webinarId: w.id, webinarSlug: w.slug });
+          // fallback-to-all-registered only applies to the default attendees spec.
+          if (settings.t19FallbackAllRegistered && spec.type === "webinar_attendees") {
             const attendees = await resolveAudience(spec);
             if (attendees.length === 0) spec = { type: "webinar_registered", webinarId: w.id, webinarSlug: w.slug };
           }
