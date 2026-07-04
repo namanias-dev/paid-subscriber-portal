@@ -5402,7 +5402,7 @@ export async function getDashboard(): Promise<DashboardData> {
       const ed = new Date(e.enrolled_at);
       return ed.getMonth() === d.getMonth() && ed.getFullYear() === d.getFullYear();
     }).length;
-    months.push({ month: label, count: count || Math.floor(Math.random() * 6) + 2 });
+    months.push({ month: label, count });
   }
 
   const revenueByCourse = courses
@@ -5440,7 +5440,7 @@ export async function getDashboard(): Promise<DashboardData> {
     demoBookings: leads.filter((l) => l.demo_booked).length,
     conversionRate,
     enrollmentsByMonth: months,
-    revenueByCourse: revenueByCourse.length ? revenueByCourse : [{ name: "Sample", value: 40000 }],
+    revenueByCourse,
     leadSources,
     funnel,
   };
