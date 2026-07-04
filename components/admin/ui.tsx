@@ -51,15 +51,34 @@ export function KpiCard({
   );
 }
 
+/**
+ * In-flight GET de-duplication. Several `useAdminData` hooks on one page often read
+ * DIFFERENT keys from the SAME endpoint (e.g. the Payments page has 7 hooks all
+ * hitting /api/admin/payments). Without this, each hook fired its own request, so
+ * that heavy route ran 7× per page load. Here concurrent requests to the same URL
+ * share ONE fetch+parse promise; the entry is dropped as soon as it settles, so a
+ * later reload() (e.g. after a mutation) always fetches fresh — never stale money.
+ */
+const inflightGet = new Map<string, Promise<unknown>>();
+
+function dedupedFetchJson(url: string): Promise<unknown> {
+  const existing = inflightGet.get(url);
+  if (existing) return existing;
+  const p = fetch(url)
+    .then((r) => r.json())
+    .finally(() => { inflightGet.delete(url); });
+  inflightGet.set(url, p);
+  return p;
+}
+
 export function useAdminData<T>(url: string, key: string): { data: T | null; loading: boolean; reload: () => void } {
   const [data, setData] = useState<T | null>(null);
   const [loading, setLoading] = useState(true);
 
   const reload = useCallback(() => {
     setLoading(true);
-    fetch(url)
-      .then((r) => r.json())
-      .then((d) => setData(d[key] ?? null))
+    dedupedFetchJson(url)
+      .then((d) => setData(((d as Record<string, T> | null)?.[key]) ?? null))
       .catch(() => setData(null))
       .finally(() => setLoading(false));
   }, [url, key]);
