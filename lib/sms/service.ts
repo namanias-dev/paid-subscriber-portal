@@ -114,22 +114,36 @@ export function withDerivedVars(templateId: string, vars: Record<string, string 
 }
 
 /**
- * Merge the editable variable store (global + per-template) UNDER the caller's
- * explicit variables, then apply the derived defaults. Precedence, high→low:
- *   1 explicit recipient data (non-empty)  2 per-template override  3 global
- *   4 config/env default (via getResolvedDefaults + withDerivedVars).
- * This is what makes a rotated login_url take effect on the next send/preview
- * with no code change. Absent/empty explicit values never clobber the store.
+ * Keys that must ALWAYS come from the recipient, never from a saved override —
+ * because they are per-PERSON, not campaign-level. Freezing them to one stored
+ * value would misinform students. Two groups:
+ *   • identity : name, first_name, login_code (wrong-code safety — Issue 2).
+ *   • per-recipient FACTS : amount, payment_status (a saved override would tell
+ *     everyone the SAME amount / status — factually wrong per student).
+ * Campaign-level vars (item_short, item_name, webinar_time, webinar_date) are
+ * the same for the whole send, so an explicit admin override wins for those.
  */
+export const RECIPIENT_ONLY_VARS = new Set(["login_code", "name", "first_name", "amount", "payment_status"]);
+
 /**
- * In-memory merge of caller vars OVER precomputed store defaults (no DB). Split
- * out so a batch can resolve the store defaults ONCE and merge each recipient
- * locally, instead of one DB round-trip per recipient (the bulk-timeout fix).
+ * In-memory merge of the editable variable store (global + per-template
+ * overrides) with the caller's per-recipient vars, then derived defaults.
+ * Precedence, high→low:
+ *   1 recipient identity (login_code / name / first_name — always the recipient)
+ *   2 explicit admin override (any key present in the store defaults)
+ *   3 caller / audience value for keys that have NO override
+ *   4 config/env default (via withDerivedVars).
+ * WYSIWYG guarantee: when an override exists it is the value actually sent — an
+ * audience-derived item_short can no longer silently clobber it. Split out (no
+ * DB) so a batch resolves store defaults ONCE and merges each recipient locally.
  */
 export function mergeSendVars(templateId: string, defaults: Record<string, string>, vars: Record<string, string | number | null | undefined> = {}): Record<string, string | number | null | undefined> {
   const merged: Record<string, string | number | null | undefined> = { ...defaults };
   for (const [k, val] of Object.entries(vars)) {
-    if (val !== undefined && val !== null && String(val).trim() !== "") merged[k] = val;
+    if (val === undefined || val === null || String(val).trim() === "") continue;
+    // Identity always follows the recipient; otherwise the caller/audience value
+    // only FILLS a key that has no explicit override, so overrides are never lost.
+    if (RECIPIENT_ONLY_VARS.has(k) || !(k in defaults)) merged[k] = val;
   }
   return withDerivedVars(templateId, merged);
 }

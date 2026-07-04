@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requirePermission } from "@/lib/adminGuard";
 import { resolveAudience, type AudienceSpec } from "@/lib/sms/audiences";
-import { mergeSendVars, withDerivedVars } from "@/lib/sms/service";
+import { mergeSendVars, RECIPIENT_ONLY_VARS } from "@/lib/sms/service";
 import { getTemplate, getSettings } from "@/lib/sms/store";
 import { getResolvedDefaults } from "@/lib/sms/variables";
 import { renderTemplate, validateBody, WORST_SAMPLE } from "@/lib/sms/templates";
@@ -73,28 +73,37 @@ export async function POST(req: Request) {
   // Real values available for THIS recipient (derive first_name from a real name).
   const realVars = withDerivedVarsNoStore(r.vars);
 
+  // Exact values that WOULD be sent (same precedence as the send path): identity
+  // from the recipient, explicit overrides win, else the recipient/audience value.
+  const realMerged = mergeSendVars(templateId, storeDefaults, r.vars);
+  const realMissing = renderTemplate(tpl.body_template, realMerged).missing;
+
   const slots = tpl.variables;
   const vars = slots.map((key) => {
     const real = nonEmpty(realVars[key]);
     const store = nonEmpty(storeDefaults[key]);
     const sample = WORST_SAMPLE[key];
+    const recipientOnly = RECIPIENT_ONLY_VARS.has(key);
     let source: VarSource; let value: string;
-    if (real != null) { source = "real"; value = real; }
+    // Mirror mergeSendVars: an explicit override wins for non-identity keys, so
+    // the chip shows the value that is actually sent — no more "seen ≠ sent".
+    if (!recipientOnly && store != null) { source = "store"; value = store; }
+    else if (real != null) { source = "real"; value = real; }
     else if (store != null) { source = "store"; value = store; }
     else if (sample != null) { source = "sample"; value = sample; }
     else { source = "missing"; value = ""; }
     return { key, value, source };
   });
 
-  // Readable preview: real > store > sample fills every slot so admins see the
-  // final shape; the per-var chips flag which slots fell back to sample/missing.
-  const readableVars = withDerivedVars(templateId, { ...WORST_SAMPLE, ...storeDefaults, ...stripEmpty(r.vars) });
+  // Readable preview: start from the EXACT send-time values, then fill any slot
+  // still empty with a sample purely so the admin sees the final shape. The
+  // per-var chips above flag which slots fell back to sample/missing.
+  const readableVars: Record<string, string | number | null | undefined> = { ...realMerged };
+  for (const key of slots) {
+    if (nonEmpty(readableVars[key]) == null && WORST_SAMPLE[key] != null) readableVars[key] = WORST_SAMPLE[key];
+  }
   const rendered = renderTemplate(tpl.body_template, readableVars);
   const analysis = validateBody(rendered.text).analysis;
-
-  // Is THIS recipient deliverable for real (no sample needed)?
-  const realMerged = mergeSendVars(templateId, storeDefaults, r.vars);
-  const realMissing = renderTemplate(tpl.body_template, realMerged).missing;
 
   return NextResponse.json({
     ok: true,

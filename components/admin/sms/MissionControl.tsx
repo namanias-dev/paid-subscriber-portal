@@ -1020,29 +1020,78 @@ function GlobalVarRow({ g, canEdit, onSave }: { g: GlobalVar; canEdit: boolean; 
   );
 }
 
+const overriddenKeys = (t: TplVars): string[] =>
+  Object.keys(t.overrides || {}).filter((k) => (t.overrides[k] ?? "").trim() !== "");
+
 function PerTemplateOverrides({ templates, canEdit, onSave }: { templates: TplVars[]; canEdit: boolean; onSave: (scope: string, key: string, value: string) => Promise<boolean>; }) {
   const withVars = templates.filter((t) => t.variables.length > 0);
-  const [tid, setTid] = useState("");
-  const sel = withVars.find((t) => t.id === tid);
+  // ITEM 5: surface ONLY the overrides that actually exist — not every slot of
+  // every template. Same source of truth as the send path (sms_variables scopes).
+  const active = templates.map((t) => ({ t, keys: overriddenKeys(t) })).filter((x) => x.keys.length > 0);
 
   return (
     <section className="space-y-3">
       <h2 className="font-heading text-xs font-bold uppercase tracking-wide text-muted">Per-template overrides</h2>
-      <p className="text-xs text-muted">Optional. Override a variable for ONE template (wins over the global). Leave blank to inherit the global / default.</p>
-      <select className="input max-w-sm" value={tid} onChange={(e) => setTid(e.target.value)}>
-        <option value="">Select a template…</option>
-        {withVars.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-      </select>
-      {sel && (
-        <div className="card space-y-3 p-4">
-          <p className="text-xs text-muted">{sel.name} · variables: {sel.variables.join(", ")}</p>
-          {sel.variables.map((k) => (
-            <TplVarRow key={`${sel.id}:${k}`} tid={sel.id} k={k} value={sel.overrides[k] || ""} canEdit={canEdit} onSave={onSave} />
+      <p className="text-xs text-muted">Only variables you&apos;ve customised are shown — every other slot uses the global / default. An override is the exact value sent (it is never replaced by an audience value).</p>
+
+      {active.length === 0 ? (
+        <p className="rounded-xl border border-dashed border-line bg-surface p-3 text-sm text-muted">No per-template overrides set. Add one below to pin a variable for a single template.</p>
+      ) : (
+        <div className="space-y-3">
+          {active.map(({ t, keys }) => (
+            <div key={t.id} className="card space-y-3 p-4">
+              <p className="text-sm font-semibold">{t.name} <span className="pill pill-green ml-1 text-[10px]">{keys.length} override{keys.length === 1 ? "" : "s"}</span></p>
+              {keys.map((k) => (
+                <TplVarRow key={`${t.id}:${k}`} tid={t.id} k={k} value={t.overrides[k] || ""} canEdit={canEdit} onSave={onSave} />
+              ))}
+              {t.updated_at && <p className="text-xs text-muted">Updated {t.updated_by ? `by ${t.updated_by} ` : ""}{formatISTDateTime(t.updated_at)}</p>}
+            </div>
           ))}
-          {sel.updated_at && <p className="text-xs text-muted">Overrides updated {sel.updated_by ? `by ${sel.updated_by} ` : ""}{formatISTDateTime(sel.updated_at)}</p>}
         </div>
       )}
+
+      {canEdit && <AddOverride templates={withVars} onSave={onSave} />}
     </section>
+  );
+}
+
+/** Add a NEW per-template override: pick template → pick an un-overridden variable → value. */
+function AddOverride({ templates, onSave }: { templates: TplVars[]; onSave: (scope: string, key: string, value: string) => Promise<boolean>; }) {
+  const [tid, setTid] = useState("");
+  const [key, setKey] = useState("");
+  const [val, setVal] = useState("");
+  const [busy, setBusy] = useState(false);
+  const sel = templates.find((t) => t.id === tid);
+  const addable = sel ? sel.variables.filter((k) => (sel.overrides[k] ?? "").trim() === "") : [];
+  const looksUrl = key === "login_url" || key.endsWith("_url");
+  const invalid = looksUrl && val.trim() !== "" && !isHttpUrl(val.trim());
+
+  async function add() {
+    if (!tid || !key || !val.trim()) return;
+    setBusy(true);
+    const ok = await onSave(tid, key, val.trim());
+    setBusy(false);
+    if (ok) { setKey(""); setVal(""); }
+  }
+
+  return (
+    <div className="card space-y-3 p-4">
+      <p className="text-sm font-semibold">Add an override</p>
+      <div className="flex flex-col gap-2 sm:flex-row">
+        <select className="input sm:max-w-[220px]" value={tid} onChange={(e) => { setTid(e.target.value); setKey(""); }}>
+          <option value="">Select a template…</option>
+          {templates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+        </select>
+        <select className="input sm:max-w-[180px]" value={key} onChange={(e) => setKey(e.target.value)} disabled={!sel}>
+          <option value="">{sel ? "Variable…" : "Pick template first"}</option>
+          {addable.map((k) => <option key={k} value={k}>{`{${k}}`}</option>)}
+        </select>
+        <input className="input font-mono text-sm" value={val} onChange={(e) => setVal(e.target.value)} disabled={!key} placeholder="value to send" />
+        <button onClick={add} disabled={busy || !tid || !key || !val.trim() || invalid} className="btn btn-primary shrink-0">{busy ? "…" : "Add"}</button>
+      </div>
+      {sel && addable.length === 0 && <p className="text-xs text-muted">Every variable for this template already has an override.</p>}
+      {invalid && <p className="text-xs text-danger">Enter a well-formed http(s) URL.</p>}
+    </div>
   );
 }
 
