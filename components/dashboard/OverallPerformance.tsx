@@ -161,7 +161,7 @@ function SnapshotHeader({ data, enablePdfExport }: { data: OverallData; enablePd
           {enablePdfExport && (
             <button
               type="button"
-              onClick={() => downloadOverallPerformancePdf(data)}
+              onClick={() => { void downloadOverallPerformancePdf(data); }}
               className="ca-focus inline-flex items-center gap-1.5 rounded-full border border-line bg-surface px-3 py-1.5 text-xs font-semibold text-ink2 hover:text-ink"
             >
               <Download size={13} aria-hidden="true" /> Download PDF

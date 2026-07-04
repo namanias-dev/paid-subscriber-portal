@@ -1,4 +1,3 @@
-import { jsPDF } from "jspdf";
 import type { PaymentReceipt } from "./types";
 
 export interface ReceiptContact {
@@ -56,6 +55,7 @@ async function loadImage(url: string): Promise<{ data: string; w: number; h: num
  * desktop) — it mirrors the on-screen ReceiptView exactly.
  */
 export async function downloadReceiptPdf(receipt: PaymentReceipt, contact: ReceiptContact): Promise<void> {
+  const { jsPDF } = await import("jspdf"); // lazy: keep jspdf out of the initial bundle
   const doc = new jsPDF({ unit: "mm", format: "a4" });
   const pageW = doc.internal.pageSize.getWidth();
   const M = 14; // margin

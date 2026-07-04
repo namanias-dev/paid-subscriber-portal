@@ -1,4 +1,4 @@
-import { jsPDF } from "jspdf";
+import type { jsPDF } from "jspdf";
 import type { OverallPerformance, MasteryRow } from "./overallPerformance";
 import type { LeaderboardRow } from "./leaderboard";
 
@@ -41,7 +41,8 @@ function safeName(s: string): string {
 }
 
 /** A cursor-based page helper shared by both exporters. */
-function makeDoc(orientation: "p" | "l") {
+async function makeDoc(orientation: "p" | "l") {
+  const { jsPDF } = await import("jspdf"); // lazy: keep jspdf out of the initial bundle
   const doc = new jsPDF({ unit: "pt", format: "a4", orientation });
   const pageW = doc.internal.pageSize.getWidth();
   const pageH = doc.internal.pageSize.getHeight();
@@ -57,8 +58,8 @@ function makeDoc(orientation: "p" | "l") {
 }
 
 /* ----------------------------- PER-STUDENT REPORT ----------------------------- */
-export function downloadOverallPerformancePdf(data: OverallPerformance) {
-  const { doc, state, ensure } = makeDoc("p");
+export async function downloadOverallPerformancePdf(data: OverallPerformance) {
+  const { doc, state, ensure } = await makeDoc("p");
   const contentW = state.pageW - MARGIN * 2;
 
   // Header band.
@@ -248,13 +249,13 @@ export function downloadOverallPerformancePdf(data: OverallPerformance) {
 }
 
 /* ------------------------------- LEADERBOARD ------------------------------- */
-export function downloadLeaderboardPdf(input: {
+export async function downloadLeaderboardPdf(input: {
   batchLabel: string;
   snapshotISO: string;
   studentCount: number;
   rows: LeaderboardRow[];
 }) {
-  const { doc, state } = makeDoc("l");
+  const { doc, state } = await makeDoc("l");
   const contentW = state.pageW - MARGIN * 2;
 
   // Header band.

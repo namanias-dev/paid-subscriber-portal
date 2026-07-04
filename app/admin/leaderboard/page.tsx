@@ -108,7 +108,7 @@ export default function LeaderboardPage() {
 
   function exportPdf() {
     if (!data) return;
-    downloadLeaderboardPdf({ batchLabel: data.batchLabel, snapshotISO: data.snapshotISO, studentCount: view.length, rows: view });
+    void downloadLeaderboardPdf({ batchLabel: data.batchLabel, snapshotISO: data.snapshotISO, studentCount: view.length, rows: view });
   }
 
   function toggleSort(key: SortKey) {
