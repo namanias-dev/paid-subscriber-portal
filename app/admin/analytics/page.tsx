@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import {
   Users, MousePointerClick, TicketCheck, IndianRupee, ArrowRight, LogIn, FileClock, Wallet,
@@ -10,7 +11,12 @@ import { LoadingBlock } from "@/components/admin/ui";
 import InfoTip from "@/components/admin/InfoTip";
 import { formatINR } from "@/lib/dates";
 import { METRICS, GLOBAL_NOTES, type MetricDef } from "@/lib/analytics/metrics";
-import Trends from "@/components/admin/analytics/Trends";
+// Trends is the only Recharts-backed tab; load it lazily so Recharts stays out of
+// the initial /admin/analytics bundle. It renders only behind the "trends" tab.
+const Trends = dynamic(() => import("@/components/admin/analytics/Trends"), {
+  ssr: false,
+  loading: () => <div className="space-y-4"><LoadingBlock /><LoadingBlock /></div>,
+});
 import ActivityTab from "@/components/admin/analytics/Activity";
 import QuizTab from "@/components/admin/analytics/Quiz";
 import WebinarsTab from "@/components/admin/analytics/Webinars";

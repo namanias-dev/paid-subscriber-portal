@@ -2,9 +2,17 @@
 
 import { useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
-import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Cell } from "recharts";
+import dynamic from "next/dynamic";
 import Modal from "@/components/ui/Modal";
 import { istYMD } from "@/lib/dates";
+
+// The Recharts bar chart is only shown inside the expanded panel/modal. Lazy-load
+// it so Recharts stays out of the initial bundle of pages that render only the
+// CSS-only mini sparkline card (e.g. /admin/payments). Same-height skeleton = no CLS.
+const RegistrationsBarChart = dynamic(() => import("@/components/admin/RegistrationsBarChart"), {
+  ssr: false,
+  loading: () => <div className="h-full w-full animate-shimmer rounded-xl bg-surface2" />,
+});
 
 /** YMD (IST) for `daysAgo` days before today. */
 function ymdDaysAgo(daysAgo: number): string {
@@ -128,17 +136,7 @@ export function RegistrationsTrendPanel({
         {showEmpty ? (
           emptyState
         ) : (
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={chartData} margin={{ top: 8, right: 8, left: -16, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#eef0f4" />
-              <XAxis dataKey="label" tick={{ fontSize: 11 }} interval={frame === "30d" || frame === "month" ? 2 : 0} tickLine={false} axisLine={{ stroke: "#e5e7eb" }} />
-              <YAxis allowDecimals={false} tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
-              <Tooltip cursor={{ fill: "rgba(0,87,255,0.06)" }} contentStyle={{ borderRadius: 12, border: "1px solid #e5e7eb", fontSize: 12 }} formatter={(v) => [`${v} registrations`, "Registrations"]} labelFormatter={(l) => `${l}`} />
-              <Bar dataKey="count" radius={[4, 4, 0, 0]} fill="#0057FF">
-                {chartData.map((d) => <Cell key={d.ymd} fill={d.count > 0 ? "#0057FF" : "#dbe3ff"} />)}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
+          <RegistrationsBarChart chartData={chartData} denseTicks={frame === "30d" || frame === "month"} />
         )}
       </div>
       {footNote && <p className="text-xs text-muted">{footNote}</p>}

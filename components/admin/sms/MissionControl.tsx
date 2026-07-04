@@ -1,11 +1,17 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, BarChart, Bar } from "recharts";
+import dynamic from "next/dynamic";
 import { Activity, Send, Workflow, FileText, ScrollText, BarChart3, Settings as SettingsIcon, RefreshCw, Download, AlertTriangle, CheckCircle2, Power, Braces, Link2, RotateCcw, Users, Search, SlidersHorizontal, Bookmark, Save, Trash2, History } from "lucide-react";
 import { LoadingBlock } from "@/components/admin/ui";
 import { useToast } from "@/components/ui/Toast";
 import { formatISTDateTime } from "@/lib/dates";
+
+// Recharts is heavy and only shown inside the Overview/Analytics tabs — lazy-load
+// the chart bodies so Recharts stays out of the initial Mission Control bundle.
+const ChartSkeleton = () => <div className="h-[220px] w-full animate-shimmer rounded-xl bg-surface2" />;
+const SmsTrend24h = dynamic(() => import("@/components/admin/sms/SmsCharts").then((m) => m.SmsTrend24h), { ssr: false, loading: ChartSkeleton });
+const SmsSendsOverTime = dynamic(() => import("@/components/admin/sms/SmsCharts").then((m) => m.SmsSendsOverTime), { ssr: false, loading: ChartSkeleton });
 
 // ---- shared types (mirror API responses) ----
 interface TemplateRow {
@@ -132,16 +138,7 @@ function OverviewTab() {
 
       <div className="card p-4">
         <p className="mb-3 text-sm font-semibold">Last 24 hours</p>
-        <ResponsiveContainer width="100%" height={220}>
-          <LineChart data={data.trend24h}>
-            <CartesianGrid strokeDasharray="3 3" stroke="var(--line)" />
-            <XAxis dataKey="hour" tick={{ fontSize: 11 }} interval={3} />
-            <YAxis tick={{ fontSize: 11 }} allowDecimals={false} />
-            <Tooltip />
-            <Line type="monotone" dataKey="sent" stroke="#16a34a" strokeWidth={2} dot={false} />
-            <Line type="monotone" dataKey="failed" stroke="#dc2626" strokeWidth={2} dot={false} />
-          </LineChart>
-        </ResponsiveContainer>
+        <SmsTrend24h data={data.trend24h} />
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
@@ -1254,9 +1251,7 @@ function AnalyticsTab() {
     <div className="space-y-5">
       <div className="card p-4">
         <p className="mb-3 text-sm font-semibold">Sends over time (30 days)</p>
-        <ResponsiveContainer width="100%" height={220}>
-          <BarChart data={data.sendsOverTime}><CartesianGrid strokeDasharray="3 3" stroke="var(--line)" /><XAxis dataKey="day" tick={{ fontSize: 10 }} /><YAxis tick={{ fontSize: 11 }} allowDecimals={false} /><Tooltip /><Bar dataKey="sent" fill="#16a34a" /><Bar dataKey="failed" fill="#dc2626" /></BarChart>
-        </ResponsiveContainer>
+        <SmsSendsOverTime data={data.sendsOverTime} />
       </div>
       <div className="grid gap-4 lg:grid-cols-2">
         <div className="card p-4">
