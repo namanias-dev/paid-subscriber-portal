@@ -397,6 +397,7 @@ function SendTab({ meta }: { meta: Meta | null }) {
                 <select className="input" value={fStatus} onChange={(e) => { setFStatus(e.target.value); setSavedId(""); }}>
                   <option value="">Any status</option>
                   <option value="paid">Paid</option>
+                  <option value="notpaid">Not paid (no successful payment)</option>
                   <option value="pending">Pending</option>
                   <option value="failed">Failed</option>
                   <option value="abandoned">Abandoned</option>
@@ -419,7 +420,7 @@ function SendTab({ meta }: { meta: Meta | null }) {
         {panel === "preset" && (
           <Field label="Preset segment">
             <select className="input" value={audType} onChange={(e) => { setAudType(e.target.value); setLastPreset(e.target.value); setPreview(null); setRecipients(null); }}>
-              <optgroup label="Payments"><option value="payment_pending">Pending</option><option value="payment_failed">Failed</option><option value="payment_paid">Paid</option><option value="payment_abandoned">Abandoned</option><option value="payment_all">All payments</option></optgroup>
+              <optgroup label="Payments"><option value="payment_paid">Paid</option><option value="payment_not_paid">NOT paid (no successful payment)</option><option value="payment_pending">Pending</option><option value="payment_failed">Failed</option><option value="payment_abandoned">Abandoned</option><option value="payment_all">All payments</option></optgroup>
               <optgroup label="Webinar"><option value="webinar_registered">Registered</option><option value="webinar_not_registered">NOT registered</option><option value="webinar_attendees">Attended</option><option value="webinar_no_show">No-show</option></optgroup>
               <optgroup label="People"><option value="leads">Leads</option><option value="users_with_mobile">All users with mobile</option>{!isPromo && <option value="all">Everyone (guarded)</option>}</optgroup>
             </select>

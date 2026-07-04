@@ -11,7 +11,7 @@ import {
   getWebinarRegistrationsByWebinar, getWebinarPaymentStatusesForSlug,
   getAllCourses, getAllCourseEnrollments,
 } from "../dataProvider";
-import { isPaidStatus, dedupePaidRows, itemKey } from "../paymentsAgg";
+import { isPaidStatus } from "../paymentsAgg";
 import { firstNamesMatch, optedOutSet } from "./store";
 import type { RelatedEntity } from "./service";
 import type { Payment } from "../types";
@@ -26,13 +26,13 @@ export interface Recipient {
 
 export type AudienceType =
   | "person"
-  | "payment_pending" | "payment_failed" | "payment_paid" | "payment_abandoned" | "payment_all"
+  | "payment_pending" | "payment_failed" | "payment_paid" | "payment_abandoned" | "payment_not_paid" | "payment_all"
   | "webinar_registered" | "webinar_not_registered" | "webinar_attendees" | "webinar_no_show"
   | "leads" | "users_with_mobile" | "all"
   | "filtered";
 
 /** Payment class used by the composable "filtered" audience (course/webinar/payments). */
-export type FilterPayStatus = "paid" | "failed" | "pending" | "abandoned";
+export type FilterPayStatus = "paid" | "failed" | "pending" | "abandoned" | "notpaid";
 export type FilterTimeframe = "7d" | "30d" | "6mo" | "all" | "month";
 
 /**
@@ -71,6 +71,7 @@ export const AUDIENCE_OPTIONS: { type: AudienceType; label: string; needsWebinar
   { type: "payment_failed", label: "Payments — Failed" },
   { type: "payment_paid", label: "Payments — Paid" },
   { type: "payment_abandoned", label: "Payments — Abandoned" },
+  { type: "payment_not_paid", label: "Payments — NOT paid (no successful payment)" },
   { type: "payment_all", label: "Payments — All" },
   { type: "webinar_registered", label: "Webinar — Registered", needsWebinar: true },
   { type: "webinar_not_registered", label: "Webinar — NOT registered (with mobile)", needsWebinar: true, promotionalForCold: true },
@@ -201,27 +202,41 @@ async function resolveAudienceInner(spec: AudienceSpec): Promise<Recipient[]> {
     return [attach(d, spec.name || null, {}, {})];
   }
 
-  // ----- payment segments (reconciled via paymentsAgg) -----
+  // ----- payment segments (per-student, PAID-wins) -----
+  // A single student can have many rows for the same obligation
+  // (INITIATED -> FAILED -> ABANDONED -> PAID). We aggregate PER PHONE and let
+  // PAID win: a student with >=1 successful payment is "paid" and can NEVER fall
+  // into a non-paid segment, no matter how many failed/abandoned attempts they
+  // have. NOT-PAID is the exact complement (zero successful payments). This
+  // reuses payClassOf / PAY_PRIORITY so it reconciles with the filter builder,
+  // and no longer relies on the is_superseded flag as a PAID-wins proxy.
   if (spec.type.startsWith("payment_")) {
     const payments = await getPayments();
-    let rows: Payment[];
-    // Superseded attempts (another attempt for the same student+item was paid)
-    // must never be nudged — they are moot. Only un-superseded rows are eligible.
-    if (spec.type === "payment_paid") rows = dedupePaidRows(payments.filter((p) => isPaidStatus(p.status)));
-    else if (spec.type === "payment_pending") rows = payments.filter((p) => !p.is_superseded && (p.status === "PENDING" || p.status === "VERIFYING" || p.status === "pending"));
-    else if (spec.type === "payment_failed") rows = payments.filter((p) => !p.is_superseded && p.status === "FAILED");
-    else if (spec.type === "payment_abandoned") rows = payments.filter((p) => !p.is_superseded && p.status === "ABANDONED");
-    else rows = payments; // payment_all
-    // keep the most recent row per phone for messaging context
-    const byPhone = new Map<string, Payment>();
-    for (const p of rows) {
+    const byPhone = new Map<string, { cls: FilterPayStatus | "none"; row: Payment }>();
+    for (const p of payments) {
       const d = norm(p.phone);
       if (!d) continue;
+      const cls = payClassOf(p.status); // "none" for INITIATED / unknown
       const prev = byPhone.get(d);
-      if (!prev || new Date(p.created_at).getTime() > new Date(prev.created_at).getTime()) byPhone.set(d, p);
+      if (!prev) { byPhone.set(d, { cls, row: p }); continue; }
+      if (PAY_PRIORITY[cls] > PAY_PRIORITY[prev.cls]) { prev.cls = cls; prev.row = p; }
+      else if (PAY_PRIORITY[cls] === PAY_PRIORITY[prev.cls] &&
+        new Date(p.created_at).getTime() > new Date(prev.row.created_at).getTime()) prev.row = p;
     }
-    return dedupeRecipients([...byPhone.entries()].map(([d, p]) =>
-      attach(d, p.student_name, paymentVars(p), { payment_id: p.id, course_id: p.item_type === "course" ? p.item_slug : null, webinar_id: p.item_type === "webinar" ? p.item_slug : null })));
+    const match = (cls: FilterPayStatus | "none"): boolean => {
+      switch (spec.type) {
+        case "payment_paid": return cls === "paid";
+        case "payment_pending": return cls === "pending";
+        case "payment_failed": return cls === "failed";
+        case "payment_abandoned": return cls === "abandoned";
+        case "payment_not_paid": return cls !== "paid"; // complement of paid (incl. INITIATED)
+        default: return true; // payment_all
+      }
+    };
+    return dedupeRecipients([...byPhone.entries()]
+      .filter(([, a]) => match(a.cls))
+      .map(([d, a]) => attach(d, a.row.student_name, paymentVars(a.row),
+        { payment_id: a.row.id, course_id: a.row.item_type === "course" ? a.row.item_slug : null, webinar_id: a.row.item_type === "webinar" ? a.row.item_slug : null })));
   }
 
   // ----- webinar segments -----
@@ -311,7 +326,9 @@ const payClassOf = (status: string | null | undefined): FilterPayStatus | "none"
   if (s === "ABANDONED") return "abandoned";
   return "none";
 };
-const PAY_PRIORITY: Record<FilterPayStatus | "none", number> = { paid: 4, pending: 3, failed: 2, abandoned: 1, none: 0 };
+// Ordering for PAID-wins aggregation. "notpaid" is a filter selector only (never
+// an actual row class), so it sorts at the bottom and is never chosen as a class.
+const PAY_PRIORITY: Record<FilterPayStatus | "none", number> = { paid: 4, pending: 3, failed: 2, abandoned: 1, none: 0, notpaid: 0 };
 
 /** Per-phone per-dimension summary: membership, best pay class, most-recent date. */
 interface DimInfo { name: string | null; payClass: FilterPayStatus | "none"; dateMs: number }
@@ -329,7 +346,10 @@ export async function resolveFilteredAudience(f: FilterSpec): Promise<Recipient[
   const attach = makeAttach(bm);
   const [fromMs, toMs] = timeframeBounds(f.timeframe, f.month);
   const inTime = (ms: number) => ms >= fromMs && ms <= toMs;
-  const statusOk = (cls: FilterPayStatus | "none") => !f.paymentStatus || cls === f.paymentStatus;
+  // "notpaid" is the PAID-wins complement: anything that is not a successful
+  // payment (failed / pending / abandoned / no attempt on that dimension).
+  const statusOk = (cls: FilterPayStatus | "none") =>
+    !f.paymentStatus || (f.paymentStatus === "notpaid" ? cls !== "paid" : cls === f.paymentStatus);
 
   const wantCourse = !!f.courseSlug;
   const wantWebinar = !!f.webinarSlug;
@@ -392,16 +412,21 @@ export async function resolveFilteredAudience(f: FilterSpec): Promise<Recipient[
   }
 
   // GENERIC payment dimension (used when neither course nor webinar is chosen):
-  // latest un-superseded payment per phone across the whole ledger.
+  // per-phone PAID-wins across the whole ledger (highest-priority class), with
+  // the most-recent date. A student with any successful payment is "paid" and is
+  // therefore never returned by a non-paid status filter.
   let genericDim: Map<string, DimInfo> | null = null;
   if (!wantCourse && !wantWebinar) {
     genericDim = new Map();
     for (const p of payments) {
-      if (p.is_superseded) continue;
       const d = norm(p.phone); if (!d) continue;
       const ms = new Date(p.created_at).getTime();
+      const cls = payClassOf(p.status);
       const prev = genericDim.get(d);
-      if (!prev || ms > prev.dateMs) genericDim.set(d, { name: p.student_name, payClass: payClassOf(p.status), dateMs: ms });
+      if (!prev) { genericDim.set(d, { name: p.student_name, payClass: cls, dateMs: ms }); continue; }
+      if (PAY_PRIORITY[cls] > PAY_PRIORITY[prev.payClass]) prev.payClass = cls;
+      if (ms > prev.dateMs) prev.dateMs = ms;
+      if (!prev.name && p.student_name) prev.name = p.student_name;
     }
   }
 
