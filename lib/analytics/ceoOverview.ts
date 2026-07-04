@@ -16,31 +16,21 @@
  * upcoming webinars, attention signals) — all built from the SAME primitives and
  * the SAME exclude-admin filter, so they reconcile with the headline numbers.
  */
-import { getPayments, getWebinars, getAllWebinarRegistrations, getAllCourseEnrollments, getAdminAccounts } from "../dataProvider";
+import { getPayments, getWebinars, getAllWebinarRegistrations, getAllCourseEnrollments } from "../dataProvider";
 import { isPaidStatus, dedupePaidRows, dedupedPaidTotal, distinctRegistrations, itemKey } from "../paymentsAgg";
 import { deriveEnrollment, isActiveEnrollment } from "../installments";
 import { normalizeIndianMobile } from "../phone";
-import { getAnalyticsOverview, getAnalyticsTimeseries, getWebinarFunnel, resolveRange, type RangePreset } from "./queries";
+import {
+  getAnalyticsOverview, getAnalyticsTimeseries, getWebinarFunnel, resolveRange,
+  fetchEvents, getTrackingStartMs, getStaffPhoneSet, countSubmittedProofs,
+  type RangePreset,
+} from "./queries";
 import type { Payment } from "../types";
 
 function normPhone(p: string | null | undefined): string | null {
   if (!p) return null;
   const n = normalizeIndianMobile(p);
   return n.ok && n.digits10 ? n.digits10 : String(p).replace(/\D/g, "").slice(-10) || null;
-}
-
-/** Internal staff phones (admin_users) — mirrors queries.getStaffPhoneSet so the
- *  "Exclude admin traffic" toggle removes the SAME rows the analytics layer does. */
-async function getStaffPhoneSet(): Promise<Set<string>> {
-  const set = new Set<string>();
-  try {
-    const accounts = await getAdminAccounts();
-    for (const a of accounts) {
-      const ph = normPhone((a as { phone?: string | null }).phone ?? null);
-      if (ph) set.add(ph);
-    }
-  } catch { /* best-effort */ }
-  return set;
 }
 
 /** A headline number with a prior-period comparison. */
@@ -171,19 +161,42 @@ export async function getCeoOverview(opts: {
   const prevToMs = new Date(prevTo).getTime();
   const excludeAdmin = !!opts.excludeAdmin;
 
-  // Reconciled headline numbers straight from the existing analytics layer, so the
-  // glance six tie out to Business Analytics for the same range.
-  const [ov, ovPrev, ts, funnel, allPaymentsRaw, webinars, regs, courseEnrollments, staffPhones] = await Promise.all([
-    getAnalyticsOverview({ from, to, excludeAdmin }),
-    getAnalyticsOverview({ from: prevFrom, to: prevTo, excludeAdmin }),
-    getAnalyticsTimeseries({ from, to, excludeAdmin }),
-    getWebinarFunnel({ from, to, excludeAdmin }),
+  // PERF: this endpoint composes four analytics aggregations that each USED to
+  // independently re-fetch the same events + payments (5× getPayments, 4× the full
+  // 50k-row event scan → ~9 s). We now load every raw input ONCE and inject it into
+  // the (unchanged) aggregation functions, so the numbers are byte-identical but the
+  // work happens a single time. Current + prior event scans run in parallel here, so
+  // the wall time is one scan — not four serial ones. (Prior uses the SAME capped
+  // fetchEvents, not a narrower query, so its registration count matches the
+  // pre-refactor value exactly even when a window exceeds the 50k row cap.)
+  const [allPaymentsRaw, eventsCur, eventsPrev, trackingStartMs, staffPhones, proofPending, webinars, regs, courseEnrollments] = await Promise.all([
     getPayments(),
+    fetchEvents(from, to),
+    fetchEvents(prevFrom, prevTo),
+    getTrackingStartMs(),
+    excludeAdmin ? getStaffPhoneSet() : Promise.resolve(new Set<string>()),
+    countSubmittedProofs(),
     getWebinars(),
     getAllWebinarRegistrations(),
     getAllCourseEnrollments(),
-    excludeAdmin ? getStaffPhoneSet() : Promise.resolve(new Set<string>()),
   ]);
+
+  // Reconciled headline numbers from the existing analytics layer (now fed the
+  // shared data), so the glance six tie out to Business Analytics for the same range.
+  const ov = await getAnalyticsOverview({ from, to, excludeAdmin }, {
+    events: eventsCur, payments: allPaymentsRaw, trackingStartMs, staffPhones, proofPending,
+  });
+  const ovPrev = await getAnalyticsOverview({ from: prevFrom, to: prevTo, excludeAdmin }, {
+    events: eventsPrev, payments: allPaymentsRaw, trackingStartMs, staffPhones, proofPending,
+  });
+  const ts = await getAnalyticsTimeseries({ from, to, excludeAdmin }, {
+    // The revenue/paid/success trend is derived entirely from payments; events and
+    // quiz attempts don't feed any field the Overview reads, so we skip loading them.
+    events: [], payments: allPaymentsRaw, staff: staffPhones, attempts: [],
+  });
+  const funnel = await getWebinarFunnel({ from, to, excludeAdmin }, {
+    events: eventsCur, payments: allPaymentsRaw, staff: staffPhones, webinars, regs,
+  });
 
   // Working payment set: not-deleted, and (when excludeAdmin) staff-excluded by the
   // SAME rule the analytics layer uses — so every bespoke slice below reconciles.

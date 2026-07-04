@@ -12,7 +12,7 @@ import { isPaidStatus, dedupePaidRows, dedupedPaidTotal, distinctRegistrations, 
 import { normalizeIndianMobile } from "../phone";
 import { istInputToISO } from "../dates";
 import { NON_ATTRIBUTABLE_SOURCES, sourceLabel } from "./metrics";
-import type { Payment, QuizAttempt } from "../types";
+import type { Payment, QuizAttempt, Webinar, WebinarRegistration } from "../types";
 
 /**
  * Bucket for records created BEFORE attribution tracking existed (NULL source).
@@ -59,7 +59,7 @@ export function sourceOfPayment(p: Payment): string {
 
 const EVENT_FETCH_CAP = 50000;
 
-async function fetchEvents(fromISO: string, toISO: string): Promise<EventLite[]> {
+export async function fetchEvents(fromISO: string, toISO: string): Promise<EventLite[]> {
   const db = getSupabaseAdmin();
   if (!db) return [];
   const { data } = await db
@@ -463,7 +463,7 @@ export async function getTrackingStartMs(): Promise<number | null> {
 }
 
 /** Internal staff phones (admin_users) — used by the "Exclude admin traffic" toggle. */
-async function getStaffPhoneSet(): Promise<Set<string>> {
+export async function getStaffPhoneSet(): Promise<Set<string>> {
   const set = new Set<string>();
   try {
     const accounts = await getAdminAccounts();
@@ -520,20 +520,40 @@ export interface AnalyticsOverview {
   };
 }
 
-export async function getAnalyticsOverview(opts: { from: string; to: string; excludeAdmin?: boolean }): Promise<AnalyticsOverview> {
+/**
+ * Pre-loaded raw inputs for the overview aggregation. When a caller (e.g. the CEO
+ * Overview) already holds these — because it composes several analytics functions
+ * for one request — it passes them in so we DON'T re-fetch the same events/payments
+ * per function. The compute below is byte-identical whether the data is injected or
+ * self-loaded, so numbers never drift.
+ */
+export interface OverviewPre {
+  events: EventLite[];
+  payments: Payment[];
+  trackingStartMs: number | null;
+  staffPhones: Set<string>;
+  proofPending: number;
+}
+
+export async function getAnalyticsOverview(opts: { from: string; to: string; excludeAdmin?: boolean }, pre?: OverviewPre): Promise<AnalyticsOverview> {
   const fromISO = new Date(opts.from).toISOString();
   const toISO = new Date(opts.to).toISOString();
   const fromMs = new Date(fromISO).getTime();
   const toMs = new Date(toISO).getTime();
   const excludeAdmin = !!opts.excludeAdmin;
 
-  const [allEvents, allPayments, trackingStartMs, staffPhones, proofPending] = await Promise.all([
-    fetchEvents(fromISO, toISO),
-    getPayments(),
-    getTrackingStartMs(),
-    excludeAdmin ? getStaffPhoneSet() : Promise.resolve(new Set<string>()),
-    countSubmittedProofs(),
-  ]);
+  let allEvents: EventLite[], allPayments: Payment[], trackingStartMs: number | null, staffPhones: Set<string>, proofPending: number;
+  if (pre) {
+    ({ events: allEvents, payments: allPayments, trackingStartMs, staffPhones, proofPending } = pre);
+  } else {
+    [allEvents, allPayments, trackingStartMs, staffPhones, proofPending] = await Promise.all([
+      fetchEvents(fromISO, toISO),
+      getPayments(),
+      getTrackingStartMs(),
+      excludeAdmin ? getStaffPhoneSet() : Promise.resolve(new Set<string>()),
+      countSubmittedProofs(),
+    ]);
+  }
 
   const events = excludeAdmin ? allEvents.filter((e) => !(e.phone && staffPhones.has(normPhone(e.phone)!))) : allEvents;
 
@@ -608,7 +628,7 @@ export async function getAnalyticsOverview(opts: { from: string; to: string; exc
   };
 }
 
-async function countSubmittedProofs(): Promise<number> {
+export async function countSubmittedProofs(): Promise<number> {
   const db = getSupabaseAdmin();
   if (!db) return 0;
   const { count } = await db.from("payment_proofs").select("id", { count: "exact", head: true }).eq("status", "submitted");
@@ -803,19 +823,32 @@ export interface TimeseriesPoint {
   revenue: number;
 }
 
-export async function getAnalyticsTimeseries(opts: { from: string; to: string; excludeAdmin?: boolean }): Promise<{ range: { from: string; to: string }; points: TimeseriesPoint[] }> {
+/** Pre-loaded raw inputs for the timeseries aggregation (see OverviewPre). */
+export interface TimeseriesPre {
+  events: EventLite[];
+  payments: Payment[];
+  staff: Set<string>;
+  attempts: QuizAttempt[];
+}
+
+export async function getAnalyticsTimeseries(opts: { from: string; to: string; excludeAdmin?: boolean }, pre?: TimeseriesPre): Promise<{ range: { from: string; to: string }; points: TimeseriesPoint[] }> {
   const fromISO = new Date(opts.from).toISOString();
   const toISO = new Date(opts.to).toISOString();
   const fromMs = new Date(fromISO).getTime();
   const toMs = new Date(toISO).getTime();
   const excludeAdmin = !!opts.excludeAdmin;
 
-  const [allEvents, allPayments, staff, attempts] = await Promise.all([
-    fetchEvents(fromISO, toISO),
-    getPayments(),
-    excludeAdmin ? getStaffPhoneSet() : Promise.resolve(new Set<string>()),
-    fetchAttemptsInRange(fromMs, toMs),
-  ]);
+  let allEvents: EventLite[], allPayments: Payment[], staff: Set<string>, attempts: QuizAttempt[];
+  if (pre) {
+    ({ events: allEvents, payments: allPayments, staff, attempts } = pre);
+  } else {
+    [allEvents, allPayments, staff, attempts] = await Promise.all([
+      fetchEvents(fromISO, toISO),
+      getPayments(),
+      excludeAdmin ? getStaffPhoneSet() : Promise.resolve(new Set<string>()),
+      fetchAttemptsInRange(fromMs, toMs),
+    ]);
+  }
   const events = excludeAdmin ? allEvents.filter((e) => !(e.phone && staff.has(normPhone(e.phone)!))) : allEvents;
   let payments = allPayments.filter((p) => !p.deleted_at && (() => { const t = new Date(p.created_at).getTime(); return t >= fromMs && t <= toMs; })());
   if (excludeAdmin) payments = applyExcludeAdmin(payments, staff);
@@ -985,20 +1018,34 @@ export interface WebinarFunnel {
   webinars: { slug: string; title: string; registrations: number; paid: number; attended: number; revenue: number }[];
 }
 
-export async function getWebinarFunnel(opts: { from: string; to: string; excludeAdmin?: boolean }): Promise<WebinarFunnel> {
+/** Pre-loaded raw inputs for the webinar-funnel aggregation (see OverviewPre). */
+export interface FunnelPre {
+  events: EventLite[];
+  payments: Payment[];
+  staff: Set<string>;
+  webinars: Webinar[];
+  regs: WebinarRegistration[];
+}
+
+export async function getWebinarFunnel(opts: { from: string; to: string; excludeAdmin?: boolean }, pre?: FunnelPre): Promise<WebinarFunnel> {
   const fromISO = new Date(opts.from).toISOString();
   const toISO = new Date(opts.to).toISOString();
   const fromMs = new Date(fromISO).getTime();
   const toMs = new Date(toISO).getTime();
   const excludeAdmin = !!opts.excludeAdmin;
 
-  const [allEvents, allPayments, staff, webinars, regs] = await Promise.all([
-    fetchEvents(fromISO, toISO),
-    getPayments(),
-    excludeAdmin ? getStaffPhoneSet() : Promise.resolve(new Set<string>()),
-    getWebinars(),
-    getAllWebinarRegistrations(),
-  ]);
+  let allEvents: EventLite[], allPayments: Payment[], staff: Set<string>, webinars: Webinar[], regs: WebinarRegistration[];
+  if (pre) {
+    ({ events: allEvents, payments: allPayments, staff, webinars, regs } = pre);
+  } else {
+    [allEvents, allPayments, staff, webinars, regs] = await Promise.all([
+      fetchEvents(fromISO, toISO),
+      getPayments(),
+      excludeAdmin ? getStaffPhoneSet() : Promise.resolve(new Set<string>()),
+      getWebinars(),
+      getAllWebinarRegistrations(),
+    ]);
+  }
   const events = excludeAdmin ? allEvents.filter((e) => !(e.phone && staff.has(normPhone(e.phone)!))) : allEvents;
 
   const distinct = (name: string, key: (e: EventLite) => string | null) => {
