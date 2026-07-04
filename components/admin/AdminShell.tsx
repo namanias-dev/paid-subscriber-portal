@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import Logo from "@/components/ui/Logo";
 import AdminLogin from "./AdminLogin";
 import AdminPasswordModal from "./AdminPasswordModal";
@@ -16,7 +16,6 @@ interface AdminMe { username: string; role: string; role_name?: string; permissi
 
 export default function AdminShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const router = useRouter();
   const [authed, setAuthed] = useState<boolean | null>(null);
   const [open, setOpen] = useState(false);
   const [admin, setAdmin] = useState<AdminMe | null>(null);

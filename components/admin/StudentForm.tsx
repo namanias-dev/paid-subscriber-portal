@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft, User, GraduationCap, Video, Wallet, Check, Copy, MessageCircle } from "lucide-react";
 import { LoadingBlock } from "@/components/admin/ui";
@@ -46,7 +45,6 @@ function Field({ label, children, hint }: { label: string; children: React.React
 const inputCls = "w-full rounded-lg border border-line bg-surface px-3 py-2.5 text-sm focus:border-primary focus:outline-none";
 
 export default function StudentForm() {
-  const router = useRouter();
   const { toast } = useToast();
 
   const [courses, setCourses] = useState<Course[] | null>(null);

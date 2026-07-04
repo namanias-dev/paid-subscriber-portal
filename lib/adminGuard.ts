@@ -22,12 +22,6 @@ export async function requireAdmin(): Promise<boolean> {
   return !!session;
 }
 
-/** Effective permissions of the current admin (empty if not logged in). */
-export async function getAdminPermissions(): Promise<PermissionSet> {
-  const session = await getAdminSession();
-  return effectivePermissions(session);
-}
-
 /** True only if the logged-in admin holds the given permission. */
 export async function requirePermission(key: PermissionKey): Promise<boolean> {
   const session = await getAdminSession();

@@ -183,8 +183,3 @@ export const GLOBAL_NOTES: string[] = [
   "Duplicate retry payments are collapsed, so one purchase is never counted twice and a duplicate attempt never inflates paid students.",
   "Source buckets: “Untracked” = no source captured · “Pre-tracking” = created before visitor tracking began ({trackingStart}) · “Admin (manual)” = offline/admin-recorded payments. These have no visitor attribution, so their conversion rates are N/A.",
 ];
-
-export function metricTip(key: string): { label: string; meaning: string; formula: string } | null {
-  const m = METRICS[key];
-  return m ? { label: m.label, meaning: m.meaning, formula: m.formula } : null;
-}
