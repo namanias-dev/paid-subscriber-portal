@@ -19,19 +19,13 @@
 import { getPayments, getWebinars, getAllWebinarRegistrations, getAllCourseEnrollments } from "../dataProvider";
 import { isPaidStatus, dedupePaidRows, dedupedPaidTotal, distinctRegistrations, itemKey } from "../paymentsAgg";
 import { deriveEnrollment, isActiveEnrollment } from "../installments";
-import { normalizeIndianMobile } from "../phone";
+import { normPhone } from "../phone";
 import {
   getAnalyticsOverview, getAnalyticsTimeseries, getWebinarFunnel, resolveRange,
   fetchEvents, getTrackingStartMs, getStaffPhoneSet, countSubmittedProofs,
   type RangePreset,
 } from "./queries";
 import type { Payment } from "../types";
-
-function normPhone(p: string | null | undefined): string | null {
-  if (!p) return null;
-  const n = normalizeIndianMobile(p);
-  return n.ok && n.digits10 ? n.digits10 : String(p).replace(/\D/g, "").slice(-10) || null;
-}
 
 /** A headline number with a prior-period comparison. */
 export interface GlanceMetric {

@@ -9,7 +9,7 @@
  *  - Stores UTC `occurred_at` (rendered IST at the edges).
  */
 import { getSupabaseAdmin } from "../supabase";
-import { normalizeIndianMobile } from "../phone";
+import { normPhone } from "../phone";
 import { flattenForStamp, type AttributionState } from "../attribution";
 import { sendMetaPurchase } from "./thirdParty";
 import { fireAutoSms } from "../sms/dispatch";
@@ -58,12 +58,6 @@ export function parseDevice(ua: string | null | undefined): DeviceInfo {
     : /safari/i.test(s) ? "Safari"
     : "Other";
   return { type, os, browser };
-}
-
-function normPhone(phone: string | null | undefined): string | null {
-  if (!phone) return null;
-  const n = normalizeIndianMobile(phone);
-  return n.ok && n.digits10 ? n.digits10 : String(phone).replace(/\D/g, "").slice(-10) || null;
 }
 
 export interface WriteEventInput {

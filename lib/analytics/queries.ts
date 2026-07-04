@@ -9,7 +9,7 @@
 import { getSupabaseAdmin } from "../supabase";
 import { getPayments, getAdminAccounts, getAllAttempts, getAllQuizzes, getWebinars, getAllWebinarRegistrations } from "../dataProvider";
 import { isPaidStatus, dedupePaidRows, dedupedPaidTotal, distinctRegistrations, itemKey } from "../paymentsAgg";
-import { normalizeIndianMobile } from "../phone";
+import { normPhone } from "../phone";
 import { istInputToISO } from "../dates";
 import { NON_ATTRIBUTABLE_SOURCES, sourceLabel } from "./metrics";
 import type { Payment, QuizAttempt, Webinar, WebinarRegistration } from "../types";
@@ -38,12 +38,6 @@ export interface EventLite {
 
 type AttrTouch = { source?: string; medium?: string; campaign?: string; content?: string; landing_path?: string };
 type AttrJSON = { first_touch?: AttrTouch; last_touch?: AttrTouch };
-
-function normPhone(p: string | null | undefined): string | null {
-  if (!p) return null;
-  const n = normalizeIndianMobile(p);
-  return n.ok && n.digits10 ? n.digits10 : String(p).replace(/\D/g, "").slice(-10) || null;
-}
 
 export function sourceOfEvent(e: EventLite): string {
   // A captured attribution with no UTM/referrer is genuinely "direct"; a totally

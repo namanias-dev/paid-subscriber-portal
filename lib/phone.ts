@@ -58,6 +58,20 @@ export function normalizeIndianMobile(raw: string | null | undefined): Normalize
 }
 
 /**
+ * Loose 10-digit normalization for analytics/event matching: the canonical
+ * Indian mobile digits when the input is a valid mobile, else a best-effort
+ * last-10-digits fallback so records with unusual formatting still correlate.
+ * Returns null for empty input. Shared by the analytics/event layers so every
+ * phone-based match uses one definition. (Stricter callers should prefer
+ * {@link normalizeIndianMobile} directly and reject `.ok === false`.)
+ */
+export function normPhone(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const n = normalizeIndianMobile(raw);
+  return n.ok && n.digits10 ? n.digits10 : String(raw).replace(/\D/g, "").slice(-10) || null;
+}
+
+/**
  * Build a wa.me link. Returns null if the number is invalid.
  * Accepts a raw or already-normalized number.
  */
