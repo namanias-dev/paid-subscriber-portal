@@ -5,6 +5,7 @@ import { useToast } from "@/components/ui/Toast";
 import { startPayment } from "@/lib/startPayment";
 import { formatINR } from "@/lib/dates";
 import { trackClient } from "@/lib/analytics/client";
+import { metaPixelLead } from "@/lib/analytics/metaPixel";
 import PaymentCautionModal from "@/components/public/PaymentCautionModal";
 
 export default function WebinarRegister({
@@ -122,6 +123,10 @@ export default function WebinarRegister({
       }
 
       setDone(true);
+      // Meta Lead (browser) for the FREE registration — same deterministic
+      // event_id (lead_<webinarId:phone>) the server CAPI uses, so Meta dedupes.
+      // Consent-gated + inert without a pixel id.
+      metaPixelLead(`${webinarId}:${phone}`, { value: 0, contentName: webinarSlug ?? webinarId });
       toast("Registered! See you there. 🎯", "success");
     } catch {
       setError("Something went wrong.");

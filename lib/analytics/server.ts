@@ -267,8 +267,9 @@ export async function recordRegistrationCreated(reg: { id?: string; webinar_id: 
   });
   // Meta Lead (server) — the free-registration conversion. Paid webinars fire
   // Purchase from the PAID chokepoint instead; this Lead marks the free capture.
-  // Dedupes with the browser pixel via lead_<registration id>.
-  const leadId = reg.id || `${reg.webinar_id}:${phone}`;
+  // The id is DETERMINISTIC from webinar_id + phone so the browser pixel computes
+  // the SAME lead_<...> event_id and Meta dedupes the two copies.
+  const leadId = `${reg.webinar_id}:${phone ?? ""}`;
   const match = await lookupMetaMatch(phone);
   await sendMetaLead({
     id: leadId,

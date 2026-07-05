@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { formatINR, formatISTDate } from "@/lib/dates";
+import { metaPixelInitiateCheckout, metaPixelPurchase } from "@/lib/analytics/metaPixel";
 import type { InstallmentItem } from "@/lib/types";
 
 interface Contact {
@@ -139,6 +140,24 @@ export default function StatusClient({ contact }: { contact: Contact }) {
   const status = data?.status ?? "PENDING";
   const isPaid = status === "PAID" || status === "captured";
   const notPaid = !isPaid;
+
+  // Meta Pixel (consent-gated, inert without a pixel id). Fires with the SAME
+  // deterministic event_id the server CAPI uses (ic_<ref> / paid_<ref>) so Meta
+  // dedupes pixel + CAPI into one conversion. The Purchase value is the reconciled
+  // server amount from the status API — never recomputed here. Each fires once.
+  const icFired = useRef(false);
+  const purchaseFired = useRef(false);
+  useEffect(() => {
+    if (!data || !ref) return;
+    if (!icFired.current && notPaid) {
+      icFired.current = true;
+      metaPixelInitiateCheckout(ref, { value: data.amount || 0, contentName: data.item, category: data.itemType });
+    }
+    if (!purchaseFired.current && isPaid) {
+      purchaseFired.current = true;
+      metaPixelPurchase(ref, { value: data.amount || 0, contentName: data.item, category: data.itemType });
+    }
+  }, [data, ref, isPaid, notPaid]);
   const loginCode = data?.loginCode || null;
   const amountLabel = data && data.amount > 0 ? formatINR(data.amount) : "Free";
   const dateLabel = new Date().toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" });
