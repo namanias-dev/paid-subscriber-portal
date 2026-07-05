@@ -22,6 +22,7 @@ import QuizTab from "@/components/admin/analytics/Quiz";
 import WebinarsTab from "@/components/admin/analytics/Webinars";
 import PaymentsTab from "@/components/admin/analytics/Payments";
 import CampaignsTab from "@/components/admin/analytics/Campaigns";
+import AttributionTab from "@/components/admin/analytics/Attribution";
 
 interface Overview {
   range: { from: string; to: string };
@@ -48,7 +49,7 @@ const PRESET_LABELS: Record<Preset, string> = {
   today: "Today", yesterday: "Yesterday", "7d": "7 days", "30d": "30 days", this_month: "This month", custom: "Custom",
 };
 
-type Tab = "overview" | "trends" | "activity" | "quiz" | "webinars" | "payments" | "campaigns";
+type Tab = "overview" | "trends" | "activity" | "quiz" | "webinars" | "payments" | "campaigns" | "attribution";
 const TABS: { id: Tab; label: string }[] = [
   { id: "overview", label: "Overview" },
   { id: "trends", label: "Trends" },
@@ -57,6 +58,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "webinars", label: "Webinars" },
   { id: "payments", label: "Payments" },
   { id: "campaigns", label: "Campaigns" },
+  { id: "attribution", label: "Attribution (Meta)" },
 ];
 
 const nf = (n: number) => n.toLocaleString("en-IN");
@@ -170,6 +172,7 @@ export default function AnalyticsDashboardPage() {
       {tab === "webinars" && <WebinarsTab qs={qs} />}
       {tab === "payments" && <PaymentsTab qs={qs} />}
       {tab === "campaigns" && <CampaignsTab qs={qs} />}
+      {tab === "attribution" && <AttributionTab qs={qs} />}
 
       {tab === "overview" && (loading ? (
         <div className="space-y-4"><LoadingBlock /><LoadingBlock /></div>

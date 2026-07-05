@@ -12,6 +12,7 @@ import { isPaidStatus, dedupePaidRows, dedupedPaidTotal, distinctRegistrations, 
 import { normPhone } from "../phone";
 import { istInputToISO } from "../dates";
 import { NON_ATTRIBUTABLE_SOURCES, sourceLabel } from "./metrics";
+import { getMetaSpend } from "./metaInsights";
 import type { Payment, QuizAttempt, Webinar, WebinarRegistration } from "../types";
 
 /**
@@ -1246,4 +1247,145 @@ export async function getCampaignBreakdown(opts: { from: string; to: string; dim
   })).sort((a, b) => (b.revenue || 0) - (a.revenue || 0) || b.visitors - a.visitors);
 
   return { range: { from: fromISO, to: toISO }, dimension: dim, moneyAttributable, rows };
+}
+
+/* ============================================================================
+ * Meta attribution report — per-campaign leads, paid webinars, paid admissions,
+ * revenue, and (when an Ad Account is connected) spend / cost-per-conversion /
+ * ROAS. Money is reconciled from the payments table via the SAME dedupe the
+ * Payments tab uses, so revenue always ties out. Attribution is honest: money is
+ * attributed only where a campaign was actually stamped on the payment; the rest
+ * is shown as "untracked" and never silently assigned to a campaign.
+ *
+ * Coverage limits (stated in the UI): payments carry SOURCE + CAMPAIGN only, so
+ * revenue splits by campaign — NOT by adset/ad (utm_content/utm_term live on the
+ * click event, not the payment). Lead counts are campaign-level too.
+ * ========================================================================== */
+const META_SOURCES = new Set(["facebook", "instagram", "meta"]);
+
+export interface MetaAttributionRow {
+  campaign: string;
+  label: string;
+  source: string | null;
+  isMeta: boolean;
+  isUntracked: boolean;
+  leads: number;
+  paidWebinars: number;
+  paidAdmissions: number;
+  paidTotal: number;
+  revenue: number;
+  spend: number | null;
+  costPerConversion: number | null;
+  roas: number | null;
+}
+
+export interface MetaAttributionReport {
+  range: { from: string; to: string };
+  spendConnected: boolean;
+  spendError: string | null;
+  rows: MetaAttributionRow[];
+  totals: { leads: number; paidWebinars: number; paidAdmissions: number; revenue: number; spend: number | null };
+  coverage: { totalRevenue: number; attributedRevenue: number; untrackedRevenue: number; metaRevenue: number };
+  notes: string[];
+}
+
+export async function getMetaAttribution(opts: { from: string; to: string; excludeAdmin?: boolean }): Promise<MetaAttributionReport> {
+  const fromISO = new Date(opts.from).toISOString();
+  const toISO = new Date(opts.to).toISOString();
+  const fromMs = new Date(fromISO).getTime();
+  const toMs = new Date(toISO).getTime();
+  const excludeAdmin = !!opts.excludeAdmin;
+
+  const [allEvents, allPayments, staff, spend] = await Promise.all([
+    fetchEvents(fromISO, toISO),
+    getPayments(),
+    excludeAdmin ? getStaffPhoneSet() : Promise.resolve(new Set<string>()),
+    getMetaSpend(fromISO, toISO),
+  ]);
+  const events = excludeAdmin ? allEvents.filter((e) => !(e.phone && staff.has(normPhone(e.phone)!))) : allEvents;
+
+  // Leads (free registrations) by campaign — from the click event's first touch.
+  const leads = new Map<string, number>();
+  for (const e of events) {
+    if (e.event_name !== "registration_created") continue;
+    const ft = e.attribution?.first_touch || e.attribution?.last_touch;
+    const k = (ft?.campaign || "(untracked)").toLowerCase();
+    leads.set(k, (leads.get(k) || 0) + 1);
+  }
+
+  // Money — reconciled from payments (PAID, deduped), split by item type.
+  let payments = allPayments.filter((p) => !p.deleted_at && isPaidStatus(p.status) && (() => { const t = new Date(p.created_at).getTime(); return t >= fromMs && t <= toMs; })());
+  if (excludeAdmin) payments = applyExcludeAdmin(payments, staff);
+
+  const web = new Map<string, Set<string>>();
+  const adm = new Map<string, Set<string>>();
+  const rev = new Map<string, number>();
+  const srcOf = new Map<string, string>();
+  for (const p of dedupePaidRows(payments)) {
+    const k = (p.attribution_campaign || "(untracked)").toLowerCase();
+    const ph = normPhone(p.phone) || `pay:${p.id}`;
+    if (p.item_type === "webinar") (web.get(k) || web.set(k, new Set()).get(k)!).add(ph);
+    else if (p.item_type === "course") (adm.get(k) || adm.set(k, new Set()).get(k)!).add(ph);
+    rev.set(k, (rev.get(k) || 0) + p.amount);
+    if (p.attribution_source && !srcOf.has(k)) srcOf.set(k, p.attribution_source.toLowerCase());
+  }
+
+  const keys = new Set<string>([...leads.keys(), ...web.keys(), ...adm.keys(), ...rev.keys()]);
+  const rows: MetaAttributionRow[] = [...keys].map((k) => {
+    const isUntracked = k === "(untracked)" || k === "(none)";
+    const source = srcOf.get(k) || null;
+    const isMeta = !isUntracked && !!source && META_SOURCES.has(source);
+    const paidWebinars = web.get(k)?.size || 0;
+    const paidAdmissions = adm.get(k)?.size || 0;
+    const paidTotal = paidWebinars + paidAdmissions;
+    const revenue = rev.get(k) || 0;
+    const campaignSpend = spend.configured && !isUntracked ? (spend.byCampaign.get(k) ?? null) : null;
+    return {
+      campaign: k,
+      label: isUntracked ? "Untracked / pre-tracking" : k,
+      source,
+      isMeta,
+      isUntracked,
+      leads: leads.get(k) || 0,
+      paidWebinars,
+      paidAdmissions,
+      paidTotal,
+      revenue,
+      spend: campaignSpend,
+      costPerConversion: campaignSpend !== null && paidTotal > 0 ? Math.round(campaignSpend / paidTotal) : null,
+      roas: campaignSpend !== null && campaignSpend > 0 ? Number((revenue / campaignSpend).toFixed(2)) : null,
+    };
+  }).sort((a, b) => Number(a.isUntracked) - Number(b.isUntracked) || b.revenue - a.revenue || b.paidTotal - a.paidTotal);
+
+  const totalRevenue = rows.reduce((s, r) => s + r.revenue, 0);
+  const untrackedRevenue = rows.filter((r) => r.isUntracked).reduce((s, r) => s + r.revenue, 0);
+  const metaRevenue = rows.filter((r) => r.isMeta).reduce((s, r) => s + r.revenue, 0);
+  const totalSpend = spend.configured ? rows.reduce((s, r) => s + (r.spend || 0), 0) : null;
+
+  return {
+    range: { from: fromISO, to: toISO },
+    spendConnected: spend.configured,
+    spendError: spend.error || null,
+    rows,
+    totals: {
+      leads: rows.reduce((s, r) => s + r.leads, 0),
+      paidWebinars: rows.reduce((s, r) => s + r.paidWebinars, 0),
+      paidAdmissions: rows.reduce((s, r) => s + r.paidAdmissions, 0),
+      revenue: totalRevenue,
+      spend: totalSpend,
+    },
+    coverage: {
+      totalRevenue,
+      attributedRevenue: totalRevenue - untrackedRevenue,
+      untrackedRevenue,
+      metaRevenue,
+    },
+    notes: [
+      "Revenue reconciles to the Payments tab (PAID, deduped). Money is attributed only where a campaign was stamped on the payment; the rest is shown as Untracked, never guessed.",
+      "Payments carry source + campaign only, so revenue splits by campaign — not by adset/ad. Lead counts are campaign-level.",
+      spend.configured
+        ? "Spend/CPA/ROAS come from the connected Meta Ad Account, matched to campaigns by name (utm_campaign must equal the Meta campaign name)."
+        : "Connect META_AD_ACCOUNT_ID to show spend, cost-per-conversion and ROAS.",
+    ],
+  };
 }
