@@ -140,7 +140,7 @@ export async function sendMetaPurchase(
     fbc: match?.fbc ?? null,
     fbp: match?.fbp ?? null,
     customData: {
-      content_type: payment.item_type === "course" ? "product" : "product",
+      content_type: "product",
       content_category: payment.item_type, // "course" | "webinar"
       content_name: payment.item,
       content_ids: [payment.item_slug || payment.item_type],
