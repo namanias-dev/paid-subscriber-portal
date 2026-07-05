@@ -22,6 +22,17 @@ export interface AttributionTouch {
   referrer: string | null;
   /** Raw source/domain kept for "other"/"referral" so nothing is lost. */
   raw?: string | null;
+  /**
+   * Meta click identifiers, captured additively at landing. Never PII:
+   *  - fbclid: raw click id from the ad URL (?fbclid=...)
+   *  - fbc/fbp: the `_fbc`/`_fbp` browser cookies (set by the pixel), used as
+   *    non-PII match keys for CAPI so attribution works WITHOUT advanced matching.
+   * All optional — absent for non-Meta traffic. Ride the existing JSONB touch, so
+   * they persist onto buyers.first_touch/last_touch with no schema migration.
+   */
+  fbclid?: string | null;
+  fbc?: string | null;
+  fbp?: string | null;
 }
 
 export interface AttributionState {
@@ -117,9 +128,9 @@ export function buildTouch(input: {
   };
 }
 
-/** Does this touch carry a real marketing signal (utm or external referrer)? */
+/** Does this touch carry a real marketing signal (utm, external referrer, or Meta click)? */
 export function touchIsMeaningful(t: AttributionTouch): boolean {
-  return t.source !== "direct" || !!t.campaign || !!t.medium;
+  return t.source !== "direct" || !!t.campaign || !!t.medium || !!t.fbclid || !!t.fbc;
 }
 
 /** Merge a new touch into existing state: first-touch frozen, last-touch rolling. */
@@ -160,6 +171,26 @@ export function parseConsentCookie(raw: string | null | undefined): ConsentState
     if (v && typeof v === "object") return v as ConsentState;
   } catch { /* ignore */ }
   return null;
+}
+
+/**
+ * Extract Meta non-PII match keys (fbc/fbp/fbclid) from a stored attribution
+ * state. Prefers first-touch (the click that actually drove acquisition), falls
+ * back to last-touch. Used server-side at the PAID chokepoint to attach match
+ * signals to the CAPI event so it links to the ad WITHOUT advanced matching.
+ */
+export function metaIdentityFromState(state: AttributionState | null): {
+  fbc: string | null;
+  fbp: string | null;
+  fbclid: string | null;
+} {
+  const ft = state?.first_touch || null;
+  const lt = state?.last_touch || null;
+  return {
+    fbc: ft?.fbc || lt?.fbc || null,
+    fbp: ft?.fbp || lt?.fbp || null,
+    fbclid: ft?.fbclid || lt?.fbclid || null,
+  };
 }
 
 /** A short readable attribution summary for record-stamping (source + campaign). */

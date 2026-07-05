@@ -74,6 +74,16 @@ export function captureAttribution(): void {
       path: url.pathname,
       ownHost: location.hostname,
     });
+    // Meta click ids (non-PII), captured additively so CAPI can match without
+    // advanced matching. `_fbp`/`_fbc` are set by the pixel when it loads; when
+    // there's an ?fbclid= but no `_fbc` yet, derive it so we don't lose the click.
+    const fbclid = url.searchParams.get("fbclid");
+    const fbp = readCookie("_fbp");
+    let fbc = readCookie("_fbc");
+    if (!fbc && fbclid) fbc = `fb.1.${Date.now()}.${fbclid}`;
+    if (fbclid) touch.fbclid = fbclid;
+    if (fbc) touch.fbc = fbc;
+    if (fbp) touch.fbp = fbp;
     const existing = parseAttrCookie(readCookie(ATTR_COOKIE));
     const merged = mergeAttribution(existing, touch, new Date().toISOString());
     writeCookie(ATTR_COOKIE, serializeAttr(merged), YEAR * 2);

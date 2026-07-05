@@ -10,8 +10,8 @@
  */
 import { getSupabaseAdmin } from "../supabase";
 import { normPhone } from "../phone";
-import { flattenForStamp, type AttributionState } from "../attribution";
-import { sendMetaPurchase } from "./thirdParty";
+import { flattenForStamp, metaIdentityFromState, type AttributionState } from "../attribution";
+import { sendMetaPurchase, sendMetaLead, sendMetaInitiateCheckout } from "./thirdParty";
 import { fireAutoSms } from "../sms/dispatch";
 import { TRIGGERS } from "../sms/templates";
 import { supersedeUnpaidSiblings } from "../paymentSupersede";
@@ -142,6 +142,8 @@ export async function recordPaymentInitiated(p: Payment): Promise<void> {
       amount: p.amount, payment_kind: p.payment_kind ?? null, installment_no: p.installment_no ?? null,
     },
   });
+  // Meta InitiateCheckout (server) — dedupes with the browser pixel via ic_<ref>.
+  await sendMetaInitiateCheckout(p, await lookupMetaMatch(phone)).catch(() => {});
 }
 
 /** A generic status transition (idempotent per ref+status). */
@@ -190,7 +192,10 @@ export async function recordPaymentPaid(p: Payment, source = "system"): Promise<
   });
   if (newlyPaid) {
     await backfillBuyerSource(phone, p.attribution_source ?? null, p.attribution_campaign ?? null);
-    await sendMetaPurchase(p).catch(() => {});
+    // Meta Purchase — fired ONCE from this verified-PAID chokepoint, carrying the
+    // SAME reconciled rupee amount. Matched via the buyer's stored fbc/fbp (no PII
+    // unless G1 is enabled). Inert until CAPI keys are set. Never blocks the flow.
+    await sendMetaPurchase(p, await lookupMetaMatch(phone)).catch(() => {});
     // Paid wins: flag the other open unpaid attempts for this same student+item+
     // purpose as superseded so a PAID group is never mislabelled "needs action".
     // Idempotent; touches only this group; logged to payment_action_log.
@@ -260,6 +265,41 @@ export async function recordRegistrationCreated(reg: { id?: string; webinar_id: 
     dedupe_key: reg.id ? `reg:${reg.id}` : `reg:${reg.webinar_id}:${phone}`,
     props: { registration_id: reg.id ?? null, webinar_id: reg.webinar_id, webinar_slug: reg.webinar_slug ?? null, phone, price: reg.price ?? 0, is_free: !!reg.is_free },
   });
+  // Meta Lead (server) — the free-registration conversion. Paid webinars fire
+  // Purchase from the PAID chokepoint instead; this Lead marks the free capture.
+  // Dedupes with the browser pixel via lead_<registration id>.
+  const leadId = reg.id || `${reg.webinar_id}:${phone}`;
+  const match = await lookupMetaMatch(phone);
+  await sendMetaLead({
+    id: leadId,
+    phone,
+    value: reg.price ?? 0,
+    contentName: reg.webinar_slug ?? reg.webinar_id,
+    fbc: match.fbc,
+    fbp: match.fbp,
+  }).catch(() => {});
+}
+
+/**
+ * Look up the Meta non-PII match keys (fbc/fbp) we persisted onto the buyer's
+ * attribution touches at landing. This is what bridges the click→payment gap for
+ * server-side CAPI without any PII. Never throws; returns nulls on any miss.
+ */
+async function lookupMetaMatch(phone: string | null): Promise<{ fbc: string | null; fbp: string | null }> {
+  const db = getSupabaseAdmin();
+  const ph = normPhone(phone);
+  if (!db || !ph) return { fbc: null, fbp: null };
+  try {
+    const { data } = await db.from("buyers").select("first_touch,last_touch").eq("phone", ph).maybeSingle();
+    if (!data) return { fbc: null, fbp: null };
+    const id = metaIdentityFromState({
+      first_touch: (data.first_touch as AttributionState["first_touch"]) ?? null,
+      last_touch: (data.last_touch as AttributionState["last_touch"]) ?? null,
+    });
+    return { fbc: id.fbc, fbp: id.fbp };
+  } catch {
+    return { fbc: null, fbp: null };
+  }
 }
 
 /** Set buyer.attribution_source only if empty (first-touch wins). */
