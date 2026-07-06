@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
+import { cookies } from "next/headers";
 import { registerWebinar, getWebinarById, logWebinarAudit } from "@/lib/dataProvider";
 import { canRegisterForWebinar, buildClosedError } from "@/lib/webinarLifecycle";
+import { ATTR_COOKIE, parseAttrCookie } from "@/lib/attribution";
 
 export async function POST(req: Request) {
   try {
@@ -22,7 +24,11 @@ export async function POST(req: Request) {
       await logWebinarAudit({ action: "payment_blocked_expired", webinar_id: webinar.id, actor: "system", detail: { phone, free: true } });
       return NextResponse.json(buildClosedError(webinar, nextSlug), { status: 409 });
     }
-    await registerWebinar(webinarId, name, phone);
+    // First-party attribution snapshot from the nsa_attr cookie (best-effort; never
+    // blocks). Threaded into the lead so registration_created carries the campaign
+    // and the buyer record is stamped first-touch-wins at the lead moment.
+    const attr = parseAttrCookie(cookies().get(ATTR_COOKIE)?.value);
+    await registerWebinar(webinarId, name, phone, attr);
     return NextResponse.json({ ok: true });
   } catch {
     return NextResponse.json({ ok: false, error: "Could not register." }, { status: 500 });

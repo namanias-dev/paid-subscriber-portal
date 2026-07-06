@@ -256,13 +256,18 @@ export async function recordStaffReview(p: Payment, decision: "approved" | "reje
   }
 }
 
-export async function recordRegistrationCreated(reg: { id?: string; webinar_id: string; webinar_slug?: string | null; phone: string; price?: number; is_free?: boolean }): Promise<void> {
+export async function recordRegistrationCreated(reg: { id?: string; webinar_id: string; webinar_slug?: string | null; phone: string; price?: number; is_free?: boolean; attribution?: AttributionState | null }): Promise<void> {
   const phone = normPhone(reg.phone);
   await writeEvent({
     event_name: "registration_created",
     phone,
     buyer_id: await resolveBuyerId(phone),
     dedupe_key: reg.id ? `reg:${reg.id}` : `reg:${reg.webinar_id}:${phone}`,
+    // Carry the first-party attribution snapshot (first/last touch, incl. campaign
+    // + Meta click ids) so leads attribute to the campaign that drove them. Same
+    // {first_touch,last_touch} shape the client beacon writes — the Meta report
+    // reads attribution.first_touch.campaign. Null when no cookie (honest untracked).
+    attribution: reg.attribution ?? null,
     props: { registration_id: reg.id ?? null, webinar_id: reg.webinar_id, webinar_slug: reg.webinar_slug ?? null, phone, price: reg.price ?? 0, is_free: !!reg.is_free },
   });
   // Meta Lead (server) — the free-registration conversion. Paid webinars fire

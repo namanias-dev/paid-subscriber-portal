@@ -5,7 +5,8 @@ import { generateAccessCode } from "./codeGenerator";
 import { generateLoginCode } from "./buyerCode";
 import { normalizeIndianMobile } from "./phone";
 import { verifyFromStoredCallback, eazypayVerify, type VerifyOutcome, type SettlementStatus } from "./eazypay";
-import { recordPaymentPaid, recordPaymentInitiated, recordPaymentStatusChanged, recordRegistrationCreated } from "./analytics/server";
+import { recordPaymentPaid, recordPaymentInitiated, recordPaymentStatusChanged, recordRegistrationCreated, stampBuyerAttribution } from "./analytics/server";
+import type { AttributionState } from "./attribution";
 import { fireAutoSms } from "./sms/dispatch";
 import { TRIGGERS } from "./sms/templates";
 import { NON_DUPLICABLE_WEBINAR_FIELDS, buildDuplicateSlug } from "./webinarLifecycle";
@@ -1882,7 +1883,7 @@ export async function deleteWebinar(id: string): Promise<boolean> {
   }
   return dbDelete("webinars", id);
 }
-export async function registerWebinar(webinarId: string, name: string, phone: string): Promise<{ ok: boolean }> {
+export async function registerWebinar(webinarId: string, name: string, phone: string, attr?: AttributionState | null): Promise<{ ok: boolean }> {
   if (demoMode()) {
     const w = mock.webinars.find((x) => x.id === webinarId);
     if (w) w.registrations += 1;
@@ -1905,8 +1906,10 @@ export async function registerWebinar(webinarId: string, name: string, phone: st
   let webinarPrice = 0;
   if (db) { try { const { data } = await db.from("webinars").select("title, price").eq("id", webinarId).maybeSingle(); webinarTitle = (data?.title as string) ?? null; webinarPrice = Number((data as { price?: number } | null)?.price ?? 0) || 0; } catch { /* ignore */ } }
   const isFreeWebinar = webinarPrice <= 0;
-  // Analytics (best-effort, idempotent): a webinar registration milestone.
-  void recordRegistrationCreated({ webinar_id: webinarId, phone, price: webinarPrice, is_free: isFreeWebinar }).catch(() => {});
+  // Analytics (best-effort, idempotent): a webinar registration milestone. The
+  // attribution snapshot (from the nsa_attr cookie, passed by the route) rides the
+  // event so the lead attributes to its campaign — the Meta report reads it.
+  void recordRegistrationCreated({ webinar_id: webinarId, phone, price: webinarPrice, is_free: isFreeWebinar, attribution: attr ?? null }).catch(() => {});
   // Auto-SMS (disabled by default): "Webinar Registered". FREE webinars confirm at
   // registration (registration == confirmation). PAID webinars must NOT confirm here —
   // payment is unresolved at registration time; the confirmation fires only after a
@@ -1920,6 +1923,11 @@ export async function registerWebinar(webinarId: string, name: string, phone: st
   // student + buyer so they appear in Students & Enrollments and can open their
   // portal (webinar materials). Idempotent — one person stays one student.
   await ensureBuyer(phone, name).catch(() => null);
+  // Persist the acquisition campaign onto the buyer AT THE LEAD MOMENT (after the
+  // buyer row exists). First-touch-wins — never overwrites an existing first touch —
+  // so a later payment can be traced back to the original campaign even months later
+  // and cross-device (the report falls back to buyers.first_touch.campaign).
+  void stampBuyerAttribution(phone, attr ?? null).catch(() => {});
   return { ok: true };
 }
 

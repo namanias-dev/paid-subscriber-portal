@@ -1289,6 +1289,38 @@ export interface MetaAttributionReport {
   notes: string[];
 }
 
+/**
+ * Look up buyers' permanently-stored first-touch campaign + source by phone — the
+ * lifetime attribution fallback for paid rows with no cookie campaign of their own.
+ * Prefers the frozen `first_touch` JSONB; falls back to the flat `attribution_*`
+ * columns (same first-touch-wins value). Best-effort; never throws.
+ */
+async function fetchBuyerFirstTouchByPhone(phones: Set<string>): Promise<Map<string, { campaign: string | null; source: string | null }>> {
+  const out = new Map<string, { campaign: string | null; source: string | null }>();
+  const db = getSupabaseAdmin();
+  if (!db || phones.size === 0) return out;
+  const list = [...phones];
+  const CHUNK = 500;
+  try {
+    for (let i = 0; i < list.length; i += CHUNK) {
+      const slice = list.slice(i, i + CHUNK);
+      const { data } = await db
+        .from("buyers")
+        .select("phone,first_touch,attribution_campaign,attribution_source")
+        .in("phone", slice);
+      for (const r of (data as { phone: string; first_touch: AttrTouch | null; attribution_campaign: string | null; attribution_source: string | null }[]) || []) {
+        const ph = normPhone(r.phone);
+        if (!ph) continue;
+        const ft = r.first_touch || null;
+        const campaign = ft?.campaign || r.attribution_campaign || null;
+        const source = ft?.source || r.attribution_source || null;
+        if (campaign || source) out.set(ph, { campaign, source });
+      }
+    }
+  } catch { /* best-effort */ }
+  return out;
+}
+
 export async function getMetaAttribution(opts: { from: string; to: string; excludeAdmin?: boolean }): Promise<MetaAttributionReport> {
   const fromISO = new Date(opts.from).toISOString();
   const toISO = new Date(opts.to).toISOString();
@@ -1316,18 +1348,36 @@ export async function getMetaAttribution(opts: { from: string; to: string; exclu
   // Money — reconciled from payments (PAID, deduped), split by item type.
   let payments = allPayments.filter((p) => !p.deleted_at && isPaidStatus(p.status) && (() => { const t = new Date(p.created_at).getTime(); return t >= fromMs && t <= toMs; })());
   if (excludeAdmin) payments = applyExcludeAdmin(payments, staff);
+  const dedupedPaid = dedupePaidRows(payments);
+
+  // LIFETIME FALLBACK: for a paid row whose OWN attribution (stamped from the cookie
+  // at checkout) is missing, fall back to the buyer's permanently-stored first touch
+  // (by phone). This turns cookie-only, same-browser attribution into true lifetime,
+  // cross-device, buyer-level attribution — a lead who clicked on mobile and paid
+  // months later on a laptop still credits the original campaign. We NEVER guess:
+  // only a REAL stored first_touch.campaign is used; otherwise the row stays Untracked.
+  const fallbackPhones = new Set<string>();
+  for (const p of dedupedPaid) {
+    if (!p.attribution_campaign) { const ph = normPhone(p.phone); if (ph) fallbackPhones.add(ph); }
+  }
+  const buyerFirstTouch = await fetchBuyerFirstTouchByPhone(fallbackPhones);
 
   const web = new Map<string, Set<string>>();
   const adm = new Map<string, Set<string>>();
   const rev = new Map<string, number>();
   const srcOf = new Map<string, string>();
-  for (const p of dedupePaidRows(payments)) {
-    const k = (p.attribution_campaign || "(untracked)").toLowerCase();
-    const ph = normPhone(p.phone) || `pay:${p.id}`;
-    if (p.item_type === "webinar") (web.get(k) || web.set(k, new Set()).get(k)!).add(ph);
-    else if (p.item_type === "course") (adm.get(k) || adm.set(k, new Set()).get(k)!).add(ph);
+  for (const p of dedupedPaid) {
+    const ph = normPhone(p.phone);
+    const fb = ph ? buyerFirstTouch.get(ph) : undefined;
+    // Payment's own campaign wins; else the buyer's stored first-touch campaign; else Untracked.
+    const campaign = p.attribution_campaign || fb?.campaign || null;
+    const source = p.attribution_source || fb?.source || null;
+    const k = (campaign || "(untracked)").toLowerCase();
+    const payerKey = ph || `pay:${p.id}`;
+    if (p.item_type === "webinar") (web.get(k) || web.set(k, new Set()).get(k)!).add(payerKey);
+    else if (p.item_type === "course") (adm.get(k) || adm.set(k, new Set()).get(k)!).add(payerKey);
     rev.set(k, (rev.get(k) || 0) + p.amount);
-    if (p.attribution_source && !srcOf.has(k)) srcOf.set(k, p.attribution_source.toLowerCase());
+    if (source && !srcOf.has(k)) srcOf.set(k, source.toLowerCase());
   }
 
   const keys = new Set<string>([...leads.keys(), ...web.keys(), ...adm.keys(), ...rev.keys()]);
@@ -1381,7 +1431,7 @@ export async function getMetaAttribution(opts: { from: string; to: string; exclu
       metaRevenue,
     },
     notes: [
-      "Revenue reconciles to the Payments tab (PAID, deduped). Money is attributed only where a campaign was stamped on the payment; the rest is shown as Untracked, never guessed.",
+      "Revenue reconciles to the Payments tab (PAID, deduped). Money is attributed where a campaign was stamped on the payment OR, when that is missing, from the buyer's permanently-stored first-touch campaign (lifetime, cross-device); the rest is shown as Untracked, never guessed.",
       "Payments carry source + campaign only, so revenue splits by campaign — not by adset/ad. Lead counts are campaign-level.",
       spend.configured
         ? "Spend/CPA/ROAS come from the connected Meta Ad Account, matched to campaigns by name (utm_campaign must equal the Meta campaign name)."
