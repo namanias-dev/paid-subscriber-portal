@@ -74,6 +74,12 @@ export default function ContentAdmin() {
   const videoInput = useRef<HTMLInputElement>(null);
   const [thumbFile, setThumbFile] = useState<File | null>(null);
   const thumbInput = useRef<HTMLInputElement>(null);
+  // Document/notes upload (non-recording types): choose "Upload PDF" or "Add link".
+  const [notesMode, setNotesMode] = useState<"link" | "upload">("link");
+  const [notesFile, setNotesFile] = useState<File | null>(null);
+  const notesInput = useRef<HTMLInputElement>(null);
+  const [notesBusy, setNotesBusy] = useState(false);
+  const [existingNote, setExistingNote] = useState<{ key: string; size: number | null } | null>(null);
   const editing = !!form.id;
 
   // Orientation / starter assignment (reuse this video in After-Registration of
@@ -152,6 +158,9 @@ export default function ContentAdmin() {
     setForm(EMPTY_FORM);
     setVideoFile(null);
     setThumbFile(null);
+    setNotesMode("link");
+    setNotesFile(null);
+    setExistingNote(null);
     setOrientRole("orientation");
     setOrientTargets(new Set());
     setOpen(true);
@@ -180,6 +189,11 @@ export default function ContentAdmin() {
     });
     setVideoFile(null);
     setThumbFile(null);
+    // Existing note file (uploaded to our storage) → default to the upload tab so
+    // its presence is obvious; otherwise the link tab. Never auto-clears the link.
+    setNotesMode(c.notes_pdf_key ? "upload" : "link");
+    setNotesFile(null);
+    setExistingNote(c.notes_pdf_key ? { key: c.notes_pdf_key, size: c.notes_pdf_size ?? null } : null);
     setOrientRole("orientation");
     setOrientTargets(new Set());
     setOpen(true);
@@ -284,6 +298,32 @@ export default function ContentAdmin() {
       }
     }
 
+    // Document/notes file (non-recording types) → presigned PUT straight to R2.
+    // Stores a STABLE /api/media link + the R2 key + size (fixes the missing-size
+    // issue automatically and never expires like a pasted signed URL).
+    const isDocType = form.type !== "recording" && form.type !== "live_link";
+    if (notesFile && recordingId && isDocType && notesMode === "upload") {
+      setNotesBusy(true);
+      try {
+        const sign = await fetch("/api/admin/content/notes/sign", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ contentId: recordingId, contentType: notesFile.type || "application/pdf", size: notesFile.size }),
+        });
+        const sd = await sign.json().catch(() => ({}));
+        if (sd?.ok && sd.url) {
+          const put = await fetch(sd.url, { method: "PUT", headers: { "Content-Type": notesFile.type || "application/pdf" }, body: notesFile });
+          if (!put.ok) throw new Error("upload failed");
+        } else {
+          toast(sd?.error || "PDF upload failed", "error");
+        }
+      } catch {
+        toast("PDF upload failed — content was saved. Try editing it and re-uploading.", "error");
+      } finally {
+        setNotesBusy(false);
+      }
+    }
+
     // Hosted + a file chosen → kick off the resilient background upload.
     if (hosted && videoFile && recordingId) {
       const meta = await readVideoMeta(videoFile);
@@ -304,6 +344,9 @@ export default function ContentAdmin() {
     setForm(EMPTY_FORM);
     setVideoFile(null);
     setThumbFile(null);
+    setNotesFile(null);
+    setNotesMode("link");
+    setExistingNote(null);
     reload();
   }
 
@@ -402,8 +445,8 @@ export default function ContentAdmin() {
                   </div>
                 )}
               </td>
-              <td className="px-4 py-3 whitespace-nowrap text-xs tabular-nums text-muted" title={c.source_type === "hosted" && !c.file_size ? "Size not recorded — run the backfill script" : undefined}>
-                {rowBytes > 0 ? formatBytes(rowBytes) : (c.source_type === "hosted" ? "—" : "")}
+              <td className="px-4 py-3 whitespace-nowrap text-xs tabular-nums text-muted" title={c.source_type === "hosted" && !c.file_size ? "Size not recorded — run the backfill script" : (rowBytes === 0 && c.type !== "recording" && c.type !== "live_link" ? "External link — size not measurable" : undefined)}>
+                {rowBytes > 0 ? formatBytes(rowBytes) : (c.source_type === "hosted" || c.type !== "recording" && c.type !== "live_link" ? "—" : "")}
               </td>
               <td className="px-4 py-3">{formatDate(c.date)}</td>
               <td className="px-4 py-3">
@@ -583,21 +626,57 @@ export default function ContentAdmin() {
               </div>
               <p className="text-xs text-muted">Full-payment access window (Lifetime / N months) is set per course under Courses → Access &amp; Entitlements. Per-student grant/extend/revoke lives in Access at Risk.</p>
             </div>
-          ) : (
-            /* External links only */
+          ) : isRecording ? (
+            /* External links only (recordings) */
             <div className="rounded-xl border border-line p-3">
               <p className="mb-2 text-xs font-semibold text-ink2">External links only — YouTube / Drive / Telegram (any one or a combination)</p>
-              {isRecording ? (
-                <>
-                  <input className="input mb-2" placeholder="YouTube link" value={form.youtube_link} onChange={(e) => setForm({ ...form, youtube_link: e.target.value })} />
-                  <input className="input mb-2" placeholder="Google Drive link" value={form.drive_link} onChange={(e) => setForm({ ...form, drive_link: e.target.value })} />
-                  <input className="input" placeholder="Telegram link" value={form.telegram_link} onChange={(e) => setForm({ ...form, telegram_link: e.target.value })} />
-                </>
+              <input className="input mb-2" placeholder="YouTube link" value={form.youtube_link} onChange={(e) => setForm({ ...form, youtube_link: e.target.value })} />
+              <input className="input mb-2" placeholder="Google Drive link" value={form.drive_link} onChange={(e) => setForm({ ...form, drive_link: e.target.value })} />
+              <input className="input" placeholder="Telegram link" value={form.telegram_link} onChange={(e) => setForm({ ...form, telegram_link: e.target.value })} />
+            </div>
+          ) : (
+            /* Documents / notes: UPLOAD a PDF to our storage, or ADD a link */
+            <div className="space-y-3 rounded-xl border border-line p-3">
+              <div className="grid grid-cols-2 gap-2">
+                {(["upload", "link"] as const).map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => setNotesMode(m)}
+                    className={`min-h-[44px] rounded-xl border px-3 text-sm font-semibold transition ${notesMode === m ? "border-[var(--ca-gold)] bg-[rgba(212,175,55,0.12)] text-ink" : "border-line bg-surface text-ink2 hover:border-[rgba(212,175,55,0.5)]"}`}
+                  >
+                    {m === "upload" ? "⬆️ Upload PDF" : "🔗 Add link"}
+                  </button>
+                ))}
+              </div>
+
+              {notesMode === "upload" ? (
+                <div>
+                  <input
+                    ref={notesInput}
+                    type="file"
+                    accept="application/pdf,.pdf,.doc,.docx,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                    className="hidden"
+                    onChange={(e) => setNotesFile(e.target.files?.[0] || null)}
+                  />
+                  <button type="button" onClick={() => notesInput.current?.click()} className="btn btn-secondary w-full text-sm">
+                    {notesFile
+                      ? `📄 ${notesFile.name} (${formatBytes(notesFile.size)})`
+                      : existingNote
+                        ? "Replace PDF / document (optional)"
+                        : "Choose PDF / document"}
+                  </button>
+                  {existingNote && !notesFile && (
+                    <p className="mt-1 text-xs text-emerald-700">✓ A file is already uploaded{existingNote.size ? ` (${formatBytes(existingNote.size)})` : ""} — students open it via a stable link. Choose a new file only to replace it.</p>
+                  )}
+                  <p className="mt-1 text-xs text-muted">PDF, DOC or DOCX up to 100&nbsp;MB. Stored in our Cloudflare storage — the link never expires and the size shows automatically.</p>
+                </div>
               ) : (
                 <>
                   <input className="input mb-2" placeholder="Google Drive / PDF link" value={form.drive_link} onChange={(e) => setForm({ ...form, drive_link: e.target.value })} />
                   <input className="input mb-2" placeholder="Telegram link" value={form.telegram_link} onChange={(e) => setForm({ ...form, telegram_link: e.target.value })} />
                   <input className="input" placeholder="YouTube link (optional)" value={form.youtube_link} onChange={(e) => setForm({ ...form, youtube_link: e.target.value })} />
+                  <p className="mt-1 text-xs text-muted">External link (Google Drive, Telegram, etc.) — opens as-is. File size can&apos;t be measured for external links, so the list shows &ldquo;—&rdquo;.</p>
                 </>
               )}
             </div>
@@ -607,8 +686,8 @@ export default function ContentAdmin() {
             <div><label className="label">Drip release date</label><input type="date" className="input" value={form.drip_date} onChange={(e) => setForm({ ...form, drip_date: e.target.value })} /></div>
             <label className="flex items-end gap-2 pb-2 text-sm"><input type="checkbox" checked={form.is_published} onChange={(e) => setForm({ ...form, is_published: e.target.checked })} /> Publish now</label>
           </div>
-          <button onClick={save} className="btn btn-primary w-full">
-            {isRecording && form.source_type === "hosted" && videoFile ? "Save & start upload" : editing ? "Save changes" : "Add Content"}
+          <button onClick={save} disabled={notesBusy} className="btn btn-primary w-full disabled:opacity-60">
+            {notesBusy ? "Uploading PDF…" : isRecording && form.source_type === "hosted" && videoFile ? "Save & start upload" : !isRecording && notesMode === "upload" && notesFile ? "Save & upload PDF" : editing ? "Save changes" : "Add Content"}
           </button>
         </div>
       </Modal>

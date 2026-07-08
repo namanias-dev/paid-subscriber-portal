@@ -10,6 +10,7 @@ import {
   GetObjectCommand,
   PutObjectCommand,
   DeleteObjectCommand,
+  HeadObjectCommand,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import type { MultipartPart } from "./types";
@@ -118,6 +119,28 @@ export function mediaAssetKey(folder: string, ext: string): string {
   const safeExt = (ext || "bin").replace(/[^a-z0-9]/gi, "").toLowerCase() || "bin";
   const rand = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   return `media/${safeFolder}/${rand}.${safeExt}`;
+}
+
+/**
+ * Key for a document/notes file uploaded against a content_item (type notes /
+ * booklet / pyq / …). Lives under `media/` so the existing public `/api/media`
+ * proxy serves it with a STABLE url (never an expiring presigned link), and is
+ * namespaced by the content id so replacing a file is deterministic.
+ */
+export function contentNotesKey(contentId: string, ext: string): string {
+  const safeId = (contentId || "_").replace(/[^a-z0-9-]/gi, "") || "_";
+  const safeExt = (ext || "pdf").replace(/[^a-z0-9]/gi, "").toLowerCase() || "pdf";
+  return `media/content-notes/${safeId}/file.${safeExt}`;
+}
+
+/** HEAD an object and return its size in bytes, or null if missing/inaccessible. */
+export async function headObjectSize(key: string): Promise<number | null> {
+  try {
+    const out = await r2().send(new HeadObjectCommand({ Bucket: bucket(), Key: key }));
+    return typeof out.ContentLength === "number" ? out.ContentLength : null;
+  } catch {
+    return null;
+  }
 }
 
 // ----------------------------- Multipart -----------------------------
