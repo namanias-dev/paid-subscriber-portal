@@ -47,6 +47,7 @@ export default function CourseForm({ course }: { course?: Course }) {
       price: 0, original_price: null, language: "Hinglish (Bilingual)", target_years: "2026/27",
       duration: "12 months", faculty: "Naman Sir", status: "draft", emi_amount: null, emi_months: null,
       brochure_link: "", razorpay_link: "", featured: false, included: [], not_included: [],
+      show_included: true, show_not_included: true,
       batches: [starter], default_batch_id: starter.id,
     };
   });
@@ -86,7 +87,12 @@ export default function CourseForm({ course }: { course?: Course }) {
 
   async function save() {
     if (!c.title?.trim()) return toast("Title is required", "error");
-    const payload = deriveCourseFromDefault(c);
+    const cleanList = (v: string[] | undefined) => (v || []).map((s) => s.trim()).filter(Boolean);
+    const payload = deriveCourseFromDefault({
+      ...c,
+      included: cleanList(c.included),
+      not_included: cleanList(c.not_included),
+    });
     setSaving(true);
     const res = await fetch(isNew ? "/api/admin/courses" : `/api/admin/courses/${course!.id}`, {
       method: isNew ? "POST" : "PATCH",
@@ -147,9 +153,7 @@ export default function CourseForm({ course }: { course?: Course }) {
                   <Field label="Target years"><input className="input" value={c.target_years || ""} onChange={(e) => set("target_years", e.target.value)} /></Field>
                   <Field label="Duration"><input className="input" value={c.duration || ""} onChange={(e) => set("duration", e.target.value)} /></Field>
                   <Field label="Faculty"><input className="input" value={c.faculty || ""} onChange={(e) => set("faculty", e.target.value)} /></Field>
-                  <Field label="What's included" full hint="Comma separated.">
-                    <input className="input" value={(c.included || []).join(", ")} onChange={(e) => set("included", e.target.value.split(",").map((s) => s.trim()).filter(Boolean))} />
-                  </Field>
+                  <div className="sm:col-span-2 text-xs text-[var(--ca-slate-500)]">Edit &ldquo;What&apos;s included&rdquo; &amp; &ldquo;What&apos;s not included&rdquo; (with show/hide) in the <b>Rich Content</b> tab.</div>
                 </Section>
 
                 <Section title="Schedule, modes & dates" desc="Mode, timing, start date, price, EMI and seats are now set per BATCH — go to the Batches tab. The values below are auto-derived from the default batch on save (read-only here) so there's a single source of truth and no double entry.">
@@ -248,6 +252,24 @@ export default function CourseForm({ course }: { course?: Course }) {
                 </Section>
                 <Section title="Who should join">
                   <StringListEditor value={c.who_should_attend} onChange={(v) => set("who_should_attend", v)} placeholder="e.g. Working professionals targeting UPSC 2027" addLabel="+ Add audience point" />
+                </Section>
+                <Section title="What's included" desc="Bullet points shown on the public course page. Add, edit, reorder or remove items. Turn the section off to hide it entirely.">
+                  <div className="sm:col-span-2 mb-1">
+                    <label className="flex items-center gap-2 text-sm font-medium">
+                      <input type="checkbox" checked={c.show_included !== false} onChange={(e) => set("show_included", e.target.checked)} />
+                      Show &ldquo;What&apos;s included&rdquo; on the public page
+                    </label>
+                  </div>
+                  <StringListEditor value={c.included} onChange={(v) => set("included", v)} placeholder="e.g. Live + recorded lectures" addLabel="+ Add included item" reorderable />
+                </Section>
+                <Section title="What's not included" desc="Optional. Leave empty or switch off to remove this section from the public course page.">
+                  <div className="sm:col-span-2 mb-1">
+                    <label className="flex items-center gap-2 text-sm font-medium">
+                      <input type="checkbox" checked={c.show_not_included !== false} onChange={(e) => set("show_not_included", e.target.checked)} />
+                      Show &ldquo;What&apos;s not included&rdquo; on the public page
+                    </label>
+                  </div>
+                  <StringListEditor value={c.not_included} onChange={(v) => set("not_included", v)} placeholder="e.g. Printed material (shipping extra)" addLabel="+ Add not-included item" reorderable />
                 </Section>
                 <Section title="What you'll get" desc="Deliverables / bonuses included.">
                   <LearnItemsEditor value={c.what_you_get} onChange={(v) => set("what_you_get", v)} addLabel="+ Add deliverable" />

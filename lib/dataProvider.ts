@@ -40,6 +40,7 @@ import type {
   SiteSettings,
   Question,
   Quiz,
+  QuizAccessRules,
   QuizQuestion,
   QuizAttempt,
   QuizAnswer,
@@ -1432,6 +1433,8 @@ export async function addCourse(input: Partial<Course>): Promise<Course> {
     razorpay_link: input.razorpay_link ?? null,
     included: input.included || [],
     not_included: input.not_included || [],
+    show_included: input.show_included ?? true,
+    show_not_included: input.show_not_included ?? true,
     curriculum: input.curriculum || [],
     schedule: input.schedule ?? null,
     featured: input.featured ?? false,
@@ -5760,6 +5763,39 @@ export async function getQuizBySlug(slug: string): Promise<Quiz | null> {
   const { data } = await db.from("quizzes").select("*").eq("slug", slug).maybeSingle();
   return (data as Quiz) ?? null;
 }
+/**
+ * "Foundation" programs (Safalta + Saarthi, all batches/variants incl. the legacy
+ * -old imports) whose PAID students are always entitled to paid quizzes. Access is
+ * enrollment-driven via the course↔quiz mapping, so listing these course IDs on a
+ * paid quiz's access_rules.allowed_course_ids grants every current AND future paid
+ * enrollee automatically. Matched by slug/title so new Safalta/Saarthi courses are
+ * covered without code changes.
+ */
+export function isFoundationCourse(c: { slug?: string | null; title?: string | null }): boolean {
+  const s = `${c.slug ?? ""} ${c.title ?? ""}`.toLowerCase();
+  return s.includes("safalta") || s.includes("saarthi");
+}
+export async function getFoundationCourseIds(): Promise<string[]> {
+  const courses = await getAllCourses();
+  return courses.filter(isFoundationCourse).map((c) => c.id);
+}
+/**
+ * Future-proof hook: when a quiz is PAID, union the foundation (Safalta/Saarthi)
+ * course IDs into its access_rules.allowed_course_ids so those students always get
+ * access. Idempotent (set union) and additive — never removes admin-set courses.
+ * `base` is the effective access_rules to merge into (existing ∪ patch).
+ */
+export async function applyFoundationQuizAccess(isPaid: boolean, base: QuizAccessRules | undefined): Promise<QuizAccessRules | undefined> {
+  if (!isPaid) return base;
+  const foundationIds = await getFoundationCourseIds();
+  if (!foundationIds.length) return base;
+  const ar: QuizAccessRules = { ...(base || {}) };
+  const existing = ar.allowed_course_ids || [];
+  const merged = [...new Set([...existing, ...foundationIds])];
+  ar.allowed_course_ids = merged;
+  return ar;
+}
+
 export async function addQuiz(input: Partial<Quiz>): Promise<Quiz> {
   const ts = new Date().toISOString();
   const row: Quiz = {
@@ -5798,6 +5834,8 @@ export async function addQuiz(input: Partial<Quiz>): Promise<Quiz> {
     created_at: ts,
     updated_at: ts,
   };
+  // Future-proof: a newly-created PAID quiz auto-grants Safalta/Saarthi students.
+  row.access_rules = (await applyFoundationQuizAccess(row.requires_payment === true, row.access_rules)) || {};
   if (demoMode()) {
     mock.quizzes.unshift(row);
     return row;
@@ -5806,6 +5844,16 @@ export async function addQuiz(input: Partial<Quiz>): Promise<Quiz> {
 }
 export async function updateQuiz(id: string, patch: Partial<Quiz>): Promise<Quiz | null> {
   const next = { ...patch, updated_at: new Date().toISOString() };
+  // Future-proof: when a quiz is (or becomes) PAID, ensure Safalta/Saarthi course
+  // IDs stay present in allowed_course_ids. Merge against the existing quiz so a
+  // PATCH that doesn't touch access_rules/requires_payment still stays covered.
+  const existing = await getQuizById(id);
+  if (existing) {
+    const isPaid = (next.requires_payment ?? existing.requires_payment) === true;
+    const base = (next.access_rules ?? existing.access_rules) as QuizAccessRules | undefined;
+    const mergedAr = await applyFoundationQuizAccess(isPaid, base);
+    if (mergedAr) next.access_rules = mergedAr;
+  }
   if (demoMode()) {
     const idx = mock.quizzes.findIndex((q) => q.id === id);
     if (idx === -1) return null;

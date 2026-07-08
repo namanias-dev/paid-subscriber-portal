@@ -502,6 +502,10 @@ export interface Course {
   razorpay_link: string | null;
   included: string[];
   not_included: string[];
+  /** Per-section visibility on the public course page. Default ON (true) so
+   * existing courses render exactly as before until an admin toggles them off. */
+  show_included?: boolean;
+  show_not_included?: boolean;
   curriculum: CourseModule[];
   schedule: string | null;
   featured: boolean;
