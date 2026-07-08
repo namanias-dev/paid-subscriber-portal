@@ -44,8 +44,11 @@ export default function CourseDetail({ course, related, comparison, view, brochu
   const cover = course.cover_image_url || course.image || course.mobile_image_url || null;
   const enrollHref = purchase ? purchase.href : course.price === 0 ? `/enroll/${course.slug}` : `/courses/${course.slug}/enroll`;
   const enrollLabel = purchase ? purchase.cta : course.price === 0 ? "Book Now" : "Enroll Now";
-  const included = (course.included || []).filter(Boolean);
-  const notIncluded = (course.not_included || []).filter(Boolean);
+  // Per-section visibility toggles (default ON so existing courses are unchanged).
+  const showIncluded = course.show_included !== false;
+  const showNotIncluded = course.show_not_included !== false;
+  const included = showIncluded ? (course.included || []).filter(Boolean) : [];
+  const notIncluded = showNotIncluded ? (course.not_included || []).filter(Boolean) : [];
   const curriculum = (course.curriculum || []).filter((m) => m?.title?.trim());
 
   const timings = (course.batch_timings || []).filter(Boolean);

@@ -383,17 +383,33 @@ export function StringListEditor({
   onChange,
   placeholder = "Add a point",
   addLabel = "+ Add point",
+  reorderable = false,
 }: {
   value: string[] | undefined;
   onChange: (v: string[]) => void;
   placeholder?: string;
   addLabel?: string;
+  /** When true, shows ↑/↓ controls to reorder items. */
+  reorderable?: boolean;
 }) {
   const items = value || [];
+  const move = (from: number, to: number) => {
+    if (to < 0 || to >= items.length) return;
+    const next = [...items];
+    const [moved] = next.splice(from, 1);
+    next.splice(to, 0, moved);
+    onChange(next);
+  };
   return (
     <div className="sm:col-span-2 space-y-2">
       {items.map((it, i) => (
         <div key={i} className="flex gap-2">
+          {reorderable && (
+            <div className="flex flex-col">
+              <button type="button" onClick={() => move(i, i - 1)} disabled={i === 0} className="btn btn-secondary px-2 py-0.5 text-xs disabled:opacity-40" aria-label="Move up">↑</button>
+              <button type="button" onClick={() => move(i, i + 1)} disabled={i === items.length - 1} className="btn btn-secondary px-2 py-0.5 text-xs disabled:opacity-40" aria-label="Move down">↓</button>
+            </div>
+          )}
           <input className="input" placeholder={placeholder} value={it} onChange={(e) => onChange(items.map((x, idx) => (idx === i ? e.target.value : x)))} />
           <button type="button" onClick={() => onChange(items.filter((_, idx) => idx !== i))} className="btn btn-secondary text-sm text-danger">Remove</button>
         </div>
