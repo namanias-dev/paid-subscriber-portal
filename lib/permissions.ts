@@ -20,6 +20,7 @@ export type PermissionKey =
   | "content_webinars"
   | "content_quizzes"
   | "content_current_affairs"
+  | "content_resources"
   | "content_pdfs_media"
   | "manage_seo"
   | "publish_content"
@@ -53,6 +54,7 @@ export const PERMISSIONS: PermissionMeta[] = [
   { key: "content_webinars", label: "Manage webinars & events", group: "Content" },
   { key: "content_quizzes", label: "Manage quizzes & question bank", group: "Content" },
   { key: "content_current_affairs", label: "Manage Current Affairs", group: "Content" },
+  { key: "content_resources", label: "Manage UPSC Resources (SEO hub)", group: "Content" },
   { key: "content_pdfs_media", label: "Manage PDFs & media", group: "Content" },
   { key: "manage_seo", label: "Manage SEO & metadata", group: "Content" },
   { key: "publish_content", label: "Publish / unpublish content", group: "Content" },
@@ -85,6 +87,7 @@ const CONTENT_KEYS: PermissionKey[] = [
   "content_webinars",
   "content_quizzes",
   "content_current_affairs",
+  "content_resources",
   "content_pdfs_media",
   "manage_seo",
   "publish_content",

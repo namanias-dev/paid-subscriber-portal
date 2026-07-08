@@ -38,3 +38,6 @@ next-env.d.ts
 
 # Word temp/lock files
 ~$*
+
+# Local DB backups (contain PII — never commit)
+/backups/

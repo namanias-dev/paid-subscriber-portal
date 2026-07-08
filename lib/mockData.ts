@@ -27,6 +27,7 @@ import type {
   CaCategory,
   CaTag,
   CaPdf,
+  Resource,
 } from "./types";
 
 const DAY = 86400000;
@@ -641,3 +642,9 @@ export const caPdfs: CaPdf[] = [
     updated_at: iso(now - 1 * DAY),
   },
 ];
+
+// =================================================================
+// UPSC RESOURCES (SEO content hub) — seed drafts live in the DB;
+// demo mode starts empty (admin creates content).
+// =================================================================
+export const resources: Resource[] = [];

@@ -11,6 +11,7 @@ const UPLOAD_PERMS = [
   "content_webinars",
   "content_pdfs_media",
   "content_current_affairs",
+  "content_resources",
   "content_quizzes",
   "manage_settings",
 ] as const;

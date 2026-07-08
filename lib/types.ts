@@ -1840,6 +1840,74 @@ export interface CaCategory {
   created_at: string;
 }
 
+// ============================ UPSC RESOURCES (SEO content hub) ============================
+export type ResourceStatus = "draft" | "scheduled" | "published" | "archived";
+export type ResourceExamRelevance = "prelims" | "mains" | "interview" | "beginner" | "all";
+export type ResourceDifficulty = "beginner" | "intermediate" | "advanced";
+
+/** A reusable call-to-action block the admin can attach to an article. */
+export interface ResourceCta {
+  /** Preset kind drives the default icon/label; "custom" allows a free link. */
+  kind: "webinar" | "course" | "quiz" | "whatsapp" | "centre" | "pdf" | "custom";
+  title?: string | null;
+  description?: string | null;
+  cta_label?: string | null;
+  href?: string | null;
+  enabled?: boolean;
+}
+
+/** Related-content selectors (by slug) that also feed the internal-link graph. */
+export interface ResourceRelated {
+  resource_slugs?: string[];
+  quiz_slugs?: string[];
+  webinar_slugs?: string[];
+  course_slugs?: string[];
+}
+
+/**
+ * A UPSC Resource — an evergreen SEO article/guide, separate from (but linkable
+ * to) Current Affairs. Supports a chronological "Day 1 → Exam" journey.
+ */
+export interface Resource {
+  id: string;
+  slug: string;
+  title: string;
+  /** Short excerpt / summary; also the meta-description fallback. */
+  summary: string;
+  body_html: string | null;
+  sections: PageSection[];
+  /** Category slug, e.g. beginner | strategy | books | syllabus | optional | prelims | mains | local | notes. */
+  category: string | null;
+  subject: string | null;
+  exam_relevance: ResourceExamRelevance | null;
+  target_year: string | null;
+  difficulty: ResourceDifficulty | null;
+  status: ResourceStatus;
+  publish_at: string | null;
+  author: string | null;
+  reading_time: number | null;
+  featured_image: string | null;
+  tags: string[];
+  pdf_ids: string[];
+  /** FAQ items — power an on-page FAQ block + FAQPage JSON-LD. */
+  faq: { q: string; a: string }[];
+  /** Ordered CTA blocks rendered on the article. */
+  cta_blocks: ResourceCta[];
+  related: ResourceRelated;
+  focus_keyword: string | null;
+  seo: CaSeo;
+  // --- Chronological journey ---
+  /** Journey stage label, e.g. "Stage 1: Getting Started". Empty = not in journey. */
+  journey_stage: string | null;
+  /** Order within the whole roadmap (ascending). */
+  order_index: number;
+  /** Marks a local-SEO page → enables LocalBusiness schema + local CTAs. */
+  is_local: boolean;
+  views: number;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface CaTag {
   id: string;
   slug: string;
