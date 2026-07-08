@@ -10,11 +10,12 @@
  *   node scripts/backfill-content-sizes.mjs           # DRY-RUN (default)
  *   node scripts/backfill-content-sizes.mjs --apply    # write sizes to the DB
  *
- * Maps R2 keys → rows:
- *   processed/<course>/<recId>/lecture.mp4       -> content_items.file_size
- *   processed/webinars/<webinarId>/recording.mp4 -> webinars.recording_file_size
- *   notes/<course>/<recId>/notes.pdf             -> content_items.notes_pdf_size
- *   thumbnails/<course>/<recId>/thumb.jpg        -> content_items.thumbnail_size
+ * Matching is done by the EXACT key each row already stores (never by guessing the
+ * R2 path layout), so it is correct regardless of how the object path is shaped:
+ *   content_items.processed_key   -> content_items.file_size
+ *   content_items.notes_pdf_key   -> content_items.notes_pdf_size
+ *   content_items.thumbnail_key   -> content_items.thumbnail_size
+ *   webinars.recording_key        -> webinars.recording_file_size
  *
  * Env (from .env.local or the shell): the CLOUDFLARE_R2_* vars +
  *   NEXT_PUBLIC_SUPABASE_URL/SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY.
@@ -70,24 +71,10 @@ async function main() {
   const supa = await db();
   const objects = await listObjects();
 
-  // R2 sizes keyed by target id.
-  const contentVideo = new Map();  // recId -> bytes
-  const contentNotes = new Map();  // recId -> bytes
-  const contentThumb = new Map();  // recId -> bytes
-  const webinarVideo = new Map();  // webinarId -> bytes
-
-  for (const o of objects) {
-    const parts = o.key.split("/");
-    if (o.key.startsWith("processed/webinars/") && parts.length >= 4) {
-      webinarVideo.set(parts[2], o.size);
-    } else if (o.key.startsWith("processed/") && parts.length >= 4) {
-      contentVideo.set(parts[2], o.size);
-    } else if (o.key.startsWith("notes/") && parts.length >= 4) {
-      contentNotes.set(parts[2], o.size);
-    } else if (o.key.startsWith("thumbnails/") && parts.length >= 4) {
-      contentThumb.set(parts[2], o.size);
-    }
-  }
+  // R2 object sizes keyed by their EXACT key — the row already stores this key, so
+  // matching is precise and independent of the path layout.
+  const sizeByKey = new Map();
+  for (const o of objects) sizeByKey.set(o.key, o.size);
 
   const { data: content, error: cErr } = await supa
     .from("content_items")
@@ -98,19 +85,19 @@ async function main() {
     .select("id, recording_key, recording_file_size");
   if (wErr) throw new Error(`webinars read failed: ${wErr.message}`);
 
-  // Plan updates: only where DB size is NULL and R2 has a size.
+  // Plan updates: only where the DB size is NULL, the row has a key, and R2 has it.
   const contentUpdates = [];
   for (const c of content || []) {
     const patch = {};
-    if ((c.file_size == null) && contentVideo.has(c.id)) patch.file_size = contentVideo.get(c.id);
-    if ((c.notes_pdf_size == null) && contentNotes.has(c.id)) patch.notes_pdf_size = contentNotes.get(c.id);
-    if ((c.thumbnail_size == null) && contentThumb.has(c.id)) patch.thumbnail_size = contentThumb.get(c.id);
+    if (c.file_size == null && c.processed_key && sizeByKey.has(c.processed_key)) patch.file_size = sizeByKey.get(c.processed_key);
+    if (c.notes_pdf_size == null && c.notes_pdf_key && sizeByKey.has(c.notes_pdf_key)) patch.notes_pdf_size = sizeByKey.get(c.notes_pdf_key);
+    if (c.thumbnail_size == null && c.thumbnail_key && sizeByKey.has(c.thumbnail_key)) patch.thumbnail_size = sizeByKey.get(c.thumbnail_key);
     if (Object.keys(patch).length) contentUpdates.push({ id: c.id, patch });
   }
   const webinarUpdates = [];
   for (const w of webinars || []) {
-    if (w.recording_file_size == null && webinarVideo.has(w.id)) {
-      webinarUpdates.push({ id: w.id, patch: { recording_file_size: webinarVideo.get(w.id) } });
+    if (w.recording_file_size == null && w.recording_key && sizeByKey.has(w.recording_key)) {
+      webinarUpdates.push({ id: w.id, patch: { recording_file_size: sizeByKey.get(w.recording_key) } });
     }
   }
 
