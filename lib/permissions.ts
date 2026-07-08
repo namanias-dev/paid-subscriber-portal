@@ -27,7 +27,8 @@ export type PermissionKey =
   | "view_analytics_nonrevenue"
   | "view_analytics_revenue"
   | "manage_integrations"
-  | "send_sms";
+  | "send_sms"
+  | "manage_careers";
 
 export interface PermissionMeta {
   key: PermissionKey;
@@ -59,6 +60,7 @@ export const PERMISSIONS: PermissionMeta[] = [
   { key: "manage_students_leads", label: "Manage students, leads & enrollments", group: "Operations" },
   { key: "view_analytics_nonrevenue", label: "View non-revenue analytics", group: "Operations" },
   { key: "send_sms", label: "Send SMS (Approved templates) & view SMS logs", group: "Operations" },
+  { key: "manage_careers", label: "Manage careers & job applications", group: "Operations" },
 ];
 
 export const PERMISSION_KEYS: PermissionKey[] = PERMISSIONS.map((p) => p.key);
@@ -132,6 +134,7 @@ export const DEFAULT_ROLES: RoleSeed[] = [
       manage_students_leads: true,
       view_analytics_nonrevenue: true,
       send_sms: true,
+      manage_careers: true,
     },
     can: ["Full content (Courses, Webinars, Quizzes, Current Affairs, PDFs)", "SEO, publishing & settings", "Students, leads & non-revenue analytics"],
     cannot: ["View revenue or payments", "Edit pricing/plans", "Manage staff or roles"],
@@ -162,7 +165,7 @@ export const DEFAULT_ROLES: RoleSeed[] = [
     id: "support_ops",
     name: "Support / Operations",
     description: "View and respond to students & leads, manage enrollments. No publishing, revenue or staff.",
-    permissions: { manage_students_leads: true, view_analytics_nonrevenue: true, send_sms: true },
+    permissions: { manage_students_leads: true, view_analytics_nonrevenue: true, send_sms: true, manage_careers: true },
     can: ["View students & leads", "Respond & manage enrollments", "View non-revenue analytics"],
     cannot: ["Publish content", "Access revenue", "Manage staff"],
     is_system: true,
