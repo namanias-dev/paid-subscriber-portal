@@ -68,6 +68,16 @@ export default function WebinarRegister({
       setError("Enter a valid email address, or leave it blank.");
       return;
     }
+    // Funnel signal: the user actually TRIED to register (valid form submitted),
+    // fired before the network call / gateway hand-off so we can distinguish
+    // viewed → tried → registered. Attribution (incl. campaign) rides via the
+    // /api/track cookie server-side. Best-effort, never blocks.
+    trackClient("registration_attempt", {
+      webinar_id: webinarId,
+      webinar_slug: webinarSlug ?? null,
+      is_paid: isPaid,
+      price: payable,
+    });
     // PAID webinars redirect to the gateway — surface the caution first. Free
     // registrations have no hand-off, so proceed straight away.
     if (isPaid) {

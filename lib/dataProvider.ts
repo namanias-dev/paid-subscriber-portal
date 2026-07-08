@@ -7,6 +7,7 @@ import { normalizeIndianMobile } from "./phone";
 import { verifyFromStoredCallback, eazypayVerify, type VerifyOutcome, type SettlementStatus } from "./eazypay";
 import { recordPaymentPaid, recordPaymentInitiated, recordPaymentStatusChanged, recordRegistrationCreated, stampBuyerAttribution } from "./analytics/server";
 import type { AttributionState } from "./attribution";
+import { flattenForStamp, metaIdentityFromState } from "./attribution";
 import { fireAutoSms } from "./sms/dispatch";
 import { TRIGGERS } from "./sms/templates";
 import { NON_DUPLICABLE_WEBINAR_FIELDS, buildDuplicateSlug } from "./webinarLifecycle";
@@ -1990,7 +1991,7 @@ export async function deleteWebinar(id: string): Promise<boolean> {
   }
   return dbDelete("webinars", id);
 }
-export async function registerWebinar(webinarId: string, name: string, phone: string, attr?: AttributionState | null): Promise<{ ok: boolean }> {
+export async function registerWebinar(webinarId: string, name: string, phone: string, attr?: AttributionState | null, visitorId?: string | null): Promise<{ ok: boolean }> {
   if (demoMode()) {
     const w = mock.webinars.find((x) => x.id === webinarId);
     if (w) w.registrations += 1;
@@ -2003,20 +2004,38 @@ export async function registerWebinar(webinarId: string, name: string, phone: st
   const db = getSupabaseAdmin();
   if (db) {
     try {
-      await db.from("webinar_registrations").insert({ webinar_id: webinarId, name, phone });
+      // FIRST-PARTY CONVERSION CAPTURE: persist the acquisition source + campaign
+      // (any-touch: first-touch wins, else last-touch) and the non-PII Meta click
+      // ids (fbclid/fbc) from the nsa_attr cookie onto the registration row — the
+      // same snapshot payments already stamp — so free-webinar leads attribute to
+      // their ad instead of collapsing to "Untracked". Best-effort; a null cookie
+      // just leaves the columns null (honest untracked), matching payment behavior.
+      const flat = flattenForStamp(attr ?? null);
+      const metaId = metaIdentityFromState(attr ?? null);
+      await db.from("webinar_registrations").insert({
+        webinar_id: webinarId,
+        name,
+        phone,
+        attribution_source: flat.source,
+        attribution_campaign: flat.campaign,
+        attribution_fbclid: metaId.fbclid,
+        attribution_fbc: metaId.fbc,
+      });
     } catch {
       /* ignore */
     }
   }
-  // Title + price fetched cheaply (price decides the confirmation-SMS timing).
+  // Title + slug + price fetched cheaply (price decides the confirmation-SMS timing;
+  // slug gives the Meta Lead a precise content_name + event_source_url).
   let webinarTitle: string | null = null;
+  let webinarSlug: string | null = null;
   let webinarPrice = 0;
-  if (db) { try { const { data } = await db.from("webinars").select("title, price").eq("id", webinarId).maybeSingle(); webinarTitle = (data?.title as string) ?? null; webinarPrice = Number((data as { price?: number } | null)?.price ?? 0) || 0; } catch { /* ignore */ } }
+  if (db) { try { const { data } = await db.from("webinars").select("title, slug, price").eq("id", webinarId).maybeSingle(); webinarTitle = (data?.title as string) ?? null; webinarSlug = (data as { slug?: string } | null)?.slug ?? null; webinarPrice = Number((data as { price?: number } | null)?.price ?? 0) || 0; } catch { /* ignore */ } }
   const isFreeWebinar = webinarPrice <= 0;
   // Analytics (best-effort, idempotent): a webinar registration milestone. The
   // attribution snapshot (from the nsa_attr cookie, passed by the route) rides the
   // event so the lead attributes to its campaign — the Meta report reads it.
-  void recordRegistrationCreated({ webinar_id: webinarId, phone, price: webinarPrice, is_free: isFreeWebinar, attribution: attr ?? null }).catch(() => {});
+  void recordRegistrationCreated({ webinar_id: webinarId, webinar_slug: webinarSlug, phone, visitor_id: visitorId ?? null, price: webinarPrice, is_free: isFreeWebinar, attribution: attr ?? null }).catch(() => {});
   // Auto-SMS (disabled by default): "Webinar Registered". FREE webinars confirm at
   // registration (registration == confirmation). PAID webinars must NOT confirm here —
   // payment is unresolved at registration time; the confirmation fires only after a

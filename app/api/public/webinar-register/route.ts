@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { registerWebinar, getWebinarById, logWebinarAudit } from "@/lib/dataProvider";
 import { canRegisterForWebinar, buildClosedError } from "@/lib/webinarLifecycle";
-import { ATTR_COOKIE, parseAttrCookie } from "@/lib/attribution";
+import { ATTR_COOKIE, VISITOR_COOKIE, parseAttrCookie } from "@/lib/attribution";
 
 export async function POST(req: Request) {
   try {
@@ -27,8 +27,12 @@ export async function POST(req: Request) {
     // First-party attribution snapshot from the nsa_attr cookie (best-effort; never
     // blocks). Threaded into the lead so registration_created carries the campaign
     // and the buyer record is stamped first-touch-wins at the lead moment.
-    const attr = parseAttrCookie(cookies().get(ATTR_COOKIE)?.value);
-    await registerWebinar(webinarId, name, phone, attr);
+    const jar = cookies();
+    const attr = parseAttrCookie(jar.get(ATTR_COOKIE)?.value);
+    // Visitor id bridges this conversion to the same visitor's anonymous,
+    // campaign-rich landing page views so the lead attributes to its ad campaign.
+    const visitorId = jar.get(VISITOR_COOKIE)?.value || null;
+    await registerWebinar(webinarId, name, phone, attr, visitorId);
     return NextResponse.json({ ok: true });
   } catch {
     return NextResponse.json({ ok: false, error: "Could not register." }, { status: 500 });

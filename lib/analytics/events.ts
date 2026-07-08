@@ -6,6 +6,7 @@ export type EventName =
   // webinar funnel
   | "webinar_view"
   | "click_register_pay"
+  | "registration_attempt"
   | "registration_created"
   // course funnel
   | "course_view"
@@ -41,6 +42,7 @@ export const CLIENT_ALLOWED_EVENTS: ReadonlySet<EventName> = new Set<EventName>(
   "webinar_view",
   "course_view",
   "click_register_pay",
+  "registration_attempt",
   "click_enroll",
   "enrolled_card_viewed",
   "zoom_link_clicked",

@@ -47,6 +47,19 @@ export function sourceOfEvent(e: EventLite): string {
   return s || UNTRACKED;
 }
 
+/**
+ * ANY-TOUCH campaign for a conversion event. Prefer the frozen first-touch, but
+ * fall back to the last-touch when the first touch carried no campaign — so a
+ * returning visitor whose FIRST visit was organic/direct but who then clicked an
+ * ad still credits that ad's campaign instead of collapsing to "Untracked".
+ * (The old `first_touch || last_touch` object-pick lost the campaign whenever a
+ * first-touch object existed but had a null campaign.)
+ */
+export function campaignOfEvent(e: EventLite): string | null {
+  const c = e.attribution?.first_touch?.campaign || e.attribution?.last_touch?.campaign;
+  return (c || "").toString().trim() || null;
+}
+
 export function sourceOfPayment(p: Payment): string {
   // NULL = created before tracking -> "untracked" (never silently "direct").
   return p.attribution_source ? p.attribution_source.toLowerCase() : UNTRACKED;
@@ -1049,6 +1062,9 @@ export async function getWebinarFunnel(opts: { from: string; to: string; exclude
     return s.size;
   };
   const views = distinct("webinar_view", (e) => e.visitor_id);
+  // Tried to register (submitted a valid form) — sits between viewing and the
+  // completed registration so we can see drop-off at the intent step.
+  const attempts = distinct("registration_attempt", (e) => e.visitor_id || (e.phone ? normPhone(e.phone) : null));
   const payClicks = distinct("click_register_pay", (e) => e.visitor_id || (e.phone ? normPhone(e.phone) : null));
   const registrations = events.filter((e) => e.event_name === "registration_created").length;
   const joined = distinct("zoom_link_clicked", (e) => (e.phone ? normPhone(e.phone) : e.visitor_id));
@@ -1060,6 +1076,7 @@ export async function getWebinarFunnel(opts: { from: string; to: string; exclude
 
   const steps = [
     { label: "Webinar page views", value: views },
+    { label: "Attempted registration", value: attempts },
     { label: "Clicked register/pay", value: payClicks },
     { label: "Registered", value: registrations },
     { label: "Paid", value: paid },
@@ -1208,8 +1225,15 @@ export async function getCampaignBreakdown(opts: { from: string; to: string; dim
 
   const keyOf = (e: EventLite): string => {
     if (dim === "device") return (e.device?.type || "unknown").toLowerCase();
-    const ft = e.attribution?.first_touch || e.attribution?.last_touch;
-    const v = dim === "medium" ? ft?.medium : dim === "landing_path" ? ft?.landing_path : ft?.campaign;
+    // Any-touch resolution per field: first-touch wins, else last-touch — so a
+    // returning-visitor ad click isn't lost when the frozen first touch is empty.
+    const ft = e.attribution?.first_touch;
+    const lt = e.attribution?.last_touch;
+    const v = dim === "medium"
+      ? (ft?.medium || lt?.medium)
+      : dim === "landing_path"
+      ? (ft?.landing_path || lt?.landing_path)
+      : campaignOfEvent(e);
     return (v || "(none)").toString().toLowerCase();
   };
 
@@ -1336,12 +1360,36 @@ export async function getMetaAttribution(opts: { from: string; to: string; exclu
   ]);
   const events = excludeAdmin ? allEvents.filter((e) => !(e.phone && staff.has(normPhone(e.phone)!))) : allEvents;
 
-  // Leads (free registrations) by campaign — from the click event's first touch.
+  // VISITOR/PHONE CAMPAIGN FALLBACK: a registration event's own 2-slot cookie has
+  // often rolled past the ad click by the time the lead registers, but the SAME
+  // visitor's other events (page views etc., already fetched here) still carry the
+  // campaign. Build a visitor_id/phone -> campaign map so a returning-visitor lead
+  // credits the ad that drove them instead of collapsing to Untracked. First hit
+  // wins (events arrive newest-first), so we take the most recent known campaign.
+  const campaignByVisitor = new Map<string, string>();
+  const campaignByPhone = new Map<string, string>();
+  for (const e of events) {
+    const c = campaignOfEvent(e);
+    if (!c) continue;
+    const cl = c.toLowerCase();
+    if (e.visitor_id && !campaignByVisitor.has(e.visitor_id)) campaignByVisitor.set(e.visitor_id, cl);
+    const ph = e.phone ? normPhone(e.phone) : null;
+    if (ph && !campaignByPhone.has(ph)) campaignByPhone.set(ph, cl);
+  }
+
+  // Leads (free registrations) by campaign — any-touch on the event, then the
+  // visitor/phone fallback above.
   const leads = new Map<string, number>();
   for (const e of events) {
     if (e.event_name !== "registration_created") continue;
-    const ft = e.attribution?.first_touch || e.attribution?.last_touch;
-    const k = (ft?.campaign || "(untracked)").toLowerCase();
+    let c = campaignOfEvent(e)?.toLowerCase() || null;
+    if (!c) {
+      const ph = e.phone ? normPhone(e.phone) : null;
+      c = (e.visitor_id ? campaignByVisitor.get(e.visitor_id) : undefined)
+        || (ph ? campaignByPhone.get(ph) : undefined)
+        || null;
+    }
+    const k = c || "(untracked)";
     leads.set(k, (leads.get(k) || 0) + 1);
   }
 

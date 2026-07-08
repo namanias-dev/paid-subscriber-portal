@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { cookies } from "next/headers";
 import { getBuyerSession } from "@/lib/session";
 import {
   getCourseEnrollmentById,
@@ -6,6 +7,8 @@ import {
   getPaymentByReference,
   findRecentOpenInstallmentPayment,
 } from "@/lib/dataProvider";
+import { ATTR_COOKIE, parseAttrCookie, flattenForStamp } from "@/lib/attribution";
+import { stampBuyerAttribution } from "@/lib/analytics/server";
 import {
   isEazypayConfigured,
   buildPaymentUrl,
@@ -89,6 +92,12 @@ export async function POST(req: Request) {
 
     const referenceNo = await uniqueReference("course");
 
+    // Attribution snapshot from the first-party cookie (best-effort; never blocks)
+    // so installment/full-pay checkouts also carry source + campaign (any-touch),
+    // matching the new-checkout path in create-payment.
+    const attr = parseAttrCookie(cookies().get(ATTR_COOKIE)?.value);
+    const attrFlat = flattenForStamp(attr);
+
     await createPayment({
       student_name: enrollment.student_name,
       phone: enrollment.phone,
@@ -108,7 +117,10 @@ export async function POST(req: Request) {
       enrollment_id: enrollment.id,
       payment_kind: kind,
       installment_no: payInstallmentNo,
+      attribution_source: attrFlat.source,
+      attribution_campaign: attrFlat.campaign,
     });
+    void stampBuyerAttribution(enrollment.phone, attr).catch(() => {});
 
     const gatewayEmail = enrollment.email || `${enrollment.phone}@guest.namanias.com`;
     if (isEazypayConfigured()) {

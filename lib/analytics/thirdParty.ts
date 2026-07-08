@@ -17,6 +17,8 @@
  */
 import crypto from "crypto";
 import type { Payment } from "../types";
+import { getSupabaseAdmin } from "../supabase";
+import { SITE_URL } from "../config";
 import {
   META_GRAPH_VERSION,
   purchaseEventId,
@@ -64,6 +66,47 @@ function sha256(v: string): string {
 function hashedPhone(phone: string | null | undefined): string | null {
   const d = (phone || "").replace(/\D/g, "").slice(-10);
   return d.length === 10 ? sha256(`91${d}`) : null;
+}
+
+/**
+ * Persist ONE CAPI delivery outcome (status, events_received, fbtrace_id, error)
+ * to `meta_capi_log`. FAILURE-SAFE by contract: every path is swallowed so a
+ * logging error can NEVER break the user flow or the calling emitter. No PII and
+ * no access token are ever written (only Meta's own response fields).
+ */
+async function logCapiDelivery(entry: {
+  event_name: string;
+  event_id: string;
+  ok: boolean;
+  http_status: number | null;
+  events_received: number | null;
+  fbtrace_id: string | null;
+  test_mode: boolean;
+  error: unknown;
+}): Promise<void> {
+  try {
+    const db = getSupabaseAdmin();
+    if (!db) return;
+    await db.from("meta_capi_log").insert({
+      event_name: entry.event_name,
+      event_id: entry.event_id,
+      ok: entry.ok,
+      http_status: entry.http_status,
+      events_received: entry.events_received,
+      fbtrace_id: entry.fbtrace_id,
+      test_mode: entry.test_mode,
+      error: entry.error ?? null,
+    });
+  } catch {
+    /* never throw — logging is strictly best-effort */
+  }
+}
+
+/** Canonical event_source_url for a payment's item (SITE_URL-based, no PII). */
+function eventSourceUrlForPayment(p: Payment): string {
+  if (p.item_type === "course" && p.item_slug) return `${SITE_URL}/courses/${p.item_slug}`;
+  if (p.item_type === "webinar" && p.item_slug) return `${SITE_URL}/webinars/${p.item_slug}`;
+  return SITE_URL;
 }
 
 export interface MetaEventInput {
@@ -114,10 +157,41 @@ async function sendMetaEvent(eventName: MetaEventName, eventId: string, opts: Me
       }],
       ...(testCode ? { test_event_code: testCode } : {}),
     };
-    await fetch(`https://graph.facebook.com/${graphVersion()}/${pixelId}/events?access_token=${token}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
+    // Capture the Graph API response so delivery is provable (2xx + events_received)
+    // or the error is surfaced — without ever blocking or breaking the user flow.
+    let httpStatus: number | null = null;
+    let eventsReceived: number | null = null;
+    let fbtraceId: string | null = null;
+    let errObj: unknown = null;
+    let ok = false;
+    try {
+      const res = await fetch(`https://graph.facebook.com/${graphVersion()}/${pixelId}/events?access_token=${token}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      httpStatus = res.status;
+      const json = (await res.json().catch(() => null)) as
+        | { events_received?: number; fbtrace_id?: string; error?: unknown }
+        | null;
+      if (json) {
+        if (typeof json.events_received === "number") eventsReceived = json.events_received;
+        if (typeof json.fbtrace_id === "string") fbtraceId = json.fbtrace_id;
+        if (json.error) errObj = json.error;
+      }
+      ok = res.ok && !errObj;
+    } catch (e) {
+      errObj = { message: (e as Error)?.message || "fetch_failed" };
+    }
+    void logCapiDelivery({
+      event_name: eventName,
+      event_id: eventId,
+      ok,
+      http_status: httpStatus,
+      events_received: eventsReceived,
+      fbtrace_id: fbtraceId,
+      test_mode: !!testCode,
+      error: errObj,
     });
   } catch { /* never throw */ }
 }
@@ -139,6 +213,7 @@ export async function sendMetaPurchase(
     email: payment.email,
     fbc: match?.fbc ?? null,
     fbp: match?.fbp ?? null,
+    eventSourceUrl: eventSourceUrlForPayment(payment),
     customData: {
       content_type: "product",
       content_category: payment.item_type, // "course" | "webinar"
@@ -156,6 +231,7 @@ export async function sendMetaLead(input: {
   contentName?: string | null;
   fbc?: string | null;
   fbp?: string | null;
+  eventSourceUrl?: string | null;
 }): Promise<void> {
   await sendMetaEvent("Lead", leadEventId(input.id), {
     value: input.value ?? 0,
@@ -163,6 +239,7 @@ export async function sendMetaLead(input: {
     phone: input.phone,
     fbc: input.fbc ?? null,
     fbp: input.fbp ?? null,
+    eventSourceUrl: input.eventSourceUrl ?? null,
     customData: input.contentName ? { content_name: input.contentName } : {},
   });
 }
@@ -180,6 +257,7 @@ export async function sendMetaInitiateCheckout(
     email: payment.email,
     fbc: match?.fbc ?? null,
     fbp: match?.fbp ?? null,
+    eventSourceUrl: eventSourceUrlForPayment(payment),
     customData: {
       content_category: payment.item_type,
       content_name: payment.item,
