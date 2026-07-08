@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
-import { getContentById, updateContent, deleteContent, logStorageAudit } from "@/lib/dataProvider";
+import { getContentById, updateContent, deleteContent } from "@/lib/dataProvider";
 import { requirePermission, getActionActor } from "@/lib/adminGuard";
-import { cleanupRecordingR2 } from "@/lib/r2Cleanup";
+import { r2Configured, abortMultipart, lectureVideoKey } from "@/lib/r2";
+import { enqueuePurge, contentItemKeys } from "@/lib/mediaCascade";
 import type { ContentItem } from "@/lib/types";
 
 export async function PATCH(
@@ -71,30 +72,45 @@ export async function DELETE(
       return NextResponse.json({ ok: false, error: "Not found" }, { status: 404 });
     }
 
-    // 1) Delete the DB row first (the admin-visible record).
+    // 1) Delete the DB row first (the admin-visible record) — a failed R2 call
+    //    must never leave the admin unable to remove content.
     const ok = await deleteContent(params.id);
     if (!ok) {
       return NextResponse.json({ ok: false, error: "Not found" }, { status: 404 });
     }
 
-    // 2) Cascade to R2: reclaim the binary so storage isn't wasted. Resilient —
-    //    failures are logged + audited + surfaced (never silently orphaned). The
-    //    DB delete already succeeded, so we never block the admin on R2 hiccups.
-    const cleanup = await cleanupRecordingR2(rec);
     const actor = await getActionActor();
-    await logStorageAudit([
-      ...cleanup.deleted.map((k) => ({ action: "delete_cascade" as const, r2_key: k, recording_id: rec.id, status: "deleted" as const, actor: actor?.id, detail: rec.title })),
-      ...cleanup.failed.map((k) => ({ action: "delete_cascade" as const, r2_key: k, recording_id: rec.id, status: "failed" as const, actor: actor?.id, detail: rec.title })),
-    ]);
-    if (cleanup.failed.length) {
-      console.error(`[content/delete] R2 cleanup left ${cleanup.failed.length} object(s) for ${rec.id} — run the orphan tool:`, cleanup.failed);
+
+    // 2a) Abort any IN-PROGRESS multipart immediately (uncommitted parts — no
+    //     reason to keep them through the grace window; they aren't recoverable
+    //     content). Completed recordings have no upload id, so this is a no-op.
+    if (r2Configured() && rec.source_type === "hosted" && rec.multipart_upload_id) {
+      const courseId = (rec.course_ids && rec.course_ids[0]) || rec.course_id || "";
+      const mpKey = rec.multipart_key || rec.processed_key || lectureVideoKey(courseId, rec.id);
+      await abortMultipart(mpKey, rec.multipart_upload_id);
     }
+
+    // 2b) Cascade every finished object this item owns (video + thumbnail +
+    //     notes PDF, or an uploaded/migrated standalone note). Enqueued for a
+    //     grace-period purge, reference-checked (never removes a shared object),
+    //     scope-guarded and audited. External-link notes resolve to zero keys →
+    //     record-only delete, no R2 call.
+    const cascade = await enqueuePurge({
+      keys: contentItemKeys(rec),
+      owner: { type: "content_item", id: rec.id },
+      title: rec.title,
+      actor: actor?.id,
+    });
 
     return NextResponse.json({
       ok: true,
-      storage: { deleted: cleanup.deleted, failed: cleanup.failed },
-      ...(cleanup.failed.length
-        ? { warning: `Recording deleted, but ${cleanup.failed.length} storage object(s) could not be removed and were logged for cleanup.` }
+      storage: {
+        scheduled: cascade.scheduled,
+        skippedReferenced: cascade.skippedReferenced,
+        graceHours: cascade.graceHours,
+      },
+      ...(cascade.scheduled.length
+        ? { note: `Record removed. ${cascade.scheduled.length} file(s) scheduled for deletion in ${cascade.graceHours}h (recoverable until then).` }
         : {}),
     });
   } catch {
