@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import dynamic from "next/dynamic";
 import { PageHeader, useAdminData, LoadingBlock, TableShell } from "@/components/admin/ui";
 import Modal from "@/components/ui/Modal";
 import JourneyTimeline from "@/components/admin/JourneyTimeline";
@@ -8,10 +9,19 @@ import SendSmsButton from "@/components/admin/sms/SendSmsButton";
 import SearchBar from "@/components/ui/SearchBar";
 import GroupedTimeline, { type TimelineGroup } from "@/components/admin/GroupedTimeline";
 import SortControl from "@/components/admin/SortControl";
+import TimeframeFilter from "@/components/admin/TimeframeFilter";
 import { useToast } from "@/components/ui/Toast";
 import { usePersistentState } from "@/lib/usePersistentState";
-import { formatINR } from "@/lib/dates";
-import type { Lead, LeadStatus } from "@/lib/types";
+import { formatINR, formatISTDateTime, istYMD, istTodayYMD, istYMDToMs, resolveTimeframe, type TimeframeValue } from "@/lib/dates";
+import type { Lead, LeadStatus, LeadSourceTouch } from "@/lib/types";
+
+const DAY_MS = 86400000;
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+const LeadsBarChart = dynamic(() => import("@/components/admin/RegistrationsBarChart"), {
+  ssr: false,
+  loading: () => <div className="h-full w-full animate-shimmer rounded-xl bg-surface2" />,
+});
 
 const STAGES: LeadStatus[] = ["New", "Contacted", "Demo Booked", "Demo Attended", "Negotiation", "Admitted", "Lost"];
 const SOURCES = ["Instagram", "Meta Form", "Webinar", "Demo", "Website", "WhatsApp", "Referral", "home_popup"];
@@ -46,8 +56,12 @@ export default function LeadsPage() {
   const [sort, setSort] = usePersistentState<LeadSort>("nsa.leads.sort", "recent");
   const [q, setQ] = useState("");
   const [source, setSource] = useState("all");
+  const [tf, setTf] = usePersistentState<TimeframeValue>("nsa.leads.tf", { mode: "all" });
+  const [showChart, setShowChart] = usePersistentState<boolean>("nsa.leads.chart", true);
   const [addOpen, setAddOpen] = useState(false);
   const [active, setActive] = useState<Lead | null>(null);
+
+  const { fromMs, toMs } = useMemo(() => resolveTimeframe(tf), [tf]);
 
   const filtered = useMemo(() => {
     const list = leads || [];
@@ -55,9 +69,11 @@ export default function LeadsPage() {
     return list.filter((l) => {
       if (source !== "all" && l.source !== source) return false;
       if (query && !(`${l.name} ${l.phone} ${l.city ?? ""}`.toLowerCase().includes(query))) return false;
+      const ms = new Date(l.created_at).getTime();
+      if (Number.isFinite(fromMs) && !(ms >= fromMs && ms < toMs)) return false;
       return true;
     });
-  }, [leads, q, source]);
+  }, [leads, q, source, fromMs, toMs]);
 
   // Group the (already filtered) leads by PERSON (phone) — purely presentational.
   // Multiple submissions for one phone stack as a timeline; one-off leads render
@@ -163,7 +179,7 @@ export default function LeadsPage() {
         }
       />
 
-      <div className="mb-4 flex flex-wrap items-center gap-2">
+      <div className="mb-3 flex flex-wrap items-center gap-2">
         <div className="min-w-[200px] flex-1"><SearchBar value={q} onChange={setQ} placeholder="Search name / phone / city" /></div>
         <select value={source} onChange={(e) => setSource(e.target.value)} className="input max-w-[180px]">
           <option value="all">All sources</option>
@@ -175,6 +191,26 @@ export default function LeadsPage() {
           <button onClick={() => setView("list")} className="px-3 py-2 text-sm" style={{ background: view === "list" ? "var(--primary)" : "#fff", color: view === "list" ? "#fff" : "var(--ink2)" }}>Stacked</button>
         </div>
       </div>
+
+      {/* Timeframe filter — scopes BOTH the list/kanban and the trend chart. */}
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+        <TimeframeFilter value={tf} onChange={setTf} size="sm" />
+        <button onClick={() => setShowChart(!showChart)} className="btn btn-secondary text-xs">
+          {showChart ? "Hide trend" : "Show trend"}
+        </button>
+      </div>
+
+      {showChart && (
+        <div className="card mb-4 p-4">
+          <div className="mb-2 flex items-center justify-between">
+            <p className="text-sm font-semibold">Leads by day{source !== "all" ? ` · ${source}` : ""}</p>
+            <span className="text-sm text-muted">Total: <span className="font-bold text-ink">{filtered.length}</span></span>
+          </div>
+          <div className="h-64 w-full">
+            <LeadsTrendChart leads={filtered} fromMs={fromMs} toMs={toMs} />
+          </div>
+        </div>
+      )}
 
       {/* Portal lead accounts (quiz/marketing leads with a login code — never in seats/finance). */}
       <details className="card mb-4 p-0">
@@ -255,6 +291,61 @@ export default function LeadsPage() {
   );
 }
 
+/**
+ * Leads time-series bar chart. Reuses the Payments/Finance RegistrationsBarChart
+ * (recharts) body. Buckets the already-filtered leads by IST day within the
+ * selected window; spans > ~92 days roll up into monthly buckets so the chart
+ * stays readable. Totals always match the list above (same filtered set).
+ */
+function LeadsTrendChart({ leads, fromMs, toMs }: { leads: Lead[]; fromMs: number; toMs: number }) {
+  const { chartData, dense } = useMemo(() => {
+    const byDay = new Map<string, number>();
+    for (const l of leads) { const ymd = istYMD(l.created_at); if (ymd) byDay.set(ymd, (byDay.get(ymd) || 0) + 1); }
+
+    let startYMD: string;
+    let endYMD: string;
+    const today = istTodayYMD();
+    if (!Number.isFinite(fromMs)) {
+      const days = [...byDay.keys()].sort();
+      startYMD = days[0] || today;
+      endYMD = today;
+    } else {
+      startYMD = istYMD(new Date(fromMs)) || today;
+      endYMD = istYMD(new Date(toMs - 1)) || today;
+    }
+    const startMs = istYMDToMs(startYMD);
+    const endMs = istYMDToMs(endYMD);
+    const dayCount = Math.round((endMs - startMs) / DAY_MS) + 1;
+
+    if (dayCount > 92) {
+      // monthly buckets
+      const byMonth = new Map<string, number>();
+      for (const [ymd, c] of byDay) byMonth.set(ymd.slice(0, 7), (byMonth.get(ymd.slice(0, 7)) || 0) + c);
+      const out: { label: string; ymd: string; count: number }[] = [];
+      const [sy, sm] = startYMD.split("-").map(Number);
+      const [ey, em] = endYMD.split("-").map(Number);
+      let y = sy, m = sm;
+      while (y < ey || (y === ey && m <= em)) {
+        const key = `${y}-${String(m).padStart(2, "0")}`;
+        out.push({ label: `${MONTHS[m - 1]} ${String(y).slice(2)}`, ymd: key, count: byMonth.get(key) || 0 });
+        if (m === 12) { m = 1; y++; } else m++;
+      }
+      return { chartData: out, dense: out.length > 14 };
+    }
+
+    const out: { label: string; ymd: string; count: number }[] = [];
+    for (let ms = startMs; ms <= endMs; ms += DAY_MS) {
+      const ymd = istYMD(new Date(ms)) || "";
+      const [, mo, d] = ymd.split("-");
+      out.push({ label: `${d}/${mo}`, ymd, count: byDay.get(ymd) || 0 });
+    }
+    return { chartData: out, dense: out.length > 14 };
+  }, [leads, fromMs, toMs]);
+
+  if (chartData.length === 0) return <div className="flex h-full items-center justify-center text-sm text-muted">No leads in this timeframe.</div>;
+  return <LeadsBarChart chartData={chartData} denseTicks={dense} />;
+}
+
 function AddLeadModal({ open, onClose, onAdded }: { open: boolean; onClose: () => void; onAdded: () => void }) {
   const { toast } = useToast();
   const [form, setForm] = useState({ name: "", phone: "", city: "", source: "Website", course_interest: "" });
@@ -323,13 +414,15 @@ function LeadDetail({
           <Info label="Phone" value={lead.phone} />
           <Info label="Email" value={lead.email || "—"} />
           <Info label="City" value={lead.city || "—"} />
-          <Info label="Source" value={lead.source} />
+          <Info label="Source (latest)" value={lead.source} />
           <Info label="Counsellor" value={lead.counsellor || "—"} />
           <Info label="Interest" value={lead.course_interest || "—"} />
           <Info label="Target" value={lead.target_year ? String(lead.target_year) : "—"} />
           {lead.admitted && <Info label="Fee" value={formatINR(lead.total_fee || 0)} />}
           {lead.admitted && <Info label="Pending" value={formatINR(lead.pending_balance || 0)} />}
         </div>
+
+        <SourceHistory lead={lead} />
 
         <div>
           <label className="label">Pipeline stage</label>
@@ -360,6 +453,46 @@ function LeadDetail({
         </div>
       </div>
     </Modal>
+  );
+}
+
+/**
+ * Source / touchpoint history for a (possibly de-duplicated) lead. Shows the
+ * first-touch and latest-touch attribution plus the full chronological list of
+ * every source the person arrived through.
+ */
+function SourceHistory({ lead }: { lead: Lead }) {
+  const touches: LeadSourceTouch[] = Array.isArray(lead.sources) && lead.sources.length
+    ? lead.sources
+    : [{ source: lead.source, campaign: lead.campaign, course_interest: lead.course_interest, at: lead.created_at }];
+  const ordered = [...touches].sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime());
+  const first = ordered[0];
+  const last = ordered[ordered.length - 1];
+  const fmtSrc = (t: LeadSourceTouch) => [t.source || "—", t.campaign ? `(${t.campaign})` : ""].filter(Boolean).join(" ");
+
+  return (
+    <div className="rounded-xl border border-line bg-surface p-3">
+      <div className="mb-2 flex items-center justify-between">
+        <p className="text-xs font-semibold uppercase tracking-wide text-muted">Source history</p>
+        <span className="pill pill-gray text-[10px]">{ordered.length} touchpoint{ordered.length === 1 ? "" : "s"}{lead.merged_count ? ` · ${lead.merged_count} merged` : ""}</span>
+      </div>
+      <div className="mb-2 grid grid-cols-2 gap-2 text-xs">
+        <div><span className="text-muted">First touch: </span><span className="font-medium text-ink">{lead.first_source || first.source || "—"}{lead.first_campaign ? ` (${lead.first_campaign})` : first.campaign ? ` (${first.campaign})` : ""}</span></div>
+        <div><span className="text-muted">Last touch: </span><span className="font-medium text-ink">{fmtSrc(last)}</span></div>
+      </div>
+      <ol className="max-h-40 space-y-1.5 overflow-y-auto border-t border-line pt-2 text-xs">
+        {ordered.map((t, i) => (
+          <li key={i} className="flex items-center justify-between gap-2">
+            <span className="min-w-0 truncate">
+              <span className="font-medium text-ink">{t.source || "—"}</span>
+              {t.campaign && <span className="text-muted"> · {t.campaign}</span>}
+              {t.course_interest && <span className="text-muted"> · {t.course_interest}</span>}
+            </span>
+            <span className="shrink-0 text-muted">{formatISTDateTime(t.at)}</span>
+          </li>
+        ))}
+      </ol>
+    </div>
   );
 }
 

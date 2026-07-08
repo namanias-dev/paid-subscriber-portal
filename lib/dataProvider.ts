@@ -1590,15 +1590,113 @@ export async function getEnrollments(studentId?: string): Promise<Enrollment[]> 
 
 // ============================ LEADS / CRM ============================
 export async function getLeads(): Promise<Lead[]> {
+  // De-duplicated view: soft-merged duplicates (merged_into set) are hidden from
+  // every list and downstream segment (SMS, analytics) — only canonical leads
+  // surface, each once, with the latest attribution.
+  if (demoMode()) return mock.leads.filter((l) => !l.merged_into);
+  const rows = await dbSelect<Lead>("leads");
+  if (!rows.length) return mock.leads.filter((l) => !l.merged_into);
+  return rows.filter((l) => !l.merged_into);
+}
+
+/** All lead rows including soft-merged duplicates (for the merge tooling / audits). */
+export async function getAllLeadsRaw(): Promise<Lead[]> {
   if (demoMode()) return [...mock.leads];
   const rows = await dbSelect<Lead>("leads");
   return rows.length ? rows : [...mock.leads];
 }
+
+/** Candidate stored phone formats for a normalized 10-digit Indian mobile. */
+function leadPhoneVariants(digits10: string): string[] {
+  return [digits10, `91${digits10}`, `+91${digits10}`, `0${digits10}`];
+}
+
+/**
+ * The active (non-merged) canonical lead for a phone, if one exists. Earliest
+ * created wins as the canonical record. Powers the ingestion de-dup guard.
+ */
+export async function findActiveLeadByPhone(phone: string | null | undefined): Promise<Lead | null> {
+  const n = normalizeIndianMobile(phone);
+  if (!n.ok || !n.digits10) return null;
+  if (demoMode()) {
+    const cands = mock.leads
+      .filter((l) => !l.merged_into && normalizeIndianMobile(l.phone).digits10 === n.digits10)
+      .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+    return cands[0] ?? null;
+  }
+  const db = getSupabaseAdmin();
+  if (!db) return null;
+  const { data } = await db
+    .from("leads")
+    .select("*")
+    .in("phone", leadPhoneVariants(n.digits10))
+    .is("merged_into", null)
+    .order("created_at", { ascending: true })
+    .limit(1);
+  return ((data as Lead[]) || [])[0] ?? null;
+}
+
+interface LeadTouch { source: string | null; campaign?: string | null; course_interest?: string | null; at: string; lead_id?: string }
+
+/**
+ * Fold a repeat submission from a known phone into its existing canonical lead:
+ * LAST-TOUCH wins for the displayed source/campaign; the full touchpoint history
+ * is appended to `sources`; empty scalar fields are filled (never overwritten);
+ * boolean flags are OR-ed; the pipeline status is never regressed. First-touch
+ * attribution is preserved in first_source/first_campaign.
+ */
+async function foldTouchIntoLead(existing: Lead, input: Partial<Lead>, touch: LeadTouch, now: string): Promise<Lead> {
+  const history: LeadTouch[] = Array.isArray(existing.sources) ? [...existing.sources] : [];
+  history.push({ ...touch, lead_id: existing.id });
+  const patch: Partial<Lead> = {
+    // last-touch wins for the primary attribution shown on the record
+    source: touch.source || existing.source,
+    campaign: touch.campaign ?? existing.campaign ?? null,
+    sources: history,
+    updated_at: now,
+    // preserve first-touch (backfill from the record's own source on the first fold)
+    first_source: existing.first_source || existing.source || touch.source || null,
+    first_campaign: existing.first_campaign ?? existing.campaign ?? touch.campaign ?? null,
+  };
+  // Fill (never clobber) scalar fields from the new submission.
+  if ((!existing.name || existing.name === "New Lead") && input.name) patch.name = input.name;
+  if (!existing.email && input.email) patch.email = input.email;
+  if (!existing.city && input.city) patch.city = input.city;
+  if (!existing.state && input.state) patch.state = input.state;
+  if (!existing.course_interest && input.course_interest) patch.course_interest = input.course_interest;
+  if (existing.target_year == null && input.target_year != null) patch.target_year = input.target_year;
+  if (!existing.counsellor && input.counsellor) patch.counsellor = input.counsellor;
+  // OR-in engagement flags (a later touch can only add, never remove).
+  if (input.webinar_registered && !existing.webinar_registered) patch.webinar_registered = true;
+  if (demoMode()) {
+    const idx = mock.leads.findIndex((l) => l.id === existing.id);
+    if (idx !== -1) { mock.leads[idx] = { ...mock.leads[idx], ...patch }; return mock.leads[idx]; }
+    return { ...existing, ...patch };
+  }
+  const updated = await dbUpdate<Lead>("leads", existing.id, patch as Record<string, unknown>);
+  return updated || { ...existing, ...patch };
+}
+
 export async function addLead(input: Partial<Lead>): Promise<Lead> {
+  const now = new Date().toISOString();
+  const norm = normalizeIndianMobile(input.phone || "");
+  const touch: LeadTouch = {
+    source: input.source || "Website",
+    campaign: input.campaign ?? null,
+    course_interest: input.course_interest ?? null,
+    at: now,
+  };
+
+  // INGESTION DE-DUP GUARD: a repeat from the same phone folds into the existing
+  // canonical lead instead of creating a duplicate row.
+  const existing = await findActiveLeadByPhone(input.phone);
+  if (existing) return foldTouchIntoLead(existing, input, touch, now);
+
+  const id = uuid();
   const row = {
-    id: uuid(),
+    id,
     name: input.name || "New Lead",
-    phone: input.phone || "",
+    phone: norm.ok ? norm.digits10 : (input.phone || ""),
     city: input.city ?? null,
     state: input.state ?? null,
     source: input.source || "Website",
@@ -1620,7 +1718,12 @@ export async function addLead(input: Partial<Lead>): Promise<Lead> {
     pending_balance: null,
     follow_up_date: input.follow_up_date ?? null,
     counsellor: input.counsellor ?? null,
-    created_at: new Date().toISOString(),
+    created_at: now,
+    updated_at: now,
+    sources: [{ ...touch, lead_id: id }],
+    first_source: touch.source,
+    first_campaign: touch.campaign,
+    merged_count: 0,
   } as Lead;
   // Only attach email when provided — keeps inserts working even if the
   // `email` column hasn't been added yet (migration applied separately).
