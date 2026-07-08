@@ -25,6 +25,7 @@ export default function PublicFooter({ brand }: { brand?: BrandConfig }) {
       links: [
         { href: "/about", label: "About Naman Sir" },
         { href: "/demo", label: "Book Free Demo" },
+        { href: "/careers", label: "Careers" },
         { href: "/contact", label: "Contact" },
         { href: "/login", label: "Student Login" },
       ],
