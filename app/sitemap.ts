@@ -5,14 +5,16 @@ import {
   getAllCourses,
   getPublicWebinars,
   getPublicCaArticles,
+  getPublicResources,
 } from "@/lib/dataProvider";
 import { caEffectiveDate } from "@/lib/caView";
+import { RESOURCE_CATEGORIES } from "@/lib/resourceConstants";
 
 export const dynamic = "force-dynamic";
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const now = new Date();
-  const staticRoutes = ["", "/courses", "/current-affairs", "/current-affairs/daily", "/current-affairs/monthly", "/quizzes", "/webinars", "/results", "/free-resources", "/about", "/contact"].map((p) => ({
+  const staticRoutes = ["", "/courses", "/current-affairs", "/current-affairs/daily", "/current-affairs/monthly", "/quizzes", "/webinars", "/results", "/resources", "/free-resources", "/about", "/contact"].map((p) => ({
     url: `${SITE_URL}${p}`,
     lastModified: now,
     changeFrequency: "weekly" as const,
@@ -60,5 +62,26 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     caRoutes = [...articleUrls, ...dateUrls, ...monthUrls, ...catUrls, ...tagUrls];
   } catch { /* ignore */ }
 
-  return [...staticRoutes, ...quizRoutes, ...courseRoutes, ...webinarRoutes, ...caRoutes];
+  let resourceRoutes: MetadataRoute.Sitemap = [];
+  try {
+    const resources = await getPublicResources();
+    const indexable = resources.filter((r) => r.seo?.noindex !== true);
+    const articleUrls = indexable.map((r) => ({
+      url: `${SITE_URL}/resources/${r.slug}`,
+      lastModified: r.updated_at ? new Date(r.updated_at) : now,
+      changeFrequency: "weekly" as const,
+      priority: 0.7,
+    }));
+    // Category cluster pages that actually have published content.
+    const usedCats = new Set(indexable.map((r) => r.category).filter(Boolean) as string[]);
+    const catUrls = RESOURCE_CATEGORIES.filter((c) => usedCats.has(c.slug)).map((c) => ({
+      url: `${SITE_URL}/resources/${c.slug}`,
+      lastModified: now,
+      changeFrequency: "weekly" as const,
+      priority: 0.6,
+    }));
+    resourceRoutes = [...articleUrls, ...catUrls];
+  } catch { /* ignore */ }
+
+  return [...staticRoutes, ...quizRoutes, ...courseRoutes, ...webinarRoutes, ...caRoutes, ...resourceRoutes];
 }

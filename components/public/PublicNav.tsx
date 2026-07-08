@@ -6,7 +6,7 @@ import Image from "next/image";
 import { usePathname } from "next/navigation";
 import {
   Menu, X, ArrowRight, LogOut, LogIn, LayoutDashboard, UserCircle,
-  BookOpen, Newspaper, ListChecks, Trophy, Video, Gift, Info, Phone, Sparkles,
+  BookOpen, Newspaper, ListChecks, Trophy, Video, Gift, Info, Phone, Sparkles, GraduationCap,
   type LucideIcon,
 } from "lucide-react";
 import Logo from "@/components/ui/Logo";
@@ -23,6 +23,7 @@ const NAV_ICONS: Record<string, LucideIcon> = {
   "/courses": BookOpen,
   "/current-affairs": Newspaper,
   "/quizzes": ListChecks,
+  "/resources": GraduationCap,
   "/results": Trophy,
   "/webinars": Video,
   "/free-resources": Gift,

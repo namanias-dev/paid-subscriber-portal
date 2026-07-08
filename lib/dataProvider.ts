@@ -6682,3 +6682,20 @@ export async function incrementResourceView(id: string): Promise<void> {
     await db.from("resources").update({ views: next }).eq("id", id);
   } catch { /* best-effort */ }
 }
+
+export type ResourceEventType = "cta_click" | "quiz_click" | "pdf_download" | "share";
+export async function logResourceEvent(type: ResourceEventType, ref?: string | null): Promise<void> {
+  if (demoMode()) return;
+  const db = getSupabaseAdmin();
+  if (!db) return;
+  try {
+    await db.from("resource_events").insert({ id: uuid(), type, ref: ref ?? null });
+  } catch { /* best-effort */ }
+}
+export async function getResourceEvents(): Promise<{ id: string; type: string; ref: string | null; created_at: string }[]> {
+  if (demoMode()) return [];
+  const db = getSupabaseAdmin();
+  if (!db) return [];
+  const { data } = await db.from("resource_events").select("*").order("created_at", { ascending: false }).limit(5000);
+  return (data as { id: string; type: string; ref: string | null; created_at: string }[]) ?? [];
+}

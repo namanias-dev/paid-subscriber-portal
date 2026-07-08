@@ -63,3 +63,19 @@ begin
       using (status = 'published' and (publish_at is null or publish_at <= now()));
   end if;
 end $$;
+
+-- ---------------------------------------------------------------------------
+-- Lightweight engagement events (self-contained; does NOT touch the Meta/UTM
+-- attribution pipeline). Mirrors ca_events. Writes go through the server.
+-- ---------------------------------------------------------------------------
+create table if not exists public.resource_events (
+  id         text primary key,
+  type       text not null,   -- cta_click | quiz_click | pdf_download | share
+  ref        text,            -- e.g. resource slug or target href
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_resource_events_type on public.resource_events (type);
+create index if not exists idx_resource_events_ref  on public.resource_events (ref);
+
+alter table public.resource_events enable row level security;
+-- No anon policies: only the service role (server APIs) may read/write.

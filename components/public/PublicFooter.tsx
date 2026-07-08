@@ -15,6 +15,7 @@ export default function PublicFooter({ brand }: { brand?: BrandConfig }) {
         { href: "/courses", label: "All Courses" },
         { href: "/current-affairs", label: "Current Affairs" },
         { href: "/quizzes", label: "Quizzes & Tests" },
+        { href: "/resources", label: "UPSC Resources" },
         { href: "/results", label: "Results" },
         { href: "/webinars", label: "Webinars" },
         { href: "/free-resources", label: "Free Resources" },
