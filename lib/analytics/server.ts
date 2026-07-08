@@ -281,14 +281,21 @@ export async function recordRegistrationCreated(reg: { id?: string; webinar_id: 
   // The id is DETERMINISTIC from webinar_id + phone so the browser pixel computes
   // the SAME lead_<...> event_id and Meta dedupes the two copies.
   const leadId = `${reg.webinar_id}:${phone ?? ""}`;
-  const match = await lookupMetaMatch(phone);
+  // Match keys: prefer the buyer's stored fbc/fbp, but fall back to THIS
+  // registration's own click ids (from the nsa_attr cookie). At registration time
+  // the buyer row is often brand-new with no fbc/fbp yet, so without this fallback
+  // the Lead reaches Meta with no customer-information parameters and is rejected
+  // ("Invalid parameter" / error_subcode 2804050) — i.e. the conversion silently
+  // never lands. The cookie already carries fbc/fbp for real Meta clicks.
+  const buyerMatch = await lookupMetaMatch(phone);
+  const cookieMatch = metaIdentityFromState(reg.attribution ?? null);
   await sendMetaLead({
     id: leadId,
     phone,
     value: reg.price ?? 0,
     contentName: reg.webinar_slug ?? reg.webinar_id,
-    fbc: match.fbc,
-    fbp: match.fbp,
+    fbc: buyerMatch.fbc || cookieMatch.fbc,
+    fbp: buyerMatch.fbp || cookieMatch.fbp,
     eventSourceUrl: reg.webinar_slug ? `${SITE_URL}/webinars/${reg.webinar_slug}` : `${SITE_URL}/webinars`,
   }).catch(() => {});
 }
