@@ -29,6 +29,7 @@ export const ADMIN_NAV: AdminNavItem[] = [
   { href: "/admin/library", label: "Brochure Library", icon: "🗂️", group: "Academics", perm: "content_pdfs_media" },
   { href: "/admin/webinars", label: "Webinars & Events", icon: "🎥", group: "Academics", perm: "content_webinars" },
   { href: "/admin/content", label: "Content / LMS", icon: "📚", group: "Academics", perm: "content_courses" },
+  { href: "/admin/resources", label: "UPSC Resources", icon: "📗", group: "Academics", perm: "content_resources" },
   { href: "/admin/lecture-comments", label: "Lecture Q&A", icon: "💬", group: "Academics", perm: "content_courses" },
   { href: "/admin/plans", label: "Subscription Plans", icon: "💎", group: "Academics", perm: "manage_pricing" },
   { href: "/admin/current-affairs", label: "CA Articles", icon: "📰", group: "Current Affairs", perm: "content_current_affairs" },

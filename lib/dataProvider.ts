@@ -52,6 +52,7 @@ import type {
   CaLead,
   CaEvent,
   CaEventType,
+  Resource,
   Role,
   AdminAccount,
   LibraryDoc,
@@ -6563,4 +6564,138 @@ export async function getCaEvents(): Promise<CaEvent[]> {
   if (demoMode()) return [];
   const rows = await dbSelect<CaEvent>("ca_events");
   return rows;
+}
+
+// ========================= UPSC RESOURCES (SEO hub) =========================
+
+/** True when a resource is publicly visible (published + not future-scheduled). */
+export function isResourcePublished(r: Resource | null | undefined): boolean {
+  if (!r) return false;
+  if (r.status !== "published") return false;
+  if (r.publish_at && new Date(r.publish_at).getTime() > Date.now()) return false;
+  return true;
+}
+
+export async function getResources(): Promise<Resource[]> {
+  if (demoMode()) return [...mock.resources];
+  const db = getSupabaseAdmin();
+  if (!db) return [...mock.resources];
+  const { data } = await db.from("resources").select("*").order("order_index", { ascending: true }).order("updated_at", { ascending: false });
+  return (data as Resource[]) ?? [];
+}
+
+/** Public list: published, not future. Ordered by journey order, then newest. */
+export async function getPublicResources(): Promise<Resource[]> {
+  const all = await getResources();
+  return all
+    .filter(isResourcePublished)
+    .sort((a, b) => {
+      const oa = a.order_index ?? 9999;
+      const ob = b.order_index ?? 9999;
+      if (oa !== ob) return oa - ob;
+      return new Date(b.publish_at || b.created_at).getTime() - new Date(a.publish_at || a.created_at).getTime();
+    });
+}
+
+/** Returns the row regardless of status (admin/preview); callers gate on isResourcePublished. */
+export async function getResourceBySlug(slug: string): Promise<Resource | null> {
+  const all = await getResources();
+  return all.find((r) => r.slug === slug) ?? null;
+}
+
+export async function getResourceById(id: string): Promise<Resource | null> {
+  const all = await getResources();
+  return all.find((r) => r.id === id) ?? null;
+}
+
+export async function addResource(input: Partial<Resource>): Promise<Resource> {
+  const ts = new Date().toISOString();
+  const row = {
+    id: uuid(),
+    slug: input.slug || slugify(input.title || "resource"),
+    title: input.title || "Untitled resource",
+    summary: input.summary || "",
+    body_html: input.body_html ?? null,
+    sections: input.sections ?? [],
+    category: input.category ?? null,
+    subject: input.subject ?? null,
+    exam_relevance: input.exam_relevance ?? null,
+    target_year: input.target_year ?? null,
+    difficulty: input.difficulty ?? null,
+    status: input.status || "draft",
+    publish_at: input.publish_at ?? null,
+    author: input.author ?? null,
+    reading_time: input.reading_time ?? null,
+    featured_image: input.featured_image ?? null,
+    tags: input.tags ?? [],
+    pdf_ids: input.pdf_ids ?? [],
+    faq: input.faq ?? [],
+    cta_blocks: input.cta_blocks ?? [],
+    related: input.related ?? {},
+    focus_keyword: input.focus_keyword ?? null,
+    seo: input.seo ?? {},
+    journey_stage: input.journey_stage ?? null,
+    order_index: input.order_index ?? 0,
+    is_local: input.is_local ?? false,
+    views: 0,
+    created_at: ts,
+    updated_at: ts,
+  } as Resource;
+  if (demoMode()) {
+    mock.resources.unshift(row);
+    return row;
+  }
+  return dbInsert<Resource>("resources", row as unknown as Record<string, unknown>);
+}
+
+export async function updateResource(id: string, patch: Partial<Resource>): Promise<Resource | null> {
+  if (demoMode()) {
+    const idx = mock.resources.findIndex((r) => r.id === id);
+    if (idx === -1) return null;
+    mock.resources[idx] = { ...mock.resources[idx], ...patch };
+    return mock.resources[idx];
+  }
+  return dbUpdate<Resource>("resources", id, patch as Record<string, unknown>);
+}
+
+export async function deleteResource(id: string): Promise<boolean> {
+  if (demoMode()) {
+    const idx = mock.resources.findIndex((r) => r.id === id);
+    if (idx === -1) return false;
+    mock.resources.splice(idx, 1);
+    return true;
+  }
+  return dbDelete("resources", id);
+}
+
+export async function incrementResourceView(id: string): Promise<void> {
+  if (demoMode()) {
+    const r = mock.resources.find((x) => x.id === id);
+    if (r) r.views += 1;
+    return;
+  }
+  const db = getSupabaseAdmin();
+  if (!db) return;
+  try {
+    const { data } = await db.from("resources").select("views").eq("id", id).maybeSingle();
+    const next = ((data?.views as number) ?? 0) + 1;
+    await db.from("resources").update({ views: next }).eq("id", id);
+  } catch { /* best-effort */ }
+}
+
+export type ResourceEventType = "cta_click" | "quiz_click" | "pdf_download" | "share";
+export async function logResourceEvent(type: ResourceEventType, ref?: string | null): Promise<void> {
+  if (demoMode()) return;
+  const db = getSupabaseAdmin();
+  if (!db) return;
+  try {
+    await db.from("resource_events").insert({ id: uuid(), type, ref: ref ?? null });
+  } catch { /* best-effort */ }
+}
+export async function getResourceEvents(): Promise<{ id: string; type: string; ref: string | null; created_at: string }[]> {
+  if (demoMode()) return [];
+  const db = getSupabaseAdmin();
+  if (!db) return [];
+  const { data } = await db.from("resource_events").select("*").order("created_at", { ascending: false }).limit(5000);
+  return (data as { id: string; type: string; ref: string | null; created_at: string }[]) ?? [];
 }
