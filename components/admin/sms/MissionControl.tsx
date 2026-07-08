@@ -2,10 +2,11 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
-import { Activity, Send, Workflow, FileText, ScrollText, BarChart3, Settings as SettingsIcon, RefreshCw, Download, AlertTriangle, CheckCircle2, Power, Braces, Link2, RotateCcw, Users, Search, SlidersHorizontal, Bookmark, Save, Trash2, History } from "lucide-react";
+import { Activity, Send, Workflow, FileText, ScrollText, BarChart3, Settings as SettingsIcon, RefreshCw, Download, AlertTriangle, CheckCircle2, Power, Braces, Link2, RotateCcw, Users, Search, SlidersHorizontal, Bookmark, Save, Trash2, History, Clock, ChevronDown } from "lucide-react";
 import { LoadingBlock } from "@/components/admin/ui";
 import { useToast } from "@/components/ui/Toast";
-import { formatISTDateTime } from "@/lib/dates";
+import TimeframeFilter from "@/components/admin/TimeframeFilter";
+import { formatISTDateTime, TIMEFRAME_LABELS, type TimeframeValue } from "@/lib/dates";
 
 // Recharts is heavy and only shown inside the Overview/Analytics tabs — lazy-load
 // the chart bodies so Recharts stays out of the initial Mission Control bundle.
@@ -183,13 +184,23 @@ function dateFieldNote(courseSlug: string, webinarSlug: string): string {
   return "payment date (payments.created_at)";
 }
 
+/** Which date the preset timeframe filter scopes on, for the given segment. */
+function presetDateNote(audType: string): string {
+  if (audType.startsWith("payment_")) return "payment date";
+  if (audType.startsWith("webinar_")) return "webinar registration date";
+  if (audType === "leads") return "lead created date";
+  return "signup date";
+}
+
 function SendTab({ meta }: { meta: Meta | null }) {
   const { toast } = useToast();
   const [templates, setTemplates] = useState<TemplateRow[]>([]);
   const [templateId, setTemplateId] = useState("");
-  // Filter builder is the first-class default; presets/person are secondary modes.
-  const [audType, setAudType] = useState("filtered");
+  // Preset segment is the first-class default; filter builder / person are secondary.
+  const [audType, setAudType] = useState("payment_paid");
   const [lastPreset, setLastPreset] = useState("payment_paid");
+  // Timeframe scoping for the PRESET segment (mirrors the Lead CRM filter).
+  const [pTf, setPTf] = useState<TimeframeValue>({ mode: "all" });
   const [mobile, setMobile] = useState("");
   const [name, setName] = useState("");
   const [webinarSlug, setWebinarSlug] = useState("");
@@ -266,8 +277,8 @@ function SendTab({ meta }: { meta: Meta | null }) {
         restrictTo,
       };
     }
-    return { type: audType, mobile, name, webinarSlug: needsWebinar ? webinarSlug : null, source: audType === "leads" ? source : null, stage: audType === "leads" ? stage : null, restrictTo };
-  }, [isFiltered, fCourse, fWebinar, fStatus, fTimeframe, fMonth, audType, mobile, name, needsWebinar, webinarSlug, source, stage]);
+    return { type: audType, mobile, name, webinarSlug: needsWebinar ? webinarSlug : null, source: audType === "leads" ? source : null, stage: audType === "leads" ? stage : null, presetTimeframe: audType === "person" ? null : pTf, restrictTo };
+  }, [isFiltered, fCourse, fWebinar, fStatus, fTimeframe, fMonth, audType, mobile, name, needsWebinar, webinarSlug, source, stage, pTf]);
 
   const runPreview = useCallback(async (silent = false) => {
     if (!silent) setBusy(true);
@@ -283,12 +294,17 @@ function SendTab({ meta }: { meta: Meta | null }) {
     }
   }, [buildAudience, templateId, toast]);
 
-  // Live count for the filtered audience: debounced auto-preview as filters change.
+  // Live recipient count: debounced auto-preview for the filter builder AND preset
+  // segments (person mode too, once a valid mobile is entered) so the admin always
+  // sees how many will receive the message for the current segment + timeframe.
   useEffect(() => {
-    if (!isFiltered) return;
+    const canAuto = isFiltered || panel === "preset" || (panel === "person" && mobile.trim().length >= 10);
+    if (!canAuto) return;
+    // Preset webinar segments need a webinar selected before a count is meaningful.
+    if (panel === "preset" && needsWebinar && !webinarSlug) return;
     const t = setTimeout(() => { runPreview(true); }, 400);
     return () => clearTimeout(t);
-  }, [isFiltered, fCourse, fWebinar, fStatus, fTimeframe, fMonth, templateId, runPreview]);
+  }, [isFiltered, panel, audType, fCourse, fWebinar, fStatus, fTimeframe, fMonth, pTf, mobile, name, needsWebinar, webinarSlug, source, stage, templateId, runPreview]);
 
   // Rich template preview (per-recipient message, real-vs-sample vars, coverage).
   const runRich = useCallback(async (idx: number) => {
@@ -415,14 +431,21 @@ function SendTab({ meta }: { meta: Meta | null }) {
         )}
 
         {panel === "preset" && (
-          <Field label="Preset segment">
-            <select className="input" value={audType} onChange={(e) => { setAudType(e.target.value); setLastPreset(e.target.value); setPreview(null); setRecipients(null); }}>
-              <optgroup label="Payments"><option value="payment_paid">Paid</option><option value="payment_not_paid">NOT paid (no successful payment)</option><option value="payment_pending">Pending</option><option value="payment_failed">Failed</option><option value="payment_abandoned">Abandoned</option><option value="payment_all">All payments</option></optgroup>
-              <optgroup label="Webinar"><option value="webinar_registered">Registered</option><option value="webinar_not_registered">NOT registered</option><option value="webinar_attendees">Attended</option><option value="webinar_no_show">No-show</option></optgroup>
-              <optgroup label="People"><option value="leads">Leads</option><option value="users_with_mobile">All users with mobile</option>{!isPromo && <option value="all">Everyone (guarded)</option>}</optgroup>
-            </select>
-            {isPromo && <p className="mt-1 text-xs text-amber-700">Promotional template — warm audiences only (leads / users / webinar). The All audience is disabled (no promo route).</p>}
-          </Field>
+          <div className="space-y-3 rounded-xl border border-line bg-surface p-3">
+            <Field label="Preset segment">
+              <select className="input" value={audType} onChange={(e) => { setAudType(e.target.value); setLastPreset(e.target.value); setPreview(null); setRecipients(null); }}>
+                <optgroup label="Payments"><option value="payment_paid">Paid</option><option value="payment_not_paid">NOT paid (no successful payment)</option><option value="payment_pending">Pending</option><option value="payment_failed">Failed</option><option value="payment_abandoned">Abandoned</option><option value="payment_all">All payments</option></optgroup>
+                <optgroup label="Webinar"><option value="webinar_registered">Registered</option><option value="webinar_not_registered">NOT registered</option><option value="webinar_attendees">Attended</option><option value="webinar_no_show">No-show</option></optgroup>
+                <optgroup label="People"><option value="leads">Leads</option><option value="users_with_mobile">All users with mobile</option>{!isPromo && <option value="all">Everyone (guarded)</option>}</optgroup>
+              </select>
+              {isPromo && <p className="mt-1 text-xs text-amber-700">Promotional template — warm audiences only (leads / users / webinar). The All audience is disabled (no promo route).</p>}
+            </Field>
+            <div>
+              <p className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold text-ink2"><Clock size={13} /> Timeframe {pTf.mode !== "all" && <span className="font-normal text-muted">· {TIMEFRAME_LABELS[pTf.mode]}</span>}</p>
+              <TimeframeFilter value={pTf} onChange={(v) => { setPTf(v); setPreview(null); setRecipients(null); }} size="sm" />
+              <p className="mt-1.5 text-xs text-muted">Scopes recipients by {presetDateNote(audType)}.{pTf.mode === "all" ? "" : " Only people from the selected window will receive this."}</p>
+            </div>
+          </div>
         )}
 
         {panel === "person" && (
@@ -455,13 +478,24 @@ function SendTab({ meta }: { meta: Meta | null }) {
         {balance?.configured && <p className="text-xs text-muted">Gateway credits: <span className="font-semibold tabular-nums">{balance.balance ?? "—"}</span></p>}
         {lowCredits && <p className="text-xs text-danger">Not enough credits ({balance?.balance}) for {preview?.count} recipients — the send will be refused.</p>}
 
-        <div className="space-y-1.5 rounded-xl border border-line p-2.5">
-          <p className="text-xs font-medium text-muted">Test send to yourself first</p>
-          <div className="flex gap-2">
-            <input className="input" placeholder="your 10-digit mobile" value={testMobile} onChange={(e) => setTestMobile(e.target.value)} />
-            <button onClick={doTestSend} disabled={testBusy || !templateId || !testMobile.trim()} className="btn btn-secondary shrink-0">{testBusy ? "…" : "Send test"}</button>
+        <details className="group rounded-xl border border-line">
+          <summary className="flex cursor-pointer list-none items-center gap-2 p-2.5 text-xs font-medium text-muted">
+            <ChevronDown size={14} className="shrink-0 transition group-open:rotate-180" />
+            Test send to yourself first <span className="font-normal">(optional)</span>
+          </summary>
+          <div className="space-y-1.5 border-t border-line p-2.5">
+            <div className="flex gap-2">
+              <input className="input" placeholder="your 10-digit mobile" value={testMobile} onChange={(e) => setTestMobile(e.target.value)} />
+              <button onClick={doTestSend} disabled={testBusy || !templateId || !testMobile.trim()} className="btn btn-secondary shrink-0">{testBusy ? "…" : "Send test"}</button>
+            </div>
+            <p className="text-[11px] text-muted">One message to this number, sample values fill any blanks (real login link). All safeguards apply.</p>
           </div>
-          <p className="text-[11px] text-muted">One message to this number, sample values fill any blanks (real login link). All safeguards apply.</p>
+        </details>
+
+        <div className="flex items-center gap-1.5 rounded-lg bg-surface px-2.5 py-1.5 text-xs">
+          <Users size={13} className="text-muted" />
+          <span className="text-muted">Recipients matching current {panel === "filtered" ? "filters" : panel === "person" ? "contact" : "segment + timeframe"}:</span>
+          <span className="font-semibold tabular-nums text-ink">{busy ? "…" : (preview?.count ?? "—")}</span>
         </div>
 
         <div className="flex gap-2 pt-1">

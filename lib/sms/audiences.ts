@@ -5,7 +5,7 @@
  */
 import { getSupabaseAdmin } from "../supabase";
 import { normalizeIndianMobile } from "../phone";
-import { formatISTTime } from "../dates";
+import { formatISTTime, resolveTimeframe, type TimeframeValue } from "../dates";
 import {
   getPayments, getLeads, getBuyers, getWebinars, getWebinarBySlug,
   getWebinarRegistrationsByWebinar, getWebinarPaymentStatusesForSlug,
@@ -58,6 +58,13 @@ export interface AudienceSpec {
   name?: string | null;     // for "person"
   filters?: FilterSpec;     // for "filtered"
   /**
+   * Optional timeframe scoping for PRESET segments (payment_* / webinar_* / leads
+   * / users_with_mobile / all). Mirrors the Lead CRM filter. Scopes recipients by
+   * the natural date of each segment (payment date, registration date, lead/buyer
+   * created date). Null / mode "all" = no scoping (unchanged behaviour).
+   */
+  presetTimeframe?: TimeframeValue | null;
+  /**
    * Restrict the resolved set to these normalized 10-digit phones (intersection).
    * Powers resend-to-failed: re-run the SAME audience so vars rebuild correctly,
    * but only for the failed numbers. All safeguards still apply downstream.
@@ -102,6 +109,20 @@ async function buyerMap(): Promise<Map<string, { name: string | null; login_code
       const existing = map.get(d);
       if (existing) { existing.ambiguous = true; existing.login_code = null; }
       else map.set(d, { name: b.name, login_code: b.login_code, ambiguous: false });
+    }
+  } catch { /* ignore */ }
+  return map;
+}
+
+/** phone(10) -> buyer created_at ms (for preset timeframe scoping of buyer audiences). */
+async function buyerCreatedMsMap(): Promise<Map<string, number>> {
+  const map = new Map<string, number>();
+  try {
+    for (const b of await getBuyers()) {
+      const d = norm(b.phone);
+      if (!d) continue;
+      const ms = b.created_at ? new Date(b.created_at).getTime() : NaN;
+      if (Number.isFinite(ms)) { const prev = map.get(d); if (prev == null || ms < prev) map.set(d, ms); }
     }
   } catch { /* ignore */ }
   return map;
@@ -195,6 +216,12 @@ async function resolveAudienceInner(spec: AudienceSpec): Promise<Recipient[]> {
   const bm = await buyerMap();
   const attach = makeAttach(bm);
 
+  // PRESET timeframe scoping (additive; only active when a non-"all" timeframe is
+  // supplied). Filters recipients by the natural date of the segment.
+  const ptf = spec.presetTimeframe && spec.presetTimeframe.mode !== "all"
+    ? resolveTimeframe(spec.presetTimeframe) : null;
+  const inPreset = (ms: number) => !ptf || (ms >= ptf.fromMs && ms < ptf.toMs);
+
   // ----- specific person -----
   if (spec.type === "person") {
     const d = norm(spec.mobile);
@@ -234,7 +261,7 @@ async function resolveAudienceInner(spec: AudienceSpec): Promise<Recipient[]> {
       }
     };
     return dedupeRecipients([...byPhone.entries()]
-      .filter(([, a]) => match(a.cls))
+      .filter(([, a]) => match(a.cls) && inPreset(new Date(a.row.created_at).getTime()))
       .map(([d, a]) => attach(d, a.row.student_name, paymentVars(a.row),
         { payment_id: a.row.id, course_id: a.row.item_type === "course" ? a.row.item_slug : null, webinar_id: a.row.item_type === "webinar" ? a.row.item_slug : null })));
   }
@@ -245,8 +272,8 @@ async function resolveAudienceInner(spec: AudienceSpec): Promise<Recipient[]> {
     if (!webinar) return [];
     const vars = { item_short: webinar.title, item_name: webinar.title, webinar_time: formatISTTime(webinar.datetime), webinar_date: webinar.datetime };
     const regs = await getWebinarRegistrationsByWebinar(webinar.id);
-    const regByPhone = new Map<string, { name: string | null; id: string; attended: boolean }>();
-    for (const r of regs) { const d = norm(r.phone); if (d) regByPhone.set(d, { name: r.name, id: r.id, attended: !!r.attended }); }
+    const regByPhone = new Map<string, { name: string | null; id: string; attended: boolean; createdMs: number }>();
+    for (const r of regs) { const d = norm(r.phone); if (d) regByPhone.set(d, { name: r.name, id: r.id, attended: !!r.attended, createdMs: new Date(r.created_at).getTime() }); }
     const zoom = await zoomClickedPhones(webinar.slug);
 
     // PAID webinars: a bare webinar_registrations lead row is NOT a confirmed seat.
@@ -258,14 +285,14 @@ async function resolveAudienceInner(spec: AudienceSpec): Promise<Recipient[]> {
       const isPaidWebinar = (webinar.price ?? 0) > 0;
       const payByPhone = isPaidWebinar ? await getWebinarPaymentStatusesForSlug(webinar.slug) : null;
       return dedupeRecipients([...regByPhone.entries()]
-        .filter(([d]) => !isPaidWebinar || payByPhone!.get(d) === "PAID")
+        .filter(([d, r]) => (!isPaidWebinar || payByPhone!.get(d) === "PAID") && inPreset(r.createdMs))
         .map(([d, r]) => attach(d, r.name, vars, { registration_id: r.id, webinar_id: webinar.id })));
     }
     if (spec.type === "webinar_attendees") {
-      return dedupeRecipients([...regByPhone.entries()].filter(([d, r]) => r.attended || zoom.has(d)).map(([d, r]) => attach(d, r.name, vars, { registration_id: r.id, webinar_id: webinar.id })));
+      return dedupeRecipients([...regByPhone.entries()].filter(([d, r]) => (r.attended || zoom.has(d)) && inPreset(r.createdMs)).map(([d, r]) => attach(d, r.name, vars, { registration_id: r.id, webinar_id: webinar.id })));
     }
     if (spec.type === "webinar_no_show") {
-      return dedupeRecipients([...regByPhone.entries()].filter(([d, r]) => !r.attended && !zoom.has(d)).map(([d, r]) => attach(d, r.name, vars, { registration_id: r.id, webinar_id: webinar.id })));
+      return dedupeRecipients([...regByPhone.entries()].filter(([d, r]) => !r.attended && !zoom.has(d) && inPreset(r.createdMs)).map(([d, r]) => attach(d, r.name, vars, { registration_id: r.id, webinar_id: webinar.id })));
     }
     // not-registered: everyone with a mobile (buyers + leads) minus registered
     const universe = new Map<string, string | null>();
@@ -279,18 +306,23 @@ async function resolveAudienceInner(spec: AudienceSpec): Promise<Recipient[]> {
     let leads = await getLeads();
     if (spec.source) leads = leads.filter((l) => (l.source || "").toLowerCase() === spec.source!.toLowerCase());
     if (spec.stage) leads = leads.filter((l) => (l.status || "").toLowerCase() === spec.stage!.toLowerCase());
+    if (ptf) leads = leads.filter((l) => inPreset(new Date(l.created_at).getTime()));
     return dedupeRecipients(leads.map((l) => { const d = norm(l.phone); return d ? attach(d, l.name, { item_short: l.course_interest || "" }, { lead_id: l.id }) : null; }).filter((x): x is Recipient => !!x));
   }
 
+  // buyer signup dates (only needed when a preset timeframe scopes buyers).
+  const buyerDateMs = ptf ? await buyerCreatedMsMap() : null;
+  const buyerInTime = (d: string) => !buyerDateMs || !buyerDateMs.has(d) || inPreset(buyerDateMs.get(d)!);
+
   // ----- users with mobile -----
   if (spec.type === "users_with_mobile") {
-    return dedupeRecipients([...bm.entries()].map(([d, b]) => attach(d, b.name, {}, {})));
+    return dedupeRecipients([...bm.entries()].filter(([d]) => buyerInTime(d)).map(([d, b]) => attach(d, b.name, {}, {})));
   }
 
   // ----- everyone (guarded) -----
   if (spec.type === "all") {
-    const list: Recipient[] = [...bm.entries()].map(([d, b]) => attach(d, b.name, {}, {}));
-    for (const l of await getLeads()) { const d = norm(l.phone); if (d) list.push(attach(d, l.name, {}, { lead_id: l.id })); }
+    const list: Recipient[] = [...bm.entries()].filter(([d]) => buyerInTime(d)).map(([d, b]) => attach(d, b.name, {}, {}));
+    for (const l of await getLeads()) { const d = norm(l.phone); if (d && inPreset(new Date(l.created_at).getTime())) list.push(attach(d, l.name, {}, { lead_id: l.id })); }
     return dedupeRecipients(list);
   }
 
