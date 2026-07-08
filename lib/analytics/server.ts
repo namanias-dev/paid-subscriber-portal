@@ -9,6 +9,7 @@
  *  - Stores UTC `occurred_at` (rendered IST at the edges).
  */
 import { getSupabaseAdmin } from "../supabase";
+import { SITE_URL } from "../config";
 import { normPhone } from "../phone";
 import { flattenForStamp, metaIdentityFromState, type AttributionState } from "../attribution";
 import { sendMetaPurchase, sendMetaLead, sendMetaInitiateCheckout } from "./thirdParty";
@@ -283,6 +284,7 @@ export async function recordRegistrationCreated(reg: { id?: string; webinar_id: 
     contentName: reg.webinar_slug ?? reg.webinar_id,
     fbc: match.fbc,
     fbp: match.fbp,
+    eventSourceUrl: reg.webinar_slug ? `${SITE_URL}/webinars/${reg.webinar_slug}` : `${SITE_URL}/webinars`,
   }).catch(() => {});
 }
 

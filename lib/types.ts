@@ -1027,6 +1027,11 @@ export interface WebinarRegistration {
   phone: string;
   attended: boolean;
   created_at: string;
+  // --- First-party attribution (additive; stamped at registration) ---
+  attribution_source?: string | null;
+  attribution_campaign?: string | null;
+  attribution_fbclid?: string | null;
+  attribution_fbc?: string | null;
   // --- Late-registration migration provenance (additive) ---
   moved_from_webinar_id?: string | null;
   moved_to_webinar_id?: string | null;
