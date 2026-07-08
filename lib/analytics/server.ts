@@ -257,10 +257,15 @@ export async function recordStaffReview(p: Payment, decision: "approved" | "reje
   }
 }
 
-export async function recordRegistrationCreated(reg: { id?: string; webinar_id: string; webinar_slug?: string | null; phone: string; price?: number; is_free?: boolean; attribution?: AttributionState | null }): Promise<void> {
+export async function recordRegistrationCreated(reg: { id?: string; webinar_id: string; webinar_slug?: string | null; phone: string; visitor_id?: string | null; price?: number; is_free?: boolean; attribution?: AttributionState | null }): Promise<void> {
   const phone = normPhone(reg.phone);
   await writeEvent({
     event_name: "registration_created",
+    // Carry the visitor_id so this server-emitted conversion joins to the SAME
+    // visitor's anonymous, campaign-rich landing page views — the bridge that
+    // lets a lead attribute to the ad campaign that drove it (the 2-slot cookie
+    // on the event itself has usually rolled past the ad click by now).
+    visitor_id: reg.visitor_id ?? null,
     phone,
     buyer_id: await resolveBuyerId(phone),
     dedupe_key: reg.id ? `reg:${reg.id}` : `reg:${reg.webinar_id}:${phone}`,

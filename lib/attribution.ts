@@ -144,10 +144,26 @@ export function mergeAttribution(
     prev.first_touch ||
     (touchIsMeaningful(touch) || !prev.last_touch ? { ...touch, first_seen_at: nowISO } : null);
   // Last-touch updates only on a meaningful new signal; otherwise keep prior.
-  const last =
-    touchIsMeaningful(touch) || !prev.last_touch
-      ? { ...touch, last_seen_at: nowISO }
-      : prev.last_touch;
+  let last: AttributionState["last_touch"];
+  if (touchIsMeaningful(touch) || !prev.last_touch) {
+    // CAMPAIGN-STICKY last touch: roll to the new signal, but carry forward the
+    // last-KNOWN campaign + Meta click ids (fbclid/fbc/fbp) when this touch didn't
+    // carry its own. Otherwise a later organic/social visit (e.g. an in-app
+    // Instagram referral with no utm) would ERASE the ad campaign that actually
+    // drove a returning visitor — the click that matters is a middle touch the
+    // 2-slot cookie can't keep. Never overwrites a real new campaign/click id.
+    const carried: AttributionTouch = { ...touch };
+    const prevLast = prev.last_touch;
+    if (prevLast) {
+      if (!carried.campaign && prevLast.campaign) carried.campaign = prevLast.campaign;
+      if (!carried.fbclid && prevLast.fbclid) carried.fbclid = prevLast.fbclid;
+      if (!carried.fbc && prevLast.fbc) carried.fbc = prevLast.fbc;
+      if (!carried.fbp && prevLast.fbp) carried.fbp = prevLast.fbp;
+    }
+    last = { ...carried, last_seen_at: nowISO };
+  } else {
+    last = prev.last_touch;
+  }
   return { first_touch: first, last_touch: last };
 }
 

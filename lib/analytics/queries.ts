@@ -1360,13 +1360,36 @@ export async function getMetaAttribution(opts: { from: string; to: string; exclu
   ]);
   const events = excludeAdmin ? allEvents.filter((e) => !(e.phone && staff.has(normPhone(e.phone)!))) : allEvents;
 
-  // Leads (free registrations) by campaign — from the click event's first touch.
+  // VISITOR/PHONE CAMPAIGN FALLBACK: a registration event's own 2-slot cookie has
+  // often rolled past the ad click by the time the lead registers, but the SAME
+  // visitor's other events (page views etc., already fetched here) still carry the
+  // campaign. Build a visitor_id/phone -> campaign map so a returning-visitor lead
+  // credits the ad that drove them instead of collapsing to Untracked. First hit
+  // wins (events arrive newest-first), so we take the most recent known campaign.
+  const campaignByVisitor = new Map<string, string>();
+  const campaignByPhone = new Map<string, string>();
+  for (const e of events) {
+    const c = campaignOfEvent(e);
+    if (!c) continue;
+    const cl = c.toLowerCase();
+    if (e.visitor_id && !campaignByVisitor.has(e.visitor_id)) campaignByVisitor.set(e.visitor_id, cl);
+    const ph = e.phone ? normPhone(e.phone) : null;
+    if (ph && !campaignByPhone.has(ph)) campaignByPhone.set(ph, cl);
+  }
+
+  // Leads (free registrations) by campaign — any-touch on the event, then the
+  // visitor/phone fallback above.
   const leads = new Map<string, number>();
   for (const e of events) {
     if (e.event_name !== "registration_created") continue;
-    // Any-touch campaign: don't collapse a returning-visitor ad click to Untracked
-    // just because the frozen first touch predates the campaign.
-    const k = (campaignOfEvent(e) || "(untracked)").toLowerCase();
+    let c = campaignOfEvent(e)?.toLowerCase() || null;
+    if (!c) {
+      const ph = e.phone ? normPhone(e.phone) : null;
+      c = (e.visitor_id ? campaignByVisitor.get(e.visitor_id) : undefined)
+        || (ph ? campaignByPhone.get(ph) : undefined)
+        || null;
+    }
+    const k = c || "(untracked)";
     leads.set(k, (leads.get(k) || 0) + 1);
   }
 

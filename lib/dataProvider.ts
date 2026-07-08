@@ -1991,7 +1991,7 @@ export async function deleteWebinar(id: string): Promise<boolean> {
   }
   return dbDelete("webinars", id);
 }
-export async function registerWebinar(webinarId: string, name: string, phone: string, attr?: AttributionState | null): Promise<{ ok: boolean }> {
+export async function registerWebinar(webinarId: string, name: string, phone: string, attr?: AttributionState | null, visitorId?: string | null): Promise<{ ok: boolean }> {
   if (demoMode()) {
     const w = mock.webinars.find((x) => x.id === webinarId);
     if (w) w.registrations += 1;
@@ -2035,7 +2035,7 @@ export async function registerWebinar(webinarId: string, name: string, phone: st
   // Analytics (best-effort, idempotent): a webinar registration milestone. The
   // attribution snapshot (from the nsa_attr cookie, passed by the route) rides the
   // event so the lead attributes to its campaign — the Meta report reads it.
-  void recordRegistrationCreated({ webinar_id: webinarId, webinar_slug: webinarSlug, phone, price: webinarPrice, is_free: isFreeWebinar, attribution: attr ?? null }).catch(() => {});
+  void recordRegistrationCreated({ webinar_id: webinarId, webinar_slug: webinarSlug, phone, visitor_id: visitorId ?? null, price: webinarPrice, is_free: isFreeWebinar, attribution: attr ?? null }).catch(() => {});
   // Auto-SMS (disabled by default): "Webinar Registered". FREE webinars confirm at
   // registration (registration == confirmation). PAID webinars must NOT confirm here —
   // payment is unresolved at registration time; the confirmation fires only after a
