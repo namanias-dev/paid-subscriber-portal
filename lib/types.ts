@@ -86,6 +86,10 @@ export interface ContentItem {
   notes_pdf_key?: string | null;
   duration_seconds?: number | null;
   file_size?: number | null;
+  /** R2 size (bytes) of the attached notes PDF (notes_pdf_key), when uploaded. */
+  notes_pdf_size?: number | null;
+  /** R2 size (bytes) of the custom thumbnail (thumbnail_key), when uploaded. */
+  thumbnail_size?: number | null;
   resolution?: string | null;
   /** Opt-in (default false) to serve a public lecture via the R2 public CDN base URL. */
   public_cdn?: boolean;
@@ -850,6 +854,33 @@ export interface Lead {
   follow_up_date: string | null;
   counsellor: string | null;
   created_at: string;
+  /** Last-touch update time (bumped on every merged touchpoint). */
+  updated_at?: string | null;
+  /**
+   * Full touchpoint history for a de-duplicated lead — every source/campaign the
+   * person arrived through, oldest first. The row's own `source`/`campaign` mirror
+   * the LATEST touch; `first_source`/`first_campaign` preserve the first touch.
+   */
+  sources?: LeadSourceTouch[];
+  /** First-touch attribution, preserved when later touches overwrite source/campaign. */
+  first_source?: string | null;
+  first_campaign?: string | null;
+  /**
+   * Soft-merge pointer. When set, this row is a duplicate folded into the canonical
+   * lead with this id and is hidden from every list/segment. Null = active/canonical.
+   */
+  merged_into?: string | null;
+  /** How many duplicate rows were merged into this canonical lead. */
+  merged_count?: number;
+}
+
+/** One touchpoint in a de-duplicated lead's source history. */
+export interface LeadSourceTouch {
+  source: string | null;
+  campaign?: string | null;
+  course_interest?: string | null;
+  at: string;
+  lead_id?: string;
 }
 
 export interface LeadActivity {

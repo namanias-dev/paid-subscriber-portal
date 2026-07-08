@@ -7,7 +7,7 @@ import { useToast } from "@/components/ui/Toast";
 import { useUploadManager } from "@/components/admin/upload/uploadManager";
 import { CONTENT_META } from "@/lib/contentMeta";
 import { SUBJECTS } from "@/lib/config";
-import { formatDate, formatISTDateTime } from "@/lib/dates";
+import { formatDate, formatISTDateTime, formatBytes } from "@/lib/dates";
 import type { ContentItem, ContentType, Course, Webinar, OrientationRole } from "@/lib/types";
 
 /** Read duration + resolution from a video file (client-side; no processing). */
@@ -119,6 +119,34 @@ export default function ContentAdmin() {
     list.sort((a, b) => new Date(b.date || b.created_at).getTime() - new Date(a.date || a.created_at).getTime());
     return list;
   }, [content, q, fCourse, fType, fSubject, fStatus]);
+
+  // Storage analytics: total uploaded bytes across all Content/LMS assets, split
+  // by category. Recordings/Videos = hosted lecture files + hosted webinar
+  // recordings; Notes/PDFs = attached lecture notes; Thumbnails = custom covers.
+  // External links (YouTube/Drive/Telegram) carry no bytes and are excluded.
+  const storage = useMemo(() => {
+    const items = content || [];
+    const wlist = webinars || [];
+    let videoBytes = 0, videoCount = 0, notesBytes = 0, notesCount = 0, thumbBytes = 0, thumbCount = 0;
+    let hostedMissing = 0; // completed hosted videos with no known size (need backfill)
+    for (const c of items) {
+      if (c.source_type === "hosted" && c.upload_status === "completed") {
+        if (c.file_size && c.file_size > 0) { videoBytes += c.file_size; videoCount++; }
+        else hostedMissing++;
+      }
+      if (c.notes_pdf_size && c.notes_pdf_size > 0) { notesBytes += c.notes_pdf_size; notesCount++; }
+      if (c.thumbnail_size && c.thumbnail_size > 0) { thumbBytes += c.thumbnail_size; thumbCount++; }
+    }
+    for (const w of wlist) {
+      if (w.recording_upload_status === "completed" && w.recording_file_size && w.recording_file_size > 0) {
+        videoBytes += w.recording_file_size; videoCount++;
+      } else if (w.recording_upload_status === "completed" && w.recording_key) {
+        hostedMissing++;
+      }
+    }
+    const total = videoBytes + notesBytes + thumbBytes;
+    return { total, videoBytes, videoCount, notesBytes, notesCount, thumbBytes, thumbCount, hostedMissing };
+  }, [content, webinars]);
 
   function openAdd() {
     setForm(EMPTY_FORM);
@@ -243,7 +271,7 @@ export default function ContentAdmin() {
         const sign = await fetch("/api/admin/lectures/asset/sign", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ recordingId, kind: "thumbnail", contentType: thumbFile.type || "image/jpeg" }),
+          body: JSON.stringify({ recordingId, kind: "thumbnail", contentType: thumbFile.type || "image/jpeg", size: thumbFile.size }),
         });
         const sd = await sign.json().catch(() => ({}));
         if (sd?.ok && sd.url) {
@@ -310,6 +338,19 @@ export default function ContentAdmin() {
     <div>
       <PageHeader title="Content / LMS Manager" subtitle="Assign recordings, notes, tests & CA to batches — they appear in students' Class Hub." action={<button onClick={openAdd} className="btn btn-primary text-sm">+ Add Content</button>} />
 
+      {/* Storage analytics — total uploaded bytes + breakdown by category */}
+      <div className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <StorageCard label="Total upload size" value={formatBytes(storage.total) || "0 B"} sub={`${storage.videoCount + storage.notesCount + storage.thumbCount} files`} accent />
+        <StorageCard label="Recordings / Videos" value={formatBytes(storage.videoBytes) || "0 B"} sub={`${storage.videoCount} file${storage.videoCount === 1 ? "" : "s"}`} />
+        <StorageCard label="Notes / PDFs" value={formatBytes(storage.notesBytes) || "0 B"} sub={`${storage.notesCount} file${storage.notesCount === 1 ? "" : "s"}`} />
+        <StorageCard label="Thumbnails" value={formatBytes(storage.thumbBytes) || "0 B"} sub={`${storage.thumbCount} file${storage.thumbCount === 1 ? "" : "s"}`} />
+      </div>
+      {storage.hostedMissing > 0 && (
+        <p className="mb-4 -mt-1 text-xs text-amber-700">
+          {storage.hostedMissing} hosted recording{storage.hostedMissing === 1 ? "" : "s"} {storage.hostedMissing === 1 ? "has" : "have"} no stored size yet. Run <code className="font-mono">node scripts/backfill-content-sizes.mjs --apply</code> to read actual sizes from Cloudflare R2.
+        </p>
+      )}
+
       {/* Filters */}
       <div className="mb-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
         <input className="input" placeholder="Search title / subject…" value={q} onChange={(e) => setQ(e.target.value)} />
@@ -332,9 +373,10 @@ export default function ContentAdmin() {
         </select>
       </div>
 
-      <TableShell headers={["Title", "Type", "Subject", "Batches", "Date", "Published", ""]}>
+      <TableShell headers={["Title", "Type", "Subject", "Batches", "Size", "Date", "Published", ""]}>
         {rows.map((c) => {
           const cids = itemCourseIds(c);
+          const rowBytes = (c.file_size || 0) + (c.notes_pdf_size || 0) + (c.thumbnail_size || 0);
           return (
             <tr key={c.id} className="border-b border-line last:border-0 hover:bg-surface2">
               <td className="px-4 py-3 font-medium">
@@ -360,6 +402,9 @@ export default function ContentAdmin() {
                   </div>
                 )}
               </td>
+              <td className="px-4 py-3 whitespace-nowrap text-xs tabular-nums text-muted" title={c.source_type === "hosted" && !c.file_size ? "Size not recorded — run the backfill script" : undefined}>
+                {rowBytes > 0 ? formatBytes(rowBytes) : (c.source_type === "hosted" ? "—" : "")}
+              </td>
               <td className="px-4 py-3">{formatDate(c.date)}</td>
               <td className="px-4 py-3">
                 <button onClick={() => togglePublish(c)} className={`pill ${c.is_published ? "pill-green" : "pill-gray"}`}>{c.is_published ? "Live" : "Draft"}</button>
@@ -374,7 +419,7 @@ export default function ContentAdmin() {
           );
         })}
         {rows.length === 0 && (
-          <tr><td colSpan={7} className="px-4 py-10 text-center text-sm text-muted">No content matches these filters.</td></tr>
+          <tr><td colSpan={8} className="px-4 py-10 text-center text-sm text-muted">No content matches these filters.</td></tr>
         )}
       </TableShell>
 
@@ -567,6 +612,16 @@ export default function ContentAdmin() {
           </button>
         </div>
       </Modal>
+    </div>
+  );
+}
+
+function StorageCard({ label, value, sub, accent }: { label: string; value: string; sub?: string; accent?: boolean }) {
+  return (
+    <div className={`card p-4 ${accent ? "border-primary/30 bg-primary/[0.03]" : ""}`}>
+      <p className="text-xs uppercase tracking-wide text-muted">{label}</p>
+      <p className="mt-1 font-heading text-2xl font-extrabold tabular-nums">{value}</p>
+      {sub && <p className="mt-0.5 text-xs text-muted">{sub}</p>}
     </div>
   );
 }
@@ -766,7 +821,7 @@ function WebinarRecordings({ webinars, reload, libraryVideos }: { webinars: Webi
         onChange={(e) => onVideoChosen(e.target.files?.[0] || null)}
       />
 
-      <TableShell headers={["Webinar", "Date", "Recording", "Status", ""]}>
+      <TableShell headers={["Webinar", "Date", "Recording", "Status", "Size", ""]}>
         {list.map((w) => {
           const value = linkFor(w);
           const dirty = drafts[w.id] !== undefined && (drafts[w.id] || "").trim() !== (w.recording_link || "").trim();
@@ -843,12 +898,15 @@ function WebinarRecordings({ webinars, reload, libraryVideos }: { webinars: Webi
                   <span className="pill pill-gray">No recording</span>
                 )}
               </td>
+              <td className="px-4 py-3 whitespace-nowrap text-xs tabular-nums text-muted">
+                {hosted ? (w.recording_file_size ? formatBytes(w.recording_file_size) : (w.recording_is_reference ? "shared" : "—")) : ""}
+              </td>
               <td className="px-4 py-3" />
             </tr>
           );
         })}
         {list.length === 0 && (
-          <tr><td colSpan={5} className="px-4 py-10 text-center text-sm text-muted">No webinars found.</td></tr>
+          <tr><td colSpan={6} className="px-4 py-10 text-center text-sm text-muted">No webinars found.</td></tr>
         )}
       </TableShell>
 

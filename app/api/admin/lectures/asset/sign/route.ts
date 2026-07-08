@@ -25,10 +25,16 @@ export async function POST(req: Request) {
   if (!rec) return NextResponse.json({ ok: false, error: "Recording not found" }, { status: 404 });
   const courseId = (rec.course_ids && rec.course_ids[0]) || rec.course_id || "_";
   const key = kind === "notes" ? lectureNotesKey(courseId, recordingId) : lectureThumbnailKey(courseId, recordingId);
+  // Capture the asset size (bytes) at upload time so storage analytics stay
+  // accurate without a backfill. Optional — omitted sizes fall back to null.
+  const size = Number(body.size);
+  const sizeVal = Number.isFinite(size) && size > 0 ? Math.round(size) : null;
 
   try {
     const url = await signPutUrl(key, contentType, 600);
-    await updateContent(recordingId, kind === "notes" ? { notes_pdf_key: key } : { thumbnail_key: key });
+    await updateContent(recordingId, kind === "notes"
+      ? { notes_pdf_key: key, notes_pdf_size: sizeVal }
+      : { thumbnail_key: key, thumbnail_size: sizeVal });
     return NextResponse.json({ ok: true, url, key });
   } catch (e) {
     return NextResponse.json({ ok: false, error: (e as Error).message || "Could not sign asset" }, { status: 500 });

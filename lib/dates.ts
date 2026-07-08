@@ -206,3 +206,75 @@ export function formatINR(amount: number | null | undefined): string {
 export function yesterdayISODate(): string {
   return new Date(Date.now() - DAY_MS).toISOString().slice(0, 10);
 }
+
+// ----------------------------- Timeframe filter (shared) -----------------------------
+// One vocabulary reused by the Lead CRM date filter, the leads time-series chart,
+// and the SMS "preset segment" timeframe — so all three behave identically. All
+// bounds are IST calendar days (Asia/Kolkata, UTC+5:30).
+
+export type TimeframeMode = "all" | "today" | "7d" | "30d" | "this_month" | "month" | "range";
+
+export interface TimeframeValue {
+  mode: TimeframeMode;
+  /** "YYYY-MM" when mode === "month". */
+  month?: string;
+  /** "YYYY-MM-DD" (inclusive) when mode === "range". */
+  from?: string;
+  to?: string;
+}
+
+export const TIMEFRAME_LABELS: Record<TimeframeMode, string> = {
+  all: "All time",
+  today: "Today",
+  "7d": "Last 7 days",
+  "30d": "Last 30 days",
+  this_month: "This month",
+  month: "Specific month",
+  range: "Custom range",
+};
+
+/** IST midnight (start of day) for a "YYYY-MM-DD" as epoch ms. */
+export function istYMDToMs(ymd: string): number {
+  return new Date(`${ymd}T00:00:00+05:30`).getTime();
+}
+
+/**
+ * Resolve a timeframe selection to an inclusive-start / exclusive-end epoch-ms
+ * window `[fromMs, toMs)`. "all" spans the whole timeline. Rolling windows
+ * (7d/30d) are calendar-day aligned in IST so they match the daily chart buckets.
+ */
+export function resolveTimeframe(v: TimeframeValue): { fromMs: number; toMs: number } {
+  const todayYMD = istTodayYMD();
+  const startOfToday = istYMDToMs(todayYMD);
+  const endOfToday = startOfToday + DAY_MS;
+  switch (v.mode) {
+    case "today":
+      return { fromMs: startOfToday, toMs: endOfToday };
+    case "7d":
+      return { fromMs: startOfToday - 6 * DAY_MS, toMs: endOfToday };
+    case "30d":
+      return { fromMs: startOfToday - 29 * DAY_MS, toMs: endOfToday };
+    case "this_month": {
+      const from = istYMDToMs(`${todayYMD.slice(0, 7)}-01`);
+      return { fromMs: from, toMs: endOfToday };
+    }
+    case "month": {
+      const m = /^(\d{4})-(\d{2})$/.exec(v.month || "");
+      if (!m) return { fromMs: -Infinity, toMs: Infinity };
+      const y = Number(m[1]); const mo = Number(m[2]);
+      const from = istYMDToMs(`${m[1]}-${m[2]}-01`);
+      const ny = mo === 12 ? y + 1 : y; const nmo = mo === 12 ? 1 : mo + 1;
+      const to = istYMDToMs(`${ny}-${String(nmo).padStart(2, "0")}-01`);
+      return { fromMs: from, toMs: to };
+    }
+    case "range": {
+      if (!v.from || !v.to) return { fromMs: -Infinity, toMs: Infinity };
+      const from = istYMDToMs(v.from);
+      const to = istYMDToMs(v.to) + DAY_MS; // inclusive end day
+      return from <= to ? { fromMs: from, toMs: to } : { fromMs: to - DAY_MS, toMs: from + DAY_MS };
+    }
+    case "all":
+    default:
+      return { fromMs: -Infinity, toMs: Infinity };
+  }
+}
