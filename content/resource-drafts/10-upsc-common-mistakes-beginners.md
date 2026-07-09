@@ -31,7 +31,9 @@ schema: ["Article", "FAQPage"]
     { "q": "Is studying 15 hours a day good for UPSC?", "a": "Usually no. Fifteen-hour days are rarely sustainable and often mean low-focus, low-retention study. Consistency over 12-18 months matters far more than heroic days you cannot repeat. Build a plan around 6-8 focused hours with real breaks, sleep and revision rather than chasing a high hour count." },
     { "q": "What is the biggest mistake UPSC beginners make?", "a": "Preparing to prepare - spending the first months hoarding booklists, PDFs and strategy videos without building a system, and delaying the two highest-return habits: current affairs and answer writing. Beginners who start small but real from month one outpace those still 'planning' a year later." },
     { "q": "How do I avoid burnout during UPSC preparation?", "a": "Protect sleep, keep one lighter day a week, exercise, and measure output not hours. Burnout usually comes from unsustainable plans and guilt, not from the exam itself. A repeatable, humane routine you sustain for 18 months beats an intense one you abandon in a month." },
-    { "q": "Can I clear UPSC while working or in college?", "a": "Yes. Many aspirants clear it with 3-4 protected, focused hours on weekdays and longer weekend sessions, using commutes for revision and current affairs. The key is consistency and a plan sized to your real life - not comparing your hours to full-time aspirants." }
+    { "q": "Can I clear UPSC while working or in college?", "a": "Yes. Many aspirants clear it with 3-4 protected, focused hours on weekdays and longer weekend sessions, using commutes for revision and current affairs. The key is consistency and a plan sized to your real life - not comparing your hours to full-time aspirants." },
+    { "q": "What mistakes do UPSC aspirants make close to the Prelims exam?", "a": "The two costliest are reading new material in the final month instead of revising, and neglecting CSAT until it's too late. Others include over- or under-attempting because they never found a safe attempt range in mocks, and taking mocks without analysing them. In the last stretch, revision, PYQs, CSAT practice and honest mock analysis matter far more than any new source." },
+    { "q": "Is it a mistake to compare my UPSC preparation with others?", "a": "Constant comparison is one of the quieter but most damaging habits — it drives anxiety, copied timetables that don't fit your life, and burnout. Use others only for learning specific techniques, not for measuring your worth or pace. Track your own output and consistency; your background, hours and strengths are yours alone." }
   ]
 }
 META-->
@@ -89,6 +91,34 @@ META-->
 <h3>12. Neglecting health and sleep</h3>
 <p>Burnout masquerades as "dedication" and ends more attempts than it saves. <strong>Fix:</strong> protect 7 hours of sleep, move daily, keep one lighter day.</p>
 
+<h2>The Deeper Reason Beginners Make These Mistakes</h2>
+<p>Almost every classic beginner mistake traces back to a single root: <strong>mistaking activity for progress.</strong> Collecting booklists, downloading PDFs, watching strategy videos, reading a book once and moving on — all of it <em>feels</em> productive because you're busy, but none of it builds the two things the exam actually tests: retained, revised knowledge and the skill of writing it down under time pressure. The aspirants who struggle are rarely lazy; they're often the busiest, working hard on the wrong things. The shift that fixes most mistakes at once is to redefine progress as <strong>output and retention</strong>, not consumption — an evaluated answer written, a subject revised for the third time, a mock analysed honestly. Once you measure yourself by what you can reproduce in the exam hall rather than by how much you've read, the individual mistakes below become easy to spot and avoid, because they all fail that single test.</p>
+
+<h2>A Few More Costly Mistakes, In Detail</h2>
+<ul>
+<li><strong>Perfectionism on the first source.</strong> Trying to master one book before moving on means you never build the full picture — and the book makes far more sense on a second reading anyway, after you've seen how topics connect. Move on, then revise.</li>
+<li><strong>Note-making that copies the book.</strong> Bloated notes that duplicate the source are unrevisable and defeat the purpose. Notes must compress, not reproduce.</li>
+<li><strong>Ignoring feedback loops.</strong> Studying entirely alone with no evaluated answers or mock analysis means repeating invisible mistakes for months. You cannot correct what you cannot see.</li>
+<li><strong>Neglecting the essay and language papers.</strong> The essay is 250 marks yet routinely under-practised, and a failed qualifying language paper invalidates an entire Mains — both are avoidable with a little early attention.</li>
+<li><strong>All-or-nothing thinking.</strong> One missed day or one bad mock triggers a spiral of guilt and abandonment. Consistency means returning after a bad day, not being perfect.</li>
+</ul>
+
+<h2>Mistakes Change by Stage — Catch Them Early</h2>
+<p>The same aspirant makes different mistakes at different points. Knowing what's coming lets you pre-empt it:</p>
+<table>
+<thead><tr><th>Stage</th><th>Typical mistake</th><th>The fix</th></tr></thead>
+<tbody>
+<tr><td><strong>Beginner (0–3 months)</strong></td><td>Endless resource collection; "preparing to prepare"</td><td>Fix a limited booklist; start the newspaper + one answer this week</td></tr>
+<tr><td><strong>Foundation (3–8 months)</strong></td><td>Reading without revising or writing</td><td>Build weekly revision + one evaluated answer per study day</td></tr>
+<tr><td><strong>Pre-Prelims</strong></td><td>New material in the last month; ignoring CSAT</td><td>Revision-only + PYQs + CSAT mocks</td></tr>
+<tr><td><strong>Mains phase</strong></td><td>Under-practised answer writing &amp; essay</td><td>Daily timed answers, evaluated; fortnightly essay</td></tr>
+<tr><td><strong>Any stage</strong></td><td>Isolation, no feedback, comparison anxiety</td><td>Join a peer/test group; get answers evaluated</td></tr>
+</tbody>
+</table>
+
+<h2>A Word on Burnout (It Ends More Attempts Than the Exam)</h2>
+<p>Beginners romanticise exhaustion — 15-hour days, no rest, guilt on any lighter day. In reality, <strong>burnout, not the syllabus, is what ends most attempts prematurely.</strong> It creeps in through unsustainable plans and constant comparison, and it shows up as falling focus, resentment of study, and illness. Protect against it deliberately: guard 7 hours of sleep, keep one genuinely lighter day a week, move your body daily, and measure output (answers written, topics revised) rather than hours logged. A humane routine you can run for 18 months will always beat an intense one you abandon in a month.</p>
+
 <h2>How Many Hours Should You <em>Really</em> Study?</h2>
 <p>This is the most-asked and most-misleading question in UPSC prep. The honest, mentor-tested answer: <strong>quality × consistency beats raw hours.</strong> A focused 6–8 hours, sustained, is a serious full-time schedule. Ten distracted hours — phone nearby, mind wandering — are worth less than six deep ones.</p>
 <table>
@@ -101,6 +131,29 @@ META-->
 </tbody>
 </table>
 <blockquote><p><strong>The myth of 15-hour days:</strong> they look impressive and collapse fast. UPSC is an 12–18 month marathon; the winner is the one who shows up focused every day, not the one who sprints for a week and burns out.</p></blockquote>
+
+<h2>Recovering From a Setback (Without Quitting)</h2>
+<p>Most successful candidates have a failed Prelims, a bad Mains or a low-motivation phase behind them. The mistake isn't the setback — it's how aspirants respond to it. A healthy recovery looks like this:</p>
+<ol>
+<li><strong>Diagnose honestly, don't catastrophise.</strong> Was it a knowledge gap, an answer-writing gap, CSAT, or temperament? Name the real cause instead of concluding "I'm not cut out for this."</li>
+<li><strong>Fix the process, not just the effort.</strong> "Study harder" is not a plan; "add evaluated answer writing" or "revise limited sources three times" is.</li>
+<li><strong>Keep the base warm.</strong> Even in a low phase, protect the newspaper and light revision so you don't start from zero when you resume.</li>
+<li><strong>Get an outside view.</strong> A mentor or evaluated test can spot the blind spot you can't — isolation makes setbacks feel bigger than they are.</li>
+<li><strong>Set a small next target</strong> and rebuild momentum from it, rather than staring at the whole mountain again.</li>
+</ol>
+<p>Persistence with <em>corrected</em> methods — not blind repetition — is what turns a failed attempt into a selection.</p>
+
+<h2>The Comparison Trap</h2>
+<p>One mistake deserves special mention because it's invisible and corrosive: <strong>comparing your preparation to everyone else's.</strong> In the age of study groups and social media, it's easy to see one aspirant finishing Polity while another posts a fifteen-hour study log, and to conclude you're falling behind. This comparison is almost always misleading — you're seeing other people's highlight reels, not their struggles, and everyone's starting point, background and runway differ. The aspirants who stay steady measure themselves against <em>one person only: who they were last week.</em> Did you revise what you planned? Did you write and get an answer evaluated? Is your recall better than a month ago? Those are the only comparisons that predict your result. Chasing someone else's pace leads to two failure modes — either you burn out trying to match an unsustainable log, or you demoralise yourself against an illusion. Run your own race at a pace you can sustain for the full marathon, and let others run theirs.</p>
+
+<h2>Habits That Quietly Protect Your Preparation</h2>
+<ul>
+<li><strong>Consistent sleep</strong> — memory consolidation and focus depend on it; all-nighters are a false economy.</li>
+<li><strong>Daily movement</strong> — even a short walk sustains energy over a long preparation.</li>
+<li><strong>A single, revisable note set</strong> per subject — so revision is fast and repeatable.</li>
+<li><strong>A weekly review</strong> — catch drift early, before it becomes a month-long backlog.</li>
+<li><strong>Limited, deliberate social-media use</strong> — the biggest silent thief of a serious aspirant's hours.</li>
+</ul>
 
 <h2>What Focused Hours Actually Look Like</h2>
 <ul>

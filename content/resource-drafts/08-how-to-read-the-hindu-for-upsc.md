@@ -31,7 +31,9 @@ schema: ["Article", "FAQPage"]
     { "q": "How much time should I spend on the newspaper daily?", "a": "45 to 60 focused minutes is enough and ideal. Beginners often spend 2-3 hours reading cover to cover, which is counter-productive. The skill is selective reading - covering what UPSC values quickly and consistently, every single day." },
     { "q": "Should I make current affairs notes from the newspaper?", "a": "Yes - one concise, topic-wise note (digital or notebook) organised by GS themes, not by date. Add only issues with syllabus relevance, in bullets, and revise the note monthly. A single evolving note beats scattered daily notes you never revisit." },
     { "q": "Do I need a monthly current affairs magazine if I read the newspaper?", "a": "One monthly compilation is useful for consolidated revision and to catch anything you missed, but it does not replace the daily habit. Use the newspaper for understanding and the monthly for revision - not two overlapping heavy sources." },
-    { "q": "How do I link newspaper articles to the UPSC syllabus?", "a": "Keep the official syllabus in mind and tag each useful article to a GS paper and topic - governance, economy, environment, IR, ethics. Over a few weeks this becomes automatic, and you will instinctively read 'as an examiner', skipping what the exam never asks." }
+    { "q": "How do I link newspaper articles to the UPSC syllabus?", "a": "Keep the official syllabus in mind and tag each useful article to a GS paper and topic - governance, economy, environment, IR, ethics. Over a few weeks this becomes automatic, and you will instinctively read 'as an examiner', skipping what the exam never asks." },
+    { "q": "How do I read the newspaper differently for Prelims and Mains?", "a": "For Prelims, extract facts — schemes, terms, institutions, who/what/where — mostly from news pages. For Mains, extract arguments — causes, effects, both sides and the way forward — mainly from editorials and 'Explained' pieces. In practice you capture both from a single daily read by noting one fact line and one argument line per issue, so a single note serves the whole year." },
+    { "q": "How far back should current affairs go for the UPSC exam?", "a": "As a working rule, focus on roughly the 12–18 months before your exam, since that window covers most of what UPSC draws current-affairs questions from. Consolidate it into one theme-wise note and revise it monthly, faster each pass. Chasing years of old current affairs is rarely productive; depth of revision on the relevant window matters more." }
   ]
 }
 META-->
@@ -83,6 +85,29 @@ META-->
 </ol>
 <p>That's a complete, high-yield read in under an hour, every day.</p>
 
+<h2>Worked Example: One Editorial → Notes → Answer Point</h2>
+<p>Suppose today's editorial argues about reforming a welfare scheme. Here's the full extraction in under three minutes:</p>
+<ul>
+<li><strong>Issue (one line):</strong> "Should scheme X shift from universal to targeted delivery?"</li>
+<li><strong>For:</strong> better fiscal efficiency, reaches the neediest, reduces leakage.</li>
+<li><strong>Against:</strong> exclusion errors, identification costs, political feasibility.</li>
+<li><strong>Fact/anchor:</strong> the ministry, one data point or committee reference.</li>
+<li><strong>Syllabus tag:</strong> GS-II (governance, welfare); also usable in an essay on the welfare state.</li>
+</ul>
+<p>Those five bullets go straight under "Schemes / Governance" in your note. Months later, that single entry can supply a Prelims fact, a balanced GS-II answer, and an essay example — from three minutes of reading. That is the entire return-on-time argument for reading the newspaper well.</p>
+
+<h2>Reading Differently for Prelims vs Mains</h2>
+<p>The same newspaper serves both stages, but your eye shifts by season:</p>
+<table>
+<thead><tr><th>Focus</th><th>Prelims lens</th><th>Mains lens</th></tr></thead>
+<tbody>
+<tr><td>What you extract</td><td>Facts: schemes, terms, institutions, who/what/where</td><td>Arguments: causes, effects, for/against, way forward</td></tr>
+<tr><td>From which parts</td><td>News pages, boxes, factual snippets</td><td>Editorials, op-eds, "Explained"</td></tr>
+<tr><td>Note style</td><td>Crisp factual bullets</td><td>Issue + multi-side arguments + examples</td></tr>
+</tbody>
+</table>
+<p>In practice you capture both from a single read — a fact line and an argument line — so one note serves the whole year.</p>
+
 <h2>Building the One Note That Works</h2>
 <ul>
 <li><strong>Organise by theme, not date.</strong> Sections like Polity, Economy, Environment, IR, S&amp;T, Ethics, Schemes — so at revision you see a subject's whole story together.</li>
@@ -90,6 +115,40 @@ META-->
 <li><strong>Keep it evolving.</strong> Append new developments under the same theme rather than starting fresh.</li>
 <li><strong>Revise monthly.</strong> A note you never revisit is a diary, not a study tool.</li>
 <li><strong>Tag Prelims vs Mains relevance</strong> lightly, so revision is targeted near each exam.</li>
+</ul>
+
+<h2>A Section-by-Section Walkthrough</h2>
+<p>Knowing how to treat each part of the paper removes the guesswork:</p>
+<table>
+<thead><tr><th>Section</th><th>How to treat it</th></tr></thead>
+<tbody>
+<tr><td><strong>Front page</strong></td><td>Scan for genuinely national/policy stories; ignore political theatrics</td></tr>
+<tr><td><strong>Editorial &amp; Op-Ed</strong></td><td>Read closely — the core of UPSC value; note issue + both sides</td></tr>
+<tr><td><strong>National / "The Nation"</strong></td><td>Governance, institutions, judgements, schemes — high priority</td></tr>
+<tr><td><strong>Economy / Business</strong></td><td>Policy, RBI, budget, reports; skip market ticker noise</td></tr>
+<tr><td><strong>International</strong></td><td>India's ties, groupings, neighbourhood; skip distant, non-strategic news</td></tr>
+<tr><td><strong>Science &amp; Tech / Environment</strong></td><td>Space, health, digital governance, climate, biodiversity — note concisely</td></tr>
+<tr><td><strong>"Explained" / Analysis</strong></td><td>Built for aspirants — read for structured understanding of an issue</td></tr>
+<tr><td><strong>Sport / City / Lifestyle</strong></td><td>Skip almost entirely (keep only major national achievements)</td></tr>
+</tbody>
+</table>
+
+<h2>The Weekly and Monthly Consolidation Workflow</h2>
+<p>Daily reading without consolidation leaks away. Layer your revision:</p>
+<ol>
+<li><strong>Daily:</strong> add each useful issue to your single theme-wise note in bullets (issue + arguments + a fact).</li>
+<li><strong>Weekly:</strong> spend 30–40 minutes tidying the week's entries and merging duplicates under their themes.</li>
+<li><strong>Monthly:</strong> revise the whole note; optionally cross-check against one monthly compilation to catch anything you missed.</li>
+<li><strong>Pre-exam:</strong> your note is now a compact, well-revised current-affairs digest — far more useful than a stack of unread magazines.</li>
+</ol>
+<p>This is the difference between "reading the newspaper daily" and actually <em>retaining</em> current affairs for the exam.</p>
+
+<h2>Print or Digital? And Which Editions?</h2>
+<p>Either format works — consistency matters more than the medium:</p>
+<ul>
+<li><strong>Physical paper</strong> encourages linear, distraction-free reading and easy marking.</li>
+<li><strong>E-paper / apps</strong> save cost and clutter and are searchable; the risk is the phone's distractions, so use a focused reading mode.</li>
+<li><strong>Read the national edition</strong> rather than a purely local one, since UPSC's interest is national and international, not city news.</li>
 </ul>
 
 <h2>Newspaper + Primary Sources = Complete Current Affairs</h2>
@@ -100,6 +159,12 @@ META-->
 <li>Official newspaper sites — <a href="https://www.thehindu.com" target="_blank" rel="noopener noreferrer">The Hindu</a> and <a href="https://indianexpress.com" target="_blank" rel="noopener noreferrer">The Indian Express</a> (the Express "Explained" section is especially beginner-friendly).</li>
 </ul>
 
+<h2>The Two Extremes Beginners Fall Into</h2>
+<p>Almost every beginner's newspaper habit fails in one of two opposite ways, and recognising yours is half the cure. The first is <strong>over-reading</strong>: treating the newspaper like a textbook, reading every column for two or three hours, highlighting relentlessly, and feeling productive while retaining little. This person "finishes" the paper but has no usable notes and no time left for static study. The second is <strong>under-reading</strong>: skimming headlines in ten minutes, making no notes, and convincing themselves they've "done" current affairs. This person is perpetually surprised by current-affairs questions in mocks. The correct path runs between the two — a fixed 45–60 minute selective read, driven by the syllabus filter, feeding a single note you actually revise. If you drift toward over-reading, tighten your time-box and trust the skip filter; if you drift toward under-reading, force yourself to extract at least three noted issues each day.</p>
+
+<h2>Why the Newspaper Is Your Best Mains Resource</h2>
+<p>Beginners think of the newspaper as a Prelims tool, but its real payoff is in Mains and the essay. A single well-understood issue — say, a debate on federalism, a new environmental regulation, or a governance reform — can supply an <strong>introduction, several body arguments, examples and a way-forward conclusion</strong> across multiple answers, and even an essay. Editorials, in particular, are free daily lessons in balanced argumentation: notice how a good op-ed states a position, acknowledges the counter-view, marshals evidence, and closes with a reasoned stance — that is exactly the structure a high-scoring Mains answer uses. Reading with this lens turns your daily paper into a growing bank of answer material, which is why we insist beginners read for issues and arguments, not just for facts to memorise. Over a year, this habit quietly builds the articulation that Mains rewards more than raw knowledge.</p>
+
 <h2>The Hindu vs Indian Express — Which One?</h2>
 <table>
 <thead><tr><th>Paper</th><th>Strengths</th><th>Best for</th></tr></thead>
@@ -109,6 +174,9 @@ META-->
 </tbody>
 </table>
 <p><strong>Pick one and stay consistent.</strong> The "best" newspaper is the one you read fully every day. Don't split attention across two.</p>
+
+<h2>How Long Before It Clicks?</h2>
+<p>Beginners often abandon the newspaper habit in the first three or four weeks because it feels slow, painful and unrewarding — an hour spent, little retained, and no obvious payoff. This is completely normal and worth pushing through, because the newspaper is a skill that <strong>compounds</strong>. In the first few weeks you're building vocabulary, learning the syllabus filter, and figuring out what to skip; retention is low and the effort feels disproportionate. By the second month, patterns start to repeat — the same schemes, institutions and debates resurface — and you begin recognising rather than decoding. By the third or fourth month, a good aspirant reads faster, notes better, and starts seeing the same issues appear in mock questions, which finally makes the effort feel worthwhile. The lesson: judge the newspaper habit by its effect at three months, not three weeks. The aspirants who quit early never reach the point where it pays off; those who persist find that by the time the exam arrives, current affairs — which terrifies most beginners — has quietly become one of their strengths.</p>
 
 <h2>Newspaper Mistakes That Waste Your Year</h2>
 <ol>

@@ -31,7 +31,9 @@ schema: ["Article", "FAQPage"]
     { "q": "Should I make notes from NCERTs?", "a": "Yes, but short and revisable — bullets, not paragraphs, and only after your second reading so you note what actually matters. Over-detailed notes that copy the book defeat the purpose; the goal is a condensed version you can revise in minutes before Prelims." },
     { "q": "Old NCERTs or new NCERTs for UPSC?", "a": "For most subjects the current NCERTs are fine. A few aspirants prefer the older NCERTs for History (for their narrative depth), but you do not need both — pick one set per subject and revise it well. Consistency and revision matter more than the edition." },
     { "q": "How long does it take to finish NCERTs for UPSC?", "a": "A disciplined beginner can cover the core NCERTs in about 6–8 weeks reading purposefully for a couple of hours a day. It should not become a six-month project — NCERTs are the foundation, not the whole house." },
-    { "q": "Are NCERTs enough for UPSC Prelims?", "a": "NCERTs alone are not enough, but they are the base a large share of Prelims questions build on. Pair them with one standard book per subject, current affairs, and previous-year questions to be Prelims-ready." }
+    { "q": "Are NCERTs enough for UPSC Prelims?", "a": "NCERTs alone are not enough, but they are the base a large share of Prelims questions build on. Pair them with one standard book per subject, current affairs, and previous-year questions to be Prelims-ready." },
+    { "q": "Should I keep NCERT notes digital or on paper?", "a": "Either works — what matters is keeping one growing, compressed note per subject rather than scattered scraps. Many aspirants read from physical books for focus but keep digital notes so they can search them and append standard-book points and current affairs to the same file over time, turning it into a single revision document by exam day." },
+    { "q": "Do I need to re-read NCERTs during revision?", "a": "You rarely need to re-read the full books — that is exactly why you made compressed third-pass notes. During Prelims revision you revise those notes (not the whole chapters), and you return to the book itself only for specific topics you find shaky. Good notes are what let you revise a subject in an hour instead of a week." }
   ]
 }
 META-->
@@ -79,6 +81,15 @@ META-->
 <p>Make crisp bullet notes — a condensed chapter you can revise in a few minutes. Not a rewrite of the book; a <em>compression</em> of it. Good notes are the ones you'll actually re-read four times before Prelims.</p>
 <blockquote><p><strong>Then move on.</strong> Do not perfect one book. You will return during revision, and it'll make far more sense the second time — after you've seen how topics connect.</p></blockquote>
 
+<h2>The 3-Pass Method on a Real Chapter</h2>
+<p>Let's make it concrete with a Class 11 Polity chapter on <em>Fundamental Rights</em>:</p>
+<ul>
+<li><strong>Pass 1 (no pen):</strong> read the whole chapter and grasp the story — why the Constitution guarantees rights, that they are enforceable, and that they are not absolute. Don't underline; just understand the arc.</li>
+<li><strong>Pass 2 (underline):</strong> mark the six categories of rights, the key Articles (14, 19, 21, 32), reasonable restrictions, and one or two landmark examples. Ask at each: <em>"Could this be a Prelims statement or a GS-II point?"</em></li>
+<li><strong>Pass 3 (notes):</strong> compress to a bullet list — "6 FRs; Art 14 equality; Art 19 six freedoms + restrictions; Art 21 life &amp; personal liberty (expansive judicial reading); Art 32 = heart &amp; soul (Ambedkar)." That's a chapter revisable in ninety seconds.</li>
+</ul>
+<p>Notice the third pass fits on a few lines — that compression, revised repeatedly, is what survives to the exam hall. A chapter you "read carefully once" rarely does.</p>
+
 <h2>How to Make NCERT Notes That Are Actually Revisable</h2>
 <ul>
 <li><strong>Bullets over paragraphs.</strong> Each point should be a trigger for recall, not a full sentence to re-read.</li>
@@ -100,6 +111,30 @@ META-->
 <li><strong>Science &amp; Environment:</strong> concepts only; depth comes from current affairs, not the textbook.</li>
 </ul>
 
+<h2>Digital or Physical? Reading and Note Formats</h2>
+<p>Both work — the trap is switching endlessly. A practical setup many aspirants find efficient:</p>
+<ul>
+<li><strong>Read from physical books</strong> where possible (easier on the eyes, better for deep focus and marginal marking).</li>
+<li><strong>Keep notes digital</strong> so you can search them, and — crucially — <em>append</em> standard-book points and current affairs to the same NCERT note over time.</li>
+<li><strong>One growing note per subject</strong> becomes your single revision document by exam time, instead of scattered scraps.</li>
+</ul>
+<p>The format is secondary; the discipline of a single, growing, compressed note per subject is what matters.</p>
+
+<h2>How NCERT Reading Changes Across the Year</h2>
+<p>Your relationship with NCERTs isn't one-and-done — it evolves:</p>
+<table>
+<thead><tr><th>Stage</th><th>What NCERTs do for you</th></tr></thead>
+<tbody>
+<tr><td>Foundation (weeks 1–8)</td><td>Build concepts and vocabulary via the 3-pass method</td></tr>
+<tr><td>Core building</td><td>Serve as the base you layer standard books onto</td></tr>
+<tr><td>Prelims revision</td><td>Your compressed NCERT notes become quick-revision fuel</td></tr>
+<tr><td>Mains</td><td>Supply neutral framing and definitions for answers</td></tr>
+</tbody>
+</table>
+
+<h2>The One Habit That Makes NCERTs Stick</h2>
+<p>Reading an NCERT once feels like an achievement, but a single read leaves almost nothing behind six weeks later. The habit that separates aspirants who <em>build</em> on their NCERTs from those who re-read them forever is <strong>immediate active recall</strong>: after finishing a chapter, close the book and spend two minutes recalling — out loud or on paper — the main points before you look again. It's uncomfortable, it exposes what you didn't retain, and that discomfort is exactly the signal that learning is happening. Pair this with a quick weekly recall of the week's chapters, and your NCERT knowledge moves from short-term to durable. Most aspirants skip recall because passive re-reading feels smoother and more reassuring; the ones who clear the exam accept the friction of testing themselves. Do this from your very first NCERT and you'll finish the foundation phase with knowledge you can actually use, not just chapters you've "covered."</p>
+
 <h2>NCERT Mistakes That Waste Months</h2>
 <ol>
 <li><strong>Reading passively</strong> — eyes on the page, mind elsewhere. Use the 3-pass method to force engagement.</li>
@@ -109,6 +144,16 @@ META-->
 <li><strong>Turning NCERTs into a six-month project</strong> and never reaching standard books.</li>
 <li><strong>Skipping the syllabus link</strong> and reading trivia the exam never asks.</li>
 </ol>
+
+<h2>Common Questions Beginners Have About NCERTs</h2>
+<h3>Do I read NCERTs cover to cover, or selectively?</h3>
+<p>Read the relevant NCERTs fully the first time — you don't yet know enough to skip safely. From the second pass onward you become selective, focusing on the syllabus-relevant portions. Skipping on the first read is how beginners miss the very concepts that later trip them up.</p>
+<h3>Should I watch NCERT video lectures instead of reading?</h3>
+<p>Videos can help clarify a genuinely difficult concept, but they are a supplement, not a substitute. Reading builds the retention and reading-stamina the exam demands; passive watching rarely does. Use videos to unblock, then return to the book and your notes.</p>
+<h3>How do I know I've "finished" an NCERT properly?</h3>
+<p>Not when you've turned the last page, but when you can (a) recall the chapter's key points from your bullet notes without opening the book, and (b) attempt basic PYQs on that theme. If you can't, the book isn't finished — the reading was passive.</p>
+<h3>What about NCERTs for optional subjects?</h3>
+<p>For optionals like Geography, Sociology, History and Political Science, the relevant NCERTs are an excellent starting base before the standard optional books — the same three-pass, syllabus-linked method applies.</p>
 
 <h2>Your NCERT Checklist</h2>
 <ul>
