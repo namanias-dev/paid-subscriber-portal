@@ -62,6 +62,29 @@ The app never crashes on missing env vars — every integration degrades gracefu
 
 ---
 
+## 🤖 AI Counselor Agent (Phase 1 — ships dark)
+
+An internal, guided-flow lead counselor. **Phase 1 has NO public UI** — nothing renders on the site (`AI_AGENT_PUBLIC_WIDGET=false`) and **no SMS / follow-ups are sent**. It is purely additive: no existing table structure, payment, auth, webinar, quiz or analytics flow is changed.
+
+**Env vars** (all optional; safe defaults — see `.env.example`):
+
+| Var | Default | Purpose |
+| --- | --- | --- |
+| `AI_AGENT_PROVIDER` | `guided_flow` | Conversation engine (no external LLM in Phase 1) |
+| `AI_AGENT_PUBLIC_WIDGET` | `false` | Master switch for any public agent UI |
+| `AI_AGENT_STORE_CONVERSATIONS` | `true` | Persist **redacted** turns/events to internal tables |
+| `AI_AGENT_RETENTION_DAYS` | `180` | Retention window (informational in Phase 1) |
+| `AI_AGENT_AUTOFOLLOWUP_ENABLED` | `false` | Follow-up **sending** (off; table is schema-only) |
+| `AI_AGENT_REQUIRE_MARKETING_CONSENT` | `true` | Require marketing consent (`nsa_consent`) before persisting marketing-usable lead data |
+
+**Database:** apply `supabase/migrations/2026-07-10-ai-counselor-agent.sql` in the Supabase SQL editor (fully idempotent). It creates 7 internal tables: `ai_leads`, `ai_conversations`, `ai_lead_events`, `ai_followups`, `ai_agent_settings`, `ai_offer_cache`, `ai_security_audit`.
+
+**Admin access:** protected by the schemaless `manage_ai_agent` permission (add the key to a role's `roles.permissions` JSONB — no migration needed). Super Admin inherits it automatically.
+
+**Reuses existing conventions:** live offers via `getPublishedCourses()` / `getPublicWebinars()` + `webinarLifecycle` (only `OPEN` webinars); DB via `getSupabaseAdmin()`; admin auth via `requirePermission()`; consent/attribution via `nsa_consent` / `nsa_attr`; phone via `normalizeIndianMobile()`.
+
+---
+
 ## 🧱 Tech stack
 
 Next.js 14 (App Router) · TypeScript · Tailwind CSS · Framer Motion · Recharts · Supabase (Postgres + RLS) · Razorpay · Resend · JWT (`jose`) · bcrypt.
