@@ -40,7 +40,7 @@ export default async function SiteLayout({ children }: { children: React.ReactNo
       <PublicFooter brand={settings.brand} />
       <FloatingWhatsApp waLink={waLink} />
       {/* AI counsellor widget — renders ONLY when AI_AGENT_PUBLIC_WIDGET=true (ship dark). */}
-      <AiCounselorMount />
+      <AiCounselorMount waLink={waLink} />
     </div>
   );
 }

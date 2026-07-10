@@ -12,24 +12,14 @@
  * widget for the counsellor-handoff WhatsApp action (wa.me click-to-chat only).
  */
 import { getAiAgentConfig } from "@/lib/ai-agent/config";
-import { getSiteSettings } from "@/lib/dataProvider";
-import { whatsappLink } from "@/lib/phone";
 import AiCounselorWidget from "./AiCounselorWidget";
 
-export default async function AiCounselorMount() {
+/**
+ * `waLink` is resolved once in the public layout (from the admin-editable site
+ * settings) and passed in, so we don't re-fetch settings here. Falls back to null.
+ */
+export default function AiCounselorMount({ waLink = null }: { waLink?: string | null }) {
   const cfg = getAiAgentConfig();
   if (!cfg.publicWidget) return null;
-
-  let waLink: string | null = null;
-  try {
-    const settings = await getSiteSettings();
-    waLink = whatsappLink(
-      settings.brand.whatsapp || settings.brand.support_phone,
-      "Hi, I'd like some guidance on UPSC preparation.",
-    );
-  } catch {
-    waLink = null;
-  }
-
   return <AiCounselorWidget waLink={waLink} />;
 }
