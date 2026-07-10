@@ -1,6 +1,7 @@
 import PublicNav from "@/components/public/PublicNav";
 import PublicFooter from "@/components/public/PublicFooter";
 import FloatingWhatsApp from "@/components/public/FloatingWhatsApp";
+import AiCounselorMount from "@/components/ai-agent/AiCounselorMount";
 import { getSiteSettings, hasUpcomingWebinars } from "@/lib/dataProvider";
 import { getStudentSession, getBuyerSession } from "@/lib/session";
 import { resolveNavTabs } from "@/lib/navConfig";
@@ -38,6 +39,8 @@ export default async function SiteLayout({ children }: { children: React.ReactNo
       <main className="flex-1">{children}</main>
       <PublicFooter brand={settings.brand} />
       <FloatingWhatsApp waLink={waLink} />
+      {/* AI counsellor widget — renders ONLY when AI_AGENT_PUBLIC_WIDGET=true (ship dark). */}
+      <AiCounselorMount />
     </div>
   );
 }
