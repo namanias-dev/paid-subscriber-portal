@@ -7,6 +7,7 @@ import CaToc from "@/components/public/ca/CaToc";
 import CaPdfButton from "@/components/public/ca/CaPdfButton";
 import ResourceShareBar from "@/components/public/resources/ResourceShareBar";
 import ResourceCtas from "@/components/public/resources/ResourceCtas";
+import ResourceArticleView from "@/components/public/resources/ResourceArticleView";
 import ResourceCard from "@/components/public/resources/ResourceCard";
 import {
   getResourceBySlug,
@@ -208,6 +209,10 @@ async function ArticlePage({ slug, preview }: { slug: string; preview: boolean }
         </>
       )}
       <CaReadingProgress targetId={BODY_ID} />
+
+      {published && !preview && (
+        <ResourceArticleView slug={article.slug} category={article.category} title={article.title} />
+      )}
 
       {preview && !published && (
         <div className="bg-gradient-to-r from-[var(--ca-gold)] to-[var(--ca-gold-bright)] py-2 text-center text-sm font-semibold text-[var(--ca-navy-900)]">

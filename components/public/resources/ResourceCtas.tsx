@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { ArrowRight, Video, GraduationCap, ListChecks, MessageCircle, MapPin, Download, Sparkles } from "lucide-react";
 import type { ResourceCta } from "@/lib/types";
+import { ga4Event } from "@/lib/analytics/ga4";
 
 const ICONS: Record<string, typeof ArrowRight> = {
   webinar: Video,
@@ -23,6 +24,8 @@ function track(kind: string, href: string) {
       keepalive: true,
     }).catch(() => {});
   } catch { /* ignore */ }
+  // GA4 (independent, consent-gated, no PII) fires alongside the in-house beacon.
+  ga4Event("resource_cta_click", { cta_kind: kind, cta_href: href });
 }
 
 export default function ResourceCtas({ blocks }: { blocks: ResourceCta[] }) {

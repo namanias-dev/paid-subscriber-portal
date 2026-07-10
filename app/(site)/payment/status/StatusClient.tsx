@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { formatINR, formatISTDate } from "@/lib/dates";
 import { metaPixelInitiateCheckout, metaPixelPurchase } from "@/lib/analytics/metaPixel";
+import { ga4ConversionEvent } from "@/lib/analytics/ga4";
 import type { InstallmentItem } from "@/lib/types";
 
 interface Contact {
@@ -156,6 +157,10 @@ export default function StatusClient({ contact }: { contact: Contact }) {
     if (!purchaseFired.current && isPaid) {
       purchaseFired.current = true;
       metaPixelPurchase(ref, { value: data.amount || 0, contentName: data.item, category: data.itemType });
+      // GA4 purchase conversion. STRICTLY numeric value + currency — no ref, no
+      // login code, no item/person data (the payment status URL carries PII, so
+      // GA4 never sends a page_view here; only this PII-free conversion fires).
+      ga4ConversionEvent("payment_success", { value: data.amount || 0, currency: "INR" });
     }
   }, [data, ref, isPaid, notPaid]);
   const loginCode = data?.loginCode || null;
