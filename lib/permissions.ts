@@ -29,7 +29,8 @@ export type PermissionKey =
   | "view_analytics_revenue"
   | "manage_integrations"
   | "send_sms"
-  | "manage_careers";
+  | "manage_careers"
+  | "manage_ai_agent";
 
 export interface PermissionMeta {
   key: PermissionKey;
@@ -63,6 +64,7 @@ export const PERMISSIONS: PermissionMeta[] = [
   { key: "view_analytics_nonrevenue", label: "View non-revenue analytics", group: "Operations" },
   { key: "send_sms", label: "Send SMS (Approved templates) & view SMS logs", group: "Operations" },
   { key: "manage_careers", label: "Manage careers & job applications", group: "Operations" },
+  { key: "manage_ai_agent", label: "Manage AI Counselor Agent (leads, conversations & settings)", group: "Operations" },
 ];
 
 export const PERMISSION_KEYS: PermissionKey[] = PERMISSIONS.map((p) => p.key);
