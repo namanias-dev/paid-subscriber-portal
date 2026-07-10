@@ -151,7 +151,9 @@ export default function LeadCaptureForm({
             ? "Our records show this is already sorted — nothing pending on your side."
             : json?.already
               ? "You're already registered for this — see you there."
-              : null,
+              : intent === "payment_recovery" && json?.none
+                ? "I couldn't find a pending enrolment for that number. If that seems off, a counsellor can look into it with you."
+                : null,
       });
     } catch {
       setError("Network error — please try again.");
