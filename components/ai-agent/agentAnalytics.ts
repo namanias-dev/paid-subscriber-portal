@@ -1,54 +1,34 @@
 "use client";
 
 /**
- * Client-side agent analytics. Phase 2 records the agent's user-facing events to
- * the agent's INTERNAL append-only store (POST /api/ai-agent/events, redacted
- * server-side). NO PII is ever sent — only a session id + PII-free props.
+ * Client-side agent analytics.
  *
- * Phase 4 additionally bridges these into the site-wide analytics_events pipeline
- * so AI-influenced conversions attribute alongside the rest of the funnel.
+ * Reuses the SITE-WIDE first-party analytics pipeline (trackClient → /api/track →
+ * analytics_events): no parallel table, session/visitor ids + attribution
+ * (nsa_attr) are resolved by the shared client helper / server route, and NO PII
+ * is ever sent (event names + PII-free props only). This is what lets
+ * AI-influenced registrations/payments attribute alongside the rest of the funnel
+ * (by phone/visitor, via the same registration_created / payment events).
+ *
+ * The agent's own conversation turns are stored separately (internal
+ * ai_conversations / ai_lead_events) by the message API — that is distinct from
+ * these user-facing analytics events.
  */
+import { trackClient } from "@/lib/analytics/client";
+import type { EventName } from "@/lib/analytics/events";
 
-/** PII-free agent event names surfaced by the widget. */
-export type AgentEventName =
-  | "ai_widget_opened"
-  | "ai_widget_dismissed"
-  | "ai_message_sent"
-  | "ai_quick_reply"
-  | "ai_lead_created"
-  | "ai_webinar_register_click"
-  | "ai_payment_start_click"
-  | "ai_whatsapp_click"
-  | "ai_callback_requested"
-  | "ai_payment_recovery_click"
-  | "ai_resource_click"
-  | "ai_offer_click";
+/** PII-free agent event names (a subset of the shared EventName union). */
+export type AgentEventName = Extract<EventName, `ai_${string}`>;
 
-function isBrowser(): boolean {
-  return typeof window !== "undefined" && typeof navigator !== "undefined";
-}
-
-/** Fire an agent event. Best-effort, never throws, non-blocking. */
+/**
+ * Fire an agent analytics event through the shared pipeline. `sessionId` is kept
+ * for call-site clarity but identity/session/attribution are resolved from the
+ * first-party cookies server-side — never trusted from here.
+ */
 export function trackAgentEvent(
-  sessionId: string,
+  _sessionId: string,
   eventType: AgentEventName,
   props: Record<string, string | number | boolean | null> = {},
 ): void {
-  if (!isBrowser() || !sessionId) return;
-  try {
-    const payload = JSON.stringify({ session_id: sessionId, event_type: eventType, payload: props });
-    const url = "/api/ai-agent/events";
-    if (navigator.sendBeacon) {
-      navigator.sendBeacon(url, new Blob([payload], { type: "application/json" }));
-    } else {
-      void fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: payload,
-        keepalive: true,
-      }).catch(() => {});
-    }
-  } catch {
-    /* ignore */
-  }
+  trackClient(eventType, props);
 }
