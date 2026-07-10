@@ -108,9 +108,9 @@ export const COURSE = {
 /** (3) Webinar / masterclass recommendation. */
 export const WEBINAR = {
   intro: "Let me check what's open for registration right now.",
-  found: "Here's what's open right now — free to attend:",
+  found: "Here's what's open for registration right now:",
   outro:
-    "Want me to register you? It only takes your name and number.",
+    "Want me to save your spot? Just your name and number to get started.",
   none: FALLBACKS.noWebinar,
 } as const;
 
