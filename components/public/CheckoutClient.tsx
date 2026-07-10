@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { trackClient } from "@/lib/analytics/client";
+import { ga4Event } from "@/lib/analytics/ga4";
 import {
   ArrowLeft,
   ShieldCheck,
@@ -53,6 +54,8 @@ export default function CheckoutClient({ course }: { course: Course }) {
 
   useEffect(() => {
     trackClient("course_view", { course_id: course.id, course_slug: course.slug, course_title: course.title, price: course.price });
+    // GA4 (independent, consent-gated, no PII) fires alongside the in-house tracker.
+    ga4Event("course_view", { course_id: course.id, course_slug: course.slug, value: course.price, currency: "INR" });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const cfg = useMemo(() => resolveEmiConfig(ec), [ec]);
@@ -139,6 +142,9 @@ export default function CheckoutClient({ course }: { course: Course }) {
     }
     setLoading(true);
     trackClient("click_enroll", { course_id: course.id, course_slug: course.slug, item_type: "course", price: ec.price });
+    // GA4 enroll/buy click + payment_start — numeric value + currency only, no PII.
+    ga4Event("course_enroll_click", { course_id: course.id, course_slug: course.slug, value: ec.price, currency: "INR" });
+    ga4Event("payment_start", { item_type: "course", course_slug: course.slug, value: todayAmount, currency: "INR" });
     try {
       const res = await fetch("/api/v1/enroll/create-payment", {
         method: "POST",

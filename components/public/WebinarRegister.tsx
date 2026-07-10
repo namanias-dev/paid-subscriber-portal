@@ -6,6 +6,7 @@ import { startPayment } from "@/lib/startPayment";
 import { formatINR } from "@/lib/dates";
 import { trackClient } from "@/lib/analytics/client";
 import { metaPixelLead } from "@/lib/analytics/metaPixel";
+import { ga4Event } from "@/lib/analytics/ga4";
 import PaymentCautionModal from "@/components/public/PaymentCautionModal";
 
 export default function WebinarRegister({
@@ -36,6 +37,8 @@ export default function WebinarRegister({
 
   useEffect(() => {
     trackClient("webinar_view", { webinar_id: webinarId, webinar_slug: webinarSlug ?? null, is_paid: isPaid, price });
+    // GA4 (independent, consent-gated, no PII) fires alongside the in-house tracker.
+    ga4Event("webinar_view", { webinar_id: webinarId, webinar_slug: webinarSlug ?? null, is_paid: isPaid, value: price, currency: "INR" });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -78,6 +81,14 @@ export default function WebinarRegister({
       is_paid: isPaid,
       price: payable,
     });
+    // GA4 register-button click (valid form submitted). No PII (ids/slug only).
+    ga4Event("webinar_register_click", {
+      webinar_id: webinarId,
+      webinar_slug: webinarSlug ?? null,
+      is_paid: isPaid,
+      value: payable,
+      currency: "INR",
+    });
     // PAID webinars redirect to the gateway — surface the caution first. Free
     // registrations have no hand-off, so proceed straight away.
     if (isPaid) {
@@ -116,6 +127,8 @@ export default function WebinarRegister({
 
       if (isPaid && webinarSlug) {
         trackClient("click_register_pay", { webinar_id: webinarId, webinar_slug: webinarSlug, item_type: "webinar", price: payable, source_section: "webinar_register" });
+        // GA4 payment_start — numeric value + currency only, no PII.
+        ga4Event("payment_start", { item_type: "webinar", webinar_slug: webinarSlug, value: payable, currency: "INR" });
         const result = await startPayment({
           itemType: "webinar",
           webinarSlug,

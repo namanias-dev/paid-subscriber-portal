@@ -2,6 +2,7 @@
 
 import { usePathname } from "next/navigation";
 import { motion, useReducedMotion } from "framer-motion";
+import { ga4Event } from "@/lib/analytics/ga4";
 
 /** Path prefixes where the floating support button should appear. */
 const ALLOWED_PREFIXES = ["/courses", "/webinars", "/portal"];
@@ -24,6 +25,7 @@ export default function FloatingWhatsApp({ waLink }: { waLink: string | null }) 
       target="_blank"
       rel="noopener noreferrer"
       aria-label="Chat with us on WhatsApp"
+      onClick={() => ga4Event("whatsapp_click", { source: "floating_button", page_path: pathname })}
       initial={reduce ? { opacity: 0 } : { opacity: 0, scale: 0.6, y: 12 }}
       animate={{ opacity: 1, scale: 1, y: 0 }}
       transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1], delay: 0.3 }}

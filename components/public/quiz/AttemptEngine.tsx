@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { formatQuestionHtml } from "@/lib/quizFormat";
 import { setAppBusy } from "@/lib/appBusy";
+import { ga4Event } from "@/lib/analytics/ga4";
 
 interface ClientQuestion {
   question_id: string;
@@ -38,6 +39,9 @@ export default function AttemptEngine({
   resultBase: string;
 }) {
   const router = useRouter();
+  // GA4 quiz events fire ONLY for the public quiz flow (this engine is reused by
+  // the private portal/dashboard). GA4 is also path-gated, so this is belt-and-braces.
+  const isPublicQuiz = apiBase.includes("/public");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<{ reason?: string; message: string } | null>(null);
   const [attemptId, setAttemptId] = useState<string | null>(null);
@@ -66,6 +70,7 @@ export default function AttemptEngine({
       });
       const data = await res.json();
       if (data.ok) {
+        if (isPublicQuiz) ga4Event("quiz_complete", { quiz_slug: slug, auto });
         localStorage.removeItem(storageKey);
         router.push(`${resultBase}/${data.attemptId}`);
       } else {
@@ -97,6 +102,7 @@ export default function AttemptEngine({
           setLoading(false);
           return;
         }
+        if (isPublicQuiz) ga4Event("quiz_start", { quiz_slug: slug, question_count: (data.questions || []).length });
         setAttemptId(data.attemptId);
         setQuestions(data.questions || []);
         setShowTimer(data.showTimer !== false);
