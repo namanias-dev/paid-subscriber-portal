@@ -31,6 +31,12 @@ export const metadata: Metadata = {
   title: "Naman Sharma IAS Academy — Crack UPSC the Right Way",
   description:
     "Chandigarh's most personal UPSC academy. Foundation, Optionals, Test Series & Mentorship — Online, Offline & Hybrid. Daily current affairs, MCQs, PYQs and live classes by Naman Sir.",
+  // Google Search Console site verification via HTML meta tag.
+  // Env-gated: renders `<meta name="google-site-verification" ...>` server-side
+  // only when NEXT_PUBLIC_GSC_VERIFICATION is set; otherwise omitted entirely.
+  verification: {
+    google: process.env.NEXT_PUBLIC_GSC_VERIFICATION || undefined,
+  },
 };
 
 export const viewport: Viewport = {
