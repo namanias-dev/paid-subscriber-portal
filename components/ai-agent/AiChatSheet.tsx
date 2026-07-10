@@ -67,6 +67,7 @@ export default function AiChatSheet({
 }) {
   const [transcript, setTranscript] = useState<TranscriptEntry[]>([]);
   const [current, setCurrent] = useState<AgentResponse | null>(null);
+  const [injectedCards, setInjectedCards] = useState<AgentCard[]>([]);
   const [loading, setLoading] = useState(true);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const seq = useRef(0);
@@ -183,16 +184,32 @@ export default function AiChatSheet({
   }
 
   function handleLeadSubmitted(nextStep: string, intent: string | null, result: LeadCaptureResult) {
+    const it = intent || result.intent || "chat";
     if (result.ok) {
-      trackAgentEvent(sessionId, "ai_lead_created", { intent: intent || "chat", temperature: result.temperature || "" });
-      if (intent === "callback" || intent === "campus_visit") {
-        trackAgentEvent(sessionId, "ai_callback_requested", { intent });
+      trackAgentEvent(sessionId, "ai_lead_created", { intent: it, temperature: result.temperature || "" });
+      if (it === "callback" || it === "campus_visit") {
+        trackAgentEvent(sessionId, "ai_callback_requested", { intent: it });
+      } else if (it === "webinar") {
+        trackAgentEvent(sessionId, "ai_webinar_register_click", {});
+        // PAID webinar → hand off to the existing payment flow (never bypassed).
+        if (result.payUrl) {
+          trackAgentEvent(sessionId, "ai_payment_start_click", {});
+          navigate(result.payUrl);
+        }
+      } else if (it === "payment_recovery") {
+        trackAgentEvent(sessionId, "ai_payment_recovery_click", {});
+        if (result.recovery) {
+          setInjectedCards((prev) => [...prev, { kind: "payment_recovery", data: result.recovery! }]);
+        }
+      }
+      if (result.message) {
+        setTranscript((prev) => [...prev, { id: nextId(), role: "agent", text: result.message! }]);
       }
     }
     void sendTurn({ step: nextStep });
   }
 
-  function renderCard(card: AgentCard, idx: number) {
+  function renderCard(card: AgentCard, idx: number | string) {
     switch (card.kind) {
       case "offer":
         return (
@@ -266,6 +283,10 @@ export default function AiChatSheet({
                 {t.text}
               </div>
             ),
+          )}
+
+          {injectedCards.length > 0 && (
+            <div className="space-y-2.5">{injectedCards.map((c, i) => renderCard(c, `inj${i}`))}</div>
           )}
 
           {current?.cards && current.cards.length > 0 && (

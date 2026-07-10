@@ -26,7 +26,6 @@ import {
   HANDOFF,
   NURTURE,
   RESOURCE,
-  CONSENT,
   CAPTURE,
   COMMON,
   FALLBACKS,
@@ -427,10 +426,33 @@ const NODES: Record<string, NodeFn> = {
       : { id: "resume", label: RECOVERY.resumeLabel, action: "open_url", href: "/courses", track: "ai_payment_recovery_click", kind: "primary" };
     return {
       messages: msgs(RECOVERY.initiated, RECOVERY.statusNeutral, RECOVERY.offerResume),
-      quickReplies: [resume, { id: "help", label: RECOVERY.helpCta, flow: "counselor_handoff" }, QR.restart()],
+      quickReplies: [
+        resume,
+        { id: "check", label: RECOVERY.checkCta, next: withParams("recovery:check", { offer: c.page.offerId || undefined }) },
+        { id: "help", label: RECOVERY.helpCta, flow: "counselor_handoff" },
+        QR.restart(),
+      ],
       cards: [],
       meta: { intent: "payment_recovery" },
     };
+  },
+  // Phone-based status check: matches by phone (+ item) via /api/ai-agent/payment-recovery.
+  "recovery:check": (c) => {
+    const offerId = c.params.offer || c.page.offerId || null;
+    const offer = offerId
+      ? c.offers.courses.find((o) => o.id === offerId) || c.offers.webinars.find((o) => o.id === offerId) || null
+      : null;
+    return captureCard({
+      intent: "payment_recovery",
+      title: RECOVERY.checkTitle,
+      subtitle: RECOVERY.checkSubtitle,
+      fields: ["phone"],
+      submitLabel: RECOVERY.submitCheck,
+      nextStep: "capture:done",
+      offerId: offer?.id ?? null,
+      offerType: offer?.type ?? null,
+      ctx: c,
+    });
   },
 
   // -------------------------------------------------- (7) COUNSELOR HANDOFF
@@ -519,30 +541,6 @@ const NODES: Record<string, NodeFn> = {
 };
 
 /* ------------------------------------------------------------------ *
- * Consent explainer node (synthesised, not in the registry)
- * ------------------------------------------------------------------ */
-
-function consentNode(nextStep: string): NodeResult {
-  return {
-    messages: msgs(HANDOFF.intro),
-    quickReplies: [QR.restart()],
-    cards: [
-      {
-        kind: "consent",
-        data: {
-          title: CONSENT.title,
-          body: CONSENT.body,
-          acceptLabel: CONSENT.accept,
-          declineLabel: CONSENT.decline,
-          nextStep,
-        },
-      },
-    ],
-    meta: { requiresConsent: true, intent: "consent" },
-  };
-}
-
-/* ------------------------------------------------------------------ *
  * Public entry
  * ------------------------------------------------------------------ */
 
@@ -581,18 +579,10 @@ export async function runGuidedFlow(
   };
 
   const node = NODES[base] || NODES["root:menu"];
-  let result = node(ctx);
-
-  // Consent gate: if a node wants a phone capture but marketing consent is
-  // required and not yet granted, show the consent explainer first and resume the
-  // capture step after acceptance. (The capture form ALSO carries an inline
-  // consent checkbox as defense-in-depth.)
-  const wantsPhone = result.cards.some(
-    (c) => c.kind === "lead_form" && c.data.fields.includes("phone"),
-  );
-  if (wantsPhone && deps.requireConsent && !deps.hasMarketingConsent) {
-    result = consentNode(stepId);
-  }
+  // Consent before phone capture is enforced INLINE by the capture form: the
+  // ConsentNotice checkbox is required (and consent_marketing is persisted on the
+  // lead) whenever `meta.requiresConsent` is set — see captureCard().
+  const result = node(ctx);
 
   return {
     flow: flowOfStep(base),

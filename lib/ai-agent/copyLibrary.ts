@@ -160,6 +160,14 @@ export const RECOVERY = {
   statusNeutral:
     "Your enrolment isn't complete yet. No seat is confirmed until payment is done, so let's finish it properly when you're ready.",
   helpCta: "Have a counsellor help me finish",
+  checkCta: "Check my enrolment status",
+  checkTitle: "Check your status",
+  checkSubtitle: "Enter the number you enrolled with — I'll only show your own status.",
+  submitCheck: "Check status",
+  allClear:
+    "Good news — our records show your enrolment is already complete. Nothing pending on your side.",
+  noneFound:
+    "I couldn't find a pending enrolment for that number. If that seems off, a counsellor can look into it with you.",
 } as const;
 
 /** (7) Counselor handoff. */

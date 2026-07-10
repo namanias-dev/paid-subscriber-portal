@@ -1,15 +1,20 @@
 "use client";
 
 /**
- * Lead-capture form rendered as a chat card. Submits to the Phase-1 public
- * endpoint POST /api/ai-agent/leads (dedupe + validation + consent gating live
- * there). Client-side we only do light validation + consent gating for UX.
+ * Lead-capture form rendered as a chat card. Its submit endpoint is chosen by the
+ * form's INTENT so it plugs straight into the Phase-4 integrations, while consent
+ * gating + dedupe + validation always live server-side:
+ *   - webinar         → POST /api/ai-agent/webinar-register (dedupe-safe register;
+ *                       PAID webinars return a payUrl into the existing Eazypay flow)
+ *   - callback/visit  → POST /api/ai-agent/callback (creates the admin follow-up)
+ *   - payment_recovery→ POST /api/ai-agent/payment-recovery (REAL-status recovery)
+ *   - everything else → POST /api/ai-agent/leads
  *
- * PII (name/phone/email) goes ONLY to the leads endpoint — never to analytics.
+ * PII (name/phone/email) goes ONLY to these endpoints — never to analytics.
  */
 import { useState } from "react";
 import { normalizeIndianMobile } from "@/lib/phone";
-import type { LeadFormCardData } from "@/lib/ai-agent/providers/types";
+import type { LeadFormCardData, PaymentRecoveryCardData } from "@/lib/ai-agent/providers/types";
 import ConsentNotice from "./ConsentNotice";
 
 const CURRENT_YEAR = new Date().getFullYear();
@@ -18,6 +23,29 @@ const TARGET_YEARS = [CURRENT_YEAR, CURRENT_YEAR + 1, CURRENT_YEAR + 2, CURRENT_
 export interface LeadCaptureResult {
   ok: boolean;
   temperature?: string | null;
+  /** Set when a PAID webinar must route into the existing payment flow. */
+  payUrl?: string | null;
+  /** Set by the payment-recovery check to render a recovery card. */
+  recovery?: PaymentRecoveryCardData | null;
+  /** Recorded intent, so the sheet can fire the right analytics event. */
+  intent?: string | null;
+  /** Optional confirmation line to show in the transcript. */
+  message?: string | null;
+}
+
+/** Resolve the submit endpoint + payload for a given form intent. */
+function endpointFor(intent: string | null): string {
+  switch (intent) {
+    case "webinar":
+      return "/api/ai-agent/webinar-register";
+    case "callback":
+    case "campus_visit":
+      return "/api/ai-agent/callback";
+    case "payment_recovery":
+      return "/api/ai-agent/payment-recovery";
+    default:
+      return "/api/ai-agent/leads";
+  }
 }
 
 export default function LeadCaptureForm({
@@ -66,28 +94,39 @@ export default function LeadCaptureForm({
 
     setBusy(true);
     try {
-      const res = await fetch("/api/ai-agent/leads", {
+      const intent = data.intent || "chat";
+      const marketingConsent = needsPhone ? consent || undefined : undefined;
+      const body: Record<string, unknown> = {
+        session_id: sessionId,
+        name: name.trim() || undefined,
+        phone: phone.trim() || undefined,
+        offer_id: data.offerId || undefined,
+        offer_type: data.offerType || undefined,
+        consent_marketing: marketingConsent,
+      };
+      // The generic leads endpoint accepts the richer profile; specialised
+      // endpoints only need the fields above (+ city/intent for callback).
+      if (intent === "callback" || intent === "campus_visit") {
+        body.city = city.trim() || undefined;
+        body.intent = intent;
+      } else if (intent !== "webinar" && intent !== "payment_recovery") {
+        body.email = email.trim() || undefined;
+        body.city = city.trim() || undefined;
+        body.target_year = targetYear || undefined;
+        body.source = `ai_agent:${intent}`;
+        body.status = "new";
+        body.signals = {
+          hasPhone: needsPhone,
+          hasEmail: !!email.trim(),
+          formFieldsProvided: [name, city, targetYear, email].filter((v) => v.trim()).length,
+          marketingConsent: consent,
+        };
+      }
+
+      const res = await fetch(endpointFor(intent), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          session_id: sessionId,
-          name: name.trim() || undefined,
-          phone: phone.trim() || undefined,
-          email: email.trim() || undefined,
-          city: city.trim() || undefined,
-          target_year: targetYear || undefined,
-          offer_id: data.offerId || undefined,
-          offer_type: data.offerType || undefined,
-          source: `ai_agent:${data.intent || "chat"}`,
-          status: "new",
-          consent_marketing: needsPhone ? consent || undefined : undefined,
-          signals: {
-            hasPhone: needsPhone,
-            hasEmail: !!email.trim(),
-            formFieldsProvided: [name, city, targetYear, email].filter((v) => v.trim()).length,
-            marketingConsent: consent,
-          },
-        }),
+        body: JSON.stringify(body),
       });
       const json = await res.json().catch(() => ({}));
       if (res.status === 202 && json?.requiresConsent) {
@@ -101,7 +140,19 @@ export default function LeadCaptureForm({
         return;
       }
       setDone(true);
-      onSubmitted(data.nextStep, { ok: true, temperature: json?.lead?.temperature ?? null });
+      onSubmitted(data.nextStep, {
+        ok: true,
+        intent,
+        temperature: json?.lead?.temperature ?? null,
+        payUrl: typeof json?.payUrl === "string" ? json.payUrl : null,
+        recovery: (json?.recovery as PaymentRecoveryCardData | undefined) ?? null,
+        message:
+          typeof json?.paid === "boolean" && json.paid
+            ? "Our records show this is already sorted — nothing pending on your side."
+            : json?.already
+              ? "You're already registered for this — see you there."
+              : null,
+      });
     } catch {
       setError("Network error — please try again.");
       setBusy(false);
