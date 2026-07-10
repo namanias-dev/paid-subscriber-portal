@@ -17,14 +17,18 @@ export async function GET() {
 
   try {
     const head = { count: "exact" as const, head: true };
-    const [total, cold, warm, hot, conversations, followupsPending] = await Promise.all([
-      db.from("ai_leads").select("id", head),
-      db.from("ai_leads").select("id", head).eq("temperature", "cold"),
-      db.from("ai_leads").select("id", head).eq("temperature", "warm"),
-      db.from("ai_leads").select("id", head).eq("temperature", "hot"),
-      db.from("ai_conversations").select("id", head),
-      db.from("ai_followups").select("id", head).eq("status", "pending"),
-    ]);
+    const since7d = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    const [total, cold, warm, hot, conversations, followupsPending, recent, conversions] =
+      await Promise.all([
+        db.from("ai_leads").select("id", head),
+        db.from("ai_leads").select("id", head).eq("temperature", "cold"),
+        db.from("ai_leads").select("id", head).eq("temperature", "warm"),
+        db.from("ai_leads").select("id", head).eq("temperature", "hot"),
+        db.from("ai_conversations").select("id", head),
+        db.from("ai_followups").select("id", head).eq("status", "pending"),
+        db.from("ai_leads").select("id", head).gte("created_at", since7d),
+        db.from("ai_leads").select("id", head).in("status", ["converted", "enrolled", "registered"]),
+      ]);
 
     return NextResponse.json({
       ok: true,
@@ -34,9 +38,11 @@ export async function GET() {
           cold: cold.count ?? 0,
           warm: warm.count ?? 0,
           hot: hot.count ?? 0,
+          recent7d: recent.count ?? 0,
         },
         conversations: conversations.count ?? 0,
         followups: { pending: followupsPending.count ?? 0 },
+        conversions: conversions.count ?? 0,
       },
     });
   } catch {
