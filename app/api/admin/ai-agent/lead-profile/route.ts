@@ -13,7 +13,7 @@
 import { NextResponse } from "next/server";
 import { requirePermission, getActionActor } from "@/lib/adminGuard";
 import { getSupabaseAdmin } from "@/lib/supabase";
-import { getPaymentsByPhone } from "@/lib/dataProvider";
+import { getPaymentsByPhone, isPaidStatus } from "@/lib/dataProvider";
 import { getLiveOffers } from "@/lib/ai-agent/offerResolver";
 import { recommendCourses, recommendWebinar } from "@/lib/ai-agent/recommendationEngine";
 import { writeSecurityAudit, ipFromRequest } from "@/lib/ai-agent/audit";
@@ -61,7 +61,7 @@ export async function GET(req: Request) {
       getLiveOffers().catch(() => ({ courses: [], webinars: [], generated_at: "" })),
     ]);
 
-    const hasPaid = (payments as { status?: string }[]).some((p) => p.status === "PAID");
+    const hasPaid = (payments as { status?: string }[]).some((p) => isPaidStatus(p.status));
 
     // Recommended pitch — server-sourced live offers only (never invented).
     const courseRec = recommendCourses(offers, { mode: "either", limit: 1 })[0] || null;

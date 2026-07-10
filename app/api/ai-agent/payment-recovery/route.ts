@@ -12,7 +12,7 @@
  */
 import { NextResponse } from "next/server";
 import { normalizeIndianMobile } from "@/lib/phone";
-import { getPaymentsByPhone } from "@/lib/dataProvider";
+import { getPaymentsByPhone, isPaidStatus } from "@/lib/dataProvider";
 import { resolveLiveOffer } from "@/lib/ai-agent/offerResolver";
 import { getAgentContext } from "@/lib/ai-agent/request";
 import { hit } from "@/lib/ai-agent/rateLimit";
@@ -30,7 +30,10 @@ interface Body {
   consent_marketing?: boolean;
 }
 
-const NOT_PAID = new Set(["INITIATED", "ABANDONED", "VERIFYING", "FAILED"]);
+// Non-paid, recoverable states (mirrors dataProvider.NONPAID_STATUSES minus paid).
+// Compared case-insensitively; paid detection uses the shared isPaidStatus() so a
+// "captured" row (also a paid status app-wide) is NEVER treated as recoverable.
+const NOT_PAID = new Set(["INITIATED", "PENDING", "ABANDONED", "VERIFYING", "FAILED"]);
 
 export async function POST(req: Request) {
   const cfg = getAiAgentConfig();
@@ -62,12 +65,15 @@ export async function POST(req: Request) {
       ? payments.filter((p) => p.item_slug === offer.slug && p.item_type === offer.type)
       : payments;
 
-    // PAID wins — hide recovery entirely, never re-pitch.
-    if (relevant.some((p) => p.status === "PAID")) {
+    // PAID wins — hide recovery entirely, never re-pitch. Uses the app-wide
+    // isPaidStatus() so both "PAID" and "captured" count as done.
+    if (relevant.some((p) => isPaidStatus(p.status))) {
       return NextResponse.json({ ok: true, paid: true });
     }
 
-    const pending = relevant.find((p) => NOT_PAID.has(String(p.status || "").toUpperCase()));
+    const pending = relevant.find(
+      (p) => !isPaidStatus(p.status) && NOT_PAID.has(String(p.status || "").toUpperCase()),
+    );
     if (!pending) {
       // No abandoned/pending attempt to recover.
       return NextResponse.json({ ok: true, none: true });
