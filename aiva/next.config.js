@@ -12,8 +12,8 @@ const BUILD_ID = (
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-  // AIVA type-checks in CI/build; lint runs separately.
-  eslint: { ignoreDuringBuilds: true },
+  // AIVA lints and type-checks on every build (no suppression).
+  eslint: { dirs: ["app", "components", "lib"] },
   typescript: { ignoreBuildErrors: false },
   env: { NEXT_PUBLIC_BUILD_ID: BUILD_ID },
   generateBuildId: async () => BUILD_ID,
