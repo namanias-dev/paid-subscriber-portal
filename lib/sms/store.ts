@@ -4,7 +4,7 @@
  * the portal stays fully functional with no DB. Never throws into callers.
  */
 import { getSupabaseAdmin } from "../supabase";
-import { SEED_TEMPLATES, uniqueVariables, TRIGGERS } from "./templates";
+import { SEED_TEMPLATES, uniqueVariables, TRIGGERS, seedById } from "./templates";
 import { envDailyCap, envPerMobileDailyCap, smsEnvEnabled } from "./config";
 import type { SmsTemplate, SmsLog, SmsAutoRule, SmsSettings, SmsTemplateStatus } from "./types";
 
@@ -214,6 +214,100 @@ export async function upsertTemplate(id: string, patch: TemplatePatch, createIfM
     } else {
       await db.from("sms_templates").update(clean).eq("id", id);
     }
+    return getTemplate(id);
+  } catch { return null; }
+}
+
+/** A template id is "built-in" when it ships in code (SEED_TEMPLATES). Only
+ * non-seed rows are self-serve and may be edited/deactivated by send_sms staff. */
+export function isSeedTemplateId(id: string): boolean {
+  return !!seedById(id);
+}
+
+/** Slugify a template name into a stable, url-safe id (a-z0-9_). */
+function slugifyTemplateId(name: string): string {
+  const base = (name || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 48);
+  return base || "custom_template";
+}
+
+/**
+ * Is a DLT gateway_template_id already used by ANY template (code seed OR DB
+ * row)? Powers the uniqueness guard for self-serve creates/edits so two
+ * templates can never claim the same approved DLT id. `exceptId` skips the row
+ * being edited. Fail-open (false) on infra error — the DB unique-ish check is a
+ * guard, not a hard constraint.
+ */
+export async function dltIdInUse(gatewayTemplateId: string, exceptId?: string): Promise<boolean> {
+  const gid = (gatewayTemplateId || "").trim();
+  if (!gid) return false;
+  const inSeed = SEED_TEMPLATES.some((s) => s.gateway_template_id === gid && s.id !== exceptId);
+  if (inSeed) return true;
+  const db = getSupabaseAdmin();
+  if (!db) return demo().templates.some((t) => t.gateway_template_id === gid && t.id !== exceptId);
+  try {
+    let q = db.from("sms_templates").select("id").eq("gateway_template_id", gid);
+    if (exceptId) q = q.neq("id", exceptId);
+    const { data } = await q.limit(1);
+    return (data || []).length > 0;
+  } catch { return false; }
+}
+
+export interface CreateTemplateInput {
+  name: string;
+  use_case: SmsTemplate["use_case"];
+  message_type: SmsTemplate["message_type"];
+  body_template: string;
+  gateway_template_id: string;
+  sender_id?: string | null;
+  route?: string | null;
+  audience_type?: string | null;
+  is_active?: boolean;
+  created_by?: string | null;
+}
+
+/**
+ * Create a NEW self-serve template with a generated, unique id. Never modifies
+ * existing rows (INSERT only). Callers MUST have validated the body (GSM/Rs/no-
+ * emoji) and DLT id (numeric + unique) first. When `is_active`, the row lands
+ * send-ready (status 'active'); otherwise it is saved as 'draft'. Returns the
+ * created template, or null on a store error.
+ */
+export async function createTemplate(input: CreateTemplateInput): Promise<SmsTemplate | null> {
+  const variables = uniqueVariables(input.body_template);
+  const active = !!input.is_active;
+  const row = {
+    name: input.name.trim(),
+    use_case: input.use_case,
+    message_type: input.message_type,
+    body_template: input.body_template,
+    variables,
+    gateway_template_id: input.gateway_template_id.trim(),
+    sender_id: input.sender_id?.trim() || "NAMIAS",
+    route: input.route?.trim() || "12",
+    status: (active ? "active" : "draft") as SmsTemplateStatus,
+    is_active: active,
+    auto_send_enabled: false,
+    trigger_event: null as string | null,
+    audience_type: input.audience_type ?? null,
+    created_by: input.created_by ?? null,
+    updated_by: input.created_by ?? null,
+  };
+  const base = slugifyTemplateId(input.name);
+  const db = getSupabaseAdmin();
+  if (!db) {
+    const d = demo();
+    let id = base; let n = 2;
+    while (d.templates.some((t) => t.id === id) || seedById(id)) id = `${base}_${n++}`;
+    const t = { id, ...row, created_at: nowISO(), updated_at: nowISO() } as SmsTemplate;
+    d.templates.unshift(t);
+    return t;
+  }
+  try {
+    let id = base; let n = 2;
+    // id must be free in BOTH the live table and the code seed set.
+    while ((await getTemplate(id)) || seedById(id)) id = `${base}_${n++}`;
+    const { error } = await db.from("sms_templates").insert({ id, ...row });
+    if (error) return null;
     return getTemplate(id);
   } catch { return null; }
 }
