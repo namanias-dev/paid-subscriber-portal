@@ -10,14 +10,15 @@ export const dynamic = "force-dynamic";
 export default function CommandCenterPage() {
   return (
     <div className="mx-auto max-w-6xl space-y-8">
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <Card className="flex flex-col justify-center">
-          <SectionTitle sub="Every pulse is a real business event.">AIVA Neural Core</SectionTitle>
-          <NeuralCore enable3d={flags.brain3d} />
-        </Card>
-        <div>
-          <Brief />
-        </div>
+      <Card>
+        <SectionTitle sub="Live agent brain — each node is a domain agent, each pulse a real business event. Hover to inspect, click to zoom in.">
+          AIVA Neural Core
+        </SectionTitle>
+        <NeuralCore enable3d={flags.brain3d} />
+      </Card>
+
+      <div>
+        <Brief />
       </div>
 
       <div>
