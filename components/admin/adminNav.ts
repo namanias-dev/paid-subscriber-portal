@@ -24,6 +24,7 @@ export const ADMIN_NAV: AdminNavItem[] = [
   { href: "/admin/marketing", label: "Marketing", icon: "📣", group: "Sales", perm: "manage_students_leads" },
   { href: "/admin/referrals", label: "Referrals", icon: "🎁", group: "Sales", perm: "manage_students_leads" },
   { href: "/admin/careers", label: "Careers", icon: "💼", group: "Sales", perm: "manage_careers" },
+  { href: "/admin/ai-agent", label: "AI Counsellor", icon: "🤖", group: "Sales", perm: "manage_ai_agent" },
   { href: "/admin/communications/sms", label: "SMS Mission Control", icon: "📱", group: "Sales", perm: "send_sms" },
   { href: "/admin/courses", label: "Courses", icon: "🎓", group: "Academics", perm: "content_courses" },
   { href: "/admin/library", label: "Brochure Library", icon: "🗂️", group: "Academics", perm: "content_pdfs_media" },
