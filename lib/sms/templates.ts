@@ -95,6 +95,10 @@ export const SEED_TEMPLATES: SeedTemplate[] = [
   { id: "general_webinar_invite", name: "General Webinar Invite / Sign-Up", use_case: "WEBINAR", message_type: "promotional", trigger_event: null, audience_type: null,
     gateway_template_id: "1707178272502168903",
     body: "Hi {first_name}, our next UPSC webinar is open! View list and enroll: {login_url}. Naman Sharma IAS Academy" },
+  // Static promo (no variables) — DLT-locked body byte-exact with the approved sheet.
+  { id: "new_webinar_enroll", name: "new webinar enroll", use_case: "WEBINAR", message_type: "promotional", trigger_event: null, audience_type: null,
+    gateway_template_id: "1707178358697914131",
+    body: "Confused about UPSC/IAS Preparation Join Naman Sir 2-hr LIVE UPSC Masterclass. Fee Rs.50. Enroll: https://vm.ltd/NAMIAS/fBLiXB Naman Sharma IAS Academy" },
   // --- NOT DLT-approved (no id in approved sheet) — cannot send until approved ---
   { id: "reminder_day_before", name: "Reminder Day Before", use_case: "WEBINAR", message_type: "service", trigger_event: TRIGGERS.webinar_day_before, audience_type: "webinar_registered",
     gateway_template_id: null,
