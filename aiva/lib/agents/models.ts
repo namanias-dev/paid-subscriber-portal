@@ -1,7 +1,7 @@
 import { getSupabase } from "../supabase";
-import { getRevenueTower } from "../revenue/tower";
 import { inr } from "../revenue/dailyBrief";
 import { AGENTS, agentById, type AgentMeta } from "./registry";
+import { revenueIntel, admissionsIntel, webinarFunnel, type FunnelBar } from "../insights/agents";
 import type { Risk } from "../flags";
 import { canExecute } from "../flags";
 
@@ -28,6 +28,13 @@ export type AgentSnapshot = {
   metrics: Metric[];
   recommendations: Recommendation[];
   note?: string;
+  /** One-line smart takeaway generated from the computed data (templated NL). */
+  headline?: string;
+  /** Optional funnel / breakdown bars (value drives the bar width in the panel). */
+  funnelTitle?: string;
+  funnel?: FunnelBar[];
+  /** Honest limitations: which requested insight couldn't be computed and why. */
+  caveats?: string[];
 };
 
 function rec(r: Omit<Recommendation, "executable" | "blockedReason">): Recommendation {
@@ -54,17 +61,15 @@ export async function getAgentSnapshot(id: string): Promise<AgentSnapshot | null
 
   switch (id) {
     case "revenue": {
-      const t = await getRevenueTower();
+      const intel = await revenueIntel();
+      const t = intel.tower;
       return {
         agent,
-        metrics: [
-          { label: "Collected", value: inr(t.collected) },
-          { label: "Outstanding", value: inr(t.outstanding) },
-          { label: "Overdue (all)", value: inr(t.overdueTotal.amount), hint: `${t.overdueTotal.count} lines` },
-          { label: "At-risk", value: inr(t.atRiskRevenue) },
-          { label: "Proofs pending", value: String(t.proofsPending) },
-          { label: "Abandoned", value: inr(t.abandoned.amount), hint: `${t.abandoned.count}` },
-        ],
+        headline: intel.headline,
+        metrics: intel.metrics,
+        funnelTitle: intel.funnelTitle,
+        funnel: intel.funnel,
+        caveats: intel.caveats,
         recommendations: [
           t.overdueTotal.count > 0
             ? rec({
@@ -96,16 +101,22 @@ export async function getAgentSnapshot(id: string): Promise<AgentSnapshot | null
     }
 
     case "admissions": {
-      const leads = await count("leads");
-      const uncontacted = await count("leads", (q) => q.eq("called", false));
-      const webinarRegs = await count("webinar_registrations");
+      const [intel, leads, uncontacted] = await Promise.all([
+        admissionsIntel(),
+        count("leads"),
+        count("leads", (q) => q.eq("called", false)),
+      ]);
       return {
         agent,
+        headline: intel.headline,
         metrics: [
+          ...intel.metrics,
           { label: "Total leads", value: String(leads) },
           { label: "Uncontacted", value: String(uncontacted) },
-          { label: "Webinar registrants", value: String(webinarRegs) },
         ],
+        funnelTitle: intel.funnelTitle,
+        funnel: intel.funnel,
+        caveats: intel.caveats,
         recommendations: [
           uncontacted > 0
             ? rec({
@@ -200,14 +211,14 @@ export async function getAgentSnapshot(id: string): Promise<AgentSnapshot | null
     }
 
     case "analytics": {
-      const t = await getRevenueTower();
+      const intel = await webinarFunnel();
       return {
         agent,
-        metrics: [
-          { label: "Collected", value: inr(t.collected) },
-          { label: "Expected", value: inr(t.expected) },
-          { label: "Active enrollments", value: String(t.activeEnrollments) },
-        ],
+        headline: intel.headline,
+        metrics: intel.metrics,
+        funnelTitle: intel.funnelTitle,
+        funnel: intel.funnel,
+        caveats: intel.caveats,
         recommendations: [],
       };
     }

@@ -13,11 +13,17 @@ type Recommendation = {
   blockedReason?: string;
 };
 
+type FunnelBar = { label: string; value: number; sub?: string };
+
 type Snapshot = {
   agent: { id: string; name: string; blurb: string; href: string };
   metrics: { label: string; value: string; hint?: string }[];
   recommendations: Recommendation[];
   note?: string;
+  headline?: string;
+  funnelTitle?: string;
+  funnel?: FunnelBar[];
+  caveats?: string[];
 };
 
 /** Slide-in panel shown when a Neural Core node is selected. Read-only agent snapshot. */
@@ -54,6 +60,13 @@ export default function AgentDetailPanel({ domain, onClose }: { domain: string; 
         <p className="text-sm text-danger">Could not load: {error}</p>
       ) : (
         <>
+          {snap?.headline ? (
+            <div className="aiva-headline mb-3">
+              <span className="aiva-headline-icon" aria-hidden>◆</span>
+              <p>{snap.headline}</p>
+            </div>
+          ) : null}
+
           <div className="grid grid-cols-2 gap-2">
             {(snap?.metrics || []).map((m) => (
               <div key={m.label} className="aiva-kpi">
@@ -64,6 +77,31 @@ export default function AgentDetailPanel({ domain, onClose }: { domain: string; 
             ))}
             {(!snap || snap.metrics.length === 0) && <p className="text-sm text-muted">No live metrics for this agent yet.</p>}
           </div>
+
+          {snap?.funnel && snap.funnel.length > 0 ? (
+            <div className="mt-4">
+              <div className="aiva-label mb-2">{snap.funnelTitle || "Breakdown"}</div>
+              <div className="space-y-1.5">
+                {(() => {
+                  const max = Math.max(1, ...snap.funnel!.map((f) => f.value));
+                  return snap.funnel!.map((f) => (
+                    <div key={f.label} className="aiva-funnel-row">
+                      <div className="aiva-funnel-head">
+                        <span className="aiva-funnel-label">{f.label}</span>
+                        <span className="aiva-funnel-value">
+                          {f.value}
+                          {f.sub ? <span className="aiva-funnel-sub"> · {f.sub}</span> : null}
+                        </span>
+                      </div>
+                      <div className="aiva-funnel-track">
+                        <div className="aiva-funnel-fill" style={{ width: `${Math.round((f.value / max) * 100)}%` }} />
+                      </div>
+                    </div>
+                  ));
+                })()}
+              </div>
+            </div>
+          ) : null}
 
           {snap && snap.recommendations.length > 0 ? (
             <div className="mt-4">
@@ -80,6 +118,17 @@ export default function AgentDetailPanel({ domain, onClose }: { domain: string; 
                   </div>
                 ))}
               </div>
+            </div>
+          ) : null}
+
+          {snap?.caveats && snap.caveats.length > 0 ? (
+            <div className="mt-4">
+              <div className="aiva-label mb-1">Data notes</div>
+              <ul className="space-y-1">
+                {snap.caveats.map((c, i) => (
+                  <li key={i} className="aiva-caveat">{c}</li>
+                ))}
+              </ul>
             </div>
           ) : null}
 

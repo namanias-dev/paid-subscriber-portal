@@ -1,5 +1,11 @@
 import { getSupabase } from "./supabase";
-import type { Payment, CourseEnrollment, PaymentProofStatus } from "@portal/lib/types";
+import type {
+  Payment,
+  CourseEnrollment,
+  PaymentProofStatus,
+  WebinarRegistration,
+  Webinar,
+} from "@portal/lib/types";
 
 /**
  * Read-only data access for AIVA against the shared DB. Paginates past Supabase's 1000-row cap.
@@ -30,6 +36,14 @@ export async function fetchPayments(): Promise<Payment[]> {
 
 export async function fetchCourseEnrollments(): Promise<CourseEnrollment[]> {
   return fetchAll<CourseEnrollment>("course_enrollments", "*", "created_at");
+}
+
+export async function fetchWebinarRegistrations(): Promise<WebinarRegistration[]> {
+  return fetchAll<WebinarRegistration>("webinar_registrations", "*", "created_at");
+}
+
+export async function fetchWebinars(): Promise<Webinar[]> {
+  return fetchAll<Webinar>("webinars", "*", "created_at");
 }
 
 /** Map of payment_id -> proof status, for group-status derivation. */

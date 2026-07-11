@@ -1,9 +1,10 @@
 "use client";
 
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { Html } from "@react-three/drei";
-import { useMemo, useRef, useState, type MutableRefObject } from "react";
+import { Html, OrbitControls } from "@react-three/drei";
+import { useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import * as THREE from "three";
+import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 import { AGENTS } from "@/lib/agents/registry";
 import { nodeLayout, activityByDomain, synapseEdges, PULSE_HEX, type Vec3 } from "@/lib/neural/graph";
 import type { Pulse } from "@/lib/events/projection";
@@ -152,25 +153,61 @@ function PulseDot({ from, color, phase, dur }: { from: THREE.Vector3; color: str
   );
 }
 
-/** Smoothly flies the camera toward the selected node and back to the overview. */
-function CameraRig({ selected, nodeRefs }: { selected: string | null; nodeRefs: MutableRefObject<Record<string, THREE.Object3D | null>> }) {
+const DEFAULT_CAM: Vec3 = [0, 0, 7];
+
+/**
+ * Bridges OrbitControls (user owns the camera) with programmatic focus. On node-select or a
+ * reset signal it animates the orbit target + camera to frame that node (or the default view),
+ * temporarily locking user input, then hands control straight back — so drag/zoom/pan still work.
+ */
+function Rig({
+  selected,
+  resetSignal,
+  nodeRefs,
+  controlsRef,
+}: {
+  selected: string | null;
+  resetSignal: number;
+  nodeRefs: MutableRefObject<Record<string, THREE.Object3D | null>>;
+  controlsRef: MutableRefObject<OrbitControlsImpl | null>;
+}) {
   const { camera } = useThree();
+  const focusing = useRef(false);
+  const desiredPos = useRef(new THREE.Vector3(...DEFAULT_CAM));
+  const desiredTarget = useRef(new THREE.Vector3(0, 0, 0));
   const tmp = useRef(new THREE.Vector3());
-  const desired = useRef(new THREE.Vector3(0, 0, 7));
-  const look = useRef(new THREE.Vector3(0, 0, 0));
-  useFrame(() => {
+
+  useEffect(() => {
+    const controls = controlsRef.current;
     const obj = selected ? nodeRefs.current[selected] : null;
     if (obj) {
       obj.getWorldPosition(tmp.current);
       const dir = tmp.current.clone().normalize();
-      desired.current.copy(tmp.current.clone().add(dir.multiplyScalar(2.1)));
-      look.current.lerp(tmp.current, 0.12);
+      desiredTarget.current.copy(tmp.current);
+      desiredPos.current.copy(tmp.current.clone().add(dir.multiplyScalar(2.4)));
     } else {
-      desired.current.set(0, 0, 7);
-      look.current.lerp(new THREE.Vector3(0, 0, 0), 0.12);
+      desiredTarget.current.set(0, 0, 0);
+      desiredPos.current.set(...DEFAULT_CAM);
     }
-    camera.position.lerp(desired.current, 0.07);
-    camera.lookAt(look.current);
+    focusing.current = true;
+    if (controls) controls.enabled = false; // lock input during the fly-to
+  }, [selected, resetSignal, controlsRef, nodeRefs]);
+
+  useFrame(() => {
+    const controls = controlsRef.current;
+    if (!controls) return;
+    if (focusing.current) {
+      camera.position.lerp(desiredPos.current, 0.09);
+      controls.target.lerp(desiredTarget.current, 0.12);
+      const done =
+        camera.position.distanceTo(desiredPos.current) < 0.03 &&
+        controls.target.distanceTo(desiredTarget.current) < 0.03;
+      if (done) {
+        focusing.current = false;
+        controls.enabled = true;
+      }
+    }
+    controls.update();
   });
   return null;
 }
@@ -181,22 +218,33 @@ function Scene({
   onSelect,
   reducedMotion,
   maxDots,
+  resetSignal,
+  controlsRef,
 }: {
   pulses: Pulse[];
   selected: string | null;
   onSelect: (id: string) => void;
   reducedMotion: boolean;
   maxDots: number;
+  resetSignal: number;
+  controlsRef: MutableRefObject<OrbitControlsImpl | null>;
 }) {
   const layout = useMemo(() => nodeLayout(), []);
   const activity = useMemo(() => activityByDomain(pulses), [pulses]);
   const edges = useMemo(() => synapseEdges(2), []);
   const nodeRefs = useRef<Record<string, THREE.Object3D | null>>({});
   const spin = useRef<THREE.Group>(null);
+  const [interacting, setInteracting] = useState(false);
+  const idleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  useFrame((_, dt) => {
-    if (spin.current && !reducedMotion && !selected) spin.current.rotation.y += dt * 0.09;
-  });
+  useEffect(() => {
+    return () => {
+      if (idleTimer.current) clearTimeout(idleTimer.current);
+    };
+  }, []);
+
+  // Orbit-controls auto-rotate spins the CAMERA (not the group), so the group stays still.
+  const autoRotate = !reducedMotion && !selected && !interacting;
 
   const dots = useMemo(() => {
     return pulses.slice(0, maxDots).map((p, i) => ({
@@ -210,7 +258,32 @@ function Scene({
 
   return (
     <>
-      <CameraRig selected={selected} nodeRefs={nodeRefs} />
+      <Rig selected={selected} resetSignal={resetSignal} nodeRefs={nodeRefs} controlsRef={controlsRef} />
+      <OrbitControls
+        ref={controlsRef}
+        enableDamping
+        dampingFactor={0.08}
+        rotateSpeed={0.7}
+        zoomSpeed={0.8}
+        panSpeed={0.6}
+        enablePan
+        minDistance={3.4}
+        maxDistance={15}
+        autoRotate={autoRotate}
+        autoRotateSpeed={0.6}
+        // Touch: 1 finger rotate, 2 fingers pinch-zoom + pan (matches the mouse mapping).
+        touches={{ ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN }}
+        makeDefault
+        onStart={() => {
+          if (idleTimer.current) clearTimeout(idleTimer.current);
+          setInteracting(true);
+        }}
+        onEnd={() => {
+          if (idleTimer.current) clearTimeout(idleTimer.current);
+          // Resume the idle spin a few seconds after the last interaction.
+          idleTimer.current = setTimeout(() => setInteracting(false), 3000);
+        }}
+      />
       <ambientLight intensity={0.5} />
       <pointLight position={[6, 6, 6]} intensity={1.1} />
       <group ref={spin}>
@@ -255,15 +328,34 @@ export default function NeuralCore3D({
 }) {
   const reducedMotion = typeof window !== "undefined" && !!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
   const small = typeof window !== "undefined" && window.innerWidth < 640;
+  const controlsRef = useRef<OrbitControlsImpl | null>(null);
+  const [resetSignal, setResetSignal] = useState(0);
+
+  const resetView = () => {
+    onSelect(""); // clear any selected node
+    setResetSignal((n) => n + 1); // re-frame the default view even if nothing was selected
+  };
+
   return (
-    <div className="mx-auto aspect-square w-full max-w-[560px]">
+    <div className="neural-canvas-wrap mx-auto aspect-square w-full max-w-[560px]">
+      <button type="button" className="neural-reset" onClick={resetView} aria-label="Reset view">
+        Reset view
+      </button>
       <Canvas
         camera={{ position: [0, 0, 7], fov: 50 }}
         dpr={small ? [1, 1.4] : [1, 1.75]}
         gl={{ antialias: true, alpha: true, powerPreference: "high-performance" }}
         onPointerMissed={() => onSelect("")}
       >
-        <Scene pulses={pulses} selected={selected || null} onSelect={onSelect} reducedMotion={reducedMotion} maxDots={small ? 12 : 22} />
+        <Scene
+          pulses={pulses}
+          selected={selected || null}
+          onSelect={onSelect}
+          reducedMotion={reducedMotion}
+          maxDots={small ? 12 : 22}
+          resetSignal={resetSignal}
+          controlsRef={controlsRef}
+        />
       </Canvas>
     </div>
   );
