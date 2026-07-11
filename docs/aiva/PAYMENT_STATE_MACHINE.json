@@ -1,0 +1,77 @@
+{
+  "domain": "revenue",
+  "source_of_truth": [
+    "lib/paymentsAgg.ts",
+    "lib/paymentGroups.ts",
+    "lib/paymentProofs.ts",
+    "lib/dataProvider.ts"
+  ],
+  "note": "payments.status is an unconstrained text column; allowed values are enforced in application code (lib/types.ts). AIVA must reuse the reconciliation primitives, never re-derive paid/outstanding logic.",
+  "payment_states": {
+    "INITIATED": { "meaning": "Checkout intent created on 'Pay' click. NOT money.", "counts_as_revenue": false },
+    "PENDING": { "meaning": "Gateway in-flight (within ~120 min window). NOT money.", "counts_as_revenue": false, "aliases": ["pending"] },
+    "VERIFYING": { "meaning": "Re-checking with ICICI; timer moves PENDING->VERIFYING (never auto-FAILED).", "counts_as_revenue": false },
+    "ABANDONED": { "meaning": "Evidence-less INITIATED/PENDING expired (~30 min sweep). History only.", "counts_as_revenue": false },
+    "FAILED": { "meaning": "Gateway explicit failure (ICICI callback/verify only).", "counts_as_revenue": false },
+    "PAID": { "meaning": "Money received (gateway or manual/offline/imported).", "counts_as_revenue": true },
+    "captured": { "meaning": "Legacy Razorpay paid.", "counts_as_revenue": true },
+    "refunded": { "meaning": "Refunded.", "counts_as_revenue": false }
+  },
+  "paid_detection": {
+    "function": "isPaidStatus(status)",
+    "file": "lib/paymentsAgg.ts",
+    "rule": "status === 'PAID' || status === 'captured'"
+  },
+  "manual_imported": {
+    "representation": "status='PAID', gateway='offline' (or 'admin'/'manual')",
+    "writer": "recordOfflineCoursePayment() in lib/dataProvider.ts",
+    "counts_as_revenue": true
+  },
+  "group_key": {
+    "function": "groupKeyOf(p)",
+    "file": "lib/paymentGroups.ts",
+    "shape": "phone | item_type | item/item_slug | purpose",
+    "purpose_values": ["seat", "inst:<n>", "full"]
+  },
+  "group_status_priority": ["paid", "verifying", "pending", "initiated", "abandoned", "failed", "refunded", "unknown"],
+  "supersede": {
+    "migration": "supabase/migrations/2026-payment-supersede.sql",
+    "columns": ["is_superseded", "superseded_by_payment_id", "superseded_at", "superseded_reason"],
+    "rule": "When one attempt in a group becomes PAID, unpaid siblings get is_superseded=true. No SUPERSEDED status value. Two PAID rows in a group => possible duplicate, flagged, never auto-superseded.",
+    "audit": "payment_action_log.action in ('supersede','unsupersede')"
+  },
+  "soft_delete": {
+    "migration": "supabase/migrations/2026-duplicate-merge-payment-trash.sql",
+    "columns": ["deleted_at", "deleted_by", "deleted_reason"],
+    "rule": "Live money/access reads filter deleted_at IS NULL."
+  },
+  "proofs": {
+    "table": "payment_proofs",
+    "states": ["submitted", "reupload_requested", "accepted", "rejected"],
+    "rule": "Proof upload elevates group to 'verifying'; accepted counts as approved. Proof NEVER grants access; only PAID/captured does.",
+    "access_check": "phoneHasAccessToItem(phone, item_type, item_slug) in lib/paymentProofs.ts"
+  },
+  "settlement": {
+    "column": "payments.settlement_status",
+    "values": { "settled": "money in merchant account", "in_progress": "confirmed but settling (RIP/SIP); access still granted", "null": "non-paid/unknown" }
+  },
+  "reconciliation_rules_v1": [
+    "Imported/manual verified payments count as paid.",
+    "Pending/verifying/checkout-opened do not count as paid.",
+    "Paid wins over duplicate attempts.",
+    "Duplicate attempts do not create duplicate enrollments.",
+    "Outstanding is based on active enrollment/payment plan.",
+    "Proof uploaded enters verification, not paid.",
+    "Approved proof becomes paid through trusted logic (acceptPaymentManually).",
+    "A paid attempt suppresses reminders for superseded attempts.",
+    "Cancelled/expired enrollments do not inflate outstanding revenue."
+  ],
+  "aiva_must_never_v1": [
+    "Mark a payment paid without trusted evidence",
+    "Revoke access automatically",
+    "Count attempts as revenue",
+    "Count duplicate enrollments",
+    "Send reminders after payment/proof approval",
+    "Modify gateway callbacks"
+  ]
+}

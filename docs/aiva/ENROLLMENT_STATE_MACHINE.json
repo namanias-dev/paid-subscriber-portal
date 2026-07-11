@@ -1,0 +1,61 @@
+{
+  "domain": "revenue",
+  "source_of_truth": ["lib/installments.ts", "lib/dataProvider.ts"],
+  "systems": {
+    "course_enrollments": {
+      "pk": "id (text)",
+      "identity": "phone",
+      "purpose": "Phase 2 Book-Your-Seat + EMI ledger (current system)",
+      "status_values": ["pending", "seat_booked", "partially_paid", "fully_paid", "cancelled"],
+      "plan_type": ["full", "emi"],
+      "payment_plan": ["FULL", "EMI", "CUSTOM_INSTALLMENTS"],
+      "schedule_source_of_truth": "course_enrollments.schedule (jsonb InstallmentItem[])"
+    },
+    "enrollments": {
+      "pk": "id (text)",
+      "identity": "student_id (uuid)",
+      "purpose": "Legacy LMS subscription enrollments",
+      "status_values": ["active", "completed", "cancelled"]
+    }
+  },
+  "status_derivation": {
+    "function": "enrollmentStatusFromSchedule(enr) / status field",
+    "file": "lib/installments.ts",
+    "rules": [
+      "amount_paid == 0 => pending",
+      "remaining == 0 => fully_paid",
+      "seat paid, no installments paid => seat_booked",
+      "else => partially_paid",
+      "admin cancel => cancelled",
+      "duplicate merge => cancelled + superseded_by set"
+    ]
+  },
+  "derive_enrollment": {
+    "function": "deriveEnrollment(enr, now?)",
+    "file": "lib/installments.ts",
+    "returns": ["paid", "remaining", "nextPayable", "paidCount", "installmentTotal", "progressPct", "isFullyPaid", "hasOverdue"]
+  },
+  "active_enrollment": {
+    "function": "isActiveEnrollment(enr)",
+    "rule": "status != 'cancelled' AND (amount_paid > 0 OR status == 'fully_paid')"
+  },
+  "attempt_vs_enrollment": "amount_paid = 0 + status = 'pending' = payment attempt only, not enrolled (isAttemptEnrollment).",
+  "installment_line_status": ["pending", "paid", "overdue", "waived", "cancelled"],
+  "installment_kind": ["seat", "installment", "full", "one_time"],
+  "payment_link": {
+    "payments.enrollment_id": "-> course_enrollments.id",
+    "payments.payment_kind + payments.installment_no": "identify which schedule line was paid"
+  },
+  "access": {
+    "buyer_access": "entitlements = all payments where status in (PAID,captured) for phone; buyers table one phone -> one login_code",
+    "course_entitlements": "courses.entitlements jsonb consumed by lib/entitlements.ts",
+    "overrides": "course_access_overrides (mode grant|revoke) always wins",
+    "grace": "15-day grace on unpaid installment before access revoked",
+    "revoke_is_red_action": true
+  },
+  "duplicate_merge": {
+    "migration": "supabase/migrations/2026-duplicate-merge-payment-trash.sql",
+    "canonical_pointer": "course_enrollments.superseded_by -> kept enrollment id",
+    "audit_table": "enrollment_merge_log"
+  }
+}

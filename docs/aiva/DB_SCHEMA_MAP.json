@@ -1,0 +1,53 @@
+{
+  "source": "supabase/schema.sql + supabase/migrations/*.sql (53 migrations) + lib/types.ts",
+  "note": "Most status fields are unconstrained text; only 3 SQL CHECK constraints exist (students.plan, content_items.type). Allowed values enforced in lib/types.ts. RLS enabled on most tables; /api routes use the service role (getSupabaseAdmin) and bypass RLS.",
+  "domains": {
+    "students_identity": ["students", "buyers", "auth_attempts", "access_logs"],
+    "courses": ["courses", "library_docs", "plans"],
+    "enrollments": ["enrollments", "course_enrollments", "enrollment_plan_change_log", "enrollment_merge_log"],
+    "payments": ["payments", "payment_proofs", "payment_receipts", "payment_action_log", "referrals"],
+    "webinars": ["webinars", "webinar_registrations", "webinar_audit_log"],
+    "leads_crm": ["leads", "lead_activities", "lead_forms", "form_submissions"],
+    "quiz": ["questions", "quizzes", "quiz_questions", "quiz_attempts", "quiz_answers", "import_jobs"],
+    "current_affairs": ["ca_categories", "ca_tags", "ca_articles", "ca_pdfs", "ca_leads", "ca_bookmarks", "ca_events"],
+    "resources": ["resources", "resource_events"],
+    "content_classhub": ["content_items", "class_hub_views", "lecture_watch_progress", "course_access_overrides", "bookmarks", "content_progress", "content_orientation_assignments", "lecture_comments"],
+    "analytics": ["analytics_events", "analytics_daily", "meta_capi_log"],
+    "sms": ["sms_templates", "sms_logs", "sms_auto_rules", "sms_settings", "sms_variables", "sms_saved_audiences", "sms_opt_outs"],
+    "rbac_staff": ["roles", "admin_users", "staff", "staff_access_grants"],
+    "careers": ["careers_positions", "careers_applications", "careers_settings"],
+    "ai_counselor": ["ai_leads", "ai_conversations", "ai_lead_events", "ai_followups", "ai_agent_settings", "ai_offer_cache", "ai_security_audit"],
+    "site_media": ["site_settings", "media_deletion_log", "storage_audit_log"]
+  },
+  "key_status_enums": {
+    "payments.status": ["INITIATED", "PENDING", "pending", "VERIFYING", "ABANDONED", "FAILED", "PAID", "captured", "refunded"],
+    "payments.settlement_status": ["settled", "in_progress", null],
+    "payment_proofs.status": ["submitted", "reupload_requested", "accepted", "rejected"],
+    "course_enrollments.status": ["pending", "seat_booked", "partially_paid", "fully_paid", "cancelled"],
+    "enrollments.status": ["active", "completed", "cancelled"],
+    "courses.status": ["draft", "published", "closed"],
+    "webinars.status": ["upcoming", "live", "completed"],
+    "webinars.registration_status": ["OPEN", "CLOSED", "DISABLED", "DRAFT"],
+    "leads.status": ["New", "Contacted", "Demo Booked", "Demo Attended", "Negotiation", "Admitted", "Lost"],
+    "leads.temperature": ["Interested", "Warm", "Cold", "Junk"],
+    "quiz_attempts.status": ["IN_PROGRESS", "SUBMITTED", "AUTO_SUBMITTED", "EXPIRED", "ABANDONED"],
+    "sms_templates.status": ["draft", "pending", "approved", "active", "inactive"],
+    "sms_logs.status": ["QUEUED", "SENT", "FAILED", "DELIVERED", "UNKNOWN"],
+    "admin_users.status": ["active", "disabled"]
+  },
+  "aiva_new_tables": {
+    "migration": "supabase/migrations/2026-07-11-aiva-foundation.sql",
+    "tables": [
+      "business_events",
+      "aiva_codebase_snapshots",
+      "aiva_recommendations",
+      "aiva_action_requests",
+      "aiva_action_approvals",
+      "aiva_action_runs",
+      "aiva_audit_log",
+      "aiva_system_health_checks"
+    ],
+    "additive_only": true,
+    "touches_existing_tables": false
+  }
+}

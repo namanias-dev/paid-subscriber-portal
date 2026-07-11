@@ -1,0 +1,55 @@
+{
+  "note": "Maps each AIVA domain agent to the real tables, source-of-truth functions, and allowlisted (read-only in v1) tools it may use.",
+  "agents": {
+    "revenue": {
+      "tables": ["payments", "payment_proofs", "course_enrollments", "payment_receipts", "payment_action_log"],
+      "functions": ["isPaidStatus", "dedupePaidRows", "dedupedPaidTotal", "buildPaymentGroups", "deriveEnrollment", "isActiveEnrollment", "installmentStatus"],
+      "tools": ["get_revenue_summary", "get_outstanding_installments", "get_payment_proof_queue", "get_abandoned_checkouts", "get_paid_without_access", "get_ceo_daily_brief"]
+    },
+    "admissions": {
+      "tables": ["leads", "lead_activities", "webinar_registrations", "buyers"],
+      "functions": [],
+      "tools": ["get_hot_leads", "get_student_journey", "create_counselor_brief"]
+    },
+    "marketing": {
+      "tables": ["analytics_events", "sms_logs", "sms_templates", "sms_opt_outs", "courses", "webinars"],
+      "functions": [],
+      "tools": ["get_active_offers", "get_campaign_performance", "prepare_sms_campaign", "preview_sms_campaign"]
+    },
+    "student_success": {
+      "tables": ["buyers", "course_enrollments", "quiz_attempts", "lecture_watch_progress", "class_hub_views", "access_logs"],
+      "functions": ["deriveEnrollment"],
+      "tools": ["get_student_journey", "create_staff_call_tasks"]
+    },
+    "content": {
+      "tables": ["ca_articles", "resources", "quizzes", "ca_events", "resource_events"],
+      "functions": [],
+      "tools": []
+    },
+    "batch_launch": {
+      "tables": ["courses", "webinars"],
+      "functions": [],
+      "tools": ["duplicate_course_as_draft", "duplicate_webinar_as_draft", "prepare_batch_launch"]
+    },
+    "operations": {
+      "tables": ["sms_logs", "payment_proofs", "webinars", "content_items", "system_health_checks"],
+      "functions": [],
+      "tools": []
+    },
+    "analytics": {
+      "tables": ["analytics_events", "analytics_daily", "payments", "meta_capi_log"],
+      "functions": ["getAnalyticsOverview (pattern)", "getCeoOverview (pattern)"],
+      "tools": ["get_revenue_summary", "get_campaign_performance"]
+    },
+    "security": {
+      "tables": ["ai_security_audit", "aiva_audit_log", "storage_audit_log", "payment_action_log", "webinar_audit_log", "admin_users"],
+      "functions": ["isSuperAdmin", "resolvePermissions"],
+      "tools": []
+    },
+    "codebase_intelligence": {
+      "tables": ["aiva_codebase_snapshots"],
+      "artifacts": ["docs/aiva/*"],
+      "tools": []
+    }
+  }
+}

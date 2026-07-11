@@ -1,0 +1,23 @@
+{
+  "note": "Risk classification for every AIVA action. In the first release ALL amber/red actions are disabled behind feature flags; only green (read/draft) actions are available, and even those never mutate business data in read-only mode.",
+  "green_automatic": [
+    "Read metrics", "Generate summaries", "Score leads (in-memory)", "Recommend offers", "Create internal drafts", "Detect anomalies", "Update internal agent memory (when AIVA_LEARNING_ENABLED)"
+  ],
+  "amber_one_tap_approval": [
+    "Send installment reminder", "Send an SMS campaign", "Schedule a campaign", "Create a payment retry link", "Publish a webinar", "Publish a course", "Bulk-create counselor tasks", "Change a campaign audience"
+  ],
+  "red_explicit_confirmation": [
+    "Revoke/suspend access", "Change price", "Issue refund", "Mark payment paid", "Delete records", "Change enrollment status", "Bulk edit installment plans", "Send a very large campaign", "Change payment/bank configuration", "Export sensitive data"
+  ],
+  "v1_disabled_by_flags": {
+    "AIVA_READ_ONLY": true,
+    "AIVA_CAMPAIGNS_ENABLED": false,
+    "AIVA_INSTALLMENT_REMINDERS_ENABLED": false,
+    "AIVA_WEBSITE_RECOMMENDATIONS_ENABLED": false,
+    "AIVA_AUTO_GREEN_ACTIONS_ENABLED": false
+  },
+  "action_request_requirements": [
+    "What will happen", "Why", "Affected users", "Estimated revenue impact", "Risks", "Exclusions", "Preview", "Rollback", "Approval expiration", "Idempotency key"
+  ],
+  "server_side_enforcement": "Every action tool checks flags + risk + Super Admin server-side before any mutation. In v1 the execute path is a no-op that records an audit entry and returns DISABLED."
+}

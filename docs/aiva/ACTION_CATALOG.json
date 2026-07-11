@@ -1,0 +1,33 @@
+{
+  "note": "Allowlisted tools. In v1 every tool is either read-only (implemented) or draft-only (metadata registered, execution DISABLED behind flags). No arbitrary SQL, no direct payment/access mutation, no bulk send.",
+  "tools": [
+    { "name": "get_ceo_daily_brief", "risk": "green", "readonly": true, "implemented": true, "dry_run": true },
+    { "name": "get_revenue_summary", "risk": "green", "readonly": true, "implemented": true },
+    { "name": "get_outstanding_installments", "risk": "green", "readonly": true, "implemented": true },
+    { "name": "get_payment_proof_queue", "risk": "green", "readonly": true, "implemented": true },
+    { "name": "get_abandoned_checkouts", "risk": "green", "readonly": true, "implemented": true },
+    { "name": "get_paid_without_access", "risk": "green", "readonly": true, "implemented": true },
+    { "name": "get_active_offers", "risk": "green", "readonly": true, "implemented": true },
+    { "name": "get_hot_leads", "risk": "green", "readonly": true, "implemented": true },
+    { "name": "get_student_journey", "risk": "green", "readonly": true, "implemented": true },
+    { "name": "get_campaign_performance", "risk": "green", "readonly": true, "implemented": true },
+    { "name": "prepare_sms_campaign", "risk": "amber", "readonly": false, "implemented": false, "flag": "AIVA_CAMPAIGNS_ENABLED" },
+    { "name": "preview_sms_campaign", "risk": "green", "readonly": true, "implemented": false, "flag": "AIVA_CAMPAIGNS_ENABLED" },
+    { "name": "approve_sms_campaign", "risk": "amber", "readonly": false, "implemented": false, "flag": "AIVA_CAMPAIGNS_ENABLED" },
+    { "name": "create_staff_call_tasks", "risk": "amber", "readonly": false, "implemented": false },
+    { "name": "duplicate_course_as_draft", "risk": "amber", "readonly": false, "implemented": false },
+    { "name": "duplicate_webinar_as_draft", "risk": "amber", "readonly": false, "implemented": false },
+    { "name": "prepare_batch_launch", "risk": "amber", "readonly": false, "implemented": false },
+    { "name": "request_course_publish", "risk": "amber", "readonly": false, "implemented": false },
+    { "name": "request_webinar_publish", "risk": "amber", "readonly": false, "implemented": false },
+    { "name": "create_counselor_brief", "risk": "green", "readonly": true, "implemented": false },
+    { "name": "create_payment_retry_link", "risk": "amber", "readonly": false, "implemented": false, "flag": "AIVA_INSTALLMENT_REMINDERS_ENABLED" },
+    { "name": "schedule_followup", "risk": "amber", "readonly": false, "implemented": false },
+    { "name": "cancel_followup", "risk": "amber", "readonly": false, "implemented": false },
+    { "name": "mark_lead_contacted", "risk": "amber", "readonly": false, "implemented": false },
+    { "name": "record_agent_feedback", "risk": "green", "readonly": false, "implemented": false, "flag": "AIVA_LEARNING_ENABLED" }
+  ],
+  "forbidden_tools": [
+    "Arbitrary SQL", "Direct payment-status mutation", "Direct refund", "Direct proof approval by model", "Secret retrieval", "Login-code retrieval", "Database deletion", "Unbounded bulk messaging", "Production shell access"
+  ]
+}

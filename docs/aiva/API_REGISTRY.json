@@ -1,0 +1,65 @@
+{
+  "note": "Portal API chokepoints AIVA must know about (never mutate in v1). AIVA's own APIs are read-only and live under aiva/app/api.",
+  "portal_chokepoints": [
+    {
+      "route": "app/api/v1/bank/payment/route.ts",
+      "domain": "payments",
+      "purpose": "ICICI Eazypay return URL (GET+POST); verifies signature; updatePaymentByReference + finalizeCoursePaymentByReference",
+      "auth": "signature verification (verifyResponseSignature)",
+      "risk": "critical",
+      "aiva_access": "none (do not touch)"
+    },
+    {
+      "route": "app/api/v1/enroll/create-payment/route.ts",
+      "domain": "payments",
+      "purpose": "Course enrollment checkout (seat/EMI/full); planCourseEnrollment + addCourseEnrollment + createPayment",
+      "risk": "critical",
+      "aiva_access": "none"
+    },
+    {
+      "route": "app/api/v1/enroll/pay/route.ts",
+      "domain": "payments",
+      "purpose": "Logged-in installment/full pay for existing enrollment",
+      "risk": "critical",
+      "aiva_access": "none"
+    },
+    {
+      "route": "app/api/webhook/razorpay/route.ts",
+      "domain": "payments",
+      "purpose": "Legacy Razorpay payment.captured -> students table",
+      "risk": "critical",
+      "aiva_access": "none"
+    },
+    {
+      "route": "lib/analytics/server.ts::recordPaymentPaid",
+      "domain": "payments",
+      "purpose": "Single verified-PAID milestone (Meta Purchase + SMS + supersede siblings)",
+      "risk": "critical",
+      "aiva_access": "read pattern only; optional emit hook behind AIVA_EMIT_EVENTS"
+    },
+    {
+      "route": "app/api/admin/sms/send/route.ts",
+      "domain": "sms",
+      "purpose": "Manual/bulk SMS send (super admin)",
+      "risk": "amber/red",
+      "aiva_access": "none in v1 (campaigns disabled)"
+    },
+    {
+      "route": "app/api/cron/*",
+      "domain": "ops",
+      "purpose": "verify-payments, analytics-rollup, sms-dispatch, media-purge, ping",
+      "auth": "CRON_SECRET",
+      "aiva_access": "read health only"
+    }
+  ],
+  "aiva_apis": [
+    { "route": "aiva/app/api/auth/login", "method": "POST", "purpose": "Super-admin login against shared admin_users", "risk": "green", "readonly": true },
+    { "route": "aiva/app/api/auth/logout", "method": "POST", "purpose": "Clear aiva_session", "risk": "green" },
+    { "route": "aiva/app/api/brief", "method": "GET", "purpose": "CEO daily brief (read-only)", "risk": "green", "readonly": true },
+    { "route": "aiva/app/api/revenue", "method": "GET", "purpose": "Revenue Control Tower read model", "risk": "green", "readonly": true },
+    { "route": "aiva/app/api/agents/[domain]", "method": "GET", "purpose": "Per-agent read model + recommendations (drafts only)", "risk": "green", "readonly": true },
+    { "route": "aiva/app/api/pulses", "method": "GET", "purpose": "Real recent business events for Neural Core", "risk": "green", "readonly": true },
+    { "route": "aiva/app/api/health", "method": "GET", "purpose": "System health checks", "risk": "green", "readonly": true },
+    { "route": "aiva/app/api/audit", "method": "GET", "purpose": "AIVA audit log read", "risk": "green", "readonly": true }
+  ]
+}

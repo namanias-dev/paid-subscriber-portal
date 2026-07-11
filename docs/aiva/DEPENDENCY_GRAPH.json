@@ -1,0 +1,15 @@
+{
+  "note": "Reuse graph between AIVA (aiva/) and the portal (repo root). AIVA only depends on the pure island; the portal has ZERO dependency on AIVA.",
+  "pure_island_reused_by_aiva": {
+    "lib/types.ts": { "imports": [], "purity": "type-only" },
+    "lib/dates.ts": { "imports": [], "purity": "pure" },
+    "lib/permissions.ts": { "imports": [], "purity": "pure" },
+    "lib/paymentsAgg.ts": { "imports": ["lib/types.ts"], "purity": "pure" },
+    "lib/paymentGroups.ts": { "imports": ["lib/types.ts", "lib/paymentsAgg.ts"], "purity": "pure" },
+    "lib/installments.ts": { "imports": ["lib/dates.ts", "lib/types.ts"], "purity": "pure" }
+  },
+  "aiva_alias": { "@portal/*": "repo root", "@/*": "aiva/*" },
+  "not_reused_by_aiva": ["lib/dataProvider.ts (heavy)", "lib/supabase.ts (aiva has own)", "lib/analytics/* (aiva has own read layer)", "lib/sms/* (no send in v1)", "components/* (portal UI)"],
+  "portal_depends_on_aiva": false,
+  "build_isolation": "Separate Vercel projects; AIVA root dir = aiva. Ignored Build Step filters cross-app rebuilds (see DEPLOYMENT.md)."
+}

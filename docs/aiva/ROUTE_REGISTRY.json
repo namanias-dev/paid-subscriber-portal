@@ -1,0 +1,41 @@
+{
+  "portal": {
+    "app_root": ".",
+    "route_groups": {
+      "(site)": {
+        "purpose": "Public marketing + buyer portal",
+        "key_routes": ["/", "/courses", "/courses/[slug]", "/courses/[slug]/enroll", "/webinars", "/webinars/[slug]", "/quizzes/*", "/current-affairs/*", "/resources/*", "/careers/*", "/login", "/payment/status", "/portal/*", "/lecture/[id]"]
+      },
+      "admin": {
+        "purpose": "Staff CMS/ops (RBAC via AdminShell + per-page/API guards). ~59 pages.",
+        "auth": "naman_admin_token cookie; page shell checks /api/admin/me",
+        "key_routes": ["/admin", "/admin/analytics", "/admin/payments", "/admin/enrollments", "/admin/courses", "/admin/webinars", "/admin/leads", "/admin/students", "/admin/communications/sms", "/admin/staff", "/admin/settings", "/admin/ai-agent", "/admin/access-risk", "/admin/current-affairs", "/admin/resources", "/admin/careers"]
+      },
+      "dashboard": { "purpose": "Authenticated student LMS", "auth": "naman_student_token via middleware.ts" }
+    },
+    "middleware_protected": ["/dashboard/:path*", "/portal/:path*"],
+    "note": "/admin is NOT middleware-protected; guarded at page + API layer."
+  },
+  "aiva": {
+    "app_root": "aiva",
+    "domain": "aiva.namanias.com",
+    "auth": "aiva_session cookie (Super Admin only)",
+    "pages": [
+      "/login",
+      "/aiva",
+      "/aiva/revenue",
+      "/aiva/admissions",
+      "/aiva/marketing",
+      "/aiva/student-success",
+      "/aiva/content",
+      "/aiva/batch-launch",
+      "/aiva/analytics",
+      "/aiva/security",
+      "/aiva/approvals",
+      "/aiva/actions",
+      "/aiva/learning",
+      "/aiva/codebase-intelligence",
+      "/aiva/system-health"
+    ]
+  }
+}

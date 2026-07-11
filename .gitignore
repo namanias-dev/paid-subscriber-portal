@@ -3,6 +3,14 @@
 /.pnp
 .pnp.js
 
+# AIVA app (separate Next.js app — see aiva/)
+/aiva/node_modules
+/aiva/.next
+/aiva/out
+/aiva/.vercel
+/aiva/*.tsbuildinfo
+/aiva/next-env.d.ts
+
 # next.js
 /.next/
 /out/

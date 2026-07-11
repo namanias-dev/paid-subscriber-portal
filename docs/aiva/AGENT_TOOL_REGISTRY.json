@@ -1,0 +1,16 @@
+{
+  "note": "Which allowlisted tools each agent may invoke. Maps to ACTION_CATALOG.json. Runtime enforcement lives in aiva/lib/tools/registry.ts.",
+  "agents": {
+    "ceo_orchestrator": ["get_ceo_daily_brief", "get_revenue_summary", "get_hot_leads", "get_campaign_performance"],
+    "revenue": ["get_revenue_summary", "get_outstanding_installments", "get_payment_proof_queue", "get_abandoned_checkouts", "get_paid_without_access", "create_payment_retry_link", "create_staff_call_tasks", "prepare_sms_campaign"],
+    "admissions": ["get_hot_leads", "get_student_journey", "create_counselor_brief", "mark_lead_contacted", "schedule_followup"],
+    "marketing": ["get_active_offers", "get_campaign_performance", "prepare_sms_campaign", "preview_sms_campaign", "approve_sms_campaign"],
+    "student_success": ["get_student_journey", "create_staff_call_tasks", "schedule_followup"],
+    "content": ["get_active_offers"],
+    "batch_launch": ["duplicate_course_as_draft", "duplicate_webinar_as_draft", "prepare_batch_launch", "request_course_publish", "request_webinar_publish"],
+    "operations": ["get_payment_proof_queue"],
+    "analytics": ["get_revenue_summary", "get_campaign_performance"],
+    "security": [],
+    "codebase_intelligence": []
+  }
+}

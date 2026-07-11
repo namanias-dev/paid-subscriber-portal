@@ -1,0 +1,58 @@
+{
+  "domain": "events",
+  "canonical_table": "business_events (AIVA additive, migration 2026-07-11-aiva-foundation.sql)",
+  "existing_pipeline": {
+    "table": "analytics_events",
+    "writer": "writeEvent(input) / track(input) in lib/analytics/server.ts",
+    "dedupe": "analytics_events.dedupe_key partial unique index (uq_ae_dedupe)",
+    "canonical_event_names_file": "lib/analytics/events.ts",
+    "note": "AIVA reuses analytics_events + payments + course_enrollments + payment_proofs as its live event/projection source in v1. business_events is written by the AIVA emitter (idempotent) and by optional portal hooks behind AIVA_EMIT_EVENTS (default off)."
+  },
+  "business_events_schema": {
+    "id": "uuid",
+    "event_type": "text (see catalog below)",
+    "actor_type": "text (visitor|lead|student|staff|admin|system|agent)",
+    "actor_id": "text",
+    "anonymous_session_id": "text",
+    "student_id": "text",
+    "lead_id": "text",
+    "enrollment_id": "text",
+    "payment_id": "text",
+    "course_id": "text",
+    "webinar_id": "text",
+    "campaign_id": "text",
+    "source": "text",
+    "payload_json": "jsonb (PII-masked)",
+    "occurred_at": "timestamptz",
+    "idempotency_key": "text (unique)",
+    "schema_version": "int"
+  },
+  "catalog": [
+    "visitor.session_started", "visitor.page_viewed", "visitor.offer_viewed", "visitor.cta_clicked",
+    "lead.created", "lead.updated", "lead.consented", "lead.opted_out",
+    "quiz.started", "quiz.completed",
+    "webinar.viewed", "webinar.registered", "webinar.attended",
+    "course.viewed", "course.checkout_started",
+    "payment.checkout_opened", "payment.pending", "payment.proof_uploaded", "payment.paid", "payment.failed", "payment.abandoned", "payment.expired",
+    "installment.created", "installment.due", "installment.overdue", "installment.paid",
+    "enrollment.created", "enrollment.activated", "enrollment.suspended", "enrollment.completed",
+    "class.joined", "class.missed", "recording.viewed", "recording.completed",
+    "admin.course_created", "admin.course_duplicated", "admin.course_published", "admin.webinar_created", "admin.webinar_duplicated", "admin.payment_recorded", "admin.proof_approved", "admin.access_granted", "admin.access_revoked",
+    "campaign.drafted", "campaign.approved", "campaign.sent", "campaign.converted",
+    "agent.recommendation_created", "agent.recommendation_approved", "agent.recommendation_rejected", "agent.action_executed"
+  ],
+  "privacy_rules": [
+    "No raw passwords, login codes, full payment proofs, gateway secrets, unnecessary PII.",
+    "Mask phone/email in non-privileged views.",
+    "Version event schemas (schema_version).",
+    "Deduplicate by idempotency_key."
+  ],
+  "projection_from_existing": {
+    "payment.paid": "payments where status in (PAID,captured), occurred_at = created_at",
+    "payment.abandoned": "payments where status = ABANDONED",
+    "payment.proof_uploaded": "payment_proofs where status in (submitted, reupload_requested)",
+    "installment.overdue": "course_enrollments schedule lines via deriveEnrollment().hasOverdue",
+    "webinar.registered": "webinar_registrations",
+    "visitor/lead/quiz": "analytics_events (event_name mapping)"
+  }
+}

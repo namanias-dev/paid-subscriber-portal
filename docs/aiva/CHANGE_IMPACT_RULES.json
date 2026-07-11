@@ -1,0 +1,26 @@
+{
+  "note": "Domain->file mapping used by scripts/aiva-sync-codebase-intelligence.ts to determine which registries to re-validate on a Git diff, and the CI failure conditions from the AIVA spec section 6.2.",
+  "domain_paths": {
+    "revenue": ["lib/paymentsAgg.ts", "lib/paymentGroups.ts", "lib/installments.ts", "lib/paymentProofs.ts", "app/api/v1/bank/**", "app/api/v1/enroll/**", "app/api/admin/payments/**"],
+    "enrollments": ["lib/installments.ts", "app/api/admin/enrollments/**", "app/api/v1/enroll/**"],
+    "auth_rbac": ["lib/permissions.ts", "lib/session.ts", "lib/auth.ts", "lib/adminGuard.ts", "middleware.ts", "app/api/admin/login/**", "app/api/auth/**"],
+    "events_analytics": ["lib/analytics/**", "app/api/track/**", "supabase/migrations/2026-analytics-attribution.sql"],
+    "sms": ["lib/sms/**", "app/api/admin/sms/**", "app/api/cron/sms-dispatch/**"],
+    "courses_webinars": ["lib/dataProvider.ts", "app/api/admin/courses/**", "app/api/admin/webinars/**"],
+    "db_schema": ["supabase/schema.sql", "supabase/migrations/**"],
+    "deployment": ["vercel.json", "next.config.js", "aiva/vercel.json", "aiva/next.config.js"]
+  },
+  "ci_fail_conditions": [
+    "a sensitive API changed without registry update",
+    "a tool contract is stale",
+    "an approval rule is bypassed",
+    "a payment/enrollment state is undocumented",
+    "an event emitter was removed unexpectedly",
+    "a protected route loses authorization",
+    "a migration breaks an agent query"
+  ],
+  "snapshot_table": {
+    "name": "aiva_codebase_snapshots",
+    "columns": ["commit_sha", "indexed_at", "affected_domains", "manifest_hash", "status", "validation_results"]
+  }
+}

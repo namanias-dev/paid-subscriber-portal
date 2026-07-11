@@ -1,0 +1,40 @@
+{
+  "name": "namanias-aiva",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AIVA — Aman's Intelligent Virtual Assistant. Private CEO Command Center for Naman Sharma IAS Academy. Separate Next.js app / separate Vercel project, same GitHub repo.",
+  "scripts": {
+    "dev": "next dev -p 3100",
+    "build": "next build",
+    "start": "next start -p 3100",
+    "lint": "next lint",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@react-three/drei": "^9.114.3",
+    "@react-three/fiber": "^8.17.10",
+    "@supabase/supabase-js": "^2.45.4",
+    "bcryptjs": "^2.4.3",
+    "framer-motion": "^12.40.0",
+    "jose": "^5.9.6",
+    "next": "14.2.35",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "recharts": "^2.13.3",
+    "three": "^0.169.0"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "@types/node": "^20.16.11",
+    "@types/react": "^18.3.11",
+    "@types/react-dom": "^18.3.0",
+    "@types/three": "^0.169.0",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.4.47",
+    "tailwindcss": "^3.4.13",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.8"
+  }
+}

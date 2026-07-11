@@ -1,0 +1,16 @@
+{
+  "name": "AIVA — Aman's Intelligent Virtual Assistant",
+  "short_name": "AIVA",
+  "description": "Private CEO Command Center for Naman Sharma IAS Academy.",
+  "start_url": "/aiva",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#050d24",
+  "theme_color": "#0b1f4d",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
