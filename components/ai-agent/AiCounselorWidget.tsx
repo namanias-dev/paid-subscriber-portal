@@ -27,6 +27,46 @@ const AiChatSheet = dynamic(() => import("./AiChatSheet"), { ssr: false });
 
 const { minDelayMs, maxDelayMs, scrollFraction, dismissSuppressMs, storageKeys } = TRIGGER_POLICY;
 
+/**
+ * Launcher glyph selection. Flip this single constant to swap the premium mark:
+ *  - "compass"  → elegant compass (guidance / direction)  [DEFAULT]
+ *  - "northstar" → four-point north-star (aspiration / clarity)
+ * Purely visual; no behaviour changes either way.
+ */
+const LAUNCHER_VARIANT: "compass" | "northstar" = "compass";
+
+/** Deep-navy tone derived from the --primary token (no new palette colors). */
+const NAVY_DEEP = "color-mix(in srgb, var(--primary) 55%, #000)";
+
+/** Minimal, gold-on-navy brand mark rendered inside the launcher badge. */
+function LauncherGlyph() {
+  if (LAUNCHER_VARIANT === "northstar") {
+    return (
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" aria-hidden="true" style={{ color: "var(--gold)" }}>
+        <path
+          d="M12 3 L13.9 10.1 L21 12 L13.9 13.9 L12 21 L10.1 13.9 L3 12 L10.1 10.1 Z"
+          fill="currentColor"
+        />
+        <path d="M18.4 4.4 L19 6.4 L21 7 L19 7.6 L18.4 9.6 L17.8 7.6 L15.8 7 L17.8 6.4 Z" fill="currentColor" opacity="0.85" />
+      </svg>
+    );
+  }
+  // Default: compass.
+  return (
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" aria-hidden="true" style={{ color: "var(--gold)" }}>
+      <circle cx="12" cy="12" r="8.4" stroke="currentColor" strokeWidth="1.3" />
+      <path
+        d="M12 3.1v1.7M12 19.2v1.7M20.9 12h-1.7M4.8 12H3.1"
+        stroke="currentColor"
+        strokeWidth="1.3"
+        strokeLinecap="round"
+      />
+      <path d="M15.6 8.4 11.1 11.1 8.4 15.6 12.9 12.9 Z" fill="currentColor" />
+      <circle cx="12" cy="12" r="1.05" fill={NAVY_DEEP} />
+    </svg>
+  );
+}
+
 function safeLocalGet(key: string): string | null {
   try {
     return typeof window !== "undefined" ? window.localStorage.getItem(key) : null;
@@ -114,17 +154,25 @@ export default function AiCounselorWidget({ waLink }: { waLink: string | null })
           type="button"
           onClick={openSheet}
           aria-label="Chat with a Naman IAS counsellor"
-          className="fixed right-4 z-40 flex items-center gap-2 rounded-full py-2.5 pl-3 pr-4 text-sm font-semibold text-white shadow-lg transition hover:scale-[1.03]"
+          className="group fixed right-4 z-40 flex items-center gap-2.5 rounded-full py-2 pl-2 pr-2.5 text-sm font-semibold text-white outline-none transition-[transform,box-shadow] duration-200 ease-out shadow-[0_4px_10px_-2px_rgba(0,18,54,0.35),0_12px_30px_-8px_rgba(0,40,120,0.5)] focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[var(--gold)] focus-visible:ring-offset-transparent motion-safe:hover:-translate-y-0.5 motion-safe:hover:scale-[1.03] motion-safe:active:scale-95 motion-safe:hover:shadow-[0_8px_16px_-2px_rgba(0,18,54,0.45),0_20px_44px_-8px_rgba(0,50,140,0.6),0_0_22px_-2px_rgba(201,162,39,0.45)] sm:pl-2.5 sm:pr-4"
           style={{
             bottom: "5rem",
-            background: "var(--primary)",
+            background: "linear-gradient(145deg, var(--primary) 0%, color-mix(in srgb, var(--primary) 55%, #000) 100%)",
+            border: "1px solid color-mix(in srgb, var(--gold) 70%, transparent)",
             marginBottom: "env(safe-area-inset-bottom)",
           }}
         >
-          <span className="flex h-7 w-7 items-center justify-center rounded-full text-base" style={{ background: "var(--gold, #d4af37)", color: "var(--primary)" }}>
-            🎓
+          <span
+            className="flex h-9 w-9 items-center justify-center rounded-full"
+            style={{
+              background: "color-mix(in srgb, var(--primary) 55%, #000)",
+              border: "1px solid color-mix(in srgb, var(--gold) 55%, transparent)",
+              boxShadow: "inset 0 1px 2px rgba(255,255,255,0.12)",
+            }}
+          >
+            <LauncherGlyph />
           </span>
-          <span className="hidden sm:inline">Ask a counsellor</span>
+          <span className="hidden pr-0.5 sm:inline">Ask a counsellor</span>
         </button>
       )}
 
