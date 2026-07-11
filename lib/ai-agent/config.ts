@@ -56,3 +56,45 @@ export function getAiAgentConfig(): AiAgentConfig {
     requireMarketingConsent: readBool("AI_AGENT_REQUIRE_MARKETING_CONSENT", true),
   };
 }
+
+/**
+ * PHASE 5 (OPTIONAL) — local-model + worker configuration.
+ *
+ * ALL of these are UNSET in production. When unset, every Phase-5 feature is a
+ * clean no-op: the Ollama provider reports itself unavailable (so selection
+ * falls back to guided_flow) and the worker HMAC endpoints return 404. NOTHING
+ * here should ever be configured in Vercel Production — the localhost Ollama URL
+ * is unreachable from serverless anyway, and the guarded fallback keeps the live
+ * site on the deterministic guided flow regardless.
+ */
+export interface AiAgentLlmConfig {
+  /** Base URL of a LOCAL Ollama server, e.g. "http://127.0.0.1:11434". Unset in prod. */
+  ollamaBaseUrl: string | undefined;
+  /** Ollama model tag used to POLISH wording, e.g. "llama3.2". */
+  ollamaModel: string;
+  /** Hard timeout (ms) for any single Ollama call. Never exceeds this. */
+  ollamaTimeoutMs: number;
+}
+
+export function getAiAgentLlmConfig(): AiAgentLlmConfig {
+  return {
+    ollamaBaseUrl: readEnv("OLLAMA_BASE_URL"),
+    ollamaModel: readEnv("OLLAMA_MODEL") || "llama3.2",
+    // Clamp to a sane ceiling so a misconfigured value can never hang a request.
+    ollamaTimeoutMs: Math.min(readInt("OLLAMA_TIMEOUT_MS", 8000), 8000),
+  };
+}
+
+export interface AiAgentWorkerConfig {
+  /** Shared secret for HMAC-signing worker <-> portal requests. Unset in prod. */
+  hmacSecret: string | undefined;
+  /** Max clock skew (ms) tolerated on a signed request's timestamp. */
+  hmacMaxSkewMs: number;
+}
+
+export function getAiAgentWorkerConfig(): AiAgentWorkerConfig {
+  return {
+    hmacSecret: readEnv("AI_AGENT_HMAC_SECRET"),
+    hmacMaxSkewMs: readInt("AI_AGENT_HMAC_MAX_SKEW_MS", 300_000),
+  };
+}
