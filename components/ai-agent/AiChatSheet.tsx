@@ -263,7 +263,7 @@ export default function AiChatSheet({
             </div>
             <div className="leading-tight text-white">
               <p className="text-sm font-bold">Naman IAS Counsellor</p>
-              <p className="text-[11px] opacity-80">Guidance, not spam</p>
+              <p className="text-[11px] opacity-80">Personalised UPSC mentorship</p>
             </div>
           </div>
           <button type="button" onClick={onClose} aria-label="Close chat" className="rounded-full p-1.5 text-white/90 hover:bg-white/10">
