@@ -135,7 +135,7 @@ export default function LeadCaptureForm({
         return;
       }
       if (!res.ok || !json?.ok) {
-        setError(json?.error === "consent_required" ? "Consent is required." : "Couldn't save that — please try again.");
+        setError(json?.error === "consent_required" ? "I need your permission first." : "Couldn't save that — please try again.");
         setBusy(false);
         return;
       }
@@ -148,15 +148,15 @@ export default function LeadCaptureForm({
         recovery: (json?.recovery as PaymentRecoveryCardData | undefined) ?? null,
         message:
           typeof json?.paid === "boolean" && json.paid
-            ? "Our records show this is already sorted — nothing pending on your side."
+            ? "Our records show this is already done — nothing pending from your side."
             : json?.already
               ? "You're already registered for this — see you there."
               : intent === "payment_recovery" && json?.none
-                ? "I couldn't find a pending enrolment for that number. If that seems off, a counsellor can look into it with you."
+                ? "I couldn't find a pending enrolment for that number. If that seems wrong, a counsellor can check it with you."
                 : null,
       });
     } catch {
-      setError("Network error — please try again.");
+      setError("Network problem — please try again.");
       setBusy(false);
     }
   }
