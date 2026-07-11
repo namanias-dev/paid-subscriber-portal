@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
-import { Activity, Send, Workflow, FileText, ScrollText, BarChart3, Settings as SettingsIcon, RefreshCw, Download, AlertTriangle, CheckCircle2, Power, Braces, Link2, RotateCcw, Users, Search, SlidersHorizontal, Bookmark, Save, Trash2, History, Clock, ChevronDown } from "lucide-react";
+import { Activity, Send, Workflow, FileText, ScrollText, BarChart3, Settings as SettingsIcon, RefreshCw, Download, AlertTriangle, CheckCircle2, Power, Braces, Link2, RotateCcw, Users, Search, SlidersHorizontal, Bookmark, Save, Trash2, History, Clock, ChevronDown, Plus, ShieldCheck } from "lucide-react";
 import { LoadingBlock } from "@/components/admin/ui";
 import { useToast } from "@/components/ui/Toast";
 import TimeframeFilter from "@/components/admin/TimeframeFilter";
@@ -19,7 +19,10 @@ interface TemplateRow {
   id: string; name: string; use_case: string; message_type: string; status: string;
   is_active: boolean; gateway_template_id: string | null; body_template: string; variables: string[];
   trigger_event: string | null; audience_type: string | null;
+  sender_id?: string; route?: string;
   worstCaseChars: number; worstCaseSegments: number; over155: boolean; bodyErrors: string[];
+  /** true = self-serve (staff-added); false = built-in code seed. */
+  custom?: boolean;
 }
 interface RuleRow {
   trigger: string; template_id: string | null; template_name: string | null; template_ready: boolean;
@@ -910,11 +913,32 @@ function AutomationsTab({ canEdit }: { canEdit: boolean }) {
 }
 
 // ============================ TEMPLATES ============================
+// Substitution syntax used by the send pipeline: {token} (lowercase + _). The
+// server re-detects authoritatively on save; this mirrors it for live preview.
+const TPL_VAR_RE = /\{([a-z_]+)\}/g;
+const KNOWN_VARS = new Set(["name", "first_name", "mobile", "login_code", "login_url", "item_name", "item_short", "amount", "payment_status", "webinar_date", "webinar_time", "support_number"]);
+function detectVars(body: string): string[] { return [...new Set([...body.matchAll(TPL_VAR_RE)].map((m) => m[1]))]; }
+function unknownVars(body: string): string[] { return detectVars(body).filter((v) => !KNOWN_VARS.has(v)); }
+
+/** Compliance banner shown wherever staff add / edit templates. */
+function ComplianceNote() {
+  return (
+    <div className="flex gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+      <ShieldCheck size={16} className="mt-0.5 shrink-0" />
+      <p>
+        <b>DLT / DND compliance.</b> This is a regulated SMS system. You may add ONLY templates whose <b>exact approved body</b> is registered against a real <b>DLT Template ID</b>. The body must byte-match the approved DLT registration (wording, spacing, links, punctuation) — otherwise the gateway rejects or garbles the message. No free-text or unapproved content may be sent. Adding a template here never sends anything and never changes opt-out / consent rules.
+      </p>
+    </div>
+  );
+}
+
 function TemplatesTab({ canEdit }: { canEdit: boolean }) {
   const { toast } = useToast();
   const [templates, setTemplates] = useState<TemplateRow[]>([]);
   const [loading, setLoading] = useState(true);
-  const [editing, setEditing] = useState<TemplateRow | null>(null);
+  const [editing, setEditing] = useState<TemplateRow | null>(null);   // built-in (Super Admin) editor
+  const [managing, setManaging] = useState<TemplateRow | null>(null); // self-serve editor (send_sms)
+  const [adding, setAdding] = useState(false);
   const load = useCallback(() => { setLoading(true); fetch("/api/admin/sms/templates").then((r) => r.json()).then((d) => setTemplates(d.ok ? d.templates : [])).finally(() => setLoading(false)); }, []);
   useEffect(() => { load(); }, [load]);
 
@@ -922,29 +946,181 @@ function TemplatesTab({ canEdit }: { canEdit: boolean }) {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap gap-2">
+        <button onClick={() => setAdding(true)} className="btn btn-primary text-sm"><Plus size={15} /> Add template</button>
         <a href="/api/admin/sms/dlt?format=md" className="btn btn-secondary text-sm"><Download size={15} /> Export DLT (Markdown)</a>
         <a href="/api/admin/sms/dlt?format=csv" className="btn btn-secondary text-sm"><Download size={15} /> Export DLT (CSV)</a>
       </div>
+      <ComplianceNote />
       <div className="card overflow-x-auto p-0">
         <table className="w-full min-w-[760px] text-left text-sm">
           <thead><tr className="border-b border-line text-xs uppercase tracking-wide text-muted">
-            <th className="px-4 py-3">Template</th><th className="px-4 py-3">Use</th><th className="px-4 py-3">Status</th><th className="px-4 py-3">DLT ID</th><th className="px-4 py-3">Worst-case</th><th className="px-4 py-3 text-right">Edit</th>
+            <th className="px-4 py-3">Template</th><th className="px-4 py-3">Use</th><th className="px-4 py-3">Status</th><th className="px-4 py-3">DLT ID</th><th className="px-4 py-3">Worst-case</th><th className="px-4 py-3 text-right">Manage</th>
           </tr></thead>
           <tbody>
             {templates.map((t) => (
               <tr key={t.id} className="border-b border-line/60 last:border-0">
-                <td className="px-4 py-3 font-medium text-ink">{t.name}{t.message_type === "promotional" && <span className="pill pill-amber ml-1 text-[10px]">promo</span>}</td>
+                <td className="px-4 py-3 font-medium text-ink">{t.name}{t.message_type === "promotional" && <span className="pill pill-amber ml-1 text-[10px]">promo</span>}{t.custom && <span className="pill pill-blue ml-1 text-[10px]">custom</span>}</td>
                 <td className="px-4 py-3 text-xs">{t.use_case}</td>
                 <td className="px-4 py-3"><span className={`pill text-[10px] ${STATUS_TONE[t.status] || "pill-gray"}`}>{t.status}</span></td>
                 <td className="px-4 py-3 font-mono text-xs">{t.gateway_template_id || <span className="text-amber-700">missing</span>}</td>
                 <td className="px-4 py-3 text-xs">{t.worstCaseChars}c · {t.worstCaseSegments}seg {t.over155 && <span className="text-amber-700">⚠️</span>}</td>
-                <td className="px-4 py-3 text-right"><button onClick={() => setEditing(t)} className="btn btn-secondary text-xs">Open</button></td>
+                <td className="px-4 py-3 text-right">
+                  {t.custom
+                    ? <button onClick={() => setManaging(t)} className="btn btn-secondary text-xs">Edit</button>
+                    : <button onClick={() => setEditing(t)} className="btn btn-secondary text-xs">Open{!canEdit ? " (view)" : ""}</button>}
+                </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+      <p className="text-xs text-muted"><span className="pill pill-blue text-[10px]">custom</span> templates are self-serve — you can edit / deactivate them here. Built-in templates open in the Super-Admin editor and stay code-managed.</p>
+      {adding && <AddTemplateModal onClose={() => setAdding(false)} onSaved={() => { setAdding(false); load(); toast("Template added.", "success"); }} />}
       {editing && <TemplateEditor t={editing} canEdit={canEdit} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load(); toast("Saved.", "success"); }} />}
+      {managing && <ManageTemplateModal t={managing} onClose={() => setManaging(null)} onSaved={(msg) => { setManaging(null); load(); toast(msg || "Saved.", "success"); }} />}
+    </div>
+  );
+}
+
+const USE_CASE_OPTS: { value: string; label: string }[] = [
+  { value: "WEBINAR", label: "Webinar" },
+  { value: "PAYMENT", label: "Payment" },
+  { value: "POST_WEBINAR", label: "Post-webinar" },
+  { value: "ONBOARDING", label: "Onboarding" },
+];
+
+/** Shared editable field set for add / edit self-serve templates. */
+function TemplateFieldSet({
+  name, setName, useCase, setUseCase, messageType, setMessageType, dlt, setDlt, body, setBody, senderId, setSenderId, route, setRoute, active, setActive,
+}: {
+  name: string; setName: (v: string) => void; useCase: string; setUseCase: (v: string) => void;
+  messageType: string; setMessageType: (v: string) => void; dlt: string; setDlt: (v: string) => void;
+  body: string; setBody: (v: string) => void; senderId: string; setSenderId: (v: string) => void;
+  route: string; setRoute: (v: string) => void; active: boolean; setActive: (v: boolean) => void;
+}) {
+  const len = useMemo(() => [...body].length, [body]);
+  const rupee = body.includes("₹");
+  const vars = useMemo(() => detectVars(body), [body]);
+  const unknown = useMemo(() => unknownVars(body), [body]);
+  const dltValid = dlt.trim() === "" || /^\d{6,25}$/.test(dlt.trim());
+
+  return (
+    <div className="space-y-3">
+      <Field label="Template name (internal label — not sent)">
+        <input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Diwali Masterclass Invite" maxLength={120} />
+      </Field>
+      <div className="grid grid-cols-2 gap-2">
+        <Field label="Category"><select className="input" value={useCase} onChange={(e) => setUseCase(e.target.value)}>{USE_CASE_OPTS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select></Field>
+        <Field label="Message type"><select className="input" value={messageType} onChange={(e) => setMessageType(e.target.value)}><option value="service">Service</option><option value="promotional">Promotional</option></select></Field>
+      </div>
+      <Field label="DLT Template ID (required · numeric · unique)">
+        <input className="input font-mono text-sm" value={dlt} onChange={(e) => setDlt(e.target.value)} placeholder="e.g. 1707178358697914131" inputMode="numeric" />
+        {!dltValid && <p className="mt-1 text-xs text-danger">DLT Template ID must be numeric (6–25 digits).</p>}
+      </Field>
+      <Field label="Message body (must byte-match the approved DLT text)">
+        <textarea className="input min-h-[110px] font-mono text-xs" value={body} onChange={(e) => setBody(e.target.value)} placeholder="Paste the exact approved body. Use {first_name}, {login_url}, {login_code}… for variable slots." />
+        <p className={`mt-1 text-xs ${len > 155 ? "text-amber-700" : "text-muted"}`}>{len} chars{len > 155 ? " (> 155 — multi-segment)" : ""}{rupee ? " · ❌ contains ₹ (use Rs)" : ""}</p>
+      </Field>
+      <div className="rounded-xl border border-line bg-surface p-2.5 text-xs">
+        <p className="font-semibold text-ink2">Detected variables</p>
+        {vars.length === 0 ? <p className="mt-1 text-muted">None — this body is fully static.</p> : (
+          <div className="mt-1 flex flex-wrap gap-1.5">
+            {vars.map((v) => <span key={v} className={`pill text-[10px] ${KNOWN_VARS.has(v) ? "pill-green" : "pill-amber"}`}><span className="font-mono">{`{${v}}`}</span></span>)}
+          </div>
+        )}
+        {unknown.length > 0 && <p className="mt-1.5 text-amber-700">Unknown placeholder(s) {unknown.map((u) => `{${u}}`).join(", ")} — nothing fills these, so they render empty and those recipients are skipped (missing-vars) at send time.</p>}
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <Field label="Sender / header ID"><input className="input font-mono text-sm" value={senderId} onChange={(e) => setSenderId(e.target.value)} placeholder="NAMIAS" /></Field>
+        <Field label="Route"><input className="input font-mono text-sm" value={route} onChange={(e) => setRoute(e.target.value)} placeholder="12" /></Field>
+      </div>
+      <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} /> Active (send-ready now — requires a DLT ID and a clean body)</label>
+    </div>
+  );
+}
+
+function AddTemplateModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
+  const { toast } = useToast();
+  const [name, setName] = useState("");
+  const [useCase, setUseCase] = useState("WEBINAR");
+  const [messageType, setMessageType] = useState("service");
+  const [dlt, setDlt] = useState("");
+  const [body, setBody] = useState("");
+  const [senderId, setSenderId] = useState("NAMIAS");
+  const [route, setRoute] = useState("12");
+  const [active, setActive] = useState(true);
+  const [busy, setBusy] = useState(false);
+
+  async function save() {
+    setBusy(true);
+    const r = await fetch("/api/admin/sms/templates/manage", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, use_case: useCase, message_type: messageType, gateway_template_id: dlt, body_template: body, sender_id: senderId, route, is_active: active }),
+    }).then((x) => x.json()).catch(() => null);
+    setBusy(false);
+    if (r?.ok) { if (r.warnings?.length) toast(r.warnings.join(" "), "info"); onSaved(); }
+    else toast(r?.error || "Could not add template", "error");
+  }
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+      <div className="card max-h-[90vh] w-full max-w-xl overflow-y-auto p-5" onClick={(e) => e.stopPropagation()}>
+        <h3 className="text-lg font-bold">Add DLT template</h3>
+        <p className="mt-0.5 text-xs text-muted">Register an approved template so staff can send it — no code change needed.</p>
+        <div className="mt-4"><ComplianceNote /></div>
+        <div className="mt-4">
+          <TemplateFieldSet name={name} setName={setName} useCase={useCase} setUseCase={setUseCase} messageType={messageType} setMessageType={setMessageType} dlt={dlt} setDlt={setDlt} body={body} setBody={setBody} senderId={senderId} setSenderId={setSenderId} route={route} setRoute={setRoute} active={active} setActive={setActive} />
+        </div>
+        <div className="mt-5 flex justify-end gap-2">
+          <button onClick={onClose} className="btn btn-secondary">Cancel</button>
+          <button onClick={save} disabled={busy || !name.trim() || !dlt.trim() || !body.trim()} className="btn btn-primary">{busy ? "…" : "Add template"}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ManageTemplateModal({ t, onClose, onSaved }: { t: TemplateRow; onClose: () => void; onSaved: (msg?: string) => void }) {
+  const { toast } = useToast();
+  const [name, setName] = useState(t.name);
+  const [useCase, setUseCase] = useState(t.use_case);
+  const [messageType, setMessageType] = useState(t.message_type);
+  const [dlt, setDlt] = useState(t.gateway_template_id || "");
+  const [body, setBody] = useState(t.body_template);
+  const [senderId, setSenderId] = useState(t.sender_id || "NAMIAS");
+  const [route, setRoute] = useState(t.route || "12");
+  const [active, setActive] = useState(t.is_active);
+  const [busy, setBusy] = useState(false);
+
+  async function call(payload: Record<string, unknown>, successMsg: string) {
+    setBusy(true);
+    const r = await fetch("/api/admin/sms/templates/manage", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: t.id, ...payload }) }).then((x) => x.json()).catch(() => null);
+    setBusy(false);
+    if (r?.ok) { if (r.warnings?.length) toast(r.warnings.join(" "), "info"); onSaved(successMsg); }
+    else toast(r?.error || "Save failed", "error");
+  }
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+      <div className="card max-h-[90vh] w-full max-w-xl overflow-y-auto p-5" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center gap-2">
+          <h3 className="text-lg font-bold">Edit template</h3>
+          <span className="pill pill-blue text-[10px]">custom</span>
+          <span className={`pill text-[10px] ${STATUS_TONE[t.status] || "pill-gray"}`}>{t.status}</span>
+        </div>
+        <p className="mt-0.5 text-xs text-muted">Self-serve template. To retire it, deactivate (kept for history) — deletion is intentionally not offered so past send logs stay intact.</p>
+        <div className="mt-4"><ComplianceNote /></div>
+        <div className="mt-4">
+          <TemplateFieldSet name={name} setName={setName} useCase={useCase} setUseCase={setUseCase} messageType={messageType} setMessageType={setMessageType} dlt={dlt} setDlt={setDlt} body={body} setBody={setBody} senderId={senderId} setSenderId={setSenderId} route={route} setRoute={setRoute} active={active} setActive={setActive} />
+        </div>
+        <div className="mt-5 flex flex-wrap justify-end gap-2">
+          <button onClick={onClose} className="btn btn-secondary">Close</button>
+          {t.is_active
+            ? <button onClick={() => call({ action: "deactivate" }, "Deactivated.")} disabled={busy} className="btn btn-secondary"><Power size={14} /> Deactivate</button>
+            : <button onClick={() => call({ action: "activate" }, "Activated.")} disabled={busy} className="btn btn-secondary"><Power size={14} /> Activate</button>}
+          <button onClick={() => call({ name, use_case: useCase, message_type: messageType, gateway_template_id: dlt, body_template: body, sender_id: senderId, route, is_active: active }, "Saved.")} disabled={busy || !name.trim() || !dlt.trim() || !body.trim()} className="btn btn-primary">{busy ? "…" : "Save changes"}</button>
+        </div>
+      </div>
     </div>
   );
 }

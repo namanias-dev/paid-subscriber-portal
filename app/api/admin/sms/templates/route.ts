@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requirePermission, requireSuperAdmin, currentAdminId } from "@/lib/adminGuard";
-import { listTemplates, getTemplate, upsertTemplate } from "@/lib/sms/store";
+import { listTemplates, getTemplate, upsertTemplate, isSeedTemplateId } from "@/lib/sms/store";
 import { validateBody, worstCaseFill, uniqueVariables } from "@/lib/sms/templates";
 import { loginUrlSample } from "@/lib/sms/config";
 
@@ -13,7 +13,9 @@ export async function GET() {
   const enriched = templates.map((t) => {
     const wc = worstCaseFill(t.body_template, sample);
     const v = validateBody(t.body_template);
-    return { ...t, worstCaseChars: wc.analysis.length, worstCaseSegments: wc.analysis.segments, over155: wc.analysis.length > 155, bodyErrors: v.errors };
+    // `custom` = self-serve (not a code seed); only these are editable via the
+    // send_sms-gated manage API. Built-ins stay under the Super Admin editor.
+    return { ...t, worstCaseChars: wc.analysis.length, worstCaseSegments: wc.analysis.segments, over155: wc.analysis.length > 155, bodyErrors: v.errors, custom: !isSeedTemplateId(t.id) };
   });
   return NextResponse.json({ ok: true, templates: enriched });
 }

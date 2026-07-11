@@ -144,6 +144,24 @@ export function seedById(id: string): SeedTemplate | undefined {
   return SEED_TEMPLATES.find((t) => t.id === id);
 }
 
+/**
+ * Canonical variable catalogue — the only tokens the send pipeline can resolve
+ * (mirrors SmsVariable in ./types + the variable store). A self-serve template
+ * body MAY use other {tokens}, but they are flagged as "unknown" (a warning, not
+ * a hard block) because nothing fills them, so they would render empty / mark a
+ * recipient as missing-vars at send time.
+ */
+export const KNOWN_VARIABLES: readonly string[] = [
+  "name", "first_name", "mobile", "login_code", "login_url",
+  "item_name", "item_short", "amount", "payment_status",
+  "webinar_date", "webinar_time", "support_number",
+] as const;
+
+/** Body {tokens} that are NOT in the canonical catalogue (first-seen order). */
+export function unknownVariables(body: string): string[] {
+  return uniqueVariables(body).filter((v) => !KNOWN_VARIABLES.includes(v));
+}
+
 // ---------------------------------------------------------------------------
 // Variables
 // ---------------------------------------------------------------------------
