@@ -3,8 +3,6 @@ import Link from "next/link";
 import type { LucideIcon } from "lucide-react";
 import { Users, GraduationCap, Handshake, MapPin, Building2, MonitorPlay, Video, Shuffle, Newspaper, PenLine, FileDown, Send } from "lucide-react";
 import Hero from "@/components/public/home/Hero";
-import AnnouncementBar from "@/components/public/home/AnnouncementBar";
-import WhatsNewSection from "@/components/public/home/WhatsNewSection";
 import CourseExplorer from "@/components/public/home/CourseExplorer";
 import TopperShowcase from "@/components/public/home/TopperShowcase";
 import Testimonials from "@/components/public/Testimonials";
@@ -14,7 +12,6 @@ import LeadForm from "@/components/public/LeadForm";
 import LeadPopup from "@/components/public/LeadPopup";
 import CaArticleCard from "@/components/public/ca/CaArticleCard";
 import { getPublishedCourses, getPublicWebinars, getSiteSettings, getPublicCaArticles, getWebinarRegisteredCounts } from "@/lib/dataProvider";
-import { getWhatsNew } from "@/lib/announcements";
 import { webinarRegCountDisplay, WEBINAR_REGCOUNT_ENCOURAGE } from "@/lib/webinarLifecycle";
 import { getPurchaseSnapshot, coursePurchaseMap } from "@/lib/purchaseStatus";
 import { ACADEMY } from "@/lib/config";
@@ -55,12 +52,11 @@ const FAQ = [
 ];
 
 export default async function HomePage() {
-  const [courses, webinars, settings, caArticles, whatsNew] = await Promise.all([
+  const [courses, webinars, settings, caArticles] = await Promise.all([
     getPublishedCourses(),
     getPublicWebinars(),
     getSiteSettings(),
     getPublicCaArticles(),
-    getWhatsNew(),
   ]);
   // Single source of truth for purchase awareness — identical to /courses + detail.
   const snapshot = await getPurchaseSnapshot();
@@ -73,7 +69,6 @@ export default async function HomePage() {
 
   return (
     <>
-      <AnnouncementBar items={whatsNew.barItems} />
       <Hero hero={settings.hero} />
       <LeadPopup config={settings.popup} />
 
@@ -148,9 +143,6 @@ export default async function HomePage() {
           <CourseExplorer courses={courses} limit={6} purchaseMap={purchaseMap} />
         </div>
       </section>
-
-      {/* What's New — auto-sourced from live content */}
-      <WhatsNewSection data={whatsNew} />
 
       {/* Current Affairs */}
       {homeCa.length > 0 && (

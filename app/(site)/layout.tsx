@@ -6,15 +6,17 @@ import { getSiteSettings, hasUpcomingWebinars } from "@/lib/dataProvider";
 import { getStudentSession, getBuyerSession } from "@/lib/session";
 import { resolveNavTabs } from "@/lib/navConfig";
 import { whatsappLink } from "@/lib/phone";
+import { getWhatsNew } from "@/lib/announcements";
 
 export default async function SiteLayout({ children }: { children: React.ReactNode }) {
   const settings = await getSiteSettings();
   // Auto NEW badge on the Webinars nav item when any webinar is scheduled (not
   // completed). Uses a lightweight, cached check instead of fetching every webinar.
-  const [session, buyerSession, upcomingWebinars] = await Promise.all([
+  const [session, buyerSession, upcomingWebinars, whatsNew] = await Promise.all([
     getStudentSession(),
     getBuyerSession(),
     hasUpcomingWebinars(),
+    getWhatsNew(),
   ]);
   const userName = session?.name || buyerSession?.name || null;
   const waLink = whatsappLink(
@@ -35,6 +37,7 @@ export default async function SiteLayout({ children }: { children: React.ReactNo
         userName={userName}
         links={resolveNavTabs(settings.nav)}
         hasUpcomingWebinars={upcomingWebinars}
+        announcements={whatsNew.barItems}
       />
       <main className="flex-1">{children}</main>
       <PublicFooter brand={settings.brand} />
