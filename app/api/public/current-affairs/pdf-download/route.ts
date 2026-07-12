@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getCaPdfById, incrementCaPdfDownload, addCaLead, logCaEvent, rateLimited } from "@/lib/dataProvider";
+import { getCaPdfById, incrementCaPdfDownload, addCaLead, logCaEvent, rateLimited, getPublishedArticlePdfIds, isPublicCaPdf } from "@/lib/dataProvider";
 import { getCurrentUserPhone } from "@/lib/caSession";
 import { normalizeIndianMobile } from "@/lib/phone";
 
@@ -11,6 +11,17 @@ export async function POST(req: Request) {
     const pdf = await getCaPdfById((body.id || "").toString());
     if (!pdf || !pdf.file_url) {
       return NextResponse.json({ ok: false, error: "This file isn't available yet." }, { status: 404 });
+    }
+
+    // Public-exposure gate: this endpoint serves the PUBLIC Downloads/article
+    // surfaces only. Genuinely-free compilations (daily/monthly) and notes that
+    // are attached to a published free article are allowed; class/paid-only
+    // notes are rejected here so a logged-out/free user can never obtain the
+    // file_url by guessing a direct id. Entitled students access their gated
+    // notes through the separate courses/content system, which is untouched.
+    const publishedArticlePdfIds = await getPublishedArticlePdfIds();
+    if (!isPublicCaPdf(pdf, publishedArticlePdfIds)) {
+      return NextResponse.json({ ok: false, error: "This file isn't available for public download." }, { status: 403 });
     }
 
     const sessionPhone = await getCurrentUserPhone();

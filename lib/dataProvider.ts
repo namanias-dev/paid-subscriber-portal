@@ -6465,16 +6465,57 @@ export async function getPublicCaPdfsByKind(kind: CaPdf["kind"]): Promise<CaPdf[
     });
 }
 /**
- * All publicly-downloadable PDFs (any kind) for the Resources → Downloads
- * folder. A PDF is public once it has a file attached; login/lead gating is
- * enforced at download time by /api/public/current-affairs/pdf-download, so it
- * is safe to LIST gated items here (we never expose the file_url until the gate
- * passes). Newest first. Never exposes admin-only/placeholder records.
+ * Kinds the academy openly publishes as FREE, public compilations: daily
+ * current-affairs notes and monthly compilations. These are meant for anyone.
+ * "general" PDFs are subject/class notes that are NOT part of the public free
+ * offering — they are only public when explicitly attached to a published
+ * (free) current-affairs article; otherwise they are class/paid-only material.
+ */
+const PUBLIC_CA_PDF_KINDS: ReadonlyArray<CaPdf["kind"]> = ["daily", "monthly"];
+
+/**
+ * Ids of PDFs explicitly attached to a LIVE (published, not-future) CA article.
+ * Such notes are legitimately public in the context of that free article, so
+ * they may be served/listed publicly even when their kind is "general".
+ */
+export async function getPublishedArticlePdfIds(): Promise<Set<string>> {
+  const articles = await getPublicCaArticles();
+  const ids = new Set<string>();
+  for (const a of articles) {
+    for (const id of a.pdf_ids || []) {
+      if (id) ids.add(id);
+    }
+  }
+  return ids;
+}
+
+/**
+ * Authoritative rule for whether a CA PDF may be exposed on PUBLIC surfaces
+ * (the Downloads folder, the "What's New" downloads group, and the public
+ * download route). Genuinely-free compilations (daily/monthly) are public;
+ * "general" notes are class/paid material and are public ONLY when attached to
+ * a published free article. Placeholder records (no file_url) are never public.
+ *
+ * Used for both LISTING and server-side DOWNLOAD enforcement so a logged-out /
+ * free user can never obtain the file_url of a paid/class-only note.
+ */
+export function isPublicCaPdf(pdf: CaPdf, publishedArticlePdfIds: Set<string>): boolean {
+  if (!pdf.file_url) return false;
+  if (PUBLIC_CA_PDF_KINDS.includes(pdf.kind)) return true;
+  return publishedArticlePdfIds.has(pdf.id);
+}
+
+/**
+ * All publicly-downloadable PDFs for the Resources → Downloads folder and the
+ * homepage "What's New" downloads group. Returns ONLY genuinely free/public
+ * files (daily/monthly compilations, plus any "general" note attached to a
+ * published free article). Paid/class-only notes are excluded entirely and
+ * their file_url is never shipped to the client. Newest first.
  */
 export async function getPublicDownloadablePdfs(): Promise<CaPdf[]> {
-  const all = await getCaPdfs();
+  const [all, publishedArticlePdfIds] = await Promise.all([getCaPdfs(), getPublishedArticlePdfIds()]);
   return all
-    .filter((p) => !!p.file_url)
+    .filter((p) => isPublicCaPdf(p, publishedArticlePdfIds))
     .sort((a, b) => {
       const da = a.date_ref || a.created_at;
       const db2 = b.date_ref || b.created_at;
