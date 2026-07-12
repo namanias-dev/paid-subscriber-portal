@@ -1,5 +1,7 @@
 import { Fragment } from "react";
 import Link from "next/link";
+import type { LucideIcon } from "lucide-react";
+import { Users, GraduationCap, Handshake, MapPin, Building2, MonitorPlay, Video, Shuffle, Newspaper, PenLine, FileDown, Send } from "lucide-react";
 import Hero from "@/components/public/home/Hero";
 import CourseExplorer from "@/components/public/home/CourseExplorer";
 import TopperShowcase from "@/components/public/home/TopperShowcase";
@@ -18,19 +20,28 @@ import { directionsUrl, mapEmbedUrl } from "@/lib/maps";
 // Render fresh so newly published courses / upcoming webinars surface here too.
 export const dynamic = "force-dynamic";
 
-const WHY = [
-  { icon: "👥", title: "Small batches (~40)", desc: "Personal attention for every aspirant — not a crowded hall." },
-  { icon: "🎓", title: "9+ years of mentoring", desc: "A proven, refined methodology that produces results." },
-  { icon: "🤝", title: "Direct faculty mentorship", desc: "Learn from Naman Sir directly, with 1:1 guidance." },
-  { icon: "📍", title: "Chandigarh se bhi UPSC", desc: "World-class preparation, right here in the Tricity." },
+const WHY: { icon: LucideIcon; title: string; desc: string }[] = [
+  { icon: Users, title: "Small batches (~40)", desc: "Personal attention for every aspirant — not a crowded hall." },
+  { icon: GraduationCap, title: "9+ years of mentoring", desc: "A proven, refined methodology that produces results." },
+  { icon: Handshake, title: "Direct faculty mentorship", desc: "Learn from Naman Sir directly, with 1:1 guidance." },
+  { icon: MapPin, title: "Chandigarh se bhi UPSC", desc: "World-class preparation, right here in the Tricity." },
 ];
 
-const MODES = [
-  { icon: "🏛️", title: "Offline — Chandigarh", desc: "Classroom batches at Sector 17C." },
-  { icon: "💻", title: "Live Online — Pan India", desc: "Interactive live classes from anywhere." },
-  { icon: "🎥", title: "Recorded", desc: "Self-paced learning, anytime access." },
-  { icon: "🔀", title: "Hybrid", desc: "Best of both — class + recordings." },
+const MODES: { icon: LucideIcon; title: string; desc: string }[] = [
+  { icon: Building2, title: "Offline — Chandigarh", desc: "Classroom batches at Sector 17C." },
+  { icon: MonitorPlay, title: "Live Online — Pan India", desc: "Interactive live classes from anywhere." },
+  { icon: Video, title: "Recorded", desc: "Self-paced learning, anytime access." },
+  { icon: Shuffle, title: "Hybrid", desc: "Best of both — class + recordings." },
 ];
+
+/** Premium tinted icon chip used across the homepage feature cards. */
+function HomeChip({ icon: Icon }: { icon: LucideIcon }) {
+  return (
+    <div className="mb-3 inline-flex h-12 w-12 items-center justify-center rounded-xl bg-[var(--primary-tint)] text-[var(--primary)]">
+      <Icon size={24} strokeWidth={1.75} aria-hidden="true" />
+    </div>
+  );
+}
 
 const FAQ = [
   { q: "Do you teach in Hindi or English?", a: "Our classes are bilingual (Hinglish) so every aspirant can follow comfortably." },
@@ -84,7 +95,7 @@ export default async function HomePage() {
           {WHY.map((w) => (
             <StaggerItem key={w.title}>
               <div className="card card-hover h-full p-6">
-                <div className="mb-3 text-3xl">{w.icon}</div>
+                <HomeChip icon={w.icon} />
                 <h3 className="text-lg">{w.title}</h3>
                 <p className="mt-1.5 text-sm text-ink2">{w.desc}</p>
               </div>
@@ -107,7 +118,7 @@ export default async function HomePage() {
             {MODES.map((m) => (
               <StaggerItem key={m.title}>
                 <div className="card card-hover h-full p-6">
-                  <div className="mb-3 text-3xl">{m.icon}</div>
+                  <HomeChip icon={m.icon} />
                   <h3 className="text-lg">{m.title}</h3>
                   <p className="mt-1.5 text-sm text-ink2">{m.desc}</p>
                 </div>
@@ -161,15 +172,15 @@ export default async function HomePage() {
           <h2 className="text-3xl font-extrabold sm:text-4xl">{c.free_heading}</h2>
         </Reveal>
         <Stagger className="mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
-          {[
-            { icon: "📰", t: "Daily Current Affairs" },
-            { icon: "📝", t: "Daily MCQs" },
-            { icon: "📚", t: "Free PDFs & Notes" },
-            { icon: "✈️", t: "Join Telegram (23K+)" },
-          ].map((r) => (
+          {([
+            { icon: Newspaper, t: "Daily Current Affairs" },
+            { icon: PenLine, t: "Daily MCQs" },
+            { icon: FileDown, t: "Free PDFs & Notes" },
+            { icon: Send, t: "Join Telegram (23K+)" },
+          ] as { icon: LucideIcon; t: string }[]).map((r) => (
             <StaggerItem key={r.t}>
               <Link href="/free-resources" className="card card-hover block p-6">
-                <div className="mb-3 text-3xl">{r.icon}</div>
+                <HomeChip icon={r.icon} />
                 <h3 className="text-base">{r.t}</h3>
               </Link>
             </StaggerItem>
@@ -238,7 +249,7 @@ export default async function HomePage() {
               ))}
             </div>
             <div className="mt-6 flex flex-wrap gap-3">
-              <a href={directionsUrl(settings.brand)} target="_blank" rel="noopener noreferrer" className="btn btn-primary">📍 Get Directions</a>
+              <a href={directionsUrl(settings.brand)} target="_blank" rel="noopener noreferrer" className="btn btn-primary inline-flex items-center gap-2"><MapPin size={16} strokeWidth={2} /> Get Directions</a>
               <Link href="/contact" className="btn btn-secondary">Contact us →</Link>
             </div>
           </Reveal>

@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import AppIcon from "@/components/ui/AppIcon";
 import { STUDENT_BOTTOM_NAV } from "./navItems";
 
 export default function BottomNav() {
@@ -18,7 +19,7 @@ export default function BottomNav() {
               className="flex flex-1 flex-col items-center gap-0.5 rounded-lg py-1.5 text-[10px] font-medium transition"
               style={{ color: active ? "var(--primary)" : "var(--muted)" }}
             >
-              <span className="text-lg">{item.icon}</span>
+              <AppIcon name={item.icon} size={20} />
               {item.label}
             </Link>
           );

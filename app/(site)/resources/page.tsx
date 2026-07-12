@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { BookOpen, ArrowRight, Compass, Flame, Sparkles } from "lucide-react";
+import { CaIconChip } from "@/components/public/ca/CaIcons";
+import { appIcon } from "@/lib/appIcons";
 import { getPublicResources } from "@/lib/dataProvider";
 import { journeyResources, resourceMetadata } from "@/lib/resourceView";
 import { RESOURCE_CATEGORIES } from "@/lib/resourceConstants";
@@ -60,7 +62,7 @@ export default async function ResourcesHub() {
           <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {RESOURCE_CATEGORIES.map((c) => (
               <Link key={c.slug} href={`/resources/${c.slug}`} className="ca-card ca-focus group flex items-start gap-4 p-5">
-                <span className="text-2xl">{c.icon}</span>
+                <CaIconChip icon={appIcon(c.icon)} variant="light" size={20} />
                 <div>
                   <h3 className="font-heading font-bold text-[var(--ca-navy-900)] group-hover:text-[var(--ca-navy-600)]">{c.name}</h3>
                   <p className="mt-1 text-sm leading-relaxed text-[var(--ca-slate-700)]">{c.blurb}</p>

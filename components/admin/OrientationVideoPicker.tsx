@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useToast } from "@/components/ui/Toast";
 import { CONTENT_META } from "@/lib/contentMeta";
+import AppIcon from "@/components/ui/AppIcon";
 import type { AssignedOrientationVideo, ContentItem, OrientationRole, OrientationTargetType } from "@/lib/types";
 
 /**
@@ -130,7 +131,7 @@ export default function OrientationVideoPicker({
                 <button type="button" disabled={busy || i === 0} onClick={() => move(i, -1)} className="text-xs text-muted disabled:opacity-30" aria-label="Move up">▲</button>
                 <button type="button" disabled={busy || i === assigned.length - 1} onClick={() => move(i, 1)} className="text-xs text-muted disabled:opacity-30" aria-label="Move down">▼</button>
               </div>
-              <span className="text-lg">{CONTENT_META[a.content.type]?.icon || "🎥"}</span>
+              <AppIcon name={CONTENT_META[a.content.type]?.icon || "recording"} size={18} className="shrink-0 text-[var(--ca-navy-600)]" />
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-medium">{a.content.title}</p>
                 <p className="truncate text-xs text-muted">
@@ -174,7 +175,7 @@ export default function OrientationVideoPicker({
                   onClick={() => add(c.id)}
                   className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm hover:bg-surface2"
                 >
-                  <span className="text-base">{CONTENT_META[c.type]?.icon || "🎥"}</span>
+                  <AppIcon name={CONTENT_META[c.type]?.icon || "recording"} size={16} className="shrink-0 text-[var(--ca-navy-600)]" />
                   <span className="flex-1 truncate">{c.title}</span>
                   {c.subject && <span className="pill pill-gray text-[10px]">{c.subject}</span>}
                   {!c.is_published && <span className="pill pill-amber text-[10px]">Draft</span>}

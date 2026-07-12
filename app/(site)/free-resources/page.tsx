@@ -1,15 +1,17 @@
+import type { LucideIcon } from "lucide-react";
+import { Newspaper, PenLine, FileDown, Map as MapIcon, PlaySquare, Send } from "lucide-react";
 import Reveal, { Stagger, StaggerItem } from "@/components/ui/Reveal";
 import { ACADEMY } from "@/lib/config";
 
 export const metadata = { title: "Free Resources — Naman Sharma IAS Academy" };
 
-const RES = [
-  { icon: "📰", title: "Daily Current Affairs", desc: "Exam-ready daily CA with crisp analysis.", href: ACADEMY.telegram, cta: "Get on Telegram" },
-  { icon: "📝", title: "Daily Prelims MCQs", desc: "Practice 10 MCQs daily with explanations.", href: ACADEMY.telegram, cta: "Join Telegram" },
-  { icon: "📚", title: "Free PDFs & Notes", desc: "Booklets, value-adds and revision notes.", href: ACADEMY.telegram, cta: "Download" },
-  { icon: "🗺️", title: "UPSC Through Maps", desc: "Free sample map sets for Prelims geography.", href: "/courses/upsc-through-maps-prelims-2026", cta: "Explore" },
-  { icon: "▶", title: "YouTube Lectures", desc: "220K+ subscribers — free strategy & concept videos.", href: ACADEMY.youtube, cta: "Watch on YouTube" },
-  { icon: "✈️", title: "Telegram Community", desc: "Join 23K+ aspirants for daily updates.", href: ACADEMY.telegram, cta: "Join Now" },
+const RES: { icon: LucideIcon; title: string; desc: string; href: string; cta: string }[] = [
+  { icon: Newspaper, title: "Daily Current Affairs", desc: "Exam-ready daily CA with crisp analysis.", href: ACADEMY.telegram, cta: "Get on Telegram" },
+  { icon: PenLine, title: "Daily Prelims MCQs", desc: "Practice 10 MCQs daily with explanations.", href: ACADEMY.telegram, cta: "Join Telegram" },
+  { icon: FileDown, title: "Free PDFs & Notes", desc: "Booklets, value-adds and revision notes.", href: ACADEMY.telegram, cta: "Download" },
+  { icon: MapIcon, title: "UPSC Through Maps", desc: "Free sample map sets for Prelims geography.", href: "/courses/upsc-through-maps-prelims-2026", cta: "Explore" },
+  { icon: PlaySquare, title: "YouTube Lectures", desc: "220K+ subscribers — free strategy & concept videos.", href: ACADEMY.youtube, cta: "Watch on YouTube" },
+  { icon: Send, title: "Telegram Community", desc: "Join 23K+ aspirants for daily updates.", href: ACADEMY.telegram, cta: "Join Now" },
 ];
 
 export default function FreeResourcesPage() {
@@ -25,7 +27,9 @@ export default function FreeResourcesPage() {
         {RES.map((r) => (
           <StaggerItem key={r.title}>
             <div className="card card-hover flex h-full flex-col p-6">
-              <div className="mb-3 text-3xl">{r.icon}</div>
+              <div className="mb-3 inline-flex h-12 w-12 items-center justify-center rounded-xl bg-[var(--primary-tint)] text-[var(--primary)]">
+                <r.icon size={24} strokeWidth={1.75} aria-hidden="true" />
+              </div>
               <h3 className="text-lg">{r.title}</h3>
               <p className="mt-1.5 flex-1 text-sm text-ink2">{r.desc}</p>
               <a

@@ -9,6 +9,7 @@ import ResourceShareBar from "@/components/public/resources/ResourceShareBar";
 import ResourceCtas from "@/components/public/resources/ResourceCtas";
 import ResourceArticleView from "@/components/public/resources/ResourceArticleView";
 import ResourceCard from "@/components/public/resources/ResourceCard";
+import AppIcon from "@/components/ui/AppIcon";
 import {
   getResourceBySlug,
   getPublicResources,
@@ -102,7 +103,7 @@ async function CategoryPage({ slug }: { slug: string }) {
             <Link href="/resources" className="hover:text-white">Resources</Link><ChevronRight size={13} />
             <span className="text-white/90">{cat.name}</span>
           </nav>
-          <p className="ca-eyebrow">{cat.icon} UPSC Resources</p>
+          <p className="ca-eyebrow flex items-center gap-1.5"><AppIcon name={cat.icon} size={14} strokeWidth={2} /> UPSC Resources</p>
           <h1 className="mt-2 font-heading text-4xl font-extrabold tracking-tight text-white">{cat.name}</h1>
           <p className="mt-3 max-w-2xl text-[var(--ca-slate-300)]">{cat.blurb}</p>
         </div>

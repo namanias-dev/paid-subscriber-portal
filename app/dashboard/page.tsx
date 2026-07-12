@@ -8,16 +8,17 @@ import SubjectChips from "@/components/dashboard/SubjectChips";
 import ContentCard from "@/components/dashboard/ContentCard";
 import ExpiredView from "@/components/dashboard/ExpiredView";
 import EmptyState from "@/components/ui/EmptyState";
+import AppIcon from "@/components/ui/AppIcon";
 import { CardSkeleton } from "@/components/ui/Skeleton";
 import { todayISODate } from "@/lib/dates";
 
 const QUICK = [
-  { href: "/dashboard/my-courses", icon: "🎓", label: "My Courses" },
-  { href: "/dashboard/live", icon: "🔴", label: "Live Classes" },
-  { href: "/dashboard/tests", icon: "🧪", label: "Test Series" },
-  { href: "/dashboard/material", icon: "📚", label: "Study Material" },
-  { href: "/dashboard/mentorship", icon: "🤝", label: "Mentorship" },
-  { href: "/dashboard/fees", icon: "💳", label: "My Fees" },
+  { href: "/dashboard/my-courses", icon: "courses", label: "My Courses" },
+  { href: "/dashboard/live", icon: "live", label: "Live Classes" },
+  { href: "/dashboard/tests", icon: "tests", label: "Test Series" },
+  { href: "/dashboard/material", icon: "material", label: "Study Material" },
+  { href: "/dashboard/mentorship", icon: "mentorship", label: "Mentorship" },
+  { href: "/dashboard/fees", icon: "fees", label: "My Fees" },
 ];
 
 export default function DashboardHome() {
@@ -57,7 +58,7 @@ export default function DashboardHome() {
         <div className="grid grid-cols-3 gap-3 sm:grid-cols-6">
           {QUICK.map((q) => (
             <Link key={q.href} href={q.href} className="card card-hover flex flex-col items-center gap-1.5 p-4 text-center">
-              <span className="text-2xl">{q.icon}</span>
+              <span className="inline-flex h-11 w-11 items-center justify-center rounded-xl bg-[var(--primary-tint)] text-[var(--primary)]"><AppIcon name={q.icon} size={22} /></span>
               <span className="text-xs font-medium text-ink2">{q.label}</span>
             </Link>
           ))}
