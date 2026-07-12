@@ -240,7 +240,8 @@ export async function getDrill(domain: string, metric: string, q: string, page: 
     case "revenue:aging:4_7":
     case "revenue:aging:8plus":
     case "revenue:atrisk": {
-      const bucket = metric === "revenue:overdue15" ? "15plus" : metric.split(":")[2] || "all";
+      const parts = metric.split(":");
+      const bucket = metric === "overdue15" ? "15plus" : parts[0] === "aging" ? parts[1] || "all" : "all";
       const now = Date.now();
       const lines: Subject[] = [];
       for (const e of enrollments) {
@@ -262,7 +263,7 @@ export async function getDrill(domain: string, metric: string, q: string, page: 
           lines.push({ id: `${e.id}:${i}`, name: e.student_name || "—", phone: e.phone, enrollmentId: e.id, amount: amt, amountLabel: od === 0 ? "Due today" : `${od}d overdue`, dueDate: line.due });
         }
       }
-      if (metric === "revenue:atrisk") {
+      if (metric === "atrisk") {
         for (const p of payments as Payment[]) {
           if (String(p.status) !== "ABANDONED") continue;
           lines.push({ id: p.id, name: p.student_name || "—", phone: p.phone, amount: Number(p.amount) || 0, amountLabel: "Abandoned", registeredAt: p.created_at });
@@ -270,7 +271,7 @@ export async function getDrill(domain: string, metric: string, q: string, page: 
       }
       subjects = lines;
       title =
-        metric === "revenue:atrisk" ? "At-risk revenue (overdue + abandoned)" :
+        metric === "atrisk" ? "At-risk revenue (overdue + abandoned)" :
         bucket === "today" ? "Installments due today" :
         bucket === "1_3" ? "Overdue 1–3 days" :
         bucket === "4_7" ? "Overdue 4–7 days" :

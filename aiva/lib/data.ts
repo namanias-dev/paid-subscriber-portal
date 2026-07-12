@@ -125,6 +125,39 @@ export async function fetchStudentIdsByPhone(phones: string[]): Promise<Map<stri
   return out;
 }
 
+/** A minimal student identity row for the Student 360 lookup. Read-only. */
+export type StudentLite = { id: string; name: string | null; phone: string | null; email: string | null };
+
+/**
+ * Resolve a small candidate set of students for a free-text query (name substring OR phone
+ * last-10). Read-only, capped, used only by the Student 360 tool. Never returns full PII to the
+ * client — callers mask before rendering.
+ */
+export async function fetchStudentsSearch(query: string, limit = 8): Promise<StudentLite[]> {
+  const sb = getSupabase();
+  const q = String(query || "").trim();
+  if (!sb || q.length < 2) return [];
+  const digits = q.replace(/\D/g, "");
+  try {
+    if (digits.length >= 4) {
+      const { data } = await sb
+        .from("students")
+        .select("id, name, phone, email")
+        .ilike("phone", `%${digits.slice(-10)}%`)
+        .limit(limit);
+      return (data as unknown as StudentLite[]) || [];
+    }
+    const { data } = await sb
+      .from("students")
+      .select("id, name, phone, email")
+      .ilike("name", `%${q}%`)
+      .limit(limit);
+    return (data as unknown as StudentLite[]) || [];
+  } catch {
+    return [];
+  }
+}
+
 /** Map of payment_id -> proof status, for group-status derivation. */
 export async function fetchProofStatuses(): Promise<Record<string, PaymentProofStatus | undefined>> {
   const sb = getSupabase();

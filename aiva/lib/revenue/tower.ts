@@ -1,6 +1,7 @@
 import { fetchPayments, fetchCourseEnrollments, countOpenProofs } from "../data";
 import { isPaidStatus, dedupePaidRows, dedupedPaidTotal } from "@portal/lib/paymentsAgg";
 import { deriveEnrollment, isActiveEnrollment, isLineOutstanding } from "@portal/lib/installments";
+import { memo } from "../cache";
 import type { Payment, CourseEnrollment, InstallmentItem } from "@portal/lib/types";
 
 /**
@@ -119,4 +120,13 @@ export async function getRevenueTower(now = Date.now()): Promise<RevenueTower> {
 
 function normPhone(p: string | null | undefined): string {
   return String(p || "").replace(/\D/g, "").slice(-10);
+}
+
+/**
+ * 60-second memoized tower. The assistant's data tools call this so one chat turn that hits
+ * several tools recomputes the reconciliation truth at most once per minute. Reconciles
+ * identically to getRevenueTower (same code path); only the result is cached.
+ */
+export function getRevenueTowerCached(): Promise<RevenueTower> {
+  return memo("revenue-tower", 60_000, () => getRevenueTower(Date.now()));
 }
