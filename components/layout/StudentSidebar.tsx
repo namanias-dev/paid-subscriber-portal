@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import Logo from "@/components/ui/Logo";
+import AppIcon from "@/components/ui/AppIcon";
 import LogoutButton from "./LogoutButton";
 import { STUDENT_NAV } from "./navItems";
 
@@ -31,7 +32,7 @@ export default function StudentSidebar() {
                 color: active ? "var(--primary)" : "var(--ink2)",
               }}
             >
-              <span className="text-lg">{item.icon}</span>
+              <AppIcon name={item.icon} size={19} />
               {item.label}
             </Link>
           );

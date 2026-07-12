@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import Logo from "@/components/ui/Logo";
+import AppIcon from "@/components/ui/AppIcon";
+import { LogOut, Menu } from "lucide-react";
 import AdminLogin from "./AdminLogin";
 import AdminPasswordModal from "./AdminPasswordModal";
 import { ADMIN_NAV } from "./adminNav";
@@ -84,7 +86,7 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
                       color: active ? "var(--primary)" : "var(--ink2)",
                     }}
                   >
-                    <span>{item.icon}</span>
+                    <AppIcon name={item.icon} size={17} />
                     {item.label}
                   </Link>
                 );
@@ -93,7 +95,7 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
           </div>
         ))}
       </nav>
-      <button onClick={logout} className="btn btn-ghost m-3 justify-start">↩ Logout</button>
+      <button onClick={logout} className="btn btn-ghost m-3 inline-flex items-center justify-start gap-2"><LogOut size={16} strokeWidth={1.75} aria-hidden="true" /> Logout</button>
     </>
   );
 
@@ -113,7 +115,7 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
 
       <div className="lg:pl-64">
         <header className="frost sticky top-0 z-30 flex items-center justify-between border-b border-line px-4 py-3">
-          <button onClick={() => setOpen(true)} className="rounded-lg border border-line p-2 lg:hidden">☰</button>
+          <button onClick={() => setOpen(true)} className="rounded-lg border border-line p-2 lg:hidden" aria-label="Open menu"><Menu size={18} strokeWidth={2} /></button>
           <div className="hidden text-sm text-ink2 lg:block">UPSC Edtech Control Center</div>
           <div className="flex items-center gap-3">
             <Link href="/" className="text-sm text-ink2 hover:text-primary">View site ↗</Link>

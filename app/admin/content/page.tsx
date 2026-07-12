@@ -6,6 +6,7 @@ import Modal from "@/components/ui/Modal";
 import { useToast } from "@/components/ui/Toast";
 import { useUploadManager } from "@/components/admin/upload/uploadManager";
 import { CONTENT_META } from "@/lib/contentMeta";
+import AppIcon from "@/components/ui/AppIcon";
 import { SUBJECTS } from "@/lib/config";
 import { formatDate, formatISTDateTime, formatBytes } from "@/lib/dates";
 import type { ContentItem, ContentType, Course, Webinar, OrientationRole } from "@/lib/types";
@@ -423,7 +424,10 @@ export default function ContentAdmin() {
           return (
             <tr key={c.id} className="border-b border-line last:border-0 hover:bg-surface2">
               <td className="px-4 py-3 font-medium">
-                {CONTENT_META[c.type].icon} {c.class_no != null && <span className="text-primary">C{c.class_no} · </span>}{c.title}
+                <span className="inline-flex items-center gap-2">
+                  <AppIcon name={CONTENT_META[c.type].icon} size={16} className="shrink-0 text-[var(--ca-navy-600)]" />
+                  <span>{c.class_no != null && <span className="text-primary">C{c.class_no} · </span>}{c.title}</span>
+                </span>
               </td>
               <td className="px-4 py-3 text-xs">
                 {CONTENT_META[c.type].label}

@@ -6,15 +6,15 @@ import type { ResourceCta } from "./types";
  * them as its own slug (the router treats them as category pages).
  */
 export const RESOURCE_CATEGORIES: { slug: string; name: string; icon: string; blurb: string }[] = [
-  { slug: "beginner", name: "Beginner Guides", icon: "🚀", blurb: "Start from zero — the complete Day-1 roadmap for new UPSC aspirants." },
-  { slug: "strategy", name: "Strategy", icon: "🎯", blurb: "Prelims, Mains and answer-writing strategy that actually works." },
-  { slug: "books", name: "Booklist & NCERTs", icon: "📚", blurb: "The right books, NCERT strategy and how to read them." },
-  { slug: "syllabus", name: "Syllabus & Pattern", icon: "🧭", blurb: "The official UPSC syllabus and exam pattern, explained simply." },
-  { slug: "optional", name: "Optional Subjects", icon: "🧩", blurb: "How to choose and prepare your optional subject." },
-  { slug: "prelims", name: "Prelims", icon: "📝", blurb: "Everything for the UPSC Prelims — GS + CSAT." },
-  { slug: "mains", name: "Mains", icon: "✍️", blurb: "GS papers, essay and answer writing for the UPSC Mains." },
-  { slug: "notes", name: "Free Notes & PDFs", icon: "📄", blurb: "Free, downloadable UPSC notes, roadmaps and booklists." },
-  { slug: "local", name: "UPSC in Chandigarh", icon: "📍", blurb: "UPSC coaching for Chandigarh, Mohali, Panchkula, Tricity & Himachal." },
+  { slug: "beginner", name: "Beginner Guides", icon: "beginner", blurb: "Start from zero — the complete Day-1 roadmap for new UPSC aspirants." },
+  { slug: "strategy", name: "Strategy", icon: "strategy", blurb: "Prelims, Mains and answer-writing strategy that actually works." },
+  { slug: "books", name: "Booklist & NCERTs", icon: "books", blurb: "The right books, NCERT strategy and how to read them." },
+  { slug: "syllabus", name: "Syllabus & Pattern", icon: "syllabus", blurb: "The official UPSC syllabus and exam pattern, explained simply." },
+  { slug: "optional", name: "Optional Subjects", icon: "optional", blurb: "How to choose and prepare your optional subject." },
+  { slug: "prelims", name: "Prelims", icon: "prelims", blurb: "Everything for the UPSC Prelims — GS + CSAT." },
+  { slug: "mains", name: "Mains", icon: "mains", blurb: "GS papers, essay and answer writing for the UPSC Mains." },
+  { slug: "notes", name: "Free Notes & PDFs", icon: "notes_pdf", blurb: "Free, downloadable UPSC notes, roadmaps and booklists." },
+  { slug: "local", name: "UPSC in Chandigarh", icon: "local", blurb: "UPSC coaching for Chandigarh, Mohali, Panchkula, Tricity & Himachal." },
 ];
 
 /** Slugs reserved for category cluster pages (cannot be used as article slugs). */
@@ -22,6 +22,7 @@ export const RESERVED_RESOURCE_SLUGS = new Set<string>([
   ...RESOURCE_CATEGORIES.map((c) => c.slug),
   "feed.xml",
   "search",
+  "downloads",
 ]);
 
 export function resourceCategoryName(slug: string | null | undefined): string {

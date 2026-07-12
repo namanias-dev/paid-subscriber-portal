@@ -28,6 +28,10 @@ export type EventName =
   | "enrolled_card_viewed"
   | "zoom_link_clicked"
   | "course_opened"
+  // resources / downloads
+  | "resource_download_click"
+  // announcements ("What's New")
+  | "announcement_click"
   // consent
   | "consent_updated"
   // AI counsellor agent (guided flow) — PII-free funnel events
@@ -61,6 +65,8 @@ export const CLIENT_ALLOWED_EVENTS: ReadonlySet<EventName> = new Set<EventName>(
   "enrolled_card_viewed",
   "zoom_link_clicked",
   "course_opened",
+  "resource_download_click",
+  "announcement_click",
   "consent_updated",
   // AI counsellor agent — all low-risk, PII-free funnel signals emitted from the
   // widget. Anything that grants access / moves money stays server-emitted.

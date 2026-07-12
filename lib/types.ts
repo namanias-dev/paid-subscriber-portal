@@ -1943,6 +1943,22 @@ export interface CaPdf {
   updated_at: string;
 }
 
+/** Admin-pinned manual announcement shown alongside auto "What's New" items. */
+export interface Announcement {
+  id: string;
+  title: string;
+  href: string | null;
+  badge: string | null;
+  active: boolean;
+  /** Show in the slim rotating bar at the top of the homepage. */
+  pinned: boolean;
+  starts_at: string | null;
+  ends_at: string | null;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface CaLead {
   id: string;
   phone: string;

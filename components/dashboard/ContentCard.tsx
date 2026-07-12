@@ -1,6 +1,7 @@
 "use client";
 
 import { CONTENT_META, contentLink } from "@/lib/contentMeta";
+import AppIcon from "@/components/ui/AppIcon";
 import { formatDate } from "@/lib/dates";
 import BookmarkButton from "@/components/ui/BookmarkButton";
 import type { ContentItem } from "@/lib/types";
@@ -30,7 +31,7 @@ export default function ContentCard({
       <div className={locked ? "pointer-events-none select-none blur-sm" : ""}>
         <div className="flex items-start justify-between gap-2">
           <div className="flex items-start gap-3">
-            <span className="text-2xl">{meta.icon}</span>
+            <span className="ca-icon-chip ca-icon-chip--light shrink-0" style={{ width: 40, height: 40 }}><AppIcon name={meta.icon} size={20} /></span>
             <div>
               <h4 className="text-base leading-snug">{item.title}</h4>
               <div className="mt-1 flex flex-wrap items-center gap-1.5">

@@ -1,7 +1,9 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { BookOpen, ArrowRight, Compass, Flame, Sparkles } from "lucide-react";
-import { getPublicResources } from "@/lib/dataProvider";
+import { BookOpen, ArrowRight, Compass, Flame, Sparkles, Download, FolderDown } from "lucide-react";
+import { CaIconChip } from "@/components/public/ca/CaIcons";
+import { appIcon } from "@/lib/appIcons";
+import { getPublicResources, getPublicDownloadablePdfs } from "@/lib/dataProvider";
 import { journeyResources, resourceMetadata } from "@/lib/resourceView";
 import { RESOURCE_CATEGORIES } from "@/lib/resourceConstants";
 import { ACADEMY } from "@/lib/config";
@@ -21,7 +23,7 @@ export function generateMetadata(): Metadata {
 }
 
 export default async function ResourcesHub() {
-  const all = await getPublicResources();
+  const [all, downloads] = await Promise.all([getPublicResources(), getPublicDownloadablePdfs()]);
   const journey = journeyResources(all);
   const popular = [...all].sort((a, b) => (b.views || 0) - (a.views || 0)).slice(0, 6);
   const searchItems = all.map((r) => ({ slug: r.slug, title: r.title, summary: r.summary, category: r.category, tags: r.tags }));
@@ -54,13 +56,41 @@ export default async function ResourcesHub() {
       </section>
 
       <div className="container-wide">
+        {/* Downloads folder — premium entry point to all downloadable files */}
+        <section className="pt-10">
+          <Link href="/resources/downloads" className="ca-downloads-card ca-focus group">
+            <div className="ca-downloads-card__inner flex flex-col gap-4 p-6 sm:flex-row sm:items-center sm:justify-between sm:p-7">
+              <div className="flex items-center gap-4">
+                <span className="ca-icon-chip shrink-0" style={{ width: 56, height: 56 }}>
+                  <FolderDown size={26} strokeWidth={1.75} />
+                </span>
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h2 className="font-heading text-xl font-bold text-white sm:text-2xl">Downloads</h2>
+                    {downloads.length > 0 && (
+                      <span className="ca-badge ca-badge-gold">{downloads.length} file{downloads.length === 1 ? "" : "s"}</span>
+                    )}
+                  </div>
+                  <p className="mt-1 max-w-md text-sm leading-relaxed text-[var(--ca-slate-300)]">
+                    All free UPSC PDFs, notes and monthly compilations shared by the academy — in one place.
+                  </p>
+                </div>
+              </div>
+              <span className="ca-btn ca-btn-gold ca-focus w-full shrink-0 justify-center sm:w-auto">
+                <Download size={16} strokeWidth={2} /> Open Downloads
+                <ArrowRight size={16} className="transition-transform group-hover:translate-x-0.5" />
+              </span>
+            </div>
+          </Link>
+        </section>
+
         {/* Categories */}
         <section className="py-12">
           <h2 className="font-heading text-2xl font-bold tracking-tight text-[var(--ca-navy-900)]">Explore by topic</h2>
           <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {RESOURCE_CATEGORIES.map((c) => (
               <Link key={c.slug} href={`/resources/${c.slug}`} className="ca-card ca-focus group flex items-start gap-4 p-5">
-                <span className="text-2xl">{c.icon}</span>
+                <CaIconChip icon={appIcon(c.icon)} variant="light" size={20} />
                 <div>
                   <h3 className="font-heading font-bold text-[var(--ca-navy-900)] group-hover:text-[var(--ca-navy-600)]">{c.name}</h3>
                   <p className="mt-1 text-sm leading-relaxed text-[var(--ca-slate-700)]">{c.blurb}</p>
