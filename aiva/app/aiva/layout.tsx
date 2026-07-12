@@ -3,6 +3,7 @@ import { pageSession } from "@/lib/guard";
 import { flags } from "@/lib/flags";
 import AppNav from "@/components/AppNav";
 import SwRegister from "@/components/SwRegister";
+import DrillProvider from "@/components/drill/DrillProvider";
 
 export const dynamic = "force-dynamic";
 
@@ -21,10 +22,12 @@ export default async function AivaLayout({ children }: { children: React.ReactNo
   if (!session?.is_super) redirect("/login");
 
   return (
-    <div className="flex min-h-screen flex-col md:flex-row">
-      <SwRegister />
-      <AppNav name={session.name || session.username} />
-      <main className="min-w-0 flex-1 p-4 md:p-8">{children}</main>
-    </div>
+    <DrillProvider>
+      <div className="flex min-h-screen flex-col md:flex-row">
+        <SwRegister />
+        <AppNav name={session.name || session.username} />
+        <main className="min-w-0 flex-1 p-4 md:p-8">{children}</main>
+      </div>
+    </DrillProvider>
   );
 }

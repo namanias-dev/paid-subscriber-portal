@@ -480,6 +480,99 @@ body {
   }
 }
 
+/* ---- Open-in-Portal buttons ---- */
+.aiva-portal-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: 9999px;
+  border: 1px solid rgba(77, 139, 255, 0.4);
+  background: rgba(0, 87, 255, 0.12);
+  color: #bcd0ff;
+  text-decoration: none;
+  transition: background 0.15s ease, border-color 0.15s ease;
+  white-space: nowrap;
+}
+.aiva-portal-btn:hover {
+  background: rgba(0, 87, 255, 0.24);
+  border-color: rgba(77, 139, 255, 0.75);
+  color: #eaf0ff;
+}
+.aiva-portal-ext {
+  font-size: 0.85em;
+  opacity: 0.8;
+}
+.aiva-portal-listdot {
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  border-radius: 9999px;
+  background: #f2c94c;
+  margin-left: 2px;
+}
+
+/* ---- Clickable live-feed chips ---- */
+.aiva-chip-clickable {
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.aiva-chip-clickable:hover {
+  border-color: rgba(77, 139, 255, 0.6);
+  background: rgba(30, 45, 82, 0.5);
+}
+
+/* ---- Attention strip ---- */
+.aiva-flag {
+  border-radius: 12px;
+  border: 1px solid rgba(120, 150, 220, 0.22);
+  background: rgba(12, 22, 50, 0.5);
+  overflow: hidden;
+}
+.aiva-flag-high {
+  border-color: rgba(235, 87, 87, 0.5);
+  background: rgba(235, 87, 87, 0.07);
+}
+.aiva-flag-medium {
+  border-color: rgba(242, 201, 76, 0.45);
+  background: rgba(242, 201, 76, 0.06);
+}
+.aiva-flag-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 11px 13px;
+  text-align: left;
+  cursor: pointer;
+  background: transparent;
+}
+.aiva-flag-title {
+  flex: 1;
+  font-weight: 600;
+  color: #fff;
+  font-size: 14px;
+}
+.aiva-flag-chevron {
+  color: #8593b8;
+  font-size: 12px;
+}
+.aiva-flag-body {
+  padding: 0 13px 13px 13px;
+}
+.aiva-flag-calc {
+  margin-top: 6px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(120, 150, 220, 0.2);
+  background: rgba(4, 10, 28, 0.55);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11.5px;
+  color: #aeb9d8;
+}
+.aiva-spark svg {
+  display: block;
+}
+
 @media (prefers-reduced-motion: reduce) {
   * {
     animation-duration: 0.001ms !important;

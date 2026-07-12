@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import OpenInPortal from "@/components/portal/OpenInPortal";
+import type { PortalLink } from "@/lib/portal/links";
 
 type TimelineStep = { label: string; date: string | null; done: boolean };
 type SmsSummary = { count: number; lastType: string | null; lastSent: string | null; lastStatus: string | null; hasReminder: boolean };
@@ -18,6 +20,7 @@ type DrillRow = {
   matchConfidence: "confirmed" | "probable" | null;
   sms: SmsSummary;
   timeline: TimelineStep[];
+  links: PortalLink[];
 };
 type DrillResult = { ok: true; title: string; note?: string; total: number; page: number; pageSize: number; rows: DrillRow[] };
 
@@ -140,6 +143,12 @@ export default function DrillPanel({ domain, metric, label, onClose }: { domain:
                       {t.date ? <span className="aiva-step-date"> {fmtDate(t.date)}</span> : null}
                     </span>
                   ))}
+                </div>
+              ) : null}
+
+              {r.links && r.links.length > 0 ? (
+                <div className="mt-2">
+                  <OpenInPortal links={r.links} size="xs" />
                 </div>
               ) : null}
             </div>

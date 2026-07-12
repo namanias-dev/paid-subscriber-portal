@@ -35,6 +35,9 @@ export type AgentSnapshot = {
   funnel?: FunnelBar[];
   /** Honest limitations: which requested insight couldn't be computed and why. */
   caveats?: string[];
+  /** Optional trend series (oldest→newest) for a small sparkline. */
+  sparkline?: number[];
+  sparklineLabel?: string;
 };
 
 function rec(r: Omit<Recommendation, "executable" | "blockedReason">): Recommendation {
@@ -66,6 +69,8 @@ export async function getAgentSnapshot(id: string): Promise<AgentSnapshot | null
       return {
         agent,
         headline: intel.headline,
+        sparkline: intel.sparkline,
+        sparklineLabel: intel.sparklineLabel,
         metrics: intel.metrics,
         funnelTitle: intel.funnelTitle,
         funnel: intel.funnel,

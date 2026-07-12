@@ -5,12 +5,14 @@ import {
   fetchWebinars,
   fetchCoursesLite,
   fetchSmsForPhones,
+  fetchStudentIdsByPhone,
   type SmsLogLite,
 } from "../data";
 import { isPaidStatus } from "@portal/lib/paymentsAgg";
 import { deriveEnrollment, isActiveEnrollment, isLineOutstanding } from "@portal/lib/installments";
 import { normPhone } from "./calc";
 import { maskPhone } from "../mask";
+import { recordLinks, type PortalLink } from "../portal/links";
 import type { CourseEnrollment, WebinarRegistration, Webinar, Payment, InstallmentItem } from "@portal/lib/types";
 
 /**
@@ -45,6 +47,7 @@ export type DrillRow = {
   matchConfidence: "confirmed" | "probable" | null;
   sms: SmsSummary;
   timeline: TimelineStep[];
+  links: PortalLink[];
 };
 
 export type DrillResult = {
@@ -231,12 +234,13 @@ export async function getDrill(domain: string, metric: string, q: string, page: 
       break;
     }
     case "revenue:overdue":
+    case "revenue:overdue15":
     case "revenue:aging:today":
     case "revenue:aging:1_3":
     case "revenue:aging:4_7":
     case "revenue:aging:8plus":
     case "revenue:atrisk": {
-      const bucket = metric.split(":")[2] || "all";
+      const bucket = metric === "revenue:overdue15" ? "15plus" : metric.split(":")[2] || "all";
       const now = Date.now();
       const lines: Subject[] = [];
       for (const e of enrollments) {
@@ -252,6 +256,7 @@ export async function getDrill(domain: string, metric: string, q: string, page: 
             bucket === "1_3" ? od >= 1 && od <= 3 :
             bucket === "4_7" ? od >= 4 && od <= 7 :
             bucket === "8plus" ? od >= 8 :
+            bucket === "15plus" ? od >= 15 :
             true; // overdue/atrisk = all outstanding+overdue lines
           if (!inBucket) continue;
           lines.push({ id: `${e.id}:${i}`, name: e.student_name || "—", phone: e.phone, enrollmentId: e.id, amount: amt, amountLabel: od === 0 ? "Due today" : `${od}d overdue`, dueDate: line.due });
@@ -270,7 +275,40 @@ export async function getDrill(domain: string, metric: string, q: string, page: 
         bucket === "1_3" ? "Overdue 1–3 days" :
         bucket === "4_7" ? "Overdue 4–7 days" :
         bucket === "8plus" ? "Overdue 8+ days" :
+        bucket === "15plus" ? "Overdue 15+ days" :
         "Overdue installments";
+      break;
+    }
+
+    case "revenue:paidnoenroll": {
+      const activePhones = new Set(enrollments.filter((e) => isActiveEnrollment(e)).map((e) => normPhone(e.phone)));
+      const byPhone = new Map<string, Subject>();
+      for (const p of payments as Payment[]) {
+        if (p.item_type !== "course" || !isPaidStatus(p.status as never)) continue;
+        const ph = normPhone(p.phone);
+        if (!ph || activePhones.has(ph)) continue;
+        if (!byPhone.has(ph)) byPhone.set(ph, { id: ph, name: p.student_name || "—", phone: p.phone, amount: Number(p.amount) || 0, amountLabel: "Paid, no active enrollment", registeredAt: p.created_at });
+      }
+      subjects = [...byPhone.values()];
+      title = "Paid but no active enrollment";
+      break;
+    }
+
+    case "revenue:recentpaid": {
+      const cut = Date.now() - 30 * DAY;
+      subjects = (payments as Payment[])
+        .filter((p) => isPaidStatus(p.status as never) && (Date.parse(p.created_at) || 0) >= cut)
+        .map((p) => ({ id: p.id, name: p.student_name || "—", phone: p.phone, amount: Number(p.amount) || 0, amountLabel: "Paid", registeredAt: p.created_at }));
+      title = "Payments collected (last 30 days)";
+      break;
+    }
+
+    case "admissions:nosms": {
+      const active = enrollments.filter((e) => isActiveEnrollment(e));
+      const smsRows = await fetchSmsForPhones(active.map((e) => e.phone));
+      const withSms = new Set(smsRows.map((l) => normPhone(l.normalized_mobile || l.mobile)).filter(Boolean));
+      subjects = active.filter((e) => !withSms.has(normPhone(e.phone))).map(enrToSubject);
+      title = "Active enrollments with zero SMS contact";
       break;
     }
 
@@ -298,7 +336,10 @@ export async function getDrill(domain: string, metric: string, q: string, page: 
   const total = filtered.length;
   const pageRows = paginate(filtered, page, PAGE_SIZE);
 
-  const smsLogs = await fetchSmsForPhones(pageRows.map((s) => s.phone));
+  const [smsLogs, studentIds] = await Promise.all([
+    fetchSmsForPhones(pageRows.map((s) => s.phone)),
+    fetchStudentIdsByPhone(pageRows.map((s) => s.phone)),
+  ]);
   const smsByPhone = new Map<string, SmsLogLite[]>();
   for (const l of smsLogs) {
     const ph = normPhone(l.normalized_mobile || l.mobile);
@@ -336,6 +377,7 @@ export async function getDrill(domain: string, metric: string, q: string, page: 
       matchConfidence: s.matchMethod === "phone" ? "confirmed" : s.matchMethod === "name_probable" ? "probable" : null,
       sms,
       timeline,
+      links: recordLinks({ studentId: studentIds.get(ph) || null, webinarId: s.webinarId || null, courseId: e?.course_id || null, showPayments: true }),
     };
   });
 

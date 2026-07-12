@@ -3,6 +3,7 @@ import NeuralCore from "@/components/neural/NeuralCore";
 import Brief from "@/components/Brief";
 import AgentGrid from "@/components/AgentGrid";
 import CommandBox from "@/components/CommandBox";
+import AttentionStrip from "@/components/AttentionStrip";
 import { Card, SectionTitle } from "@/components/kit";
 
 export const dynamic = "force-dynamic";
@@ -10,6 +11,8 @@ export const dynamic = "force-dynamic";
 export default function CommandCenterPage() {
   return (
     <div className="mx-auto max-w-6xl space-y-8">
+      <AttentionStrip />
+
       <Card>
         <SectionTitle sub="Live agent brain — each node is a domain agent, each pulse a real business event. Hover to inspect, click to zoom in.">
           AIVA Neural Core

@@ -19,6 +19,7 @@ import {
   funnelStages,
   daysAgo,
   attendeeConversion,
+  dailySeries,
   type FunnelStage,
 } from "./calc";
 import type { CourseEnrollment, WebinarRegistration, Webinar } from "@portal/lib/types";
@@ -46,6 +47,9 @@ export type AgentIntel = {
   funnelTitle?: string;
   funnel?: FunnelBar[];
   caveats?: string[];
+  /** Optional trend series (oldest→newest) for a small sparkline. */
+  sparkline?: number[];
+  sparklineLabel?: string;
 };
 
 type RegRow = WebinarRegistration & { matched_enrollment_id?: string | null; match_method?: string | null };
@@ -304,6 +308,7 @@ export async function revenueIntel(now = Date.now()): Promise<RevenueIntel> {
   }
   const tr = trend(last30, prev30);
   const collectionRate = pct(tower.collected, tower.expected);
+  const spark = dailySeries(deduped.map((p) => ({ date: p.created_at, amount: p.amount })), 14, now);
 
   const regPhones = new Set<string>();
   for (const r of regs) {
@@ -320,8 +325,10 @@ export async function revenueIntel(now = Date.now()): Promise<RevenueIntel> {
   return {
     tower,
     headline,
+    sparkline: spark,
+    sparklineLabel: "Collected · last 14 days",
     metrics: [
-      { label: "Collected (30d)", value: inr(last30), hint: `prior 30d ${inr(prev30)}` },
+      { label: "Collected (30d)", value: inr(last30), hint: `prior 30d ${inr(prev30)}`, drill: "revenue:recentpaid" },
       { label: "Trend", value: `${tr.deltaPct >= 0 ? "+" : ""}${tr.deltaPct}%`, hint: dirWord },
       { label: "Collection rate", value: `${collectionRate}%`, hint: `of ${inr(tower.expected)} expected` },
       { label: "At-risk", value: inr(tower.atRiskRevenue), hint: "overdue + abandoned", drill: "revenue:atrisk" },

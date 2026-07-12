@@ -1,10 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
 import { useApi, RiskPill, Skeleton } from "@/components/kit";
 import { agentById } from "@/lib/agents/registry";
-import DrillPanel from "./DrillPanel";
+import { useDrill } from "@/components/drill/DrillProvider";
+import Sparkline from "@/components/Sparkline";
 
 type Recommendation = {
   id: string;
@@ -26,6 +26,8 @@ type Snapshot = {
   funnelTitle?: string;
   funnel?: FunnelBar[];
   caveats?: string[];
+  sparkline?: number[];
+  sparklineLabel?: string;
 };
 
 /** Slide-in panel shown when a Neural Core node is selected. Read-only agent snapshot. */
@@ -33,7 +35,7 @@ export default function AgentDetailPanel({ domain, onClose }: { domain: string; 
   const meta = agentById(domain);
   const { data, loading, error } = useApi<{ snapshot: Snapshot }>(`/api/agents/${domain}`);
   const snap = data?.snapshot;
-  const [drill, setDrill] = useState<{ metric: string; label: string } | null>(null);
+  const { openDrill } = useDrill();
 
   return (
     <div className="neural-panel" role="dialog" aria-label={`${meta?.name || "Agent"} details`}>
@@ -70,6 +72,10 @@ export default function AgentDetailPanel({ domain, onClose }: { domain: string; 
             </div>
           ) : null}
 
+          {snap?.sparkline && snap.sparkline.length > 1 ? (
+            <div className="mb-3"><Sparkline values={snap.sparkline} label={snap.sparklineLabel} /></div>
+          ) : null}
+
           <div className="grid grid-cols-2 gap-2">
             {(snap?.metrics || []).map((m) =>
               m.drill ? (
@@ -77,7 +83,7 @@ export default function AgentDetailPanel({ domain, onClose }: { domain: string; 
                   key={m.label}
                   type="button"
                   className="aiva-kpi aiva-kpi-clickable text-left"
-                  onClick={() => setDrill({ metric: m.drill!, label: m.label })}
+                  onClick={() => openDrill({ domain, metric: m.drill!, label: m.label })}
                   aria-label={`Show records behind ${m.label}`}
                 >
                   <div className="aiva-label">{m.label} <span className="aiva-kpi-drill" aria-hidden>↗</span></div>
@@ -121,7 +127,7 @@ export default function AgentDetailPanel({ domain, onClose }: { domain: string; 
                         key={f.label}
                         type="button"
                         className="aiva-funnel-row aiva-funnel-row-clickable w-full text-left"
-                        onClick={() => setDrill({ metric: f.drill!, label: f.label })}
+                        onClick={() => openDrill({ domain, metric: f.drill!, label: f.label })}
                         aria-label={`Show records behind ${f.label}`}
                       >
                         {inner}
@@ -173,8 +179,6 @@ export default function AgentDetailPanel({ domain, onClose }: { domain: string; 
           Open {meta.name} workspace
         </Link>
       ) : null}
-
-      {drill ? <DrillPanel domain={domain} metric={drill.metric} label={drill.label} onClose={() => setDrill(null)} /> : null}
     </div>
   );
 }

@@ -107,6 +107,24 @@ export async function fetchSmsForPhones(phones: string[]): Promise<SmsLogLite[]>
   return out;
 }
 
+/** Resolve students.id for a small set of phones (last-10 key) so AIVA can deep-link record-level. */
+export async function fetchStudentIdsByPhone(phones: string[]): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  const sb = getSupabase();
+  if (!sb || phones.length === 0) return out;
+  const keys = Array.from(new Set(phones.map((p) => String(p).replace(/\D/g, "").slice(-10)).filter((p) => p.length === 10)));
+  for (let i = 0; i < keys.length; i += 100) {
+    const chunk = keys.slice(i, i + 100);
+    const { data } = await sb.from("students").select("id, phone").in("phone", chunk);
+    for (const r of data || []) {
+      const ph = String((r as { phone?: string }).phone || "").replace(/\D/g, "").slice(-10);
+      const id = (r as { id?: string }).id;
+      if (ph && id && !out.has(ph)) out.set(ph, id);
+    }
+  }
+  return out;
+}
+
 /** Map of payment_id -> proof status, for group-status derivation. */
 export async function fetchProofStatuses(): Promise<Record<string, PaymentProofStatus | undefined>> {
   const sb = getSupabase();

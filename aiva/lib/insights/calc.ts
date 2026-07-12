@@ -81,6 +81,22 @@ export function daysAgo(now: number, days: number): number {
   return now - days * DAY_MS;
 }
 
+/**
+ * Bucket dated amounts into a per-day series of length `days`, oldest→newest (index days-1 = today).
+ * Pure/deterministic given `now`. Used for trend sparklines. Unit-tested.
+ */
+export function dailySeries(items: { date: string; amount: number }[], days: number, now = Date.now()): number[] {
+  const DAY = 86_400_000;
+  const out = new Array(days).fill(0);
+  for (const it of items) {
+    const t = Date.parse(it.date) || 0;
+    if (!t) continue;
+    const dayIdx = Math.floor((now - t) / DAY);
+    if (dayIdx >= 0 && dayIdx < days) out[days - 1 - dayIdx] += Number(it.amount) || 0;
+  }
+  return out;
+}
+
 export type AttendanceSplit = {
   known: boolean;
   attendees: number;
