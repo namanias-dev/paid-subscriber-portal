@@ -15,6 +15,7 @@ export const ADMIN_NAV: AdminNavItem[] = [
   { href: "/admin/learning", label: "Learning", icon: "learning", group: "Overview" },
   { href: "/admin/analytics", label: "Business Analytics", icon: "analytics", group: "Overview", perm: "view_revenue" },
   { href: "/admin/home", label: "Home Page", icon: "home", group: "Overview", perm: "manage_settings" },
+  { href: "/admin/announcements", label: "Announcements", icon: "sparkle", group: "Website", perm: "manage_settings" },
   { href: "/admin/toppers", label: "Toppers / Results", icon: "toppers", group: "Website", perm: "manage_settings" },
   { href: "/admin/navigation", label: "Navigation / Header", icon: "navigation", group: "Website", perm: "manage_settings" },
   { href: "/admin/about", label: "About Page", icon: "about", group: "Website", perm: "manage_settings" },

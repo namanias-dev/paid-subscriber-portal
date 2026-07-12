@@ -64,6 +64,7 @@ import type {
   DuplicateEnrollmentGroup,
   EnrollmentMergeLog,
   InstallmentItem,
+  Announcement,
 } from "./types";
 import { deriveEnrollment, enrollmentStatusFromSchedule, installmentsSummary, planCourseEnrollment, resolveEmiConfig, isLineCancelledOrWaived, isLineOutstanding, isActiveEnrollment, isAttemptEnrollment } from "./installments";
 import { changePlan, type ChangePlanTarget, type ConvertOptions } from "./paymentPlanChange";
@@ -6601,6 +6602,70 @@ export async function getCaEvents(): Promise<CaEvent[]> {
   if (demoMode()) return [];
   const rows = await dbSelect<CaEvent>("ca_events");
   return rows;
+}
+
+// ========================= ANNOUNCEMENTS ("What's New") =====================
+
+/** All announcements (admin view), newest priority first. */
+export async function getAnnouncements(): Promise<Announcement[]> {
+  if (demoMode()) return [];
+  const db = getSupabaseAdmin();
+  if (!db) return [];
+  const { data } = await db
+    .from("announcements")
+    .select("*")
+    .order("sort_order", { ascending: true })
+    .order("created_at", { ascending: false });
+  return (data as Announcement[]) ?? [];
+}
+
+/** True when an announcement is live right now (active + within date window). */
+export function isAnnouncementLive(a: Announcement | null | undefined, now: number = Date.now()): boolean {
+  if (!a || !a.active) return false;
+  if (a.starts_at && new Date(a.starts_at).getTime() > now) return false;
+  if (a.ends_at && new Date(a.ends_at).getTime() < now) return false;
+  return true;
+}
+
+/** Public list: only live announcements, ordered for display. */
+export async function getActiveAnnouncements(): Promise<Announcement[]> {
+  const all = await getAnnouncements();
+  const now = Date.now();
+  return all.filter((a) => isAnnouncementLive(a, now));
+}
+
+export async function getAnnouncementById(id: string): Promise<Announcement | null> {
+  const all = await getAnnouncements();
+  return all.find((a) => a.id === id) ?? null;
+}
+
+export async function addAnnouncement(input: Partial<Announcement>): Promise<Announcement> {
+  const ts = new Date().toISOString();
+  const row = {
+    id: uuid(),
+    title: (input.title || "").trim() || "Untitled",
+    href: input.href ?? null,
+    badge: input.badge ?? null,
+    active: input.active ?? true,
+    pinned: input.pinned ?? true,
+    starts_at: input.starts_at ?? null,
+    ends_at: input.ends_at ?? null,
+    sort_order: input.sort_order ?? 0,
+    created_at: ts,
+    updated_at: ts,
+  } as Announcement;
+  if (demoMode()) return row;
+  return dbInsert<Announcement>("announcements", row as unknown as Record<string, unknown>);
+}
+
+export async function updateAnnouncement(id: string, patch: Partial<Announcement>): Promise<Announcement | null> {
+  if (demoMode()) return null;
+  return dbUpdate<Announcement>("announcements", id, { ...patch, updated_at: new Date().toISOString() } as Record<string, unknown>);
+}
+
+export async function deleteAnnouncement(id: string): Promise<boolean> {
+  if (demoMode()) return true;
+  return dbDelete("announcements", id);
 }
 
 // ========================= UPSC RESOURCES (SEO hub) =========================
