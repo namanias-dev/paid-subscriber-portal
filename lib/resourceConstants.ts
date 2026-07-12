@@ -22,6 +22,7 @@ export const RESERVED_RESOURCE_SLUGS = new Set<string>([
   ...RESOURCE_CATEGORIES.map((c) => c.slug),
   "feed.xml",
   "search",
+  "downloads",
 ]);
 
 export function resourceCategoryName(slug: string | null | undefined): string {

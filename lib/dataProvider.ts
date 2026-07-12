@@ -6463,6 +6463,24 @@ export async function getPublicCaPdfsByKind(kind: CaPdf["kind"]): Promise<CaPdf[
       return da < db2 ? 1 : da > db2 ? -1 : 0;
     });
 }
+/**
+ * All publicly-downloadable PDFs (any kind) for the Resources → Downloads
+ * folder. A PDF is public once it has a file attached; login/lead gating is
+ * enforced at download time by /api/public/current-affairs/pdf-download, so it
+ * is safe to LIST gated items here (we never expose the file_url until the gate
+ * passes). Newest first. Never exposes admin-only/placeholder records.
+ */
+export async function getPublicDownloadablePdfs(): Promise<CaPdf[]> {
+  const all = await getCaPdfs();
+  return all
+    .filter((p) => !!p.file_url)
+    .sort((a, b) => {
+      const da = a.date_ref || a.created_at;
+      const db2 = b.date_ref || b.created_at;
+      return da < db2 ? 1 : da > db2 ? -1 : 0;
+    });
+}
+
 export async function addCaPdf(input: Partial<CaPdf>): Promise<CaPdf> {
   const ts = new Date().toISOString();
   const row = {

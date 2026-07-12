@@ -573,6 +573,53 @@ a {
 .ca-card:hover .ca-icon-chip--light {
   filter: brightness(1.12);
 }
+/* Premium "Downloads" folder card — gradient gold border on navy with a soft
+   neon glow and a subtle hover lift. Reduced-motion safe. */
+.ca-downloads-card {
+  position: relative;
+  display: block;
+  border-radius: 22px;
+  padding: 1.5px; /* space for the gradient border */
+  background: linear-gradient(135deg, rgba(242, 201, 76, 0.9), rgba(212, 175, 55, 0.35) 45%, rgba(30, 58, 138, 0.6));
+  box-shadow: 0 18px 44px -20px rgba(212, 175, 55, 0.5), 0 10px 30px -18px rgba(10, 26, 63, 0.6);
+  transition: transform 0.24s ease, box-shadow 0.24s ease;
+}
+.ca-downloads-card__inner {
+  position: relative;
+  overflow: hidden;
+  border-radius: 20.5px;
+  background:
+    radial-gradient(60% 120% at 100% 0%, rgba(242, 201, 76, 0.18), transparent 60%),
+    linear-gradient(135deg, var(--ca-navy-900), var(--ca-navy-800));
+}
+.ca-downloads-card::after {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: 22px;
+  padding: 1.5px;
+  background: linear-gradient(135deg, rgba(242, 201, 76, 0.7), transparent 55%);
+  opacity: 0;
+  transition: opacity 0.24s ease;
+  pointer-events: none;
+}
+.ca-downloads-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 26px 60px -22px rgba(212, 175, 55, 0.7), 0 14px 36px -18px rgba(10, 26, 63, 0.7);
+}
+.ca-downloads-card:hover::after {
+  opacity: 1;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ca-downloads-card,
+  .ca-downloads-card::after {
+    transition: none;
+  }
+  .ca-downloads-card:hover {
+    transform: none;
+  }
+}
+
 /* Icon chip — navy on light backgrounds */
 .ca-icon-chip--light {
   color: var(--ca-navy-600);
