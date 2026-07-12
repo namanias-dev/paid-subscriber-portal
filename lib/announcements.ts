@@ -30,6 +30,8 @@ export interface WhatsNewItem {
   label: string;
   /** Optional external link (open in new tab). */
   external?: boolean;
+  /** Optional short, human meta line (e.g. a date) shown under the title. */
+  meta?: string;
   /** Sort timestamp (ms). */
   ts: number;
 }
@@ -51,6 +53,23 @@ function ms(iso: string | null | undefined): number {
   if (!iso) return 0;
   const t = Date.parse(iso);
   return Number.isNaN(t) ? 0 : t;
+}
+
+/** Short, human date label (e.g. "12 Jul 2026"). Empty string when unparseable. */
+function fmtDate(iso: string | null | undefined, withTime = false): string {
+  if (!iso) return "";
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return typeof iso === "string" ? iso : "";
+  try {
+    return new Date(t).toLocaleString("en-IN", {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+      ...(withTime ? { hour: "numeric", minute: "2-digit" } : {}),
+    });
+  } catch {
+    return "";
+  }
 }
 
 /** Build the full "What's New" feed. Best-effort: never throws to the page. */
@@ -85,6 +104,7 @@ export async function getWhatsNew(limitPerGroup = 4): Promise<WhatsNew> {
         title: w.title,
         href: `/webinars/${w.slug}`,
         label: "Live webinar",
+        meta: fmtDate(w.datetime, true),
         ts: ms(w.datetime) || now,
       }));
 
@@ -110,6 +130,7 @@ export async function getWhatsNew(limitPerGroup = 4): Promise<WhatsNew> {
         title: r.title,
         href: `/resources/${r.slug}`,
         label: "New guide",
+        meta: fmtDate(r.publish_at || r.created_at),
         ts: ms(r.publish_at || r.created_at) || now,
       }));
 
@@ -119,6 +140,7 @@ export async function getWhatsNew(limitPerGroup = 4): Promise<WhatsNew> {
       title: p.title,
       href: "/resources/downloads",
       label: "New PDF",
+      meta: p.date_ref || fmtDate(p.created_at),
       ts: ms(p.date_ref) || ms(p.created_at) || now,
     }));
 

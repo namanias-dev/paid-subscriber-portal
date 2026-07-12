@@ -30,6 +30,9 @@ export type EventName =
   | "course_opened"
   // resources / downloads
   | "resource_download_click"
+  // free-download smart lead gate (PII-free: only file id/kind ever sent)
+  | "download_lead_prompt"
+  | "download_lead_submit"
   // announcements ("What's New")
   | "announcement_click"
   // consent
@@ -66,6 +69,8 @@ export const CLIENT_ALLOWED_EVENTS: ReadonlySet<EventName> = new Set<EventName>(
   "zoom_link_clicked",
   "course_opened",
   "resource_download_click",
+  "download_lead_prompt",
+  "download_lead_submit",
   "announcement_click",
   "consent_updated",
   // AI counsellor agent — all low-risk, PII-free funnel signals emitted from the
