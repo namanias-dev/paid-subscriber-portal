@@ -1,9 +1,18 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { Download, FileText, Lock, Search } from "lucide-react";
 import type { CaPdf, CaPdfKind } from "@/lib/types";
 import { trackClient } from "@/lib/analytics/client";
+import {
+  incFreeDownloadCount,
+  markLeadCaptured,
+  shouldGateDownload,
+} from "@/lib/downloads/leadGate";
+import DownloadLeadGateModal from "./DownloadLeadGateModal";
+
+/** Resolves once the visitor is allowed to proceed with a download. */
+type EnsureLead = (pdf: CaPdf) => Promise<{ ok: boolean; phone?: string }>;
 
 const KIND_LABEL: Record<CaPdfKind, string> = {
   monthly: "Monthly Compilations",
@@ -20,7 +29,7 @@ const FILTERS: { id: "all" | CaPdfKind; label: string }[] = [
 
 /** One downloadable file row — reuses the CA download API (gating + count) and
  *  fires a PII-free `resource_download_click` on success. */
-function DownloadRow({ pdf }: { pdf: CaPdf }) {
+function DownloadRow({ pdf, ensureLead }: { pdf: CaPdf; ensureLead: EnsureLead }) {
   const [busy, setBusy] = useState(false);
   const [needLead, setNeedLead] = useState(false);
   const [phone, setPhone] = useState("");
@@ -30,15 +39,24 @@ function DownloadRow({ pdf }: { pdf: CaPdf }) {
     setBusy(true);
     setErr("");
     try {
+      // Smart session lead gate: frictionless first download, ONE short form on
+      // a later download. Real access gates stay server-side (below) — untouched.
+      const gate = await ensureLead(pdf);
+      if (!gate.ok) {
+        setBusy(false);
+        return;
+      }
+      const phoneForDownload = leadPhone || gate.phone;
       const res = await fetch("/api/public/current-affairs/pdf-download", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: pdf.id, phone: leadPhone }),
+        body: JSON.stringify({ id: pdf.id, phone: phoneForDownload }),
       });
       const d = await res.json().catch(() => ({ ok: false }));
       if (d.ok && d.url) {
         // PII-free download signal for the first-party analytics pipeline.
         trackClient("resource_download_click", { pdf_id: pdf.id, kind: pdf.kind, surface: "resources_downloads" });
+        incFreeDownloadCount();
         window.open(d.url, "_blank", "noopener,noreferrer");
         setNeedLead(false);
       } else if (d.requiresLead) {
@@ -109,6 +127,34 @@ function DownloadRow({ pdf }: { pdf: CaPdf }) {
 export default function DownloadsExplorer({ pdfs }: { pdfs: CaPdf[] }) {
   const [filter, setFilter] = useState<"all" | CaPdfKind>("all");
   const [q, setQ] = useState("");
+  const [gatePdf, setGatePdf] = useState<CaPdf | null>(null);
+  const resolverRef = useRef<((r: { ok: boolean; phone?: string }) => void) | null>(null);
+
+  const ensureLead = useCallback<EnsureLead>((pdf) => {
+    return new Promise((resolve) => {
+      if (!shouldGateDownload()) {
+        resolve({ ok: true });
+        return;
+      }
+      resolverRef.current = resolve;
+      setGatePdf(pdf);
+    });
+  }, []);
+
+  const handleGateSubmitted = useCallback((leadPhone: string) => {
+    markLeadCaptured();
+    const resolve = resolverRef.current;
+    resolverRef.current = null;
+    setGatePdf(null);
+    resolve?.({ ok: true, phone: leadPhone });
+  }, []);
+
+  const handleGateClose = useCallback(() => {
+    const resolve = resolverRef.current;
+    resolverRef.current = null;
+    setGatePdf(null);
+    resolve?.({ ok: false });
+  }, []);
 
   const counts = useMemo(() => {
     const c: Record<string, number> = { all: pdfs.length, monthly: 0, daily: 0, general: 0 };
@@ -156,9 +202,13 @@ export default function DownloadsExplorer({ pdfs }: { pdfs: CaPdf[] }) {
       ) : (
         <div className="mt-6 grid gap-3 sm:grid-cols-2">
           {visible.map((p) => (
-            <DownloadRow key={p.id} pdf={p} />
+            <DownloadRow key={p.id} pdf={p} ensureLead={ensureLead} />
           ))}
         </div>
+      )}
+
+      {gatePdf && (
+        <DownloadLeadGateModal pdf={gatePdf} onSubmitted={handleGateSubmitted} onClose={handleGateClose} />
       )}
     </div>
   );
