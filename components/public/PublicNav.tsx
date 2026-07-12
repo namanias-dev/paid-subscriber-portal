@@ -10,6 +10,8 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import Logo from "@/components/ui/Logo";
+import GlobalAnnouncementBar from "@/components/public/GlobalAnnouncementBar";
+import type { WhatsNewItem } from "@/lib/announcements";
 import { ACADEMY } from "@/lib/config";
 import { DEFAULT_NAV_TABS, type NavTab } from "@/lib/navConfig";
 import { requestLogout } from "@/lib/welcome";
@@ -53,6 +55,7 @@ export default function PublicNav({
   userName = null,
   links = DEFAULT_NAV_TABS,
   hasUpcomingWebinars = false,
+  announcements = [],
 }: {
   logoUrl?: string | null;
   logoAlt?: string | null;
@@ -65,6 +68,8 @@ export default function PublicNav({
   userName?: string | null;
   links?: NavTab[];
   hasUpcomingWebinars?: boolean;
+  /** Auto-sourced "What's New" items for the slim global ticker under the nav. */
+  announcements?: WhatsNewItem[];
 }) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
@@ -214,6 +219,10 @@ export default function PublicNav({
           <X size={22} className={`absolute transition-all duration-200 motion-reduce:transition-none ${open ? "rotate-0 opacity-100" : "-rotate-90 opacity-0"}`} aria-hidden="true" />
         </button>
       </div>
+
+      {/* Slim global "What's New" ticker — pinned directly under the nav on every
+          public page because it lives inside this sticky, in-flow header block. */}
+      <GlobalAnnouncementBar items={announcements} />
     </header>
 
       {/* Mobile drawer — rendered OUTSIDE <header> because the header's backdrop-filter
