@@ -74,6 +74,39 @@ export async function fetchCoursesLite(): Promise<CourseLite[]> {
   return data as unknown as CourseLite[];
 }
 
+/** A single SMS log row (subset AIVA needs to summarise comms history). Read-only. */
+export type SmsLogLite = {
+  normalized_mobile: string | null;
+  mobile: string | null;
+  template_name: string | null;
+  trigger_event: string | null;
+  status: string | null;
+  sent_at: string | null;
+  created_at: string | null;
+};
+
+/**
+ * On-demand SMS history for a SMALL set of phones (a drill-down page), joined by the
+ * portal's own normalized_mobile. Never pulls the whole sms_logs table.
+ */
+export async function fetchSmsForPhones(phones: string[]): Promise<SmsLogLite[]> {
+  const sb = getSupabase();
+  if (!sb || phones.length === 0) return [];
+  const keys = Array.from(new Set(phones.map((p) => String(p).replace(/\D/g, "").slice(-10)).filter((p) => p.length === 10)));
+  if (keys.length === 0) return [];
+  const out: SmsLogLite[] = [];
+  // Chunk the IN() list to stay well under URL limits.
+  for (let i = 0; i < keys.length; i += 100) {
+    const chunk = keys.slice(i, i + 100);
+    const { data } = await sb
+      .from("sms_logs")
+      .select("normalized_mobile, mobile, template_name, trigger_event, status, sent_at, created_at")
+      .in("normalized_mobile", chunk);
+    if (data) out.push(...(data as unknown as SmsLogLite[]));
+  }
+  return out;
+}
+
 /** Map of payment_id -> proof status, for group-status derivation. */
 export async function fetchProofStatuses(): Promise<Record<string, PaymentProofStatus | undefined>> {
   const sb = getSupabase();

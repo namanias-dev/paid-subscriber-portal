@@ -1,8 +1,10 @@
 "use client";
 
 import Link from "next/link";
+import { useState } from "react";
 import { useApi, RiskPill, Skeleton } from "@/components/kit";
 import { agentById } from "@/lib/agents/registry";
+import DrillPanel from "./DrillPanel";
 
 type Recommendation = {
   id: string;
@@ -13,11 +15,11 @@ type Recommendation = {
   blockedReason?: string;
 };
 
-type FunnelBar = { label: string; value: number; sub?: string };
+type FunnelBar = { label: string; value: number; sub?: string; drill?: string };
 
 type Snapshot = {
   agent: { id: string; name: string; blurb: string; href: string };
-  metrics: { label: string; value: string; hint?: string }[];
+  metrics: { label: string; value: string; hint?: string; drill?: string }[];
   recommendations: Recommendation[];
   note?: string;
   headline?: string;
@@ -31,6 +33,7 @@ export default function AgentDetailPanel({ domain, onClose }: { domain: string; 
   const meta = agentById(domain);
   const { data, loading, error } = useApi<{ snapshot: Snapshot }>(`/api/agents/${domain}`);
   const snap = data?.snapshot;
+  const [drill, setDrill] = useState<{ metric: string; label: string } | null>(null);
 
   return (
     <div className="neural-panel" role="dialog" aria-label={`${meta?.name || "Agent"} details`}>
@@ -68,13 +71,27 @@ export default function AgentDetailPanel({ domain, onClose }: { domain: string; 
           ) : null}
 
           <div className="grid grid-cols-2 gap-2">
-            {(snap?.metrics || []).map((m) => (
-              <div key={m.label} className="aiva-kpi">
-                <div className="aiva-label">{m.label}</div>
-                <div className="mt-1 font-heading text-xl font-bold text-white">{m.value}</div>
-                {m.hint ? <div className="mt-0.5 text-xs text-muted">{m.hint}</div> : null}
-              </div>
-            ))}
+            {(snap?.metrics || []).map((m) =>
+              m.drill ? (
+                <button
+                  key={m.label}
+                  type="button"
+                  className="aiva-kpi aiva-kpi-clickable text-left"
+                  onClick={() => setDrill({ metric: m.drill!, label: m.label })}
+                  aria-label={`Show records behind ${m.label}`}
+                >
+                  <div className="aiva-label">{m.label} <span className="aiva-kpi-drill" aria-hidden>↗</span></div>
+                  <div className="mt-1 font-heading text-xl font-bold text-white">{m.value}</div>
+                  {m.hint ? <div className="mt-0.5 text-xs text-muted">{m.hint}</div> : null}
+                </button>
+              ) : (
+                <div key={m.label} className="aiva-kpi">
+                  <div className="aiva-label">{m.label}</div>
+                  <div className="mt-1 font-heading text-xl font-bold text-white">{m.value}</div>
+                  {m.hint ? <div className="mt-0.5 text-xs text-muted">{m.hint}</div> : null}
+                </div>
+              ),
+            )}
             {(!snap || snap.metrics.length === 0) && <p className="text-sm text-muted">No live metrics for this agent yet.</p>}
           </div>
 
@@ -84,20 +101,35 @@ export default function AgentDetailPanel({ domain, onClose }: { domain: string; 
               <div className="space-y-1.5">
                 {(() => {
                   const max = Math.max(1, ...snap.funnel!.map((f) => f.value));
-                  return snap.funnel!.map((f) => (
-                    <div key={f.label} className="aiva-funnel-row">
-                      <div className="aiva-funnel-head">
-                        <span className="aiva-funnel-label">{f.label}</span>
-                        <span className="aiva-funnel-value">
-                          {f.value}
-                          {f.sub ? <span className="aiva-funnel-sub"> · {f.sub}</span> : null}
-                        </span>
-                      </div>
-                      <div className="aiva-funnel-track">
-                        <div className="aiva-funnel-fill" style={{ width: `${Math.round((f.value / max) * 100)}%` }} />
-                      </div>
-                    </div>
-                  ));
+                  return snap.funnel!.map((f) => {
+                    const inner = (
+                      <>
+                        <div className="aiva-funnel-head">
+                          <span className="aiva-funnel-label">{f.label}{f.drill ? <span className="aiva-kpi-drill" aria-hidden> ↗</span> : null}</span>
+                          <span className="aiva-funnel-value">
+                            {f.value}
+                            {f.sub ? <span className="aiva-funnel-sub"> · {f.sub}</span> : null}
+                          </span>
+                        </div>
+                        <div className="aiva-funnel-track">
+                          <div className="aiva-funnel-fill" style={{ width: `${Math.round((f.value / max) * 100)}%` }} />
+                        </div>
+                      </>
+                    );
+                    return f.drill ? (
+                      <button
+                        key={f.label}
+                        type="button"
+                        className="aiva-funnel-row aiva-funnel-row-clickable w-full text-left"
+                        onClick={() => setDrill({ metric: f.drill!, label: f.label })}
+                        aria-label={`Show records behind ${f.label}`}
+                      >
+                        {inner}
+                      </button>
+                    ) : (
+                      <div key={f.label} className="aiva-funnel-row">{inner}</div>
+                    );
+                  });
                 })()}
               </div>
             </div>
@@ -141,6 +173,8 @@ export default function AgentDetailPanel({ domain, onClose }: { domain: string; 
           Open {meta.name} workspace
         </Link>
       ) : null}
+
+      {drill ? <DrillPanel domain={domain} metric={drill.metric} label={drill.label} onClose={() => setDrill(null)} /> : null}
     </div>
   );
 }

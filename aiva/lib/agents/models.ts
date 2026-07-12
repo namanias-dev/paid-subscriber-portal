@@ -11,7 +11,7 @@ import { canExecute } from "../flags";
  * (all amber/red actions are disabled in the read-only first release).
  */
 
-export type Metric = { label: string; value: string; hint?: string };
+export type Metric = { label: string; value: string; hint?: string; drill?: string };
 
 export type Recommendation = {
   id: string;

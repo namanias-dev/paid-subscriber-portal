@@ -334,6 +334,152 @@ body {
   top: 2px;
 }
 
+/* ---- Drill-down: clickable metrics/funnel + modal list ---- */
+.aiva-kpi-clickable {
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+  border: 1px solid transparent;
+}
+.aiva-kpi-clickable:hover {
+  border-color: rgba(77, 139, 255, 0.55);
+  background: rgba(30, 45, 82, 0.5);
+}
+.aiva-kpi-drill {
+  color: #7aa5ff;
+  font-size: 10px;
+}
+.aiva-funnel-row-clickable {
+  cursor: pointer;
+  border-radius: 8px;
+  padding: 3px 4px;
+  margin: -3px -4px;
+  transition: background 0.15s ease;
+}
+.aiva-funnel-row-clickable:hover {
+  background: rgba(30, 45, 82, 0.5);
+}
+
+.aiva-drill-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(3, 7, 20, 0.72);
+  backdrop-filter: blur(4px);
+  animation: neural-slide-in 0.2s ease;
+}
+.aiva-drill {
+  width: 100%;
+  max-width: 600px;
+  max-height: 86vh;
+  overflow-y: auto;
+  padding: 16px;
+  border-radius: 16px;
+  border: 1px solid rgba(120, 150, 220, 0.35);
+  background: rgba(8, 16, 40, 0.98);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.6);
+}
+.aiva-drill-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.aiva-drill-search {
+  width: 100%;
+  padding: 9px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(120, 150, 220, 0.3);
+  background: rgba(4, 10, 28, 0.8);
+  color: #eaf0ff;
+  font-size: 13px;
+  outline: none;
+}
+.aiva-drill-search:focus {
+  border-color: rgba(77, 139, 255, 0.6);
+}
+.aiva-drill-count {
+  margin: 10px 2px;
+  font-size: 12px;
+  color: #8593b8;
+}
+.aiva-drill-note {
+  color: #f2c94c;
+}
+.aiva-drill-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.aiva-drill-row {
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(120, 150, 220, 0.22);
+  background: rgba(12, 22, 50, 0.55);
+  font-size: 13px;
+}
+.aiva-tag {
+  display: inline-block;
+  font-size: 11px;
+  line-height: 1.4;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  border: 1px solid rgba(120, 150, 220, 0.3);
+  color: #cdd7f2;
+  background: rgba(40, 63, 116, 0.35);
+}
+.aiva-tag-ok {
+  border-color: rgba(39, 174, 96, 0.5);
+  color: #7ee2a8;
+}
+.aiva-tag-warn {
+  border-color: rgba(242, 201, 76, 0.5);
+  color: #f2c94c;
+}
+.aiva-drill-timeline {
+  margin-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.aiva-step {
+  font-size: 10px;
+  padding: 2px 7px;
+  border-radius: 9999px;
+  border: 1px solid rgba(120, 150, 220, 0.25);
+  color: #8593b8;
+}
+.aiva-step-done {
+  border-color: rgba(77, 139, 255, 0.5);
+  color: #cdd7f2;
+  background: rgba(0, 87, 255, 0.14);
+}
+.aiva-step-date {
+  color: #6b7aa3;
+}
+.aiva-drill-pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 12px;
+}
+@media (max-width: 640px) {
+  .aiva-drill-backdrop {
+    padding: 0;
+  }
+  .aiva-drill {
+    max-width: 100%;
+    max-height: 100vh;
+    height: 100%;
+    border-radius: 0;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   * {
     animation-duration: 0.001ms !important;

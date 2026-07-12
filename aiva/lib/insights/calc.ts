@@ -81,6 +81,46 @@ export function daysAgo(now: number, days: number): number {
   return now - days * DAY_MS;
 }
 
+export type AttendanceSplit = {
+  known: boolean;
+  attendees: number;
+  noShows: number;
+  attendeeConverted: number;
+  noShowConverted: number;
+  attendeeConvPct: number;
+  noShowConvPct: number;
+};
+
+/**
+ * Attendee-vs-no-show conversion. `known` is false when no registrant has an attendance
+ * flag yet (attendance list not uploaded) — callers should show "not uploaded", not zeros.
+ */
+export function attendeeConversion(rows: { attended: boolean; converted: boolean }[]): AttendanceSplit {
+  const known = rows.some((r) => r.attended);
+  let attendees = 0;
+  let noShows = 0;
+  let attendeeConverted = 0;
+  let noShowConverted = 0;
+  for (const r of rows) {
+    if (r.attended) {
+      attendees += 1;
+      if (r.converted) attendeeConverted += 1;
+    } else {
+      noShows += 1;
+      if (r.converted) noShowConverted += 1;
+    }
+  }
+  return {
+    known,
+    attendees,
+    noShows,
+    attendeeConverted,
+    noShowConverted,
+    attendeeConvPct: pct(attendeeConverted, attendees),
+    noShowConvPct: pct(noShowConverted, noShows),
+  };
+}
+
 export type FunnelStage = { label: string; value: number; ofPrev: number; ofTop: number };
 
 /**
