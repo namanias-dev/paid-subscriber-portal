@@ -2739,7 +2739,7 @@ export async function getWebinarById(id: string): Promise<Webinar | null> {
 // ====================== WEBINAR LIFECYCLE AUDIT ======================
 
 export interface WebinarAuditEntry {
-  action: "webinar_duplicated" | "registration_moved" | "registration_auto_closed" | "payment_blocked_expired";
+  action: "webinar_duplicated" | "registration_moved" | "registration_auto_closed" | "payment_blocked_expired" | "attendance_marked";
   webinar_id?: string | null;
   target_webinar_id?: string | null;
   actor?: string | null;

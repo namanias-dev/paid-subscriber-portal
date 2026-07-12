@@ -3,6 +3,8 @@ import {
   fetchCourseEnrollments,
   fetchWebinarRegistrations,
   fetchWebinars,
+  fetchCoursesLite,
+  type CourseLite,
 } from "../data";
 import { isPaidStatus, dedupePaidRows } from "@portal/lib/paymentsAgg";
 import { deriveEnrollment, isActiveEnrollment } from "@portal/lib/installments";
@@ -12,21 +14,28 @@ import {
   normPhone,
   pct,
   ratePerDay,
+  etaDays,
   trend,
   funnelStages,
   daysAgo,
   type FunnelStage,
 } from "./calc";
-import type { CourseEnrollment } from "@portal/lib/types";
+import type { CourseEnrollment, WebinarRegistration, Webinar } from "@portal/lib/types";
 
 /**
- * DB-facing insight builders. Each REASONS over already-verified read primitives
- * (isPaidStatus, dedupePaidRows, deriveEnrollment, isActiveEnrollment) so every number
- * ties out with the portal's Payments/Finance truth. Read-only: no writes, no side effects.
+ * DB-facing insight builders. Each REASONS over verified read primitives (isPaidStatus,
+ * dedupePaidRows, deriveEnrollment, isActiveEnrollment) so numbers tie out with the portal's
+ * Payments/Finance truth. Read-only: no writes, no side effects.
  *
- * Where a requested insight can't be honestly computed from the current schema, the builder
- * returns a `caveats[]` string naming the exact missing field/relationship — it never fakes it.
+ * As of the Phase B/C data-plumbing fix these consume the NEW additive columns:
+ *   - webinar_registrations.matched_enrollment_id / match_method  (phone-confirmed vs name-probable)
+ *   - webinars.registrations_source  (row_level vs aggregate_manual/vanity)
+ *   - course_enrollments.batch_id     (mapped from batch_label; enables per-batch + seat-fill)
+ * Where an insight still can't be honestly computed, the builder returns a `caveats[]` string
+ * naming the exact missing field — it never fakes it.
  */
+
+const DAY = 86_400_000;
 
 export type FunnelBar = { label: string; value: number; sub?: string };
 
@@ -38,19 +47,9 @@ export type AgentIntel = {
   caveats?: string[];
 };
 
-/** Index active enrollments by normalized phone (first-enrolled kept for timing). */
-function activeByPhone(enrollments: CourseEnrollment[]): Map<string, CourseEnrollment[]> {
-  const m = new Map<string, CourseEnrollment[]>();
-  for (const e of enrollments) {
-    if (!isActiveEnrollment(e)) continue;
-    const ph = normPhone(e.phone);
-    if (ph.length !== 10) continue;
-    const arr = m.get(ph);
-    if (arr) arr.push(e);
-    else m.set(ph, [e]);
-  }
-  return m;
-}
+type RegRow = WebinarRegistration & { matched_enrollment_id?: string | null; match_method?: string | null };
+type EnrRow = CourseEnrollment & { batch_id?: string | null };
+type WebRow = Webinar & { registrations_source?: string | null };
 
 function funnelBars(stages: FunnelStage[]): FunnelBar[] {
   return stages.map((s, i) => ({
@@ -60,9 +59,15 @@ function funnelBars(stages: FunnelStage[]): FunnelBar[] {
   }));
 }
 
+function numOrNull(v: unknown): number | null {
+  if (v == null || v === "") return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
 /**
- * THE webinar funnel: registrants → converted to admission → paid, linked by normalized phone
- * (the portal's identity key). Also splits converts booked before vs after their first webinar.
+ * THE webinar funnel on the CORRECTED link: registrants → phone-confirmed converts → paid,
+ * with a separate probable (name-match) tier and honest handling of aggregate-only webinars.
  */
 export async function webinarFunnel(now = Date.now()): Promise<AgentIntel> {
   const [regs, enrollments, webinars] = await Promise.all([
@@ -70,160 +75,190 @@ export async function webinarFunnel(now = Date.now()): Promise<AgentIntel> {
     fetchCourseEnrollments(),
     fetchWebinars(),
   ]);
+  const enrById = new Map(enrollments.map((e) => [e.id, e]));
 
-  // Registrant phones: first registration time + whether ever marked attended.
-  const regByPhone = new Map<string, { firstReg: number; attended: boolean }>();
-  for (const r of regs) {
+  // Distinct registrant phones (row-level), carrying the DB-computed match tier + timing.
+  const byPhone = new Map<
+    string,
+    { method: "phone" | "name_probable" | null; enrId: string | null; firstReg: number; attended: boolean }
+  >();
+  for (const r of regs as RegRow[]) {
     const ph = normPhone(r.phone);
     if (ph.length !== 10) continue;
+    const method = r.match_method === "phone" ? "phone" : r.match_method === "name_probable" ? "name_probable" : null;
     const t = Date.parse(r.created_at) || now;
-    const prev = regByPhone.get(ph);
-    if (!prev) regByPhone.set(ph, { firstReg: t, attended: !!r.attended });
-    else {
-      prev.firstReg = Math.min(prev.firstReg, t);
-      prev.attended = prev.attended || !!r.attended;
+    const cur = byPhone.get(ph);
+    if (!cur) {
+      byPhone.set(ph, { method, enrId: r.matched_enrollment_id ?? null, firstReg: t, attended: !!r.attended });
+    } else {
+      if (method === "phone" || (method === "name_probable" && cur.method == null)) {
+        cur.method = method;
+        cur.enrId = r.matched_enrollment_id ?? cur.enrId;
+      }
+      cur.firstReg = Math.min(cur.firstReg, t);
+      cur.attended = cur.attended || !!r.attended;
     }
   }
 
-  const enrByPhone = activeByPhone(enrollments);
-  const regPhones = regByPhone.size;
-  const convertedPhones = [...regByPhone.keys()].filter((ph) => enrByPhone.has(ph));
-  const converted = convertedPhones.length;
-
-  let convertedPaid = 0;
-  let collectedFromCohort = 0;
-  let stillOwing = 0;
+  const regPhones = byPhone.size;
+  let confirmed = 0;
+  let probable = 0;
+  let paidConfirmed = 0;
+  let collectedConfirmed = 0;
+  let owingConfirmed = 0;
   let bookedBefore = 0;
   let bookedAfter = 0;
-  for (const ph of convertedPhones) {
-    const es = enrByPhone.get(ph)!;
-    const paidSum = es.reduce((a, e) => a + deriveEnrollment(e).paid, 0);
-    collectedFromCohort += paidSum;
-    if (paidSum > 0) convertedPaid += 1;
-    if (es.some((e) => deriveEnrollment(e).remaining > 0)) stillOwing += 1;
-    const firstEnr = Math.min(...es.map((e) => Date.parse(e.created_at) || now));
-    if (firstEnr < regByPhone.get(ph)!.firstReg) bookedBefore += 1;
-    else bookedAfter += 1;
+  for (const v of byPhone.values()) {
+    if (v.method === "phone") {
+      confirmed += 1;
+      const e = v.enrId ? enrById.get(v.enrId) : null;
+      if (e) {
+        const d = deriveEnrollment(e);
+        collectedConfirmed += d.paid;
+        if (d.paid > 0) paidConfirmed += 1;
+        if (d.remaining > 0) owingConfirmed += 1;
+        const fe = Date.parse(e.created_at) || now;
+        if (fe < v.firstReg) bookedBefore += 1;
+        else bookedAfter += 1;
+      }
+    } else if (v.method === "name_probable") {
+      probable += 1;
+    }
   }
 
-  const convPct = pct(converted, regPhones);
+  const convPct = pct(confirmed, regPhones);
+  const agg = (webinars as WebRow[]).filter((w) => w.registrations_source === "aggregate_manual");
+  const aggCount = agg.reduce((a, w) => a + (Number(w.registrations) || 0), 0);
+  const attendedKnown = [...byPhone.values()].some((v) => v.attended);
+
   const stages = funnelStages([
-    { label: "Registrants (phone-linked)", value: regPhones },
-    { label: "Converted to admission", value: converted },
-    { label: "Paid ≥ 1 installment", value: convertedPaid },
+    { label: "Registrants (row-level)", value: regPhones },
+    { label: "Converted — phone-confirmed", value: confirmed },
+    { label: "Paid ≥ 1 installment", value: paidConfirmed },
   ]);
-
-  // Attendance quality + registration-source reconciliation → honest caveats.
-  const attendedTrue = [...regByPhone.values()].filter((v) => v.attended).length;
-  const denormReg = webinars.reduce((a, w) => a + (Number(w.registrations) || 0), 0);
-  const rowReg = regs.length;
-  const caveats: string[] = [
-    "Registrant→admission link is by normalized phone (last 10 digits) — the same identity key the portal reconciles on. A registrant who enrolls under a different number is not matched.",
-  ];
-  if (attendedTrue === 0) {
-    caveats.push(
-      "Attendance→conversion is NOT shown: webinar_registrations.attended is false/unset for every row. Populate it (post-webinar attendee sync) to unlock attendee-vs-no-show conversion.",
-    );
-  }
-  if (denormReg !== rowReg && denormReg > 0) {
-    caveats.push(
-      `Two registration sources disagree: webinars.registrations totals ${denormReg} (aggregate counter) vs ${rowReg} per-registration rows carrying a phone. Conversion is computed only on the ${rowReg} phone-bearing rows; webinars stored as an aggregate count can't be phone-linked.`,
-    );
-  }
+  const bars = funnelBars(stages);
+  if (probable > 0) bars.splice(2, 0, { label: "+ Probable (name-match)", value: probable, sub: "needs review — not in rate" });
 
   const headline =
     regPhones === 0
-      ? "No phone-linked webinar registrations yet — funnel activates once registrations carry a phone."
-      : `${converted} of ${regPhones} webinar registrants (${convPct}%) converted to admission; ${convertedPaid} have paid, ${inr(collectedFromCohort)} collected from this cohort${bookedAfter > 0 ? ` — ${bookedAfter} booked after their webinar` : ""}.`;
+      ? "No row-level webinar registrations to link yet."
+      : `${confirmed} of ${regPhones} row-level registrants (${convPct}%) converted to admission — phone-confirmed; +${probable} probable via name-match. ${inr(collectedConfirmed)} collected from the confirmed cohort${aggCount > 0 ? `. ${aggCount.toLocaleString("en-IN")} more registrants exist only as aggregate counts and can't be linked` : ""}.`;
+
+  const caveats: string[] = [];
+  if (agg.length > 0) {
+    caveats.push(
+      `${agg.length} webinar(s) hold only an aggregate registration count (${agg.map((w) => `${w.title}: ${w.registrations}`).join("; ")}) with NO per-registrant rows — checked import_jobs + webinar_audit_log, unrecoverable. They are excluded from conversion, not faked.`,
+    );
+  }
+  if (probable > 0) {
+    caveats.push(
+      `${probable} probable convert(s) matched by name with a DIFFERENT phone than they registered with — shown separately and NOT merged into the confirmed rate; needs human confirmation.`,
+    );
+  }
+  if (!attendedKnown) {
+    caveats.push(
+      "Attendance→conversion still not shown: webinar_registrations.attended is unset. Use the new POST /api/admin/webinars/:id/attendance to upload attendee phones; then attendee-vs-no-show conversion unlocks.",
+    );
+  }
 
   return {
     headline,
     metrics: [
-      { label: "Registrants (linked)", value: String(regPhones), hint: `${rowReg} rows` },
-      { label: "Converted", value: `${converted}`, hint: `${convPct}% of registrants` },
-      { label: "Paid cohort", value: `${convertedPaid}`, hint: `${stillOwing} still owing` },
-      { label: "Cohort collected", value: inr(collectedFromCohort) },
-      { label: "Booked after webinar", value: String(bookedAfter) },
-      { label: "Booked before webinar", value: String(bookedBefore) },
+      { label: "Registrants (row-level)", value: String(regPhones) },
+      { label: "Converted (confirmed)", value: String(confirmed), hint: `${convPct}% · +${probable} probable` },
+      { label: "Paid cohort", value: String(paidConfirmed), hint: `${owingConfirmed} still owing` },
+      { label: "Cohort collected", value: inr(collectedConfirmed) },
+      { label: "Booked after webinar", value: String(bookedAfter), hint: `${bookedBefore} before` },
+      { label: "Aggregate-only (unlinkable)", value: aggCount.toLocaleString("en-IN") },
     ],
-    funnelTitle: "Webinar → Admission funnel",
-    funnel: funnelBars(stages),
+    funnelTitle: "Webinar → Admission funnel (corrected link)",
+    funnel: bars,
     caveats,
   };
 }
 
-/**
- * Admissions intelligence: enrollments broken down BY BATCH (not one total), booking pace,
- * and how many admissions came through a tracked webinar.
- */
-export async function admissionsIntel(now = Date.now()): Promise<AgentIntel> {
-  const [enrollments, regs] = await Promise.all([
-    fetchCourseEnrollments(),
-    fetchWebinarRegistrations(),
-  ]);
-  const active = enrollments.filter(isActiveEnrollment);
+/** Nearest-first upcoming-batch timeline built from the newly usable batch_id + batches[] dates. */
+function buildBatchTimeline(courses: CourseLite[], active: EnrRow[], now: number) {
+  const out: { course: string; label: string; daysTo: number; booked: number; capacity: number | null; pctFill: number | null; eta: number | null }[] = [];
+  for (const c of courses) {
+    for (const b of c.batches || []) {
+      const startMs = b.start_date ? Date.parse(b.start_date) : NaN;
+      if (!Number.isFinite(startMs) || startMs <= now) continue;
+      const booked = active.filter((e) => e.batch_id === b.id).length;
+      const capacity = numOrNull(b.capacity) ?? c.capacity ?? null;
+      const last14 = active.filter((e) => e.batch_id === b.id && (Date.parse(e.created_at) || 0) >= daysAgo(now, 14)).length;
+      const perDay = ratePerDay(last14, 14);
+      out.push({
+        course: c.title || c.slug || c.id,
+        label: b.label || b.id || "Batch",
+        daysTo: Math.ceil((startMs - now) / DAY),
+        booked,
+        capacity,
+        pctFill: capacity ? pct(booked, capacity) : null,
+        eta: capacity ? etaDays(capacity - booked, perDay) : null,
+      });
+    }
+  }
+  return out.sort((a, b) => a.daysTo - b.daysTo);
+}
 
-  // Per-batch breakdown (course + batch label). batch_label is a freeform display string.
+/** Admissions intelligence: per-BATCH breakdown (via batch_id), booking pace, and upcoming-batch timeline. */
+export async function admissionsIntel(now = Date.now()): Promise<AgentIntel> {
+  const [enrollments, courses] = await Promise.all([fetchCourseEnrollments(), fetchCoursesLite()]);
+  const active = (enrollments as EnrRow[]).filter(isActiveEnrollment);
+
+  // batch_id → "Course · Batch label" for readable grouping.
+  const batchLabelById = new Map<string, string>();
+  for (const c of courses) for (const b of c.batches || []) if (b.id) batchLabelById.set(b.id, `${c.title || "Course"} · ${b.label || b.id}`);
+
   const byBatch = new Map<string, { count: number; collected: number }>();
+  let mapped = 0;
   for (const e of active) {
-    const key = `${e.course_title || "Course"} · ${e.batch_label || "No batch set"}`;
+    if (e.batch_id) mapped += 1;
+    const key = e.batch_id ? batchLabelById.get(e.batch_id) || `${e.course_title} · ${e.batch_id}` : `${e.course_title || "Course"} · ${e.batch_label || "Unmapped"}`;
     const b = byBatch.get(key) || { count: 0, collected: 0 };
     b.count += 1;
     b.collected += deriveEnrollment(e).paid;
     byBatch.set(key, b);
   }
-  const batches = [...byBatch.entries()]
-    .map(([label, v]) => ({ label, ...v }))
-    .sort((a, b) => b.count - a.count);
+  const batches = [...byBatch.entries()].map(([label, v]) => ({ label, ...v })).sort((a, b) => b.count - a.count);
 
-  // Booking pace over rolling windows.
-  const ts = (e: CourseEnrollment) => Date.parse(e.created_at) || 0;
+  const ts = (e: EnrRow) => Date.parse(e.created_at) || 0;
   const last14 = active.filter((e) => ts(e) >= daysAgo(now, 14)).length;
-  const last30 = active.filter((e) => ts(e) >= daysAgo(now, 30)).length;
   const perDay14 = ratePerDay(last14, 14);
 
-  // Webinar-sourced admissions (phone-linked).
-  const regByPhone = new Map<string, number>();
-  for (const r of regs) {
-    const ph = normPhone(r.phone);
-    if (ph.length !== 10) continue;
-    const t = Date.parse(r.created_at) || now;
-    regByPhone.set(ph, Math.min(regByPhone.get(ph) ?? Infinity, t));
-  }
-  let viaWebinar = 0;
-  let afterWebinar = 0;
-  for (const e of active) {
-    const ph = normPhone(e.phone);
-    const reg = regByPhone.get(ph);
-    if (reg == null) continue;
-    viaWebinar += 1;
-    if ((ts(e) || now) >= reg) afterWebinar += 1;
-  }
+  const timeline = buildBatchTimeline(courses, active, now);
+  const next = timeline[0];
 
-  const topBatch = batches[0];
   const headline =
     active.length === 0
       ? "No active enrollments yet."
-      : `${active.length} active enrollments across ${batches.length} batch${batches.length === 1 ? "" : "es"}; booking ~${perDay14.toFixed(1)}/day (last 14d)${topBatch ? `. Biggest batch: ${topBatch.label.split(" · ").pop()} (${topBatch.count})` : ""}. ${viaWebinar} came via a tracked webinar.`;
+      : next
+        ? `Next batch "${next.label.split(" · ").pop()}" (${next.course}) starts in ${next.daysTo} day${next.daysTo === 1 ? "" : "s"}; ${next.booked}${next.capacity ? `/${next.capacity} seats (${next.pctFill}%)` : " booked (capacity not set)"}${next.eta != null ? ` · ~${next.eta}d to fill at current pace` : ""}. ${active.length} active enrollments overall, ~${perDay14.toFixed(1)}/day.`
+        : `${active.length} active enrollments across ${batches.length} batches; booking ~${perDay14.toFixed(1)}/day (14d). No dated upcoming batch configured.`;
 
-  const caveats = [
-    "Next-batch timeline & seat-fill (\"fills in ~N days\", \"% of seats booked\") can't be computed: courses.batches[].start_date, .capacity and .seats_left are all null, and course_enrollments has no batch_id FK (only a freeform batch_label). To unlock this, populate start_date + capacity per batch in courses.batches and stamp a batch_id on course_enrollments so admissions attach to a specific dated batch.",
+  const unmapped = active.length - mapped;
+  const caveats: string[] = [
+    `${mapped}/${active.length} active enrollments now carry a batch_id (exact-label + sole-batch mapping); ${unmapped} remain unmapped where a course has multiple batches sharing one date-only label (e.g. Public Administration, Safalta GS 2027) — those can't be split by mode/timing from batch_label alone.`,
   ];
+  const capGaps = timeline.filter((t) => t.capacity == null).map((t) => t.course);
+  if (capGaps.length) {
+    caveats.push(
+      `Seat-fill % is shown only where a batch has capacity set; upcoming batches without capacity (${[...new Set(capGaps)].join(", ")}) show booked counts only.`,
+    );
+  }
 
   return {
     headline,
     metrics: [
       { label: "Active enrollments", value: String(active.length) },
       { label: "Distinct batches", value: String(batches.length) },
-      { label: "Pace (last 14d)", value: `${perDay14.toFixed(1)}/day`, hint: `${last14} in 14d · ${last30} in 30d` },
-      { label: "Via webinar", value: String(viaWebinar), hint: `${afterWebinar} after registering` },
+      { label: "Batch-mapped", value: `${mapped}/${active.length}`, hint: `${unmapped} unmapped` },
+      { label: "Pace (14d)", value: `${perDay14.toFixed(1)}/day` },
+      ...(next ? [{ label: "Next batch in", value: `${next.daysTo}d`, hint: next.label.split(" · ").pop() }] : []),
     ],
     funnelTitle: "Active enrollments by batch",
-    funnel: batches.slice(0, 6).map((b) => ({
-      label: b.label,
-      value: b.count,
-      sub: `${inr(b.collected)} collected`,
-    })),
+    funnel: batches.slice(0, 6).map((b) => ({ label: b.label, value: b.count, sub: `${inr(b.collected)} collected` })),
     caveats,
   };
 }
@@ -231,9 +266,8 @@ export async function admissionsIntel(now = Date.now()): Promise<AgentIntel> {
 export type RevenueIntel = AgentIntel & { tower: RevenueTower };
 
 /**
- * Revenue intelligence: not just a collected total — 30-day trend, collection rate,
- * overdue aging, at-risk revenue, and a webinar-cohort vs direct split. Reuses the Revenue
- * Control Tower verbatim so headline numbers match the Payments tab.
+ * Revenue intelligence: 30-day trend, collection rate, overdue aging, at-risk, and a
+ * webinar-cohort vs direct split on the SAME deduped rows as the Payments tab.
  */
 export async function revenueIntel(now = Date.now()): Promise<RevenueIntel> {
   const [tower, payments, regs] = await Promise.all([
@@ -256,7 +290,6 @@ export async function revenueIntel(now = Date.now()): Promise<RevenueIntel> {
   const tr = trend(last30, prev30);
   const collectionRate = pct(tower.collected, tower.expected);
 
-  // Cohort split on the SAME deduped rows → reconciles exactly with tower.collected.
   const regPhones = new Set<string>();
   for (const r of regs) {
     const ph = normPhone(r.phone);
@@ -288,7 +321,7 @@ export async function revenueIntel(now = Date.now()): Promise<RevenueIntel> {
       { label: "8+ days", value: tower.overdue8plus.count, sub: inr(tower.overdue8plus.amount) },
     ],
     caveats: [
-      "Cohort split uses the same deduped PAID rows as the Payments tab; webinar-cohort = paid rows whose phone matches a webinar registrant (last-10-digit key), everything else is counted as direct.",
+      "Cohort split uses the same deduped PAID rows as the Payments tab; webinar-cohort = paid rows whose phone matches a webinar registrant (last-10-digit key), everything else counts as direct.",
     ],
   };
 }

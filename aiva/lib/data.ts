@@ -46,6 +46,34 @@ export async function fetchWebinars(): Promise<Webinar[]> {
   return fetchAll<Webinar>("webinars", "*", "created_at");
 }
 
+/** Batch shape read from courses.batches[] (only the fields AIVA needs for timeline/seat-fill). */
+export type CourseBatchLite = {
+  id?: string | null;
+  label?: string | null;
+  start_date?: string | null;
+  capacity?: number | string | null;
+};
+
+export type CourseLite = {
+  id: string;
+  title: string | null;
+  slug: string | null;
+  capacity: number | null;
+  default_batch_id: string | null;
+  batches: CourseBatchLite[] | null;
+};
+
+/** Minimal courses read for batch timeline / seat-fill (avoids pulling heavy jsonb blobs). */
+export async function fetchCoursesLite(): Promise<CourseLite[]> {
+  const sb = getSupabase();
+  if (!sb) return [];
+  const { data, error } = await sb
+    .from("courses")
+    .select("id, title, slug, capacity, default_batch_id, batches");
+  if (error || !data) return [];
+  return data as unknown as CourseLite[];
+}
+
 /** Map of payment_id -> proof status, for group-status derivation. */
 export async function fetchProofStatuses(): Promise<Record<string, PaymentProofStatus | undefined>> {
   const sb = getSupabase();
