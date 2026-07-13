@@ -29,6 +29,16 @@ const nextConfig = {
       // Supabase Storage public URLs (cover images, logo, portrait, etc.)
       { protocol: "https", hostname: "*.supabase.co" },
       { protocol: "https", hostname: "*.supabase.in" },
+      // The site's own media proxy (/api/media/*). Admin uploads (hero portrait,
+      // logo, etc.) are stored as absolute https URLs on this host and streamed
+      // from R2 via short-lived signed redirects. next/image must allow the host
+      // or it rejects the request with 400 INVALID_IMAGE_OPTIMIZE_REQUEST, which
+      // renders as a broken "?" image. Apex + www + any subdomain.
+      { protocol: "https", hostname: "namanias.com" },
+      { protocol: "https", hostname: "*.namanias.com" },
+      // The R2 origin the media proxy redirects to (defensive: covers URLs that
+      // resolve/point straight at storage).
+      { protocol: "https", hostname: "*.r2.cloudflarestorage.com" },
     ],
     // Admin-uploaded logos may be SVG. These are trusted (admin-only uploads).
     dangerouslyAllowSVG: true,

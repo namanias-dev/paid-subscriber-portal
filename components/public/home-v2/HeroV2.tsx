@@ -4,6 +4,19 @@ import { DEFAULT_HERO } from "@/lib/homeDefaults";
 import type { HeroConfig, HeroButtonStyle } from "@/lib/types";
 import HeroBackdrop from "./HeroBackdrop";
 import HeroStageV2 from "./HeroStageV2";
+import HeroCardCluster from "./HeroCardCluster";
+
+/**
+ * Canonicalize an admin-uploaded portrait URL for next/image. The media proxy
+ * lives on the apex `namanias.com`, which 308-redirects to `www` — rewriting it
+ * up front skips a redirect hop for the image optimizer. Any other value
+ * (Supabase URL, other host) is passed through untouched.
+ */
+function normalizePortraitUrl(url?: string | null): string | undefined {
+  const u = url?.trim();
+  if (!u) return undefined;
+  return u.replace(/^https?:\/\/namanias\.com\//i, "https://www.namanias.com/");
+}
 
 const BTN_CLASS: Record<HeroButtonStyle, string> = {
   primary: "ca-btn ca-btn-gold",
@@ -28,7 +41,7 @@ export default function HeroV2({ hero }: { hero?: HeroConfig }) {
     (b) => b.enabled && b.label?.trim() && b.href?.trim(),
   );
   // Reuse the same admin-editable source the classic hero uses — never hardcoded.
-  const portrait = h.portrait_url?.trim();
+  const portrait = normalizePortraitUrl(h.portrait_url);
   const portraitAlt = h.portrait_alt?.trim() || "Naman Sir";
 
   // Highlight the mentor's name in gold without fragmenting the heading into
@@ -99,21 +112,7 @@ export default function HeroV2({ hero }: { hero?: HeroConfig }) {
         {portrait ? (
           <HeroStageV2 src={portrait} alt={portraitAlt} />
         ) : (
-          <div className="relative mx-auto hidden h-[420px] w-full max-w-md lg:block" aria-hidden="true">
-            <div className="ca-glass hv2-float absolute left-2 top-6 w-56 p-5">
-              <p className="ca-eyebrow">Live class tonight</p>
-              <p className="mt-1 font-heading text-lg font-bold text-white">Ethics — Case Studies</p>
-              <p className="mt-0.5 text-sm text-[var(--ca-slate-400)]">8:00 PM · Live + Recording</p>
-            </div>
-            <div className="ca-glass hv2-float--slow absolute right-0 top-32 w-52 p-5">
-              <p className="ca-eyebrow">Prelims → Interview</p>
-              <p className="mt-1 font-heading text-lg font-bold text-white">One clear path</p>
-            </div>
-            <div className="ca-glass hv2-float absolute bottom-4 left-10 w-56 p-5" style={{ animationDelay: "1.2s" }}>
-              <p className="ca-eyebrow">Answer writing</p>
-              <p className="mt-1 font-heading text-lg font-bold text-white">Personal feedback</p>
-            </div>
-          </div>
+          <HeroCardCluster className="hidden lg:block" />
         )}
       </div>
 
