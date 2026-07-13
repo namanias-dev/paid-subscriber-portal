@@ -70,6 +70,7 @@ import type {
 import { deriveEnrollment, enrollmentStatusFromSchedule, installmentsSummary, planCourseEnrollment, resolveEmiConfig, isLineCancelledOrWaived, isLineOutstanding, isActiveEnrollment, isAttemptEnrollment } from "./installments";
 import { changePlan, type ChangePlanTarget, type ConvertOptions } from "./paymentPlanChange";
 import { mergeSiteSettings } from "./homeDefaults";
+import { normalizeLeaderboardSettings, type LeaderboardSettings } from "./leaderboardConfig";
 import { DEFAULT_ROLES, resolvePermissions, type PermissionSet } from "./permissions";
 import { dedupedPaidTotal } from "./paymentsAgg";
 
@@ -5651,7 +5652,7 @@ export const getSiteSettings = cache(async function getSiteSettings(): Promise<S
  * so editing one screen (e.g. Settings/brand) never wipes another (e.g. Home).
  */
 export async function updateSiteSettings(patch: Partial<SiteSettings>): Promise<SiteSettings> {
-  const keys = ["logo_url", "logo_alt", "hero", "popup", "content", "brand", "toppers", "nav", "about"] as const;
+  const keys = ["logo_url", "logo_alt", "hero", "popup", "content", "brand", "toppers", "nav", "about", "leaderboard"] as const;
   const provided: Record<string, unknown> = {};
   for (const k of keys) {
     if (k in patch && typeof patch[k] !== "undefined") provided[k] = patch[k];
@@ -5681,6 +5682,22 @@ export async function updateSiteSettings(patch: Partial<SiteSettings>): Promise<
     .single();
   if (error) throw new Error(error.message);
   return mergeSiteSettings(data as Partial<SiteSettings>);
+}
+
+/**
+ * Admin-managed leaderboard config (GLOBAL exclude list + tuned Reliability C).
+ * Persisted as the single `site_settings.leaderboard` jsonb — one source of
+ * truth shared by the admin leaderboard and any student-facing leaderboard.
+ */
+export async function getLeaderboardSettings(): Promise<LeaderboardSettings> {
+  const settings = await getSiteSettings();
+  return normalizeLeaderboardSettings(settings.leaderboard);
+}
+
+/** Admin write — replaces the leaderboard config (already normalised by caller). */
+export async function updateLeaderboardSettings(next: LeaderboardSettings): Promise<LeaderboardSettings> {
+  const saved = await updateSiteSettings({ leaderboard: normalizeLeaderboardSettings(next) });
+  return normalizeLeaderboardSettings(saved.leaderboard);
 }
 
 // ============================ QUIZ PLATFORM ============================

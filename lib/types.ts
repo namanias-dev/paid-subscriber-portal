@@ -1,3 +1,5 @@
+import type { LeaderboardSettings } from "./leaderboardConfig";
+
 export type PlanId = "1m" | "3m" | "6m" | "12m" | "lifetime";
 
 export type ContentType =
@@ -1495,6 +1497,8 @@ export interface SiteSettings {
   toppers: Topper[];
   nav: NavConfig;
   about: AboutContent;
+  /** Admin-managed leaderboard config (global exclude list + tuned Reliability C). */
+  leaderboard: LeaderboardSettings;
   updated_at?: string;
 }
 

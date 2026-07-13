@@ -1,4 +1,5 @@
 import type { SiteSettings, HeroConfig, PopupConfig, HomeContent, BrandConfig, Topper, NavConfig, AboutContent } from "./types";
+import { normalizeLeaderboardSettings, DEFAULT_LEADERBOARD_SETTINGS } from "./leaderboardConfig";
 import { ACADEMY, SUPPORT } from "./config";
 
 /**
@@ -136,6 +137,7 @@ export const DEFAULT_SITE_SETTINGS: SiteSettings = {
   toppers: DEFAULT_TOPPERS,
   nav: DEFAULT_NAV,
   about: DEFAULT_ABOUT,
+  leaderboard: DEFAULT_LEADERBOARD_SETTINGS,
 };
 
 function isObj(v: unknown): v is Record<string, unknown> {
@@ -157,6 +159,7 @@ export function mergeSiteSettings(row: Partial<SiteSettings> | null | undefined)
     toppers: Array.isArray(r.toppers) ? r.toppers : DEFAULT_TOPPERS,
     nav: { overrides: { ...(isObj(r.nav) && isObj((r.nav as NavConfig).overrides) ? (r.nav as NavConfig).overrides : {}) } },
     about: { ...DEFAULT_ABOUT, ...(isObj(r.about) ? r.about : {}) },
+    leaderboard: normalizeLeaderboardSettings(r.leaderboard),
     updated_at: r.updated_at,
   };
 }
