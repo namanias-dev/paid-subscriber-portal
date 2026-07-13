@@ -5,6 +5,7 @@ import {
   Target, CheckCircle2, XCircle, MinusCircle, TrendingUp, TrendingDown, Minus,
   Award, AlertTriangle, Sparkles, BarChart3, Trophy, Flame, CalendarDays,
   ArrowUpDown, GraduationCap, Compass, Download, ChevronDown,
+  Users, ArrowUp, ArrowDown, Rocket,
 } from "lucide-react";
 import {
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid,
@@ -15,6 +16,7 @@ import { downloadOverallPerformancePdf } from "@/lib/performancePdf";
 import type {
   OverallPerformance as OverallData, MasteryRow, QuizRankRow, TrendDirection, MissedQuestion,
 } from "@/lib/overallPerformance";
+import type { StudentBatchComparison } from "@/lib/studentCohort";
 
 type ReportTarget = { attemptId: string; slug: string | null; title: string };
 
@@ -61,6 +63,9 @@ export default function OverallPerformance({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<OverallData | null>(null);
+  // Anonymous "You vs your batch" aggregates + own position. Absent in the admin
+  // per-student view (that endpoint returns no cohort) → the section hides itself.
+  const [cohort, setCohort] = useState<StudentBatchComparison | null>(null);
   // Per-attempt report modal state lives here (top level) so the modal renders
   // OUTSIDE #overall-performance-board — see the render note at the bottom.
   const [report, setReport] = useState<ReportTarget | null>(null);
@@ -75,8 +80,10 @@ export default function OverallPerformance({
       .then((r) => r.json())
       .then((d) => {
         if (cancelled) return;
-        if (d.ok) setData(d.overall as OverallData);
-        else setError(d.error || "Could not load your performance.");
+        if (d.ok) {
+          setData(d.overall as OverallData);
+          setCohort((d.cohort as StudentBatchComparison) ?? null);
+        } else setError(d.error || "Could not load your performance.");
       })
       .catch(() => !cancelled && setError("Could not load your performance."))
       .finally(() => !cancelled && setLoading(false));
@@ -115,6 +122,7 @@ export default function OverallPerformance({
       <div id="overall-performance-board" className="animate-fade-up space-y-8 overflow-x-clip motion-reduce:animate-none">
         <SnapshotHeader data={data} enablePdfExport={enablePdfExport} />
         <HeroSummary data={data} />
+        <BatchComparison cohort={cohort} data={data} />
         <MasterySection subjects={data.subjects} topics={data.topics} />
         <QuizRanking quizzes={data.quizzes} onOpenReport={setReport} />
         <AccuracyTrend data={data} />
@@ -226,6 +234,166 @@ function ScoreRing({ accuracy }: { accuracy: number }) {
       />
       <text x="44" y="49" textAnchor="middle" className="fill-ink font-heading" style={{ fontSize: 19, fontWeight: 800 }}>{pct}%</text>
     </svg>
+  );
+}
+
+/* ------------------------- YOU vs YOUR BATCH ------------------------- */
+/**
+ * Anonymous batch comparison. Shows ONLY aggregate figures (batch average,
+ * score-band counts, cohort size) + the caller's OWN position — never another
+ * student's identity. Below the small-cohort threshold (or with no batch) it
+ * hides / shows a warm "not enough data yet" note. Encouragement-first: "top X%"
+ * framing is reserved for mid-and-up; lower performers get growth/effort framing
+ * and a positive "closest next tier" nudge — never "bottom X%" or "last".
+ */
+function BatchComparison({ cohort, data }: { cohort: StudentBatchComparison | null; data: OverallData }) {
+  // Admin per-student view returns no cohort, and "no batch" has no context.
+  if (!cohort || (!cohort.available && cohort.reason === "no_batch")) return null;
+
+  if (!cohort.available) {
+    return (
+      <section>
+        <SectionTitle />
+        <div className="mt-3 rounded-2xl border border-dashed border-line bg-surface2/40 p-6 text-center text-sm text-ink2">
+          Not enough data yet to compare with your batch — as more of your batchmates attempt quizzes, you’ll see where you stand.
+        </div>
+      </section>
+    );
+  }
+
+  const you = cohort.you!;
+  const diff = Math.round((you.accuracy - cohort.classAverage) * 10) / 10;
+  const above = diff > 0;
+  const onPar = diff === 0;
+
+  return (
+    <section>
+      <SectionTitle batchTitle={cohort.batchTitle} cohortSize={cohort.cohortSize} />
+
+      {/* Headline: encouraging framing that adapts to where the student sits. */}
+      <div className="mt-3 overflow-hidden rounded-2xl border border-[rgba(212,175,55,0.3)] bg-gradient-to-br from-[rgba(212,175,55,0.12)] to-transparent p-5">
+        <div className="flex items-start gap-3">
+          <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[rgba(212,175,55,0.18)] text-[var(--ca-gold)]">
+            {you.isTopHalf ? <Trophy size={18} aria-hidden="true" /> : <Rocket size={18} aria-hidden="true" />}
+          </span>
+          <div className="min-w-0">
+            <p className="font-heading text-lg font-extrabold text-ink">
+              {you.isTopHalf
+                ? `You’re in the top ${you.topPercent}% of your batch`
+                : growthHeadline(data)}
+            </p>
+            <p className="mt-0.5 text-sm text-ink2">{encourageSub(you, data, cohort.nextTier)}</p>
+          </div>
+        </div>
+      </div>
+
+      {/* You vs batch average — two bars + a simple colored chip. */}
+      <div className="mt-3 rounded-2xl border border-line bg-surface p-5">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-sm font-bold text-ink">You vs your batch average</p>
+          <span
+            className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-bold ${
+              onPar ? "bg-surface2 text-ink2" : above ? "bg-success/10 text-success" : "bg-amber-500/10 text-amber-600"
+            }`}
+          >
+            {onPar ? <Minus size={12} /> : above ? <ArrowUp size={12} /> : <ArrowDown size={12} />}
+            {onPar ? "On par with your batch" : `${above ? "+" : "−"}${Math.abs(diff)}% vs batch average`}
+          </span>
+        </div>
+        <div className="mt-4 space-y-3">
+          <CompareBar label="You" pct={you.accuracy} tone="bg-[var(--ca-gold)]" strong />
+          <CompareBar label="Batch average" pct={cohort.classAverage} tone="bg-ink2/50" />
+        </div>
+      </div>
+
+      {/* Anonymous score-band distribution — counts only, own band highlighted. */}
+      <div className="mt-3 rounded-2xl border border-line bg-surface p-5">
+        <p className="text-sm font-bold text-ink">How your batch is spread</p>
+        <p className="mt-0.5 text-xs text-muted">Number of classmates in each accuracy band · you’re highlighted</p>
+        <BatchBands bands={cohort.scoreBands} labels={cohort.bandLabels} youIndex={you.bandIndex} />
+      </div>
+    </section>
+  );
+}
+
+function SectionTitle({ batchTitle, cohortSize }: { batchTitle?: string | null; cohortSize?: number }) {
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-2">
+      <h3 className="flex items-center gap-2 font-heading text-base font-bold">
+        <Users size={17} className="text-[var(--ca-gold)]" /> You vs your batch
+      </h3>
+      {batchTitle && cohortSize ? (
+        <span className="truncate rounded-full border border-line bg-surface px-3 py-1 text-xs font-semibold text-ink2" title={batchTitle}>
+          {cohortSize} classmates
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+/** Growth/effort headline for students below the top half — never shaming. */
+function growthHeadline(data: OverallData): string {
+  if (data.trendDirection === "improving") return "You’re on the rise 🚀";
+  const q = data.hero.totalQuizzes;
+  if (q >= 5) return `Great consistency — ${q} quizzes attempted!`;
+  return "Every quiz makes you sharper";
+}
+
+function encourageSub(
+  you: NonNullable<StudentBatchComparison["you"]>,
+  data: OverallData,
+  nextTier: StudentBatchComparison["nextTier"],
+): string {
+  if (nextTier) {
+    return `You’re ${nextTier.spots} spot${nextTier.spots !== 1 ? "s" : ""} away from the ${nextTier.label} — keep it up!`;
+  }
+  if (you.isTopHalf) return "You’re ahead of most of your batch. Fantastic work — stay consistent!";
+  if (data.trendDirection === "improving") return "Your accuracy is trending up. Keep attempting quizzes to climb higher.";
+  return "Consistency beats intensity — one more quiz moves you forward.";
+}
+
+function CompareBar({ label, pct, tone, strong }: { label: string; pct: number; tone: string; strong?: boolean }) {
+  const w = Math.max(0, Math.min(100, pct));
+  return (
+    <div>
+      <div className="mb-1 flex items-center justify-between text-xs">
+        <span className={strong ? "font-bold text-ink" : "text-ink2"}>{label}</span>
+        <span className={`font-bold ${strong ? "text-ink" : "text-ink2"}`}>{pct}%</span>
+      </div>
+      <div className="h-3 w-full overflow-hidden rounded-full bg-surface2">
+        <div className={`h-full rounded-full ${tone} transition-all duration-700 motion-reduce:transition-none`} style={{ width: `${w}%` }} />
+      </div>
+    </div>
+  );
+}
+
+function BatchBands({ bands, labels, youIndex }: { bands: number[]; labels: readonly string[]; youIndex: number }) {
+  const max = Math.max(1, ...bands);
+  return (
+    <div className="mt-4 grid grid-cols-5 gap-2">
+      {bands.map((count, i) => {
+        const mine = i === youIndex;
+        const h = Math.round((count / max) * 100);
+        return (
+          <div key={labels[i]} className="flex flex-col items-center gap-1.5">
+            {mine && (
+              <span className="inline-flex items-center gap-0.5 whitespace-nowrap rounded-full bg-[var(--ca-gold)] px-1.5 py-0.5 text-[9px] font-bold text-[#1a1304]">
+                You
+              </span>
+            )}
+            <div className="flex h-24 w-full items-end">
+              <div
+                className={`w-full rounded-t-md transition-all duration-700 motion-reduce:transition-none ${mine ? "bg-[var(--ca-gold)]" : "bg-ink2/25"}`}
+                style={{ height: `${Math.max(count > 0 ? 8 : 2, h)}%` }}
+                title={`${count} classmate${count !== 1 ? "s" : ""}`}
+              />
+            </div>
+            <span className={`text-[13px] font-bold ${mine ? "text-ink" : "text-ink2"}`}>{count}</span>
+            <span className="text-center text-[9px] leading-tight text-muted">{labels[i]}</span>
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
