@@ -1,6 +1,6 @@
 import type { QuizAttempt, Student, CourseEnrollment } from "./types";
 import type { QuizMeta } from "./overallPerformance";
-import { buildLeaderboard, leaderboardBatchKey } from "./leaderboard";
+import { buildLeaderboard, leaderboardBatchKey, isCompletedAttempt, attemptDurationSeconds } from "./leaderboard";
 import {
   LEADERBOARD_MIN_COHORT,
   SCORE_BAND_LABELS,
@@ -178,5 +178,152 @@ export function buildStudentBatchComparison(opts: {
     scoreBands: result.analytics.accuracyBands,
     bandLabels: SCORE_BAND_LABELS,
     nextTier,
+  };
+}
+
+/* ==========================================================================
+ *  FACULTY variant — the ADMIN coaching view. Same buildLeaderboard math, but:
+ *   • NO student-facing softening (below-average / bottom is shown honestly).
+ *   • NO small-cohort suppression (N=10) — faculty always see the real number;
+ *     genuinely tiny cohorts are flagged `limited` rather than hidden.
+ *   • Exposes the EXACT "rank #X of N", avg-time-vs-batch, and (when a quiz is in
+ *     context) the quiz-average comparison — all matching the leaderboard for the
+ *     same student/batch by construction (same buildLeaderboard call).
+ *   • Admin-only endpoint; the shape carries no other student's identity.
+ * ========================================================================== */
+
+/** Below this cohort size a number is technically real but not very meaningful. */
+const FACULTY_LIMITED_COHORT = 3;
+
+export interface FacultyStudentComparison {
+  available: boolean;                 // false only when the scope has no cohort
+  reason: "ok" | "no_batch" | "not_ranked" | "empty";
+  limited: boolean;                   // true ⇒ cohort tiny → show "limited cohort data"
+  scopeLabel: string;                 // "All batches" or the batch title
+  cohortSize: number;                 // N (qualified, exclusion-cleaned) — honest
+  classAverage: number;               // batch avg accuracy
+  you: {
+    accuracy: number;
+    rank: number;                     // exact #X (1 = top)
+    topPercent: number;               // rank / N * 100 (honest — can be high)
+    bandIndex: number;
+    diff: number;                     // accuracy − classAverage (negative = below)
+  } | null;
+  scoreBands: number[];               // batch accuracy-band histogram (counts)
+  bandLabels: readonly string[];
+  timeTracked: boolean;
+  batchAvgTimeSeconds: number;
+  youAvgTimeSeconds: number | null;   // student's own mean time (null when untracked)
+  quizContext: {
+    quizTitle: string;
+    quizAverage: number;              // avg accuracy across cohort on this quiz
+    youScore: number | null;          // student's accuracy on this quiz
+    rank: number | null;
+    cohortSize: number;
+  } | null;
+}
+
+/** Mean usable duration over a student's COMPLETED attempts, or null if untracked. */
+function meanOwnTime(studentAttempts: QuizAttempt[]): number | null {
+  let sum = 0, n = 0;
+  for (const a of studentAttempts) {
+    if (!isCompletedAttempt(a)) continue;
+    const d = attemptDurationSeconds(a);
+    if (d != null) { sum += d; n++; }
+  }
+  return n ? Math.round(sum / n) : null;
+}
+
+export function buildFacultyStudentComparison(opts: {
+  studentId: string;
+  studentAttempts: QuizAttempt[];
+  batchKey: string | null;            // resolved cohort scope (null = all batches)
+  quizId?: string | null;
+  quizTitle?: string | null;
+  students: Student[];
+  enrollments: CourseEnrollment[];
+  attempts: QuizAttempt[];
+  quizById: Map<string, QuizMeta>;
+  excludedStudentIds?: Iterable<string>;
+  reliabilityC?: number;
+  now?: number;
+}): FacultyStudentComparison {
+  const result = buildLeaderboard({
+    students: opts.students,
+    enrollments: opts.enrollments,
+    attempts: opts.attempts,
+    quizById: opts.quizById,
+    batchKey: opts.batchKey,
+    quizId: null, // headline standing is across ALL quizzes (matches board default)
+    excludedStudentIds: opts.excludedStudentIds,
+    reliabilityC: opts.reliabilityC,
+    now: opts.now,
+  });
+
+  const scopeLabel = result.batchLabel;
+  const cohortSize = result.studentCount;
+  const youAvgTimeSeconds = meanOwnTime(opts.studentAttempts);
+
+  // Optional quiz-in-context comparison (a second scoped pass — same roster pull).
+  let quizContext: FacultyStudentComparison["quizContext"] = null;
+  if (opts.quizId) {
+    const q = buildLeaderboard({
+      students: opts.students,
+      enrollments: opts.enrollments,
+      attempts: opts.attempts,
+      quizById: opts.quizById,
+      batchKey: opts.batchKey,
+      quizId: opts.quizId,
+      excludedStudentIds: opts.excludedStudentIds,
+      reliabilityC: opts.reliabilityC,
+      now: opts.now,
+    });
+    const qi = q.rows.findIndex((r) => r.studentId === opts.studentId);
+    quizContext = {
+      quizTitle: opts.quizTitle || "Selected quiz",
+      quizAverage: q.classAverage,
+      youScore: qi >= 0 ? q.rows[qi].accuracy : null,
+      rank: qi >= 0 ? qi + 1 : null,
+      cohortSize: q.studentCount,
+    };
+  }
+
+  const base = {
+    scopeLabel,
+    cohortSize,
+    limited: cohortSize > 0 && cohortSize < FACULTY_LIMITED_COHORT,
+    classAverage: result.classAverage,
+    scoreBands: result.analytics.accuracyBands,
+    bandLabels: SCORE_BAND_LABELS,
+    timeTracked: result.analytics.timeTracked,
+    batchAvgTimeSeconds: result.analytics.avgTimeSeconds,
+    youAvgTimeSeconds,
+    quizContext,
+  };
+
+  if (cohortSize === 0) {
+    return { available: false, reason: "empty", you: null, ...base };
+  }
+
+  const idx = result.rows.findIndex((r) => r.studentId === opts.studentId);
+  if (idx < 0) {
+    // Cohort exists but this student has no qualifying attempt in scope — still
+    // return honest cohort figures (average, bands) so faculty see the context.
+    return { available: true, reason: "not_ranked", you: null, ...base };
+  }
+
+  const meRow = result.rows[idx];
+  const rank = idx + 1;
+  return {
+    available: true,
+    reason: "ok",
+    you: {
+      accuracy: meRow.accuracy,
+      rank,
+      topPercent: Math.max(1, Math.ceil((rank / cohortSize) * 100)),
+      bandIndex: scoreBandIndex(meRow.accuracy),
+      diff: Math.round((meRow.accuracy - result.classAverage) * 10) / 10,
+    },
+    ...base,
   };
 }

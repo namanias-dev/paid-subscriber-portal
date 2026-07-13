@@ -5,7 +5,7 @@ import {
   Target, CheckCircle2, XCircle, MinusCircle, TrendingUp, TrendingDown, Minus,
   Award, AlertTriangle, Sparkles, BarChart3, Trophy, Flame, CalendarDays,
   ArrowUpDown, GraduationCap, Compass, Download, ChevronDown,
-  Users, ArrowUp, ArrowDown, Rocket,
+  Users, ArrowUp, ArrowDown, Rocket, Clock,
 } from "lucide-react";
 import {
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid,
@@ -16,7 +16,7 @@ import { downloadOverallPerformancePdf } from "@/lib/performancePdf";
 import type {
   OverallPerformance as OverallData, MasteryRow, QuizRankRow, TrendDirection, MissedQuestion,
 } from "@/lib/overallPerformance";
-import type { StudentBatchComparison } from "@/lib/studentCohort";
+import type { StudentBatchComparison, FacultyStudentComparison } from "@/lib/studentCohort";
 
 type ReportTarget = { attemptId: string; slug: string | null; title: string };
 
@@ -55,17 +55,23 @@ export default function OverallPerformance({
   courseId,
   endpoint,
   enablePdfExport = false,
+  variant = "student",
+  headerActions,
 }: {
   courseId?: string;
   endpoint?: string;
   enablePdfExport?: boolean;
+  /** "student" = encouraging + suppressed; "faculty" = honest admin coaching view. */
+  variant?: "student" | "faculty";
+  /** Extra actions rendered in the snapshot header (e.g. "View Student Profile"). */
+  headerActions?: React.ReactNode;
 }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<OverallData | null>(null);
-  // Anonymous "You vs your batch" aggregates + own position. Absent in the admin
-  // per-student view (that endpoint returns no cohort) → the section hides itself.
-  const [cohort, setCohort] = useState<StudentBatchComparison | null>(null);
+  // "You vs your batch" aggregates + own position. Student endpoints return the
+  // suppressed/encouraging shape; the admin endpoint returns the faculty shape.
+  const [cohort, setCohort] = useState<StudentBatchComparison | FacultyStudentComparison | null>(null);
   // Per-attempt report modal state lives here (top level) so the modal renders
   // OUTSIDE #overall-performance-board — see the render note at the bottom.
   const [report, setReport] = useState<ReportTarget | null>(null);
@@ -82,7 +88,7 @@ export default function OverallPerformance({
         if (cancelled) return;
         if (d.ok) {
           setData(d.overall as OverallData);
-          setCohort((d.cohort as StudentBatchComparison) ?? null);
+          setCohort(d.cohort ?? null);
         } else setError(d.error || "Could not load your performance.");
       })
       .catch(() => !cancelled && setError("Could not load your performance."))
@@ -120,9 +126,18 @@ export default function OverallPerformance({
           on the grids below. `clip` (not `hidden`) avoids creating a scroll
           container, so it has no side effects on the sections or the chart. */}
       <div id="overall-performance-board" className="animate-fade-up space-y-8 overflow-x-clip motion-reduce:animate-none">
-        <SnapshotHeader data={data} enablePdfExport={enablePdfExport} />
+        <SnapshotHeader
+          data={data}
+          enablePdfExport={enablePdfExport}
+          headerActions={headerActions}
+          facultyCohort={variant === "faculty" ? (cohort as FacultyStudentComparison | null) : null}
+        />
         <HeroSummary data={data} />
-        <BatchComparison cohort={cohort} data={data} />
+        {variant === "faculty" ? (
+          <FacultyComparison cohort={cohort as FacultyStudentComparison | null} data={data} />
+        ) : (
+          <BatchComparison cohort={cohort as StudentBatchComparison | null} data={data} />
+        )}
         <MasterySection subjects={data.subjects} topics={data.topics} />
         <QuizRanking quizzes={data.quizzes} onOpenReport={setReport} />
         <AccuracyTrend data={data} />
@@ -153,7 +168,12 @@ export default function OverallPerformance({
 }
 
 /* ----------------------------- SNAPSHOT HEADER ----------------------------- */
-function SnapshotHeader({ data, enablePdfExport }: { data: OverallData; enablePdfExport?: boolean }) {
+function SnapshotHeader({ data, enablePdfExport, headerActions, facultyCohort }: {
+  data: OverallData;
+  enablePdfExport?: boolean;
+  headerActions?: React.ReactNode;
+  facultyCohort?: FacultyStudentComparison | null;
+}) {
   const date = new Date(data.snapshotISO).toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" });
   return (
     <div className="rounded-2xl border border-[rgba(212,175,55,0.3)] bg-gradient-to-br from-[rgba(212,175,55,0.1)] to-transparent p-5">
@@ -165,11 +185,12 @@ function SnapshotHeader({ data, enablePdfExport }: { data: OverallData; enablePd
           <h3 className="mt-1 truncate font-heading text-2xl font-extrabold text-ink">{data.studentName}</h3>
           {data.batchLabel && <p className="mt-0.5 truncate text-sm text-ink2">{data.batchLabel}</p>}
         </div>
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+          {headerActions}
           {enablePdfExport && (
             <button
               type="button"
-              onClick={() => { void downloadOverallPerformancePdf(data); }}
+              onClick={() => { void downloadOverallPerformancePdf(data, facultyCohort ?? undefined); }}
               className="ca-focus inline-flex items-center gap-1.5 rounded-full border border-line bg-surface px-3 py-1.5 text-xs font-semibold text-ink2 hover:text-ink"
             >
               <Download size={13} aria-hidden="true" /> Download PDF
@@ -393,6 +414,178 @@ function BatchBands({ bands, labels, youIndex }: { bands: number[]; labels: read
           </div>
         );
       })}
+    </div>
+  );
+}
+
+/* --------------------- FACULTY (ADMIN) BATCH STANDING --------------------- */
+/**
+ * Honest coaching view. Unlike the student BatchComparison, this NEVER softens:
+ * it shows the exact rank #X of N, below-average signals in red, and "Bottom X%"
+ * where applicable, and applies NO small-cohort suppression (tiny cohorts are
+ * flagged "limited" instead). Numbers come from the SAME buildLeaderboard as the
+ * leaderboard, so they match the board for the same student/batch by construction.
+ */
+function fmtSec(sec: number | null): string {
+  if (sec == null || sec <= 0) return "—";
+  if (sec < 60) return `${sec}s`;
+  const m = Math.floor(sec / 60), s = sec % 60;
+  return s ? `${m}m ${s}s` : `${m}m`;
+}
+
+function standingChip(rank: number, n: number): { label: string; cls: string } {
+  const topPercent = Math.max(1, Math.ceil((rank / n) * 100));
+  if (topPercent <= 50) return { label: `Top ${topPercent}%`, cls: "bg-success/10 text-success" };
+  const bottomPercent = Math.max(1, Math.ceil(((n - rank + 1) / n) * 100));
+  return { label: `Bottom ${bottomPercent}%`, cls: "bg-danger/10 text-danger" };
+}
+
+function FacultyComparison({ cohort, data }: { cohort: FacultyStudentComparison | null; data: OverallData }) {
+  if (!cohort) return null;
+
+  const title = (
+    <div className="flex flex-wrap items-center justify-between gap-2">
+      <h3 className="flex items-center gap-2 font-heading text-base font-bold">
+        <Users size={17} className="text-[var(--ca-gold)]" /> Batch standing
+        <span className="font-normal text-ink2">· {cohort.scopeLabel}</span>
+      </h3>
+      {cohort.cohortSize > 0 && (
+        <span className="rounded-full border border-line bg-surface px-3 py-1 text-xs font-semibold text-ink2">
+          {cohort.cohortSize} in cohort
+        </span>
+      )}
+    </div>
+  );
+
+  if (!cohort.available || cohort.reason === "empty") {
+    return (
+      <section>
+        {title}
+        <div className="mt-3 rounded-2xl border border-dashed border-line bg-surface2/40 p-6 text-center text-sm text-ink2">
+          No cohort data for this scope yet — once batchmates attempt quizzes, comparison figures will appear.
+        </div>
+      </section>
+    );
+  }
+
+  const you = cohort.you;
+  const chip = you ? standingChip(you.rank, cohort.cohortSize) : null;
+  const timeDelta = cohort.timeTracked && cohort.youAvgTimeSeconds != null
+    ? cohort.youAvgTimeSeconds - cohort.batchAvgTimeSeconds
+    : null;
+
+  return (
+    <section>
+      {title}
+
+      {cohort.limited && (
+        <p className="mt-2 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs font-medium text-amber-600">
+          Limited cohort data — only {cohort.cohortSize} qualifying student{cohort.cohortSize !== 1 ? "s" : ""} in this scope, so these figures are indicative.
+        </p>
+      )}
+
+      <div className={`mt-3 grid gap-3 [&>*]:min-w-0 sm:grid-cols-2 ${cohort.quizContext ? "lg:grid-cols-4" : "lg:grid-cols-3"}`}>
+        {/* Rank */}
+        <div className="rounded-2xl border border-line bg-surface p-4">
+          <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted"><Trophy size={13} /> Rank</p>
+          {you ? (
+            <>
+              <p className="mt-1 font-heading text-2xl font-extrabold text-ink">#{you.rank} <span className="text-base font-bold text-ink2">of {cohort.cohortSize}</span></p>
+              {chip && <span className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[11px] font-bold ${chip.cls}`}>{chip.label}</span>}
+            </>
+          ) : (
+            <p className="mt-1 text-sm text-ink2">No qualifying attempt in scope</p>
+          )}
+        </div>
+
+        {/* vs batch average */}
+        <div className="rounded-2xl border border-line bg-surface p-4">
+          <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted"><Target size={13} /> vs batch average</p>
+          <p className="mt-1 font-heading text-2xl font-extrabold text-ink">{you ? `${you.accuracy}%` : "—"}</p>
+          <p className="mt-0.5 text-[11px] text-muted">Batch avg {cohort.classAverage}%</p>
+          {you && (
+            you.diff === 0 ? (
+              <span className="mt-1 inline-flex text-[11px] font-semibold text-muted">at batch average</span>
+            ) : (
+              <span className={`mt-1 inline-flex items-center gap-0.5 text-[11px] font-bold ${you.diff > 0 ? "text-success" : "text-danger"}`}>
+                {you.diff > 0 ? <ArrowUp size={11} /> : <ArrowDown size={11} />}
+                {you.diff > 0 ? "+" : "−"}{Math.abs(you.diff)}% {you.diff > 0 ? "above" : "below"} avg
+              </span>
+            )
+          )}
+        </div>
+
+        {/* Avg time vs batch */}
+        <div className="rounded-2xl border border-line bg-surface p-4">
+          <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted"><Clock size={13} /> Avg time</p>
+          {cohort.timeTracked && cohort.youAvgTimeSeconds != null ? (
+            <>
+              <p className="mt-1 font-heading text-2xl font-extrabold text-ink">{fmtSec(cohort.youAvgTimeSeconds)}</p>
+              <p className="mt-0.5 text-[11px] text-muted">Batch avg {fmtSec(cohort.batchAvgTimeSeconds)}</p>
+              {timeDelta != null && timeDelta !== 0 && (
+                <span className={`mt-1 inline-flex text-[11px] font-semibold ${timeDelta < 0 ? "text-success" : "text-amber-600"}`}>
+                  {fmtSec(Math.abs(timeDelta))} {timeDelta < 0 ? "faster" : "slower"}
+                </span>
+              )}
+            </>
+          ) : (
+            <p className="mt-1 text-sm text-muted">Not tracked</p>
+          )}
+        </div>
+
+        {/* Quiz-in-context — only when a quiz was selected on the board */}
+        {cohort.quizContext && (
+          <div className="rounded-2xl border border-line bg-surface p-4">
+            <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted"><BarChart3 size={13} /> On selected quiz</p>
+            <p className="mt-1 truncate font-heading text-lg font-extrabold text-ink" title={cohort.quizContext.quizTitle}>
+              {cohort.quizContext.youScore != null ? `${cohort.quizContext.youScore}%` : "Not attempted"}
+            </p>
+            <p className="mt-0.5 text-[11px] text-muted">Quiz avg {cohort.quizContext.quizAverage}%{cohort.quizContext.rank ? ` · #${cohort.quizContext.rank} of ${cohort.quizContext.cohortSize}` : ""}</p>
+            <p className="mt-1 truncate text-[11px] text-ink2" title={cohort.quizContext.quizTitle}>{cohort.quizContext.quizTitle}</p>
+          </div>
+        )}
+      </div>
+
+      {/* Score-band distribution with "this student is here" marker */}
+      <div className="mt-3 rounded-2xl border border-line bg-surface p-5">
+        <p className="text-sm font-bold text-ink">Cohort accuracy distribution</p>
+        <p className="mt-0.5 text-xs text-muted">Students per accuracy band{you ? " · this student highlighted" : ""} · batch average marked</p>
+        <FacultyBands bands={cohort.scoreBands} labels={cohort.bandLabels} youIndex={you?.bandIndex ?? -1} avgPct={cohort.classAverage} />
+      </div>
+    </section>
+  );
+}
+
+function FacultyBands({ bands, labels, youIndex, avgPct }: { bands: number[]; labels: readonly string[]; youIndex: number; avgPct: number }) {
+  const max = Math.max(1, ...bands);
+  return (
+    <div className="mt-4">
+      <div className="relative flex h-28 items-end gap-2">
+        <div
+          className="pointer-events-none absolute bottom-6 top-0 z-10 border-l-2 border-dashed border-[var(--ca-gold)]"
+          style={{ left: `${Math.min(100, Math.max(0, avgPct))}%` }}
+          aria-hidden="true"
+        />
+        {bands.map((count, i) => {
+          const mine = i === youIndex;
+          const h = Math.round((count / max) * 100);
+          return (
+            <div key={labels[i]} className="flex flex-1 flex-col items-center justify-end gap-1">
+              {mine && <span className="whitespace-nowrap rounded-full bg-[var(--ca-gold)] px-1.5 py-0.5 text-[9px] font-bold text-[#1a1304]">This student</span>}
+              <span className="text-[11px] font-bold tabular-nums text-ink2">{count}</span>
+              <div
+                className={`w-full rounded-t-md transition-all duration-700 motion-reduce:transition-none ${mine ? "bg-[var(--ca-gold)]" : "bg-primary/60"}`}
+                style={{ height: `${Math.max(count > 0 ? 6 : 2, h)}%` }}
+                title={`${labels[i]}: ${count}`}
+              />
+              <span className="text-center text-[9px] leading-tight text-muted">{labels[i]}</span>
+            </div>
+          );
+        })}
+      </div>
+      <p className="mt-3 flex items-center justify-center gap-2 text-xs font-medium text-ink2">
+        <span className="inline-block h-2 w-2 rounded-full bg-[var(--ca-gold)]" /> Batch average {avgPct}%
+      </p>
     </div>
   );
 }

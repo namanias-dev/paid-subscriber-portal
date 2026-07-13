@@ -2,9 +2,12 @@ import { NextResponse } from "next/server";
 import { requirePermission } from "@/lib/adminGuard";
 import {
   getStudentById, getAllQuizzes, getAttemptsByUser, getAnswersByAttemptIds,
-  getCourseEnrollmentsByPhone,
+  getCourseEnrollmentsByPhone, getStudents, getAllCourseEnrollments,
+  getAttemptsByUserIds, getLeaderboardSettings,
 } from "@/lib/dataProvider";
 import { buildOverallPerformance } from "@/lib/overallPerformance";
+import { leaderboardBatchKey } from "@/lib/leaderboard";
+import { buildFacultyStudentComparison, chooseStudentBatchKey } from "@/lib/studentCohort";
 
 export const dynamic = "force-dynamic";
 
@@ -23,14 +26,21 @@ export async function GET(req: Request) {
     const { searchParams } = new URL(req.url);
     const studentId = searchParams.get("studentId") || "";
     if (!studentId) return NextResponse.json({ ok: false, error: "Missing studentId" }, { status: 400 });
+    // Cohort scope carried from the leaderboard: "all" ⇒ all batches; a batch key
+    // ⇒ that batch; absent ⇒ derive the student's primary batch (direct entry).
+    const batchScope = searchParams.get("batchScope");
+    const quizId = searchParams.get("quizId") || null;
 
     const student = await getStudentById(studentId);
     if (!student) return NextResponse.json({ ok: false, error: "Student not found" }, { status: 404 });
 
-    const [allQuizzes, attempts, enrollments] = await Promise.all([
+    const [allQuizzes, attempts, enrollments, students, allEnrollments, settings] = await Promise.all([
       getAllQuizzes(),
       getAttemptsByUser(student.id),
       getCourseEnrollmentsByPhone(student.phone).catch(() => []),
+      getStudents(),
+      getAllCourseEnrollments(),
+      getLeaderboardSettings(),
     ]);
 
     const quizById = new Map(allQuizzes.map((q) => [q.id, q]));
@@ -47,7 +57,37 @@ export async function GET(req: Request) {
       batchLabel,
     });
 
-    return NextResponse.json({ ok: true, overall });
+    // Faculty comparison (honest, no suppression). Resolve the cohort scope, pull
+    // ONLY that roster's attempts in one batched query, then reuse buildLeaderboard.
+    const norm = (p: string | null | undefined) => (p || "").trim();
+    let batchKey: string | null;
+    if (batchScope === "all") batchKey = null;
+    else if (batchScope) batchKey = batchScope;
+    else batchKey = chooseStudentBatchKey(allEnrollments, student.phone); // may be null ⇒ all
+
+    const phonesInScope = new Set(
+      batchKey
+        ? allEnrollments.filter((e) => e.course_id && leaderboardBatchKey(e.course_id, e.batch_label) === batchKey).map((e) => norm(e.phone))
+        : students.map((s) => norm(s.phone)),
+    );
+    const rosterIds = students.filter((s) => phonesInScope.has(norm(s.phone))).map((s) => s.id);
+    const rosterAttempts = rosterIds.length ? await getAttemptsByUserIds(rosterIds) : [];
+
+    const facultyCohort = buildFacultyStudentComparison({
+      studentId: student.id,
+      studentAttempts: attempts,
+      batchKey,
+      quizId,
+      quizTitle: quizId ? quizById.get(quizId)?.title ?? null : null,
+      students,
+      enrollments: allEnrollments,
+      attempts: rosterAttempts,
+      quizById,
+      excludedStudentIds: settings.excludedStudentIds,
+      reliabilityC: settings.reliabilityC,
+    });
+
+    return NextResponse.json({ ok: true, overall, cohort: facultyCohort });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Failed to load performance.";
     return NextResponse.json({ ok: false, error: msg }, { status: 500 });
