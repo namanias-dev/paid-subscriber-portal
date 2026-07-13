@@ -10,6 +10,7 @@
  * Analytics events here are strictly PII-free (session id + intent only).
  */
 import { useCallback, useEffect, useRef, useState } from "react";
+import { X } from "lucide-react";
 import type {
   AgentCard,
   AgentResponse,
@@ -17,7 +18,7 @@ import type {
   FlowId,
   QuickReply,
 } from "@/lib/ai-agent/providers/types";
-import { CONSENT } from "@/lib/ai-agent/copyLibrary";
+import { AGENT_NAME, CONSENT } from "@/lib/ai-agent/copyLibrary";
 import QuickReplyButtons from "./QuickReplyButtons";
 import OfferRecommendationCard from "./OfferRecommendationCard";
 import RoadmapCard from "./RoadmapCard";
@@ -52,6 +53,23 @@ const KNOWN_EVENTS: ReadonlySet<string> = new Set<AgentEventName>([
   "ai_offer_click",
 ]);
 
+/** Gold-on-navy compass mark, matching the floating launcher glyph. */
+function CounsellorMark() {
+  return (
+    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" aria-hidden="true" style={{ color: "var(--ca-gold-bright)" }}>
+      <circle cx="12" cy="12" r="8.4" stroke="currentColor" strokeWidth="1.3" />
+      <path
+        d="M12 3.1v1.7M12 19.2v1.7M20.9 12h-1.7M4.8 12H3.1"
+        stroke="currentColor"
+        strokeWidth="1.3"
+        strokeLinecap="round"
+      />
+      <path d="M15.6 8.4 11.1 11.1 8.4 15.6 12.9 12.9 Z" fill="currentColor" />
+      <circle cx="12" cy="12" r="1.05" fill="var(--ca-navy-900)" />
+    </svg>
+  );
+}
+
 export default function AiChatSheet({
   sessionId,
   waLink,
@@ -70,6 +88,8 @@ export default function AiChatSheet({
   const [injectedCards, setInjectedCards] = useState<AgentCard[]>([]);
   const [loading, setLoading] = useState(true);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const closeBtnRef = useRef<HTMLButtonElement | null>(null);
+  const previouslyFocused = useRef<HTMLElement | null>(null);
   const seq = useRef(0);
   const started = useRef(false);
 
@@ -133,6 +153,25 @@ export default function AiChatSheet({
   }, [initialFlow, sendTurn, sessionId, pageContext.pagePath]);
 
   useEffect(() => scrollToEnd(), [transcript, current, scrollToEnd]);
+
+  // Focus management: move focus into the panel on open, restore on close, and
+  // allow Esc to close (presentation/accessibility only — onClose is unchanged).
+  useEffect(() => {
+    previouslyFocused.current = (document.activeElement as HTMLElement) || null;
+    const focusTimer = requestAnimationFrame(() => closeBtnRef.current?.focus());
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        onClose();
+      }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      cancelAnimationFrame(focusTimer);
+      document.removeEventListener("keydown", onKeyDown);
+      previouslyFocused.current?.focus?.();
+    };
+  }, [onClose]);
 
   function fire(name: string | undefined, fallback: AgentEventName, props: Record<string, string | number | boolean | null> = {}) {
     const evt = name && KNOWN_EVENTS.has(name) ? (name as AgentEventName) : fallback;
@@ -249,62 +288,92 @@ export default function AiChatSheet({
   }
 
   return (
-    <div className="fixed inset-0 z-[60] flex sm:items-end sm:justify-end" role="dialog" aria-modal="true" aria-label="Naman IAS counsellor chat">
-      <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" onClick={onClose} />
-      <div
-        className="relative flex h-full w-full flex-col bg-surface shadow-2xl sm:m-4 sm:h-[min(640px,85vh)] sm:w-[400px] sm:rounded-2xl"
-        style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
-      >
+    <div
+      className="fixed inset-0 z-[60] flex sm:items-end sm:justify-end sm:p-4 lg:p-6"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Naman IAS counsellor chat"
+    >
+      <div className="cac-overlay" onClick={onClose} aria-hidden="true" />
+
+      <div className="cac-panel">
+        <span className="cac-orb-a" aria-hidden="true" />
+
         {/* Header */}
-        <div className="flex items-center justify-between gap-2 border-b border-line px-4 py-3" style={{ background: "var(--primary)" }}>
-          <div className="flex items-center gap-2.5">
-            <div className="flex h-9 w-9 items-center justify-center rounded-full text-base" style={{ background: "var(--gold, #d4af37)", color: "var(--primary)" }}>
-              🎓
-            </div>
-            <div className="leading-tight text-white">
-              <p className="text-sm font-bold">Naman IAS Counsellor</p>
-              <p className="text-[11px] opacity-80">Your UPSC prep guide</p>
+        <header className="cac-header">
+          <div className="flex min-w-0 items-center gap-3">
+            <span className="cac-brandmark" aria-hidden="true">
+              <CounsellorMark />
+            </span>
+            <div className="min-w-0 leading-tight">
+              <p className="truncate text-sm font-bold tracking-tight">{AGENT_NAME}</p>
+              <span className="cac-status">
+                <span className="cac-status-dot" aria-hidden="true" />
+                Online · Your UPSC prep guide
+              </span>
             </div>
           </div>
-          <button type="button" onClick={onClose} aria-label="Close chat" className="rounded-full p-1.5 text-white/90 hover:bg-white/10">
-            ✕
+          <button
+            ref={closeBtnRef}
+            type="button"
+            onClick={onClose}
+            aria-label="Close chat"
+            className="cac-iconbtn"
+          >
+            <X size={18} strokeWidth={2.2} aria-hidden="true" />
           </button>
-        </div>
+        </header>
 
         {/* Transcript */}
-        <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto px-3.5 py-4">
+        <div
+          ref={scrollRef}
+          className="cac-log flex flex-col gap-3.5"
+          role="log"
+          aria-live="polite"
+          aria-relevant="additions"
+          aria-label="Conversation with the Naman IAS counsellor"
+        >
           {transcript.map((t) =>
             t.role === "agent" ? (
-              <div key={t.id} className="max-w-[85%] rounded-2xl rounded-tl-sm bg-white px-3.5 py-2.5 text-sm leading-relaxed text-ink shadow-sm">
-                {t.text}
+              <div key={t.id} className="cac-row cac-row--agent">
+                <span className="cac-avatar" aria-hidden="true">
+                  <CounsellorMark />
+                </span>
+                <div className="cac-bubble cac-bubble--agent">{t.text}</div>
               </div>
             ) : (
-              <div key={t.id} className="ml-auto max-w-[85%] rounded-2xl rounded-tr-sm px-3.5 py-2.5 text-sm leading-relaxed text-white shadow-sm" style={{ background: "var(--primary)" }}>
-                {t.text}
+              <div key={t.id} className="cac-row cac-row--user">
+                <div className="cac-bubble cac-bubble--user">{t.text}</div>
               </div>
             ),
           )}
 
           {injectedCards.length > 0 && (
-            <div className="space-y-2.5">{injectedCards.map((c, i) => renderCard(c, `inj${i}`))}</div>
+            <div className="cac-cards">{injectedCards.map((c, i) => renderCard(c, `inj${i}`))}</div>
           )}
 
           {current?.cards && current.cards.length > 0 && (
-            <div className="space-y-2.5">{current.cards.map((c, i) => renderCard(c, i))}</div>
+            <div className="cac-cards">{current.cards.map((c, i) => renderCard(c, i))}</div>
           )}
 
           {loading && (
-            <div className="flex max-w-[60%] gap-1 rounded-2xl rounded-tl-sm bg-white px-3.5 py-3 shadow-sm">
-              <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-muted [animation-delay:-0.3s]" />
-              <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-muted [animation-delay:-0.15s]" />
-              <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-muted" />
+            <div className="cac-row cac-row--agent">
+              <span className="cac-avatar" aria-hidden="true">
+                <CounsellorMark />
+              </span>
+              <div className="cac-typing" role="status" aria-label="Counsellor is typing">
+                <span />
+                <span />
+                <span />
+              </div>
             </div>
           )}
         </div>
 
-        {/* Quick replies */}
+        {/* Quick replies — premium docked footer */}
         {current?.quickReplies && current.quickReplies.length > 0 && (
-          <div className="border-t border-line bg-white/70 px-3.5 py-3">
+          <div className="cac-footer">
+            <p className="cac-footer-hint">Choose a reply</p>
             <QuickReplyButtons replies={current.quickReplies} disabled={loading} onSelect={handleQuickReply} />
           </div>
         )}

@@ -14,24 +14,16 @@ export default function QuickReplyButtons({
 }) {
   if (!replies || replies.length === 0) return null;
   return (
-    <div className="flex flex-wrap gap-1.5">
+    <div className="flex flex-wrap gap-2">
       {replies.map((r) => {
-        const primary = r.kind === "primary";
-        const ghost = r.kind === "ghost";
+        const variant = r.kind === "primary" ? "cac-chip--primary" : r.kind === "ghost" ? "cac-chip--ghost" : "cac-chip--default";
         return (
           <button
             key={r.id}
             type="button"
             disabled={disabled}
             onClick={() => onSelect(r)}
-            className="rounded-full border px-3 py-1.5 text-xs font-medium transition disabled:opacity-50"
-            style={
-              primary
-                ? { background: "var(--primary)", color: "#fff", borderColor: "var(--primary)" }
-                : ghost
-                ? { background: "transparent", color: "var(--ink2)", borderColor: "var(--line)" }
-                : { background: "var(--primary-tint)", color: "var(--primary)", borderColor: "transparent" }
-            }
+            className={`cac-chip ${variant}`}
           >
             {r.label}
           </button>
