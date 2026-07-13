@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { CheckCircle2 } from "lucide-react";
 import { useToast } from "@/components/ui/Toast";
 import { COURSE_CATEGORIES } from "@/lib/config";
 
@@ -55,7 +56,9 @@ export default function LeadForm({
   if (done) {
     return (
       <div className="rounded-2xl border border-line bg-surface2 p-6 text-center">
-        <div className="mb-2 text-3xl">✅</div>
+        <div className="mb-2 flex justify-center text-[var(--success)]">
+          <CheckCircle2 size={36} strokeWidth={2} aria-hidden="true" />
+        </div>
         <p className="font-heading text-lg">Request received!</p>
         <p className="mt-1 text-sm text-ink2">Naman Sir&apos;s team will reach out shortly.</p>
       </div>

@@ -8,6 +8,7 @@ import Accordion from "@/components/ui/Accordion";
 import LeadForm from "@/components/public/LeadForm";
 import LeadPopup from "@/components/public/LeadPopup";
 import { directionsUrl, mapEmbedUrl } from "@/lib/maps";
+import { whatsappLink } from "@/lib/phone";
 import { ACADEMY } from "@/lib/config";
 import type { SiteSettings, Course, CaArticle, Webinar } from "@/lib/types";
 import type { CoursePurchaseView } from "@/lib/purchaseStatus";
@@ -17,6 +18,7 @@ import TopperStripV2 from "./TopperStripV2";
 import WebinarBandV2 from "./WebinarBandV2";
 import HomeV2JsonLd from "./HomeV2JsonLd";
 import HomeV2Motion from "./HomeV2Motion";
+import FloatingWhatsAppV2 from "./FloatingWhatsAppV2";
 import { WHY_V2, MODES_V2, FREE_V2, FAQ_V2, stripLeadingEmoji } from "./content";
 
 /** Light navy icon chip used by the premium feature cards. */
@@ -56,11 +58,16 @@ export default function HomeV2({
 }: HomeV2Props) {
   const c = settings.content;
   const trustBar = (c.trust_bar || []).map(stripLeadingEmoji).filter(Boolean);
+  const waLink = whatsappLink(
+    settings.brand.whatsapp || settings.brand.support_phone,
+    "Hi, I have a question about your courses / webinars.",
+  );
 
   return (
     <>
       <HomeV2JsonLd settings={settings} courses={courses} />
       <HomeV2Motion />
+      <FloatingWhatsAppV2 waLink={waLink} />
       <LeadPopup config={settings.popup} />
 
       {preview && (
