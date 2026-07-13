@@ -1082,3 +1082,391 @@ a {
   .nsa-logout-backdrop,
   .nsa-logout-card { animation: nsaWelcomeIn 0.15s ease both; }
 }
+
+/* =====================================================================
+   AI COUNSELLOR CHAT — premium conversational surface (PRESENTATION ONLY)
+   Navy + gold, glassmorphism, soft depth. Scoped with .cac- prefixes so no
+   existing module/token is affected. Reuses the --ca-* palette above. No agent
+   logic, flows, analytics, or copy are touched by this layer.
+   ===================================================================== */
+
+/* Backdrop — soft navy scrim with a whisper of blur */
+.cac-overlay {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(120% 90% at 100% 0%, rgba(10, 26, 63, 0.28), transparent 60%),
+    rgba(8, 17, 40, 0.46);
+  -webkit-backdrop-filter: blur(3px);
+  backdrop-filter: blur(3px);
+  animation: cacOverlayIn 0.28s ease both;
+}
+
+/* The chat surface. Mobile: full-height sheet. Desktop: docked premium panel. */
+.cac-panel {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background:
+    radial-gradient(120% 70% at 50% -10%, rgba(15, 37, 87, 0.06), transparent 60%),
+    linear-gradient(180deg, #ffffff, #f7f9fd 62%, #f3f6fc);
+  color: var(--ink);
+  animation: cacSheetUp 0.34s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@media (min-width: 640px) {
+  .cac-panel {
+    width: 420px;
+    height: min(680px, calc(100dvh - 2rem));
+    border-radius: 26px;
+    border: 1px solid rgba(255, 255, 255, 0.6);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.85),
+      0 2px 8px rgba(10, 26, 63, 0.12),
+      0 40px 90px -30px rgba(10, 26, 63, 0.55),
+      0 0 0 1px rgba(212, 175, 55, 0.14);
+    animation: cacPanelIn 0.36s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+}
+@media (min-width: 1024px) {
+  .cac-panel {
+    width: 440px;
+    height: min(720px, calc(100dvh - 3rem));
+  }
+}
+
+/* Ambient gold orb behind the surface (decorative, -z) */
+.cac-orb-a {
+  position: absolute;
+  z-index: -1;
+  width: 260px;
+  height: 260px;
+  top: -90px;
+  right: -70px;
+  border-radius: 9999px;
+  filter: blur(72px);
+  pointer-events: none;
+  background: rgba(212, 175, 55, 0.16);
+}
+
+/* Header — deep navy with a gold hairline underline */
+.cac-header {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.9rem 1rem;
+  color: #fff;
+  background:
+    radial-gradient(90% 140% at 100% 0%, rgba(212, 175, 55, 0.16), transparent 55%),
+    linear-gradient(135deg, var(--ca-navy-900), var(--ca-navy-800));
+}
+.cac-header::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(212, 175, 55, 0.65), transparent);
+}
+
+/* Brand mark chip in header — glassy gold-on-navy, matches the launcher */
+.cac-brandmark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  border-radius: 13px;
+  background: linear-gradient(160deg, rgba(212, 175, 55, 0.28), rgba(212, 175, 55, 0.06));
+  border: 1px solid rgba(212, 175, 55, 0.42);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28), 0 8px 18px -10px rgba(0, 0, 0, 0.6);
+}
+
+.cac-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 11px;
+  line-height: 1;
+  color: rgba(255, 255, 255, 0.82);
+}
+.cac-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 9999px;
+  background: #34d399;
+  box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.6);
+  animation: cacPulse 2.4s ease-in-out infinite;
+}
+
+/* Header icon buttons (close / minimize) — 44px hit target, subtle glass hover */
+.cac-iconbtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 11px;
+  color: rgba(255, 255, 255, 0.9);
+  transition: background 0.18s ease, color 0.18s ease, transform 0.18s ease;
+}
+.cac-iconbtn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+}
+.cac-iconbtn:active {
+  transform: scale(0.94);
+}
+.cac-iconbtn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(212, 175, 55, 0.6);
+}
+
+/* Transcript scroll area */
+.cac-log {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 1.1rem 1rem max(0.6rem, env(safe-area-inset-bottom));
+  scroll-behavior: smooth;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(10, 26, 63, 0.18) transparent;
+}
+.cac-log::-webkit-scrollbar {
+  width: 8px;
+}
+.cac-log::-webkit-scrollbar-thumb {
+  background: rgba(10, 26, 63, 0.16);
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+.cac-log::-webkit-scrollbar-thumb:hover {
+  background: rgba(10, 26, 63, 0.28);
+  background-clip: padding-box;
+}
+
+/* A message row + its entrance animation */
+.cac-row {
+  display: flex;
+  gap: 0.55rem;
+  animation: cacRise 0.34s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.cac-row--user {
+  justify-content: flex-end;
+}
+
+/* Small assistant avatar beside agent bubbles */
+.cac-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  align-self: flex-end;
+  border-radius: 9999px;
+  background: linear-gradient(160deg, var(--ca-navy-800), var(--ca-navy-900));
+  border: 1px solid rgba(212, 175, 55, 0.4);
+  box-shadow: 0 4px 10px -4px rgba(10, 26, 63, 0.5);
+}
+
+/* Bubbles */
+.cac-bubble {
+  max-width: 88%;
+  padding: 0.7rem 0.9rem;
+  font-size: 0.9rem;
+  line-height: 1.55;
+  border-radius: 18px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.cac-bubble--agent {
+  background: #ffffff;
+  color: var(--ink);
+  border: 1px solid var(--ca-slate-200);
+  border-top-left-radius: 6px;
+  box-shadow: 0 1px 2px rgba(10, 26, 63, 0.05), 0 10px 24px -16px rgba(10, 26, 63, 0.28);
+}
+.cac-bubble--user {
+  color: #fff;
+  border-top-right-radius: 6px;
+  background: linear-gradient(135deg, var(--ca-navy-800), var(--ca-navy-900));
+  border: 1px solid rgba(212, 175, 55, 0.28);
+  box-shadow: 0 1px 2px rgba(10, 26, 63, 0.2), 0 12px 26px -14px rgba(10, 26, 63, 0.55);
+}
+
+/* Typing indicator */
+.cac-typing {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0.85rem 0.95rem;
+  background: #fff;
+  border: 1px solid var(--ca-slate-200);
+  border-radius: 18px;
+  border-top-left-radius: 6px;
+  box-shadow: 0 1px 2px rgba(10, 26, 63, 0.05), 0 10px 24px -16px rgba(10, 26, 63, 0.28);
+}
+.cac-typing span {
+  width: 7px;
+  height: 7px;
+  border-radius: 9999px;
+  background: var(--ca-slate-400);
+  animation: cacBlink 1.3s infinite ease-in-out both;
+}
+.cac-typing span:nth-child(2) {
+  animation-delay: 0.16s;
+}
+.cac-typing span:nth-child(3) {
+  animation-delay: 0.32s;
+}
+
+/* Cards column wrapper (keeps existing card components, adds rhythm + entrance) */
+.cac-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  animation: cacRise 0.34s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Footer dock — sticky glass tray that holds the quick-reply pills */
+.cac-footer {
+  position: relative;
+  padding: 0.85rem 1rem calc(0.85rem + env(safe-area-inset-bottom));
+  background: linear-gradient(180deg, rgba(247, 249, 253, 0.6), rgba(247, 249, 253, 0.95));
+  -webkit-backdrop-filter: blur(10px) saturate(140%);
+  backdrop-filter: blur(10px) saturate(140%);
+  border-top: 1px solid var(--ca-slate-200);
+}
+.cac-footer::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(212, 175, 55, 0.4), transparent);
+}
+.cac-footer-hint {
+  margin-bottom: 0.5rem;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ca-slate-400);
+}
+
+/* Premium quick-reply pills */
+.cac-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-height: 40px;
+  padding: 0.5rem 0.95rem;
+  border-radius: 9999px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  line-height: 1.1;
+  cursor: pointer;
+  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease, background 0.18s ease, filter 0.18s ease;
+}
+.cac-chip:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.cac-chip:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(212, 175, 55, 0.55);
+}
+.cac-chip--default {
+  background: #fff;
+  color: var(--ca-navy-800);
+  border: 1px solid var(--ca-slate-200);
+  box-shadow: 0 1px 2px rgba(10, 26, 63, 0.05);
+}
+.cac-chip--default:not(:disabled):hover {
+  border-color: rgba(212, 175, 55, 0.6);
+  transform: translateY(-1px);
+  box-shadow: 0 8px 18px -10px rgba(10, 26, 63, 0.28);
+}
+.cac-chip--primary {
+  color: #fff;
+  border: 1px solid transparent;
+  background: linear-gradient(135deg, var(--ca-navy-800), var(--ca-navy-900));
+  box-shadow: inset 0 -2px 0 rgba(212, 175, 55, 0.7), 0 10px 22px -12px rgba(10, 26, 63, 0.55);
+}
+.cac-chip--primary:not(:disabled):hover {
+  transform: translateY(-1px);
+  filter: brightness(1.08);
+  box-shadow: inset 0 -2px 0 var(--ca-gold), 0 14px 28px -12px rgba(10, 26, 63, 0.6);
+}
+.cac-chip--ghost {
+  background: transparent;
+  color: var(--ca-slate-700);
+  border: 1px dashed var(--ca-slate-300);
+}
+.cac-chip--ghost:not(:disabled):hover {
+  border-color: rgba(212, 175, 55, 0.6);
+  color: var(--ca-navy-800);
+}
+.cac-chip:not(:disabled):active {
+  transform: scale(0.97);
+}
+
+/* Keyframes */
+@keyframes cacOverlayIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes cacSheetUp {
+  from { opacity: 0; transform: translateY(3%); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes cacPanelIn {
+  from { opacity: 0; transform: translateY(14px) scale(0.985); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes cacRise {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes cacBlink {
+  0%, 80%, 100% { opacity: 0.35; transform: translateY(0); }
+  40% { opacity: 1; transform: translateY(-2px); }
+}
+@keyframes cacPulse {
+  0% { box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.55); }
+  70% { box-shadow: 0 0 0 6px rgba(52, 211, 153, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(52, 211, 153, 0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cac-overlay,
+  .cac-panel,
+  .cac-row,
+  .cac-cards {
+    animation: cacOverlayIn 0.15s ease both;
+  }
+  .cac-typing span,
+  .cac-status-dot {
+    animation: none;
+  }
+  .cac-log {
+    scroll-behavior: auto;
+  }
+  .cac-chip:hover,
+  .cac-iconbtn:hover {
+    transform: none;
+  }
+}
