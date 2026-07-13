@@ -5,6 +5,7 @@ import dynamic from "next/dynamic";
 import Image from "next/image";
 import { motion, useReducedMotion, useMotionValue, useSpring, useTransform, useScroll, type MotionValue } from "framer-motion";
 import ChakraSVG from "./ChakraSVG";
+import HeroCardCluster from "./HeroCardCluster";
 
 // Heavy WebGL scene: ssr:false + lazy so three.js is a separate chunk that only
 // loads at runtime on capable desktops (never in SSR or the initial bundle).
@@ -67,6 +68,9 @@ export default function HeroStageV2({ src, alt }: { src: string; alt: string }) 
   const ref = useRef<HTMLDivElement>(null);
   const [show3d, setShow3d] = useState(false);
   const [active, setActive] = useState(true);
+  // If the portrait ever fails to load (bad URL, expired signed link, optimizer
+  // error), fall back to the premium animated cluster — never a broken "?" box.
+  const [imgFailed, setImgFailed] = useState(false);
 
   // Mouse tilt (desktop). Values normalised to [-0.5, 0.5].
   const mx = useMotionValue(0);
@@ -167,59 +171,67 @@ export default function HeroStageV2({ src, alt }: { src: string; alt: string }) 
         )}
       </div>
 
-      {/* ---- Foreground: framed portrait panel ---- */}
-      <motion.div
-        initial={reduce ? { opacity: 0 } : { opacity: 0, y: 18 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.8, ease: [0.22, 1, 0.36, 1] }}
-        style={{ rotateX: tiltX, rotateY: tiltY, y: driftY, transformStyle: "preserve-3d" }}
-        className="relative z-10 will-change-transform"
-      >
-        <div
-          className="relative overflow-hidden rounded-[28px] border border-[rgba(242,201,76,0.35)] p-3 backdrop-blur-xl"
-          style={{
-            background: "linear-gradient(160deg, rgba(28,58,110,0.55), rgba(11,20,38,0.65))",
-            boxShadow: "0 30px 90px -30px rgba(0,0,0,0.8), inset 0 1px 0 rgba(255,255,255,0.08), 0 0 60px -18px rgba(242,201,76,0.35)",
-          }}
-        >
-          {/* Gold rim highlight */}
-          <div
-            className="pointer-events-none absolute inset-0 rounded-[28px]"
-            style={{ boxShadow: "inset 0 0 0 1px rgba(242,201,76,0.25)" }}
-            aria-hidden="true"
-          />
-          <Image
-            src={src}
-            alt={alt}
-            width={620}
-            height={760}
-            priority
-            sizes="(max-width: 1024px) 80vw, 440px"
-            className="mx-auto h-auto w-full max-h-[420px] object-contain sm:max-h-[520px] lg:max-h-[560px]"
-            style={{ WebkitMaskImage: feather, maskImage: feather }}
-          />
-
-          {/* Corner IPS-star accents */}
-          <StarAccent className="absolute right-4 top-4" size={24} />
-          <StarAccent className="absolute left-4 top-10 opacity-70" size={16} />
+      {/* ---- Foreground ---- */}
+      {imgFailed ? (
+        // Graceful, premium fallback (never a broken image) over the Chakra glow.
+        <div className="relative z-10">
+          <HeroCardCluster />
         </div>
-
-        {/* National-seal medallion — inspired-by (Chakra + motto), dignified. */}
-        <div className="absolute -bottom-5 left-1/2 z-20 flex -translate-x-1/2 flex-col items-center">
+      ) : (
+        <motion.div
+          initial={reduce ? { opacity: 0 } : { opacity: 0, y: 18 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.8, ease: [0.22, 1, 0.36, 1] }}
+          style={{ rotateX: tiltX, rotateY: tiltY, y: driftY, transformStyle: "preserve-3d" }}
+          className="relative z-10 will-change-transform"
+        >
           <div
-            className="flex h-16 w-16 items-center justify-center rounded-full border border-[rgba(242,201,76,0.5)] backdrop-blur-md"
+            className="relative overflow-hidden rounded-[28px] border border-[rgba(242,201,76,0.35)] p-3 backdrop-blur-xl"
             style={{
-              background: "radial-gradient(closest-side, rgba(28,58,110,0.9), rgba(11,20,38,0.95))",
-              boxShadow: "0 0 24px -6px rgba(242,201,76,0.5)",
+              background: "linear-gradient(160deg, rgba(28,58,110,0.55), rgba(11,20,38,0.65))",
+              boxShadow: "0 30px 90px -30px rgba(0,0,0,0.8), inset 0 1px 0 rgba(255,255,255,0.08), 0 0 60px -18px rgba(242,201,76,0.35)",
             }}
           >
-            <ChakraSVG size={40} spin={!reduce} glow={false} strokeWidth={1} hubRadius={7} />
+            {/* Gold rim highlight */}
+            <div
+              className="pointer-events-none absolute inset-0 rounded-[28px]"
+              style={{ boxShadow: "inset 0 0 0 1px rgba(242,201,76,0.25)" }}
+              aria-hidden="true"
+            />
+            <Image
+              src={src}
+              alt={alt}
+              width={620}
+              height={760}
+              priority
+              sizes="(max-width: 1024px) 80vw, 440px"
+              className="mx-auto h-auto w-full max-h-[420px] object-contain sm:max-h-[520px] lg:max-h-[560px]"
+              style={{ WebkitMaskImage: feather, maskImage: feather }}
+              onError={() => setImgFailed(true)}
+            />
+
+            {/* Corner IPS-star accents */}
+            <StarAccent className="absolute right-4 top-4" size={24} />
+            <StarAccent className="absolute left-4 top-10 opacity-70" size={16} />
           </div>
-          <span className="mt-1.5 text-[11px] font-semibold text-[var(--ca-gold-bright)]" lang="sa">
-            सत्यमेव जयते
-          </span>
-        </div>
-      </motion.div>
+
+          {/* National-seal medallion — inspired-by (Chakra + motto), dignified. */}
+          <div className="absolute -bottom-5 left-1/2 z-20 flex -translate-x-1/2 flex-col items-center">
+            <div
+              className="flex h-16 w-16 items-center justify-center rounded-full border border-[rgba(242,201,76,0.5)] backdrop-blur-md"
+              style={{
+                background: "radial-gradient(closest-side, rgba(28,58,110,0.9), rgba(11,20,38,0.95))",
+                boxShadow: "0 0 24px -6px rgba(242,201,76,0.5)",
+              }}
+            >
+              <ChakraSVG size={40} spin={!reduce} glow={false} strokeWidth={1} hubRadius={7} />
+            </div>
+            <span className="mt-1.5 text-[11px] font-semibold text-[var(--ca-gold-bright)]" lang="sa">
+              सत्यमेव जयते
+            </span>
+          </div>
+        </motion.div>
+      )}
     </div>
   );
 }
