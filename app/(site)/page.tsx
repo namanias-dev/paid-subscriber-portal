@@ -1,4 +1,5 @@
 import { Fragment } from "react";
+import type { Metadata } from "next";
 import Link from "next/link";
 import type { LucideIcon } from "lucide-react";
 import { Users, GraduationCap, Handshake, MapPin, Building2, MonitorPlay, Video, Shuffle, Newspaper, PenLine, FileDown, Send } from "lucide-react";
@@ -16,9 +17,40 @@ import { webinarRegCountDisplay, WEBINAR_REGCOUNT_ENCOURAGE } from "@/lib/webina
 import { getPurchaseSnapshot, coursePurchaseMap } from "@/lib/purchaseStatus";
 import { ACADEMY } from "@/lib/config";
 import { directionsUrl, mapEmbedUrl } from "@/lib/maps";
+import HomeV2 from "@/components/public/home-v2/HomeV2";
+import { buildHomeV2Metadata } from "@/components/public/home-v2/seo";
 
 // Render fresh so newly published courses / upcoming webinars surface here too.
 export const dynamic = "force-dynamic";
+
+type SearchParams = Record<string, string | string[] | undefined>;
+
+/**
+ * Flag / param that swaps in the cinematic Home V2 experience. V2 renders when
+ * the env flag is on (promoted) OR the request carries `?v2=1` (preview). When
+ * neither is set the existing homepage renders byte-for-byte as before.
+ */
+function homeV2State(searchParams?: SearchParams): { on: boolean; envOn: boolean } {
+  const envOn = process.env.NEXT_PUBLIC_HOME_V2 === "true";
+  const raw = searchParams?.v2;
+  const paramOn = (Array.isArray(raw) ? raw[0] : raw) === "1";
+  return { on: envOn || paramOn, envOn };
+}
+
+/**
+ * SEO metadata. For the DEFAULT homepage this returns `{}` (inherits the root
+ * layout metadata exactly as today). For Home V2 it fills the SEO gaps
+ * (canonical, OpenGraph, Twitter); a `?v2=1` preview additionally gets noindex
+ * so it can never create duplicate-content while the env flag stays off.
+ */
+export async function generateMetadata({ searchParams }: { searchParams?: SearchParams }): Promise<Metadata> {
+  const { on, envOn } = homeV2State(searchParams);
+  if (!on) return {};
+  const settings = await getSiteSettings();
+  const md = buildHomeV2Metadata(settings);
+  if (!envOn) md.robots = { index: false, follow: true };
+  return md;
+}
 
 const WHY: { icon: LucideIcon; title: string; desc: string }[] = [
   { icon: Users, title: "Small batches (~40)", desc: "Personal attention for every aspirant — not a crowded hall." },
@@ -51,7 +83,7 @@ const FAQ = [
   { q: "How do I start?", a: "Book a free demo or join the ₹50 beginner masterclass to experience our teaching first." },
 ];
 
-export default async function HomePage() {
+export default async function HomePage({ searchParams }: { searchParams?: SearchParams }) {
   const [courses, webinars, settings, caArticles] = await Promise.all([
     getPublishedCourses(),
     getPublicWebinars(),
@@ -66,6 +98,23 @@ export default async function HomePage() {
   const upcomingRegCounts = await getWebinarRegisteredCounts(upcoming);
   const c = settings.content;
   const trustBar = c.trust_bar?.length ? c.trust_bar : [];
+
+  // Flag-gated cinematic Home V2 (fully isolated). Uses the SAME live data that
+  // was just fetched above, so V2 mirrors the default homepage exactly.
+  const { on: v2On, envOn: v2EnvOn } = homeV2State(searchParams);
+  if (v2On) {
+    return (
+      <HomeV2
+        settings={settings}
+        courses={courses}
+        purchaseMap={purchaseMap}
+        homeCa={homeCa}
+        upcoming={upcoming}
+        upcomingRegCounts={upcomingRegCounts}
+        preview={!v2EnvOn}
+      />
+    );
+  }
 
   return (
     <>

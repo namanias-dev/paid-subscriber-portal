@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { getSupabaseAdmin } from "./supabase";
 import * as mock from "./mockData";
 import { computeExpiry, isExpired, isExpiringSoon, yesterdayISODate, todayISODate, formatINR, formatISTDate } from "./dates";
@@ -1385,11 +1386,14 @@ export async function getAllCourses(): Promise<Course[]> {
   const rows = await dbSelect<Course>("courses");
   return sortCoursesByOrder(rows.length ? rows : [...mock.courses]);
 }
-export async function getPublishedCourses(): Promise<Course[]> {
+// React.cache dedupes this within a single server request so layout + page +
+// getWhatsNew share one fetch. External contract (name, signature, return) is
+// unchanged; outside a request scope it is a transparent passthrough.
+export const getPublishedCourses = cache(async function getPublishedCourses(): Promise<Course[]> {
   const all = await getAllCourses();
   // Public site: only published AND not disabled (Task 7).
   return all.filter((c) => c.status === "published" && c.active !== false);
-}
+});
 export async function getCourseBySlug(slug: string): Promise<Course | null> {
   const all = await getAllCourses();
   return all.find((c) => c.slug === slug) ?? null;
@@ -1841,11 +1845,11 @@ export async function hasUpcomingWebinars(): Promise<boolean> {
   _upcomingWebinarCache = { v, exp: now + UPCOMING_TTL_MS };
   return v;
 }
-/** Public webinars only — hides disabled items (Task 7). */
-export async function getPublicWebinars(): Promise<Webinar[]> {
+/** Public webinars only — hides disabled items (Task 7). Request-deduped via React.cache. */
+export const getPublicWebinars = cache(async function getPublicWebinars(): Promise<Webinar[]> {
   const all = await getWebinars();
   return all.filter((w) => w.active !== false);
-}
+});
 export async function getWebinarBySlug(slug: string): Promise<Webinar | null> {
   const all = await getWebinars();
   return all.find((w) => w.slug === slug) ?? null;
@@ -5624,8 +5628,12 @@ const demoSettings = (() => {
   return g.__namanSettings;
 })();
 
-/** Public read — always returns a fully-populated settings object (merged with defaults). */
-export async function getSiteSettings(): Promise<SiteSettings> {
+/**
+ * Public read — always returns a fully-populated settings object (merged with
+ * defaults). React.cache dedupes it within a single server request so the shared
+ * layout, the homepage and getWhatsNew hit the DB once. Contract unchanged.
+ */
+export const getSiteSettings = cache(async function getSiteSettings(): Promise<SiteSettings> {
   if (demoMode()) return mergeSiteSettings(demoSettings);
   const db = getSupabaseAdmin();
   if (!db) return mergeSiteSettings(null);
@@ -5635,7 +5643,7 @@ export async function getSiteSettings(): Promise<SiteSettings> {
   } catch {
     return mergeSiteSettings(null);
   }
-}
+});
 
 /**
  * Admin write — partial upsert of the single 'home' settings row.
