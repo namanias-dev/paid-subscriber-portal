@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import {
   Trophy, Search, Download, FileText, ArrowUpDown, Users, CalendarDays,
   ChevronLeft, ChevronRight, ShieldOff, BarChart3, Info, UserMinus, X, Plus, Check,
+  Gauge, Clock, Crown, Target, PieChart,
 } from "lucide-react";
 import { LoadingBlock } from "@/components/admin/ui";
 import { downloadLeaderboardPdf } from "@/lib/performancePdf";
@@ -16,6 +17,22 @@ const PAGE_SIZE = 50;
 
 interface QuizOption { id: string; title: string }
 interface Person { id: string; name: string; phone: string | null }
+
+interface Analytics {
+  cohortAccuracyAvg: number;
+  accuracyBands: number[];
+  attemptAccuracyAvg: number;
+  attemptAccuracyBands: number[];
+  totalAttempts: number;
+  timeTracked: boolean;
+  timeTrackedAttempts: number;
+  avgTimeSeconds: number;
+  timeBuckets: number[];
+  enrolledCount: number;
+  attemptedCount: number;
+  participationPct: number;
+  topScore: { studentId: string; name: string; accuracy: number } | null;
+}
 
 interface ApiResult {
   ok: boolean;
@@ -29,9 +46,27 @@ interface ApiResult {
   classAverage: number;
   reliabilityC: number;
   excludedCount: number;
+  analytics: Analytics;
   batches: BatchOption[];
   quizzes: QuizOption[];
   rows: LeaderboardRow[];
+}
+
+const ACCURACY_BAND_LABELS = ["0–20%", "20–40%", "40–60%", "60–80%", "80–100%"];
+const TIME_BUCKET_LABELS = ["<5m", "5–10m", "10–20m", "20–30m", "30m+"];
+
+function fmtDuration(sec: number): string {
+  if (!sec || sec < 0) return "—";
+  if (sec < 60) return `${sec}s`;
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return s ? `${m}m ${s}s` : `${m}m`;
+}
+function topPercentLabel(pct: number): string | null {
+  if (pct <= 5) return "Top 5%";
+  if (pct <= 10) return "Top 10%";
+  if (pct <= 25) return "Top 25%";
+  return null;
 }
 
 interface ExclusionsResult {
@@ -79,6 +114,8 @@ export default function LeaderboardPage() {
 
   // Feature 4 — info popover.
   const [infoOpen, setInfoOpen] = useState(false);
+  // Analytics — which distribution modal is open (null = none).
+  const [distOpen, setDistOpen] = useState<null | "accuracy" | "quiz" | "time" | "participation">(null);
 
   // Feature 5 — global exclude config.
   const [excl, setExcl] = useState<ExclusionsResult | null>(null);
@@ -150,6 +187,16 @@ export default function LeaderboardPage() {
     });
     return list;
   }, [data, q, sortKey, dir]);
+
+  // "Top X%" by raw accuracy over the whole qualified set (stable under search).
+  const topPctById = useMemo(() => {
+    const m = new Map<string, number>();
+    if (!data || data.rows.length === 0) return m;
+    const byAcc = [...data.rows].sort((a, b) => b.accuracy - a.accuracy);
+    const n = byAcc.length;
+    byAcc.forEach((r, i) => m.set(r.studentId, Math.round(((i + 1) / n) * 100)));
+    return m;
+  }, [data]);
 
   const pageRows = view.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE);
   const pageCount = Math.max(1, Math.ceil(view.length / PAGE_SIZE));
@@ -315,6 +362,16 @@ export default function LeaderboardPage() {
         classAverage={data?.classAverage ?? 0}
       />
 
+      {/* Premium analytics cards — reflect the exact current filter scope */}
+      {!loading && data && view.length > 0 && (
+        <AnalyticsCards
+          analytics={data.analytics}
+          quizSelected={!!quizId}
+          quizLabel={quizLabel}
+          onOpen={(k) => setDistOpen(k)}
+        />
+      )}
+
       {/* Table */}
       {loading ? (
         <TableSkeleton />
@@ -371,13 +428,24 @@ export default function LeaderboardPage() {
                       <td className="py-3 pl-4">
                         <span className={`inline-flex h-6 min-w-6 items-center justify-center rounded-full px-1.5 text-xs font-bold ${top3 ? "bg-gradient-to-r from-[#f4c84a] to-[#b8860b] text-[#1a1304]" : "text-muted"}`}>{rank}</span>
                       </td>
-                      <td className="py-3 font-semibold text-ink">{r.name}</td>
+                      <td className="py-3 font-semibold text-ink">
+                        <span className="inline-flex flex-wrap items-center gap-1.5">
+                          {r.name}
+                          {(() => {
+                            const lbl = topPercentLabel(topPctById.get(r.studentId) ?? 999);
+                            return lbl ? <span className="pill inline-flex items-center gap-1 bg-[rgba(212,175,55,0.14)] text-[var(--ca-gold,#b8860b)]"><Crown size={11} /> {lbl}</span> : null;
+                          })()}
+                        </span>
+                      </td>
                       <td className="hidden py-3 text-ink2 md:table-cell">{r.batchLabel || "—"}</td>
                       {r.hasData ? (
                         <>
                           <td className={`py-3 text-right font-extrabold tabular-nums ${accCls(r.reliability)}`}>{r.reliability.toFixed(1)}</td>
                           <td className="py-3 text-right tabular-nums">{r.quizzes}</td>
-                          <td className={`py-3 text-right font-bold tabular-nums ${accCls(r.accuracy)}`}>{r.accuracy}%</td>
+                          <td className={`py-3 text-right font-bold tabular-nums ${accCls(r.accuracy)}`}>
+                            {r.accuracy}%
+                            <ComparisonChip value={r.accuracy - (data?.classAverage ?? 0)} />
+                          </td>
                           <td className="hidden py-3 text-right tabular-nums sm:table-cell">{r.attemptRate}%</td>
                           <td className="hidden py-3 pr-4 lg:table-cell">
                             <div className="flex flex-wrap items-center gap-1.5 text-xs">
@@ -411,6 +479,201 @@ export default function LeaderboardPage() {
 
       {/* Feature 4 — student-friendly Reliability Score explainer */}
       {infoOpen && <InfoModal onClose={() => setInfoOpen(false)} classAverage={data?.classAverage ?? 0} c={data?.reliabilityC ?? cValue} />}
+
+      {/* Analytics distributions */}
+      {distOpen && data && (
+        <DistributionModal kind={distOpen} analytics={data.analytics} quizSelected={!!quizId} quizLabel={quizLabel} onClose={() => setDistOpen(null)} />
+      )}
+    </div>
+  );
+}
+
+function ComparisonChip({ value }: { value: number }) {
+  const rounded = Math.round(value);
+  if (rounded === 0) {
+    return <span className="mt-0.5 block text-[11px] font-medium text-muted">at average</span>;
+  }
+  const up = rounded > 0;
+  return (
+    <span className={`mt-0.5 block text-[11px] font-semibold ${up ? "text-success" : "text-danger"}`}>
+      {up ? "+" : "−"}{Math.abs(rounded)}% {up ? "above" : "below"} avg
+    </span>
+  );
+}
+
+function AnalyticsCards({ analytics: a, quizSelected, quizLabel, onOpen }: {
+  analytics: Analytics;
+  quizSelected: boolean;
+  quizLabel: string;
+  onOpen: (k: "accuracy" | "quiz" | "time" | "participation") => void;
+}) {
+  return (
+    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+      <StatCard
+        icon={<Gauge size={16} />} label="Batch average" tone="blue"
+        value={`${a.cohortAccuracyAvg}%`} benchmark="avg accuracy of this cohort"
+        onClick={() => onOpen("accuracy")}
+      />
+      <StatCard
+        icon={<Target size={16} />} label={quizSelected ? "Quiz average" : "Quiz average (all)"} tone="violet"
+        value={`${a.attemptAccuracyAvg}%`} benchmark={quizSelected ? quizLabel : `${a.totalAttempts} attempts`}
+        onClick={() => onOpen("quiz")}
+      />
+      <StatCard
+        icon={<Clock size={16} />} label="Avg time taken" tone="amber"
+        value={a.timeTracked ? fmtDuration(a.avgTimeSeconds) : "Not tracked"}
+        benchmark={a.timeTracked ? "to finish a quiz" : "no time data in scope"}
+        muted={!a.timeTracked}
+        onClick={() => onOpen("time")}
+      />
+      <StatCard
+        icon={<Users size={16} />} label="Participation" tone="green"
+        value={`${a.participationPct}%`} benchmark={`${a.attemptedCount} of ${a.enrolledCount} attempted`}
+        onClick={() => onOpen("participation")}
+      />
+      <StatCard
+        icon={<Crown size={16} />} label="Top score" tone="gold" highlight
+        value={a.topScore ? `${a.topScore.accuracy}%` : "—"}
+        benchmark={a.topScore ? a.topScore.name : "no attempts yet"}
+        onClick={() => onOpen("accuracy")}
+      />
+    </div>
+  );
+}
+
+const TONES: Record<string, string> = {
+  blue: "text-sky-600",
+  violet: "text-violet-600",
+  amber: "text-amber-600",
+  green: "text-success",
+  gold: "text-[var(--ca-gold,#b8860b)]",
+};
+
+function StatCard({ icon, label, value, benchmark, tone, onClick, highlight, muted }: {
+  icon: React.ReactNode; label: string; value: string; benchmark: string; tone: string;
+  onClick: () => void; highlight?: boolean; muted?: boolean;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`card group relative overflow-hidden p-4 text-left transition duration-200 hover:-translate-y-0.5 hover:shadow-lg ca-focus ${highlight ? "ring-1 ring-[var(--ca-gold,#b8860b)]/30 bg-[rgba(212,175,55,0.05)]" : ""}`}
+    >
+      <div className="pointer-events-none absolute -right-6 -top-6 h-20 w-20 rounded-full bg-current opacity-[0.04] blur-xl" />
+      <div className="flex items-center justify-between gap-2">
+        <span className={`inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide ${TONES[tone] || "text-ink2"}`}>{icon} {label}</span>
+        <PieChart size={13} className="text-muted opacity-0 transition group-hover:opacity-60" />
+      </div>
+      <p className={`mt-2 font-heading text-2xl font-extrabold leading-none tabular-nums ${muted ? "text-muted" : "text-ink"}`}>{value}</p>
+      <p className="mt-1.5 truncate text-xs text-ink2">{benchmark}</p>
+    </button>
+  );
+}
+
+function DistributionModal({ kind, analytics: a, quizSelected, quizLabel, onClose }: {
+  kind: "accuracy" | "quiz" | "time" | "participation";
+  analytics: Analytics; quizSelected: boolean; quizLabel: string; onClose: () => void;
+}) {
+  let title = "";
+  let subtitle = "";
+  let bars: { label: string; count: number }[] = [];
+  let markerPct: number | null = null;      // vertical avg line for %-based charts
+  let markerIndex: number | null = null;    // highlighted bucket for time chart
+  let markerText = "";
+
+  if (kind === "accuracy") {
+    title = "Accuracy distribution";
+    subtitle = "How many students fall in each accuracy band";
+    bars = ACCURACY_BAND_LABELS.map((label, i) => ({ label, count: a.accuracyBands[i] || 0 }));
+    markerPct = a.cohortAccuracyAvg;
+    markerText = `Average ${a.cohortAccuracyAvg}%`;
+  } else if (kind === "quiz") {
+    title = quizSelected ? "Quiz score distribution" : "Score distribution (all quizzes)";
+    subtitle = quizSelected ? quizLabel : `${a.totalAttempts} attempts in scope`;
+    bars = ACCURACY_BAND_LABELS.map((label, i) => ({ label, count: a.attemptAccuracyBands[i] || 0 }));
+    markerPct = a.attemptAccuracyAvg;
+    markerText = `Average ${a.attemptAccuracyAvg}%`;
+  } else if (kind === "time") {
+    title = "Time taken distribution";
+    if (!a.timeTracked) {
+      subtitle = "Time isn’t tracked for these attempts";
+    } else {
+      subtitle = `${a.timeTrackedAttempts} attempts with time recorded`;
+      bars = TIME_BUCKET_LABELS.map((label, i) => ({ label, count: a.timeBuckets[i] || 0 }));
+      // highlight the bucket containing the average
+      const s = a.avgTimeSeconds;
+      markerIndex = s < 300 ? 0 : s < 600 ? 1 : s < 1200 ? 2 : s < 1800 ? 3 : 4;
+      markerText = `Average ${fmtDuration(a.avgTimeSeconds)}`;
+    }
+  } else {
+    title = "Participation";
+    subtitle = `${a.attemptedCount} of ${a.enrolledCount} in scope attempted a quiz`;
+    bars = [
+      { label: "Attempted", count: a.attemptedCount },
+      { label: "Not yet", count: Math.max(0, a.enrolledCount - a.attemptedCount) },
+    ];
+    markerText = `${a.participationPct}% participation`;
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose} role="presentation">
+      <div className="card w-full max-w-lg p-6" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label={title}>
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="font-heading text-lg font-bold">{title}</p>
+            <p className="mt-0.5 text-sm text-ink2">{subtitle}</p>
+          </div>
+          <button onClick={onClose} className="ca-focus text-muted hover:text-ink" aria-label="Close"><X size={18} /></button>
+        </div>
+
+        {bars.length === 0 ? (
+          <div className="mt-6 rounded-lg border border-line bg-surface2/50 p-6 text-center text-sm text-ink2">
+            Not tracked for these attempts.
+          </div>
+        ) : (
+          <BandChart bars={bars} markerPct={markerPct} markerIndex={markerIndex} markerText={markerText} />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function BandChart({ bars, markerPct, markerIndex, markerText }: {
+  bars: { label: string; count: number }[];
+  markerPct: number | null; markerIndex: number | null; markerText: string;
+}) {
+  const max = Math.max(1, ...bars.map((b) => b.count));
+  return (
+    <div className="mt-5">
+      <div className="relative flex h-40 items-end gap-2 sm:gap-3">
+        {/* average marker line for %-based charts */}
+        {markerPct != null && (
+          <div
+            className="pointer-events-none absolute bottom-0 top-0 z-10 border-l-2 border-dashed border-[var(--ca-gold,#b8860b)]"
+            style={{ left: `${Math.min(100, Math.max(0, markerPct))}%` }}
+            aria-hidden="true"
+          />
+        )}
+        {bars.map((b, i) => {
+          const h = Math.round((b.count / max) * 100);
+          const isMarked = markerIndex === i;
+          return (
+            <div key={b.label} className="flex flex-1 flex-col items-center justify-end gap-1.5">
+              <span className="text-xs font-semibold tabular-nums text-ink2">{b.count}</span>
+              <div
+                className={`w-full rounded-t-md transition-all ${isMarked ? "bg-[var(--ca-gold,#b8860b)]" : "bg-primary/70"}`}
+                style={{ height: `${Math.max(2, h)}%` }}
+                title={`${b.label}: ${b.count}`}
+              />
+              <span className="text-center text-[11px] leading-tight text-muted">{b.label}</span>
+            </div>
+          );
+        })}
+      </div>
+      {markerText && (
+        <p className="mt-4 flex items-center justify-center gap-2 text-xs font-medium text-ink2">
+          <span className="inline-block h-2 w-2 rounded-full bg-[var(--ca-gold,#b8860b)]" /> {markerText}
+        </p>
+      )}
     </div>
   );
 }

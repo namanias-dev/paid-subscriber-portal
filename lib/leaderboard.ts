@@ -59,6 +59,34 @@ export interface LeaderboardRow {
   weakSubject: SubjectTag | null;
 }
 
+/**
+ * Premium analytics for the CURRENT filter scope (respecting exclude-users +
+ * qualified set). Computed on-read from the same batched attempt pull, so it
+ * serves historical AND future attempts identically — every qualifying attempt
+ * counts regardless of when it was taken. All numbers are simple: %, counts and
+ * bands/buckets (no stats jargon leaks to the UI).
+ */
+export interface LeaderboardAnalytics {
+  // (a) Batch average — per-student accuracy across the qualified cohort.
+  cohortAccuracyAvg: number;      // = classAverage
+  accuracyBands: number[];        // 5 bands [0-20,20-40,40-60,60-80,80-100] → student counts
+  // (b) Quiz average — per-attempt score % across qualifying attempts in scope.
+  attemptAccuracyAvg: number;
+  attemptAccuracyBands: number[]; // 5 bands → attempt counts
+  totalAttempts: number;          // qualifying completed attempts in scope
+  // (c) Avg time taken — from time_taken_seconds (or derived from timestamps).
+  timeTracked: boolean;           // false when no attempt in scope has usable time
+  timeTrackedAttempts: number;
+  avgTimeSeconds: number;
+  timeBuckets: number[];          // 5 buckets [<5m,5-10m,10-20m,20-30m,30m+] → attempt counts
+  // (d) Participation — attempted vs enrolled in scope.
+  enrolledCount: number;          // roster in scope (excluded users already removed)
+  attemptedCount: number;         // qualified participants (= studentCount)
+  participationPct: number;
+  // (e) Top score — best single-attempt score % in scope + who.
+  topScore: { studentId: string; name: string; accuracy: number } | null;
+}
+
 export interface LeaderboardResult {
   batchLabel: string;        // "All batches" or the selected batch title
   batchKey: string | null;   // null for All batches
@@ -70,8 +98,37 @@ export interface LeaderboardResult {
   classAverage: number;      // mean raw accuracy of the qualified cohort (0 if none)
   reliabilityC: number;      // confidence constant actually used
   excludedCount: number;     // excluded students that fall within the active scope
+  analytics: LeaderboardAnalytics;
   batches: BatchOption[];
   rows: LeaderboardRow[];
+}
+
+/** 0–100% → band index 0..4 (80–100 includes 100). */
+function bandIndex(pct: number): number {
+  return Math.min(4, Math.max(0, Math.floor(pct / 20)));
+}
+
+/** Time bucket index: <5m, 5–10m, 10–20m, 20–30m, 30m+. */
+function timeBucketIndex(sec: number): number {
+  if (sec < 300) return 0;
+  if (sec < 600) return 1;
+  if (sec < 1200) return 2;
+  if (sec < 1800) return 3;
+  return 4;
+}
+
+/**
+ * Usable duration for an attempt, in whole seconds, or null when untracked.
+ * Prefers the stored `time_taken_seconds`; falls back to submitted_at − started_at
+ * (read-time compat for any older attempt that never persisted the column). Never
+ * fabricated — returns null when neither source is usable.
+ */
+export function attemptDurationSeconds(a: QuizAttempt): number | null {
+  if (typeof a.time_taken_seconds === "number" && a.time_taken_seconds > 0) return Math.round(a.time_taken_seconds);
+  const s = a.started_at ? Date.parse(a.started_at) : NaN;
+  const e = a.submitted_at ? Date.parse(a.submitted_at) : NaN;
+  if (Number.isFinite(s) && Number.isFinite(e) && e > s) return Math.round((e - s) / 1000);
+  return null;
 }
 
 const norm = (p: string | null | undefined) => (p || "").trim();
@@ -218,6 +275,16 @@ export function buildLeaderboard(opts: {
   // fully dropped (never a 0 row). Order of operations: scope (quiz/batch) →
   // drop manual exclusions (done above) → drop n = 0 (here) → then class
   // average, Reliability Score and ranks are computed over what remains.
+  // Attempt-level analytics accumulators (Features 1b/1c) — filled from the SAME
+  // scoped attempts as we qualify students, so historical + future attempts are
+  // treated identically and there is no extra pass/query.
+  const attemptAccuracyBands = [0, 0, 0, 0, 0];
+  const timeBuckets = [0, 0, 0, 0, 0];
+  let attemptAccuracySum = 0;
+  let totalAttempts = 0;
+  let timeSecSum = 0;
+  let timeTrackedAttempts = 0;
+
   const qualified: { row: LeaderboardRow; student: Student }[] = [];
   for (const s of roster) {
     const scopedAttempts = attemptsByUser.get(s.id) || [];
@@ -239,6 +306,22 @@ export function buildLeaderboard(opts: {
     // Defensive: buildOverallPerformance also drops IN_PROGRESS, so this is only
     // false if a completed attempt carried no scorable data — still not a qualifier.
     if (!overall.hasData || overall.hero.totalQuizzes < 1) continue;
+
+    // Per-attempt analytics for this qualified student (excluded users never reach
+    // here, so aggregates stay clean).
+    for (const a of scopedAttempts) {
+      const attempted = a.correct_count + a.incorrect_count;
+      const acc = attempted > 0 ? (a.correct_count / attempted) * 100 : 0;
+      attemptAccuracyBands[bandIndex(acc)]++;
+      attemptAccuracySum += acc;
+      totalAttempts++;
+      const dur = attemptDurationSeconds(a);
+      if (dur != null) {
+        timeBuckets[timeBucketIndex(dur)]++;
+        timeSecSum += dur;
+        timeTrackedAttempts++;
+      }
+    }
 
     const { top, weak } = edges(overall.subjects);
     qualified.push({
@@ -297,6 +380,33 @@ export function buildLeaderboard(opts: {
     if (m && m.has(batchKey)) excludedCount++;
   }
 
+  // Student-level accuracy distribution (Feature 1a) + top score (Feature 1e),
+  // over the qualified rows. Ties on top score resolve to the first by sort order.
+  const accuracyBands = [0, 0, 0, 0, 0];
+  let topScore: LeaderboardAnalytics["topScore"] = null;
+  for (const r of rows) {
+    accuracyBands[bandIndex(r.accuracy)]++;
+    if (!topScore || r.accuracy > topScore.accuracy) {
+      topScore = { studentId: r.studentId, name: r.name, accuracy: r.accuracy };
+    }
+  }
+
+  const analytics: LeaderboardAnalytics = {
+    cohortAccuracyAvg: classAverage,
+    accuracyBands,
+    attemptAccuracyAvg: totalAttempts ? Math.round((attemptAccuracySum / totalAttempts) * 10) / 10 : 0,
+    attemptAccuracyBands,
+    totalAttempts,
+    timeTracked: timeTrackedAttempts > 0,
+    timeTrackedAttempts,
+    avgTimeSeconds: timeTrackedAttempts ? Math.round(timeSecSum / timeTrackedAttempts) : 0,
+    timeBuckets,
+    enrolledCount: roster.length,
+    attemptedCount: rows.length,
+    participationPct: roster.length ? Math.round((rows.length / roster.length) * 100) : 0,
+    topScore,
+  };
+
   return {
     batchLabel: batchKey ? batchCounts.get(batchKey)?.title ?? "Batch" : "All batches",
     batchKey,
@@ -308,6 +418,7 @@ export function buildLeaderboard(opts: {
     classAverage,
     reliabilityC,
     excludedCount,
+    analytics,
     batches,
     rows,
   };
