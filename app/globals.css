@@ -1184,11 +1184,42 @@ a {
   to { opacity: 1; transform: translateY(0); }
 }
 
+/* Ambient revolving Ashoka Chakra behind the hero — a large, semi-transparent
+   gold watermark near the top (the motif the classic homepage had, reimagined for
+   V2). Pure inline SVG + CSS rotation: no WebGL cost and LCP-safe. The outer node
+   handles positioning/centering; the inner node owns the slow spin so the rotate
+   transform never fights the centering translate. Clipped by the hero's
+   overflow-hidden wrapper, sits below hero content, and never intercepts events. */
+.hv2-chakra-ambient {
+  position: absolute;
+  top: clamp(-260px, -12vw, -80px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: -1;
+  pointer-events: none;
+}
+.hv2-chakra-ambient__spin {
+  animation: hv2Spin 140s linear infinite;
+  transform-origin: 50% 50%;
+  opacity: 0.1;
+  filter: drop-shadow(0 0 26px rgba(242, 201, 76, 0.14));
+}
+.hv2-chakra-ambient__spin svg { width: 820px; height: 820px; }
+
+/* Mobile: keep it even more subtle and static so it never competes with the
+   portrait or costs anything on low-power devices. */
+@media (max-width: 640px) {
+  .hv2-chakra-ambient { top: clamp(-160px, -22vw, -60px); }
+  .hv2-chakra-ambient__spin { opacity: 0.055; animation: none; }
+  .hv2-chakra-ambient__spin svg { width: 460px; height: 460px; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .hv2-stars,
   .hv2-float,
   .hv2-float--slow,
   .hv2-spin,
-  .hv2-spin--rev { animation: none !important; }
+  .hv2-spin--rev,
+  .hv2-chakra-ambient__spin { animation: none !important; }
   .hv2-reveal { opacity: 1 !important; transform: none !important; animation: none !important; }
 }
