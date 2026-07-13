@@ -16,6 +16,7 @@ import JourneyV2 from "./JourneyV2";
 import TopperStripV2 from "./TopperStripV2";
 import WebinarBandV2 from "./WebinarBandV2";
 import HomeV2JsonLd from "./HomeV2JsonLd";
+import HomeV2Motion from "./HomeV2Motion";
 import { WHY_V2, MODES_V2, FREE_V2, FAQ_V2, stripLeadingEmoji } from "./content";
 
 /** Light navy icon chip used by the premium feature cards. */
@@ -59,6 +60,7 @@ export default function HomeV2({
   return (
     <>
       <HomeV2JsonLd settings={settings} courses={courses} />
+      <HomeV2Motion />
       <LeadPopup config={settings.popup} />
 
       {preview && (
@@ -88,11 +90,11 @@ export default function HomeV2({
 
       {/* Why Naman Sir */}
       <section className="section container-wide">
-        <div className="max-w-2xl">
+        <div className="max-w-2xl" data-hv2-reveal>
           <p className="pill pill-gold mb-3">{c.why_sub}</p>
           <h2 className="font-heading text-3xl font-extrabold tracking-tight text-[var(--ca-navy-900)] sm:text-4xl">{c.why_heading}</h2>
         </div>
-        <div className="mt-10 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="mt-10 grid gap-5 sm:grid-cols-2 lg:grid-cols-4" data-hv2-stagger>
           {WHY_V2.map((w) => (
             <div key={w.title} className="ca-card h-full p-6">
               <ChipLight icon={w.icon} />
@@ -111,11 +113,11 @@ export default function HomeV2({
 
       {/* Learning modes */}
       <section className="section container-wide">
-        <div className="max-w-2xl">
+        <div className="max-w-2xl" data-hv2-reveal>
           <h2 className="font-heading text-3xl font-extrabold tracking-tight text-[var(--ca-navy-900)] sm:text-4xl">{c.modes_heading}</h2>
           <p className="mt-2 text-[var(--ca-slate-700)]">{c.modes_sub}</p>
         </div>
-        <div className="mt-10 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="mt-10 grid gap-5 sm:grid-cols-2 lg:grid-cols-4" data-hv2-stagger>
           {MODES_V2.map((m) => (
             <div key={m.title} className="ca-card h-full p-6">
               <ChipLight icon={m.icon} />
@@ -129,7 +131,7 @@ export default function HomeV2({
       {/* Course explorer (live, reuses shared CourseExplorer + CourseCard) */}
       <section className="section bg-surface">
         <div className="container-wide">
-          <div className="flex flex-wrap items-end justify-between gap-3">
+          <div className="flex flex-wrap items-end justify-between gap-3" data-hv2-reveal>
             <div className="max-w-2xl">
               <h2 className="font-heading text-3xl font-extrabold tracking-tight text-[var(--ca-navy-900)] sm:text-4xl">{c.courses_heading}</h2>
               <p className="mt-2 text-[var(--ca-slate-700)]">{c.courses_sub}</p>
@@ -147,7 +149,7 @@ export default function HomeV2({
       {/* Current Affairs (live) */}
       {homeCa.length > 0 && (
         <section className="section container-wide">
-          <div className="flex flex-wrap items-end justify-between gap-3">
+          <div className="flex flex-wrap items-end justify-between gap-3" data-hv2-reveal>
             <div className="max-w-2xl">
               <h2 className="font-heading text-3xl font-extrabold tracking-tight text-[var(--ca-navy-900)] sm:text-4xl">Today&apos;s Current Affairs</h2>
               <p className="mt-2 text-[var(--ca-slate-700)]">Daily UPSC current affairs, monthly PDFs and exam-ready analysis.</p>
@@ -156,7 +158,7 @@ export default function HomeV2({
               Explore Current Affairs <ArrowRight size={15} aria-hidden="true" />
             </Link>
           </div>
-          <div className="mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-3" data-hv2-stagger>
             {homeCa.map((a) => (
               <CaArticleCard key={a.id} article={a} />
             ))}
@@ -167,8 +169,8 @@ export default function HomeV2({
       {/* Free resources */}
       <section className="section bg-surface">
         <div className="container-wide">
-          <h2 className="font-heading text-3xl font-extrabold tracking-tight text-[var(--ca-navy-900)] sm:text-4xl">{c.free_heading}</h2>
-          <div className="mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
+          <h2 className="font-heading text-3xl font-extrabold tracking-tight text-[var(--ca-navy-900)] sm:text-4xl" data-hv2-reveal>{c.free_heading}</h2>
+          <div className="mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-4" data-hv2-stagger>
             {FREE_V2.map((r) => (
               <Link key={r.title} href="/free-resources" className="ca-card ca-focus block p-6">
                 <ChipLight icon={r.icon} />
@@ -185,7 +187,7 @@ export default function HomeV2({
       {/* Testimonials (reuses shared marquee) */}
       <section className="section bg-surface">
         <div className="container-wide">
-          <h2 className="font-heading text-3xl font-extrabold tracking-tight text-[var(--ca-navy-900)] sm:text-4xl">{c.testimonials_heading}</h2>
+          <h2 className="font-heading text-3xl font-extrabold tracking-tight text-[var(--ca-navy-900)] sm:text-4xl" data-hv2-reveal>{c.testimonials_heading}</h2>
         </div>
         <div className="mt-8">
           <Testimonials />
@@ -194,7 +196,7 @@ export default function HomeV2({
 
       {/* Locations */}
       <section className="section container-wide">
-        <div className="grid items-center gap-8 lg:grid-cols-2">
+        <div className="grid items-center gap-8 lg:grid-cols-2" data-hv2-reveal>
           <div>
             <h2 className="font-heading text-3xl font-extrabold tracking-tight text-[var(--ca-navy-900)] sm:text-4xl">{c.locations_heading}</h2>
             <p className="mt-2 text-[var(--ca-slate-700)]">{c.locations_sub}</p>
@@ -220,7 +222,7 @@ export default function HomeV2({
 
       {/* FAQ */}
       <section className="section bg-surface">
-        <div className="container-x">
+        <div className="container-x" data-hv2-reveal>
           <h2 className="text-center font-heading text-3xl font-extrabold tracking-tight text-[var(--ca-navy-900)] sm:text-4xl">{c.faq_heading}</h2>
           <div className="mx-auto mt-8 max-w-3xl">
             <Accordion items={FAQ_V2} />

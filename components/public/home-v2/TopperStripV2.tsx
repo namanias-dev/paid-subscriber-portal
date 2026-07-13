@@ -30,7 +30,7 @@ export default function TopperStripV2({
   return (
     <section className="section bg-surface">
       <div className="container-wide">
-        <div className="max-w-2xl">
+        <div className="max-w-2xl" data-hv2-reveal>
           <p className="pill pill-gold mb-3">Our results speak</p>
           <h2 className="font-heading text-3xl font-extrabold tracking-tight text-[var(--ca-navy-900)] sm:text-4xl">
             {heading || "Results that speak"}
@@ -38,7 +38,7 @@ export default function TopperStripV2({
           <p className="mt-2 text-[var(--ca-slate-700)]">{subtitle || "Real students. Real ranks — across UPSC CSE & IFoS."}</p>
         </div>
 
-        <div className="mt-10 grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="mt-10 grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4" data-hv2-stagger>
           {list.map((t) => {
             const label = t.name?.trim() || t.rank;
             return (

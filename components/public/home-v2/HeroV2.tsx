@@ -46,7 +46,7 @@ export default function HeroV2({ hero }: { hero?: HeroConfig }) {
       <div className="hv2-stars" aria-hidden="true" />
 
       {/* Gold compass / north-star motif — the AI widget's compass launcher kin. */}
-      <div className="pointer-events-none absolute -right-24 top-8 -z-0 hidden opacity-70 sm:block lg:right-[6%]" aria-hidden="true">
+      <div className="pointer-events-none absolute -right-24 top-8 -z-0 hidden opacity-70 sm:block lg:right-[6%]" aria-hidden="true" data-hv2-parallax="0.18">
         <div className="hv2-float relative h-[340px] w-[340px]">
           <div className="hv2-spin absolute inset-0">
             <Compass className="h-full w-full text-[var(--ca-gold)]" strokeWidth={0.4} />

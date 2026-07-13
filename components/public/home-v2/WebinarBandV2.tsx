@@ -23,7 +23,7 @@ export default function WebinarBandV2({
       <div className="container-wide">
         <div className="hv2-space relative overflow-hidden rounded-[28px] p-8 sm:p-12">
           <div className="hv2-stars" aria-hidden="true" />
-          <div className="relative z-10 grid items-center gap-8 lg:grid-cols-2">
+          <div className="relative z-10 grid items-center gap-8 lg:grid-cols-2" data-hv2-reveal>
             <div>
               <h2 className="font-heading text-3xl font-extrabold tracking-tight text-white sm:text-4xl">{c.band_heading}</h2>
               <p className="mt-3 max-w-md text-[var(--ca-slate-300)]">{c.band_subtext}</p>

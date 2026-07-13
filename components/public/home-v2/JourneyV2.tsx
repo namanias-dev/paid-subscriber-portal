@@ -13,7 +13,7 @@ export default function JourneyV2() {
     <section className="hv2-space relative overflow-hidden py-20 sm:py-28">
       <div className="hv2-stars" aria-hidden="true" />
       <div className="container-wide relative z-10">
-        <div className="mx-auto max-w-2xl text-center">
+        <div className="mx-auto max-w-2xl text-center" data-hv2-reveal>
           <p className="ca-eyebrow">The journey</p>
           <h2 className="mt-3 font-heading text-3xl font-extrabold tracking-tight text-white sm:text-5xl">
             From confused beginner to <span className="hv2-gold-text">officer</span>
@@ -23,7 +23,7 @@ export default function JourneyV2() {
           </p>
         </div>
 
-        <ol className="relative mx-auto mt-16 max-w-4xl">
+        <ol className="relative mx-auto mt-16 max-w-4xl" data-hv2-stagger>
           {/* The glowing spine */}
           <span
             className="hv2-spine-glow absolute left-[27px] top-2 bottom-2 w-[3px] rounded-full sm:left-1/2 sm:-ml-[1.5px]"
