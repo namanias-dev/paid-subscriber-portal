@@ -1,4 +1,5 @@
 import { Fragment } from "react";
+import type { Metadata } from "next";
 import Link from "next/link";
 import type { LucideIcon } from "lucide-react";
 import { Users, GraduationCap, Handshake, MapPin, Building2, MonitorPlay, Video, Shuffle, Newspaper, PenLine, FileDown, Send } from "lucide-react";
@@ -16,9 +17,45 @@ import { webinarRegCountDisplay, WEBINAR_REGCOUNT_ENCOURAGE } from "@/lib/webina
 import { getPurchaseSnapshot, coursePurchaseMap } from "@/lib/purchaseStatus";
 import { ACADEMY } from "@/lib/config";
 import { directionsUrl, mapEmbedUrl } from "@/lib/maps";
+import HomeV2 from "@/components/public/home-v2/HomeV2";
+import { buildHomeV2Metadata } from "@/components/public/home-v2/seo";
 
 // Render fresh so newly published courses / upcoming webinars surface here too.
 export const dynamic = "force-dynamic";
+
+type SearchParams = Record<string, string | string[] | undefined>;
+
+function paramOn(searchParams: SearchParams | undefined, key: string): boolean {
+  const raw = searchParams?.[key];
+  return (Array.isArray(raw) ? raw[0] : raw) === "1";
+}
+
+/**
+ * Home V2 is now the DEFAULT experience at `/`. The classic homepage is kept
+ * fully intact as an instant rollback path, reachable two ways:
+ *   • `?v1=1` (or `?legacy=1`) — per-request spot-check of the old homepage.
+ *   • `HOME_V2_DISABLE === "true"` — a server-only (NON-public) kill switch that
+ *     flips the whole site back to the old homepage with an env change + redeploy
+ *     and no code edit.
+ * Anything else renders the cinematic Home V2.
+ */
+function homeVariant(searchParams?: SearchParams): "v2" | "legacy" {
+  if (paramOn(searchParams, "v1") || paramOn(searchParams, "legacy")) return "legacy";
+  if (process.env.HOME_V2_DISABLE === "true") return "legacy";
+  return "v2";
+}
+
+/**
+ * SEO metadata. Home V2 is the default `/`, so it now supplies the full,
+ * INDEXABLE SEO (canonical, OpenGraph, Twitter — JSON-LD is emitted in-page).
+ * The legacy path (`?v1=1` / kill switch) inherits the root layout metadata
+ * exactly as the old homepage always did.
+ */
+export async function generateMetadata({ searchParams }: { searchParams?: SearchParams }): Promise<Metadata> {
+  if (homeVariant(searchParams) === "legacy") return {};
+  const settings = await getSiteSettings();
+  return buildHomeV2Metadata(settings);
+}
 
 const WHY: { icon: LucideIcon; title: string; desc: string }[] = [
   { icon: Users, title: "Small batches (~40)", desc: "Personal attention for every aspirant — not a crowded hall." },
@@ -51,7 +88,7 @@ const FAQ = [
   { q: "How do I start?", a: "Book a free demo or join the ₹50 beginner masterclass to experience our teaching first." },
 ];
 
-export default async function HomePage() {
+export default async function HomePage({ searchParams }: { searchParams?: SearchParams }) {
   const [courses, webinars, settings, caArticles] = await Promise.all([
     getPublishedCourses(),
     getPublicWebinars(),
@@ -66,6 +103,24 @@ export default async function HomePage() {
   const upcomingRegCounts = await getWebinarRegisteredCounts(upcoming);
   const c = settings.content;
   const trustBar = c.trust_bar?.length ? c.trust_bar : [];
+
+  // Cinematic Home V2 is now the DEFAULT render at `/`. It uses the SAME live
+  // data fetched above, so it mirrors the classic homepage's content exactly.
+  // `?v1=1`/`?legacy=1` or the HOME_V2_DISABLE kill switch fall through to the
+  // fully-intact old homepage below.
+  if (homeVariant(searchParams) === "v2") {
+    return (
+      <HomeV2
+        settings={settings}
+        courses={courses}
+        purchaseMap={purchaseMap}
+        homeCa={homeCa}
+        upcoming={upcoming}
+        upcomingRegCounts={upcomingRegCounts}
+        preview={false}
+      />
+    );
+  }
 
   return (
     <>
