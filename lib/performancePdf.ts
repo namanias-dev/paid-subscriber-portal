@@ -277,13 +277,14 @@ export async function downloadLeaderboardPdf(input: {
   // Column layout.
   const cols = [
     { key: "rank", label: "#", w: 26 },
-    { key: "name", label: "Student", w: 150 },
-    { key: "batch", label: "Batch", w: 150 },
-    { key: "quizzes", label: "Quizzes", w: 55 },
-    { key: "accuracy", label: "Accuracy", w: 65 },
-    { key: "attempt", label: "Attempt%", w: 65 },
-    { key: "top", label: "Top subject", w: 120 },
-    { key: "weak", label: "Weak subject", w: 120 },
+    { key: "name", label: "Student", w: 140 },
+    { key: "batch", label: "Batch", w: 132 },
+    { key: "reliability", label: "Score", w: 58 },
+    { key: "quizzes", label: "Quizzes", w: 52 },
+    { key: "accuracy", label: "Accuracy", w: 62 },
+    { key: "attempt", label: "Attempt%", w: 60 },
+    { key: "top", label: "Top subject", w: 112 },
+    { key: "weak", label: "Weak subject", w: 112 },
   ];
   const totalW = cols.reduce((a, c) => a + c.w, 0);
   const scale = contentW / totalW;
@@ -326,13 +327,14 @@ export async function downloadLeaderboardPdf(input: {
     cell(r.name, cols[1].w, INK, i < 3);
     cell(r.batchLabel || "—", cols[2].w, GREY);
     if (r.hasData) {
-      cell(String(r.quizzes), cols[3].w);
-      cell(`${r.accuracy}%`, cols[4].w, accColor(r.accuracy), true);
-      cell(`${r.attemptRate}%`, cols[5].w);
-      cell(r.topSubject ? `${r.topSubject.label} (${r.topSubject.accuracy}%)` : "—", cols[6].w, GREEN);
-      cell(r.weakSubject ? `${r.weakSubject.label} (${r.weakSubject.accuracy}%)` : "—", cols[7].w, RED);
+      cell(r.reliability.toFixed(1), cols[3].w, accColor(r.reliability), true);
+      cell(String(r.quizzes), cols[4].w);
+      cell(`${r.accuracy}%`, cols[5].w, accColor(r.accuracy), true);
+      cell(`${r.attemptRate}%`, cols[6].w);
+      cell(r.topSubject ? `${r.topSubject.label} (${r.topSubject.accuracy}%)` : "—", cols[7].w, GREEN);
+      cell(r.weakSubject ? `${r.weakSubject.label} (${r.weakSubject.accuracy}%)` : "—", cols[8].w, RED);
     } else {
-      cell("no attempts yet", cols[3].w + cols[4].w + cols[5].w + cols[6].w + cols[7].w, GREY);
+      cell("no attempts yet", cols[3].w + cols[4].w + cols[5].w + cols[6].w + cols[7].w + cols[8].w, GREY);
     }
     state.y += 16;
   });

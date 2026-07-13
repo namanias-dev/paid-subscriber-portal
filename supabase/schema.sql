@@ -302,9 +302,12 @@ create table if not exists public.site_settings (
   toppers jsonb not null default '[]'::jsonb,
   nav jsonb not null default '{}'::jsonb,
   about jsonb not null default '{}'::jsonb,
+  leaderboard jsonb not null default '{}'::jsonb,
   updated_at timestamptz default now()
 );
 insert into public.site_settings (id) values ('home') on conflict (id) do nothing;
+-- Additive: admin-managed leaderboard config (global exclude list + tuned Reliability C).
+alter table public.site_settings add column if not exists leaderboard jsonb not null default '{}'::jsonb;
 
 create table if not exists public.lead_forms (
   id text primary key,
