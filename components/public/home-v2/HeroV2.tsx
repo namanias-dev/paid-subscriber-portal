@@ -1,7 +1,8 @@
 import Link from "next/link";
-import { Compass, ArrowRight, Sparkles } from "lucide-react";
+import { ArrowRight, Sparkles } from "lucide-react";
 import { DEFAULT_HERO } from "@/lib/homeDefaults";
 import type { HeroConfig, HeroButtonStyle } from "@/lib/types";
+import HeroBackdrop from "./HeroBackdrop";
 
 const BTN_CLASS: Record<HeroButtonStyle, string> = {
   primary: "ca-btn ca-btn-gold",
@@ -43,18 +44,7 @@ export default function HeroV2({ hero }: { hero?: HeroConfig }) {
 
   return (
     <section className="hv2-space hv2-grain relative overflow-hidden">
-      <div className="hv2-stars" aria-hidden="true" />
-
-      {/* Gold compass / north-star motif — the AI widget's compass launcher kin. */}
-      <div className="pointer-events-none absolute -right-24 top-8 -z-0 hidden opacity-70 sm:block lg:right-[6%]" aria-hidden="true" data-hv2-parallax="0.18">
-        <div className="hv2-float relative h-[340px] w-[340px]">
-          <div className="hv2-spin absolute inset-0">
-            <Compass className="h-full w-full text-[var(--ca-gold)]" strokeWidth={0.4} />
-          </div>
-          <div className="hv2-spin--rev absolute inset-[22%] rounded-full border border-[rgba(242,201,76,0.35)]" />
-          <div className="absolute inset-0 rounded-full" style={{ boxShadow: "0 0 120px 20px rgba(242,201,76,0.18)" }} />
-        </div>
-      </div>
+      <HeroBackdrop />
 
       <div className="container-wide relative z-10 grid items-center gap-12 py-20 sm:py-28 lg:grid-cols-[1.1fr_0.9fr]">
         <div className="max-w-2xl">
