@@ -1082,3 +1082,144 @@ a {
   .nsa-logout-backdrop,
   .nsa-logout-card { animation: nsaWelcomeIn 0.15s ease both; }
 }
+
+/* =====================================================================
+   HOME V2 — cinematic "billion-dollar" homepage (flag-gated).
+   Additive, scoped with .hv2- prefixes. Reuses the existing --ca-* navy+gold
+   design tokens; introduces NO new tokens and overrides NO existing class.
+   All motion is decorative and disabled under prefers-reduced-motion.
+   ===================================================================== */
+
+/* Deep-space navy backdrop with layered gold aurora glow (the cinematic base). */
+.hv2-space {
+  position: relative;
+  isolation: isolate;
+  color: var(--ca-slate-300);
+  background:
+    radial-gradient(60% 80% at 78% -10%, rgba(242, 201, 76, 0.14), transparent 60%),
+    radial-gradient(50% 60% at 8% 12%, rgba(30, 58, 138, 0.55), transparent 62%),
+    radial-gradient(70% 90% at 50% 120%, rgba(212, 175, 55, 0.08), transparent 60%),
+    linear-gradient(180deg, #050d24 0%, var(--ca-navy-900) 45%, var(--ca-navy-800) 100%);
+}
+
+/* Procedural starfield (pure CSS, no assets). Two parallax layers of tiny dots. */
+.hv2-stars {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-image:
+    radial-gradient(1.5px 1.5px at 20% 30%, rgba(255, 255, 255, 0.9), transparent),
+    radial-gradient(1.5px 1.5px at 75% 18%, rgba(255, 255, 255, 0.7), transparent),
+    radial-gradient(1px 1px at 40% 70%, rgba(255, 255, 255, 0.75), transparent),
+    radial-gradient(1px 1px at 90% 55%, rgba(255, 255, 255, 0.6), transparent),
+    radial-gradient(1.5px 1.5px at 60% 85%, rgba(242, 201, 76, 0.7), transparent),
+    radial-gradient(1px 1px at 12% 88%, rgba(255, 255, 255, 0.55), transparent),
+    radial-gradient(1px 1px at 33% 12%, rgba(255, 255, 255, 0.5), transparent);
+  background-repeat: repeat;
+  background-size: 100% 100%;
+  opacity: 0.7;
+  animation: hv2Twinkle 6s ease-in-out infinite;
+}
+@keyframes hv2Twinkle {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 0.85; }
+}
+
+/* Slow ambient float for hero motifs. */
+@keyframes hv2Float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-12px); }
+}
+.hv2-float { animation: hv2Float 7s ease-in-out infinite; }
+.hv2-float--slow { animation: hv2Float 10s ease-in-out infinite; }
+
+/* Rotating gold north-star / compass ring (Ashoka-chakra kin). */
+@keyframes hv2Spin { to { transform: rotate(360deg); } }
+.hv2-spin { animation: hv2Spin 60s linear infinite; }
+.hv2-spin--rev { animation: hv2Spin 90s linear infinite reverse; }
+
+/* Gradient gold text for the hero highlight word. */
+.hv2-gold-text {
+  background: linear-gradient(120deg, var(--ca-gold-bright) 0%, #fff2c2 40%, var(--ca-gold) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* The journey "spine" — a glowing vertical/horizontal gold path. */
+.hv2-spine-glow {
+  background: linear-gradient(180deg, transparent, rgba(212, 175, 55, 0.55) 12%, rgba(242, 201, 76, 0.85) 50%, rgba(212, 175, 55, 0.55) 88%, transparent);
+  box-shadow: 0 0 18px rgba(242, 201, 76, 0.45);
+}
+
+/* Milestone node: glassy gold ring with a soft glow. */
+.hv2-node {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  color: var(--ca-navy-900);
+  background: radial-gradient(circle at 30% 25%, #fff6d6, var(--ca-gold-bright) 45%, var(--ca-gold) 100%);
+  box-shadow: 0 0 0 6px rgba(212, 175, 55, 0.14), 0 10px 30px -8px rgba(242, 201, 76, 0.6);
+}
+.hv2-node::after {
+  content: "";
+  position: absolute;
+  inset: -14px;
+  border-radius: 9999px;
+  border: 1px solid rgba(212, 175, 55, 0.35);
+  opacity: 0.7;
+}
+
+/* Reveal primitive for scroll-in (Phase B enhances; Phase A shows a gentle CSS
+   entrance that is instantly visible if JS never runs). */
+.hv2-reveal {
+  opacity: 0;
+  transform: translateY(22px);
+  animation: hv2RevealIn 0.8s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+@keyframes hv2RevealIn {
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Ambient revolving Ashoka Chakra behind the hero — a large, semi-transparent
+   gold watermark near the top (the motif the classic homepage had, reimagined for
+   V2). Pure inline SVG + CSS rotation: no WebGL cost and LCP-safe. The outer node
+   handles positioning/centering; the inner node owns the slow spin so the rotate
+   transform never fights the centering translate. Clipped by the hero's
+   overflow-hidden wrapper, sits below hero content, and never intercepts events. */
+.hv2-chakra-ambient {
+  position: absolute;
+  top: clamp(-260px, -12vw, -80px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: -1;
+  pointer-events: none;
+}
+.hv2-chakra-ambient__spin {
+  animation: hv2Spin 140s linear infinite;
+  transform-origin: 50% 50%;
+  opacity: 0.1;
+  filter: drop-shadow(0 0 26px rgba(242, 201, 76, 0.14));
+}
+.hv2-chakra-ambient__spin svg { width: 820px; height: 820px; }
+
+/* Mobile: keep it even more subtle and static so it never competes with the
+   portrait or costs anything on low-power devices. */
+@media (max-width: 640px) {
+  .hv2-chakra-ambient { top: clamp(-160px, -22vw, -60px); }
+  .hv2-chakra-ambient__spin { opacity: 0.055; animation: none; }
+  .hv2-chakra-ambient__spin svg { width: 460px; height: 460px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hv2-stars,
+  .hv2-float,
+  .hv2-float--slow,
+  .hv2-spin,
+  .hv2-spin--rev,
+  .hv2-chakra-ambient__spin { animation: none !important; }
+  .hv2-reveal { opacity: 1 !important; transform: none !important; animation: none !important; }
+}
