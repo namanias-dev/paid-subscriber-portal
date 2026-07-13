@@ -25,31 +25,36 @@ export const dynamic = "force-dynamic";
 
 type SearchParams = Record<string, string | string[] | undefined>;
 
-/**
- * Flag / param that swaps in the cinematic Home V2 experience. V2 renders when
- * the env flag is on (promoted) OR the request carries `?v2=1` (preview). When
- * neither is set the existing homepage renders byte-for-byte as before.
- */
-function homeV2State(searchParams?: SearchParams): { on: boolean; envOn: boolean } {
-  const envOn = process.env.NEXT_PUBLIC_HOME_V2 === "true";
-  const raw = searchParams?.v2;
-  const paramOn = (Array.isArray(raw) ? raw[0] : raw) === "1";
-  return { on: envOn || paramOn, envOn };
+function paramOn(searchParams: SearchParams | undefined, key: string): boolean {
+  const raw = searchParams?.[key];
+  return (Array.isArray(raw) ? raw[0] : raw) === "1";
 }
 
 /**
- * SEO metadata. For the DEFAULT homepage this returns `{}` (inherits the root
- * layout metadata exactly as today). For Home V2 it fills the SEO gaps
- * (canonical, OpenGraph, Twitter); a `?v2=1` preview additionally gets noindex
- * so it can never create duplicate-content while the env flag stays off.
+ * Home V2 is now the DEFAULT experience at `/`. The classic homepage is kept
+ * fully intact as an instant rollback path, reachable two ways:
+ *   • `?v1=1` (or `?legacy=1`) — per-request spot-check of the old homepage.
+ *   • `HOME_V2_DISABLE === "true"` — a server-only (NON-public) kill switch that
+ *     flips the whole site back to the old homepage with an env change + redeploy
+ *     and no code edit.
+ * Anything else renders the cinematic Home V2.
+ */
+function homeVariant(searchParams?: SearchParams): "v2" | "legacy" {
+  if (paramOn(searchParams, "v1") || paramOn(searchParams, "legacy")) return "legacy";
+  if (process.env.HOME_V2_DISABLE === "true") return "legacy";
+  return "v2";
+}
+
+/**
+ * SEO metadata. Home V2 is the default `/`, so it now supplies the full,
+ * INDEXABLE SEO (canonical, OpenGraph, Twitter — JSON-LD is emitted in-page).
+ * The legacy path (`?v1=1` / kill switch) inherits the root layout metadata
+ * exactly as the old homepage always did.
  */
 export async function generateMetadata({ searchParams }: { searchParams?: SearchParams }): Promise<Metadata> {
-  const { on, envOn } = homeV2State(searchParams);
-  if (!on) return {};
+  if (homeVariant(searchParams) === "legacy") return {};
   const settings = await getSiteSettings();
-  const md = buildHomeV2Metadata(settings);
-  if (!envOn) md.robots = { index: false, follow: true };
-  return md;
+  return buildHomeV2Metadata(settings);
 }
 
 const WHY: { icon: LucideIcon; title: string; desc: string }[] = [
@@ -99,10 +104,11 @@ export default async function HomePage({ searchParams }: { searchParams?: Search
   const c = settings.content;
   const trustBar = c.trust_bar?.length ? c.trust_bar : [];
 
-  // Flag-gated cinematic Home V2 (fully isolated). Uses the SAME live data that
-  // was just fetched above, so V2 mirrors the default homepage exactly.
-  const { on: v2On, envOn: v2EnvOn } = homeV2State(searchParams);
-  if (v2On) {
+  // Cinematic Home V2 is now the DEFAULT render at `/`. It uses the SAME live
+  // data fetched above, so it mirrors the classic homepage's content exactly.
+  // `?v1=1`/`?legacy=1` or the HOME_V2_DISABLE kill switch fall through to the
+  // fully-intact old homepage below.
+  if (homeVariant(searchParams) === "v2") {
     return (
       <HomeV2
         settings={settings}
@@ -111,7 +117,7 @@ export default async function HomePage({ searchParams }: { searchParams?: Search
         homeCa={homeCa}
         upcoming={upcoming}
         upcomingRegCounts={upcomingRegCounts}
-        preview={!v2EnvOn}
+        preview={false}
       />
     );
   }
