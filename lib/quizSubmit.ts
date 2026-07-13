@@ -1,8 +1,10 @@
 import {
   getAttemptById, getQuizById, getQuizQuestions, getAnswersByAttempt,
-  getAttemptsByQuiz, updateAttempt, saveAnswer,
+  getAttemptsByQuiz, getStudents, getAllCourseEnrollments, getLeaderboardSettings,
+  updateAttempt, saveAnswer,
 } from "./dataProvider";
-import { scoreAttempt, computePercentile } from "./quizScoring";
+import { scoreAttempt } from "./quizScoring";
+import { computeScopedRankPercentile } from "./quizRank";
 import type { QuizAttempt, QuizOptionKey } from "./types";
 
 /**
@@ -42,11 +44,29 @@ export async function finalizeAttempt(attemptId: string, opts: { auto?: boolean 
     });
   }
 
-  // Rank & percentile vs other finalized attempts.
-  const all = await getAttemptsByQuiz(quiz.id);
-  const otherScores = all.filter((a) => a.id !== attemptId && a.status !== "IN_PROGRESS").map((a) => a.score);
-  const percentile = quiz.result_settings?.show_rank_percentile !== false ? computePercentile(result.score, otherScores) : null;
-  const rank = otherScores.length ? 1 + otherScores.filter((s) => s > result.score).length : 1;
+  // Rank & percentile — batch-scoped + exclusion-aware, matching the leaderboard.
+  // Computed over qualified (completed), non-guest, non-excluded attempts within
+  // the student's own batch (guests/staff/test never skew it). Read paths recompute
+  // this on display, so persisted values are only a best-effort snapshot.
+  const [quizAttempts, students, enrollments, settings] = await Promise.all([
+    getAttemptsByQuiz(quiz.id),
+    getStudents(),
+    getAllCourseEnrollments(),
+    getLeaderboardSettings(),
+  ]);
+  const scoped = computeScopedRankPercentile({
+    quizId: quiz.id,
+    attemptId,
+    score: result.score,
+    userId: attempt.user_id,
+    quizAttempts,
+    students,
+    enrollments,
+    excludedStudentIds: settings.excludedStudentIds,
+  });
+  const gateOn = quiz.result_settings?.show_rank_percentile !== false;
+  const percentile = gateOn ? scoped.percentile : null;
+  const rank = gateOn ? scoped.rank : null;
 
   const now = Date.now();
   const timeTaken = Math.max(0, Math.round((now - Date.parse(attempt.started_at)) / 1000));

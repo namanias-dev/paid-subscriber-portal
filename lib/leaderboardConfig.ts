@@ -26,6 +26,23 @@ export const LEADERBOARD_DEFAULT_C = 3;
 export const LEADERBOARD_MIN_C = 0;
 export const LEADERBOARD_MAX_C = 50;
 
+/**
+ * Minimum cohort size before we expose a student's rank / percentile / batch
+ * distribution back to them. Below this, tiny batches could quasi-identify
+ * classmates (and a "rank 2 of 3" is both noisy and easy to shame), so the
+ * student-facing comparison + the per-attempt rank/percentile are suppressed and
+ * the UI shows a warm "not enough data yet" state instead. Tune here only.
+ */
+export const LEADERBOARD_MIN_COHORT = 10;
+
+/** Human labels for the 5 score bands, shared by admin + student distributions. */
+export const SCORE_BAND_LABELS = ["0–20%", "21–40%", "41–60%", "61–80%", "81–100%"] as const;
+
+/** 0–100% accuracy → band index 0..4 (the 81–100 band includes exactly 100). */
+export function scoreBandIndex(pct: number): number {
+  return Math.min(4, Math.max(0, Math.floor(pct / 20)));
+}
+
 export function clampReliabilityC(value: unknown): number {
   const n = typeof value === "number" && Number.isFinite(value) ? value : LEADERBOARD_DEFAULT_C;
   return Math.min(LEADERBOARD_MAX_C, Math.max(LEADERBOARD_MIN_C, n));
