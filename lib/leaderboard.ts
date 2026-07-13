@@ -64,10 +64,10 @@ export interface LeaderboardResult {
   batchKey: string | null;   // null for All batches
   quizId: string | null;     // null for All quizzes
   snapshotISO: string;
-  studentCount: number;      // roster total (paidCount + nonPayingCount)
-  paidCount: number;         // roster students who have paid (see isPayingStudent)
-  nonPayingCount: number;    // roster students with no payment (leads / free regs)
-  classAverage: number;      // mean raw accuracy of scoped cohort WITH data (0 if none)
+  studentCount: number;      // qualified participants shown (= paidCount + nonPayingCount)
+  paidCount: number;         // qualified participants who have paid (see isPayingStudent)
+  nonPayingCount: number;    // qualified participants with no payment (leads / free regs)
+  classAverage: number;      // mean raw accuracy of the qualified cohort (0 if none)
   reliabilityC: number;      // confidence constant actually used
   excludedCount: number;     // excluded students that fall within the active scope
   batches: BatchOption[];
@@ -75,6 +75,20 @@ export interface LeaderboardResult {
 }
 
 const norm = (p: string | null | undefined) => (p || "").trim();
+
+/**
+ * A student qualifies for the leaderboard only via a COMPLETED quiz attempt —
+ * i.e. one they actually submitted (manually or auto-submitted on time-up), NOT
+ * merely started (IN_PROGRESS) or abandoned/expired. `submitted_at` is the
+ * reliable marker (present for SUBMITTED / AUTO_SUBMITTED, null while in
+ * progress); we also gate on the explicit statuses for robustness against any
+ * future status that might carry a stray timestamp. Scoped to the leaderboard
+ * read path — the quiz-taking flow and per-student dashboards are untouched.
+ */
+const COMPLETED_ATTEMPT_STATUSES: ReadonlySet<string> = new Set(["SUBMITTED", "AUTO_SUBMITTED"]);
+export function isCompletedAttempt(a: QuizAttempt): boolean {
+  return COMPLETED_ATTEMPT_STATUSES.has(a.status) && !!a.submitted_at;
+}
 
 /**
  * Source of truth for "paid": real money received, mirroring the app's own
@@ -183,28 +197,38 @@ export function buildLeaderboard(opts: {
     return !!m && m.has(batchKey);
   });
 
-  // Paid vs non-paying over the (excluded-free) roster. Always sums to roster.length.
   const paidPhones = buildPaidPhoneSet(enrollments);
-  const paidCount = roster.reduce((n, s) => n + (isPayingStudent(s, paidPhones) ? 1 : 0), 0);
-  const nonPayingCount = roster.length - paidCount;
 
-  // Group the single batched attempt pull by user_id; scope to the quiz filter.
+  // Group the single batched attempt pull by user_id; scope to the quiz filter
+  // AND to COMPLETED (submitted) attempts only — so a merely-started attempt
+  // never qualifies anyone. Still one in-memory pass over the single batched
+  // pull (no N+1, no extra query).
   const attemptsByUser = new Map<string, QuizAttempt[]>();
   for (const a of attempts) {
     if (!a.user_id) continue;
     if (quizId && a.quiz_id !== quizId) continue; // Feature 1 — one-quiz scope
+    if (!isCompletedAttempt(a)) continue;         // n ≥ 1 must mean completed quizzes
     const arr = attemptsByUser.get(a.user_id) || [];
     arr.push(a);
     attemptsByUser.set(a.user_id, arr);
   }
 
-  const rows: LeaderboardRow[] = roster.map((s) => {
+  // Build a row for each roster student, then QUALIFY: keep only students with
+  // ≥ 1 completed quiz attempt in the active scope. Zero-attempt students are
+  // fully dropped (never a 0 row). Order of operations: scope (quiz/batch) →
+  // drop manual exclusions (done above) → drop n = 0 (here) → then class
+  // average, Reliability Score and ranks are computed over what remains.
+  const qualified: { row: LeaderboardRow; student: Student }[] = [];
+  for (const s of roster) {
+    const scopedAttempts = attemptsByUser.get(s.id) || [];
+    if (scopedAttempts.length === 0) continue; // n = 0 → not on the leaderboard
+
     const batchMap = batchesByPhone.get(norm(s.phone));
     const batchTitles = batchMap ? [...batchMap.values()].map((d) => d.title) : [];
     const primaryBatch = batchKey ? batchMap?.get(batchKey)?.title ?? null : batchTitles[0] ?? null;
 
     const overall = buildOverallPerformance({
-      attempts: attemptsByUser.get(s.id) || [],
+      attempts: scopedAttempts,
       quizById,
       answers: [],
       studentName: s.name,
@@ -212,48 +236,57 @@ export function buildLeaderboard(opts: {
       now,
     });
 
+    // Defensive: buildOverallPerformance also drops IN_PROGRESS, so this is only
+    // false if a completed attempt carried no scorable data — still not a qualifier.
+    if (!overall.hasData || overall.hero.totalQuizzes < 1) continue;
+
     const { top, weak } = edges(overall.subjects);
-    return {
-      studentId: s.id,
-      name: s.name,
-      phone: s.phone || null,
-      batchLabel: primaryBatch,
-      batches: batchTitles,
-      hasData: overall.hasData,
-      quizzes: overall.hero.totalQuizzes,
-      attempts: overall.hero.totalAttempts,
-      accuracy: overall.hero.accuracy,
-      attemptRate: overall.hero.attemptRate,
-      reliability: 0, // filled below once class average is known
-      topSubject: top,
-      weakSubject: weak,
-    };
-  });
+    qualified.push({
+      student: s,
+      row: {
+        studentId: s.id,
+        name: s.name,
+        phone: s.phone || null,
+        batchLabel: primaryBatch,
+        batches: batchTitles,
+        hasData: true,
+        quizzes: overall.hero.totalQuizzes,
+        attempts: overall.hero.totalAttempts,
+        accuracy: overall.hero.accuracy,
+        attemptRate: overall.hero.attemptRate,
+        reliability: 0, // filled below once class average is known
+        topSubject: top,
+        weakSubject: weak,
+      },
+    });
+  }
+
+  const rows: LeaderboardRow[] = qualified.map((q) => q.row);
 
   // Feature 3 — Reliability Score. classAverage = mean raw accuracy over the
-  // scoped cohort members who have data (n>0). Excluded users are already gone,
-  // so they never skew this baseline. Guard against an empty cohort (⇒ 0, and
-  // reliabilityScore stays divide-by-zero safe since C≥0 and n+C only hits 0
-  // when both are 0).
-  const withData = rows.filter((r) => r.hasData);
-  const classAverage = withData.length
-    ? Math.round((withData.reduce((sum, r) => sum + r.accuracy, 0) / withData.length) * 10) / 10
+  // QUALIFIED cohort only (every row here has n ≥ 1), so non-participants can't
+  // dilute the baseline. Empty cohort ⇒ 0 (reliabilityScore stays divide-by-zero
+  // safe since C ≥ 0 and n + C only hits 0 when both are 0).
+  const classAverage = rows.length
+    ? Math.round((rows.reduce((sum, r) => sum + r.accuracy, 0) / rows.length) * 10) / 10
     : 0;
   for (const r of rows) {
     r.reliability = reliabilityScore(r.quizzes, r.accuracy, classAverage, reliabilityC);
   }
 
-  // Default sort: has-data first, then highest Reliability Score (fair ranking),
-  // tie-break by more quizzes → raw accuracy → name.
-  rows.sort((a, b) => {
-    if (a.hasData !== b.hasData) return a.hasData ? -1 : 1;
-    return (
-      b.reliability - a.reliability ||
-      b.quizzes - a.quizzes ||
-      b.accuracy - a.accuracy ||
-      a.name.localeCompare(b.name)
-    );
-  });
+  // Paid vs non-paying over the QUALIFIED participants (so header counts match
+  // the list). Always sums to rows.length = studentCount.
+  const paidCount = qualified.reduce((n, q) => n + (isPayingStudent(q.student, paidPhones) ? 1 : 0), 0);
+  const nonPayingCount = rows.length - paidCount;
+
+  // Default sort over the qualified set → contiguous ranks (no gaps): highest
+  // Reliability Score first, tie-break by more quizzes → raw accuracy → name.
+  rows.sort((a, b) =>
+    b.reliability - a.reliability ||
+    b.quizzes - a.quizzes ||
+    b.accuracy - a.accuracy ||
+    a.name.localeCompare(b.name),
+  );
 
   // Excluded users that fall within the active batch scope (for the indicator).
   let excludedCount = 0;
@@ -269,7 +302,7 @@ export function buildLeaderboard(opts: {
     batchKey,
     quizId,
     snapshotISO: new Date(now).toISOString(),
-    studentCount: roster.length,
+    studentCount: rows.length,
     paidCount,
     nonPayingCount,
     classAverage,
