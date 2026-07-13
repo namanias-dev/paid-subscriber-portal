@@ -104,8 +104,16 @@ export default function LeaderboardPage() {
   const [allowed, setAllowed] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState<ApiResult | null>(null);
-  const [batchKey, setBatchKey] = useState<string>(""); // "" = All batches
-  const [quizId, setQuizId] = useState<string>("");      // "" = All quizzes
+  // Seed filters from the URL once (client-only) so returning from a student's
+  // faculty profile restores the batch/quiz scope the admin was viewing.
+  const [batchKey, setBatchKey] = useState<string>(() => {
+    if (typeof window === "undefined") return "";
+    return new URLSearchParams(window.location.search).get("batch") || "";
+  }); // "" = All batches
+  const [quizId, setQuizId] = useState<string>(() => {
+    if (typeof window === "undefined") return "";
+    return new URLSearchParams(window.location.search).get("quizId") || "";
+  }); // "" = All quizzes
   const [q, setQ] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("reliability");
   const [dir, setDir] = useState<"asc" | "desc">("desc");
@@ -252,6 +260,14 @@ export default function LeaderboardPage() {
   function exportPdf() {
     if (!data) return;
     void downloadLeaderboardPdf({ batchLabel: data.batchLabel, snapshotISO: data.snapshotISO, studentCount: view.length, rows: view });
+  }
+
+  // Deep-link to a student's faculty profile carrying the board's active scope so
+  // "Back" restores these filters and the profile's comparison matches this view.
+  function profileHref(studentId: string) {
+    const p = new URLSearchParams({ from: "leaderboard", batchScope: batchKey || "all" });
+    if (quizId) p.set("quizId", quizId);
+    return `/admin/students/${studentId}/performance?${p.toString()}`;
   }
 
   function toggleSort(key: Exclude<SortKey, "quizzesAccuracy">) {
@@ -418,8 +434,8 @@ export default function LeaderboardPage() {
                   return (
                     <tr
                       key={r.studentId}
-                      onClick={() => router.push(`/admin/students/${r.studentId}/performance`)}
-                      onKeyDown={(e) => { if (e.key === "Enter") router.push(`/admin/students/${r.studentId}/performance`); }}
+                      onClick={() => router.push(profileHref(r.studentId))}
+                      onKeyDown={(e) => { if (e.key === "Enter") router.push(profileHref(r.studentId)); }}
                       tabIndex={0}
                       role="link"
                       title={`Open ${r.name}'s performance`}

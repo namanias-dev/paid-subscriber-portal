@@ -1,6 +1,7 @@
 import type { jsPDF } from "jspdf";
 import type { OverallPerformance, MasteryRow } from "./overallPerformance";
 import type { LeaderboardRow } from "./leaderboard";
+import type { FacultyStudentComparison } from "./studentCohort";
 
 /**
  * Client-side PDF exporters for the performance views, reusing the project's
@@ -40,6 +41,13 @@ function safeName(s: string): string {
   return (s || "student").replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase() || "student";
 }
 
+function fmtSec(sec: number | null): string {
+  if (sec == null || sec <= 0) return "—";
+  if (sec < 60) return `${sec}s`;
+  const m = Math.floor(sec / 60), s = sec % 60;
+  return s ? `${m}m ${s}s` : `${m}m`;
+}
+
 /** A cursor-based page helper shared by both exporters. */
 async function makeDoc(orientation: "p" | "l") {
   const { jsPDF } = await import("jspdf"); // lazy: keep jspdf out of the initial bundle
@@ -58,7 +66,7 @@ async function makeDoc(orientation: "p" | "l") {
 }
 
 /* ----------------------------- PER-STUDENT REPORT ----------------------------- */
-export async function downloadOverallPerformancePdf(data: OverallPerformance) {
+export async function downloadOverallPerformancePdf(data: OverallPerformance, faculty?: FacultyStudentComparison) {
   const { doc, state, ensure } = await makeDoc("p");
   const contentW = state.pageW - MARGIN * 2;
 
@@ -152,6 +160,94 @@ export async function downloadOverallPerformancePdf(data: OverallPerformance) {
     });
     state.y += 6;
   };
+
+  // Faculty coaching analytics (admin PDF only) — honest batch standing, the
+  // comparison figures, and the cohort accuracy distribution with the student's
+  // band drawn IN the PDF (not a screenshot), plus an average marker line.
+  if (faculty && faculty.available && faculty.reason !== "empty") {
+    const you = faculty.you;
+    sectionTitle(`Batch standing — ${faculty.scopeLabel}`);
+
+    ensure(18);
+    doc.setFont("helvetica", "normal"); doc.setFontSize(9.5); doc.setTextColor(...INK);
+    doc.text(you ? `Rank #${you.rank} of ${faculty.cohortSize}` : `Not ranked — no qualifying attempt (cohort ${faculty.cohortSize})`, MARGIN, state.y);
+    if (you) {
+      const topPercent = Math.max(1, Math.ceil((you.rank / faculty.cohortSize) * 100));
+      const standing = topPercent <= 50 ? `Top ${topPercent}%` : `Bottom ${Math.max(1, Math.ceil(((faculty.cohortSize - you.rank + 1) / faculty.cohortSize) * 100))}%`;
+      doc.setFont("helvetica", "bold"); doc.setTextColor(...(topPercent <= 50 ? GREEN : RED));
+      doc.text(standing, MARGIN + 160, state.y);
+    }
+    state.y += 15;
+
+    ensure(16);
+    doc.setFont("helvetica", "normal"); doc.setFontSize(9.5); doc.setTextColor(...INK);
+    if (you) {
+      doc.text(`Accuracy ${you.accuracy}%   vs batch average ${faculty.classAverage}%`, MARGIN, state.y);
+      doc.setFont("helvetica", "bold"); doc.setTextColor(...(you.diff > 0 ? GREEN : you.diff < 0 ? RED : GREY));
+      doc.text(you.diff === 0 ? "at average" : `${you.diff > 0 ? "+" : "−"}${Math.abs(you.diff)}% ${you.diff > 0 ? "above" : "below"} avg`, MARGIN + 300, state.y);
+    } else {
+      doc.setTextColor(...GREY);
+      doc.text(`Batch average ${faculty.classAverage}%`, MARGIN, state.y);
+    }
+    state.y += 15;
+
+    ensure(16);
+    doc.setFont("helvetica", "normal"); doc.setFontSize(9.5); doc.setTextColor(...INK);
+    if (faculty.timeTracked && faculty.youAvgTimeSeconds != null) {
+      const d = faculty.youAvgTimeSeconds - faculty.batchAvgTimeSeconds;
+      doc.text(`Avg time ${fmtSec(faculty.youAvgTimeSeconds)}   vs batch ${fmtSec(faculty.batchAvgTimeSeconds)}`, MARGIN, state.y);
+      if (d !== 0) { doc.setFont("helvetica", "bold"); doc.setTextColor(...(d < 0 ? GREEN : AMBER)); doc.text(`${fmtSec(Math.abs(d))} ${d < 0 ? "faster" : "slower"}`, MARGIN + 300, state.y); }
+    } else {
+      doc.setTextColor(...GREY);
+      doc.text("Avg time: not tracked for these attempts", MARGIN, state.y);
+    }
+    state.y += 15;
+
+    if (faculty.quizContext) {
+      const qc = faculty.quizContext;
+      ensure(16);
+      doc.setFont("helvetica", "normal"); doc.setFontSize(9.5); doc.setTextColor(...INK);
+      const line = `On "${qc.quizTitle}": ${qc.youScore != null ? `${qc.youScore}%` : "not attempted"}   vs quiz avg ${qc.quizAverage}%${qc.rank ? ` (#${qc.rank} of ${qc.cohortSize})` : ""}`;
+      const lines = doc.splitTextToSize(line, contentW);
+      doc.text(lines, MARGIN, state.y);
+      state.y += lines.length * 12 + 2;
+    }
+
+    if (faculty.limited) {
+      ensure(14);
+      doc.setFont("helvetica", "italic"); doc.setFontSize(8); doc.setTextColor(...AMBER);
+      doc.text(`Limited cohort data — only ${faculty.cohortSize} qualifying student(s); figures are indicative.`, MARGIN, state.y);
+      state.y += 13;
+    }
+
+    // Cohort accuracy distribution bar chart (drawn natively) with student's band.
+    const bands = faculty.scoreBands;
+    const maxB = Math.max(1, ...bands);
+    ensure(100);
+    const chartX = MARGIN, chartY = state.y + 12, chartW = contentW, chartH = 64;
+    const barGap = 12;
+    const barW = (chartW - barGap * (bands.length - 1)) / bands.length;
+    bands.forEach((count, i) => {
+      const bx = chartX + i * (barW + barGap);
+      const bh = Math.max(2, Math.round((count / maxB) * (chartH - 14)));
+      const by = chartY + (chartH - 14) - bh;
+      const mine = !!you && i === you.bandIndex;
+      doc.setFillColor(...(mine ? GOLD : ([150, 170, 210] as [number, number, number])));
+      doc.rect(bx, by, barW, bh, "F");
+      doc.setFont("helvetica", "bold"); doc.setFontSize(8); doc.setTextColor(...GREY);
+      doc.text(String(count), bx + barW / 2, by - 3, { align: "center" });
+      doc.setFont("helvetica", "normal"); doc.setFontSize(7); doc.setTextColor(...GREY);
+      doc.text(faculty.bandLabels[i], bx + barW / 2, chartY + chartH, { align: "center" });
+      if (mine) { doc.setFont("helvetica", "bold"); doc.setTextColor(...GOLD); doc.text("This student", bx + barW / 2, by - 12, { align: "center" }); }
+    });
+    const avgX = chartX + Math.min(1, Math.max(0, faculty.classAverage / 100)) * chartW;
+    doc.setDrawColor(...GOLD); doc.setLineWidth(1);
+    doc.line(avgX, chartY - 6, avgX, chartY + chartH - 14);
+    doc.setLineWidth(0.5);
+    doc.setFont("helvetica", "normal"); doc.setFontSize(7.5); doc.setTextColor(...GREY);
+    doc.text(`Batch average ${faculty.classAverage}%`, chartX, chartY + chartH + 12);
+    state.y += chartH + 26;
+  }
 
   sectionTitle("Subject mastery");
   masteryTable(data.subjects.slice(0, 12));
