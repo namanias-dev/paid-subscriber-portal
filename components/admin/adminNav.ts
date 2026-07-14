@@ -43,10 +43,11 @@ export const ADMIN_NAV: AdminNavItem[] = [
   { href: "/admin/quiz-imports", label: "Question Imports", icon: "imports", group: "Assessments", perm: "content_quizzes" },
   { href: "/admin/leaderboard", label: "Performance Leaderboard", icon: "leaderboard", group: "Assessments", perm: "manage_students_leads" },
   { href: "/admin/students", label: "Students & Enrollments", icon: "students", group: "People", perm: "manage_students_leads" },
+  { href: "/admin/course-payments", label: "Fees & EMI", icon: "seats", group: "People", perm: "view_revenue" },
+  { href: "/admin/course-payments/at-risk", label: "Fees at Risk", icon: "fees_risk", group: "People", perm: "view_revenue" },
+  { href: "/admin/access-risk", label: "Access at Risk", icon: "access_risk", group: "People", perm: "view_revenue" },
   { href: "/admin/enrollments/duplicates", label: "Duplicate Enrollments", icon: "duplicates", group: "People", perm: "view_revenue" },
   { href: "/admin/payments", label: "Payments & Finance", icon: "payments", group: "People", perm: "view_revenue" },
-  { href: "/admin/course-payments", label: "Course EMI & Seats", icon: "seats", group: "People", perm: "view_revenue" },
-  { href: "/admin/access-risk", label: "Access at Risk", icon: "access_risk", group: "People", perm: "view_revenue" },
   { href: "/admin/staff", label: "Staff & Roles", icon: "staff", group: "People", perm: "manage_staff" },
   { href: "/admin/settings", label: "Settings", icon: "settings", group: "People", perm: "manage_settings" },
 ];

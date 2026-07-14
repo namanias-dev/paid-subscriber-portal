@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { ChevronLeft, ChevronRight, Search } from "lucide-react";
 import { useAdminData, LoadingBlock } from "@/components/admin/ui";
+import PeopleTabs from "@/components/admin/people/PeopleTabs";
 import { HeaderStat, InstallmentSchedule } from "@/components/admin/collections/parts";
 import { formatINR, formatISTDate } from "@/lib/dates";
 import { deriveCollections } from "@/lib/installments";
@@ -132,6 +133,7 @@ export default function CohortDrillIn() {
 
   return (
     <div>
+      <PeopleTabs active="fees" />
       {/* Breadcrumb + back */}
       <div className="mb-4 flex items-center gap-2 text-sm text-muted">
         <Link href="/admin/course-payments" className="inline-flex items-center gap-1 hover:text-primary">
@@ -145,7 +147,7 @@ export default function CohortDrillIn() {
         <div>
           <h1 className="font-heading text-2xl font-extrabold">{title}</h1>
           <p className="mt-1 text-sm text-ink2">
-            Financial &amp; capacity lens — fees collected, admissions, seats &amp; overdue for this cohort.
+            Financial &amp; capacity lens — Course Fees Collected, admissions, seats &amp; overdue for this cohort.
           </p>
         </div>
         {batches.length > 0 && (
@@ -168,8 +170,8 @@ export default function CohortDrillIn() {
 
       {/* Header stats — restate the card headline for this cohort */}
       <div className="mb-5 mt-4 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
-        <HeaderStat label="Fees collected" value={formatINR(totals.collected)} sub={`${collectionPct}% of ${formatINR(totals.totalFees)}`} tone="success" />
-        <HeaderStat label="Outstanding" value={formatINR(totals.remaining)} tone={totals.remaining > 0 ? "warning" : undefined} />
+        <HeaderStat label="Course Fees Collected" value={formatINR(totals.collected)} sub={`${collectionPct}% of ${formatINR(totals.totalFees)}`} tone="success" title="Course-enrollment fees received for this cohort. Excludes webinars & other products." />
+        <HeaderStat label="Course Fees Outstanding" value={formatINR(totals.remaining)} tone={totals.remaining > 0 ? "warning" : undefined} title="Course fees still owed by this cohort = total fees − Course Fees Collected." />
         <HeaderStat label="Overdue" value={formatINR(totals.overdueAmount)} sub={totals.overdueStudents ? `${totals.overdueStudents} student${totals.overdueStudents === 1 ? "" : "s"}` : "none"} tone={totals.overdueAmount > 0 ? "danger" : undefined} />
         <HeaderStat label="Admissions" value={String(cohort.length)} sub={`${totals.fullyPaid} fully paid`} />
         <HeaderStat label="Seats filled" value={capacity ? `${cohort.length}/${capacity}` : String(cohort.length)} sub={seatPct != null ? `${seatPct}%` : "no capacity set"} />
