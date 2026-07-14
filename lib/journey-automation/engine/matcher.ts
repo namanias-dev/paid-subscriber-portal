@@ -75,7 +75,12 @@ export async function runMatcher(
         enrollment_ref: ev.enrollment_id,
         mode,
         current_node_key: entry,
-        context: { event_type: ev.event_type, payload: ev.payload ?? {} },
+        context: {
+          event_type: ev.event_type,
+          payload: ev.payload ?? {},
+          webinar_id: ev.webinar_id ?? null,
+          payment_id: ev.payment_id ?? null,
+        },
         dedupe_key: dedupe,
       });
       if (!created) { res.skipped++; continue; }

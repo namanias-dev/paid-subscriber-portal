@@ -319,12 +319,19 @@ async function executeJob(
       break;
     }
     case "staff_task": {
-      // Read/create task only — NO business mutation. No generic task store exists yet,
-      // so we record the intended task; wiring to a real task system is a clean follow-up.
+      // Create-task-only (NO business mutation, NO send). Writes a journey-owned
+      // staff-task record for a human; idempotent per (enrollment,node).
+      const title = String(node.config?.["title"] ?? "Journey follow-up task");
+      const assignee = typeof node.config?.["assignee"] === "string" ? (node.config["assignee"] as string) : null;
+      await data.createStaffTask({
+        enrollment_id: enr.id, workflow_id: enr.workflow_id, node_key: node.node_key,
+        title, assignee, mode: enr.mode,
+        detail: { phone: enr.normalized_phone, student_id: enr.student_id, context: enr.context },
+      });
       await data.upsertNodeRun({
         enrollment_id: enr.id, workflow_id: enr.workflow_id, node_key: node.node_key, node_type: "staff_task",
-        status: enr.mode === "live" ? "done" : "simulated", mode: enr.mode,
-        outcome: { would_create_task: true, title: node.config?.["title"] ?? null, assignee: node.config?.["assignee"] ?? null },
+        status: "done", mode: enr.mode,
+        outcome: { staff_task_created: true, title, assignee },
       });
       await scheduleNext(data, clock, enr, graph, node.node_key, null, now, res);
       break;

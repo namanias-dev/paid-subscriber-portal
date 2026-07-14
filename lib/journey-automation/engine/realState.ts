@@ -6,6 +6,7 @@
  */
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { deriveCollections } from "@/lib/installments";
+import { getWebinarRegistrationIdsByPhone } from "@/lib/dataProvider";
 import { isOptedOut } from "@/lib/sms/store";
 import { normalizeIndianMobile } from "@/lib/phone";
 import type { CourseEnrollment } from "@/lib/types";
@@ -59,9 +60,22 @@ export const realState: StatePort = {
   async getLatestState(enrollment: EnrollmentRow): Promise<LatestState> {
     const phone = enrollment.normalized_phone;
     const optedOut = phone ? await isOptedOut(phone).catch(() => false) : false;
+
+    // Real webinar-registration read (existing query). If the enrollment names a
+    // target webinar we check membership; otherwise we report "registered for any".
+    const ctx = (enrollment.context ?? {}) as Record<string, unknown>;
+    const targetWebinarId = (ctx["webinar_id"] as string | null)
+      ?? ((ctx["payload"] as Record<string, unknown> | undefined)?.["webinar_id"] as string | null | undefined)
+      ?? null;
+    let registeredForWebinar = false;
+    if (phone) {
+      const regs = await getWebinarRegistrationIdsByPhone(phone).catch(() => new Set<string>());
+      registeredForWebinar = targetWebinarId ? regs.has(targetWebinarId) : regs.size > 0;
+    }
+
     const enr = await courseEnrollmentFor(enrollment.enrollment_ref, phone).catch(() => null);
     if (!enr) {
-      return { paid: false, hasOverdue: false, optedOut, enrolledInCourse: false, registeredForWebinar: false, planPausedOrWaived: false };
+      return { paid: false, hasOverdue: false, optedOut, enrolledInCourse: false, registeredForWebinar, planPausedOrWaived: false };
     }
     const d = deriveCollections(enr);
     const planPausedOrWaived = enr.status === "cancelled" || (enr.schedule || []).some((s) => s.status === "waived");
@@ -70,7 +84,7 @@ export const realState: StatePort = {
       hasOverdue: d.hasOverdue,
       optedOut,
       enrolledInCourse: enr.status !== "cancelled",
-      registeredForWebinar: false,
+      registeredForWebinar,
       planPausedOrWaived,
     };
   },
