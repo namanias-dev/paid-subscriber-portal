@@ -1,7 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Workflow, Power, ShieldCheck, Sparkles } from "lucide-react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { Workflow, Power, ShieldCheck, Sparkles, Plus } from "lucide-react";
 import { PageHeader, KpiCard, TableShell, LoadingBlock } from "@/components/admin/ui";
 import type { AutomationWorkflow, WorkflowStatus } from "@/types/journey-automation";
 import type { JourneyFlagSnapshot } from "@/lib/journey-automation/flags";
@@ -50,10 +52,13 @@ function fmtDate(iso: string | null): string {
 }
 
 export default function JourneyAutomationDashboard() {
+  const router = useRouter();
   const [data, setData] = useState<OverviewResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [canKill, setCanKill] = useState(false);
+  const [canCreate, setCanCreate] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [creating, setCreating] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -65,12 +70,30 @@ export default function JourneyAutomationDashboard() {
       setData(ovRes?.ok ? (ovRes as OverviewResponse) : null);
       const me = (meRes?.admin ?? null) as AdminMe | null;
       setCanKill(me?.permissions?.journey_manage_killswitch === true);
+      setCanCreate(me?.permissions?.journey_create_draft === true);
     } catch {
       setData(null);
     } finally {
       setLoading(false);
     }
   }, []);
+
+  async function createJourney() {
+    if (creating || !canCreate) return;
+    const name = window.prompt("Name your new journey:", "Untitled journey");
+    if (name == null) return;
+    setCreating(true);
+    try {
+      const res = await fetch("/api/admin/journey-automation/workflows", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: name.trim() || "Untitled journey" }),
+      }).then((r) => r.json());
+      if (res?.ok && res.workflow?.id) router.push(`/admin/communications/journey-automation/${res.workflow.id}`);
+    } finally {
+      setCreating(false);
+    }
+  }
 
   useEffect(() => {
     load();
@@ -117,9 +140,16 @@ export default function JourneyAutomationDashboard() {
         title="Journey Automation"
         subtitle="Design, version and orchestrate student communication journeys — safely."
         action={
-          <span className="pill pill-gold inline-flex items-center gap-1.5">
-            <Sparkles size={13} strokeWidth={2} aria-hidden="true" /> Foundation preview
-          </span>
+          <div className="flex items-center gap-2">
+            <span className="pill pill-gold inline-flex items-center gap-1.5">
+              <Sparkles size={13} strokeWidth={2} aria-hidden="true" /> Builder preview
+            </span>
+            {canCreate && (
+              <button type="button" className="btn btn-primary" disabled={creating} onClick={createJourney}>
+                <Plus size={16} strokeWidth={2.25} aria-hidden="true" /> {creating ? "Creating…" : "New journey"}
+              </button>
+            )}
+          </div>
         }
       />
 
@@ -135,9 +165,10 @@ export default function JourneyAutomationDashboard() {
               Execution &amp; sending are OFF
             </p>
             <p className="mt-0.5 text-ink2">
-              This is the foundation shipment. No journey can enroll, schedule, or send an SMS. Every
-              future send routes through the existing, DLT-compliant SMS Mission Control chokepoint.
-              The visual builder arrives in a later release.
+              You can now design and publish journeys in the visual builder, but nothing enrolls,
+              schedules, or sends yet. Publishing freezes an immutable version that will only run once
+              execution is enabled. Every future send routes through the existing, DLT-compliant SMS
+              Mission Control chokepoint.
             </p>
           </div>
         </div>
@@ -221,16 +252,24 @@ export default function JourneyAutomationDashboard() {
             <p className="font-heading text-base font-bold">No journeys yet</p>
             <p className="mt-1 max-w-md text-sm text-ink2">
               This is where student journeys will live — payment reminders, webinar nurture, onboarding
-              and more. The visual builder to create and publish them ships in a later release.
+              and more. Create your first journey in the visual builder; it stays a safe draft until you
+              publish, and won&apos;t run until execution is enabled.
             </p>
           </div>
+          {canCreate && (
+            <button type="button" className="btn btn-primary" disabled={creating} onClick={createJourney}>
+              <Plus size={16} strokeWidth={2.25} aria-hidden="true" /> {creating ? "Creating…" : "New journey"}
+            </button>
+          )}
         </div>
       ) : (
         <TableShell headers={["Workflow", "Status", "Version", "Updated"]}>
           {workflows.map((w) => (
-            <tr key={w.id} className="border-b border-line last:border-0">
+            <tr key={w.id} className="border-b border-line last:border-0 hover:bg-[var(--surface)]">
               <td className="px-4 py-3">
-                <div className="font-medium">{w.name}</div>
+                <Link href={`/admin/communications/journey-automation/${w.id}`} className="font-medium text-[var(--primary)] hover:underline">
+                  {w.name}
+                </Link>
                 {w.description && <div className="text-xs text-muted">{w.description}</div>}
               </td>
               <td className="px-4 py-3">

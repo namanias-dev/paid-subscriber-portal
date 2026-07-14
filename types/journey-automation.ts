@@ -32,7 +32,9 @@ export type NodeType =
   | "trigger"
   | "wait"
   | "send_sms"
+  | "condition"
   | "branch"
+  | "staff_task"
   | "goal"
   | "exit";
 
@@ -178,4 +180,75 @@ export interface AutomationSettings {
 /** A workflow plus its versions, for the read-only detail view. */
 export interface WorkflowWithVersions extends AutomationWorkflow {
   versions: AutomationWorkflowVersion[];
+}
+
+// ---------------------------------------------------------------------------
+// Event-capture spike (Part A). These are INGESTED only — nothing consumes them
+// this shipment (no trigger matching, no execution, no sending).
+// ---------------------------------------------------------------------------
+
+/** Event types the Part-A spike PROVED capturable at existing call-sites. */
+export type CapturedEventType =
+  | "payment_received"
+  | "installment_overdue"
+  | "webinar_registered";
+
+export interface AutomationEvent {
+  id: string;
+  event_type: string;
+  occurred_at: string;
+  student_id: string | null;
+  lead_id: string | null;
+  enrollment_id: string | null;
+  webinar_id: string | null;
+  payment_id: string | null;
+  phone: string | null;
+  payload: Record<string, unknown>;
+  dedupe_key: string | null;
+  source: string;
+  created_at: string;
+}
+
+// ---------------------------------------------------------------------------
+// Visual builder graph DTOs (Part B). Client authoring shapes; the store maps
+// node_key <-> row id when persisting to the draft graph tables.
+// ---------------------------------------------------------------------------
+
+export interface BuilderNode {
+  node_key: string;
+  type: NodeType | string;
+  config: Record<string, unknown>;
+  position: { x: number; y: number };
+}
+
+export interface BuilderEdge {
+  edge_key: string;
+  source: string; // node_key
+  target: string; // node_key
+  branch_label: string | null;
+  condition?: Record<string, unknown>;
+}
+
+export interface BuilderGraph {
+  nodes: BuilderNode[];
+  edges: BuilderEdge[];
+}
+
+/** Full editor payload returned to the builder for a workflow's current draft. */
+export interface WorkflowEditorState {
+  workflow: AutomationWorkflow;
+  draftVersion: AutomationWorkflowVersion;
+  graph: BuilderGraph;
+  versions: AutomationWorkflowVersion[];
+}
+
+/** DLT-approved template option for the SMS node selector. */
+export interface AutomationTemplateOption {
+  id: string; // automation_templates.id
+  name: string;
+  sms_template_id: string;
+  dlt_template_id: string | null;
+  body: string;
+  variables: string[];
+  approved: boolean;
 }

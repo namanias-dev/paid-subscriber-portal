@@ -15,6 +15,9 @@ import { flattenForStamp, metaIdentityFromState, type AttributionState } from ".
 import { sendMetaPurchase, sendMetaLead, sendMetaInitiateCheckout } from "./thirdParty";
 import { fireAutoSms } from "../sms/dispatch";
 import { TRIGGERS } from "../sms/templates";
+// Journey Automation event-capture spike (Phase 2, Part A): WRITE-ONLY, idempotent,
+// non-blocking ingest. Nothing consumes these events; they never send or execute.
+import { fireAutomationEvent } from "../journey-automation/events";
 import { supersedeUnpaidSiblings } from "../paymentSupersede";
 import type { EventName } from "./events";
 import type { Payment, Buyer } from "../types";
@@ -204,6 +207,17 @@ export async function recordPaymentPaid(p: Payment, source = "system"): Promise<
     // Auto-SMS (disabled by default) — fired ONLY from this verified-PAID
     // chokepoint, once per payment (dedupe_key), never off a click/intent.
     fireAutoSms({ trigger: TRIGGERS.payment_success, phone: p.phone, name: p.student_name, vars: { item_short: p.item, payment_status: "PAID", amount: p.amount }, entity: smsEntityForPayment(p), entityId: ref });
+    // Journey Automation: capture `payment_received` (write-only, idempotent per
+    // payment, non-blocking). Consumes nothing; proves capture + shape only.
+    fireAutomationEvent({
+      eventType: "payment_received",
+      phone,
+      studentId: buyerId,
+      paymentId: ref,
+      payload: { item_type: p.item_type, item_slug: p.item_slug ?? null, amount: p.amount, payment_kind: p.payment_kind ?? null, installment_no: p.installment_no ?? null },
+      dedupeKey: `payment_received:${ref}`,
+      source: "payment",
+    });
     if (p.item_type === "course") {
       fireAutoSms({ trigger: TRIGGERS.course_enrolled, phone: p.phone, name: p.student_name, vars: { item_short: p.item }, entity: smsEntityForPayment(p), entityId: ref });
     } else if (p.item_type === "webinar") {
@@ -275,6 +289,17 @@ export async function recordRegistrationCreated(reg: { id?: string; webinar_id: 
     // reads attribution.first_touch.campaign. Null when no cookie (honest untracked).
     attribution: reg.attribution ?? null,
     props: { registration_id: reg.id ?? null, webinar_id: reg.webinar_id, webinar_slug: reg.webinar_slug ?? null, phone, price: reg.price ?? 0, is_free: !!reg.is_free },
+  });
+  // Journey Automation: capture `webinar_registered` (write-only, idempotent per
+  // registration, non-blocking). Consumes nothing; proves capture + shape only.
+  fireAutomationEvent({
+    eventType: "webinar_registered",
+    phone,
+    studentId: await resolveBuyerId(phone),
+    webinarId: reg.webinar_id,
+    payload: { registration_id: reg.id ?? null, webinar_slug: reg.webinar_slug ?? null, price: reg.price ?? 0, is_free: !!reg.is_free },
+    dedupeKey: reg.id ? `webinar_registered:reg:${reg.id}` : `webinar_registered:${reg.webinar_id}:${phone}`,
+    source: "webinar",
   });
   // Meta Lead (server) — the free-registration conversion. Paid webinars fire
   // Purchase from the PAID chokepoint instead; this Lead marks the free capture.
