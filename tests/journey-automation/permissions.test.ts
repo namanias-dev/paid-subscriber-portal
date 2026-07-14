@@ -21,20 +21,22 @@ const JOURNEY_KEYS: PermissionKey[] = [
   "journey_publish",
   "journey_pause",
   "journey_manage_templates",
+  "journey_manage_execution",
   "journey_manage_killswitch",
 ];
 
 describe("journey permissions — keys exist and are restrictive", () => {
-  it("registers all seven journey permission keys", () => {
+  it("registers all journey permission keys", () => {
     for (const k of JOURNEY_KEYS) {
       assert.ok(PERMISSION_KEYS.includes(k), `missing permission key: ${k}`);
     }
   });
 
-  it("Super Admin (all permissions) holds publish + kill switch", () => {
+  it("Super Admin (all permissions) holds publish + kill switch + execution", () => {
     const perms = allPermissions();
     assert.equal(hasPermission(perms, "journey_publish"), true);
     assert.equal(hasPermission(perms, "journey_manage_killswitch"), true);
+    assert.equal(hasPermission(perms, "journey_manage_execution"), true);
   });
 });
 
