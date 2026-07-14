@@ -265,8 +265,24 @@ function SmsInspector({ cfg, templates, selectedTemplate, disabled, set }: {
     );
   }
 
+  const pendingKey = typeof cfg.pendingTemplateKey === "string" && cfg.pendingTemplateKey ? cfg.pendingTemplateKey : null;
+
   return (
     <>
+      {pendingKey && !cfg.automationTemplateId && (
+        <div className="ja-field">
+          <div className="rounded-lg border p-3 text-xs" style={{ borderColor: "var(--gold)", background: "var(--gold-soft)" }}>
+            <p className="flex items-center gap-1 font-semibold" style={{ color: "var(--navy, #0a1f44)" }}>
+              <AlertTriangle size={12} aria-hidden="true" /> Pending DLT approval
+            </p>
+            <p className="mt-1 text-ink2">
+              This step needs the template <code className="text-[11px]">{pendingKey}</code>, which is drafted but not yet
+              DLT-approved. Submit it (see <code className="text-[11px]">docs/reports/dlt-templates-to-approve.md</code>),
+              approve it in SMS Mission Control, then select it below. The journey stays a safe draft until then.
+            </p>
+          </div>
+        </div>
+      )}
       <div className="ja-field">
         <label className="ja-insp-label">Approved DLT template <Help text="Only DLT-approved templates from SMS Mission Control can be selected. This is the single source of truth." /></label>
         <select className="ja-select" value={String(cfg.automationTemplateId ?? "")} disabled={disabled} onChange={(e) => selectTemplate(e.target.value)}>
