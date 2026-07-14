@@ -61,6 +61,7 @@ import {
   MapPin,
   // misc
   Sparkles,
+  Workflow,
 } from "lucide-react";
 
 /**
@@ -101,6 +102,7 @@ export const APP_ICONS = {
   careers: Briefcase,
   ai_agent: Bot,
   sms: Smartphone,
+  journey_automation: Workflow,
   brochures: FolderOpen,
   webinars: Video,
   content: Library,
