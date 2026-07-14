@@ -153,7 +153,11 @@ export function validateGraph(nodes: GraphNode[], edges: GraphEdge[]): Validatio
     if (n.type !== SMS) continue;
     const c = asRecord(n.config);
     if (!c.automationTemplateId) {
-      add("error", "sms_no_template", `"${labelOf(n)}" needs an approved DLT template.`, n.node_key);
+      const pendingKey = typeof c.pendingTemplateKey === "string" && c.pendingTemplateKey ? c.pendingTemplateKey : null;
+      const msg = pendingKey
+        ? `"${labelOf(n)}" needs an approved DLT template (pending DLT approval: ${pendingKey}).`
+        : `"${labelOf(n)}" needs an approved DLT template.`;
+      add("error", "sms_no_template", msg, n.node_key);
     }
     const vars = Array.isArray(c.templateVariables) ? (c.templateVariables as string[]) : [];
     const mapping = asRecord(c.variableMapping);

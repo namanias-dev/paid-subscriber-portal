@@ -131,7 +131,7 @@ describe("Seed — New Lead Onboarding graph", () => {
       graph.edges.map((e) => ({ source: e.source, target: e.target, branch_label: e.branch_label })),
     );
     const noTemplate = report.issues.filter((i) => i.code === "sms_no_template");
-    assert.equal(noTemplate.length, 1, "exactly one SMS step is a placeholder needing an approved template");
+    assert.equal(noTemplate.length, 2, "two SMS steps are placeholders pending DLT approval (beginner + portal reminder)");
     // No OTHER errors than that placeholder (mapping/paths/structure all complete).
     const otherErrors = report.issues.filter((i) => i.level === "error" && i.code !== "sms_no_template");
     assert.deepEqual(otherErrors, [], `unexpected errors: ${JSON.stringify(otherErrors)}`);

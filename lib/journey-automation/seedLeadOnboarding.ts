@@ -25,21 +25,23 @@ export const SEED_TEMPLATE_REFS = {
 
 function pos(x: number, y: number) { return { x, y }; }
 
-function smsNode(
+export function smsNode(
   key: string,
   title: string,
   category: string,
   opt: AutomationTemplateOption | undefined,
   mapping: Record<string, string>,
   position: { x: number; y: number },
+  pendingKey?: string,
 ) {
   if (!opt) {
-    // Placeholder: no approved template yet. Validation flags this clearly.
+    // Placeholder: no approved template yet. Validation + inspector flag this
+    // clearly ("pending DLT approval: <key>"). The journey stays a safe draft.
     return {
       node_key: key,
       type: "send_sms",
       position,
-      config: { title, category, automationTemplateId: null, quietHours: { start: "21:00", end: "08:00" }, frequencyCap: { perDays: 1, max: 1 }, variableMapping: {} },
+      config: { title, category, automationTemplateId: null, pendingTemplateKey: pendingKey ?? null, quietHours: { start: "21:00", end: "08:00" }, frequencyCap: { perDays: 1, max: 1 }, variableMapping: {} },
     };
   }
   return {
@@ -80,8 +82,8 @@ export function buildLeadOnboardingGraph(templates: AutomationTemplateOption[]):
     smsNode("sms_welcome", "Welcome + login SMS", "transactional", welcome, welcomeMap(welcome), pos(260, 0)),
     { node_key: "wait_day1", type: "wait", position: pos(520, 0), config: { title: "Wait 1 day", durationValue: 1, durationUnit: "days" } },
     { node_key: "cond_login", type: "condition", position: pos(780, 0), config: { title: "Has logged in?", check: "has_logged_in" } },
-    smsNode("sms_beginner", "Beginner resources", "transactional", undefined, {}, pos(1040, -140)),
-    smsNode("sms_portal", "Portal access reminder", "transactional", welcome, welcomeMap(welcome), pos(1040, 140)),
+    smsNode("sms_beginner", "Beginner resources", "transactional", undefined, {}, pos(1040, -140), "beginner_resources"),
+    smsNode("sms_portal", "Portal access reminder", "transactional", undefined, {}, pos(1040, 140), "portal_login_reminder"),
     { node_key: "wait_day2", type: "wait", position: pos(1300, 0), config: { title: "Wait 2 days", durationValue: 2, durationUnit: "days" } },
     { node_key: "cond_webinar", type: "condition", position: pos(1560, 0), config: { title: "Registered for a webinar?", check: "registered_for_webinar" } },
     { node_key: "goal_converted", type: "goal", position: pos(1820, -140), config: { title: "Converted (logged in or registered)", goalType: "logged_in" } },
@@ -129,7 +131,15 @@ export async function seedLeadOnboarding(actor: KillSwitchActor): Promise<SeedRe
     webinarInvite: templates.some((t) => t.sms_template_id === SEED_TEMPLATE_REFS.webinarInvite),
   };
 
-  if (existing) return { created: false, workflowId: existing.id, usedTemplates, placeholderSteps };
+  if (existing) {
+    // Converge the existing DRAFT to the current design (safe: draft-only write,
+    // never publishes). Only re-saves while still a draft so we never clobber a
+    // published/live version.
+    if (existing.status === "draft") {
+      await saveDraftGraph(existing.id, graph, actor, "Re-synced New Lead Onboarding draft graph (execution off)");
+    }
+    return { created: false, workflowId: existing.id, usedTemplates, placeholderSteps };
+  }
 
   const wf = await createWorkflow(SEED_NAME, actor);
   await saveDraftGraph(wf.id, graph, actor, "Seeded New Lead Onboarding journey (draft; execution off)");
