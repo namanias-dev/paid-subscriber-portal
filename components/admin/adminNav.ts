@@ -51,10 +51,12 @@ export const ADMIN_NAV: AdminNavItem[] = [
   { href: "/admin/quiz-imports", label: "Question Imports", icon: "imports", group: "Assessments", perm: "content_quizzes" },
   { href: "/admin/leaderboard", label: "Performance Leaderboard", icon: "leaderboard", group: "Assessments", perm: "manage_students_leads" },
   // ── ADMISSIONS & PAYMENTS ──────────────────────────────────────────────
-  // The student → cohort-fees → collections → ledger lifecycle. Duplicate
-  // Enrollments folds into Students & Enrollments (Enrollments tab); the two
-  // risk worklists fold into "At-Risk Students" (Payment Risk / Access Risk
-  // tabs). Old routes stay live; `match` keeps child routes highlighting here.
+  // The cohort-fees → student → collections → ledger lifecycle. Fees & EMI
+  // leads (finance-first). Duplicate Enrollments folds into Students &
+  // Enrollments (Duplicate Enrollments tab); the two risk worklists fold into
+  // "At-Risk Students" (Payment Risk / Access Risk tabs). Old routes stay live;
+  // `match` keeps child routes highlighting here.
+  { href: "/admin/course-payments", label: "Fees & EMI", icon: "seats", group: "Admissions & Payments", perm: "view_revenue" },
   {
     href: "/admin/students",
     label: "Students & Enrollments",
@@ -63,7 +65,6 @@ export const ADMIN_NAV: AdminNavItem[] = [
     perm: "manage_students_leads",
     match: ["/admin/enrollments"],
   },
-  { href: "/admin/course-payments", label: "Fees & EMI", icon: "seats", group: "Admissions & Payments", perm: "view_revenue" },
   {
     href: "/admin/at-risk",
     label: "At-Risk Students",

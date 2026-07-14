@@ -9,10 +9,11 @@ import Link from "next/link";
  * passes its own `active` key (no hooks) so it is safe to render inside any
  * statically-shelled admin page.
  *
- * The Duplicate-Enrollments tool folds in here as the "Enrollments" tab (its
- * primary sidebar entry was removed); the underlying route stays fully live.
+ * The Duplicate-Enrollments tool folds in here as its own accurately-labeled
+ * "Duplicate Enrollments" tab (its primary sidebar entry was removed); the
+ * underlying route stays fully live.
  */
-export type PeopleTabKey = "students" | "enrollments";
+export type PeopleTabKey = "students" | "duplicates";
 
 interface Tab {
   key: PeopleTabKey;
@@ -24,15 +25,15 @@ interface Tab {
 const TABS: Tab[] = [
   {
     key: "students",
-    label: "Students",
+    label: "All Students",
     href: "/admin/students",
     purpose: "Operational lens · Find & manage a person — identity, contact, enrollments & access",
   },
   {
-    key: "enrollments",
-    label: "Enrollments",
+    key: "duplicates",
+    label: "Duplicate Enrollments",
     href: "/admin/enrollments/duplicates",
-    purpose: "Operational lens · Review & de-duplicate course enrollments (payment history is always preserved)",
+    purpose: "Operational lens · Review & de-duplicate repeat course enrollments (payment history is always preserved)",
   },
 ];
 
