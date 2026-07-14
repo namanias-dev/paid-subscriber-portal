@@ -41,6 +41,7 @@ export type PermissionKey =
   | "journey_publish"
   | "journey_pause"
   | "journey_manage_templates"
+  | "journey_manage_execution"
   | "journey_manage_killswitch";
 
 export interface PermissionMeta {
@@ -84,6 +85,7 @@ export const PERMISSIONS: PermissionMeta[] = [
   { key: "journey_publish", label: "Publish Journey Automation versions", group: "Communications" },
   { key: "journey_pause", label: "Pause / resume Journey Automation workflows", group: "Communications" },
   { key: "journey_manage_templates", label: "Manage Journey Automation templates", group: "Communications" },
+  { key: "journey_manage_execution", label: "Enable Journey Automation execution (simulate/live/canary)", group: "Communications" },
   { key: "journey_manage_killswitch", label: "Manage Journey Automation kill switch", group: "Communications" },
 ];
 
