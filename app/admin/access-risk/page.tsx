@@ -54,7 +54,7 @@ export default function AccessRiskAdmin() {
 
   return (
     <div>
-      <PageHeader title="Access at Risk" subtitle="Learners whose lecture access is blocked or expiring — recover revenue proactively." />
+      <PageHeader title="Access at Risk" subtitle="Lecture-access lens — learners whose access is blocked or expiring. For overdue-fee chasing, use the At Risk (Collections) tab in Course EMI & Seats." />
 
       <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Stat label="Blocked" value={blocked} tone="text-danger" />

@@ -1,8 +1,11 @@
 "use client";
 
+import { useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ChevronRight } from "lucide-react";
 import { PageHeader, useAdminData, LoadingBlock, TableShell, KpiCard } from "@/components/admin/ui";
+import CollectionsWorklist from "@/components/admin/collections/CollectionsWorklist";
 import { formatINR, formatISTDate } from "@/lib/dates";
 import { deriveEnrollment } from "@/lib/installments";
 import type { CourseEnrollment, Course } from "@/lib/types";
@@ -48,6 +51,7 @@ function courseCapacity(course: Course | undefined): number | null {
 
 export default function CoursePaymentsAdmin() {
   const router = useRouter();
+  const [tab, setTab] = useState<"cohorts" | "risk">("cohorts");
   const enr = useAdminData<CourseEnrollment[]>("/api/admin/course-enrollments", "enrollments");
   const courses = useAdminData<Course[]>("/api/admin/courses", "courses");
   if (enr.loading) return <LoadingBlock />;
@@ -89,8 +93,36 @@ export default function CoursePaymentsAdmin() {
 
   return (
     <div>
-      <PageHeader title="Course EMI & Seats" subtitle="Book-Your-Seat plans, installment status & collections (IST)" />
+      <PageHeader
+        title="Course EMI & Seats"
+        subtitle="Financial & capacity lens — cohort fees collected, admissions, seats filled & overdue EMIs (IST). Click a course to drill into its roster."
+      />
 
+      {/* Tabs: cohort analytics vs the collections worklist */}
+      <div className="mb-5 flex gap-1 border-b border-line">
+        {([
+          ["cohorts", "Cohorts"],
+          ["risk", "At Risk (Collections)"],
+        ] as const).map(([key, label]) => (
+          <button
+            key={key}
+            onClick={() => setTab(key)}
+            className={`-mb-px border-b-2 px-4 py-2 text-sm font-semibold transition ${
+              tab === key ? "border-primary text-primary" : "border-transparent text-muted hover:text-ink2"
+            }`}
+          >
+            {label}
+            {key === "risk" && overdue > 0 && (
+              <span className="ml-2 rounded-full bg-danger/10 px-2 py-0.5 text-[11px] font-bold text-danger">{overdue}</span>
+            )}
+          </button>
+        ))}
+      </div>
+
+      {tab === "risk" ? (
+        <CollectionsWorklist />
+      ) : (
+      <>
       <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <KpiCard label="Collected" value={formatINR(collected)} tone="green" />
         <KpiCard label="Outstanding" value={formatINR(outstanding)} tone="red" />
@@ -159,6 +191,8 @@ export default function CoursePaymentsAdmin() {
         })}
       </TableShell>
       {all.length === 0 && <p className="mt-6 text-center text-sm text-muted">No seat/EMI enrollments yet.</p>}
+      </>
+      )}
     </div>
   );
 }
@@ -167,11 +201,15 @@ function CourseAnalyticsCard({ s }: { s: CourseSummary }) {
   const pct = Math.min(100, Math.max(0, s.collectionPct));
   const seatPct = s.capacity ? Math.min(100, Math.round((s.admissions / s.capacity) * 100)) : null;
   return (
-    <div className="card flex flex-col gap-4 p-5">
+    <Link
+      href={`/admin/course-payments/${encodeURIComponent(s.courseId)}`}
+      className="card group flex flex-col gap-4 p-5 transition hover:border-primary hover:shadow-md focus:outline-none focus:ring-2 focus:ring-primary/40"
+      title={`Drill into ${s.title}`}
+    >
       {/* Header */}
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <h3 className="truncate font-heading text-base font-bold leading-snug" title={s.title}>{s.title}</h3>
+          <h3 className="truncate font-heading text-base font-bold leading-snug group-hover:text-primary" title={s.title}>{s.title}</h3>
           <p className="mt-0.5 text-xs text-muted">
             {s.admissions} admission{s.admissions === 1 ? "" : "s"}
             {s.emiCount > 0 ? ` · ${s.emiCount} on EMI` : ""}
@@ -217,7 +255,11 @@ function CourseAnalyticsCard({ s }: { s: CourseSummary }) {
           {formatINR(s.discountTotal)} in discounts given
         </p>
       )}
-    </div>
+
+      <span className="mt-auto inline-flex items-center gap-1 text-xs font-semibold text-primary opacity-0 transition group-hover:opacity-100">
+        View cohort roster <ChevronRight size={13} />
+      </span>
+    </Link>
   );
 }
 
