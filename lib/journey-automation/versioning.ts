@@ -20,7 +20,9 @@ const TRANSITIONS: Record<WorkflowStatus, WorkflowStatus[]> = {
   ready: ["active", "draft", "archived"],
   active: ["paused", "archived", "disabled_by_killswitch"],
   paused: ["active", "archived", "disabled_by_killswitch"],
-  archived: [],
+  // Archive is reversible: restoring lands back in the safe `draft` state so the
+  // author can review before re-publishing. Audit history + versions are kept.
+  archived: ["draft"],
   // Only the kill switch sets this; resuming lands in the safe `paused` state.
   disabled_by_killswitch: ["paused"],
 };

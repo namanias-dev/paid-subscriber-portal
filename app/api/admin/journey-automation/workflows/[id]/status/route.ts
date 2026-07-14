@@ -9,6 +9,7 @@ const ACTION_TO_STATUS: Record<string, WorkflowStatus> = {
   pause: "paused",
   resume: "active",
   archive: "archived",
+  restore: "draft",
 };
 
 /**

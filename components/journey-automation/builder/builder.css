@@ -114,6 +114,8 @@
 .ja-textarea { min-height: 72px; resize: vertical; }
 .ja-field { margin-bottom: 14px; }
 .ja-preview { background: var(--primary-tint, #eef3fb); border: 1px solid var(--line); border-radius: 10px; padding: 10px; font-size: 12px; color: var(--ink2, #4a5878); white-space: pre-wrap; }
+.ja-help { display: inline-flex; vertical-align: middle; margin-left: 4px; color: var(--muted, #8a93a6); cursor: help; }
+.ja-help:hover, .ja-help:focus { color: var(--primary); outline: none; }
 
 /* Empty canvas hint */
 .ja-empty-hint {

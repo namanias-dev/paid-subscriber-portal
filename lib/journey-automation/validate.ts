@@ -173,6 +173,31 @@ export function validateGraph(nodes: GraphNode[], edges: GraphEdge[]): Validatio
     }
   }
 
+  // Condition nodes need both a Yes and a No path so neither outcome dead-ends.
+  const labelsBySource = new Map<string, Set<string>>();
+  for (const e of edges) {
+    const set = labelsBySource.get(e.source) ?? new Set<string>();
+    set.add(String(e.branch_label ?? "").toLowerCase());
+    labelsBySource.set(e.source, set);
+  }
+  for (const n of nodes) {
+    if (n.type === "condition") {
+      const labels = labelsBySource.get(n.node_key) ?? new Set<string>();
+      if (!labels.has("yes")) add("error", "condition_no_yes", `"${labelOf(n)}" is missing a Yes path.`, n.node_key);
+      if (!labels.has("no")) add("error", "condition_no_no", `"${labelOf(n)}" is missing a No path.`, n.node_key);
+    }
+    if (n.type === "branch") {
+      const branches = asRecord(n.config)["branches"];
+      const labels = labelsBySource.get(n.node_key) ?? new Set<string>();
+      if (Array.isArray(branches)) {
+        for (const b of branches) {
+          const lbl = String((typeof b === "string" ? b : (b as Record<string, unknown>)?.["label"]) ?? "").toLowerCase();
+          if (lbl && !labels.has(lbl)) add("warning", "branch_no_edge", `"${labelOf(n)}" path "${lbl}" has no connected step.`, n.node_key);
+        }
+      }
+    }
+  }
+
   return summarize(issues);
 }
 

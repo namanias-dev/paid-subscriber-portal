@@ -10,6 +10,7 @@ import { recordPaymentPaid, recordPaymentInitiated, recordPaymentStatusChanged, 
 import type { AttributionState } from "./attribution";
 import { flattenForStamp, metaIdentityFromState } from "./attribution";
 import { fireAutoSms } from "./sms/dispatch";
+import { fireAutomationEvent } from "./journey-automation/events";
 import { TRIGGERS } from "./sms/templates";
 import { NON_DUPLICABLE_WEBINAR_FIELDS, buildDuplicateSlug } from "./webinarLifecycle";
 import type {
@@ -1741,9 +1742,35 @@ export async function addLead(input: Partial<Lead>): Promise<Lead> {
   if (input.email) row.email = input.email;
   if (demoMode()) {
     mock.leads.unshift(row);
+    fireLeadCreated(row);
     return row;
   }
-  return dbInsert<Lead>("leads", row as unknown as Record<string, unknown>);
+  const created = await dbInsert<Lead>("leads", row as unknown as Record<string, unknown>);
+  fireLeadCreated(created ?? row);
+  return created;
+}
+
+/**
+ * Fire-and-forget `lead_created` capture for Journey Automation. Non-blocking and
+ * idempotent (dedupe_key per lead id); a failure can never break lead creation.
+ * Only fires for GENUINELY NEW leads (dedup-folded touches don't re-fire).
+ */
+function fireLeadCreated(lead: Lead): void {
+  const first = String(lead.name || "").trim().split(/\s+/)[0] || "";
+  fireAutomationEvent({
+    eventType: "lead_created",
+    leadId: lead.id,
+    phone: lead.phone || null,
+    dedupeKey: `lead_created:${lead.id}`,
+    source: "lead_form",
+    payload: {
+      first_name: first,
+      name: lead.name || null,
+      source: lead.source || null,
+      campaign: lead.campaign ?? null,
+      course_interest: lead.course_interest ?? null,
+    },
+  });
 }
 export async function updateLead(id: string, patch: Partial<Lead>): Promise<Lead | null> {
   if (demoMode()) {

@@ -60,8 +60,8 @@ function workflowGoalType(g: BuilderGraph): string | null {
 export function waitMsFromConfig(config: Record<string, unknown>, now: number): number {
   const c = config ?? {};
   if (typeof c["wait_ms"] === "number") return Math.max(0, c["wait_ms"] as number);
-  const n = Number(c["duration"] ?? c["value"] ?? 0);
-  const unit = String(c["unit"] ?? "days");
+  const n = Number(c["duration"] ?? c["value"] ?? c["durationValue"] ?? 0);
+  const unit = String(c["unit"] ?? c["durationUnit"] ?? "days");
   if (Number.isFinite(n) && n > 0) {
     const mult = unit === "minutes" ? 60_000 : unit === "hours" ? 3_600_000 : unit === "days" ? 86_400_000 : 86_400_000;
     return n * mult;
@@ -73,6 +73,50 @@ export function waitMsFromConfig(config: Record<string, unknown>, now: number): 
     if (Number.isFinite(t)) return Math.max(0, t - now);
   }
   return WAIT_DEFAULT_MS;
+}
+
+/** Stable 32-bit hash (FNV-1a) for deterministic bucketing. */
+function hash32(s: string): number {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return h >>> 0;
+}
+
+export interface BranchOption { label: string; weight: number }
+
+/** Normalize a branch node's config into weighted options. */
+export function branchOptions(config: Record<string, unknown>): BranchOption[] {
+  const raw = config?.["branches"];
+  if (Array.isArray(raw)) {
+    const opts = raw
+      .map((b) => {
+        if (typeof b === "string") return { label: b, weight: 1 };
+        const o = (b ?? {}) as Record<string, unknown>;
+        const label = String(o["label"] ?? "").trim();
+        const weight = Math.max(0, Number(o["weight"] ?? 1) || 0);
+        return label ? { label, weight } : null;
+      })
+      .filter((b): b is BranchOption => b !== null && b.weight > 0);
+    if (opts.length) return opts;
+  }
+  return [{ label: "A", weight: 1 }];
+}
+
+/** Deterministic weighted choice of a branch label from an enrollment seed. */
+export function pickBranch(config: Record<string, unknown>, seed: string): string {
+  const opts = branchOptions(config);
+  const total = opts.reduce((s, o) => s + o.weight, 0);
+  if (total <= 0) return opts[0].label;
+  const point = (hash32(seed) % 10_000) / 10_000 * total;
+  let acc = 0;
+  for (const o of opts) {
+    acc += o.weight;
+    if (point < acc) return o.label;
+  }
+  return opts[opts.length - 1].label;
 }
 
 const SECRET_KEY = /(login|otp|code|password|secret|token|payment_link|link|url)/i;
@@ -251,7 +295,10 @@ async function executeJob(
       break;
     }
     case "branch": {
-      const label = typeof node.config?.["branch"] === "string" ? (node.config["branch"] as string) : null;
+      // Deterministic weighted split (A/B/n experiment). The bucket is a pure
+      // function of the enrollment id, so re-runs after a crash pick the SAME
+      // path (idempotent) and the split is reproducible in dry-run.
+      const label = pickBranch(node.config ?? {}, enr.id);
       await data.upsertNodeRun({ enrollment_id: enr.id, workflow_id: enr.workflow_id, node_key: node.node_key, node_type: "branch", status: "done", mode: enr.mode, outcome: { branch: label } });
       await scheduleNext(data, clock, enr, graph, node.node_key, label, now, res);
       break;
