@@ -1,10 +1,12 @@
 import { NextResponse } from "next/server";
-import { getPayments, getWebinars } from "@/lib/dataProvider";
+import { getPayments, getWebinars, getAllCourseEnrollments } from "@/lib/dataProvider";
 import { resolveAudience, type AudienceSpec } from "@/lib/sms/audiences";
 import { getRule, getSettings } from "@/lib/sms/store";
 import { sendSms, istMinutesOfDay, pollDeliveryStatuses } from "@/lib/sms/service";
 import { normalizeIndianMobile } from "@/lib/phone";
 import type { SmsAutoRule } from "@/lib/sms/types";
+import { deriveCollections } from "@/lib/installments";
+import { fireAutomationEvent } from "@/lib/journey-automation/events";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -182,6 +184,38 @@ async function run(req: Request) {
         }
       }
     }
+
+    // ---- Journey Automation event-capture spike (Part A): installment_overdue ----
+    // Cron-detected capture ONLY. Reads business truth via the existing
+    // deriveCollections; ingests one idempotent event per overdue installment
+    // line (dedupe once per line, ever). Consumes nothing, sends nothing, mutates
+    // nothing. Fully non-blocking — a failure here never affects the SMS cron.
+    try {
+      const enrollments = await getAllCourseEnrollments();
+      let captured = 0;
+      const nowMs = Date.now();
+      for (const e of enrollments) {
+        if (e.status === "cancelled") continue;
+        const col = deriveCollections(e);
+        if (col.missedInstallments <= 0) continue;
+        for (const line of e.schedule || []) {
+          if (line.kind !== "installment" || line.paid) continue;
+          if (line.status === "waived" || line.status === "cancelled") continue;
+          if (!line.due || new Date(line.due).getTime() >= nowMs) continue;
+          fireAutomationEvent({
+            eventType: "installment_overdue",
+            occurredAt: line.due,
+            enrollmentId: e.id,
+            phone: e.phone,
+            payload: { installment_no: line.no, amount: line.amount, due: line.due, course_id: e.course_id, days_overdue: col.daysOverdue },
+            dedupeKey: `installment_overdue:${e.id}:${line.no}`,
+            source: "cron",
+          });
+          captured++;
+        }
+      }
+      result.installment_overdue_captured = captured;
+    } catch { /* non-fatal: event capture never breaks the cron */ }
 
     // ---- delivery-report PULL: promote open SENT logs via JustGoSMS http-dlr.php ----
     try {
