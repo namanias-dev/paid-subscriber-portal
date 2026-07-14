@@ -22,7 +22,7 @@ import { getPlan } from "@/lib/config";
 import { buildWelcomeMessage, buildWhatsAppLink } from "@/lib/whatsapp";
 import { sendAccessCodeEmail } from "@/lib/email";
 import { formatDate, formatINR, istInputToISO } from "@/lib/dates";
-import { deriveEnrollment, isActiveEnrollment } from "@/lib/installments";
+import { deriveEnrollment, deriveCollections, isActiveEnrollment } from "@/lib/installments";
 import type { PlanId, Payment, CourseEnrollment, WebinarRegistration } from "@/lib/types";
 
 export interface StudentSummary {
@@ -169,7 +169,28 @@ export async function GET() {
         .sort((a, b) => a.title.localeCompare(b.title)),
     };
 
-    return NextResponse.json({ ok: true, students, stats, summaries, catalog });
+    // ---- Canonical People-area finance (ONE source of truth) ----
+    // "Collected" = COURSE FEES only, derived the SAME way as Course EMI & Seats
+    // (deriveCollections over confirmed course enrollments), so the Students KPI
+    // reconciles EXACTLY with the Fees & EMI screen. Webinar/other receipts are
+    // reported SEPARATELY (never folded into "Collected") so the figure is
+    // unambiguous. Same filter as Fees & EMI: paid & not cancelled.
+    const confirmedEnrollments = enrollments.filter(
+      (e) => e.amount_paid > 0 && e.status !== "cancelled",
+    );
+    let courseFeesCollected = 0;
+    let courseFeesOutstanding = 0;
+    for (const e of confirmedEnrollments) {
+      const d = deriveCollections(e);
+      courseFeesCollected += d.paid;
+      courseFeesOutstanding += d.remaining;
+    }
+    const webinarReceipts = paid
+      .filter((p) => p.item_type === "webinar")
+      .reduce((a, p) => a + (p.amount || 0), 0);
+    const finance = { courseFeesCollected, courseFeesOutstanding, webinarReceipts };
+
+    return NextResponse.json({ ok: true, students, stats, summaries, catalog, finance });
   } catch {
     return NextResponse.json({ ok: false, error: "Failed to load students." }, { status: 500 });
   }
