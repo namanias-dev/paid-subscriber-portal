@@ -223,7 +223,7 @@ export async function setWorkflowStatus(workflowId: string, to: WorkflowStatus, 
     if (!wf) throw new Error("Workflow not found");
     assertTransition(wf.status, to);
     const before = wf.status; wf.status = to; wf.updated_at = nowISO(); wf.updated_by = actor.id;
-    await writeAudit({ workflow_id: workflowId, version_id: null, action: to === "paused" ? "pause" : to === "archived" ? "archive" : "resume", actor, summary: `${before} -> ${to}`, before: { status: before }, after: { status: to } });
+    await writeAudit({ workflow_id: workflowId, version_id: null, action: statusAuditAction(before, to), actor, summary: `${before} -> ${to}`, before: { status: before }, after: { status: to } });
     return { ok: true };
   }
   const { data: wf } = await sb.from("automation_workflows").select("*").eq("id", workflowId).maybeSingle();
@@ -231,8 +231,15 @@ export async function setWorkflowStatus(workflowId: string, to: WorkflowStatus, 
   const from = (wf as AutomationWorkflow).status;
   assertTransition(from, to);
   await sb.from("automation_workflows").update({ status: to, updated_by: actor.id, updated_at: nowISO() }).eq("id", workflowId);
-  await writeAudit({ workflow_id: workflowId, version_id: null, action: to === "paused" ? "pause" : to === "archived" ? "archive" : "resume", actor, summary: `${from} -> ${to}`, before: { status: from }, after: { status: to } });
+  await writeAudit({ workflow_id: workflowId, version_id: null, action: statusAuditAction(from, to), actor, summary: `${from} -> ${to}`, before: { status: from }, after: { status: to } });
   return { ok: true };
+}
+
+function statusAuditAction(from: WorkflowStatus, to: WorkflowStatus): string {
+  if (to === "paused") return "pause";
+  if (to === "archived") return "archive";
+  if (from === "archived" && to === "draft") return "restore";
+  return "resume";
 }
 
 // ---------------------------------------------------------------------------
@@ -242,32 +249,111 @@ export async function duplicateWorkflow(workflowId: string, actor: KillSwitchAct
   const state = await getEditorState(workflowId, actor);
   if (!state) throw new Error("Workflow not found");
   const copy = await createWorkflow(`${state.workflow.name} (Copy)`, actor);
+  // Deep-copy the DRAFT GRAPH only — never enrollments / runs / jobs (runtime).
   await saveDraftGraph(copy.id, state.graph, actor, "Duplicated from " + state.workflow.name);
   return copy;
 }
 
 // ---------------------------------------------------------------------------
+// Rename — persists the workflow name. Audited.
+// ---------------------------------------------------------------------------
+export async function renameWorkflow(workflowId: string, name: string, actor: KillSwitchActor): Promise<AutomationWorkflow> {
+  const clean = (name || "").trim().slice(0, 160);
+  if (!clean) throw new Error("Name is required");
+  const sb = getSupabaseAdmin();
+  if (!sb) {
+    const wf = demo().workflows.find((w) => w.id === workflowId);
+    if (!wf) throw new Error("Workflow not found");
+    const before = wf.name; wf.name = clean; wf.updated_at = nowISO(); wf.updated_by = actor.id;
+    await writeAudit({ workflow_id: workflowId, version_id: null, action: "rename", actor, summary: `Renamed "${before}" -> "${clean}"`, before: { name: before }, after: { name: clean } });
+    return wf;
+  }
+  const { data: wf } = await sb.from("automation_workflows").select("*").eq("id", workflowId).maybeSingle();
+  if (!wf) throw new Error("Workflow not found");
+  const before = (wf as AutomationWorkflow).name;
+  const { data: updated } = await sb.from("automation_workflows")
+    .update({ name: clean, updated_by: actor.id, updated_at: nowISO() }).eq("id", workflowId).select("*").single();
+  await writeAudit({ workflow_id: workflowId, version_id: null, action: "rename", actor, summary: `Renamed "${before}" -> "${clean}"`, before: { name: before }, after: { name: clean } });
+  return (updated as AutomationWorkflow) ?? { ...(wf as AutomationWorkflow), name: clean };
+}
+
+// ---------------------------------------------------------------------------
+// Hard delete — permitted ONLY for a never-published draft. Published workflows
+// must be archived (reversible) so audit history and immutable versions survive.
+// ---------------------------------------------------------------------------
+export async function deleteWorkflow(workflowId: string, actor: KillSwitchActor): Promise<{ ok: true }> {
+  const sb = getSupabaseAdmin();
+  if (!sb) {
+    const wf = demo().workflows.find((w) => w.id === workflowId);
+    if (!wf) throw new Error("Workflow not found");
+    if (wf.published_version != null) throw new Error("Published workflows must be archived, not deleted");
+    demo().workflows = demo().workflows.filter((w) => w.id !== workflowId);
+    demo().versions = demo().versions.filter((v) => v.workflow_id !== workflowId);
+    await writeAudit({ workflow_id: null, version_id: null, action: "delete", actor, summary: `Deleted draft "${wf.name}"`, before: { name: wf.name, status: wf.status }, after: null });
+    return { ok: true };
+  }
+  const { data: wf } = await sb.from("automation_workflows").select("*").eq("id", workflowId).maybeSingle();
+  if (!wf) throw new Error("Workflow not found");
+  const w = wf as AutomationWorkflow;
+  if (w.published_version != null) throw new Error("Published workflows must be archived, not deleted");
+  // Audit BEFORE the delete (the FK is on delete set null, so the ledger survives).
+  await writeAudit({ workflow_id: workflowId, version_id: null, action: "delete", actor, summary: `Deleted draft "${w.name}"`, before: { name: w.name, status: w.status }, after: null });
+  const { error } = await sb.from("automation_workflows").delete().eq("id", workflowId);
+  if (error) throw new Error(error.message);
+  return { ok: true };
+}
+
+// ---------------------------------------------------------------------------
 // DLT-approved template options for the SMS node selector.
 // ---------------------------------------------------------------------------
+/**
+ * SMS-node template options — SINGLE SOURCE OF TRUTH is SMS Mission Control.
+ *
+ * Every approved + active DLT template (a `sms_templates` row with a DLT
+ * gateway id) becomes a selectable option. `automation_templates` is the
+ * FK-governed binding layer: we idempotently ensure one row per approved
+ * template so a journey always references a real, approved template (never an
+ * ad-hoc body). No hand-typed bodies, no duplicate template store. When no
+ * approved template exists, this returns [] and the UI shows a "create one in
+ * Mission Control" empty state instead of a silent empty dropdown.
+ */
 export async function listTemplateOptions(): Promise<AutomationTemplateOption[]> {
+  const smsTemplates = await listTemplates();
+  const approvedTemplates = smsTemplates.filter(
+    (t) => (t.status === "approved" || t.status === "active") && !!t.is_active && !!t.gateway_template_id,
+  );
+
   const sb = getSupabaseAdmin();
-  if (!sb) return [];
-  const [{ data: autoRows }, smsTemplates] = await Promise.all([
-    sb.from("automation_templates").select("*"),
-    listTemplates(),
-  ]);
-  const byId = new Map(smsTemplates.map((t) => [t.id, t]));
-  return (autoRows ?? []).map((a: Record<string, unknown>) => {
-    const t = byId.get(a.sms_template_id as string);
-    const approved = !!t && (t.status === "approved" || t.status === "active") && !!t.is_active && !!t.gateway_template_id;
+  if (!sb) {
+    // Local/demo: key options directly by the sms_templates id.
+    return approvedTemplates.map((t) => ({
+      id: t.id, name: t.name, sms_template_id: t.id,
+      dlt_template_id: t.gateway_template_id ?? null, body: t.body_template ?? "",
+      variables: t.variables ?? [], approved: true,
+    }));
+  }
+
+  const { data: autoRows } = await sb.from("automation_templates").select("id, name, sms_template_id");
+  const bySmsId = new Map((autoRows ?? []).map((a: Record<string, unknown>) => [a.sms_template_id as string, a]));
+
+  // Idempotently provision a binding row for any approved template missing one.
+  const missing = approvedTemplates.filter((t) => !bySmsId.has(t.id));
+  if (missing.length) {
+    const insert = missing.map((t) => ({ name: t.name, channel: "sms" as const, sms_template_id: t.id }));
+    const { data: created } = await sb.from("automation_templates").insert(insert).select("id, name, sms_template_id");
+    for (const row of (created ?? []) as Record<string, unknown>[]) bySmsId.set(row.sms_template_id as string, row);
+  }
+
+  return approvedTemplates.map((t) => {
+    const row = bySmsId.get(t.id) as Record<string, unknown> | undefined;
     return {
-      id: a.id as string,
-      name: (a.name as string) || t?.name || "Template",
-      sms_template_id: a.sms_template_id as string,
-      dlt_template_id: t?.gateway_template_id ?? null,
-      body: t?.body_template ?? "",
-      variables: t?.variables ?? [],
-      approved,
+      id: (row?.id as string) ?? t.id,
+      name: (row?.name as string) || t.name,
+      sms_template_id: t.id,
+      dlt_template_id: t.gateway_template_id ?? null,
+      body: t.body_template ?? "",
+      variables: t.variables ?? [],
+      approved: true,
     };
   });
 }

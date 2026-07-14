@@ -76,6 +76,10 @@ export async function runMatcher(
         mode,
         current_node_key: entry,
         context: {
+          // Flatten non-sensitive payload fields to the top level so journey
+          // variables (e.g. first_name) resolve by name, while keeping the raw
+          // payload + ids available. Secret values are never in payload.
+          ...(ev.payload ?? {}),
           event_type: ev.event_type,
           payload: ev.payload ?? {},
           webinar_id: ev.webinar_id ?? null,

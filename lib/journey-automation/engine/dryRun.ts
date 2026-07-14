@@ -126,7 +126,7 @@ export async function dryRunWorkflow(workflowId: string, sampleLimit = 500): Pro
       id: `dryrun:${ev.id}`, workflow_id: workflowId, version_id: versionId, event_id: ev.id,
       normalized_phone: phone, student_id: ev.student_id, lead_id: ev.lead_id, enrollment_ref: ev.enrollment_id,
       mode: workflow.execution_mode === "live" ? "live" : "simulate", status: "active",
-      current_node_key: entryNodeKey(graph), context: { event_type: ev.event_type, payload: ev.payload ?? {} },
+      current_node_key: entryNodeKey(graph), context: { ...(ev.payload ?? {}), event_type: ev.event_type, payload: ev.payload ?? {}, webinar_id: ev.webinar_id ?? null, payment_id: ev.payment_id ?? null },
       goal_met: false, exit_reason: null, dedupe_key: null, enrolled_at: nowISO, updated_at: nowISO, completed_at: null,
     };
     const latest = await realState.getLatestState(synthetic);

@@ -60,6 +60,7 @@ export const realState: StatePort = {
   async getLatestState(enrollment: EnrollmentRow): Promise<LatestState> {
     const phone = enrollment.normalized_phone;
     const optedOut = phone ? await isOptedOut(phone).catch(() => false) : false;
+    const loggedIn = phone ? await hasLoggedIn(phone).catch(() => false) : false;
 
     // Real webinar-registration read (existing query). If the enrollment names a
     // target webinar we check membership; otherwise we report "registered for any".
@@ -75,7 +76,7 @@ export const realState: StatePort = {
 
     const enr = await courseEnrollmentFor(enrollment.enrollment_ref, phone).catch(() => null);
     if (!enr) {
-      return { paid: false, hasOverdue: false, optedOut, enrolledInCourse: false, registeredForWebinar, planPausedOrWaived: false };
+      return { paid: false, hasOverdue: false, optedOut, enrolledInCourse: false, registeredForWebinar, planPausedOrWaived: false, loggedIn };
     }
     const d = deriveCollections(enr);
     const planPausedOrWaived = enr.status === "cancelled" || (enr.schedule || []).some((s) => s.status === "waived");
@@ -86,6 +87,20 @@ export const realState: StatePort = {
       enrolledInCourse: enr.status !== "cancelled",
       registeredForWebinar,
       planPausedOrWaived,
+      loggedIn,
     };
   },
 };
+
+/**
+ * Real portal-login signal (READ-ONLY): a student row for this phone whose
+ * `last_active_date` is set has signed in at least once (stamped by
+ * touchStreakOnLogin at login). Never writes anything.
+ */
+async function hasLoggedIn(phone: string): Promise<boolean> {
+  const sb = getSupabaseAdmin();
+  if (!sb) return false;
+  const { data } = await sb.from("students").select("last_active_date")
+    .eq("phone", phone).not("last_active_date", "is", null).limit(1).maybeSingle();
+  return !!data;
+}

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requirePermission, getActionActor } from "@/lib/adminGuard";
-import { getEditorState, saveDraftGraph } from "@/lib/journey-automation/builderStore";
+import { getEditorState, saveDraftGraph, renameWorkflow, deleteWorkflow } from "@/lib/journey-automation/builderStore";
 import type { BuilderGraph } from "@/types/journey-automation";
 
 export const dynamic = "force-dynamic";
@@ -35,5 +35,43 @@ export async function PUT(req: Request, { params }: { params: { id: string } }) 
     return NextResponse.json({ ok: true });
   } catch (e) {
     return NextResponse.json({ ok: false, error: (e as Error).message }, { status: 500 });
+  }
+}
+
+/** Rename a workflow (persists). Requires journey_edit_draft. Audited. */
+export async function PATCH(req: Request, { params }: { params: { id: string } }) {
+  if (!(await requirePermission("journey_edit_draft"))) {
+    return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+  }
+  const actor = await getActionActor();
+  if (!actor) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+
+  const body = await req.json().catch(() => ({}));
+  const name = typeof body.name === "string" ? body.name.trim() : "";
+  if (!name) return NextResponse.json({ ok: false, error: "Name is required" }, { status: 400 });
+  try {
+    const workflow = await renameWorkflow(params.id, name, actor);
+    return NextResponse.json({ ok: true, workflow });
+  } catch (e) {
+    return NextResponse.json({ ok: false, error: (e as Error).message }, { status: 400 });
+  }
+}
+
+/**
+ * Hard-delete a workflow. Only ever allowed for a never-published draft (the
+ * store enforces this); published workflows must be archived. Requires
+ * journey_edit_draft. Audited (ledger survives via on-delete-set-null FK).
+ */
+export async function DELETE(_req: Request, { params }: { params: { id: string } }) {
+  if (!(await requirePermission("journey_edit_draft"))) {
+    return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+  }
+  const actor = await getActionActor();
+  if (!actor) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+  try {
+    await deleteWorkflow(params.id, actor);
+    return NextResponse.json({ ok: true });
+  } catch (e) {
+    return NextResponse.json({ ok: false, error: (e as Error).message }, { status: 400 });
   }
 }

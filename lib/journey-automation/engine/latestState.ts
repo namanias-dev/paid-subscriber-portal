@@ -20,6 +20,12 @@ export interface LatestState {
   registeredForWebinar: boolean;
   /** Plan paused / proof-of-payment uploaded / fee waived => suppress dunning. */
   planPausedOrWaived: boolean;
+  /**
+   * Has ever signed into the student/buyer portal (real signal:
+   * students.last_active_date is stamped on login). Optional for backward
+   * compatibility with older state fixtures (treated as false when absent).
+   */
+  loggedIn?: boolean;
 }
 
 /** Does the workflow's goal count as met given latest state? */
@@ -36,6 +42,9 @@ export function evaluateGoal(goalType: string | null | undefined, s: LatestState
     case "webinar_registered":
     case "registered":
       return s.registeredForWebinar;
+    case "logged_in":
+    case "portal_login":
+      return !!s.loggedIn;
     default:
       return false;
   }
@@ -70,6 +79,9 @@ export function evaluateCondition(config: Record<string, unknown>, s: LatestStat
       return s.registeredForWebinar;
     case "plan_paused_or_waived":
       return s.planPausedOrWaived;
+    case "has_logged_in":
+    case "logged_in":
+      return !!s.loggedIn;
     default:
       return false;
   }

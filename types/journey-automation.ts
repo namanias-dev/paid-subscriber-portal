@@ -38,6 +38,9 @@ export type NodeType =
   | "goal"
   | "exit";
 
+/** Runtime send posture. `off` = never enrolls/sends; the safe default. */
+export type WorkflowExecutionMode = "off" | "simulate" | "live";
+
 export interface AutomationWorkflow {
   id: string;
   name: string;
@@ -46,6 +49,7 @@ export interface AutomationWorkflow {
   current_version_id: string | null;
   published_version: number | null;
   killswitch_disabled: boolean;
+  execution_mode?: WorkflowExecutionMode;
   created_by: string | null;
   updated_by: string | null;
   created_at: string;
@@ -187,8 +191,9 @@ export interface WorkflowWithVersions extends AutomationWorkflow {
 // this shipment (no trigger matching, no execution, no sending).
 // ---------------------------------------------------------------------------
 
-/** Event types the Part-A spike PROVED capturable at existing call-sites. */
+/** Event types with a wired, idempotent ingestion at an existing call-site. */
 export type CapturedEventType =
+  | "lead_created"
   | "payment_received"
   | "installment_overdue"
   | "webinar_registered";
