@@ -8,7 +8,7 @@ import type { BuilderGraph, AutomationEvent } from "@/types/journey-automation";
 import type {
   EnrollmentRow, JobRow, WorkflowRuntimeRow, CandidateWorkflow,
   NodeRunInput, NodeRunRow, ScheduleJobInput, CreateEnrollmentInput,
-  GoalCompletionInput, SuppressionInput, SendRequest, SendOutcome,
+  GoalCompletionInput, SuppressionInput, StaffTaskInput, SendRequest, SendOutcome,
 } from "./types";
 import type { EligibilityFacts } from "./eligibility";
 import type { LatestState } from "./latestState";
@@ -53,6 +53,8 @@ export interface EngineDataPort {
   upsertNodeRun(input: NodeRunInput): Promise<void>;
   recordGoal(input: GoalCompletionInput): Promise<void>;
   recordSuppression(input: SuppressionInput): Promise<void>;
+  /** Idempotent per (enrollment,node): creates a human staff-task record. No dispatch/send. */
+  createStaffTask(input: StaffTaskInput): Promise<void>;
 }
 
 /** Reads CURRENT business truth read-only. Never mutates anything. */

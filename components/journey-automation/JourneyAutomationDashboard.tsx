@@ -263,7 +263,7 @@ export default function JourneyAutomationDashboard() {
           )}
         </div>
       ) : (
-        <TableShell headers={["Workflow", "Status", "Version", "Updated"]}>
+        <TableShell headers={["Workflow", "Status", "Version", "Updated", ""]}>
           {workflows.map((w) => (
             <tr key={w.id} className="border-b border-line last:border-0 hover:bg-[var(--surface)]">
               <td className="px-4 py-3">
@@ -277,6 +277,11 @@ export default function JourneyAutomationDashboard() {
               </td>
               <td className="px-4 py-3 tabular-nums">{w.published_version != null ? `v${w.published_version}` : "—"}</td>
               <td className="px-4 py-3 text-ink2">{fmtDate(w.updated_at)}</td>
+              <td className="px-4 py-3 text-right">
+                <Link href={`/admin/communications/journey-automation/${w.id}/operate`} className="text-sm text-[var(--primary)] hover:underline">
+                  Operate &amp; analytics
+                </Link>
+              </td>
             </tr>
           ))}
         </TableShell>

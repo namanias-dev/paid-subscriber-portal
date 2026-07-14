@@ -10,7 +10,7 @@ import type {
 import type {
   EnrollmentRow, JobRow, WorkflowRuntimeRow, CandidateWorkflow,
   NodeRunInput, NodeRunRow, ScheduleJobInput, CreateEnrollmentInput,
-  GoalCompletionInput, SuppressionInput, SendRequest, SendOutcome,
+  GoalCompletionInput, SuppressionInput, StaffTaskInput, SendRequest, SendOutcome,
 } from "../../lib/journey-automation/engine/types";
 import type { AutomationEvent, BuilderGraph } from "../../types/journey-automation";
 import type { EligibilityFacts } from "../../lib/journey-automation/engine/eligibility";
@@ -71,6 +71,7 @@ export class InMemoryPort implements EngineDataPort {
   nodeRuns: NodeRunRow[] = [];
   goals: GoalCompletionInput[] = [];
   suppressions: SuppressionInput[] = [];
+  staffTasks: StaffTaskInput[] = [];
   private jobStart: Record<string, number> = {};
   settings: EngineSettings;
   cfg: FakePortConfig;
@@ -184,6 +185,10 @@ export class InMemoryPort implements EngineDataPort {
     this.goals.push(input);
   }
   async recordSuppression(input: SuppressionInput): Promise<void> { this.suppressions.push(input); }
+  async createStaffTask(input: StaffTaskInput): Promise<void> {
+    if (this.staffTasks.find((t) => t.enrollment_id === input.enrollment_id && t.node_key === input.node_key)) return;
+    this.staffTasks.push(input);
+  }
 
   // test helpers
   activeJobs() { return this.jobs.filter((j) => j.status === "queued" || j.status === "running"); }

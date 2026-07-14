@@ -119,6 +119,16 @@ export interface SuppressionInput {
   detail?: Record<string, unknown>;
 }
 
+export interface StaffTaskInput {
+  enrollment_id: string;
+  workflow_id: string;
+  node_key: string;
+  title: string;
+  assignee: string | null;
+  detail?: Record<string, unknown>;
+  mode: RunMode;
+}
+
 /** What the SMS adapter hands the SenderPort in LIVE mode (mirrors the chokepoint). */
 export interface SendRequest {
   mobile: string;

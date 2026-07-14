@@ -11,7 +11,7 @@ import type { EngineDataPort, EngineSettings } from "./ports";
 import type {
   EnrollmentRow, JobRow, WorkflowRuntimeRow, CandidateWorkflow,
   NodeRunInput, NodeRunRow, ScheduleJobInput, CreateEnrollmentInput,
-  GoalCompletionInput, SuppressionInput,
+  GoalCompletionInput, SuppressionInput, StaffTaskInput,
 } from "./types";
 import type { AutomationEvent, BuilderGraph } from "@/types/journey-automation";
 import { parseGraph, triggerNode } from "./graph";
@@ -178,6 +178,19 @@ export const supabaseEnginePort: EngineDataPort = {
     await db().from("automation_suppression_events").insert({
       enrollment_id: input.enrollment_id, workflow_id: input.workflow_id, node_key: input.node_key,
       normalized_phone: input.normalized_phone, reason: input.reason, detail: input.detail ?? {},
+    });
+  },
+
+  async createStaffTask(input: StaffTaskInput): Promise<void> {
+    const sb = db();
+    // Idempotent per (enrollment,node): the node_run UNIQUE already gates re-execution,
+    // but guard here too so retries never create duplicate tasks.
+    const { data: existing } = await sb.from("automation_staff_tasks").select("id")
+      .eq("enrollment_id", input.enrollment_id).eq("node_key", input.node_key).maybeSingle();
+    if (existing) return;
+    await sb.from("automation_staff_tasks").insert({
+      enrollment_id: input.enrollment_id, workflow_id: input.workflow_id, node_key: input.node_key,
+      title: input.title, assignee: input.assignee, detail: input.detail ?? {}, mode: input.mode,
     });
   },
 };

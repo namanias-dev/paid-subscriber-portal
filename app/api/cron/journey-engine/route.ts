@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { journeyAutomationEnabled } from "@/lib/journey-automation/flags";
+import { authorizeCron } from "@/lib/journey-automation/engine/cronAuth";
 import { supabaseEnginePort } from "@/lib/journey-automation/engine/supabasePort";
 import { realState } from "@/lib/journey-automation/engine/realState";
 import { realSender } from "@/lib/journey-automation/engine/realSender";
@@ -24,13 +25,16 @@ export const maxDuration = 60;
  * Vercel cron (daily) keeps it warm; for tighter cadence point an external
  * scheduler at it (all writes idempotent, so extra pings are safe):
  *   GET /api/cron/journey-engine?secret=<CRON_SECRET>
+ *
+ * SECURITY (hardened): CRON_SECRET is REQUIRED. Unauthenticated (or missing-config)
+ * requests are rejected with 401 — the engine drains real events, so an open route
+ * is unacceptable before any live flag-flip. CRON_SECRET MUST be set in Vercel prod;
+ * Vercel's own scheduler sends it as `Authorization: Bearer <CRON_SECRET>`.
  */
 async function run(req: Request) {
-  const secret = process.env.CRON_SECRET;
-  if (secret) {
-    const url = new URL(req.url);
-    const provided = url.searchParams.get("secret") || req.headers.get("authorization")?.replace("Bearer ", "");
-    if (provided !== secret) return NextResponse.json({ ok: false, error: "Forbidden" }, { status: 403 });
+  // Fail-closed: CRON_SECRET is REQUIRED. Missing config or bad credential => 401.
+  if (!authorizeCron(req, process.env.CRON_SECRET)) {
+    return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   }
 
   // Master feature gate: if the whole feature is off, do nothing.
