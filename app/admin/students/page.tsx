@@ -36,6 +36,8 @@ interface ApiResponse {
   summaries: Record<string, Summary>;
   catalog: Catalog;
   stats: { total: number; activeNow: number; expiringSoon: number; totalRevenue: number };
+  /** Canonical People-area finance (course-fee scope), matches Fees & EMI exactly. */
+  finance?: { courseFeesCollected: number; courseFeesOutstanding: number; webinarReceipts: number };
 }
 
 const EMPTY_SUMMARY: Summary = {
@@ -172,14 +174,20 @@ export default function StudentsAdmin() {
   if (loading) return <LoadingBlock />;
 
   const stats = data?.stats;
-  const totalOutstanding = Object.values(summaries).reduce((a, s) => a + s.totalDue, 0);
-  const totalCollected = Object.values(summaries).reduce((a, s) => a + s.totalPaid, 0);
+  // "Collected" = COURSE FEES only, from the canonical server figure (deriveCollections
+  // over confirmed enrollments) so it EQUALS the Fees & EMI screen exactly. Fall back to
+  // the course-fee subset of the summaries only if the server field is unavailable.
+  const courseFeesCollected =
+    data?.finance?.courseFeesCollected ?? Object.values(summaries).reduce((a, s) => a + s.totalPaid, 0);
+  const courseFeesOutstanding =
+    data?.finance?.courseFeesOutstanding ?? Object.values(summaries).reduce((a, s) => a + s.totalDue, 0);
+  const webinarReceipts = data?.finance?.webinarReceipts ?? 0;
 
   return (
     <div>
       <PageHeader
         title="Students & Enrollments"
-        subtitle="Operational lens — find & manage a person: identity, contact, enrollments & access. For cohort money & seats, use Course EMI & Seats."
+        subtitle="Operational lens — find & manage a person: identity, contact, enrollments & access. For cohort money & seats, use Fees & EMI."
         action={
           <div className="flex flex-wrap items-center gap-2">
             <button
@@ -201,20 +209,26 @@ export default function StudentsAdmin() {
         <KpiCard label="Total students" value={String(stats?.total ?? students.length)} tone="blue" />
         <KpiCard label="Active now" value={String(stats?.activeNow ?? 0)} tone="green" />
         <KpiCard
-          label="Total Receipts"
-          value={formatINR(totalCollected)}
+          label="Course Fees Collected"
+          value={formatINR(courseFeesCollected)}
           tone="amber"
-          hint="All products"
-          title="Total Receipts — all money received from these people across every product (course fees, webinars, etc.). For course-fee-only revenue, see Fees & EMI."
+          hint="Matches Fees & EMI"
+          title="Course Fees Collected — course-enrollment fees received (same source as Fees & EMI; these two screens match exactly). Excludes webinars & other products."
         />
         <KpiCard
           label="Course Fees Outstanding"
-          value={formatINR(totalOutstanding)}
+          value={formatINR(courseFeesOutstanding)}
           tone="red"
           hint="Course balances"
-          title="Course-enrollment fees still owed (sum of remaining balances on active course enrollments)."
+          title="Course-enrollment fees still owed = total course fees − Course Fees Collected. Matches Fees & EMI."
         />
       </div>
+      {webinarReceipts > 0 && (
+        <p className="-mt-2 mb-5 px-1 text-xs text-muted">
+          Other receipts (webinars): <span className="font-semibold text-ink2">{formatINR(webinarReceipts)}</span> — recorded separately in{" "}
+          <Link href="/admin/payments" className="text-primary hover:underline">Payments &amp; Finance</Link>. The headline “Course Fees Collected” counts course fees only.
+        </p>
+      )}
 
       {/* Finance-lens deep link — same source as Course EMI & Seats (numbers match exactly). */}
       <CourseFeesStrip />

@@ -47,7 +47,7 @@ export default function CourseFeesStrip() {
         </Link>
       </div>
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <StripStat label="Course Fees Collected" value={formatINR(collected)} tone="text-success" title="Course-enrollment fees received. Excludes webinars & other products (see Total Receipts above)." />
+        <StripStat label="Course Fees Collected" value={formatINR(collected)} tone="text-success" title="Course-enrollment fees received. Same as the Collected KPI above and the Fees & EMI screen. Excludes webinars & other products." />
         <StripStat label="Course Fees Outstanding" value={formatINR(outstanding)} tone={outstanding > 0 ? "text-warning" : undefined} title="Course fees still owed = total course fees − Course Fees Collected." />
         <StripStat label="Overdue" value={formatINR(overdueAmount)} tone={overdueAmount > 0 ? "text-danger" : undefined} sub={overdueStudents ? `${overdueStudents} student${overdueStudents === 1 ? "" : "s"}` : "none"} title="Past-due unpaid course-fee installments." />
         <Link href="/admin/course-payments/at-risk" className="rounded-xl bg-surface2 p-3 transition hover:bg-primary/5" title="Open the Fees at Risk (Collections) worklist">
