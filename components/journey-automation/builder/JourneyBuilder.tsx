@@ -17,7 +17,7 @@ import {
 import { JourneyNode, type JourneyNodeData } from "./JourneyNode";
 import NodeLibrary from "./NodeLibrary";
 import NodeInspector from "./NodeInspector";
-import { catalogByKey } from "./nodeCatalog";
+import { catalogByKey, CONDITION_CHECKS, GOAL_TYPES } from "./nodeCatalog";
 import { validateGraph, type ValidationReport } from "@/lib/journey-automation/validate";
 import type {
   AutomationTemplateOption, AutomationWorkflow, AutomationWorkflowVersion,
@@ -43,13 +43,20 @@ const STATUS_PILL: Record<WorkflowStatus, string> = {
 let keySeq = 0;
 function makeKey(type: string): string { keySeq += 1; return `${type}_${Date.now().toString(36)}_${keySeq}`; }
 
+function conditionLabel(check: string): string {
+  return CONDITION_CHECKS.find((c) => c.value === check)?.label ?? (check || "Set condition");
+}
+function goalLabel(goalType: string): string {
+  return GOAL_TYPES.find((g) => g.value === goalType)?.label ?? (goalType || "Set goal");
+}
+
 function deriveSubtitle(type: string, cfg: Record<string, unknown>, templateName?: string | null): string {
   switch (type) {
     case "trigger": return String(cfg.eventType ?? "");
     case "wait": return `${cfg.durationValue ?? 1} ${cfg.durationUnit ?? "days"}`;
     case "send_sms": return templateName || (cfg.templateName as string) || "No template";
-    case "condition": return [cfg.field, cfg.operator, cfg.value].filter(Boolean).join(" ") || "Set condition";
-    case "goal": return String(cfg.goalType ?? "");
+    case "condition": return conditionLabel(String(cfg.check ?? cfg.field ?? ""));
+    case "goal": return goalLabel(String(cfg.goalType ?? ""));
     case "staff_task": return String(cfg.assignee ?? "") || "Unassigned";
     case "branch": return `${Array.isArray(cfg.branches) ? cfg.branches.length : 0} paths`;
     case "exit": return "Ends journey";

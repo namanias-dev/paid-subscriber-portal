@@ -1,8 +1,10 @@
 "use client";
 
 import { useMemo } from "react";
-import { SendHorizontal, AlertTriangle, Info } from "lucide-react";
+import { SendHorizontal, AlertTriangle, Info, Plus, Trash2, ExternalLink, HelpCircle } from "lucide-react";
+import Link from "next/link";
 import type { AutomationTemplateOption } from "@/types/journey-automation";
+import { CONDITION_CHECKS, SMS_CATEGORIES, GOAL_TYPES, JOURNEY_VARIABLES } from "./nodeCatalog";
 
 export interface InspectorNode {
   node_key: string;
@@ -22,6 +24,15 @@ function estimateParts(body: string): number {
   const len = body.length;
   if (len === 0) return 0;
   return len <= 160 ? 1 : Math.ceil(len / 153);
+}
+
+/** Small inline help tooltip (keyboard-focusable). */
+function Help({ text }: { text: string }) {
+  return (
+    <span className="ja-help" tabIndex={0} role="note" aria-label={text} title={text}>
+      <HelpCircle size={12} aria-hidden="true" />
+    </span>
+  );
 }
 
 export default function NodeInspector({ node, templates, canEdit, onChange, onDelete }: Props) {
@@ -51,90 +62,91 @@ export default function NodeInspector({ node, templates, canEdit, onChange, onDe
     <div className="ja-panel ja-panel-right p-4">
       <div className="mb-4 flex items-center justify-between">
         <h3 className="font-heading text-sm font-bold capitalize">{String(node.type).replace(/_/g, " ")}</h3>
-        <button type="button" className="ja-btn-sm" data-variant="danger" onClick={onDelete} disabled={disabled}>Delete</button>
+        <button type="button" className="ja-btn-sm" data-variant="danger" onClick={onDelete} disabled={disabled}>
+          <Trash2 size={13} aria-hidden="true" /> Delete
+        </button>
       </div>
 
       <div className="ja-field">
-        <label className="ja-insp-label">Title</label>
+        <label className="ja-insp-label">Step name <Help text="A short label shown on the canvas so the flow reads clearly." /></label>
         <input className="ja-input" value={String(cfg.title ?? "")} disabled={disabled} onChange={(e) => set({ title: e.target.value })} />
       </div>
 
       {node.type === "trigger" && (
         <>
           <div className="ja-field">
-            <label className="ja-insp-label">Event</label>
-            <div className="ja-preview">{String(cfg.eventType ?? "—")}</div>
+            <label className="ja-insp-label">Enrolls when <Help text="The business event that starts this journey for a contact." /></label>
+            <div className="ja-preview">{triggerLabel(String(cfg.eventType ?? "—"))}</div>
           </div>
-          <p className="text-xs text-muted">This trigger fires when the event is captured. Nothing enrols yet — execution is disabled.</p>
+          <p className="text-xs text-muted">Every contact who triggers this event enrolls once. Nothing runs until execution is enabled — this is safe to design and dry-run now.</p>
         </>
       )}
 
       {node.type === "wait" && (
-        <div className="grid grid-cols-2 gap-2">
-          <div className="ja-field">
-            <label className="ja-insp-label">Duration</label>
-            <input type="number" min={1} className="ja-input" value={Number(cfg.durationValue ?? 1)} disabled={disabled} onChange={(e) => set({ durationValue: Math.max(1, Number(e.target.value) || 1) })} />
+        <>
+          <div className="grid grid-cols-2 gap-2">
+            <div className="ja-field">
+              <label className="ja-insp-label">Duration</label>
+              <input type="number" min={1} className="ja-input" value={Number(cfg.durationValue ?? 1)} disabled={disabled} onChange={(e) => set({ durationValue: Math.max(1, Number(e.target.value) || 1) })} />
+            </div>
+            <div className="ja-field">
+              <label className="ja-insp-label">Unit</label>
+              <select className="ja-select" value={String(cfg.durationUnit ?? "days")} disabled={disabled} onChange={(e) => set({ durationUnit: e.target.value })}>
+                <option value="minutes">Minutes</option>
+                <option value="hours">Hours</option>
+                <option value="days">Days</option>
+              </select>
+            </div>
           </div>
-          <div className="ja-field">
-            <label className="ja-insp-label">Unit</label>
-            <select className="ja-select" value={String(cfg.durationUnit ?? "days")} disabled={disabled} onChange={(e) => set({ durationUnit: e.target.value })}>
-              <option value="minutes">Minutes</option>
-              <option value="hours">Hours</option>
-              <option value="days">Days</option>
-            </select>
-          </div>
-        </div>
+          <p className="text-xs text-muted">The journey pauses here, then continues. Business truth is re-checked before the next step (e.g. a paid student stops receiving reminders).</p>
+        </>
       )}
 
       {node.type === "condition" && (
         <>
           <div className="ja-field">
-            <label className="ja-insp-label">Field</label>
-            <input className="ja-input" placeholder="e.g. payment_status" value={String(cfg.field ?? "")} disabled={disabled} onChange={(e) => set({ field: e.target.value })} />
+            <label className="ja-insp-label">Check <Help text="Evaluated live against current business truth right before this step runs." /></label>
+            <select className="ja-select" value={String(cfg.check ?? "has_logged_in")} disabled={disabled} onChange={(e) => set({ check: e.target.value })}>
+              {CONDITION_CHECKS.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+            </select>
+            <p className="mt-1 text-[11px] text-muted">{CONDITION_CHECKS.find((c) => c.value === (cfg.check ?? "has_logged_in"))?.help}</p>
           </div>
-          <div className="grid grid-cols-2 gap-2">
-            <div className="ja-field">
-              <label className="ja-insp-label">Operator</label>
-              <select className="ja-select" value={String(cfg.operator ?? "eq")} disabled={disabled} onChange={(e) => set({ operator: e.target.value })}>
-                <option value="eq">equals</option>
-                <option value="neq">not equals</option>
-                <option value="gt">greater than</option>
-                <option value="lt">less than</option>
-                <option value="contains">contains</option>
-              </select>
-            </div>
-            <div className="ja-field">
-              <label className="ja-insp-label">Value</label>
-              <input className="ja-input" value={String(cfg.value ?? "")} disabled={disabled} onChange={(e) => set({ value: e.target.value })} />
-            </div>
-          </div>
-          <p className="text-xs text-muted">Connect the <b>yes</b> and <b>no</b> edges from this node to define both paths.</p>
+          <p className="text-xs text-muted">Connect the <b>Yes</b> edge (true) and the <b>No</b> edge (false) from this node to define both paths.</p>
         </>
+      )}
+
+      {node.type === "branch" && (
+        <BranchInspector cfg={cfg} disabled={disabled} set={set} />
       )}
 
       {node.type === "staff_task" && (
         <>
           <div className="ja-field">
-            <label className="ja-insp-label">Assignee</label>
-            <input className="ja-input" placeholder="Team or person" value={String(cfg.assignee ?? "")} disabled={disabled} onChange={(e) => set({ assignee: e.target.value })} />
+            <label className="ja-insp-label">Assign to <Help text="Team or person responsible. Creates a task record for humans — never sends anything." /></label>
+            <input className="ja-input" placeholder="e.g. Counselling team" value={String(cfg.assignee ?? "")} disabled={disabled} onChange={(e) => set({ assignee: e.target.value })} />
           </div>
           <div className="ja-field">
-            <label className="ja-insp-label">Details</label>
-            <textarea className="ja-textarea" value={String(cfg.details ?? "")} disabled={disabled} onChange={(e) => set({ details: e.target.value })} />
+            <label className="ja-insp-label">Task details</label>
+            <textarea className="ja-textarea" placeholder="What should the team do?" value={String(cfg.details ?? "")} disabled={disabled} onChange={(e) => set({ details: e.target.value })} />
           </div>
+          <p className="text-xs text-muted">Creates a follow-up task for the team (e.g. call a high-intent lead). No message is sent.</p>
         </>
       )}
 
       {node.type === "goal" && (
-        <div className="ja-field">
-          <label className="ja-insp-label">Goal type</label>
-          <select className="ja-select" value={String(cfg.goalType ?? "payment_completed")} disabled={disabled} onChange={(e) => set({ goalType: e.target.value })}>
-            <option value="payment_completed">Payment completed</option>
-            <option value="webinar_attended">Webinar attended</option>
-            <option value="course_enrolled">Course enrolled</option>
-            <option value="custom">Custom</option>
-          </select>
-        </div>
+        <>
+          <div className="ja-field">
+            <label className="ja-insp-label">Goal achieved when <Help text="When this becomes true for a contact, the journey completes as a success and stops." /></label>
+            <select className="ja-select" value={String(cfg.goalType ?? "logged_in")} disabled={disabled} onChange={(e) => set({ goalType: e.target.value })}>
+              {GOAL_TYPES.map((g) => <option key={g.value} value={g.value}>{g.label}</option>)}
+            </select>
+          </div>
+          <p className="text-xs text-muted">Goals are checked before every step. A met goal exits the contact cleanly and powers conversion analytics.</p>
+        </>
+      )}
+
+      {node.type === "exit" && (
+        <p className="text-xs text-muted">Ends the journey for this contact with a clean exit. Use it to close every branch that isn&apos;t a goal.</p>
       )}
 
       {node.type === "send_sms" && (
@@ -142,6 +154,68 @@ export default function NodeInspector({ node, templates, canEdit, onChange, onDe
       )}
     </div>
   );
+}
+
+function triggerLabel(eventType: string): string {
+  const map: Record<string, string> = {
+    lead_created: "A new lead is registered",
+    payment_received: "A payment is received",
+    installment_overdue: "An installment becomes overdue",
+    webinar_registered: "A webinar registration happens",
+  };
+  return map[eventType] ?? eventType;
+}
+
+function BranchInspector({ cfg, disabled, set }: {
+  cfg: Record<string, unknown>;
+  disabled: boolean;
+  set: (p: Record<string, unknown>) => void;
+}) {
+  const branches = normalizeBranches(cfg.branches);
+  const total = branches.reduce((s, b) => s + (b.weight || 0), 0) || 1;
+
+  function update(next: { label: string; weight: number }[]) {
+    set({ branches: next });
+  }
+
+  return (
+    <>
+      <div className="ja-field">
+        <label className="ja-insp-label">Paths &amp; weights <Help text="Contacts are split deterministically by weight. Connect one edge per label. Same contact always takes the same path." /></label>
+        {branches.map((b, i) => (
+          <div key={i} className="mb-1.5 flex items-center gap-2">
+            <input
+              className="ja-input" placeholder="Path label" value={b.label} disabled={disabled}
+              onChange={(e) => update(branches.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)))}
+            />
+            <input
+              type="number" min={0} className="ja-input" style={{ maxWidth: 72 }} value={b.weight} disabled={disabled}
+              onChange={(e) => update(branches.map((x, j) => (j === i ? { ...x, weight: Math.max(0, Number(e.target.value) || 0) } : x)))}
+            />
+            <span className="min-w-[38px] text-right text-[11px] text-muted">{Math.round((b.weight / total) * 100)}%</span>
+            {branches.length > 2 && (
+              <button type="button" className="ja-btn-sm" data-variant="danger" disabled={disabled} onClick={() => update(branches.filter((_, j) => j !== i))} aria-label="Remove path">
+                <Trash2 size={12} aria-hidden="true" />
+              </button>
+            )}
+          </div>
+        ))}
+        {!disabled && branches.length < 5 && (
+          <button type="button" className="ja-btn-sm mt-1" onClick={() => update([...branches, { label: String.fromCharCode(65 + branches.length), weight: 1 }])}>
+            <Plus size={12} aria-hidden="true" /> Add path
+          </button>
+        )}
+      </div>
+      <p className="text-xs text-muted">Great for A/B testing message variants. Draw one edge from this node per path label.</p>
+    </>
+  );
+}
+
+function normalizeBranches(raw: unknown): { label: string; weight: number }[] {
+  if (Array.isArray(raw) && raw.length) {
+    return raw.map((b) => (typeof b === "string" ? { label: b, weight: 1 } : { label: String((b as Record<string, unknown>)?.label ?? ""), weight: Math.max(0, Number((b as Record<string, unknown>)?.weight ?? 1) || 0) }));
+  }
+  return [{ label: "A", weight: 1 }, { label: "B", weight: 1 }];
 }
 
 function SmsInspector({ cfg, templates, selectedTemplate, disabled, set }: {
@@ -155,30 +229,63 @@ function SmsInspector({ cfg, templates, selectedTemplate, disabled, set }: {
   const mapping = (cfg.variableMapping && typeof cfg.variableMapping === "object" ? cfg.variableMapping : {}) as Record<string, string>;
   const quietHours = (cfg.quietHours && typeof cfg.quietHours === "object" ? cfg.quietHours : { start: "21:00", end: "08:00" }) as { start: string; end: string };
   const freq = (cfg.frequencyCap && typeof cfg.frequencyCap === "object" ? cfg.frequencyCap : { perDays: 1, max: 1 }) as { perDays: number; max: number };
+  const category = String(cfg.category ?? "transactional");
   const body = selectedTemplate?.body ?? "";
   const missing = variables.filter((v) => !mapping[v] || String(mapping[v]).trim() === "");
 
   function selectTemplate(id: string) {
     const t = templates.find((x) => x.id === id);
-    set({ automationTemplateId: id || null, smsTemplateId: t?.sms_template_id ?? null, templateName: t?.name ?? null, templateVariables: t?.variables ?? [], body: t?.body ?? "" });
+    // Auto-map each DLT variable to the same-named journey variable when one exists.
+    const known = new Set(JOURNEY_VARIABLES.map((j) => j.value));
+    const autoMap: Record<string, string> = {};
+    for (const v of t?.variables ?? []) if (known.has(v)) autoMap[v] = v;
+    set({
+      automationTemplateId: id || null,
+      sms_template_id: t?.sms_template_id ?? null,
+      templateName: t?.name ?? null,
+      templateVariables: t?.variables ?? [],
+      body: t?.body ?? "",
+      variableMapping: { ...autoMap, ...mapping },
+    });
+  }
+
+  // Empty state: no approved DLT templates exist in Mission Control.
+  if (templates.length === 0) {
+    return (
+      <div className="ja-field">
+        <label className="ja-insp-label">Approved DLT template</label>
+        <div className="rounded-lg border p-3 text-xs" style={{ borderColor: "var(--gold)", background: "var(--gold-soft)" }}>
+          <p className="font-semibold" style={{ color: "var(--navy, #0a1f44)" }}>No approved templates yet</p>
+          <p className="mt-1 text-ink2">Journeys can only send DLT-approved templates. Create and approve one in SMS Mission Control, then it will appear here automatically.</p>
+          <Link href="/admin/communications/sms" className="mt-2 inline-flex items-center gap-1 font-medium text-[var(--primary)] hover:underline">
+            Open SMS Mission Control <ExternalLink size={12} aria-hidden="true" />
+          </Link>
+        </div>
+      </div>
+    );
   }
 
   return (
     <>
       <div className="ja-field">
-        <label className="ja-insp-label">Approved DLT template</label>
+        <label className="ja-insp-label">Approved DLT template <Help text="Only DLT-approved templates from SMS Mission Control can be selected. This is the single source of truth." /></label>
         <select className="ja-select" value={String(cfg.automationTemplateId ?? "")} disabled={disabled} onChange={(e) => selectTemplate(e.target.value)}>
           <option value="">Select a template…</option>
           {templates.map((t) => (
-            <option key={t.id} value={t.id} disabled={!t.approved}>
-              {t.name}{t.approved ? "" : " (not approved)"}
-            </option>
+            <option key={t.id} value={t.id}>{t.name}</option>
           ))}
         </select>
-        {templates.length === 0 && <p className="mt-1 text-xs text-muted">No journey templates yet. Add DLT-approved templates to enable SMS nodes.</p>}
         {selectedTemplate && (
-          <p className="mt-1 text-[11px] text-muted">DLT: {selectedTemplate.dlt_template_id ?? "—"} · {selectedTemplate.approved ? "Approved" : "Not approved"}</p>
+          <p className="mt-1 text-[11px] text-muted">DLT ID: {selectedTemplate.dlt_template_id ?? "—"} · Approved</p>
         )}
+      </div>
+
+      <div className="ja-field">
+        <label className="ja-insp-label">Message category <Help text="Controls compliance suppression: payment reminders auto-stop once paid; promotional respects the promo flag." /></label>
+        <select className="ja-select" value={category} disabled={disabled} onChange={(e) => set({ category: e.target.value })}>
+          {SMS_CATEGORIES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+        </select>
+        <p className="mt-1 text-[11px] text-muted">{SMS_CATEGORIES.find((c) => c.value === category)?.help}</p>
       </div>
 
       {selectedTemplate && (
@@ -191,22 +298,26 @@ function SmsInspector({ cfg, templates, selectedTemplate, disabled, set }: {
 
           {variables.length > 0 && (
             <div className="ja-field">
-              <label className="ja-insp-label">Variable mapping</label>
+              <label className="ja-insp-label">Variable mapping <Help text="Map each template placeholder to a journey variable. Secret values (login code/URL) are resolved live at send time and never stored." /></label>
               {variables.map((v) => (
                 <div key={v} className="mb-1.5 flex items-center gap-2">
                   <code className="min-w-[92px] text-[11px] text-ink2">{`{${v}}`}</code>
-                  <input
-                    className="ja-input"
-                    placeholder="source e.g. student.name"
+                  <select
+                    className="ja-select"
                     value={mapping[v] ?? ""}
                     disabled={disabled}
                     onChange={(e) => set({ variableMapping: { ...mapping, [v]: e.target.value } })}
-                  />
+                  >
+                    <option value="">— choose source —</option>
+                    {JOURNEY_VARIABLES.map((j) => (
+                      <option key={j.value} value={j.value}>{j.label}</option>
+                    ))}
+                  </select>
                 </div>
               ))}
               {missing.length > 0 && (
                 <p className="mt-1 flex items-center gap-1 text-[11px]" style={{ color: "var(--danger)" }}>
-                  <AlertTriangle size={12} aria-hidden="true" /> Missing mapping: {missing.join(", ")}
+                  <AlertTriangle size={12} aria-hidden="true" /> Map every variable: {missing.map((m) => `{${m}}`).join(", ")}
                 </p>
               )}
             </div>
@@ -226,7 +337,7 @@ function SmsInspector({ cfg, templates, selectedTemplate, disabled, set }: {
       </div>
       <div className="grid grid-cols-2 gap-2">
         <div className="ja-field">
-          <label className="ja-insp-label">Frequency cap (max)</label>
+          <label className="ja-insp-label">Max sends <Help text="Frequency cap: the most sends allowed to a contact within the window below." /></label>
           <input type="number" min={1} className="ja-input" value={Number(freq.max ?? 1)} disabled={disabled} onChange={(e) => set({ frequencyCap: { ...freq, max: Math.max(1, Number(e.target.value) || 1) } })} />
         </div>
         <div className="ja-field">
@@ -240,7 +351,7 @@ function SmsInspector({ cfg, templates, selectedTemplate, disabled, set }: {
         <button type="button" className="btn btn-ghost w-full cursor-not-allowed opacity-60" disabled title="Available when execution is enabled">
           <SendHorizontal size={14} aria-hidden="true" /> Test send
         </button>
-        <p className="mt-1 text-center text-[11px] text-muted">Available when execution is enabled.</p>
+        <p className="mt-1 text-center text-[11px] text-muted">Sending is off. Use Validate + Dry-run to preview safely.</p>
       </div>
     </>
   );

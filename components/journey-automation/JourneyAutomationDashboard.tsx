@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Workflow, Power, ShieldCheck, Sparkles, Plus } from "lucide-react";
+import { Workflow, Power, ShieldCheck, Plus, Pencil, Copy, Archive, ArchiveRestore, Trash2, Settings2, BarChart3 } from "lucide-react";
 import { PageHeader, KpiCard, TableShell, LoadingBlock } from "@/components/admin/ui";
 import type { AutomationWorkflow, WorkflowStatus } from "@/types/journey-automation";
 import type { JourneyFlagSnapshot } from "@/lib/journey-automation/flags";
@@ -18,6 +18,7 @@ interface KillSwitchState {
 interface OverviewResponse {
   ok: boolean;
   workflows: AutomationWorkflow[];
+  triggers?: Record<string, string>;
   flags: JourneyFlagSnapshot;
   killSwitch: KillSwitchState;
 }
@@ -25,6 +26,18 @@ interface OverviewResponse {
 interface AdminMe {
   permissions?: Record<string, boolean>;
 }
+
+const TRIGGER_LABEL: Record<string, string> = {
+  lead_created: "Lead registered",
+  payment_received: "Payment received",
+  installment_overdue: "Installment overdue",
+  webinar_registered: "Webinar registered",
+};
+
+const EXEC_MODE_LABEL: Record<string, string> = { off: "Off", simulate: "Simulate", live: "Live" };
+
+const ROW_BTN = "inline-flex h-8 w-8 items-center justify-center rounded-lg border border-line bg-white text-ink2 transition-colors hover:border-[var(--primary)] hover:text-[var(--primary)] disabled:opacity-40 disabled:cursor-not-allowed";
+const ROW_BTN_DANGER = "inline-flex h-8 w-8 items-center justify-center rounded-lg border border-line bg-white text-ink2 transition-colors hover:border-[var(--danger)] hover:text-[var(--danger)] disabled:opacity-40 disabled:cursor-not-allowed";
 
 const STATUS_PILL: Record<WorkflowStatus, string> = {
   draft: "pill-gray",
@@ -57,8 +70,11 @@ export default function JourneyAutomationDashboard() {
   const [loading, setLoading] = useState(true);
   const [canKill, setCanKill] = useState(false);
   const [canCreate, setCanCreate] = useState(false);
+  const [canEdit, setCanEdit] = useState(false);
+  const [canPause, setCanPause] = useState(false);
   const [saving, setSaving] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [rowBusy, setRowBusy] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -71,12 +87,74 @@ export default function JourneyAutomationDashboard() {
       const me = (meRes?.admin ?? null) as AdminMe | null;
       setCanKill(me?.permissions?.journey_manage_killswitch === true);
       setCanCreate(me?.permissions?.journey_create_draft === true);
+      setCanEdit(me?.permissions?.journey_edit_draft === true);
+      setCanPause(me?.permissions?.journey_pause === true);
     } catch {
       setData(null);
     } finally {
       setLoading(false);
     }
   }, []);
+
+  async function renameJourney(w: AutomationWorkflow) {
+    if (rowBusy || !canEdit) return;
+    const name = window.prompt("Rename this journey:", w.name);
+    if (name == null || name.trim() === "" || name.trim() === w.name) return;
+    setRowBusy(w.id);
+    try {
+      await fetch(`/api/admin/journey-automation/workflows/${w.id}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: name.trim() }),
+      });
+      await load();
+    } finally { setRowBusy(null); }
+  }
+
+  async function duplicateJourney(w: AutomationWorkflow) {
+    if (rowBusy || !canCreate) return;
+    setRowBusy(w.id);
+    try {
+      const res = await fetch(`/api/admin/journey-automation/workflows/${w.id}/duplicate`, { method: "POST" }).then((r) => r.json());
+      if (res?.ok && res.workflow?.id) router.push(`/admin/communications/journey-automation/${res.workflow.id}`);
+      else await load();
+    } finally { setRowBusy(null); }
+  }
+
+  async function archiveJourney(w: AutomationWorkflow) {
+    if (rowBusy || !canPause) return;
+    if (!window.confirm(`Archive "${w.name}"? It stops appearing in active lists but is fully reversible and keeps its audit history.`)) return;
+    setRowBusy(w.id);
+    try {
+      await fetch(`/api/admin/journey-automation/workflows/${w.id}/status`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "archive" }),
+      });
+      await load();
+    } finally { setRowBusy(null); }
+  }
+
+  async function restoreJourney(w: AutomationWorkflow) {
+    if (rowBusy || !canPause) return;
+    setRowBusy(w.id);
+    try {
+      await fetch(`/api/admin/journey-automation/workflows/${w.id}/status`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "restore" }),
+      });
+      await load();
+    } finally { setRowBusy(null); }
+  }
+
+  async function deleteJourney(w: AutomationWorkflow) {
+    if (rowBusy || !canEdit) return;
+    if (!window.confirm(`Permanently delete draft "${w.name}"? This cannot be undone. (Only never-published drafts can be deleted.)`)) return;
+    setRowBusy(w.id);
+    try {
+      const res = await fetch(`/api/admin/journey-automation/workflows/${w.id}`, { method: "DELETE" }).then((r) => r.json());
+      if (!res?.ok) window.alert(res?.error || "Delete failed");
+      await load();
+    } finally { setRowBusy(null); }
+  }
 
   async function createJourney() {
     if (creating || !canCreate) return;
@@ -141,8 +219,8 @@ export default function JourneyAutomationDashboard() {
         subtitle="Design, version and orchestrate student communication journeys — safely."
         action={
           <div className="flex items-center gap-2">
-            <span className="pill pill-gold inline-flex items-center gap-1.5">
-              <Sparkles size={13} strokeWidth={2} aria-hidden="true" /> Builder preview
+            <span className="pill pill-gray inline-flex items-center gap-1.5">
+              <ShieldCheck size={13} strokeWidth={2} aria-hidden="true" /> Simulation mode
             </span>
             {canCreate && (
               <button type="button" className="btn btn-primary" disabled={creating} onClick={createJourney}>
@@ -263,27 +341,43 @@ export default function JourneyAutomationDashboard() {
           )}
         </div>
       ) : (
-        <TableShell headers={["Workflow", "Status", "Version", "Updated", ""]}>
-          {workflows.map((w) => (
-            <tr key={w.id} className="border-b border-line last:border-0 hover:bg-[var(--surface)]">
-              <td className="px-4 py-3">
-                <Link href={`/admin/communications/journey-automation/${w.id}`} className="font-medium text-[var(--primary)] hover:underline">
-                  {w.name}
-                </Link>
-                {w.description && <div className="text-xs text-muted">{w.description}</div>}
-              </td>
-              <td className="px-4 py-3">
-                <span className={`pill ${STATUS_PILL[w.status] ?? "pill-gray"}`}>{STATUS_LABEL[w.status] ?? w.status}</span>
-              </td>
-              <td className="px-4 py-3 tabular-nums">{w.published_version != null ? `v${w.published_version}` : "—"}</td>
-              <td className="px-4 py-3 text-ink2">{fmtDate(w.updated_at)}</td>
-              <td className="px-4 py-3 text-right">
-                <Link href={`/admin/communications/journey-automation/${w.id}/operate`} className="text-sm text-[var(--primary)] hover:underline">
-                  Operate &amp; analytics
-                </Link>
-              </td>
-            </tr>
-          ))}
+        <TableShell headers={["Workflow", "Trigger", "Status", "Mode", "Version", "Updated", "Actions"]}>
+          {workflows.map((w) => {
+            const trigger = data?.triggers?.[w.id];
+            const mode = w.execution_mode ?? "off";
+            const neverPublished = w.published_version == null;
+            const busy = rowBusy === w.id;
+            return (
+              <tr key={w.id} className="border-b border-line last:border-0 hover:bg-[var(--surface)]">
+                <td className="px-4 py-3">
+                  <Link href={`/admin/communications/journey-automation/${w.id}`} className="font-medium text-[var(--primary)] hover:underline">
+                    {w.name}
+                  </Link>
+                  {w.description && <div className="text-xs text-muted">{w.description}</div>}
+                </td>
+                <td className="px-4 py-3 text-ink2">{trigger ? (TRIGGER_LABEL[trigger] ?? trigger) : "—"}</td>
+                <td className="px-4 py-3">
+                  <span className={`pill ${STATUS_PILL[w.status] ?? "pill-gray"}`}>{STATUS_LABEL[w.status] ?? w.status}</span>
+                </td>
+                <td className="px-4 py-3">
+                  <span className={`pill ${mode === "live" ? "pill-red" : mode === "simulate" ? "pill-blue" : "pill-gray"}`}>{EXEC_MODE_LABEL[mode] ?? mode}</span>
+                </td>
+                <td className="px-4 py-3 tabular-nums">{w.published_version != null ? `v${w.published_version}` : "—"}</td>
+                <td className="px-4 py-3 text-ink2">{fmtDate(w.updated_at)}</td>
+                <td className="px-4 py-3">
+                  <div className="flex items-center justify-end gap-1">
+                    <Link href={`/admin/communications/journey-automation/${w.id}`} className={ROW_BTN} title="Open builder"><Pencil size={14} aria-hidden="true" /></Link>
+                    <Link href={`/admin/communications/journey-automation/${w.id}/operate`} className={ROW_BTN} title="Operate & analytics"><BarChart3 size={14} aria-hidden="true" /></Link>
+                    {canEdit && <button type="button" className={ROW_BTN} title="Rename" disabled={busy} onClick={() => renameJourney(w)}><Settings2 size={14} aria-hidden="true" /></button>}
+                    {canCreate && <button type="button" className={ROW_BTN} title="Duplicate" disabled={busy} onClick={() => duplicateJourney(w)}><Copy size={14} aria-hidden="true" /></button>}
+                    {canPause && w.status !== "archived" && <button type="button" className={ROW_BTN} title="Archive" disabled={busy} onClick={() => archiveJourney(w)}><Archive size={14} aria-hidden="true" /></button>}
+                    {canPause && w.status === "archived" && <button type="button" className={ROW_BTN} title="Restore" disabled={busy} onClick={() => restoreJourney(w)}><ArchiveRestore size={14} aria-hidden="true" /></button>}
+                    {canEdit && neverPublished && <button type="button" className={ROW_BTN_DANGER} title="Delete draft" disabled={busy} onClick={() => deleteJourney(w)}><Trash2 size={14} aria-hidden="true" /></button>}
+                  </div>
+                </td>
+              </tr>
+            );
+          })}
         </TableShell>
       )}
     </>
