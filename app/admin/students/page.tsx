@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { RefreshCw, Search, Users } from "lucide-react";
 import { PageHeader, LoadingBlock, KpiCard } from "@/components/admin/ui";
+import CourseFeesStrip from "@/components/admin/students/CourseFeesStrip";
 import StatusPill, { statusOf } from "@/components/ui/StatusPill";
 import { useToast } from "@/components/ui/Toast";
 import { formatDate, formatINR } from "@/lib/dates";
@@ -177,7 +178,7 @@ export default function StudentsAdmin() {
     <div>
       <PageHeader
         title="Students & Enrollments"
-        subtitle="Every paying student — courses, webinars, EMI & access — in one place"
+        subtitle="Operational lens — find & manage a person: identity, contact, enrollments & access. For cohort money & seats, use Course EMI & Seats."
         action={
           <div className="flex flex-wrap items-center gap-2">
             <button
@@ -200,6 +201,9 @@ export default function StudentsAdmin() {
         <KpiCard label="Collected" value={formatINR(totalCollected)} tone="amber" />
         <KpiCard label="Outstanding" value={formatINR(totalOutstanding)} tone="red" />
       </div>
+
+      {/* Finance-lens deep link — same source as Course EMI & Seats (numbers match exactly). */}
+      <CourseFeesStrip />
 
       {/* Filters */}
       <div className="card mb-4 p-3">

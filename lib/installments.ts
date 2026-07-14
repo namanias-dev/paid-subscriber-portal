@@ -430,6 +430,49 @@ export function deriveEnrollment(enr: Pick<CourseEnrollment, "total_fee" | "sche
   };
 }
 
+export interface CollectionsDerived extends EnrollmentDerived {
+  /** ₹ of outstanding (unpaid, not cancelled/waived) lines whose due date has passed. */
+  overdueAmount: number;
+  /** Count of outstanding installment/seat lines past their due date. */
+  missedInstallments: number;
+  /** Whole days since the EARLIEST overdue line's due date (0 when nothing overdue). */
+  daysOverdue: number;
+  /** The next payable line's due date + amount (null/0 when nothing left to pay). */
+  nextDueDate: string | null;
+  nextDueAmount: number;
+}
+
+/**
+ * Collections/finance view of an enrollment — extends deriveEnrollment (the ONE
+ * source of truth for paid/remaining) with overdue-specific figures used by the
+ * Course EMI drill-in, the collections worklist and the Students summary strip.
+ * Pure (no I/O). Safe on empty/thin schedules — never throws, never divides by 0.
+ */
+export function deriveCollections(
+  enr: Pick<CourseEnrollment, "total_fee" | "schedule">,
+  now = Date.now(),
+): CollectionsDerived {
+  const base = deriveEnrollment(enr, now);
+  const schedule = enr.schedule || [];
+  const overdueLines = schedule.filter(
+    (s) => isLineOutstanding(s) && s.due != null && new Date(s.due).getTime() < now,
+  );
+  const overdueAmount = overdueLines.reduce((a, s) => a + (s.amount || 0), 0);
+  let daysOverdue = 0;
+  if (overdueLines.length > 0) {
+    const earliest = Math.min(...overdueLines.map((s) => new Date(s.due as string).getTime()));
+    daysOverdue = Math.max(0, Math.floor((now - earliest) / 86400000));
+  }
+  return {
+    ...base,
+    overdueAmount,
+    missedInstallments: overdueLines.length,
+    daysOverdue,
+    nextDueDate: base.nextPayable?.due ?? null,
+    nextDueAmount: base.nextPayable?.amount ?? 0,
+  };
+}
+
 /** Display status for a schedule line. */
 export function installmentStatus(item: InstallmentItem, now = Date.now()): "paid" | "overdue" | "due-soon" | "upcoming" | "waived" | "cancelled" {
   if (item.paid) return "paid";
