@@ -44,6 +44,7 @@ import {
   Armchair,
   Clock,
   AlertTriangle,
+  ShieldAlert,
   UserCog,
   Settings,
   // content types
@@ -118,6 +119,7 @@ export const APP_ICONS = {
   seats: Armchair,
   fees_risk: AlertTriangle,
   access_risk: Clock,
+  at_risk: ShieldAlert,
   staff: UserCog,
   settings: Settings,
 

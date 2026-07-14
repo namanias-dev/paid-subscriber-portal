@@ -5,7 +5,6 @@ import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { ChevronLeft, ChevronRight, Search } from "lucide-react";
 import { useAdminData, LoadingBlock } from "@/components/admin/ui";
-import PeopleTabs from "@/components/admin/people/PeopleTabs";
 import { HeaderStat, InstallmentSchedule } from "@/components/admin/collections/parts";
 import { formatINR, formatISTDate } from "@/lib/dates";
 import { deriveCollections } from "@/lib/installments";
@@ -133,11 +132,10 @@ export default function CohortDrillIn() {
 
   return (
     <div>
-      <PeopleTabs active="fees" />
       {/* Breadcrumb + back */}
       <div className="mb-4 flex items-center gap-2 text-sm text-muted">
         <Link href="/admin/course-payments" className="inline-flex items-center gap-1 hover:text-primary">
-          <ChevronLeft size={15} /> Course EMI &amp; Seats
+          <ChevronLeft size={15} /> Fees &amp; EMI
         </Link>
         <span>/</span>
         <span className="font-medium text-ink2">Cohort</span>

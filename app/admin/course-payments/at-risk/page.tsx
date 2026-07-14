@@ -1,7 +1,7 @@
 "use client";
 
 import { PageHeader } from "@/components/admin/ui";
-import PeopleTabs from "@/components/admin/people/PeopleTabs";
+import AtRiskTabs from "@/components/admin/people/AtRiskTabs";
 import CollectionsWorklist from "@/components/admin/collections/CollectionsWorklist";
 
 export default function FeesAtRiskAdmin() {
@@ -11,7 +11,7 @@ export default function FeesAtRiskAdmin() {
         title="Fees at Risk (Collections)"
         subtitle="Collections lens — overdue course-fee EMIs to chase (IST). Display & navigation only; record payments from a student's profile."
       />
-      <PeopleTabs active="risk" />
+      <AtRiskTabs active="payment" />
       <CollectionsWorklist />
     </div>
   );
