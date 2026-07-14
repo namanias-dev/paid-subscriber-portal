@@ -26,6 +26,34 @@ const STATUS_LABEL: Record<string, string> = {
 
 const NO_BATCH = "(No batch label)";
 
+/** Card-driven list filters. Each reuses an EXISTING predicate — no new math. */
+type FeeFilter = "all" | "paid" | "outstanding" | "overdue";
+
+/** Single source of truth for both the card counts and the table rows, so the
+ *  filtered subset always reconciles exactly to the card it came from. */
+function matchesFeeFilter(e: CourseEnrollment, f: FeeFilter): boolean {
+  if (f === "all") return true;
+  if (f === "overdue") return deriveEnrollment(e).hasOverdue;
+  const remaining = Math.max(0, e.total_fee - e.amount_paid);
+  if (f === "paid") return remaining <= 0;
+  if (f === "outstanding") return remaining > 0;
+  return true;
+}
+
+const FILTER_LABEL: Record<FeeFilter, string> = {
+  all: "All enrollments",
+  paid: "Fully-paid enrollments",
+  outstanding: "Enrollments with an outstanding balance",
+  overdue: "Enrollments with an overdue installment",
+};
+
+const FILTER_EMPTY: Record<FeeFilter, string> = {
+  all: "No seat/EMI enrollments yet.",
+  paid: "No fully-paid enrollments.",
+  outstanding: "No enrollments with an outstanding balance.",
+  overdue: "No overdue accounts. 🎉",
+};
+
 interface CohortSummary {
   courseId: string;
   /** When set, this card is a course+batch cohort. */
@@ -86,6 +114,7 @@ function summarize(
 export default function CoursePaymentsAdmin() {
   const router = useRouter();
   const [groupBy, setGroupBy] = useState<"course" | "batch">("course");
+  const [filter, setFilter] = useState<FeeFilter>("all");
   const enr = useAdminData<CourseEnrollment[]>("/api/admin/course-enrollments", "enrollments");
   const courses = useAdminData<Course[]>("/api/admin/courses", "courses");
   if (enr.loading) return <LoadingBlock />;
@@ -94,7 +123,14 @@ export default function CoursePaymentsAdmin() {
   const all = (enr.data || []).filter((e) => e.amount_paid > 0 && e.status !== "cancelled");
   const courseFeesCollected = all.reduce((a, e) => a + e.amount_paid, 0);
   const outstanding = all.reduce((a, e) => a + Math.max(0, e.total_fee - e.amount_paid), 0);
-  const overdue = all.filter((e) => deriveEnrollment(e).hasOverdue).length;
+  // Counts share the SAME predicate as the table filter → guaranteed reconciliation.
+  const paidCount = all.filter((e) => matchesFeeFilter(e, "paid")).length;
+  const outstandingCount = all.filter((e) => matchesFeeFilter(e, "outstanding")).length;
+  const overdue = all.filter((e) => matchesFeeFilter(e, "overdue")).length;
+
+  // Clicking the active card again clears back to "all".
+  const toggle = (f: FeeFilter) => setFilter((cur) => (cur === f ? "all" : f));
+  const rows = all.filter((e) => matchesFeeFilter(e, filter));
 
   // ---- Per-course / per-batch aggregation (read-only analytics) ----
   const courseById = new Map((courses.data || []).map((c) => [c.id, c]));
@@ -128,23 +164,56 @@ export default function CoursePaymentsAdmin() {
         subtitle="Financial & capacity lens — cohort Course Fees Collected, admissions, seats filled & overdue EMIs (IST). Click a cohort to drill into its roster."
       />
 
-      <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <div className="mb-3 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <KpiCard
           label="Course Fees Collected"
           value={formatINR(courseFeesCollected)}
           tone="green"
-          hint="Course-enrollment fees"
-          title="Course Fees Collected — fees received against course enrollments (paid installments across confirmed enrollments). Excludes webinars & other products."
+          hint={`Course-enrollment fees · ${paidCount} fully paid`}
+          title="Course Fees Collected — fees received against course enrollments (paid installments across confirmed enrollments). Excludes webinars & other products. Click to list the fully-paid enrollments."
+          onClick={() => toggle("paid")}
+          selected={filter === "paid"}
         />
         <KpiCard
           label="Course Fees Outstanding"
           value={formatINR(outstanding)}
           tone="red"
-          hint="Not yet received"
-          title="Course fees still owed = total course fees − Course Fees Collected."
+          hint={`Not yet received · ${outstandingCount} with balance`}
+          title="Course fees still owed = total course fees − Course Fees Collected. Click to list the enrollments that still owe a balance."
+          onClick={() => toggle("outstanding")}
+          selected={filter === "outstanding"}
         />
-        <KpiCard label="Active plans" value={all.length} title="Confirmed course enrollments (paid seat/EMI/full), excluding cancelled." />
-        <KpiCard label="With overdue" value={overdue} tone={overdue ? "amber" : undefined} title="Confirmed enrollments with at least one past-due unpaid installment." />
+        <KpiCard
+          label="Active plans"
+          value={all.length}
+          title="Confirmed course enrollments (paid seat/EMI/full), excluding cancelled. Click to clear filters and show all."
+          onClick={() => setFilter("all")}
+          selected={filter === "all"}
+        />
+        <KpiCard
+          label="With overdue"
+          value={overdue}
+          tone={overdue ? "amber" : undefined}
+          title="Confirmed enrollments with at least one past-due unpaid installment. Click to list only overdue accounts."
+          onClick={() => toggle("overdue")}
+          selected={filter === "overdue"}
+        />
+      </div>
+
+      {/* Active card-filter status + clear affordance */}
+      <div className="mb-5 flex items-center gap-3 px-1 text-sm">
+        {filter === "all" ? (
+          <span className="text-muted">Showing all <b className="text-ink">{all.length}</b> enrollments — tap a card above to filter.</span>
+        ) : (
+          <>
+            <span className="text-muted">
+              Showing <b className="text-ink">{rows.length}</b> of {all.length} — {FILTER_LABEL[filter]}
+            </span>
+            <button onClick={() => setFilter("all")} className="font-semibold text-primary hover:underline">
+              Clear
+            </button>
+          </>
+        )}
       </div>
 
       {/* Per-course analytics — grouping toggle: course vs course+batch */}
@@ -176,7 +245,7 @@ export default function CoursePaymentsAdmin() {
       )}
 
       <TableShell headers={["Student", "Phone", "Course", "Plan", "Paid / Total", "Installments", "Status", "Started"]}>
-        {all.map((e) => {
+        {rows.map((e) => {
           const d = deriveEnrollment(e);
           const nextDue = e.schedule.find((s) => !s.paid && s.due);
           const canOpen = !!e.student_id;
@@ -220,7 +289,7 @@ export default function CoursePaymentsAdmin() {
           );
         })}
       </TableShell>
-      {all.length === 0 && <p className="mt-6 text-center text-sm text-muted">No seat/EMI enrollments yet.</p>}
+      {rows.length === 0 && <p className="mt-6 text-center text-sm text-muted">{FILTER_EMPTY[filter]}</p>}
     </div>
   );
 }
@@ -241,8 +310,8 @@ function CohortCard({ s }: { s: CohortSummary }) {
       {/* Header */}
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <h3 className="truncate font-heading text-base font-bold leading-snug group-hover:text-primary" title={s.title}>{s.title}</h3>
-          <p className="mt-0.5 truncate text-xs text-muted">
+          <h3 className="font-heading text-base font-bold leading-snug break-words group-hover:text-primary" title={s.title}>{s.title}</h3>
+          <p className="mt-0.5 break-words text-xs text-muted" title={s.subtitle || undefined}>
             {s.subtitle ? `${s.subtitle} · ` : ""}{s.admissions} admission{s.admissions === 1 ? "" : "s"}
             {s.emiCount > 0 ? ` · ${s.emiCount} on EMI` : ""}
           </p>

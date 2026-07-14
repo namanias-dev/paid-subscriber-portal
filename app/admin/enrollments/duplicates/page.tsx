@@ -63,8 +63,8 @@ export default function DuplicateEnrollmentsPage() {
   if (forbidden) {
     return (
       <div>
-        <PageHeader title="Enrollments — duplicates" subtitle="Merge / cancel repeated bookings" />
-        <PeopleTabs active="enrollments" />
+        <PageHeader title="Duplicate Enrollments" subtitle="Merge / cancel repeated bookings" />
+        <PeopleTabs active="duplicates" />
         <div className="card p-8 text-center"><p className="text-lg font-semibold">Super Admin only</p><p className="mt-1 text-sm text-ink2">This tool is restricted to super administrators.</p></div>
       </div>
     );
@@ -73,8 +73,8 @@ export default function DuplicateEnrollmentsPage() {
 
   return (
     <div>
-      <PageHeader title="Enrollments — duplicates" subtitle="Operational lens — keep one canonical enrollment, cancel the rest (payment history is always preserved)." />
-      <PeopleTabs active="enrollments" />
+      <PageHeader title="Duplicate Enrollments" subtitle="Operational lens — keep one canonical enrollment, cancel the rest (payment history is always preserved)." />
+      <PeopleTabs active="duplicates" />
 
       {groups.length === 0 ? (
         <div className="card p-8 text-center">

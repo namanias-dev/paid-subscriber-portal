@@ -28,6 +28,8 @@ export function KpiCard({
   hint,
   tone = "blue",
   title,
+  onClick,
+  selected,
 }: {
   label: string;
   value: string | number;
@@ -35,6 +37,10 @@ export function KpiCard({
   tone?: "blue" | "green" | "amber" | "red";
   /** Native tooltip explaining the metric's scope (e.g. which money it counts). */
   title?: string;
+  /** When provided, the card becomes an interactive filter toggle (button). */
+  onClick?: () => void;
+  /** Renders the selected/active ring when this card's filter is applied. */
+  selected?: boolean;
 }) {
   const ring: Record<string, string> = {
     blue: "var(--primary)",
@@ -42,14 +48,33 @@ export function KpiCard({
     amber: "var(--warning)",
     red: "var(--danger)",
   };
-  return (
-    <div className="card p-5" title={title}>
+  const inner = (
+    <>
       <div className="flex items-center justify-between">
         <p className="text-xs font-medium uppercase tracking-wide text-muted">{label}</p>
         <span className="h-2 w-2 rounded-full" style={{ background: ring[tone] }} />
       </div>
       <p className="mt-2 font-heading text-2xl font-extrabold tabular-nums">{value}</p>
       {hint && <p className="mt-0.5 text-xs text-muted">{hint}</p>}
+    </>
+  );
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        title={title}
+        aria-pressed={selected}
+        className="card cursor-pointer p-5 text-left transition hover:shadow-md focus:outline-none focus:ring-2 focus:ring-primary/40"
+        style={selected ? { boxShadow: `0 0 0 2px ${ring[tone]}`, borderColor: ring[tone] } : undefined}
+      >
+        {inner}
+      </button>
+    );
+  }
+  return (
+    <div className="card p-5" title={title}>
+      {inner}
     </div>
   );
 }
