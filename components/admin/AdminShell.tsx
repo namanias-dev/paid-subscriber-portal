@@ -8,13 +8,40 @@ import AppIcon from "@/components/ui/AppIcon";
 import { LogOut, Menu } from "lucide-react";
 import AdminLogin from "./AdminLogin";
 import AdminPasswordModal from "./AdminPasswordModal";
-import { ADMIN_NAV } from "./adminNav";
+import { ADMIN_NAV, type AdminNavItem } from "./adminNav";
 import { UploadManagerProvider } from "./upload/uploadManager";
 import UploadManagerWidget from "./upload/UploadManagerWidget";
 import HelpPanel from "./help/HelpPanel";
 import { allPermissions, type PermissionSet } from "@/lib/permissions";
 
 interface AdminMe { username: string; role: string; role_name?: string; permissions?: PermissionSet; must_change_password?: boolean }
+
+/** A nav pattern owns `pathname` when it equals it or is a `/`-bounded prefix. */
+function matchLen(pathname: string, pattern: string): number {
+  return pathname === pattern || pathname.startsWith(pattern + "/") ? pattern.length : -1;
+}
+
+/**
+ * Resolve which single nav item is "active" for the current path. Each item can
+ * own several route prefixes (`href` + `match`); the longest matching prefix
+ * across all visible items wins, so a child route highlights its true parent
+ * and a specific sibling (e.g. `/admin/course-payments/at-risk`) is never
+ * shadowed by a shorter parent (`/admin/course-payments`). Navigation only.
+ */
+function activeNavHref(pathname: string, items: AdminNavItem[]): string | null {
+  let bestHref: string | null = null;
+  let bestLen = -1;
+  for (const item of items) {
+    for (const pattern of [item.href, ...(item.match ?? [])]) {
+      const len = matchLen(pathname, pattern);
+      if (len > bestLen) {
+        bestLen = len;
+        bestHref = item.href;
+      }
+    }
+  }
+  return bestHref;
+}
 
 export default function AdminShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -58,6 +85,7 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
   // Super Admin (and any account whose role grants it) sees everything; otherwise gate by permission.
   const visibleNav = ADMIN_NAV.filter((n) => !n.perm || perms[n.perm] === true);
   const groups = Array.from(new Set(visibleNav.map((n) => n.group)));
+  const activeHref = activeNavHref(pathname, visibleNav);
 
   const SidebarContent = (
     <>
@@ -74,7 +102,7 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
             <p className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted">{g}</p>
             <div className="space-y-0.5">
               {visibleNav.filter((n) => n.group === g).map((item) => {
-                const active = pathname === item.href;
+                const active = item.href === activeHref;
                 return (
                   <Link
                     key={item.href}

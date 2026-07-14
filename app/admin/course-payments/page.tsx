@@ -5,7 +5,6 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ChevronRight } from "lucide-react";
 import { PageHeader, useAdminData, LoadingBlock, TableShell, KpiCard } from "@/components/admin/ui";
-import PeopleTabs from "@/components/admin/people/PeopleTabs";
 import { formatINR, formatISTDate } from "@/lib/dates";
 import { deriveEnrollment } from "@/lib/installments";
 import type { CourseEnrollment, Course } from "@/lib/types";
@@ -128,7 +127,6 @@ export default function CoursePaymentsAdmin() {
         title="Fees & EMI"
         subtitle="Financial & capacity lens — cohort Course Fees Collected, admissions, seats filled & overdue EMIs (IST). Click a cohort to drill into its roster."
       />
-      <PeopleTabs active="fees" />
 
       <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <KpiCard

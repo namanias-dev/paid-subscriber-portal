@@ -7,6 +7,14 @@ export interface AdminNavItem {
   group: string;
   /** If set, the item is shown only to admins holding this permission. */
   perm?: PermissionKey;
+  /**
+   * Extra route prefixes this item "owns" for active-state highlighting, so a
+   * child/consolidated route lights up its true parent in the sidebar (e.g. the
+   * At-Risk parent owns both risk sub-routes). Longest matching prefix wins, so
+   * a more specific sibling (e.g. `/admin/course-payments/at-risk`) is never
+   * stolen by a shorter parent (`/admin/course-payments`). Navigation only.
+   */
+  match?: string[];
 }
 
 export const ADMIN_NAV: AdminNavItem[] = [
@@ -42,14 +50,31 @@ export const ADMIN_NAV: AdminNavItem[] = [
   { href: "/admin/quiz-reports", label: "Attempts & Reports", icon: "reports", group: "Assessments", perm: "content_quizzes" },
   { href: "/admin/quiz-imports", label: "Question Imports", icon: "imports", group: "Assessments", perm: "content_quizzes" },
   { href: "/admin/leaderboard", label: "Performance Leaderboard", icon: "leaderboard", group: "Assessments", perm: "manage_students_leads" },
-  // People hub — four lenses (Students · Enrollments · Fees & EMI · Fees at Risk),
-  // mirrored by the in-page PeopleTabs strip, with utilities kept reachable below.
-  { href: "/admin/students", label: "Students", icon: "students", group: "People", perm: "manage_students_leads" },
-  { href: "/admin/enrollments/duplicates", label: "Enrollments", icon: "duplicates", group: "People", perm: "view_revenue" },
-  { href: "/admin/course-payments", label: "Fees & EMI", icon: "seats", group: "People", perm: "view_revenue" },
-  { href: "/admin/course-payments/at-risk", label: "Fees at Risk", icon: "fees_risk", group: "People", perm: "view_revenue" },
-  { href: "/admin/access-risk", label: "Access at Risk (lectures)", icon: "access_risk", group: "People", perm: "view_revenue" },
-  { href: "/admin/payments", label: "Payments & Finance", icon: "payments", group: "People", perm: "view_revenue" },
-  { href: "/admin/staff", label: "Staff & Roles", icon: "staff", group: "People", perm: "manage_staff" },
-  { href: "/admin/settings", label: "Settings", icon: "settings", group: "People", perm: "manage_settings" },
+  // ── ADMISSIONS & PAYMENTS ──────────────────────────────────────────────
+  // The student → cohort-fees → collections → ledger lifecycle. Duplicate
+  // Enrollments folds into Students & Enrollments (Enrollments tab); the two
+  // risk worklists fold into "At-Risk Students" (Payment Risk / Access Risk
+  // tabs). Old routes stay live; `match` keeps child routes highlighting here.
+  {
+    href: "/admin/students",
+    label: "Students & Enrollments",
+    icon: "students",
+    group: "Admissions & Payments",
+    perm: "manage_students_leads",
+    match: ["/admin/enrollments"],
+  },
+  { href: "/admin/course-payments", label: "Fees & EMI", icon: "seats", group: "Admissions & Payments", perm: "view_revenue" },
+  {
+    href: "/admin/at-risk",
+    label: "At-Risk Students",
+    icon: "at_risk",
+    group: "Admissions & Payments",
+    perm: "view_revenue",
+    match: ["/admin/course-payments/at-risk", "/admin/access-risk"],
+  },
+  { href: "/admin/payments", label: "Payments", icon: "payments", group: "Admissions & Payments", perm: "view_revenue" },
+
+  // ── TEAM & SYSTEM ──────────────────────────────────────────────────────
+  { href: "/admin/staff", label: "Staff & Roles", icon: "staff", group: "Team & System", perm: "manage_staff" },
+  { href: "/admin/settings", label: "Settings", icon: "settings", group: "Team & System", perm: "manage_settings" },
 ];
