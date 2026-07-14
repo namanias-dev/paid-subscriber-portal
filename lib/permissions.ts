@@ -30,7 +30,18 @@ export type PermissionKey =
   | "manage_integrations"
   | "send_sms"
   | "manage_careers"
-  | "manage_ai_agent";
+  | "manage_ai_agent"
+  // Journey Automation (Communications). NEW + restrictive by default — holding
+  // send_sms (SMS Mission Control) grants NONE of these. Publishing and the kill
+  // switch are the most sensitive. Only Super Admin holds them until explicitly
+  // granted via the roles UI.
+  | "journey_view"
+  | "journey_create_draft"
+  | "journey_edit_draft"
+  | "journey_publish"
+  | "journey_pause"
+  | "journey_manage_templates"
+  | "journey_manage_killswitch";
 
 export interface PermissionMeta {
   key: PermissionKey;
@@ -65,6 +76,15 @@ export const PERMISSIONS: PermissionMeta[] = [
   { key: "send_sms", label: "Send SMS (Approved templates) & view SMS logs", group: "Operations" },
   { key: "manage_careers", label: "Manage careers & job applications", group: "Operations" },
   { key: "manage_ai_agent", label: "Manage AI Counselor Agent (leads, conversations & settings)", group: "Operations" },
+
+  // Journey Automation — granular + restrictive. NOT implied by send_sms.
+  { key: "journey_view", label: "View Journey Automation workflows", group: "Communications" },
+  { key: "journey_create_draft", label: "Create Journey Automation drafts", group: "Communications" },
+  { key: "journey_edit_draft", label: "Edit Journey Automation drafts", group: "Communications" },
+  { key: "journey_publish", label: "Publish Journey Automation versions", group: "Communications" },
+  { key: "journey_pause", label: "Pause / resume Journey Automation workflows", group: "Communications" },
+  { key: "journey_manage_templates", label: "Manage Journey Automation templates", group: "Communications" },
+  { key: "journey_manage_killswitch", label: "Manage Journey Automation kill switch", group: "Communications" },
 ];
 
 export const PERMISSION_KEYS: PermissionKey[] = PERMISSIONS.map((p) => p.key);

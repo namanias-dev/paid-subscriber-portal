@@ -34,7 +34,12 @@ export const ADMIN_NAV: AdminNavItem[] = [
   { href: "/admin/referrals", label: "Referrals", icon: "referrals", group: "Sales", perm: "manage_students_leads" },
   { href: "/admin/careers", label: "Careers", icon: "careers", group: "Sales", perm: "manage_careers" },
   { href: "/admin/ai-agent", label: "AI Counsellor", icon: "ai_agent", group: "Sales", perm: "manage_ai_agent" },
-  { href: "/admin/communications/sms", label: "SMS Mission Control", icon: "sms", group: "Sales", perm: "send_sms" },
+  // ── COMMUNICATIONS ─────────────────────────────────────────────────────
+  // Mission Control keeps its exact route, permission and behavior — only its
+  // nav group label moves here so it sits alongside Journey Automation. Journey
+  // Automation is gated by its OWN restrictive permission (NOT send_sms).
+  { href: "/admin/communications/sms", label: "SMS Mission Control", icon: "sms", group: "Communications", perm: "send_sms" },
+  { href: "/admin/communications/journey-automation", label: "Journey Automation", icon: "journey_automation", group: "Communications", perm: "journey_view" },
   { href: "/admin/courses", label: "Courses", icon: "courses", group: "Academics", perm: "content_courses" },
   { href: "/admin/library", label: "Brochure Library", icon: "brochures", group: "Academics", perm: "content_pdfs_media" },
   { href: "/admin/webinars", label: "Webinars & Events", icon: "webinars", group: "Academics", perm: "content_webinars" },
