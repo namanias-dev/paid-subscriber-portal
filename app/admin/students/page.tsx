@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { RefreshCw, Search, Users } from "lucide-react";
 import { PageHeader, LoadingBlock, KpiCard } from "@/components/admin/ui";
+import PeopleTabs from "@/components/admin/people/PeopleTabs";
 import CourseFeesStrip from "@/components/admin/students/CourseFeesStrip";
 import StatusPill, { statusOf } from "@/components/ui/StatusPill";
 import { useToast } from "@/components/ui/Toast";
@@ -194,12 +195,25 @@ export default function StudentsAdmin() {
           </div>
         }
       />
+      <PeopleTabs active="students" />
 
       <div className="mb-5 grid grid-cols-2 gap-3 md:grid-cols-4">
         <KpiCard label="Total students" value={String(stats?.total ?? students.length)} tone="blue" />
         <KpiCard label="Active now" value={String(stats?.activeNow ?? 0)} tone="green" />
-        <KpiCard label="Collected" value={formatINR(totalCollected)} tone="amber" />
-        <KpiCard label="Outstanding" value={formatINR(totalOutstanding)} tone="red" />
+        <KpiCard
+          label="Total Receipts"
+          value={formatINR(totalCollected)}
+          tone="amber"
+          hint="All products"
+          title="Total Receipts — all money received from these people across every product (course fees, webinars, etc.). For course-fee-only revenue, see Fees & EMI."
+        />
+        <KpiCard
+          label="Course Fees Outstanding"
+          value={formatINR(totalOutstanding)}
+          tone="red"
+          hint="Course balances"
+          title="Course-enrollment fees still owed (sum of remaining balances on active course enrollments)."
+        />
       </div>
 
       {/* Finance-lens deep link — same source as Course EMI & Seats (numbers match exactly). */}

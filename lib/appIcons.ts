@@ -43,6 +43,7 @@ import {
   Wallet,
   Armchair,
   Clock,
+  AlertTriangle,
   UserCog,
   Settings,
   // content types
@@ -115,6 +116,7 @@ export const APP_ICONS = {
   duplicates: Shuffle,
   payments: Wallet,
   seats: Armchair,
+  fees_risk: AlertTriangle,
   access_risk: Clock,
   staff: UserCog,
   settings: Settings,

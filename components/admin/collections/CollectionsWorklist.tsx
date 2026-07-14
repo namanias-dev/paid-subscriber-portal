@@ -12,7 +12,7 @@ type EnrollmentRow = CourseEnrollment & { student_id: string | null };
 type SortKey = "overdue" | "daysOverdue" | "nextDue" | "name" | "course";
 
 /**
- * Collections worklist ("At Risk"). Read-only: chases overdue EMI/fees.
+ * Collections worklist — powers "Fees at Risk (Collections)". Read-only: chases overdue EMI/fees.
  * Reuses /api/admin/course-enrollments + deriveCollections — the SAME source
  * as the Course EMI cards and cohort drill-in, so every figure reconciles.
  */

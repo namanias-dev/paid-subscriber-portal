@@ -72,16 +72,19 @@ export function HeaderStat({
   value,
   sub,
   tone,
+  title,
 }: {
   label: string;
   value: string;
   sub?: string;
   tone?: "danger" | "success" | "warning";
+  /** Native tooltip explaining the metric's scope. */
+  title?: string;
 }) {
   const color =
     tone === "danger" ? "text-danger" : tone === "success" ? "text-success" : tone === "warning" ? "text-warning" : "";
   return (
-    <div className="rounded-2xl border border-line bg-surface p-4">
+    <div className="rounded-2xl border border-line bg-surface p-4" title={title}>
       <p className="text-[11px] font-medium uppercase tracking-wide text-muted">{label}</p>
       <p className={`mt-1 font-heading text-xl font-extrabold tabular-nums ${color}`}>{value}</p>
       {sub && <p className="mt-0.5 text-[11px] text-muted">{sub}</p>}

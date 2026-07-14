@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { PageHeader, useAdminData, LoadingBlock, TableShell } from "@/components/admin/ui";
+import PeopleTabs from "@/components/admin/people/PeopleTabs";
 import { useToast } from "@/components/ui/Toast";
 
 interface RiskRow {
@@ -54,7 +55,8 @@ export default function AccessRiskAdmin() {
 
   return (
     <div>
-      <PageHeader title="Access at Risk" subtitle="Lecture-access lens — learners whose access is blocked or expiring. For overdue-fee chasing, use the At Risk (Collections) tab in Course EMI & Seats." />
+      <PageHeader title="Access at Risk" subtitle="Access lens — learners whose lecture access is blocked or expiring. For chasing overdue fees, use Fees at Risk (Collections)." />
+      <PeopleTabs active="access" />
 
       <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Stat label="Blocked" value={blocked} tone="text-danger" />

@@ -27,11 +27,14 @@ export function KpiCard({
   value,
   hint,
   tone = "blue",
+  title,
 }: {
   label: string;
   value: string | number;
   hint?: string;
   tone?: "blue" | "green" | "amber" | "red";
+  /** Native tooltip explaining the metric's scope (e.g. which money it counts). */
+  title?: string;
 }) {
   const ring: Record<string, string> = {
     blue: "var(--primary)",
@@ -40,7 +43,7 @@ export function KpiCard({
     red: "var(--danger)",
   };
   return (
-    <div className="card p-5">
+    <div className="card p-5" title={title}>
       <div className="flex items-center justify-between">
         <p className="text-xs font-medium uppercase tracking-wide text-muted">{label}</p>
         <span className="h-2 w-2 rounded-full" style={{ background: ring[tone] }} />
