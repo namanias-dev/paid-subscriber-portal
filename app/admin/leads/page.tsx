@@ -12,7 +12,8 @@ import SortControl from "@/components/admin/SortControl";
 import TimeframeFilter from "@/components/admin/TimeframeFilter";
 import { useToast } from "@/components/ui/Toast";
 import { usePersistentState } from "@/lib/usePersistentState";
-import { formatINR, formatISTDateTime, istYMD, istTodayYMD, istYMDToMs, resolveTimeframe, type TimeframeValue } from "@/lib/dates";
+import { formatINR, formatISTDateTime, formatISTShort, istYMD, istTodayYMD, istYMDToMs, resolveTimeframe, type TimeframeValue } from "@/lib/dates";
+import { sortLeads, KANBAN_SORTS, type KanbanSort } from "@/lib/leadsSort";
 import type { Lead, LeadStatus, LeadSourceTouch } from "@/lib/types";
 
 const DAY_MS = 86400000;
@@ -24,7 +25,7 @@ const LeadsBarChart = dynamic(() => import("@/components/admin/RegistrationsBarC
 });
 
 const STAGES: LeadStatus[] = ["New", "Contacted", "Demo Booked", "Demo Attended", "Negotiation", "Admitted", "Lost"];
-const SOURCES = ["Instagram", "Meta Form", "Webinar", "Demo", "Website", "WhatsApp", "Referral", "home_popup"];
+const SOURCES = ["Instagram", "Meta Form", "Webinar", "Demo", "Website", "WhatsApp", "Referral", "home_popup", "free_download", "quiz_public"];
 
 type LeadSort = "recent" | "activity" | "name";
 const LEAD_SORTS: { value: LeadSort; label: string }[] = [
@@ -54,6 +55,7 @@ export default function LeadsPage() {
   const { toast } = useToast();
   const [view, setView] = useState<"kanban" | "list">("kanban");
   const [sort, setSort] = usePersistentState<LeadSort>("nsa.leads.sort", "recent");
+  const [kanbanSort, setKanbanSort] = usePersistentState<KanbanSort>("nsa.leads.kanbanSort", "newest");
   const [q, setQ] = useState("");
   const [source, setSource] = useState("all");
   const [tf, setTf] = usePersistentState<TimeframeValue>("nsa.leads.tf", { mode: "all" });
@@ -186,6 +188,7 @@ export default function LeadsPage() {
           {SOURCES.map((s) => <option key={s}>{s}</option>)}
         </select>
         {view === "list" && <SortControl value={sort} onChange={setSort} options={LEAD_SORTS} />}
+        {view === "kanban" && <SortControl value={kanbanSort} onChange={setKanbanSort} options={KANBAN_SORTS} />}
         <div className="flex overflow-hidden rounded-xl border border-line">
           <button onClick={() => setView("kanban")} className="px-3 py-2 text-sm" style={{ background: view === "kanban" ? "var(--primary)" : "#fff", color: view === "kanban" ? "#fff" : "var(--ink2)" }}>Kanban</button>
           <button onClick={() => setView("list")} className="px-3 py-2 text-sm" style={{ background: view === "list" ? "var(--primary)" : "#fff", color: view === "list" ? "#fff" : "var(--ink2)" }}>Stacked</button>
@@ -243,7 +246,7 @@ export default function LeadsPage() {
       {view === "kanban" ? (
         <div className="no-scrollbar flex gap-3 overflow-x-auto pb-4">
           {STAGES.map((stage) => {
-            const items = filtered.filter((l) => l.status === stage);
+            const items = sortLeads(filtered.filter((l) => l.status === stage), kanbanSort);
             return (
               <div key={stage} className="w-72 shrink-0">
                 <div className="mb-2 flex items-center justify-between px-1">
@@ -253,13 +256,19 @@ export default function LeadsPage() {
                 <div className="space-y-2">
                   {items.map((l) => (
                     <button key={l.id} onClick={() => setActive(l)} className="card card-hover w-full p-3 text-left">
-                      <div className="flex items-center justify-between">
+                      <div className="flex items-center justify-between gap-2">
                         <span className="font-medium">{l.name}</span>
                         <span className={`pill ${l.temperature === "Interested" ? "pill-green" : l.temperature === "Warm" ? "pill-amber" : l.temperature === "Junk" ? "pill-red" : "pill-gray"}`}>{l.temperature}</span>
                       </div>
-                      <p className="mt-1 text-xs text-muted">{l.phone} · {l.city}</p>
-                      <p className="mt-1 line-clamp-1 text-xs text-ink2">{l.course_interest}</p>
-                      <p className="mt-1 text-[11px] text-muted">{l.source} · {l.counsellor}</p>
+                      <p className="mt-1 text-xs text-muted">{l.phone}{l.city ? ` · ${l.city}` : ""}</p>
+                      {l.course_interest && <p className="mt-1 line-clamp-1 text-xs text-ink2">{l.course_interest}</p>}
+                      <div className="mt-1.5 flex items-center justify-between gap-2">
+                        <span className="pill pill-gray text-[10px] font-medium">{l.source || "—"}</span>
+                        <span className="whitespace-nowrap text-[11px] text-muted" title={formatISTDateTime(l.created_at)}>
+                          {formatISTShort(l.created_at)}
+                        </span>
+                      </div>
+                      {l.counsellor && <p className="mt-1 text-[11px] text-muted">Counsellor: {l.counsellor}</p>}
                     </button>
                   ))}
                   {items.length === 0 && <div className="rounded-xl border border-dashed border-line py-6 text-center text-xs text-muted">Empty</div>}

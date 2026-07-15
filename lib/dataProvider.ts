@@ -106,6 +106,29 @@ async function dbSelect<T>(table: string, order = "created_at"): Promise<T[]> {
   const { data } = await db.from(table).select("*").order(order, { ascending: false });
   return (data as T[]) ?? [];
 }
+
+/**
+ * Like {@link dbSelect} but pages through the ENTIRE table via `.range()` so no
+ * row is silently dropped by PostgREST's default 1000-row response cap. Used for
+ * source-of-truth lists (e.g. the Lead CRM) where a hidden row = a missing lead.
+ */
+async function dbSelectAll<T>(table: string, order = "created_at", pageSize = 1000): Promise<T[]> {
+  const db = getSupabaseAdmin();
+  if (!db) return [];
+  const out: T[] = [];
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await db
+      .from(table)
+      .select("*")
+      .order(order, { ascending: false })
+      .range(from, from + pageSize - 1);
+    if (error) break;
+    const rows = (data as T[]) ?? [];
+    out.push(...rows);
+    if (rows.length < pageSize) break;
+  }
+  return out;
+}
 async function dbInsert<T>(table: string, row: Record<string, unknown>): Promise<T> {
   const db = getSupabaseAdmin();
   if (!db) throw new Error("No database");
@@ -1607,7 +1630,9 @@ export async function getLeads(): Promise<Lead[]> {
   // every list and downstream segment (SMS, analytics) — only canonical leads
   // surface, each once, with the latest attribution.
   if (demoMode()) return mock.leads.filter((l) => !l.merged_into);
-  const rows = await dbSelect<Lead>("leads");
+  // Page through ALL rows — the Lead CRM is the source of truth the automation
+  // depends on, so it must never be capped at PostgREST's default 1000 rows.
+  const rows = await dbSelectAll<Lead>("leads");
   if (!rows.length) return mock.leads.filter((l) => !l.merged_into);
   return rows.filter((l) => !l.merged_into);
 }
@@ -1615,7 +1640,7 @@ export async function getLeads(): Promise<Lead[]> {
 /** All lead rows including soft-merged duplicates (for the merge tooling / audits). */
 export async function getAllLeadsRaw(): Promise<Lead[]> {
   if (demoMode()) return [...mock.leads];
-  const rows = await dbSelect<Lead>("leads");
+  const rows = await dbSelectAll<Lead>("leads");
   return rows.length ? rows : [...mock.leads];
 }
 

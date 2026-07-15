@@ -23,6 +23,7 @@ export const LEAD_SOURCE_FORMS: LeadSourceForm[] = [
   { value: "enroll_intent", label: "Enrolment intent", where: "Captured when a visitor starts checkout." },
   { value: "quiz", label: "Quiz sign-up", where: "Public quiz gate (name + phone)." },
   { value: "webinar_registration", label: "Webinar registration", where: "Any webinar registration." },
+  { value: "free_download", label: "Free download", where: "The /resources download gate (\"Open Downloads\")." },
   { value: "admin_manual", label: "Added by staff", where: "Manually added in the admin Leads screen." },
 ];
 
