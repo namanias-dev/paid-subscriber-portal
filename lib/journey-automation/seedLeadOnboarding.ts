@@ -17,10 +17,24 @@ import { createWorkflow, saveDraftGraph, listTemplateOptions } from "./builderSt
 
 export const SEED_NAME = "New Lead Onboarding";
 
-/** Preferred approved templates for each SMS step (by sms_templates id). */
+/**
+ * Preferred approved templates for each SMS step (by the REAL sms_templates id
+ * that Mission Control carries). These are the single source of truth: the seed
+ * binds each step to the closest approved DLT template so nothing shows a false
+ * "pending". Staff can re-pick any of these in the SMS-node selector.
+ *
+ *  - welcome / portalReminder → "welcome_first_login": drives login + portal
+ *    access (login url + code). Reused for the "not logged in" reminder branch.
+ *  - webinarInvite / beginner → "general_webinar_invite": the closest approved
+ *    "explore & enrol next" nudge. NOTE: there is no dedicated approved
+ *    "beginner resources" template yet; swap to one once approved in Mission
+ *    Control (a draft is listed in docs/reports/dlt-templates-to-approve.md).
+ */
 export const SEED_TEMPLATE_REFS = {
   welcome: "welcome_first_login",
   webinarInvite: "general_webinar_invite",
+  beginner: "general_webinar_invite",
+  portalReminder: "welcome_first_login",
 } as const;
 
 function pos(x: number, y: number) { return { x, y }; }
@@ -70,6 +84,8 @@ export function buildLeadOnboardingGraph(templates: AutomationTemplateOption[]):
   const bySms = new Map(templates.map((t) => [t.sms_template_id, t]));
   const welcome = bySms.get(SEED_TEMPLATE_REFS.welcome);
   const invite = bySms.get(SEED_TEMPLATE_REFS.webinarInvite);
+  const beginner = bySms.get(SEED_TEMPLATE_REFS.beginner);
+  const portal = bySms.get(SEED_TEMPLATE_REFS.portalReminder);
 
   const welcomeMap = (t?: AutomationTemplateOption): Record<string, string> => {
     const m: Record<string, string> = {};
@@ -82,8 +98,8 @@ export function buildLeadOnboardingGraph(templates: AutomationTemplateOption[]):
     smsNode("sms_welcome", "Welcome + login SMS", "transactional", welcome, welcomeMap(welcome), pos(260, 0)),
     { node_key: "wait_day1", type: "wait", position: pos(520, 0), config: { title: "Wait 1 day", durationValue: 1, durationUnit: "days" } },
     { node_key: "cond_login", type: "condition", position: pos(780, 0), config: { title: "Has logged in?", check: "has_logged_in" } },
-    smsNode("sms_beginner", "Beginner resources", "transactional", undefined, {}, pos(1040, -140), "beginner_resources"),
-    smsNode("sms_portal", "Portal access reminder", "transactional", undefined, {}, pos(1040, 140), "portal_login_reminder"),
+    smsNode("sms_beginner", "Beginner resources", "promotional", beginner, welcomeMap(beginner), pos(1040, -140), "beginner_resources"),
+    smsNode("sms_portal", "Portal access reminder", "transactional", portal, welcomeMap(portal), pos(1040, 140), "portal_login_reminder"),
     { node_key: "wait_day2", type: "wait", position: pos(1300, 0), config: { title: "Wait 2 days", durationValue: 2, durationUnit: "days" } },
     { node_key: "cond_webinar", type: "condition", position: pos(1560, 0), config: { title: "Registered for a webinar?", check: "registered_for_webinar" } },
     { node_key: "goal_converted", type: "goal", position: pos(1820, -140), config: { title: "Converted (logged in or registered)", goalType: "logged_in" } },
@@ -114,7 +130,7 @@ export function buildLeadOnboardingGraph(templates: AutomationTemplateOption[]):
 export interface SeedResult {
   created: boolean;
   workflowId: string | null;
-  usedTemplates: { welcome: boolean; webinarInvite: boolean };
+  usedTemplates: { welcome: boolean; webinarInvite: boolean; beginner: boolean; portalReminder: boolean };
   placeholderSteps: string[];
 }
 
@@ -129,6 +145,8 @@ export async function seedLeadOnboarding(actor: KillSwitchActor): Promise<SeedRe
   const usedTemplates = {
     welcome: templates.some((t) => t.sms_template_id === SEED_TEMPLATE_REFS.welcome),
     webinarInvite: templates.some((t) => t.sms_template_id === SEED_TEMPLATE_REFS.webinarInvite),
+    beginner: templates.some((t) => t.sms_template_id === SEED_TEMPLATE_REFS.beginner),
+    portalReminder: templates.some((t) => t.sms_template_id === SEED_TEMPLATE_REFS.portalReminder),
   };
 
   if (existing) {

@@ -124,17 +124,41 @@ describe("Seed — New Lead Onboarding graph", () => {
     { id: "at-invite", name: "Invite", sms_template_id: "general_webinar_invite", dlt_template_id: "222", body: "Hi {first_name}", variables: ["first_name", "login_url"], approved: true },
   ];
 
-  it("is structurally valid with exactly ONE intentional placeholder SMS", () => {
+  it("is Ready to publish — every SMS binds to a real approved template (no false pending)", () => {
     const graph = buildLeadOnboardingGraph(templates);
     const report = validateGraph(
       graph.nodes.map((n) => ({ node_key: n.node_key, type: n.type, config: n.config })),
       graph.edges.map((e) => ({ source: e.source, target: e.target, branch_label: e.branch_label })),
     );
+    // welcome_first_login + general_webinar_invite cover welcome, beginner,
+    // portal-reminder and invite — so NOTHING is left pending.
     const noTemplate = report.issues.filter((i) => i.code === "sms_no_template");
-    assert.equal(noTemplate.length, 2, "two SMS steps are placeholders pending DLT approval (beginner + portal reminder)");
-    // No OTHER errors than that placeholder (mapping/paths/structure all complete).
-    const otherErrors = report.issues.filter((i) => i.level === "error" && i.code !== "sms_no_template");
+    assert.equal(noTemplate.length, 0, `no SMS step should be pending: ${JSON.stringify(noTemplate)}`);
+    const otherErrors = report.issues.filter((i) => i.level === "error");
     assert.deepEqual(otherErrors, [], `unexpected errors: ${JSON.stringify(otherErrors)}`);
+    // Every send_sms node stores a real Mission-Control-bound automationTemplateId.
+    const smsNodes = graph.nodes.filter((n) => n.type === "send_sms");
+    for (const n of smsNodes) {
+      assert.ok(n.config?.["automationTemplateId"], `${n.node_key} must bind an approved template`);
+    }
+  });
+
+  it("shows pending ONLY when no approved template fits (honest state)", () => {
+    // Drop general_webinar_invite: beginner + invite now have no approved fit.
+    const onlyWelcome = templates.filter((t) => t.sms_template_id === "welcome_first_login");
+    const graph = buildLeadOnboardingGraph(onlyWelcome);
+    const report = validateGraph(
+      graph.nodes.map((n) => ({ node_key: n.node_key, type: n.type, config: n.config })),
+      graph.edges.map((e) => ({ source: e.source, target: e.target, branch_label: e.branch_label })),
+    );
+    const noTemplate = report.issues.filter((i) => i.code === "sms_no_template");
+    // beginner + invite are pending; welcome + portal-reminder still bind.
+    assert.equal(noTemplate.length, 2, `expected 2 genuine pending: ${JSON.stringify(noTemplate)}`);
+    const pendingNodes = new Set(noTemplate.map((i) => i.nodeKey));
+    assert.ok(pendingNodes.has("sms_beginner") && pendingNodes.has("sms_invite"), `pending on unexpected nodes: ${JSON.stringify([...pendingNodes])}`);
+    // The step that carries a draft key surfaces it clearly for staff.
+    const beginner = noTemplate.find((i) => i.nodeKey === "sms_beginner")!;
+    assert.match(beginner.message, /pending DLT approval/);
   });
 
   it("has a trigger, a goal, an exit, and both condition paths", () => {
