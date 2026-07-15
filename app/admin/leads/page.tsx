@@ -14,6 +14,7 @@ import { useToast } from "@/components/ui/Toast";
 import { usePersistentState } from "@/lib/usePersistentState";
 import { formatINR, formatISTDateTime, formatISTShort, istYMD, istTodayYMD, istYMDToMs, resolveTimeframe, type TimeframeValue } from "@/lib/dates";
 import { sortLeads, KANBAN_SORTS, type KanbanSort } from "@/lib/leadsSort";
+import { MARKETING_CHANNELS, GOOGLE_ADS_CHANNEL } from "@/lib/attribution";
 import type { Lead, LeadStatus, LeadSourceTouch } from "@/lib/types";
 
 const DAY_MS = 86400000;
@@ -58,6 +59,8 @@ export default function LeadsPage() {
   const [kanbanSort, setKanbanSort] = usePersistentState<KanbanSort>("nsa.leads.kanbanSort", "newest");
   const [q, setQ] = useState("");
   const [source, setSource] = useState("all");
+  const [channel, setChannel] = useState("all");
+  const [campaign, setCampaign] = useState("all");
   const [tf, setTf] = usePersistentState<TimeframeValue>("nsa.leads.tf", { mode: "all" });
   const [showChart, setShowChart] = usePersistentState<boolean>("nsa.leads.chart", true);
   const [addOpen, setAddOpen] = useState(false);
@@ -65,17 +68,26 @@ export default function LeadsPage() {
 
   const { fromMs, toMs } = useMemo(() => resolveTimeframe(tf), [tf]);
 
+  // Distinct utm_campaigns present in the loaded leads (for the campaign filter).
+  const campaignOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const l of leads || []) { const c = (l.utm_campaign || "").trim(); if (c) set.add(c); }
+    return [...set].sort((a, b) => a.localeCompare(b));
+  }, [leads]);
+
   const filtered = useMemo(() => {
     const list = leads || [];
     const query = q.trim().toLowerCase();
     return list.filter((l) => {
       if (source !== "all" && l.source !== source) return false;
+      if (channel !== "all" && (l.channel || "") !== channel) return false;
+      if (campaign !== "all" && (l.utm_campaign || "") !== campaign) return false;
       if (query && !(`${l.name} ${l.phone} ${l.city ?? ""}`.toLowerCase().includes(query))) return false;
       const ms = new Date(l.created_at).getTime();
       if (Number.isFinite(fromMs) && !(ms >= fromMs && ms < toMs)) return false;
       return true;
     });
-  }, [leads, q, source, fromMs, toMs]);
+  }, [leads, q, source, channel, campaign, fromMs, toMs]);
 
   // Group the (already filtered) leads by PERSON (phone) — purely presentational.
   // Multiple submissions for one phone stack as a timeline; one-off leads render
@@ -187,6 +199,16 @@ export default function LeadsPage() {
           <option value="all">All sources</option>
           {SOURCES.map((s) => <option key={s}>{s}</option>)}
         </select>
+        <select value={channel} onChange={(e) => setChannel(e.target.value)} className="input max-w-[150px]" aria-label="Marketing channel">
+          <option value="all">All channels</option>
+          {MARKETING_CHANNELS.map((c) => <option key={c} value={c}>{c}</option>)}
+        </select>
+        {campaignOptions.length > 0 && (
+          <select value={campaign} onChange={(e) => setCampaign(e.target.value)} className="input max-w-[180px]" aria-label="Campaign">
+            <option value="all">All campaigns</option>
+            {campaignOptions.map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
+        )}
         {view === "list" && <SortControl value={sort} onChange={setSort} options={LEAD_SORTS} />}
         {view === "kanban" && <SortControl value={kanbanSort} onChange={setKanbanSort} options={KANBAN_SORTS} />}
         <div className="flex overflow-hidden rounded-xl border border-line">
@@ -262,8 +284,11 @@ export default function LeadsPage() {
                       </div>
                       <p className="mt-1 text-xs text-muted">{l.phone}{l.city ? ` · ${l.city}` : ""}</p>
                       {l.course_interest && <p className="mt-1 line-clamp-1 text-xs text-ink2">{l.course_interest}</p>}
-                      <div className="mt-1.5 flex items-center justify-between gap-2">
+                      <div className="mt-1.5 flex flex-wrap items-center gap-1">
                         <span className="pill pill-gray text-[10px] font-medium">{l.source || "—"}</span>
+                        <ChannelPill channel={l.channel} campaign={l.utm_campaign} />
+                      </div>
+                      <div className="mt-1 flex items-center justify-end">
                         <span className="whitespace-nowrap text-[11px] text-muted" title={formatISTDateTime(l.created_at)}>
                           {formatISTShort(l.created_at)}
                         </span>
@@ -427,6 +452,9 @@ function LeadDetail({
           <Info label="Counsellor" value={lead.counsellor || "—"} />
           <Info label="Interest" value={lead.course_interest || "—"} />
           <Info label="Target" value={lead.target_year ? String(lead.target_year) : "—"} />
+          <Info label="Channel" value={lead.channel || "—"} />
+          <Info label="Campaign (UTM)" value={lead.utm_campaign || "—"} />
+          {lead.gclid && <Info label="Google click id" value="Present (gclid)" />}
           {lead.admitted && <Info label="Fee" value={formatINR(lead.total_fee || 0)} />}
           {lead.admitted && <Info label="Pending" value={formatINR(lead.pending_balance || 0)} />}
         </div>
@@ -511,5 +539,28 @@ function Info({ label, value }: { label: string; value: string }) {
       <p className="text-xs uppercase tracking-wide text-muted">{label}</p>
       <p className="text-ink">{value}</p>
     </div>
+  );
+}
+
+/**
+ * Marketing channel tag. Google Ads leads get a distinct gold pill; other paid /
+ * organic channels get a subtle blue pill. The campaign (utm_campaign) rides
+ * alongside when present so staff can see which campaign drove the lead.
+ */
+function ChannelPill({ channel, campaign }: { channel?: string | null; campaign?: string | null }) {
+  if (!channel && !campaign) return null;
+  const isGoogle = channel === GOOGLE_ADS_CHANNEL;
+  return (
+    <span className="inline-flex items-center gap-1">
+      {channel && (
+        <span
+          className={`pill text-[10px] font-semibold ${isGoogle ? "pill-amber" : "pill-blue"}`}
+          title={isGoogle ? "Attributed to Google Ads (gclid or google/cpc)" : `Channel: ${channel}`}
+        >
+          {isGoogle ? "🅖 Google Ads" : channel}
+        </span>
+      )}
+      {campaign && <span className="pill pill-gray text-[10px] font-medium" title={`Campaign: ${campaign}`}>{campaign}</span>}
+    </span>
   );
 }

@@ -84,6 +84,9 @@ export function captureAttribution(): void {
     if (fbclid) touch.fbclid = fbclid;
     if (fbc) touch.fbc = fbc;
     if (fbp) touch.fbp = fbp;
+    // Google Ads click id (non-PII), supplied by Google auto-tagging (?gclid=...).
+    const gclid = url.searchParams.get("gclid");
+    if (gclid) touch.gclid = gclid;
     const existing = parseAttrCookie(readCookie(ATTR_COOKIE));
     const merged = mergeAttribution(existing, touch, new Date().toISOString());
     writeCookie(ATTR_COOKIE, serializeAttr(merged), YEAR * 2);

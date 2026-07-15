@@ -22,6 +22,7 @@ import QuizTab from "@/components/admin/analytics/Quiz";
 import WebinarsTab from "@/components/admin/analytics/Webinars";
 import PaymentsTab from "@/components/admin/analytics/Payments";
 import CampaignsTab from "@/components/admin/analytics/Campaigns";
+import LeadCampaignsTab from "@/components/admin/analytics/LeadCampaigns";
 import AttributionTab from "@/components/admin/analytics/Attribution";
 
 interface Overview {
@@ -49,7 +50,7 @@ const PRESET_LABELS: Record<Preset, string> = {
   today: "Today", yesterday: "Yesterday", "7d": "7 days", "30d": "30 days", this_month: "This month", custom: "Custom",
 };
 
-type Tab = "overview" | "trends" | "activity" | "quiz" | "webinars" | "payments" | "campaigns" | "attribution";
+type Tab = "overview" | "trends" | "activity" | "quiz" | "webinars" | "payments" | "campaigns" | "lead_campaigns" | "attribution";
 const TABS: { id: Tab; label: string }[] = [
   { id: "overview", label: "Overview" },
   { id: "trends", label: "Trends" },
@@ -58,6 +59,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "webinars", label: "Webinars" },
   { id: "payments", label: "Payments" },
   { id: "campaigns", label: "Campaigns" },
+  { id: "lead_campaigns", label: "Lead campaigns" },
   { id: "attribution", label: "Attribution (Meta)" },
 ];
 
@@ -172,6 +174,7 @@ export default function AnalyticsDashboardPage() {
       {tab === "webinars" && <WebinarsTab qs={qs} />}
       {tab === "payments" && <PaymentsTab qs={qs} />}
       {tab === "campaigns" && <CampaignsTab qs={qs} />}
+      {tab === "lead_campaigns" && <LeadCampaignsTab />}
       {tab === "attribution" && <AttributionTab qs={qs} />}
 
       {tab === "overview" && (loading ? (

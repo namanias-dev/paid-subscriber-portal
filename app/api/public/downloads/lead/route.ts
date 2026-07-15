@@ -24,6 +24,7 @@ import { upsertLead } from "@/lib/ai-agent/leadService";
 import { recordEvent } from "@/lib/ai-agent/conversationStore";
 import { getAgentContext } from "@/lib/ai-agent/request";
 import { rateLimited, addLead } from "@/lib/dataProvider";
+import { requestLeadAttribution } from "@/lib/marketing/requestAttribution";
 
 export const dynamic = "force-dynamic";
 
@@ -135,6 +136,7 @@ export async function POST(req: Request) {
           course_interest: fileTitle ?? undefined,
         },
         "free_download",
+        requestLeadAttribution(),
       );
     } catch {
       /* non-blocking — the ai_leads record above is already saved */

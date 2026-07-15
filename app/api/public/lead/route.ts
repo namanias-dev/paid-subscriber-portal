@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { addLead } from "@/lib/dataProvider";
 import { normalizeIndianMobile } from "@/lib/phone";
+import { requestLeadAttribution } from "@/lib/marketing/requestAttribution";
 
 export const dynamic = "force-dynamic";
 
@@ -26,6 +27,9 @@ export async function POST(req: Request) {
     // source_form: which form this came from (for Journey Automation trigger
     // filtering). Defaults to the generic website form when unspecified.
     const sourceForm = body.source_form ? String(body.source_form) : "public_lead_form";
+    // First-party marketing attribution from the visitor's nsa_attr cookie
+    // (utm_* / gclid captured at landing) — first-touch wins on fold.
+    const attribution = requestLeadAttribution();
     const lead = await addLead({
       name,
       phone: phoneNorm.digits10,
@@ -34,7 +38,7 @@ export async function POST(req: Request) {
       source: body.source ? String(body.source) : "Website",
       campaign: body.campaign ? String(body.campaign) : null,
       course_interest: body.course_interest ? String(body.course_interest) : null,
-    }, sourceForm);
+    }, sourceForm, attribution);
     return NextResponse.json({ ok: true, id: lead.id });
   } catch {
     return NextResponse.json({ ok: false, error: "Could not submit. Please try again." }, { status: 500 });

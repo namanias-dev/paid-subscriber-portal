@@ -182,10 +182,12 @@ export async function POST(req: Request) {
       batch_id: dedupBatchId,
     });
 
-    // Best-effort lead capture (don't block checkout on failure).
+    // Best-effort lead capture (don't block checkout on failure). Forward the
+    // visitor's cookies so /api/public/lead can read the nsa_attr attribution
+    // cookie (utm/gclid) — this server-to-server call otherwise carries none.
     fetch(new URL("/api/public/lead", req.url).toString(), {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", cookie: req.headers.get("cookie") || "" },
       body: JSON.stringify({ name, phone: mobile, email, source: "Website", campaign: "Enroll", course_interest: course.title, source_form: "enroll_intent" }),
     }).catch(() => {});
 
