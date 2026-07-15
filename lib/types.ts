@@ -1,4 +1,5 @@
 import type { LeaderboardSettings } from "./leaderboardConfig";
+import type { AttributionState } from "./attribution";
 
 export type PlanId = "1m" | "3m" | "6m" | "12m" | "lifetime";
 
@@ -871,6 +872,22 @@ export interface Lead {
   /** First-touch attribution, preserved when later touches overwrite source/campaign. */
   first_source?: string | null;
   first_campaign?: string | null;
+  /**
+   * Marketing attribution (first-party, first-touch-wins). Captured from the
+   * landing URL's utm_* / gclid params via the nsa_attr cookie at submit time.
+   * `channel` is the coarse, filterable tag (e.g. "Google Ads"); `attribution`
+   * keeps the full first/last-touch state. All additive + nullable.
+   */
+  channel?: string | null;
+  utm_source?: string | null;
+  utm_medium?: string | null;
+  utm_campaign?: string | null;
+  utm_content?: string | null;
+  utm_term?: string | null;
+  gclid?: string | null;
+  landing_page_path?: string | null;
+  referrer?: string | null;
+  attribution?: AttributionState | null;
   /**
    * Soft-merge pointer. When set, this row is a duplicate folded into the canonical
    * lead with this id and is hidden from every list/segment. Null = active/canonical.

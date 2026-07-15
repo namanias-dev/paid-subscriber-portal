@@ -33,6 +33,12 @@ export interface AttributionTouch {
   fbclid?: string | null;
   fbc?: string | null;
   fbp?: string | null;
+  /**
+   * Google Ads click identifier, captured additively at landing (?gclid=... —
+   * supplied automatically by Google auto-tagging). Never PII. Absent for
+   * non-Google traffic. Rides the existing JSONB touch — no schema migration.
+   */
+  gclid?: string | null;
 }
 
 export interface AttributionState {
@@ -128,9 +134,9 @@ export function buildTouch(input: {
   };
 }
 
-/** Does this touch carry a real marketing signal (utm, external referrer, or Meta click)? */
+/** Does this touch carry a real marketing signal (utm, external referrer, or ad click)? */
 export function touchIsMeaningful(t: AttributionTouch): boolean {
-  return t.source !== "direct" || !!t.campaign || !!t.medium || !!t.fbclid || !!t.fbc;
+  return t.source !== "direct" || !!t.campaign || !!t.medium || !!t.fbclid || !!t.fbc || !!t.gclid;
 }
 
 /** Merge a new touch into existing state: first-touch frozen, last-touch rolling. */
@@ -159,6 +165,7 @@ export function mergeAttribution(
       if (!carried.fbclid && prevLast.fbclid) carried.fbclid = prevLast.fbclid;
       if (!carried.fbc && prevLast.fbc) carried.fbc = prevLast.fbc;
       if (!carried.fbp && prevLast.fbp) carried.fbp = prevLast.fbp;
+      if (!carried.gclid && prevLast.gclid) carried.gclid = prevLast.gclid;
     }
     last = { ...carried, last_seen_at: nowISO };
   } else {
@@ -207,6 +214,55 @@ export function metaIdentityFromState(state: AttributionState | null): {
     fbp: ft?.fbp || lt?.fbp || null,
     fbclid: ft?.fbclid || lt?.fbclid || null,
   };
+}
+
+/**
+ * Extract the Google Ads click id from a stored attribution state. Prefers
+ * first-touch (the click that drove acquisition), falls back to last-touch.
+ */
+export function googleIdentityFromState(state: AttributionState | null): { gclid: string | null } {
+  const ft = state?.first_touch || null;
+  const lt = state?.last_touch || null;
+  return { gclid: ft?.gclid || lt?.gclid || null };
+}
+
+// ----------------------------- Marketing channel -----------------------------
+// A coarse, filterable channel derived from a single touch. Kept deliberately
+// small + deterministic so the CRM filter and the campaign report agree.
+
+export const GOOGLE_ADS_CHANNEL = "Google Ads";
+export const MARKETING_CHANNELS = [
+  GOOGLE_ADS_CHANNEL,
+  "Meta Ads",
+  "Organic",
+  "Referral",
+  "Direct",
+  "Other",
+] as const;
+export type MarketingChannel = (typeof MARKETING_CHANNELS)[number];
+
+const PAID_MEDIA = new Set(["cpc", "ppc", "paid", "paidsearch", "paid_search", "paid_social", "ppc_ads", "cpm"]);
+
+/**
+ * Derive the marketing channel for a touch.
+ *  - gclid OR (source=google & paid medium)     → "Google Ads"
+ *  - fbclid/fbc OR (meta source & paid medium)   → "Meta Ads"
+ *  - known social/search source (non-paid)       → "Organic"
+ *  - external referrer                           → "Referral"
+ *  - own site / no signal                        → "Direct"
+ *  - anything else (e.g. utm with unknown source)→ "Other"
+ */
+export function deriveChannel(touch: AttributionTouch | null | undefined): MarketingChannel {
+  if (!touch) return "Direct";
+  const source = clean(touch.source);
+  const medium = clean(touch.medium);
+  const paid = PAID_MEDIA.has(medium);
+  if (touch.gclid || (source === "google" && paid)) return "Google Ads";
+  if (touch.fbclid || touch.fbc || ((source === "facebook" || source === "instagram") && paid)) return "Meta Ads";
+  if (["google", "instagram", "facebook", "youtube", "telegram", "whatsapp"].includes(source)) return "Organic";
+  if (source === "referral") return "Referral";
+  if (!source || source === "direct") return "Direct";
+  return "Other";
 }
 
 /** A short readable attribution summary for record-stamping (source + campaign). */

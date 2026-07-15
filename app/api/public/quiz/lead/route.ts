@@ -8,6 +8,7 @@ import { BUYER_COOKIE, SESSION_MAX_AGE } from "@/lib/config";
 import { normalizeIndianMobile } from "@/lib/phone";
 import { VISITOR_COOKIE, ATTR_COOKIE, parseAttrCookie } from "@/lib/attribution";
 import { stampBuyerAttribution, stitchIdentityOnLogin } from "@/lib/analytics/server";
+import { requestLeadAttribution } from "@/lib/marketing/requestAttribution";
 
 export const dynamic = "force-dynamic";
 
@@ -65,7 +66,7 @@ export async function POST(req: Request) {
           campaign: "quiz",
           course_interest: String(body.interest || body.slug || "Quiz"),
           ...(email ? { email } : {}),
-        }, "quiz");
+        }, "quiz", requestLeadAttribution());
       } catch { /* non-fatal */ }
     }
 
