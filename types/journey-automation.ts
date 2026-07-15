@@ -36,7 +36,13 @@ export type NodeType =
   | "branch"
   | "staff_task"
   | "goal"
-  | "exit";
+  | "exit"
+  /**
+   * Canvas annotation (sticky note). NON-EXECUTABLE: excluded from validation and
+   * the engine entirely. Persisted with the draft graph so documentation survives
+   * save/reload. Never has edges, triggers, or goals.
+   */
+  | "note";
 
 /** Runtime send posture. `off` = never enrolls/sends; the safe default. */
 export type WorkflowExecutionMode = "off" | "simulate" | "live";

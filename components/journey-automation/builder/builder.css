@@ -96,7 +96,41 @@
   height: 18px; width: 18px; border-radius: 999px; flex: 0 0 auto;
   background: var(--danger, #dc2626); color: #fff; font-size: 12px; font-weight: 800;
 }
-.ja-handle { width: 9px !important; height: 9px !important; background: var(--primary) !important; border: 2px solid #fff !important; }
+.ja-handle { width: 11px !important; height: 11px !important; background: var(--primary) !important; border: 2px solid #fff !important; box-shadow: 0 1px 3px rgba(10,31,68,0.25); transition: transform 0.1s; }
+.ja-handle:hover { transform: scale(1.35); cursor: crosshair; }
+.ja-handle-lg { width: 13px !important; height: 13px !important; }
+.ja-node-desc { margin-top: 8px; font-size: 11px; line-height: 1.4; color: var(--ink2, #4a5878); background: var(--primary-tint, #eef3fb); border-radius: 8px; padding: 6px 8px; white-space: pre-wrap; }
+
+/* Labelled Yes/No + branch handles */
+.ja-node-handles { position: absolute; left: 0; right: 0; bottom: 0; height: 0; }
+.ja-hslot { position: absolute; bottom: -9px; transform: translateX(-50%); pointer-events: none; }
+.ja-hlabel {
+  position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%);
+  font-size: 9.5px; font-weight: 800; letter-spacing: 0.03em; text-transform: uppercase;
+  padding: 1px 6px; border-radius: 999px; border: 1px solid; white-space: nowrap;
+}
+
+/* Sticky note */
+.ja-note-card {
+  min-width: 170px; max-width: 230px; padding: 10px 12px 12px;
+  background: linear-gradient(180deg, #fef7dd, #fdeeba);
+  border: 1px solid #e9d489; border-radius: 4px 12px 12px 12px;
+}
+.ja-note-tag { display: inline-flex; align-items: center; gap: 4px; font-size: 10px; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; color: #8a6d1a; margin-bottom: 5px; }
+.ja-note-body { font-size: 12px; line-height: 1.45; color: #5c4a17; white-space: pre-wrap; word-break: break-word; }
+
+/* Quick-add picker */
+.ja-quickadd {
+  position: absolute; z-index: 20; width: 190px; max-height: 280px; overflow-y: auto;
+  background: #fff; border: 1px solid var(--line); border-radius: 12px;
+  box-shadow: 0 12px 34px rgba(10,31,68,0.20); padding: 6px;
+}
+.ja-quickadd-head { font-size: 10.5px; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted, #8a93a6); padding: 4px 8px 6px; }
+.ja-quickadd-item {
+  display: flex; align-items: center; gap: 8px; width: 100%; text-align: left;
+  border: none; background: transparent; border-radius: 8px; padding: 7px 8px; font-size: 12.5px; font-weight: 600; color: var(--ink, #16233d); cursor: pointer;
+}
+.ja-quickadd-item:hover { background: var(--primary-tint, #eef3fb); color: var(--primary); }
 
 /* React Flow surface */
 .ja-builder .react-flow__attribution { display: none; }

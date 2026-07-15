@@ -16,7 +16,8 @@ export type NodeGroup =
   | "Staff Tasks"
   | "Logic"
   | "Goals"
-  | "Exit";
+  | "Exit"
+  | "Annotations";
 
 export interface NodeCatalogItem {
   /** Palette key. For triggers this encodes the event type. */
@@ -117,10 +118,13 @@ export const NODE_CATALOG: NodeCatalogItem[] = [
 
   // --- Exit ---
   { key: "exit", type: "exit", group: "Exit", label: "Stop / Exit", description: "End the journey for this student.", icon: "OctagonMinus", available: true, defaultConfig: { title: "Exit" } },
+
+  // --- Annotations (non-executable; documentation only) ---
+  { key: "note", type: "note", group: "Annotations", label: "Note", description: "A sticky note to document the journey. Not executed.", icon: "StickyNote", available: true, defaultConfig: { title: "Note", text: "Describe this part of the journey…" } },
 ];
 
 export const NODE_GROUPS: NodeGroup[] = [
-  "Triggers", "Conditions", "Timing", "Communications", "Staff Tasks", "Logic", "Goals", "Exit",
+  "Triggers", "Conditions", "Timing", "Communications", "Staff Tasks", "Logic", "Goals", "Exit", "Annotations",
 ];
 
 export function catalogByKey(key: string): NodeCatalogItem | undefined {
@@ -137,6 +141,7 @@ export const NODE_ACCENT: Record<string, string> = {
   branch: "#7c3aed",
   goal: "#16a34a",
   exit: "var(--danger)",
+  note: "var(--gold)",
 };
 
 export const NODE_ICON: Record<string, string> = {
@@ -148,4 +153,5 @@ export const NODE_ICON: Record<string, string> = {
   branch: "Split",
   goal: "Target",
   exit: "OctagonMinus",
+  note: "StickyNote",
 };
