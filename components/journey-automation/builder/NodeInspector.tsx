@@ -58,6 +58,25 @@ export default function NodeInspector({ node, templates, canEdit, onChange, onDe
 
   const set = (patch: Record<string, unknown>) => { if (!disabled) onChange(patch); };
 
+  // Notes are documentation-only annotations (not executed, not validated).
+  if (node.type === "note") {
+    return (
+      <div className="ja-panel ja-panel-right p-4">
+        <div className="mb-4 flex items-center justify-between">
+          <h3 className="font-heading text-sm font-bold">Note</h3>
+          <button type="button" className="ja-btn-sm" data-variant="danger" onClick={onDelete} disabled={disabled}>
+            <Trash2 size={13} aria-hidden="true" /> Delete
+          </button>
+        </div>
+        <div className="ja-field">
+          <label className="ja-insp-label">Note text <Help text="A sticky note for your team. It is never sent or executed and is excluded from validation." /></label>
+          <textarea className="ja-textarea" rows={6} value={String(cfg.text ?? "")} disabled={disabled} onChange={(e) => set({ text: e.target.value })} placeholder="Document this part of the journey…" />
+        </div>
+        <p className="text-xs text-muted">Notes help staff understand a journey. They carry no logic and are ignored by the engine.</p>
+      </div>
+    );
+  }
+
   return (
     <div className="ja-panel ja-panel-right p-4">
       <div className="mb-4 flex items-center justify-between">
@@ -70,6 +89,11 @@ export default function NodeInspector({ node, templates, canEdit, onChange, onDe
       <div className="ja-field">
         <label className="ja-insp-label">Step name <Help text="A short label shown on the canvas so the flow reads clearly." /></label>
         <input className="ja-input" value={String(cfg.title ?? "")} disabled={disabled} onChange={(e) => set({ title: e.target.value })} />
+      </div>
+
+      <div className="ja-field">
+        <label className="ja-insp-label">Description <Help text="Optional note shown on the node so staff understand this step at a glance. Not sent or executed." /></label>
+        <textarea className="ja-textarea" rows={2} value={String(cfg.description ?? "")} disabled={disabled} onChange={(e) => set({ description: e.target.value })} placeholder="Optional: what this step is for…" />
       </div>
 
       {node.type === "trigger" && (

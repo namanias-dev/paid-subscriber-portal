@@ -103,10 +103,16 @@ function hasWaitlessCycle(nodes: GraphNode[], edges: GraphEdge[]): boolean {
   return false;
 }
 
-export function validateGraph(nodes: GraphNode[], edges: GraphEdge[]): ValidationReport {
+export function validateGraph(allNodes: GraphNode[], allEdges: GraphEdge[]): ValidationReport {
   const issues: ValidationIssue[] = [];
   const add = (level: ValidationLevel, code: string, message: string, nodeKey?: string) =>
     issues.push({ level, code, message, nodeKey });
+
+  // Notes are non-executable annotations: exclude them (and any stray edges that
+  // touch them) from every check so they never affect validation or the engine.
+  const nodes = allNodes.filter((n) => n.type !== "note");
+  const noteKeys = new Set(allNodes.filter((n) => n.type === "note").map((n) => n.node_key));
+  const edges = allEdges.filter((e) => !noteKeys.has(e.source) && !noteKeys.has(e.target));
 
   const triggers = nodes.filter((n) => n.type === TRIGGER);
   const goals = nodes.filter((n) => n.type === GOAL);

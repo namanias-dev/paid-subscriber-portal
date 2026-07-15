@@ -3,13 +3,13 @@
 import {
   Zap, IndianRupee, CalendarClock, CalendarCheck, UserPlus, CircleX, FileUp,
   GraduationCap, Video, VideoOff, GitBranch, Timer, MessageSquare, ClipboardList,
-  Split, Target, OctagonMinus, type LucideIcon,
+  Split, Target, OctagonMinus, StickyNote, type LucideIcon,
 } from "lucide-react";
 
 const MAP: Record<string, LucideIcon> = {
   Zap, IndianRupee, CalendarClock, CalendarCheck, UserPlus, CircleX, FileUp,
   GraduationCap, Video, VideoOff, GitBranch, Timer, MessageSquare, ClipboardList,
-  Split, Target, OctagonMinus,
+  Split, Target, OctagonMinus, StickyNote,
 };
 
 export function BuilderIcon({ name, size = 16, strokeWidth = 2, className, color }: { name: string; size?: number; strokeWidth?: number; className?: string; color?: string }) {
