@@ -186,7 +186,7 @@ export async function POST(req: Request) {
     fetch(new URL("/api/public/lead", req.url).toString(), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, phone: mobile, email, source: "Website", campaign: "Enroll", course_interest: course.title }),
+      body: JSON.stringify({ name, phone: mobile, email, source: "Website", campaign: "Enroll", course_interest: course.title, source_form: "enroll_intent" }),
     }).catch(() => {});
 
     if (isEazypayConfigured()) {

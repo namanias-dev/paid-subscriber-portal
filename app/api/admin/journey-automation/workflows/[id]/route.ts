@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { requirePermission, getActionActor } from "@/lib/adminGuard";
 import { getEditorState, saveDraftGraph, renameWorkflow, deleteWorkflow } from "@/lib/journey-automation/builderStore";
+import { journeyFlagSnapshot } from "@/lib/journey-automation/flags";
+import { getSettings } from "@/lib/journey-automation/store";
 import type { BuilderGraph } from "@/types/journey-automation";
 
 export const dynamic = "force-dynamic";
@@ -14,7 +16,15 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
   if (!actor) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   const state = await getEditorState(params.id, actor);
   if (!state) return NextResponse.json({ ok: false, error: "Not found" }, { status: 404 });
-  return NextResponse.json({ ok: true, ...state });
+  // Effective-state inputs: the server flags + kill switch so the builder can show
+  // the HONEST running state (e.g. "Live (engine OFF — not running)").
+  const settings = await getSettings();
+  return NextResponse.json({
+    ok: true,
+    ...state,
+    flags: journeyFlagSnapshot(),
+    killSwitch: { engaged: settings.kill_switch_engaged },
+  });
 }
 
 /** Save the draft graph. Requires journey_edit_draft. Audited. Never sends/executes. */

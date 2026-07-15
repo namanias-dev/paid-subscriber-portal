@@ -12,7 +12,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   ArrowLeft, Save, ShieldCheck, CheckCircle2, PlayCircle, PauseCircle, Copy, History,
-  Undo2, Redo2, AlertTriangle, X, Wand2, Trash2,
+  Undo2, Redo2, AlertTriangle, X, Wand2, Trash2, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen,
 } from "lucide-react";
 import { JourneyNode, type JourneyNodeData } from "./JourneyNode";
 import NodeLibrary from "./NodeLibrary";
@@ -23,6 +23,9 @@ import { validateGraph, type ValidationReport } from "@/lib/journey-automation/v
 import {
   outputHandles, branchDisplayLabel, planConnection, executableGraph, isNoteType,
 } from "@/lib/journey-automation/builderGraphMap";
+import { summarizeTriggerFilters, type TriggerSources } from "@/lib/journey-automation/engine/triggerMatch";
+import { effectiveJourneyState, effectiveTonePill, type ExecutionMode } from "@/lib/journey-automation/effectiveState";
+import type { JourneyFlagSnapshot } from "@/lib/journey-automation/flags";
 import type {
   AutomationTemplateOption, AutomationWorkflow, AutomationWorkflowVersion,
   BuilderGraph, WorkflowStatus,
@@ -60,7 +63,10 @@ function goalLabel(goalType: string): string {
 
 function deriveSubtitle(type: string, cfg: Record<string, unknown>, templateName?: string | null): string {
   switch (type) {
-    case "trigger": return String(cfg.eventType ?? "");
+    case "trigger": {
+      const summary = summarizeTriggerFilters(String(cfg.eventType ?? ""), cfg);
+      return summary === "All sources" ? String(cfg.eventType ?? "") : summary;
+    }
     case "wait": return `${cfg.durationValue ?? 1} ${cfg.durationUnit ?? "days"}`;
     case "send_sms": return templateName || (cfg.templateName as string) || "No template";
     case "condition": return conditionLabel(String(cfg.check ?? cfg.field ?? ""));
@@ -174,14 +180,23 @@ interface QuickAdd { source: string; handleId: string | null; flow: { x: number;
 
 function BuilderInner({ workflowId, perms }: { workflowId: string; perms: BuilderPerms }) {
   const router = useRouter();
-  const { screenToFlowPosition } = useReactFlow();
+  const { screenToFlowPosition, fitView } = useReactFlow();
   const wrapRef = useRef<HTMLDivElement>(null);
+
+  // Re-fit the canvas shortly after a layout change (panel collapse / resize) so
+  // the graph always uses the available space at any window size.
+  const refitSoon = useCallback(() => {
+    window.setTimeout(() => { try { fitView({ padding: 0.2, duration: 200 }); } catch { /* noop */ } }, 60);
+  }, [fitView]);
 
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
   const [templates, setTemplates] = useState<AutomationTemplateOption[]>([]);
+  const [triggerSources, setTriggerSources] = useState<TriggerSources>({});
+  const [flags, setFlags] = useState<JourneyFlagSnapshot | null>(null);
+  const [killSwitchEngaged, setKillSwitchEngaged] = useState(false);
   const [workflow, setWorkflow] = useState<AutomationWorkflow | null>(null);
   const [versions, setVersions] = useState<AutomationWorkflowVersion[]>([]);
   const [name, setName] = useState("");
@@ -192,6 +207,8 @@ function BuilderInner({ workflowId, perms }: { workflowId: string; perms: Builde
   const [showHistory, setShowHistory] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [quickAdd, setQuickAdd] = useState<QuickAdd | null>(null);
+  const [leftCollapsed, setLeftCollapsed] = useState(false);
+  const [rightCollapsed, setRightCollapsed] = useState(false);
 
   const nodesRef = useRef<Node[]>([]);
   const edgesRef = useRef<Edge[]>([]);
@@ -218,17 +235,21 @@ function BuilderInner({ workflowId, perms }: { workflowId: string; perms: Builde
     (async () => {
       setLoading(true);
       try {
-        const [stateRes, tplRes] = await Promise.all([
+        const [stateRes, tplRes, srcRes] = await Promise.all([
           fetch(`/api/admin/journey-automation/workflows/${workflowId}`).then((r) => r.json()),
           fetch(`/api/admin/journey-automation/templates`).then((r) => r.json()),
+          fetch(`/api/admin/journey-automation/trigger-sources`).then((r) => r.json()).catch(() => null),
         ]);
         if (!alive) return;
         const tpls = (tplRes?.options ?? []) as AutomationTemplateOption[];
         setTemplates(tpls);
+        if (srcRes?.ok) setTriggerSources(srcRes.sources ?? {});
         if (stateRes?.ok) {
           setWorkflow(stateRes.workflow);
           setVersions(stateRes.versions ?? []);
           setName(stateRes.workflow?.name ?? "");
+          setFlags(stateRes.flags ?? null);
+          setKillSwitchEngaged(!!stateRes.killSwitch?.engaged);
           setNodes(toRFNodes(stateRes.graph, tpls));
           setEdges(toRFEdges(stateRes.graph));
         }
@@ -417,6 +438,7 @@ function BuilderInner({ workflowId, perms }: { workflowId: string; perms: Builde
     const res = await fetch(`/api/admin/journey-automation/workflows/${workflowId}`).then((r) => r.json());
     if (res?.ok) {
       setWorkflow(res.workflow); setVersions(res.versions ?? []); setName(res.workflow?.name ?? "");
+      setFlags(res.flags ?? null); setKillSwitchEngaged(!!res.killSwitch?.engaged);
       setNodes(toRFNodes(res.graph, templates)); setEdges(toRFEdges(res.graph));
     }
   }, [workflowId, templates, setNodes, setEdges]);
@@ -544,10 +566,25 @@ function BuilderInner({ workflowId, perms }: { workflowId: string; perms: Builde
         <Link href="/admin/communications/journey-automation" className="ja-btn-sm" title="Back to journeys"><ArrowLeft size={15} /></Link>
         <span className="ja-toolbar-name" aria-label="Workflow name">{name || workflow.name}</span>
         <span className={`pill ${STATUS_PILL[status]}`}>{STATUS_LABEL[status]}</span>
+        {(() => {
+          const eff = effectiveJourneyState({
+            mode: ((workflow.execution_mode ?? "off") as ExecutionMode),
+            executionEnabled: !!flags?.executionEnabled,
+            smsEnabled: !!flags?.smsEnabled,
+            killSwitchEngaged,
+          });
+          return <span className={`pill ${effectiveTonePill(eff.tone)}`} title={eff.detail}>{eff.label}</span>;
+        })()}
         <span className="text-xs text-muted">{workflow.published_version ? `Published v${workflow.published_version}` : "Never published"}{dirty ? " · Unsaved" : ""}</span>
 
         <div className="ja-toolbar-spacer" />
 
+        <button className="ja-btn-sm" onClick={() => { setLeftCollapsed((v) => !v); refitSoon(); }} title={leftCollapsed ? "Show node library" : "Hide node library"} aria-pressed={leftCollapsed}>
+          {leftCollapsed ? <PanelLeftOpen size={15} /> : <PanelLeftClose size={15} />}
+        </button>
+        <button className="ja-btn-sm" onClick={() => { setRightCollapsed((v) => !v); refitSoon(); }} title={rightCollapsed ? "Show inspector" : "Hide inspector"} aria-pressed={rightCollapsed}>
+          {rightCollapsed ? <PanelRightOpen size={15} /> : <PanelRightClose size={15} />}
+        </button>
         <button className="ja-btn-sm" onClick={undo} disabled={past.current.length === 0} title="Undo (Ctrl+Z)"><Undo2 size={15} /></button>
         <button className="ja-btn-sm" onClick={redo} disabled={future.current.length === 0} title="Redo (Ctrl+Shift+Z)"><Redo2 size={15} /></button>
         <button className="ja-btn-sm" onClick={tidyUp} disabled={!perms.canEdit} title="Tidy up layout"><Wand2 size={15} /> Tidy up</button>
@@ -581,9 +618,11 @@ function BuilderInner({ workflowId, perms }: { workflowId: string; perms: Builde
         </div>
       )}
 
-      {/* Three-panel builder */}
-      <div className="ja-builder" ref={wrapRef}>
-        <NodeLibrary disabled={!perms.canEdit} />
+      {/* Three-panel builder — full-bleed so it fills the viewport width and
+          resizes live; palette + inspector are collapsible for max canvas. */}
+      <div className="ja-fullbleed">
+      <div className="ja-builder" ref={wrapRef} data-left={leftCollapsed ? "collapsed" : "open"} data-right={rightCollapsed ? "collapsed" : "open"}>
+        {!leftCollapsed && <NodeLibrary disabled={!perms.canEdit} />}
 
         <div className="ja-canvas-wrap" onDrop={onDrop} onDragOver={onDragOver}>
           <ReactFlow
@@ -642,7 +681,10 @@ function BuilderInner({ workflowId, perms }: { workflowId: string; perms: Builde
           )}
         </div>
 
-        <NodeInspector node={selectedNode} templates={templates} canEdit={perms.canEdit} onChange={updateSelectedConfig} onDelete={deleteSelected} />
+        {!rightCollapsed && (
+          <NodeInspector node={selectedNode} templates={templates} triggerSources={triggerSources} canEdit={perms.canEdit} onChange={updateSelectedConfig} onDelete={deleteSelected} />
+        )}
+      </div>
       </div>
 
       {toast && (

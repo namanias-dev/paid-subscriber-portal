@@ -62,6 +62,7 @@ export default function EnrollClient({ course }: { course: Course }) {
           source: "Website",
           campaign: "Enroll",
           course_interest: course.title,
+          source_form: "enroll_intent",
         }),
       }).catch(() => {});
 

@@ -1,10 +1,11 @@
 "use client";
 
 import { useMemo } from "react";
-import { SendHorizontal, AlertTriangle, Info, Plus, Trash2, ExternalLink, HelpCircle } from "lucide-react";
+import { SendHorizontal, AlertTriangle, Info, Plus, Trash2, ExternalLink, HelpCircle, Filter } from "lucide-react";
 import Link from "next/link";
 import type { AutomationTemplateOption } from "@/types/journey-automation";
 import { CONDITION_CHECKS, SMS_CATEGORIES, GOAL_TYPES, JOURNEY_VARIABLES } from "./nodeCatalog";
+import { TRIGGER_FILTER_DIMS, readTriggerFilters, type TriggerSources } from "@/lib/journey-automation/engine/triggerMatch";
 
 export interface InspectorNode {
   node_key: string;
@@ -15,6 +16,7 @@ export interface InspectorNode {
 interface Props {
   node: InspectorNode | null;
   templates: AutomationTemplateOption[];
+  triggerSources?: TriggerSources;
   canEdit: boolean;
   onChange: (patch: Record<string, unknown>) => void;
   onDelete: () => void;
@@ -35,7 +37,7 @@ function Help({ text }: { text: string }) {
   );
 }
 
-export default function NodeInspector({ node, templates, canEdit, onChange, onDelete }: Props) {
+export default function NodeInspector({ node, templates, triggerSources, canEdit, onChange, onDelete }: Props) {
   const cfg = node?.config ?? {};
   const disabled = !canEdit;
 
@@ -97,13 +99,7 @@ export default function NodeInspector({ node, templates, canEdit, onChange, onDe
       </div>
 
       {node.type === "trigger" && (
-        <>
-          <div className="ja-field">
-            <label className="ja-insp-label">Enrolls when <Help text="The business event that starts this journey for a contact." /></label>
-            <div className="ja-preview">{triggerLabel(String(cfg.eventType ?? "—"))}</div>
-          </div>
-          <p className="text-xs text-muted">Every contact who triggers this event enrolls once. Nothing runs until execution is enabled — this is safe to design and dry-run now.</p>
-        </>
+        <TriggerInspector cfg={cfg} disabled={disabled} set={set} triggerSources={triggerSources} />
       )}
 
       {node.type === "wait" && (
@@ -188,6 +184,74 @@ function triggerLabel(eventType: string): string {
     webinar_registered: "A webinar registration happens",
   };
   return map[eventType] ?? eventType;
+}
+
+/**
+ * Trigger config: the enrolling event + optional filters that narrow WHICH events
+ * enrol (e.g. only leads from a specific form). Options are LIVE from the backend
+ * (real forms/products/courses/webinars), so new sources appear automatically.
+ * Empty selection = "All" (every event of this type enrols).
+ */
+function TriggerInspector({ cfg, disabled, set, triggerSources }: {
+  cfg: Record<string, unknown>;
+  disabled: boolean;
+  set: (p: Record<string, unknown>) => void;
+  triggerSources?: TriggerSources;
+}) {
+  const eventType = String(cfg.eventType ?? "");
+  const dims = TRIGGER_FILTER_DIMS[eventType] ?? [];
+  const filters = readTriggerFilters(cfg);
+
+  function setDim(key: string, values: string[]) {
+    const next = { ...filters } as Record<string, string[]>;
+    if (values.length === 0) delete next[key];
+    else next[key] = values;
+    set({ filters: next });
+  }
+  function toggle(key: string, value: string) {
+    const cur = filters[key] ?? [];
+    setDim(key, cur.includes(value) ? cur.filter((v) => v !== value) : [...cur, value]);
+  }
+
+  return (
+    <>
+      <div className="ja-field">
+        <label className="ja-insp-label">Enrolls when <Help text="The business event that starts this journey for a contact." /></label>
+        <div className="ja-preview">{triggerLabel(eventType || "—")}</div>
+      </div>
+
+      {dims.map((dim) => {
+        const options = triggerSources?.[eventType]?.[dim.key] ?? [];
+        const selected = filters[dim.key] ?? [];
+        const all = selected.length === 0;
+        return (
+          <div className="ja-field" key={dim.key}>
+            <label className="ja-insp-label"><Filter size={11} aria-hidden="true" style={{ display: "inline", marginRight: 4, verticalAlign: "middle" }} />{dim.label} <Help text={dim.help} /></label>
+            <label className="ja-check">
+              <input type="checkbox" checked={all} disabled={disabled} onChange={() => setDim(dim.key, [])} />
+              <span>All ({dim.label.toLowerCase()}) — enrol every match</span>
+            </label>
+            {options.length === 0 ? (
+              <p className="mt-1 text-[11px] text-muted">No sources seen yet. New ones appear here automatically once they occur. Leave on “All” for now.</p>
+            ) : (
+              <div className="ja-check-list">
+                {options.map((o) => (
+                  <label className="ja-check" key={o.value}>
+                    <input type="checkbox" checked={selected.includes(o.value)} disabled={disabled} onChange={() => toggle(dim.key, o.value)} />
+                    <span>{o.label}{o.count > 0 ? <em className="text-muted"> · {o.count}</em> : <em className="text-muted"> · new</em>}</span>
+                  </label>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
+
+      <p className="text-xs text-muted">
+        Every contact who triggers this event {dims.length ? "and matches the filter above " : ""}enrolls once. Nothing runs until execution is enabled — safe to design and dry-run now.
+      </p>
+    </>
+  );
 }
 
 function BranchInspector({ cfg, disabled, set }: {
