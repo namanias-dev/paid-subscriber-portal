@@ -67,6 +67,7 @@ export default function LeadPopup({ config }: { config?: PopupConfig }) {
           course_interest: interest || undefined,
           source: "home_popup",
           campaign: "Home Popup",
+          source_form: "lead_popup",
         }),
       });
       const data = await res.json().catch(() => ({ ok: false }));

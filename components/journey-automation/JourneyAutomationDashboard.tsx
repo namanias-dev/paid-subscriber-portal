@@ -7,6 +7,7 @@ import { Workflow, Power, ShieldCheck, Plus, Pencil, Copy, Archive, ArchiveResto
 import { PageHeader, KpiCard, TableShell, LoadingBlock } from "@/components/admin/ui";
 import type { AutomationWorkflow, WorkflowStatus } from "@/types/journey-automation";
 import type { JourneyFlagSnapshot } from "@/lib/journey-automation/flags";
+import { effectiveJourneyState, effectiveTonePill, type ExecutionMode } from "@/lib/journey-automation/effectiveState";
 
 interface KillSwitchState {
   engaged: boolean;
@@ -33,8 +34,6 @@ const TRIGGER_LABEL: Record<string, string> = {
   installment_overdue: "Installment overdue",
   webinar_registered: "Webinar registered",
 };
-
-const EXEC_MODE_LABEL: Record<string, string> = { off: "Off", simulate: "Simulate", live: "Live" };
 
 const ROW_BTN = "inline-flex h-8 w-8 items-center justify-center rounded-lg border border-line bg-white text-ink2 transition-colors hover:border-[var(--primary)] hover:text-[var(--primary)] disabled:opacity-40 disabled:cursor-not-allowed";
 const ROW_BTN_DANGER = "inline-flex h-8 w-8 items-center justify-center rounded-lg border border-line bg-white text-ink2 transition-colors hover:border-[var(--danger)] hover:text-[var(--danger)] disabled:opacity-40 disabled:cursor-not-allowed";
@@ -360,7 +359,15 @@ export default function JourneyAutomationDashboard() {
                   <span className={`pill ${STATUS_PILL[w.status] ?? "pill-gray"}`}>{STATUS_LABEL[w.status] ?? w.status}</span>
                 </td>
                 <td className="px-4 py-3">
-                  <span className={`pill ${mode === "live" ? "pill-red" : mode === "simulate" ? "pill-blue" : "pill-gray"}`}>{EXEC_MODE_LABEL[mode] ?? mode}</span>
+                  {(() => {
+                    const eff = effectiveJourneyState({
+                      mode: (mode as ExecutionMode),
+                      executionEnabled: !!data?.flags?.executionEnabled,
+                      smsEnabled: !!data?.flags?.smsEnabled,
+                      killSwitchEngaged: !!data?.killSwitch?.engaged,
+                    });
+                    return <span className={`pill ${effectiveTonePill(eff.tone)}`} title={eff.detail}>{eff.label}</span>;
+                  })()}
                 </td>
                 <td className="px-4 py-3 tabular-nums">{w.published_version != null ? `v${w.published_version}` : "—"}</td>
                 <td className="px-4 py-3 text-ink2">{fmtDate(w.updated_at)}</td>

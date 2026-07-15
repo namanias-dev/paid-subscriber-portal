@@ -13,7 +13,8 @@ import { systemClock } from "./ports";
 import { checkEligibility, canaryAllows } from "./eligibility";
 import { enrollmentModeFor, shouldProcess } from "./mode";
 import { enrollmentDedupeKey, jobDedupeKey } from "./keys";
-import { entryNodeKey } from "./graph";
+import { entryNodeKey, triggerNode } from "./graph";
+import { eventMatchesTrigger } from "./triggerMatch";
 
 export interface MatcherResult {
   halted?: string;
@@ -45,6 +46,12 @@ export async function runMatcher(
       const wf = cand.workflow;
       if (shouldProcess(wf.execution_mode, settings.killSwitchEngaged) === "off") { res.skipped++; continue; }
       if (wf.killswitch_disabled) { res.skipped++; continue; }
+
+      // Honor the trigger's source/filter (e.g. only leads from a specific form).
+      // A non-matching event simply isn't targeted by this workflow → skip (not a
+      // suppression); "all"/no filter always matches.
+      const trig = triggerNode(cand.graph);
+      if (!eventMatchesTrigger(ev.event_type, trig?.config ?? null, ev)) { res.skipped++; continue; }
 
       const facts = await state.getEligibilityFacts(wf, ev);
       const activeCount = await data.countActiveEnrollments(wf.id);

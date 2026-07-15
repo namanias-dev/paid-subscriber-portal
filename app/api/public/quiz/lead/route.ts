@@ -65,7 +65,7 @@ export async function POST(req: Request) {
           campaign: "quiz",
           course_interest: String(body.interest || body.slug || "Quiz"),
           ...(email ? { email } : {}),
-        });
+        }, "quiz");
       } catch { /* non-fatal */ }
     }
 

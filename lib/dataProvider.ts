@@ -11,6 +11,7 @@ import type { AttributionState } from "./attribution";
 import { flattenForStamp, metaIdentityFromState } from "./attribution";
 import { fireAutoSms } from "./sms/dispatch";
 import { fireAutomationEvent } from "./journey-automation/events";
+import { normalizeSourceForm } from "./journey-automation/leadSources";
 import { TRIGGERS } from "./sms/templates";
 import { NON_DUPLICABLE_WEBINAR_FIELDS, buildDuplicateSlug } from "./webinarLifecycle";
 import type {
@@ -1689,7 +1690,7 @@ async function foldTouchIntoLead(existing: Lead, input: Partial<Lead>, touch: Le
   return updated || { ...existing, ...patch };
 }
 
-export async function addLead(input: Partial<Lead>): Promise<Lead> {
+export async function addLead(input: Partial<Lead>, sourceForm?: string): Promise<Lead> {
   const now = new Date().toISOString();
   const norm = normalizeIndianMobile(input.phone || "");
   const touch: LeadTouch = {
@@ -1742,11 +1743,11 @@ export async function addLead(input: Partial<Lead>): Promise<Lead> {
   if (input.email) row.email = input.email;
   if (demoMode()) {
     mock.leads.unshift(row);
-    fireLeadCreated(row);
+    fireLeadCreated(row, sourceForm);
     return row;
   }
   const created = await dbInsert<Lead>("leads", row as unknown as Record<string, unknown>);
-  fireLeadCreated(created ?? row);
+  fireLeadCreated(created ?? row, sourceForm);
   return created;
 }
 
@@ -1755,7 +1756,7 @@ export async function addLead(input: Partial<Lead>): Promise<Lead> {
  * idempotent (dedupe_key per lead id); a failure can never break lead creation.
  * Only fires for GENUINELY NEW leads (dedup-folded touches don't re-fire).
  */
-function fireLeadCreated(lead: Lead): void {
+function fireLeadCreated(lead: Lead, sourceForm?: string | null): void {
   const first = String(lead.name || "").trim().split(/\s+/)[0] || "";
   fireAutomationEvent({
     eventType: "lead_created",
@@ -1766,6 +1767,9 @@ function fireLeadCreated(lead: Lead): void {
     payload: {
       first_name: first,
       name: lead.name || null,
+      // Stable per-call-site identifier so the "Lead registered" trigger can
+      // filter to specific forms (see lib/journey-automation/leadSources.ts).
+      source_form: normalizeSourceForm(sourceForm),
       source: lead.source || null,
       campaign: lead.campaign ?? null,
       course_interest: lead.course_interest ?? null,
@@ -2029,7 +2033,7 @@ export async function registerWebinar(webinarId: string, name: string, phone: st
     const w = mock.webinars.find((x) => x.id === webinarId);
     if (w) w.registrations += 1;
     // also push into CRM as a lead
-    await addLead({ name, phone, source: "Webinar", webinar_registered: true, campaign: w?.title });
+    await addLead({ name, phone, source: "Webinar", webinar_registered: true, campaign: w?.title }, "webinar_registration");
     await ensureBuyer(phone, name).catch(() => null);
     fireAutoSms({ trigger: TRIGGERS.registration_created, phone, name, vars: { item_short: w?.title || "your webinar" }, entity: { webinar_id: webinarId }, entityId: webinarId });
     return { ok: true };
@@ -2077,7 +2081,7 @@ export async function registerWebinar(webinarId: string, name: string, phone: st
   if (isFreeWebinar) {
     fireAutoSms({ trigger: TRIGGERS.registration_created, phone, name, vars: { item_short: webinarTitle || "your webinar" }, entity: { webinar_id: webinarId }, entityId: webinarId });
   }
-  await addLead({ name, phone, source: "Webinar", webinar_registered: true });
+  await addLead({ name, phone, source: "Webinar", webinar_registered: true }, "webinar_registration");
   // UNIFIED IDENTITY: a webinar registrant (free or paid) becomes a first-class
   // student + buyer so they appear in Students & Enrollments and can open their
   // portal (webinar materials). Idempotent — one person stays one student.

@@ -23,6 +23,9 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: "Enter a valid email address." }, { status: 400 });
     }
 
+    // source_form: which form this came from (for Journey Automation trigger
+    // filtering). Defaults to the generic website form when unspecified.
+    const sourceForm = body.source_form ? String(body.source_form) : "public_lead_form";
     const lead = await addLead({
       name,
       phone: phoneNorm.digits10,
@@ -31,7 +34,7 @@ export async function POST(req: Request) {
       source: body.source ? String(body.source) : "Website",
       campaign: body.campaign ? String(body.campaign) : null,
       course_interest: body.course_interest ? String(body.course_interest) : null,
-    });
+    }, sourceForm);
     return NextResponse.json({ ok: true, id: lead.id });
   } catch {
     return NextResponse.json({ ok: false, error: "Could not submit. Please try again." }, { status: 500 });
