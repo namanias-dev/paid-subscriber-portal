@@ -34,6 +34,10 @@ const APPROVED: AutomationTemplateOption[] = [
   { id: "at-invite", name: "Invite", sms_template_id: "general_webinar_invite", dlt_template_id: "2", body: "Hi {first_name} {login_url}", variables: ["first_name", "login_url"], approved: true },
   { id: "at-pay", name: "Payment Success", sms_template_id: "payment_successful", dlt_template_id: "3", body: "Hi {first_name} {item_short} {login_url} {login_code}", variables: ["first_name", "item_short", "login_url", "login_code"], approved: true },
   { id: "at-webreg", name: "Webinar Confirmed", sms_template_id: "webinar_registered", dlt_template_id: "4", body: "Hi {first_name} {login_url} {login_code}", variables: ["first_name", "login_url", "login_code"], approved: true },
+  { id: "at-paypend", name: "Payment Pending", sms_template_id: "payment_pending", dlt_template_id: "5", body: "Hi {first_name} {item_short} {login_url} {login_code}", variables: ["first_name", "item_short", "login_url", "login_code"], approved: true },
+  { id: "at-aband", name: "Abandoned Nudge", sms_template_id: "abandoned_nudge", dlt_template_id: "6", body: "Hi {first_name} {item_short} {login_url} {login_code}", variables: ["first_name", "item_short", "login_url", "login_code"], approved: true },
+  { id: "at-zoom", name: "Zoom Ready", sms_template_id: "zoom_ready", dlt_template_id: "7", body: "Hi {first_name} {login_url} {login_code}", variables: ["first_name", "login_url", "login_code"], approved: true },
+  { id: "at-soon", name: "Starting Soon", sms_template_id: "starting_soon_1hr", dlt_template_id: "8", body: "Hi {first_name} {item_short} {login_url} {login_code}", variables: ["first_name", "item_short", "login_url", "login_code"], approved: true },
 ];
 const byKey = new Map(APPROVED.map((t) => [t.sms_template_id, t]));
 
@@ -62,12 +66,24 @@ describe("DRAFT DLT templates", () => {
   });
 });
 
-describe("Every seeded journey validates (only pending-template errors)", () => {
+describe("Every seeded journey validates — Ready to publish, no false pending", () => {
   for (const { name, graph } of ALL_GRAPHS) {
     it(`${name}: no structural errors; only sms_no_template`, () => {
       const rep = reportOf(graph);
       const other = rep.issues.filter((i) => i.level === "error" && i.code !== "sms_no_template");
       assert.deepEqual(other, [], `unexpected blocking errors: ${JSON.stringify(other)}`);
+    });
+    it(`${name}: every SMS binds a REAL approved template (zero false pending)`, () => {
+      // With the full approved Mission-Control set available, no step is pending.
+      const rep = reportOf(graph);
+      const pending = rep.issues.filter((i) => i.code === "sms_no_template");
+      assert.deepEqual(pending, [], `${name} has false-pending steps: ${JSON.stringify(pending)}`);
+      for (const n of graph.nodes.filter((n) => n.type === "send_sms")) {
+        const id = n.config?.["automationTemplateId"];
+        assert.ok(id, `${name}/${n.node_key} must bind an approved template`);
+        // The bound id resolves to a real approved option (single source of truth).
+        assert.ok(APPROVED.some((t) => t.id === id), `${name}/${n.node_key} bound to unknown template ${String(id)}`);
+      }
     });
     it(`${name}: every condition has BOTH a Yes and No path`, () => {
       const condKeys = graph.nodes.filter((n) => n.type === "condition").map((n) => n.node_key);

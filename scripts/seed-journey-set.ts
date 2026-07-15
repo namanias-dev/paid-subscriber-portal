@@ -33,12 +33,12 @@ async function main() {
   const byKey = new Map(templates.map((t: AutomationTemplateOption) => [t.sms_template_id, t]));
 
   const lead = await seedLeadOnboarding(SEED_ACTOR);
-  console.log(`\n${SEED_NAME}: ${lead.created ? `created ${lead.workflowId}` : `exists ${lead.workflowId} (no-op)`}`);
+  console.log(`\n${SEED_NAME}: ${lead.created ? `created ${lead.workflowId}` : `exists ${lead.workflowId} (draft re-synced)`}`);
   report(SEED_NAME, buildLeadOnboardingGraph(templates));
 
   const rest = await seedJourneySet(SEED_ACTOR);
   for (const r of rest) {
-    console.log(`\n${r.name}: ${r.created ? `created ${r.workflowId}` : `exists ${r.workflowId} (no-op)`}`);
+    console.log(`\n${r.name}: ${r.created ? `created ${r.workflowId}` : `exists ${r.workflowId} (draft re-synced)`}`);
     const def = JOURNEY_DEFS.find((d) => d.name === r.name)!;
     report(r.name, def.build(byKey));
   }
