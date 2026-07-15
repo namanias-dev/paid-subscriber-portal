@@ -23,7 +23,7 @@ import { normalizeIndianMobile } from "@/lib/phone";
 import { upsertLead } from "@/lib/ai-agent/leadService";
 import { recordEvent } from "@/lib/ai-agent/conversationStore";
 import { getAgentContext } from "@/lib/ai-agent/request";
-import { rateLimited } from "@/lib/dataProvider";
+import { rateLimited, addLead } from "@/lib/dataProvider";
 
 export const dynamic = "force-dynamic";
 
@@ -116,6 +116,28 @@ export async function POST(req: Request) {
       const status = result.error === "lead_cap_reached" ? 429 : 500;
       const msg = result.error === "lead_cap_reached" ? "Too many requests." : "Could not save right now.";
       return NextResponse.json({ ok: false, error: msg }, { status });
+    }
+
+    // Make the free-download lead a first-class citizen in the Lead CRM too.
+    // `addLead` is idempotent (folds by phone → no duplicate row) and fires an
+    // idempotent `lead_created` (source_form="free_download") so Journey
+    // Automation can enrol it. Best-effort: a CRM failure must NOT block the
+    // download the visitor just unlocked.
+    try {
+      await addLead(
+        {
+          name,
+          phone: n.digits10!,
+          city,
+          target_year: targetYear ?? undefined,
+          source: "free_download",
+          campaign: fileTitle ? `Download: ${fileTitle}` : "Free download",
+          course_interest: fileTitle ?? undefined,
+        },
+        "free_download",
+      );
+    } catch {
+      /* non-blocking — the ai_leads record above is already saved */
     }
 
     // Append a redacted, PII-free event so admins see which file drove the lead.

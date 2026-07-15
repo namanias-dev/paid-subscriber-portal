@@ -158,6 +158,37 @@ export function formatISTDateTime(iso?: string | null): string {
   return `${IST_DATE_MED.format(d)}, ${IST_TIME.format(d)} IST`;
 }
 
+const IST_DATE_DM = new Intl.DateTimeFormat("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short" });
+
+/** Compact card timestamp, e.g. "15 Jul, 9:52 AM" (IST, no year). */
+export function formatISTShort(iso?: string | null): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  return `${IST_DATE_DM.format(d)}, ${IST_TIME.format(d)}`;
+}
+
+/**
+ * Short relative age, e.g. "just now", "5m ago", "3h ago", "2d ago", or a
+ * compact date for anything older than ~7 days. Cheap + allocation-light for
+ * rendering across many cards.
+ */
+export function relativeTimeShort(iso?: string | null): string {
+  if (!iso) return "";
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return "";
+  const diff = Date.now() - t;
+  if (diff < 0) return "just now";
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  if (days <= 7) return `${days}d ago`;
+  return IST_DATE_DM.format(new Date(t));
+}
+
 /**
  * Full range label, e.g. "Sunday, 28 June 2026, 11:00 AM – 1:00 PM IST".
  * Falls back to a single time when no end is provided.
