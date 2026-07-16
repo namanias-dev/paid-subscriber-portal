@@ -106,7 +106,13 @@ export function normalizeSource(
   }
   const host = bareHost(referrer);
   if (!host) return { source: "direct", raw: null };
-  if (ownHost && (host === clean(ownHost) || host.endsWith(`.${clean(ownHost)}`))) {
+  // Normalize ownHost through the same bareHost path so `www.namanias.com` and
+  // `namanias.com` match (previously `www.` on ownHost broke this and misclassified
+  // internal self-referrals as EXTERNAL "referral" — exactly the bug where a user
+  // browsing on-site got a "Referral" first-touch that then blocked the real ad
+  // click from being recorded as first-touch acquisition).
+  const own = bareHost(ownHost || "");
+  if (own && (host === own || host.endsWith(`.${own}`))) {
     return { source: "direct", raw: null };
   }
   const mappedHost = ALIAS_TO_SOURCE[host];
@@ -139,6 +145,16 @@ export function touchIsMeaningful(t: AttributionTouch): boolean {
   return t.source !== "direct" || !!t.campaign || !!t.medium || !!t.fbclid || !!t.fbc || !!t.gclid;
 }
 
+/**
+ * Strong acquisition signal — an unambiguous paid/campaign click identifier or
+ * an explicit campaign tag. These are the touches paid attribution SHOULD win on:
+ * anything without one is either Direct, Organic, or an ambient site-referral
+ * (aggregator/wiki/on-site bounce), never something a marketer paid for.
+ */
+export function touchHasAcquisitionSignal(t: AttributionTouch): boolean {
+  return !!t.gclid || !!t.fbclid || !!t.fbc || !!t.campaign;
+}
+
 /** Merge a new touch into existing state: first-touch frozen, last-touch rolling. */
 export function mergeAttribution(
   existing: AttributionState | null,
@@ -146,17 +162,27 @@ export function mergeAttribution(
   nowISO: string,
 ): AttributionState {
   const prev = existing || { first_touch: null, last_touch: null };
-  // FIRST-TOUCH, marketing-aware:
-  //  - nothing captured yet → record this touch (meaningful or a Direct placeholder);
-  //  - an existing NON-meaningful placeholder (Direct/organic, no campaign/click id)
-  //    is UPGRADED to the first GENUINE marketing touch (ad click / campaign) that
-  //    arrives — so a returning/organic visitor who later clicks a Google ad is
-  //    correctly attributed to Google Ads instead of being stuck on Direct.
-  //  - a REAL first-touch (already meaningful) is NEVER overwritten (first-touch wins).
+  // FIRST-TOUCH, marketing-aware — priority (top wins, never demoted):
+  //  1. nothing captured yet → record this touch (meaningful or a Direct placeholder);
+  //  2. existing NON-meaningful placeholder (Direct/organic, no campaign/click id)
+  //     is UPGRADED to the first meaningful marketing touch that arrives — so a
+  //     returning/organic visitor who later clicks a Google ad is correctly
+  //     attributed instead of being stuck on Direct;
+  //  3. existing meaningful-but-AMBIENT touch (external referrer/other, still
+  //     without a click id or campaign — e.g. an aggregator hop or a same-tab
+  //     bounce whose referrer survived) is UPGRADED to a subsequent PAID AD CLICK
+  //     (gclid / fbclid / fbc / explicit campaign). A paid ad click is a first-
+  //     class acquisition — it must not be blocked by an ambient referrer that
+  //     preceded it. This is the root fix for the "testing11" case where a stale
+  //     on-site referrer first-touch masked the actual Google Ads acquisition.
+  //  4. an existing first-touch that ALREADY carries an acquisition signal
+  //     (gclid/fbclid/campaign) is NEVER overwritten (first-touch wins).
   let first = prev.first_touch;
   if (!first) {
     first = { ...touch, first_seen_at: nowISO };
   } else if (!touchIsMeaningful(first) && touchIsMeaningful(touch)) {
+    first = { ...touch, first_seen_at: nowISO };
+  } else if (!touchHasAcquisitionSignal(first) && touchHasAcquisitionSignal(touch)) {
     first = { ...touch, first_seen_at: nowISO };
   }
   // Last-touch updates only on a meaningful new signal; otherwise keep prior.

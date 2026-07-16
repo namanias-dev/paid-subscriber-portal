@@ -109,6 +109,12 @@ export default function PaymentsAdmin() {
   const codes = useAdminData<Record<string, string>>("/api/admin/payments", "buyerCodes");
   const proofsHook = useAdminData<Record<string, ProofWithAccess>>("/api/admin/payments", "proofs");
   const itemNames = useAdminData<Record<string, string>>("/api/admin/payments", "itemNames").data || {};
+  // Read-only lead attribution per phone (last-10 normalized) — for the Source
+  // pill on the Payments user card. Never enables edits, never touches payments.
+  const leadAttrByPhone = useAdminData<Record<string, { channel: string | null; utm_campaign: string | null; utm_source: string | null }>>(
+    "/api/admin/payments",
+    "leadAttrByPhone",
+  ).data || {};
   const canManage = useAdminData<boolean>("/api/admin/payments", "canManage").data || false;
   const isSuper = useAdminData<boolean>("/api/admin/payments", "isSuper").data || false;
   const { toast } = useToast();
@@ -321,6 +327,7 @@ export default function PaymentsAdmin() {
       name: r.name,
       phone: r.phone || undefined,
       tag: r.code ? <span className="font-mono text-[11px] font-semibold text-primary">{r.code}</span> : undefined,
+      meta: <SourcePill attr={leadAttrByPhone[lastDigits10(r.phone)] || null} />,
       summary: (
         <div className="flex flex-col items-end gap-1">
           <span className="text-sm font-bold text-ink">{formatINR(r.paidTotal)}</span>
@@ -338,7 +345,7 @@ export default function PaymentsAdmin() {
       ),
       nodes: r.nodes,
     }));
-  }, [visibleGroups, sort, buyerCodes, proofs, reverifying, canManage, showSuperseded, itemNames]);
+  }, [visibleGroups, sort, buyerCodes, proofs, reverifying, canManage, showSuperseded, itemNames, leadAttrByPhone]);
 
   const matchOpenIds = useMemo(
     () => (q.trim() ? new Set(userGroups.map((g) => g.id)) : undefined),
@@ -1482,6 +1489,45 @@ function GroupAttempts({
         ))}
       </div>
     </div>
+  );
+}
+
+/** Loose last-10 digits so a "+91..." phone matches a raw-10 lead-record phone. */
+function lastDigits10(raw: string | null | undefined): string {
+  if (!raw) return "";
+  return String(raw).replace(/\D/g, "").slice(-10);
+}
+
+/**
+ * Read-only marketing SOURCE pill on the Payments user card. Renders NOTHING
+ * when there's no attribution stamp on the matched lead — never shows an edit
+ * control, never fires an action, never touches payment data. Colors track the
+ * `channel` string (matches the Lead CRM's Google Ads pill for consistency).
+ */
+function SourcePill({ attr }: { attr: { channel: string | null; utm_campaign: string | null; utm_source: string | null } | null }) {
+  if (!attr || !attr.channel) return null;
+  const isGoogleAds = attr.channel === "Google Ads";
+  const isMetaAds = attr.channel === "Meta Ads";
+  const cls = isGoogleAds
+    ? "border-blue-200 bg-blue-50 text-blue-700"
+    : isMetaAds
+    ? "border-indigo-200 bg-indigo-50 text-indigo-700"
+    : "border-line bg-surface2 text-ink2";
+  return (
+    <>
+      <span
+        className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 font-medium ${cls}`}
+        title="Marketing source captured on the matching lead — read-only, no payment data changed."
+      >
+        <span aria-hidden="true">•</span>
+        {attr.channel}
+      </span>
+      {attr.utm_campaign && (
+        <span className="rounded-full border border-line bg-surface2 px-2 py-0.5 font-mono text-[10px] text-ink2" title="utm_campaign (read-only)">
+          {attr.utm_campaign}
+        </span>
+      )}
+    </>
   );
 }
 
