@@ -146,9 +146,19 @@ export function mergeAttribution(
   nowISO: string,
 ): AttributionState {
   const prev = existing || { first_touch: null, last_touch: null };
-  const first =
-    prev.first_touch ||
-    (touchIsMeaningful(touch) || !prev.last_touch ? { ...touch, first_seen_at: nowISO } : null);
+  // FIRST-TOUCH, marketing-aware:
+  //  - nothing captured yet → record this touch (meaningful or a Direct placeholder);
+  //  - an existing NON-meaningful placeholder (Direct/organic, no campaign/click id)
+  //    is UPGRADED to the first GENUINE marketing touch (ad click / campaign) that
+  //    arrives — so a returning/organic visitor who later clicks a Google ad is
+  //    correctly attributed to Google Ads instead of being stuck on Direct.
+  //  - a REAL first-touch (already meaningful) is NEVER overwritten (first-touch wins).
+  let first = prev.first_touch;
+  if (!first) {
+    first = { ...touch, first_seen_at: nowISO };
+  } else if (!touchIsMeaningful(first) && touchIsMeaningful(touch)) {
+    first = { ...touch, first_seen_at: nowISO };
+  }
   // Last-touch updates only on a meaningful new signal; otherwise keep prior.
   let last: AttributionState["last_touch"];
   if (touchIsMeaningful(touch) || !prev.last_touch) {
