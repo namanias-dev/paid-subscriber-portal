@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requirePermission, requireSuperAdmin, currentAdminId } from "@/lib/adminGuard";
+import { requirePermission, currentAdminId } from "@/lib/adminGuard";
 import { listTemplates, getTemplate, upsertTemplate, isSeedTemplateId } from "@/lib/sms/store";
 import { validateBody, worstCaseFill, uniqueVariables } from "@/lib/sms/templates";
 import { loginUrlSample } from "@/lib/sms/config";
@@ -26,7 +26,11 @@ export async function GET() {
  * and a clean (GSM/Rs/no-emoji) body.
  */
 export async function POST(req: Request) {
-  if (!(await requireSuperAdmin())) return NextResponse.json({ ok: false, error: "Super Admin only" }, { status: 403 });
+  // Operational: create/edit templates (incl. built-ins) is day-to-day Mission
+  // Control work. Gated by manage_sms (Admin + Super Admin). Editing an approved/
+  // active template still auto-drops it to Draft (below) — activation stays a
+  // controlled transition, and nothing sends without the (Super Admin) send flag.
+  if (!(await requirePermission("manage_sms"))) return NextResponse.json({ ok: false, error: "Requires SMS management permission" }, { status: 403 });
   const body = await req.json().catch(() => ({}));
   const id: string = body.id;
   if (!id) return NextResponse.json({ ok: false, error: "Missing template id" }, { status: 400 });

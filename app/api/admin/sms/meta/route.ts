@@ -13,6 +13,9 @@ export async function GET() {
   return NextResponse.json({
     ok: true,
     isSuperAdmin: await requireSuperAdmin(),
+    // Operational content management (templates + variables). True for Admin and
+    // Super Admin. Send-safety controls stay keyed off isSuperAdmin above.
+    canManageSms: await requirePermission("manage_sms"),
     webinars: webinars.map((w) => ({ id: w.id, slug: w.slug, title: w.title, datetime: w.datetime })),
     courses: courses.map((c) => ({ id: c.id, slug: c.slug, title: c.title, price: c.price })),
     leadSources,

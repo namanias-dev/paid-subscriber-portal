@@ -29,6 +29,12 @@ export type PermissionKey =
   | "view_analytics_revenue"
   | "manage_integrations"
   | "send_sms"
+  // OPERATIONAL SMS Mission Control management (create/edit/delete templates, edit
+  // message variables/content). Distinct from `send_sms` (send approved templates +
+  // view logs) and from the PROTECTED send-safety controls (SMS-enabled flag, kill
+  // switch, bulk send) which stay Super Admin only. Holding this NEVER enables
+  // sending — it only unlocks day-to-day content management.
+  | "manage_sms"
   | "manage_careers"
   | "manage_ai_agent"
   // Journey Automation (Communications). NEW + restrictive by default — holding
@@ -75,6 +81,7 @@ export const PERMISSIONS: PermissionMeta[] = [
   { key: "manage_students_leads", label: "Manage students, leads & enrollments", group: "Operations" },
   { key: "view_analytics_nonrevenue", label: "View non-revenue analytics", group: "Operations" },
   { key: "send_sms", label: "Send SMS (Approved templates) & view SMS logs", group: "Operations" },
+  { key: "manage_sms", label: "Manage SMS Mission Control (templates, variables & content)", group: "Operations" },
   { key: "manage_careers", label: "Manage careers & job applications", group: "Operations" },
   { key: "manage_ai_agent", label: "Manage AI Counselor Agent (leads, conversations & settings)", group: "Operations" },
 
