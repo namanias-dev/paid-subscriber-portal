@@ -26,6 +26,8 @@ export interface TimelineGroup {
   phone?: string;
   /** Optional mono pill (e.g. login code) shown in the header. */
   tag?: ReactNode;
+  /** Optional read-only meta line under the phone (e.g. marketing source pill). */
+  meta?: ReactNode;
   /** Right-aligned header summary (count + total + latest status). */
   summary?: ReactNode;
   /** Already sorted newest-first by the parent. */
@@ -107,6 +109,7 @@ export default function GroupedTimeline({
                   {g.tag}
                 </div>
                 {g.phone && <p className="text-xs text-muted">{g.phone}</p>}
+                {g.meta && <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px]">{g.meta}</div>}
               </div>
               <div className="shrink-0 text-right">{g.summary}</div>
               {!single && (

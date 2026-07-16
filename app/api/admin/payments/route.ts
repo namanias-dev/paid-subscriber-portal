@@ -1,8 +1,16 @@
 import { NextResponse } from "next/server";
-import { getPayments, getEnrollments, getBuyers, maybeReconcilePendingPayments, getWebinars, getAllCourses } from "@/lib/dataProvider";
+import { getPayments, getEnrollments, getBuyers, maybeReconcilePendingPayments, getWebinars, getAllCourses, getLeads } from "@/lib/dataProvider";
 import { getAllProofs, phoneHasAccessToItem } from "@/lib/paymentProofs";
 import { requireAdmin, requireAnyPermission, requirePermission, requireSuperAdmin } from "@/lib/adminGuard";
+import { normPhone } from "@/lib/phone";
 import type { PaymentProof } from "@/lib/types";
+
+/** Read-only per-user marketing attribution stamp shown on the Payments card. */
+export interface PaymentsLeadAttr {
+  channel: string | null;
+  utm_campaign: string | null;
+  utm_source: string | null;
+}
 
 export const dynamic = "force-dynamic";
 
@@ -16,13 +24,14 @@ export async function GET() {
     // Expire stale pending rows (throttled) so the admin tab never shows a
     // >10-min pending forever, even between scheduled cron sweeps.
     await maybeReconcilePendingPayments();
-    const [payments, enrollments, buyers, proofList, webinars, courses] = await Promise.all([
+    const [payments, enrollments, buyers, proofList, webinars, courses, leads] = await Promise.all([
       getPayments(),
       getEnrollments(),
       getBuyers(),
       getAllProofs(),
       getWebinars(),
       getAllCourses(),
+      getLeads(),
     ]);
     // phone -> login code, so support can resolve "forgot code" escalations.
     const buyerCodes: Record<string, string> = {};
@@ -52,11 +61,28 @@ export async function GET() {
     );
     for (const pr of proofList) proofs[pr.payment_id] = { ...pr, hasAccess: accessByKey.get(accessKey(pr)) ?? false };
 
+    // Read-only phone -> marketing attribution stamp, joined from the existing
+    // lead record so the Payments user card can surface the lead SOURCE without
+    // touching any payment/enrolment data or logic. Phone is normalized (last-10
+    // digits) so a "+91..." payment row matches a raw-10-digit lead row and vice
+    // versa. First matching lead per normalized phone wins (leads are typically
+    // deduped by phone via addLead()'s fold-by-phone anyway).
+    const leadAttrByPhone: Record<string, PaymentsLeadAttr> = {};
+    for (const l of leads) {
+      const key = normPhone(l.phone);
+      if (!key || leadAttrByPhone[key]) continue;
+      leadAttrByPhone[key] = {
+        channel: l.channel ?? null,
+        utm_campaign: l.utm_campaign ?? null,
+        utm_source: l.utm_source ?? null,
+      };
+    }
+
     // UI capability flags: who can take staff write actions (manage_payments) and
     // who can see super-admin-only controls (reverse, accountability, history).
     const [canManage, isSuper] = await Promise.all([requirePermission("manage_payments"), requireSuperAdmin()]);
 
-    return NextResponse.json({ ok: true, payments, enrollments, buyerCodes, proofs, itemNames, canManage, isSuper });
+    return NextResponse.json({ ok: true, payments, enrollments, buyerCodes, proofs, itemNames, leadAttrByPhone, canManage, isSuper });
   } catch {
     return NextResponse.json({ ok: false, error: "Failed to load payments." }, { status: 500 });
   }
