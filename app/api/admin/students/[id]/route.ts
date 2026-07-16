@@ -22,7 +22,7 @@ import { getAdminSession } from "@/lib/session";
 import { requirePermission } from "@/lib/adminGuard";
 import { computeExpiry, istInputToISO } from "@/lib/dates";
 import { deriveEnrollment, isActiveEnrollment, isAttemptEnrollment } from "@/lib/installments";
-import { getEnrollmentPlanChangeLogs } from "@/lib/dataProvider";
+import { getEnrollmentPlanChangeLogs, findActiveLeadByPhone } from "@/lib/dataProvider";
 import type { Student, PlanId, InstallmentItem, PaymentPlan } from "@/lib/types";
 
 const DAY = 86400000;
@@ -355,6 +355,19 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
       .sort((a, b) => new Date(a.submitted_at || a.created_at).getTime() - new Date(b.submitted_at || b.created_at).getTime())
       .map((a) => a.accuracy);
 
+    // Read-only marketing attribution for the profile header pill. Pulled from
+    // the existing lead record via findActiveLeadByPhone (idempotent, honours
+    // the fold-by-phone contract). Never rewritten, never touches student /
+    // enrolment / payment data. Renders NOTHING when no lead attribution matches.
+    const attributionLead = await findActiveLeadByPhone(phone).catch(() => null);
+    const leadAttribution = attributionLead
+      ? {
+          channel: attributionLead.channel ?? null,
+          utm_campaign: attributionLead.utm_campaign ?? null,
+          utm_source: attributionLead.utm_source ?? null,
+        }
+      : null;
+
     const { brand, logo_url, logo_alt } = settings;
     const contact = {
       name: brand.name || "Naman Sharma IAS Academy",
@@ -371,6 +384,7 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
       profile: {
         student,
         buyerCode: buyer?.login_code || null,
+        leadAttribution,
         courses,
         attempts: attemptCards,
         webinars: webinarRows,

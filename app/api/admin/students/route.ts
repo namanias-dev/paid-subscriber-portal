@@ -13,9 +13,11 @@ import {
   getAllWebinarRegistrations,
   getWebinars,
   getAllCourses,
+  getLeads,
   isPaidStatus,
   logAccess,
 } from "@/lib/dataProvider";
+import { normPhone } from "@/lib/phone";
 import { getAdminSession } from "@/lib/session";
 import { requirePermission } from "@/lib/adminGuard";
 import { getPlan } from "@/lib/config";
@@ -73,7 +75,7 @@ export async function GET() {
     if (!(await requirePermission("manage_students_leads"))) {
       return NextResponse.json({ ok: false, error: "Forbidden" }, { status: 403 });
     }
-    const [students, stats, enrollments, payments, regs, webinars, courses] = await Promise.all([
+    const [students, stats, enrollments, payments, regs, webinars, courses, leads] = await Promise.all([
       getStudents(),
       getStats(),
       getAllCourseEnrollments(),
@@ -81,6 +83,7 @@ export async function GET() {
       getAllWebinarRegistrations(),
       getWebinars(),
       getAllCourses(),
+      getLeads(),
     ]);
 
     const paid = payments.filter((p) => isPaidStatus(p.status));
@@ -190,7 +193,22 @@ export async function GET() {
       .reduce((a, p) => a + (p.amount || 0), 0);
     const finance = { courseFeesCollected, courseFeesOutstanding, webinarReceipts };
 
-    return NextResponse.json({ ok: true, students, stats, summaries, catalog, finance });
+    // Read-only phone -> marketing attribution stamp, joined from the existing
+    // lead record so the People/Students row can surface the lead SOURCE without
+    // touching any student / enrolment / payment data. Phone normalized (last-10)
+    // so a raw-10 lead row matches a "+91..." student row and vice versa.
+    const leadAttrByPhone: Record<string, { channel: string | null; utm_campaign: string | null; utm_source: string | null }> = {};
+    for (const l of leads) {
+      const key = normPhone(l.phone);
+      if (!key || leadAttrByPhone[key]) continue;
+      leadAttrByPhone[key] = {
+        channel: l.channel ?? null,
+        utm_campaign: l.utm_campaign ?? null,
+        utm_source: l.utm_source ?? null,
+      };
+    }
+
+    return NextResponse.json({ ok: true, students, stats, summaries, catalog, finance, leadAttrByPhone });
   } catch {
     return NextResponse.json({ ok: false, error: "Failed to load students." }, { status: 500 });
   }

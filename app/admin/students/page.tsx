@@ -5,6 +5,7 @@ import Link from "next/link";
 import { RefreshCw, Search, Users } from "lucide-react";
 import { PageHeader, LoadingBlock, KpiCard } from "@/components/admin/ui";
 import PeopleTabs from "@/components/admin/people/PeopleTabs";
+import SourcePill, { lookupLeadAttr, type LeadAttrStamp } from "@/components/admin/SourcePill";
 import CourseFeesStrip from "@/components/admin/students/CourseFeesStrip";
 import StatusPill, { statusOf } from "@/components/ui/StatusPill";
 import { useToast } from "@/components/ui/Toast";
@@ -38,6 +39,8 @@ interface ApiResponse {
   stats: { total: number; activeNow: number; expiringSoon: number; totalRevenue: number };
   /** Canonical People-area finance (course-fee scope), matches Fees & EMI exactly. */
   finance?: { courseFeesCollected: number; courseFeesOutstanding: number; webinarReceipts: number };
+  /** Read-only phone -> marketing attribution; absent for legacy environments. */
+  leadAttrByPhone?: Record<string, LeadAttrStamp>;
 }
 
 const EMPTY_SUMMARY: Summary = {
@@ -132,6 +135,7 @@ export default function StudentsAdmin() {
   const students = data?.students ?? [];
   const summaries = data?.summaries ?? {};
   const catalog = data?.catalog ?? { courses: [], webinars: [] };
+  const leadAttrByPhone = data?.leadAttrByPhone ?? {};
 
   const rows = useMemo(() => {
     const term = q.trim().toLowerCase();
@@ -323,6 +327,15 @@ export default function StudentsAdmin() {
                         <span>{s.phone}</span>
                         <span className="font-mono text-primary">{s.access_code}</span>
                       </div>
+                      {(() => {
+                        const attr = lookupLeadAttr(leadAttrByPhone, s.phone);
+                        if (!attr?.channel) return null;
+                        return (
+                          <div className="mt-1 flex flex-wrap items-center gap-1">
+                            <SourcePill attr={attr} size="compact" />
+                          </div>
+                        );
+                      })()}
                     </td>
                     <td className="px-4 py-3 align-top">
                       <EnrollmentCell sum={sum} />
@@ -361,6 +374,15 @@ export default function StudentsAdmin() {
                   <div className="min-w-0">
                     <p className="truncate font-medium text-ink">{s.name}</p>
                     <p className="mt-0.5 text-xs text-muted">{s.phone} · <span className="font-mono text-primary">{s.access_code}</span></p>
+                    {(() => {
+                      const attr = lookupLeadAttr(leadAttrByPhone, s.phone);
+                      if (!attr?.channel) return null;
+                      return (
+                        <div className="mt-1 flex flex-wrap items-center gap-1">
+                          <SourcePill attr={attr} size="compact" />
+                        </div>
+                      );
+                    })()}
                   </div>
                   <StatusPill expiry={s.expiry_date} isActive={s.is_active} />
                 </div>

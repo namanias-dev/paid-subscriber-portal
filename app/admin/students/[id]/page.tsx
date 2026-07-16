@@ -31,6 +31,7 @@ import {
 import { LoadingBlock } from "@/components/admin/ui";
 import JourneyTimeline from "@/components/admin/JourneyTimeline";
 import SendSmsButton from "@/components/admin/sms/SendSmsButton";
+import SourcePill, { type LeadAttrStamp } from "@/components/admin/SourcePill";
 import StatusPill, { statusOf } from "@/components/ui/StatusPill";
 import Modal from "@/components/ui/Modal";
 import { useToast } from "@/components/ui/Toast";
@@ -93,6 +94,8 @@ interface RecentAttempt { attemptId: string; slug: string; title: string; score:
 interface Profile {
   student: Student;
   buyerCode: string | null;
+  /** Read-only marketing attribution stamp; absent when no lead matches. */
+  leadAttribution: LeadAttrStamp | null;
   courses: CourseCard[];
   attempts: AttemptCard[];
   webinars: WebinarRow[];
@@ -316,6 +319,11 @@ export default function StudentProfilePage({ params }: { params: { id: string } 
               <span className="inline-flex items-center gap-1.5 uppercase"><GraduationCap size={14} className="opacity-60" />{s.plan}</span>
               <SendSmsButton phone={s.phone} name={s.name} />
             </div>
+            {profile.leadAttribution?.channel && (
+              <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                <SourcePill attr={profile.leadAttribution} />
+              </div>
+            )}
             <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
               <span className="inline-flex items-center gap-1.5 text-muted"><KeyRound size={13} /> Access</span>
               <CopyChip value={s.access_code} label="access code" />
