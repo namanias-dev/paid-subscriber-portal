@@ -70,7 +70,9 @@ export async function GET() {
  * are validated as well-formed http(s). Audited via updated_by.
  */
 export async function PATCH(req: Request) {
-  if (!(await requireSuperAdmin())) return NextResponse.json({ ok: false, error: "Super Admin only" }, { status: 403 });
+  // Operational: editing message variables/content is a day-to-day Mission Control
+  // action. Gated by manage_sms (Admin + Super Admin), NOT the send-safety flag.
+  if (!(await requirePermission("manage_sms"))) return NextResponse.json({ ok: false, error: "Requires SMS management permission" }, { status: 403 });
 
   const body = await req.json().catch(() => ({}));
   const scope = String(body.scope || "").trim();

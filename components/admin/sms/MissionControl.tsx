@@ -36,6 +36,8 @@ interface LogRow {
 }
 interface Meta {
   isSuperAdmin: boolean;
+  /** Operational SMS management (templates + variables) — Admin + Super Admin. */
+  canManageSms: boolean;
   webinars: { id: string; slug: string; title: string; datetime: string }[];
   courses: { id: string; slug: string; title: string; price: number }[];
   leadSources: string[]; leadStages: string[];
@@ -87,8 +89,8 @@ export default function MissionControl() {
       {tab === "send" && <SendTab meta={meta} />}
       {tab === "campaigns" && <CampaignsTab canResend={!!meta?.isSuperAdmin} />}
       {tab === "automations" && <AutomationsTab canEdit={!!meta?.isSuperAdmin} />}
-      {tab === "templates" && <TemplatesTab canEdit={!!meta?.isSuperAdmin} />}
-      {tab === "variables" && <VariablesTab canEdit={!!meta?.isSuperAdmin} />}
+      {tab === "templates" && <TemplatesTab canEdit={!!meta?.canManageSms} />}
+      {tab === "variables" && <VariablesTab canEdit={!!meta?.canManageSms} />}
       {tab === "logs" && <LogsTab />}
       {tab === "analytics" && <AnalyticsTab />}
       {tab === "settings" && <SettingsTab canEdit={!!meta?.isSuperAdmin} />}
@@ -1214,7 +1216,7 @@ function VariablesTab({ canEdit }: { canEdit: boolean }) {
       <div className="rounded-xl border border-line bg-surface p-3 text-xs text-muted">
         Variables fill the <code className="font-mono">{"{token}"}</code> slots inside template bodies at send time. Change a value here and it applies to the next send and to Send&nbsp;→&nbsp;Preview — no code change or redeploy. <span className="text-ink2">Global</span> values are shared across templates; <span className="text-ink2">per-template</span> overrides win over the global.
       </div>
-      {!canEdit && <p className="text-xs text-amber-700">Only a Super Admin can edit variables. Values below are read-only.</p>}
+      {!canEdit && <p className="text-xs text-amber-700">You need the SMS management permission to edit variables. Values below are read-only.</p>}
 
       <section className="space-y-3">
         <h2 className="font-heading text-xs font-bold uppercase tracking-wide text-muted">Global variables</h2>
