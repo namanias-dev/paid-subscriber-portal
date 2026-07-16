@@ -82,6 +82,40 @@ describe("gclid capture + first-touch persistence (Part A)", () => {
   });
 });
 
+describe("first-touch upgrade: organic/direct placeholder → genuine ad click (Part A root-cause fix)", () => {
+  it("a Direct first visit is UPGRADED to Google Ads on a later tagged ad click", () => {
+    // First visit: untagged home (the classic bug trigger — froze first-touch=Direct).
+    const s1 = mergeAttribution(null, touch({ source: "direct" }), "2026-07-01T00:00:00Z");
+    assert.equal(deriveChannel(s1.first_touch), "Direct");
+    // Later: the actual Google ad click.
+    const s2 = mergeAttribution(s1, touch({ source: "google", medium: "cpc", campaign: "webinar_test", gclid: "test123" }), "2026-07-02T00:00:00Z");
+    const a = leadAttributionFromState(s2);
+    assert.equal(a.channel, "Google Ads");
+    assert.equal(a.utm_campaign, "webinar_test");
+    assert.equal(a.gclid, "test123");
+  });
+
+  it("a REAL first-touch (Google Ads) is NEVER overwritten by a later campaign", () => {
+    const s1 = mergeAttribution(null, touch({ source: "google", medium: "cpc", campaign: "first_camp", gclid: "g-1" }), "2026-07-01T00:00:00Z");
+    const s2 = mergeAttribution(s1, touch({ source: "instagram", medium: "cpc", campaign: "later_camp" }), "2026-07-05T00:00:00Z");
+    assert.equal(s2.first_touch?.campaign, "first_camp");
+    assert.equal(leadAttributionFromState(s2).utm_campaign, "first_camp");
+  });
+
+  it("scenario 2: tagged landing on /webinars then untagged hop to home keeps Google Ads + campaign", () => {
+    // Land on /webinars?utm...gclid (full load captures).
+    const s1 = mergeAttribution(null, buildTouch({ params: { utm_source: "google", utm_medium: "cpc", utm_campaign: "webinar_test" }, referrer: null, path: "/webinars", ownHost: "www.namanias.com" }), "2026-07-01T00:00:00Z");
+    // buildTouch doesn't carry gclid; captureAttribution sets it — emulate.
+    const s1g = mergeAttribution(null, { ...s1.first_touch!, gclid: "test123" }, "2026-07-01T00:00:00Z");
+    // Hop to home (same host, no utm) — a Direct placeholder that must NOT erase the ad.
+    const s2 = mergeAttribution(s1g, touch({ source: "direct", landing_path: "/", referrer: "https://www.namanias.com/webinars" }), "2026-07-01T00:05:00Z");
+    const a = leadAttributionFromState(s2);
+    assert.equal(a.channel, "Google Ads");
+    assert.equal(a.utm_campaign, "webinar_test");
+    assert.equal(a.gclid, "test123");
+  });
+});
+
 describe("idempotent fold: never overwrite first-touch (Part A)", () => {
   it("fillMissingAttribution only fills blanks", () => {
     const existing = { channel: "Google Ads", utm_campaign: "first_camp", gclid: "g-1", utm_source: null, attribution: null };
