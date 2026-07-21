@@ -10,6 +10,8 @@ import SendSmsButton from "@/components/admin/sms/SendSmsButton";
 import PaymentAccountability from "@/components/admin/payments/PaymentAccountability";
 import SortControl from "@/components/admin/SortControl";
 import SourcePill, { lastDigits10, lookupLeadAttr, type LeadAttrStamp } from "@/components/admin/SourcePill";
+import FilterSection from "@/components/admin/payments/FilterSection";
+import SourceFilter, { decodeSourceFilter, encodeSourceFilter } from "@/components/admin/payments/SourceFilter";
 import SearchBar from "@/components/ui/SearchBar";
 import { useToast } from "@/components/ui/Toast";
 import { usePersistentState } from "@/lib/usePersistentState";
@@ -22,6 +24,8 @@ import {
   type GroupStatus,
   type PaymentGroup,
 } from "@/lib/paymentGroups";
+import { derivedChannelFor } from "@/lib/webinarSource";
+import { SOURCE_DEFINITIONS, type SourceDisplayKey } from "@/lib/marketing/sourceDefinitions";
 import type { Payment, Enrollment, PaymentProof, PaymentProofFile, PaymentProofStatus, PaymentActionLog } from "@/lib/types";
 
 type PaymentSort = "recent" | "spent" | "count" | "name";
@@ -118,6 +122,11 @@ export default function PaymentsAdmin() {
   ).data || {};
   const canManage = useAdminData<boolean>("/api/admin/payments", "canManage").data || false;
   const isSuper = useAdminData<boolean>("/api/admin/payments", "isSuper").data || false;
+  // Server-read Payments UI v2 flag (default ON). `PAYMENTS_UI_V2=false` on
+  // Vercel env instantly returns the pre-shipment card + filter layout on the
+  // next request — no client-bundle rebuild required. Defaults to `true` while
+  // loading so the v2 skeleton doesn't flicker into v1 and back.
+  const paymentsUiV2 = useAdminData<boolean>("/api/admin/payments", "paymentsUiV2").data ?? true;
   const { toast } = useToast();
 
   // ---- Filters (read-only display state) ----
@@ -141,6 +150,25 @@ export default function PaymentsAdmin() {
   const [yearVal, setYearVal] = useState("");      // YYYY
   const [rangeFrom, setRangeFrom] = useState("");  // YYYY-MM-DD
   const [rangeTo, setRangeTo] = useState("");      // YYYY-MM-DD
+  // v2 Source filter (multi-select over derived CRM channels). Initialised
+  // from the URL on mount so a bookmarked/shared link restores its selection;
+  // subsequent changes replaceState back onto the URL (see effect below).
+  const [sourceSel, setSourceSel] = useState<Set<SourceDisplayKey>>(() => {
+    if (typeof window === "undefined") return new Set();
+    return decodeSourceFilter(new URLSearchParams(window.location.search).get("source"));
+  });
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const encoded = encodeSourceFilter(sourceSel);
+    if (encoded) params.set("source", encoded);
+    else params.delete("source");
+    const next = `${window.location.pathname}${params.toString() ? `?${params.toString()}` : ""}`;
+    if (next !== `${window.location.pathname}${window.location.search}`) {
+      window.history.replaceState(null, "", next);
+    }
+  }, [sourceSel]);
 
   const payments = useMemo(() => full.data || [], [full.data]);
   const enrollments = enr.data || [];
@@ -187,11 +215,15 @@ export default function PaymentsAdmin() {
     }
   }, [dateMode, dateVal, monthVal, yearVal, rangeFrom, rangeTo, todayYMD]);
 
-  // Per-attempt predicate (type / date / search / has-proof). Status is NO LONGER
-  // a per-attempt filter — it is applied at the canonical GROUP level below.
+  // Per-attempt predicate (type / date / search / has-proof / source). Status is
+  // NO LONGER a per-attempt filter — it is applied at the canonical GROUP level.
+  // The source predicate is v2-only (guarded by `sourceSel.size`) and uses the
+  // SAME `derivedChannelFor` helper as the source card, so filter results
+  // reconcile perfectly with the card counts.
   const attemptPasses = useMemo(() => {
     const activeTypes = [...types];
     const query = q.trim().toLowerCase();
+    const hasSource = sourceSel.size > 0;
     return (p: Payment): boolean => {
       if (activeTypes.length && !activeTypes.some((k) => TYPE_DEFS.find((t) => t.key === k)!.match(p))) return false;
       if (onlyProof && !proofs[p.id]) return false;
@@ -203,9 +235,13 @@ export default function PaymentsAdmin() {
         const hay = `${p.student_name || ""} ${p.phone || ""} ${p.item || ""} ${resolveItemName(p, itemNames)} ${p.reference_no || ""}`.toLowerCase();
         if (!hay.includes(query)) return false;
       }
+      if (hasSource) {
+        const ch = derivedChannelFor(p, leadAttrByPhone);
+        if (!sourceSel.has(ch)) return false;
+      }
       return true;
     };
-  }, [types, onlyProof, proofs, range, q, itemNames]);
+  }, [types, onlyProof, proofs, range, q, itemNames, sourceSel, leadAttrByPhone]);
 
   // Flat list of attempts passing the per-attempt filters (used by CSV / re-verify
   // / abandoned hot-leads / counts). Status filtering is NOT applied here.
@@ -468,7 +504,7 @@ export default function PaymentsAdmin() {
     callReverify({ referenceNos: [ref] });
   }
 
-  const hasFilters = types.size > 0 || statuses.size > 0 || onlyProof || dateMode !== "all" || needsActionOnly || paidWithDup || proofPending || showSuperseded;
+  const hasFilters = types.size > 0 || statuses.size > 0 || onlyProof || dateMode !== "all" || needsActionOnly || paidWithDup || proofPending || showSuperseded || sourceSel.size > 0;
   function clearAll() {
     setTypes(new Set());
     setStatuses(new Set());
@@ -479,6 +515,7 @@ export default function PaymentsAdmin() {
     setShowSuperseded(false);
     setDateMode("all");
     setDateVal(""); setMonthVal(""); setYearVal(""); setRangeFrom(""); setRangeTo("");
+    setSourceSel(new Set());
   }
 
   // ---- Proof actions (request reupload / accept payment / add note) ----
@@ -614,9 +651,11 @@ export default function PaymentsAdmin() {
 
   return (
     <div>
-      {/* Premium staggered entrance (transform+opacity only; reduced-motion safe).
+      {/* Payments UI v2 removes the premium staggered entrance for a snappier,
+          instant render. Flip `PAYMENTS_UI_V2=false` (server env) to restore the
+          `.pay-stagger` transform+opacity intro (fully reduced-motion safe).
           Modals stay OUTSIDE this wrapper so they keep their own open transition. */}
-      <div className="pay-stagger">
+      <div className={paymentsUiV2 ? "" : "pay-stagger"}>
       <PageHeader
         title="Payments & Finance"
         subtitle="Razorpay & ICICI transactions, revenue & collections"
@@ -667,9 +706,14 @@ export default function PaymentsAdmin() {
         <WebinarRegistrationsByWebinarTrend payments={payments} />
       </div>
 
-      {/* Paid registrations broken down by acquisition source, per webinar. */}
+      {/* Paid registrations broken down by acquisition source, per webinar.
+          v2: pass leadAttrByPhone so the card buckets by the DERIVED CRM channel
+          (fixing the Meta Ads undercount). v1 rollback: no map → flat behavior. */}
       <div className="mb-4">
-        <WebinarSourceBreakdown payments={payments} />
+        <WebinarSourceBreakdown
+          payments={payments}
+          leadAttrByPhone={paymentsUiV2 ? leadAttrByPhone : null}
+        />
       </div>
 
       {isSuper && <PaymentAccountability />}
@@ -681,7 +725,10 @@ export default function PaymentsAdmin() {
         <KpiCard label="Transactions" value={payments.length} />
       </div>
 
-      {/* Filter bar */}
+      {/* Filter bar — v1 (unchanged when PAYMENTS_UI_V2=false). Kept intact so a
+          server env flip restores the exact pre-shipment cramped-wall layout
+          without any client changes. */}
+      {!paymentsUiV2 && (
       <div className="card mb-4 p-4">
         {/* Status chips */}
         <div className="mb-4 border-b border-line pb-4">
@@ -830,6 +877,180 @@ export default function PaymentsAdmin() {
           </div>
         )}
       </div>
+      )}
+
+      {/* Filter bar — v2: elegant, collapsible sections (Status / Payment type /
+          Date / Source). Status expands by default (most-used); the rest collapse
+          with an active-count badge so the wall never feels cramped. Reuses the
+          same handlers as v1 above; no filter state is duplicated. */}
+      {paymentsUiV2 && (
+        <div className="card mb-4 divide-y divide-line px-5">
+          <FilterSection title="Status" activeCount={statuses.size + (onlyProof ? 1 : 0) + (needsActionOnly ? 1 : 0) + (paidWithDup ? 1 : 0) + (proofPending ? 1 : 0) + (showSuperseded ? 1 : 0)} defaultOpen>
+            <div className="flex flex-wrap gap-2">
+              {STATUS_DEFS.map((s) => {
+                const active = statuses.has(s.key);
+                const dot =
+                  s.key === "paid" ? "bg-success" :
+                  s.key === "pending" ? "bg-amber-500" :
+                  s.key === "verifying" ? "bg-blue-500" :
+                  s.key === "abandoned" ? "bg-orange-500" :
+                  s.key === "failed" ? "bg-danger" : "bg-ink2";
+                return (
+                  <button
+                    key={s.key}
+                    onClick={() => toggleStatus(s.key)}
+                    aria-pressed={active}
+                    className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold motion-reduce:transition-none ${active ? "border-primary bg-primary/10 text-primary" : "border-line text-ink2 hover:border-primary/50"}`}
+                  >
+                    <span className={`h-1.5 w-1.5 rounded-full ${dot}`} aria-hidden="true" />
+                    {s.label}
+                  </button>
+                );
+              })}
+              <button
+                onClick={() => setOnlyProof((v) => !v)}
+                aria-pressed={onlyProof}
+                className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-semibold motion-reduce:transition-none ${onlyProof ? "border-primary bg-primary/10 text-primary" : "border-line text-ink2 hover:border-primary/50"}`}
+                title="Show only payments with a student-submitted proof"
+              >
+                <span aria-hidden>📎</span>
+                Proof uploaded{proofCount > 0 ? ` (${proofCount})` : ""}
+              </button>
+            </div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <ToggleChip active={needsActionOnly} onClick={() => setNeedsActionOnly((v) => !v)} title="Only groups with no paid attempt and a verifying/pending/proof-uploaded state">
+                ✅ Needs action only
+              </ToggleChip>
+              <ToggleChip active={paidWithDup} onClick={() => setPaidWithDup((v) => !v)} title="Paid groups that also have duplicate or superseded attempts">
+                💳 Paid but has duplicate attempts
+              </ToggleChip>
+              <ToggleChip active={proofPending} onClick={() => setProofPending((v) => !v)} title="Unpaid groups with a proof uploaded awaiting review">
+                📎 Proof uploaded — pending review
+              </ToggleChip>
+              <ToggleChip active={showSuperseded} onClick={() => setShowSuperseded((v) => !v)} title="Reveal superseded attempts inside every group by default">
+                👁 Show superseded
+              </ToggleChip>
+            </div>
+          </FilterSection>
+
+          <FilterSection title="Payment type" activeCount={types.size}>
+            <div className="flex flex-wrap gap-2">
+              {TYPE_DEFS.map((t) => {
+                const active = types.has(t.key);
+                return (
+                  <button
+                    key={t.key}
+                    onClick={() => toggleType(t.key)}
+                    aria-pressed={active}
+                    className={`rounded-full border px-3 py-1.5 text-xs font-semibold motion-reduce:transition-none ${active ? "border-primary bg-primary/10 text-primary" : "border-line text-ink2 hover:border-primary/50"}`}
+                  >
+                    {t.label}
+                  </button>
+                );
+              })}
+            </div>
+          </FilterSection>
+
+          <FilterSection title="Date (IST)" activeCount={dateMode === "all" ? 0 : 1}>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                onClick={() => setDateMode("all")}
+                aria-pressed={dateMode === "all"}
+                className={`rounded-full border px-3 py-1.5 text-xs font-semibold motion-reduce:transition-none ${dateMode === "all" ? "border-primary bg-primary/10 text-primary" : "border-line text-ink2 hover:border-primary/50"}`}
+              >
+                All time
+              </button>
+              {presets.map((p) => (
+                <button
+                  key={p.mode}
+                  onClick={() => setDateMode(p.mode)}
+                  aria-pressed={dateMode === p.mode}
+                  className={`rounded-full border px-3 py-1.5 text-xs font-semibold motion-reduce:transition-none ${dateMode === p.mode ? "border-primary bg-primary/10 text-primary" : "border-line text-ink2 hover:border-primary/50"}`}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
+            <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
+              <label className="flex flex-col gap-1 text-xs text-muted">
+                Specific date
+                <input type="date" value={dateVal} onChange={(e) => { setDateVal(e.target.value); setDateMode("date"); }} className="input text-sm" />
+              </label>
+              <label className="flex flex-col gap-1 text-xs text-muted">
+                Month
+                <input type="month" value={monthVal} onChange={(e) => { setMonthVal(e.target.value); setDateMode("month"); }} className="input text-sm" />
+              </label>
+              <label className="flex flex-col gap-1 text-xs text-muted">
+                Year
+                <select value={yearVal} onChange={(e) => { setYearVal(e.target.value); setDateMode("year"); }} className="input text-sm">
+                  <option value="">Select…</option>
+                  {years.map((y) => <option key={y} value={y}>{y}</option>)}
+                </select>
+              </label>
+              <div className="flex flex-col gap-1 text-xs text-muted">
+                Custom range
+                <div className="flex items-center gap-1">
+                  <input type="date" value={rangeFrom} onChange={(e) => { setRangeFrom(e.target.value); setDateMode("range"); }} className="input text-sm" />
+                  <span className="text-muted">–</span>
+                  <input type="date" value={rangeTo} onChange={(e) => { setRangeTo(e.target.value); setDateMode("range"); }} className="input text-sm" />
+                </div>
+              </div>
+            </div>
+          </FilterSection>
+
+          <FilterSection title="Source" activeCount={sourceSel.size}>
+            <SourceFilter value={sourceSel} onChange={setSourceSel} />
+            <p className="mt-2 text-[11.5px] leading-snug text-muted">
+              Filters payments by their DERIVED CRM channel (same fbclid/gclid-aware logic as the source card and the Lead CRM). Hover a pill to see how each channel is defined.
+            </p>
+          </FilterSection>
+
+          {hasFilters && (
+            <div className="flex flex-wrap items-center gap-2 py-3">
+              <span className="text-xs text-muted">Active:</span>
+              {[...statuses].map((k) => (
+                <button key={k} onClick={() => toggleStatus(k)} className="inline-flex items-center gap-1 rounded-full bg-surface2 px-2.5 py-1 text-xs font-medium hover:bg-surface motion-reduce:transition-none">
+                  {STATUS_LABEL[k]} <span aria-hidden>×</span>
+                </button>
+              ))}
+              {[...types].map((k) => (
+                <button key={k} onClick={() => toggleType(k)} className="inline-flex items-center gap-1 rounded-full bg-surface2 px-2.5 py-1 text-xs font-medium hover:bg-surface motion-reduce:transition-none">
+                  {TYPE_LABEL[k]} <span aria-hidden>×</span>
+                </button>
+              ))}
+              {[...sourceSel].map((k) => (
+                <button
+                  key={k}
+                  onClick={() => {
+                    const next = new Set(sourceSel);
+                    next.delete(k);
+                    setSourceSel(next);
+                  }}
+                  className="inline-flex items-center gap-1 rounded-full bg-surface2 px-2.5 py-1 text-xs font-medium hover:bg-surface motion-reduce:transition-none"
+                >
+                  <span
+                    aria-hidden="true"
+                    className="h-1.5 w-1.5 rounded-full"
+                    style={{ background: SOURCE_DEFINITIONS[k].color }}
+                  />
+                  {SOURCE_DEFINITIONS[k].label} <span aria-hidden>×</span>
+                </button>
+              ))}
+              {onlyProof && (
+                <button onClick={() => setOnlyProof(false)} className="inline-flex items-center gap-1 rounded-full bg-surface2 px-2.5 py-1 text-xs font-medium hover:bg-surface motion-reduce:transition-none">
+                  Proof uploaded <span aria-hidden>×</span>
+                </button>
+              )}
+              {dateChipLabel() && (
+                <button onClick={() => { setDateMode("all"); setDateVal(""); setMonthVal(""); setYearVal(""); setRangeFrom(""); setRangeTo(""); }} className="inline-flex items-center gap-1 rounded-full bg-surface2 px-2.5 py-1 text-xs font-medium hover:bg-surface motion-reduce:transition-none">
+                  {dateChipLabel()} <span aria-hidden>×</span>
+                </button>
+              )}
+              <button onClick={clearAll} className="ml-auto text-xs font-semibold text-primary hover:underline">Clear all</button>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ABANDONED = hot leads. A callout to triage + call them. */}
       {abandonedAllCount > 0 && !statuses.has("abandoned") && (

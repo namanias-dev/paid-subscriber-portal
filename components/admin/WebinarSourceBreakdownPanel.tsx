@@ -4,18 +4,32 @@ import { useMemo, useState } from "react";
 import { istYMD } from "@/lib/dates";
 import { isPaidStatus as isPaid, itemKey } from "@/lib/paymentsAgg";
 import { type Frame, inFrame } from "@/lib/webinarReg";
-import { bucketizeSources, sourceMeta } from "@/lib/webinarSource";
+import { bucketizeSources, bucketMeta, type DerivedChannelAttr } from "@/lib/webinarSource";
+import { sourceDefinition } from "@/lib/marketing/sourceDefinitions";
 import type { Payment } from "@/lib/types";
 
 /**
- * Opened content for "Paid registrations by source": timeframe controls + webinar
- * selector + the source breakdown bars. Same paid-only + distinct methodology as
- * the mini card (shared {@link bucketizeSources}). Read-only. Used full-page.
- * The content here is intentionally identical to what the card showed before —
- * only the container (modal → full page) changed.
+ * Opened content for "Paid registrations by source": timeframe controls +
+ * webinar selector + the source breakdown bars. Same paid-only + distinct
+ * methodology as the mini card (shared {@link bucketizeSources}). Read-only,
+ * used full-page.
+ *
+ * When `leadAttrByPhone` is passed (Payments UI v2 default), each paid
+ * registration is bucketed by its DERIVED CRM channel (Google Ads / Meta Ads /
+ * Organic / Referral / Direct / Other / Unknown) using the same
+ * `deriveChannel` logic the Lead CRM uses — fixing the Meta Ads undercount
+ * from the flat `attribution_source`. Each source in the expanded panel now
+ * carries its plain-English definition inline (from {@link sourceDefinition})
+ * so admins know exactly what each label means without a tooltip hunt.
  */
-export default function WebinarSourceBreakdownPanel({ payments }: { payments: Payment[] }) {
-  const [selected, setSelected] = useState<string>(""); // "" = all webinars
+export default function WebinarSourceBreakdownPanel({
+  payments,
+  leadAttrByPhone,
+}: {
+  payments: Payment[];
+  leadAttrByPhone?: Record<string, DerivedChannelAttr> | null;
+}) {
+  const [selected, setSelected] = useState<string>("");
   const [frame, setFrame] = useState<Frame>("7d");
   const [month, setMonth] = useState(() => (istYMD(new Date()) || "").slice(0, 7));
   const [year, setYear] = useState(() => Number((istYMD(new Date()) || "2026").slice(0, 4)));
@@ -45,9 +59,10 @@ export default function WebinarSourceBreakdownPanel({ payments }: { payments: Pa
     return [...set].sort((a, b) => b - a);
   }, [paidWebinar, year]);
 
+  const useDerived = !!leadAttrByPhone;
   const view = useMemo(
-    () => bucketizeSources(paidWebinar, selected, (ymd) => inFrame(ymd, frame, month, year)),
-    [paidWebinar, selected, frame, month, year],
+    () => bucketizeSources(paidWebinar, selected, (ymd) => inFrame(ymd, frame, month, year), leadAttrByPhone),
+    [paidWebinar, selected, frame, month, year, leadAttrByPhone],
   );
 
   return (
@@ -57,7 +72,7 @@ export default function WebinarSourceBreakdownPanel({ payments }: { payments: Pa
           <button
             key={f}
             onClick={() => setFrame(f)}
-            className={`rounded-full px-3 py-1.5 text-sm font-medium transition ${frame === f ? "bg-primary text-white" : "bg-surface2 text-ink2 hover:bg-surface"}`}
+            className={`rounded-full px-3 py-1.5 text-sm font-medium motion-reduce:transition-none ${frame === f ? "bg-primary text-white" : "bg-surface2 text-ink2 hover:bg-surface"}`}
           >
             {f === "7d" ? "Last 7 days" : f === "30d" ? "Last 30 days" : f === "month" ? "Month" : "Year"}
           </button>
@@ -91,22 +106,31 @@ export default function WebinarSourceBreakdownPanel({ payments }: { payments: Pa
             </p>
           </div>
         ) : (
-          <div className="space-y-2.5">
+          <div className="space-y-3">
             {view.rows.map((r) => {
-              const meta = sourceMeta(r.key);
+              const meta = bucketMeta(r.key, useDerived);
               const pct = view.total ? (r.count / view.total) * 100 : 0;
+              // v2: pull the plain-English definition for the derived channel
+              // so each row explains what the label means. Legacy flat mode
+              // leaves it blank (existing helper text below covers meaning).
+              const def = useDerived ? sourceDefinition(r.key).definition : null;
               return (
-                <div key={r.key} className="flex items-center gap-3">
-                  <span className="flex w-24 shrink-0 items-center gap-2 sm:w-28">
+                <div key={r.key} className="grid grid-cols-[7rem_minmax(0,1fr)_auto] items-center gap-3 sm:grid-cols-[7.5rem_minmax(0,1fr)_auto]">
+                  <span className="flex items-center gap-2">
                     <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: meta.color }} aria-hidden="true" />
                     <span className="truncate text-sm font-medium text-ink">{meta.label}</span>
                   </span>
-                  <span className="relative h-2.5 min-w-0 flex-1 overflow-hidden rounded-full bg-surface2">
+                  <span className="relative h-2.5 min-w-0 overflow-hidden rounded-full bg-surface2">
                     <span className="absolute inset-y-0 left-0 rounded-full" style={{ width: `${Math.max(pct, 2)}%`, background: meta.color }} />
                   </span>
                   <span className="w-16 shrink-0 text-right text-sm tabular-nums text-ink2 sm:w-20">
                     {r.count} · {pct.toFixed(0)}%
                   </span>
+                  {def && (
+                    <p className="col-span-3 -mt-1 pl-[9rem] text-[11.5px] leading-snug text-muted sm:pl-[9.5rem]">
+                      {def}
+                    </p>
+                  )}
                 </div>
               );
             })}
@@ -115,8 +139,9 @@ export default function WebinarSourceBreakdownPanel({ payments }: { payments: Pa
       </div>
 
       <p className="text-xs text-muted">
-        Paid webinar registrations by acquisition source (distinct per person/day, IST). &ldquo;Unknown&rdquo; = registrations
-        from before source attribution was captured — shown honestly, never inferred. Read-only analytics.
+        {useDerived
+          ? "Paid webinar registrations by derived acquisition channel (distinct per person/day, IST). Channels are computed the same way as the Lead CRM (fbclid/gclid-aware), so Meta Ads clicks that arrived without an explicit utm_source are attributed correctly. \u201cUnknown\u201d = no matching lead attribution — never inferred. Read-only analytics."
+          : "Paid webinar registrations by acquisition source (distinct per person/day, IST). \u201cUnknown\u201d = registrations from before source attribution was captured — shown honestly, never inferred. Read-only analytics."}
       </p>
     </div>
   );

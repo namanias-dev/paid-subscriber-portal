@@ -21,7 +21,7 @@ export default function SplitPreviewCard({
   href,
   rows,
   total,
-  maxRows = 3,
+  maxRows = 6,
   hint,
   emptyText = "No registrations in the last 7 days.",
 }: {
@@ -40,7 +40,7 @@ export default function SplitPreviewCard({
   return (
     <Link
       href={href}
-      className="card block p-4 transition-[transform,box-shadow] duration-200 ease-out hover:-translate-y-0.5 hover:shadow-lg motion-reduce:transform-none motion-reduce:transition-none"
+      className="card block p-4 hover:shadow-md motion-reduce:transition-none"
       title="Open full view"
     >
       <div className="flex items-center gap-2">
