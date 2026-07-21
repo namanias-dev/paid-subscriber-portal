@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getPayments, getEnrollments, getBuyers, maybeReconcilePendingPayments, getWebinars, getAllCourses, getLeads } from "@/lib/dataProvider";
 import { getAllProofs, phoneHasAccessToItem } from "@/lib/paymentProofs";
 import { requireAdmin, requireAnyPermission, requirePermission, requireSuperAdmin } from "@/lib/adminGuard";
+import { isPaymentsUiV2Enabled } from "@/lib/marketing/paymentsUiFlag";
 import { normPhone } from "@/lib/phone";
 import type { PaymentProof } from "@/lib/types";
 
@@ -82,7 +83,12 @@ export async function GET() {
     // who can see super-admin-only controls (reverse, accountability, history).
     const [canManage, isSuper] = await Promise.all([requirePermission("manage_payments"), requireSuperAdmin()]);
 
-    return NextResponse.json({ ok: true, payments, enrollments, buyerCodes, proofs, itemNames, leadAttrByPhone, canManage, isSuper });
+    // Server-read Payments UI v2 flag (default ON) — kept off the client bundle
+    // so `PAYMENTS_UI_V2=false` in Vercel env instantly falls the admin page
+    // back to the pre-shipment card + filter layout without a redeploy.
+    const paymentsUiV2 = isPaymentsUiV2Enabled();
+
+    return NextResponse.json({ ok: true, payments, enrollments, buyerCodes, proofs, itemNames, leadAttrByPhone, canManage, isSuper, paymentsUiV2 });
   } catch {
     return NextResponse.json({ ok: false, error: "Failed to load payments." }, { status: 500 });
   }

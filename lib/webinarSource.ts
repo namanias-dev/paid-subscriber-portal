@@ -1,9 +1,13 @@
 import { istYMD } from "./dates";
 import { isPaidStatus as isPaid, itemKey } from "./paymentsAgg";
 import type { Payment } from "./types";
+import { sourceDefinition, UNKNOWN_SOURCE, type SourceDisplayKey } from "./marketing/sourceDefinitions";
 
-/** Presentation for each normalized source; unmapped values fall back to a
- * neutral title-cased label so a new source never breaks the card. */
+/** Presentation for each normalized RAW source (legacy flat `attribution_source`
+ * bucket keys). Kept for backward compatibility with the pre-v2 breakdown; the
+ * v2 breakdown routes through {@link sourceDefinition} which speaks the derived
+ * channel vocabulary (`"Google Ads"`, `"Meta Ads"`, …). Unmapped values fall
+ * back to a neutral title-cased label so a new source never breaks the card. */
 export const SOURCE_META: Record<string, { label: string; color: string }> = {
   instagram: { label: "Instagram", color: "#E1306C" },
   facebook: { label: "Facebook", color: "#1877F2" },
@@ -32,19 +36,50 @@ export interface SourceBreakdown {
   total: number;
 }
 
+/** Loose last-10 digits so a "+91..." payment phone matches a raw-10 lead-record
+ * phone (same convention `SourcePill.lastDigits10` uses). Duplicated here to
+ * keep this file client-safe with zero react imports. */
+function last10(raw: string | null | undefined): string {
+  if (!raw) return "";
+  return String(raw).replace(/\D/g, "").slice(-10);
+}
+
+/** Minimal shape of the attribution stamp the admin payments API attaches per
+ * normalized phone. Structural match with `SourcePill.LeadAttrStamp` — kept
+ * decoupled to avoid pulling a React component into a pure lib. */
+export interface DerivedChannelAttr {
+  channel: string | null;
+}
+
 /**
  * Paid webinar registrations broken down by acquisition SOURCE. Same paid-only +
  * distinct methodology as the trend/split cards: one registration = distinct
- * (phone, webinar, IST day). Each registration's source is its stamped
- * `attribution_source` (first non-empty among that day's rows); registrations
- * with none fall into an explicit "unknown" bucket (never inferred). Buckets
- * therefore always sum to the paid total for the selection. Read-only.
+ * (phone, webinar, IST day).
  *
- * `selected` scopes to one webinar (itemKey); "" = all. `inSel` is an IST-YMD
- * predicate (timeframe window).
+ * TWO source vocabularies are supported and controlled by `leadAttrByPhone`:
+ *  - When OMITTED (legacy): each registration's source is its stamped flat
+ *    `payments.attribution_source` (first non-empty among that day's rows).
+ *    Registrations with none fall into an explicit "unknown" bucket. This is
+ *    the pre-v2 behavior — kept EXACTLY intact so a `PAYMENTS_UI_V2=false`
+ *    rollback restores byte-identical bucketing.
+ *  - When PROVIDED: each registration's source is the DERIVED CRM channel
+ *    resolved from the matching lead's `deriveChannel` output (looked up by
+ *    normalized last-10-digit phone). This mirrors the Lead CRM's channel pill
+ *    exactly, so a paid Meta ad (fbclid, no utm_source) that flat-stamped
+ *    "direct" is now correctly attributed "Meta Ads". No lead match →
+ *    honestly "Unknown". Never fabricates a source.
+ *
+ * Buckets always sum to the paid distinct-registration total for the selection.
+ * Read-only; no DB writes anywhere in this file.
  */
-export function bucketizeSources(payments: Payment[], selected: string, inSel: (ymd: string) => boolean): SourceBreakdown {
-  const regs = new Map<string, string>(); // (phone|webinar|day) -> source
+export function bucketizeSources(
+  payments: Payment[],
+  selected: string,
+  inSel: (ymd: string) => boolean,
+  leadAttrByPhone?: Record<string, DerivedChannelAttr> | null,
+): SourceBreakdown {
+  const useDerived = !!leadAttrByPhone;
+  const regs = new Map<string, string>();
   for (const p of payments) {
     if (!isPaid(p.status) || p.item_type !== "webinar") continue;
     const key = itemKey(p);
@@ -52,10 +87,15 @@ export function bucketizeSources(payments: Payment[], selected: string, inSel: (
     const ymd = istYMD(p.created_at);
     if (!ymd || !inSel(ymd)) continue;
     const rk = `${(p.phone || "").trim()}|${key}|${ymd}`;
-    const src = normSource(p.attribution_source) || "unknown";
+    const src = useDerived
+      ? derivedChannelFor(p, leadAttrByPhone)
+      : (normSource(p.attribution_source) || "unknown");
     const cur = regs.get(rk);
+    // First non-"unknown"/non-"Unknown" wins for the day; both vocabularies
+    // agree on the string comparison since neither uses the same casing twice.
+    const isUnknownSrc = src === "unknown" || src === UNKNOWN_SOURCE;
     if (cur === undefined) regs.set(rk, src);
-    else if (cur === "unknown" && src !== "unknown") regs.set(rk, src);
+    else if ((cur === "unknown" || cur === UNKNOWN_SOURCE) && !isUnknownSrc) regs.set(rk, src);
   }
   const bySource = new Map<string, number>();
   for (const s of regs.values()) bySource.set(s, (bySource.get(s) || 0) + 1);
@@ -63,8 +103,50 @@ export function bucketizeSources(payments: Payment[], selected: string, inSel: (
     .map(([key, count]) => ({ key, count }))
     // Known sources first (by count), Unknown always last for clarity.
     .sort((a, b) => {
-      if ((a.key === "unknown") !== (b.key === "unknown")) return a.key === "unknown" ? 1 : -1;
-      return b.count - a.count || sourceMeta(a.key).label.localeCompare(sourceMeta(b.key).label);
+      const aUnk = a.key === "unknown" || a.key === UNKNOWN_SOURCE;
+      const bUnk = b.key === "unknown" || b.key === UNKNOWN_SOURCE;
+      if (aUnk !== bUnk) return aUnk ? 1 : -1;
+      const aLabel = useDerived ? sourceDefinition(a.key).label : sourceMeta(a.key).label;
+      const bLabel = useDerived ? sourceDefinition(b.key).label : sourceMeta(b.key).label;
+      return b.count - a.count || aLabel.localeCompare(bLabel);
     });
   return { rows, total: regs.size };
+}
+
+/**
+ * Resolve the DERIVED CRM channel for a single payment. Looks up the matching
+ * lead by normalized last-10 phone and returns the same string
+ * `deriveChannel(touch)` produces (`"Google Ads"`, `"Meta Ads"`, `"Organic"`,
+ * `"Referral"`, `"Direct"`, `"Other"`) — or `"Unknown"` when no lead exists
+ * for that phone. NEVER fabricates a channel: empty/missing lead-side channel
+ * returns `"Unknown"`.
+ */
+export function derivedChannelFor(
+  payment: Payment,
+  byPhone: Record<string, DerivedChannelAttr> | null | undefined,
+): SourceDisplayKey {
+  if (!byPhone) return UNKNOWN_SOURCE;
+  const key = last10(payment.phone);
+  if (!key) return UNKNOWN_SOURCE;
+  const attr = byPhone[key];
+  const ch = (attr?.channel || "").trim();
+  if (!ch) return UNKNOWN_SOURCE;
+  // Trust the stored channel string as-is: it was produced by `deriveChannel`
+  // and is one of `MARKETING_CHANNELS` in modern rows. Unknown legacy strings
+  // gracefully fall through the definition lookup at render time.
+  return ch as SourceDisplayKey;
+}
+
+/**
+ * Resolve the display metadata for a bucket key produced by
+ * {@link bucketizeSources}. When derived-channel bucketization was used, keys
+ * are `"Google Ads"`/`"Meta Ads"`/etc. and metadata comes from the shared
+ * {@link sourceDefinition}. Legacy keys still resolve via {@link sourceMeta}.
+ */
+export function bucketMeta(key: string, useDerived: boolean): { label: string; color: string } {
+  if (useDerived) {
+    const def = sourceDefinition(key);
+    return { label: def.label, color: def.color };
+  }
+  return sourceMeta(key);
 }

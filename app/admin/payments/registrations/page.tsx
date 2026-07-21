@@ -15,11 +15,12 @@ import type { Payment } from "@/lib/types";
  */
 export default function RegistrationsPage() {
   const full = useAdminData<Payment[]>("/api/admin/payments", "payments");
+  const paymentsUiV2 = useAdminData<boolean>("/api/admin/payments", "paymentsUiV2").data ?? true;
   const payments = useMemo(() => full.data || [], [full.data]);
   const byDay = useMemo(() => buildWebinarByDay(payments, ""), [payments]);
 
   return (
-    <div className="pay-stagger">
+    <div className={paymentsUiV2 ? "" : "pay-stagger"}>
       <Link
         href="/admin/payments"
         className="mb-4 inline-flex items-center gap-1.5 text-sm font-medium text-ink2 transition hover:text-ink"
