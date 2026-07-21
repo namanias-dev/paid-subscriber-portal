@@ -8,6 +8,8 @@ import {
   findRecentOpenInstallmentPayment,
 } from "@/lib/dataProvider";
 import { ATTR_COOKIE, parseAttrCookie, flattenForStamp } from "@/lib/attribution";
+import { adCaptureStampFromState, EMPTY_AD_CAPTURE_STAMP } from "@/lib/marketing/adCaptureStamp";
+import { isFullCaptureEnabled } from "@/lib/marketing/adCaptureFlag";
 import { stampBuyerAttribution } from "@/lib/analytics/server";
 import {
   isEazypayConfigured,
@@ -97,6 +99,12 @@ export async function POST(req: Request) {
     // matching the new-checkout path in create-payment.
     const attr = parseAttrCookie(cookies().get(ATTR_COOKIE)?.value);
     const attrFlat = flattenForStamp(attr);
+    // Full ad-hierarchy stamp (feature-flagged, default ON). When the flag is
+    // off, spread EMPTY_AD_CAPTURE_STAMP so the write path is byte-identical
+    // to pre-shipment (all NULLs for the new columns).
+    const adStamp = isFullCaptureEnabled()
+      ? adCaptureStampFromState(attr)
+      : EMPTY_AD_CAPTURE_STAMP;
 
     await createPayment({
       student_name: enrollment.student_name,
@@ -119,6 +127,7 @@ export async function POST(req: Request) {
       installment_no: payInstallmentNo,
       attribution_source: attrFlat.source,
       attribution_campaign: attrFlat.campaign,
+      ...adStamp,
     });
     void stampBuyerAttribution(enrollment.phone, attr).catch(() => {});
 

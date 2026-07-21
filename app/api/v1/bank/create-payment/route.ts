@@ -12,6 +12,8 @@ import {
 } from "@/lib/dataProvider";
 import { canRegisterForWebinar, buildClosedError } from "@/lib/webinarLifecycle";
 import { ATTR_COOKIE, parseAttrCookie, flattenForStamp } from "@/lib/attribution";
+import { adCaptureStampFromState, EMPTY_AD_CAPTURE_STAMP } from "@/lib/marketing/adCaptureStamp";
+import { isFullCaptureEnabled } from "@/lib/marketing/adCaptureFlag";
 import { stampBuyerAttribution } from "@/lib/analytics/server";
 import { getPlan } from "@/lib/config";
 import { validateCoupon } from "@/lib/coupons";
@@ -125,6 +127,12 @@ export async function POST(req: Request) {
     // Attribution snapshot from the first-party cookie (best-effort; never blocks).
     const attr = parseAttrCookie(cookies().get(ATTR_COOKIE)?.value);
     const attrFlat = flattenForStamp(attr);
+    // Full ad-hierarchy stamp (feature-flagged, default ON). When the flag is
+    // off, spread EMPTY_AD_CAPTURE_STAMP so both createPayment calls below are
+    // byte-identical to pre-shipment (all NULLs for the new columns).
+    const adStamp = isFullCaptureEnabled()
+      ? adCaptureStampFromState(attr)
+      : EMPTY_AD_CAPTURE_STAMP;
 
     // Amount is computed server-side; any client-supplied amount is ignored.
     const baseAmount = Number(resolved.amount) || 0;
@@ -160,6 +168,7 @@ export async function POST(req: Request) {
         mode: null,
         attribution_source: attrFlat.source,
         attribution_campaign: attrFlat.campaign,
+        ...adStamp,
       });
       void stampBuyerAttribution(mobile, attr).catch(() => {});
       if (appliedCoupon && resolved.entityId && resolved.couponEntity) {
@@ -207,6 +216,7 @@ export async function POST(req: Request) {
       mode: null,
       attribution_source: attrFlat.source,
       attribution_campaign: attrFlat.campaign,
+      ...adStamp,
     });
     void stampBuyerAttribution(mobile, attr).catch(() => {});
 

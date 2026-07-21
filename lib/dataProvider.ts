@@ -18,6 +18,8 @@ import {
   fillMissingAttribution,
   leadAttributionFromState,
 } from "./marketing/leadAttribution";
+import { adCaptureStampFromState } from "./marketing/adCaptureStamp";
+import { isFullCaptureEnabled } from "./marketing/adCaptureFlag";
 import { TRIGGERS } from "./sms/templates";
 import { NON_DUPLICABLE_WEBINAR_FIELDS, buildDuplicateSlug } from "./webinarLifecycle";
 import type {
@@ -2092,7 +2094,7 @@ export async function registerWebinar(webinarId: string, name: string, phone: st
       // just leaves the columns null (honest untracked), matching payment behavior.
       const flat = flattenForStamp(attr ?? null);
       const metaId = metaIdentityFromState(attr ?? null);
-      await db.from("webinar_registrations").insert({
+      const insertRow: Record<string, unknown> = {
         webinar_id: webinarId,
         name,
         phone,
@@ -2100,7 +2102,16 @@ export async function registerWebinar(webinarId: string, name: string, phone: st
         attribution_campaign: flat.campaign,
         attribution_fbclid: metaId.fbclid,
         attribution_fbc: metaId.fbc,
-      });
+      };
+      // FULL AD-HIERARCHY CAPTURE (feature-flagged, default ON): additionally
+      // stamp the campaign_id/adset_id/ad_id/ad_name/content/term/platform
+      // columns so downstream reports can group by exact Meta or Google ad.
+      // Flipping ATTRIBUTION_FULL_CAPTURE_ENABLED=false reverts to the legacy
+      // 4-column stamp above without a redeploy or migration.
+      if (isFullCaptureEnabled()) {
+        Object.assign(insertRow, adCaptureStampFromState(attr ?? null));
+      }
+      await db.from("webinar_registrations").insert(insertRow);
     } catch {
       /* ignore */
     }

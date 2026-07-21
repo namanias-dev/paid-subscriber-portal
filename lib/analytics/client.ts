@@ -64,7 +64,14 @@ export function captureAttribution(): void {
   try {
     const url = new URL(location.href);
     const params: Record<string, string> = {};
-    for (const k of ["utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term"]) {
+    // Standard UTM + full ad-hierarchy ids (additive). Meta/Google inject
+    // campaign_id/adset_id/ad_id/ad_name via URL parameter tokens — see
+    // docs/naman-ai/reports/attribution-full-capture.md for the copy-paste
+    // parameter blocks the marketer pastes into each platform.
+    for (const k of [
+      "utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term", "utm_id",
+      "campaign_id", "adset_id", "ad_id", "ad_name",
+    ]) {
       const v = url.searchParams.get(k);
       if (v) params[k] = v;
     }
@@ -84,9 +91,15 @@ export function captureAttribution(): void {
     if (fbclid) touch.fbclid = fbclid;
     if (fbc) touch.fbc = fbc;
     if (fbp) touch.fbp = fbp;
-    // Google Ads click id (non-PII), supplied by Google auto-tagging (?gclid=...).
+    // Google Ads click ids (non-PII). `gclid` is set by auto-tagging on classic
+    // web ads; `wbraid`/`gbraid` are the privacy-safe iOS/Android app click ids
+    // that Google uses when auto-tagging can't set a cookie.
     const gclid = url.searchParams.get("gclid");
     if (gclid) touch.gclid = gclid;
+    const wbraid = url.searchParams.get("wbraid");
+    if (wbraid) touch.wbraid = wbraid;
+    const gbraid = url.searchParams.get("gbraid");
+    if (gbraid) touch.gbraid = gbraid;
     const existing = parseAttrCookie(readCookie(ATTR_COOKIE));
     const merged = mergeAttribution(existing, touch, new Date().toISOString());
     writeCookie(ATTR_COOKIE, serializeAttr(merged), YEAR * 2);
