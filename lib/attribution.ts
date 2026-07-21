@@ -39,6 +39,28 @@ export interface AttributionTouch {
    * non-Google traffic. Rides the existing JSONB touch — no schema migration.
    */
   gclid?: string | null;
+  /**
+   * Google Ads iOS/Android in-app click identifiers (?wbraid= / ?gbraid=). Ride
+   * alongside `gclid` for traffic where privacy-safe click ids are used instead
+   * of the classic gclid (typical for App/iOS 14+). Non-PII.
+   */
+  wbraid?: string | null;
+  gbraid?: string | null;
+  /**
+   * FULL AD-HIERARCHY IDENTIFIERS (additive). These are the ids and human names
+   * Meta/Google Ads inject via URL tokens (?campaign_id=…&adset_id=…&ad_id=…&
+   * ad_name=…) — see docs/naman-ai/reports/attribution-full-capture.md for the
+   * copy-paste URL parameter blocks. All optional/non-PII; absent for non-paid
+   * traffic. Ride the existing JSONB touch so `leads.attribution` picks them up
+   * with no schema change; the flat scalar columns on `webinar_registrations`
+   * and `payments` are populated by `adCaptureStampFromState` (see
+   * `lib/marketing/adCaptureStamp.ts`).
+   */
+  utm_id?: string | null;
+  campaign_id?: string | null;
+  adset_id?: string | null;
+  ad_id?: string | null;
+  ad_name?: string | null;
 }
 
 export interface AttributionState {
@@ -128,21 +150,49 @@ export function buildTouch(input: {
   ownHost?: string | null;
 }): AttributionTouch {
   const { source, raw } = normalizeSource(input.params.utm_source, input.referrer, input.ownHost);
-  return {
+  const trimOrNull = (k: string): string | null => (input.params[k] || "").trim() || null;
+  const touch: AttributionTouch = {
     source,
     medium: clean(input.params.utm_medium) || null,
-    campaign: (input.params.utm_campaign || "").trim() || null,
-    content: (input.params.utm_content || "").trim() || null,
-    term: (input.params.utm_term || "").trim() || null,
+    campaign: trimOrNull("utm_campaign"),
+    content: trimOrNull("utm_content"),
+    term: trimOrNull("utm_term"),
     landing_path: input.path || null,
     referrer: (input.referrer || "").trim() || null,
     raw,
   };
+  // Full ad-hierarchy identifiers (additive; nullable). These are the ids/name
+  // Meta and Google Ads inject via URL parameter tokens. `buildTouch` receives
+  // them as flat params from the client — the caller is expected to have
+  // parsed them off the landing URL alongside the standard utm_* keys.
+  const utmId = trimOrNull("utm_id");
+  const campaignId = trimOrNull("campaign_id");
+  const adsetId = trimOrNull("adset_id");
+  const adId = trimOrNull("ad_id");
+  const adName = trimOrNull("ad_name");
+  if (utmId) touch.utm_id = utmId;
+  if (campaignId) touch.campaign_id = campaignId;
+  if (adsetId) touch.adset_id = adsetId;
+  if (adId) touch.ad_id = adId;
+  if (adName) touch.ad_name = adName;
+  return touch;
 }
 
 /** Does this touch carry a real marketing signal (utm, external referrer, or ad click)? */
 export function touchIsMeaningful(t: AttributionTouch): boolean {
-  return t.source !== "direct" || !!t.campaign || !!t.medium || !!t.fbclid || !!t.fbc || !!t.gclid;
+  return (
+    t.source !== "direct" ||
+    !!t.campaign ||
+    !!t.medium ||
+    !!t.fbclid ||
+    !!t.fbc ||
+    !!t.gclid ||
+    !!t.wbraid ||
+    !!t.gbraid ||
+    !!t.campaign_id ||
+    !!t.adset_id ||
+    !!t.ad_id
+  );
 }
 
 /**
@@ -150,9 +200,23 @@ export function touchIsMeaningful(t: AttributionTouch): boolean {
  * an explicit campaign tag. These are the touches paid attribution SHOULD win on:
  * anything without one is either Direct, Organic, or an ambient site-referral
  * (aggregator/wiki/on-site bounce), never something a marketer paid for.
+ *
+ * The ad-hierarchy ids (`campaign_id`/`adset_id`/`ad_id`) are just as
+ * unambiguous as `gclid`/`fbclid` — they only appear when Meta or Google
+ * templates injected them, which never happens on organic/referral traffic.
  */
 export function touchHasAcquisitionSignal(t: AttributionTouch): boolean {
-  return !!t.gclid || !!t.fbclid || !!t.fbc || !!t.campaign;
+  return (
+    !!t.gclid ||
+    !!t.fbclid ||
+    !!t.fbc ||
+    !!t.wbraid ||
+    !!t.gbraid ||
+    !!t.campaign ||
+    !!t.campaign_id ||
+    !!t.adset_id ||
+    !!t.ad_id
+  );
 }
 
 /** Merge a new touch into existing state: first-touch frozen, last-touch rolling. */
@@ -202,6 +266,16 @@ export function mergeAttribution(
       if (!carried.fbc && prevLast.fbc) carried.fbc = prevLast.fbc;
       if (!carried.fbp && prevLast.fbp) carried.fbp = prevLast.fbp;
       if (!carried.gclid && prevLast.gclid) carried.gclid = prevLast.gclid;
+      if (!carried.wbraid && prevLast.wbraid) carried.wbraid = prevLast.wbraid;
+      if (!carried.gbraid && prevLast.gbraid) carried.gbraid = prevLast.gbraid;
+      // Ad-hierarchy stickiness: never let a later organic/internal hop erase
+      // the ad-level ids/name that Meta or Google injected via the original
+      // landing URL. Same rationale as the campaign/click-id carries above.
+      if (!carried.utm_id && prevLast.utm_id) carried.utm_id = prevLast.utm_id;
+      if (!carried.campaign_id && prevLast.campaign_id) carried.campaign_id = prevLast.campaign_id;
+      if (!carried.adset_id && prevLast.adset_id) carried.adset_id = prevLast.adset_id;
+      if (!carried.ad_id && prevLast.ad_id) carried.ad_id = prevLast.ad_id;
+      if (!carried.ad_name && prevLast.ad_name) carried.ad_name = prevLast.ad_name;
     }
     last = { ...carried, last_seen_at: nowISO };
   } else {
@@ -293,12 +367,37 @@ export function deriveChannel(touch: AttributionTouch | null | undefined): Marke
   const source = clean(touch.source);
   const medium = clean(touch.medium);
   const paid = PAID_MEDIA.has(medium);
-  if (touch.gclid || (source === "google" && paid)) return "Google Ads";
+  if (touch.gclid || touch.wbraid || touch.gbraid || (source === "google" && paid)) return "Google Ads";
   if (touch.fbclid || touch.fbc || ((source === "facebook" || source === "instagram") && paid)) return "Meta Ads";
   if (["google", "instagram", "facebook", "youtube", "telegram", "whatsapp"].includes(source)) return "Organic";
   if (source === "referral") return "Referral";
   if (!source || source === "direct") return "Direct";
   return "Other";
+}
+
+/**
+ * Coarse ad-platform tag derived from a single touch. SHARES the same paid-
+ * medium/click-id predicates as `deriveChannel` (do not fork the logic — bugs
+ * in one must never let the other classify differently).
+ *
+ *  - Meta   → fbclid / fbc / (facebook|instagram source & paid medium)
+ *  - Google → gclid / wbraid / gbraid / (google source & paid medium)
+ *  - Other  → any campaign-hierarchy id present (utm_source unknown, but the
+ *             marketer clearly tagged the URL: keep it distinguishable from
+ *             pure Direct/Organic/Referral, which return null).
+ *  - null   → no touch OR nothing that resembles a paid ad click.
+ */
+export function derivePlatform(
+  touch: AttributionTouch | null | undefined,
+): "meta" | "google" | "other" | null {
+  if (!touch) return null;
+  const source = clean(touch.source);
+  const medium = clean(touch.medium);
+  const paid = PAID_MEDIA.has(medium);
+  if (touch.fbclid || touch.fbc || ((source === "facebook" || source === "instagram") && paid)) return "meta";
+  if (touch.gclid || touch.wbraid || touch.gbraid || (source === "google" && paid)) return "google";
+  if (touch.campaign_id || touch.adset_id || touch.ad_id) return "other";
+  return null;
 }
 
 /** A short readable attribution summary for record-stamping (source + campaign). */

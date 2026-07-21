@@ -1051,6 +1051,15 @@ export interface WebinarRegistration {
   attribution_campaign?: string | null;
   attribution_fbclid?: string | null;
   attribution_fbc?: string | null;
+  // --- Full ad-hierarchy attribution (additive; gated by
+  // `ATTRIBUTION_FULL_CAPTURE_ENABLED`, default ON). Nullable across the board.
+  attribution_campaign_id?: string | null;
+  attribution_adset_id?: string | null;
+  attribution_ad_id?: string | null;
+  attribution_ad_name?: string | null;
+  attribution_utm_content?: string | null;
+  attribution_utm_term?: string | null;
+  attribution_platform?: "meta" | "google" | "other" | null;
   // --- Late-registration migration provenance (additive) ---
   moved_from_webinar_id?: string | null;
   moved_to_webinar_id?: string | null;
@@ -1139,6 +1148,15 @@ export interface Payment {
   // --- Attribution (analytics; normalized first-touch source snapshot) ---
   attribution_source?: string | null;
   attribution_campaign?: string | null;
+  // --- Full ad-hierarchy attribution (additive; gated by
+  // `ATTRIBUTION_FULL_CAPTURE_ENABLED`, default ON). Nullable across the board.
+  attribution_campaign_id?: string | null;
+  attribution_adset_id?: string | null;
+  attribution_ad_id?: string | null;
+  attribution_ad_name?: string | null;
+  attribution_utm_content?: string | null;
+  attribution_utm_term?: string | null;
+  attribution_platform?: "meta" | "google" | "other" | null;
   // --- Recoverable soft-delete (super-admin Trash; never hard-deleted) ---
   deleted_at?: string | null;
   deleted_by?: string | null;
