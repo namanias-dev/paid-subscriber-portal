@@ -2,6 +2,13 @@
  * Audience resolvers for manual/bulk + cron sends. REUSES dataProvider + the
  * existing paymentsAgg dedupe so recipient counts and "paid" segments reconcile
  * with the Payments tab. Every recipient is deduped by normalized 10-digit mobile.
+ *
+ * LEGACY-AWARE (CRITICAL SAFETY): every `getLeads()` call here passes
+ * `{ includeLegacy: false }` explicitly. Without this, the `webinar_not_registered`,
+ * `leads`, and `all` audiences would ingest ~175k legacy-imported historical
+ * phones into bulk-send recipient sets — one mistaken flag flip away from a
+ * mass SMS blast. Do NOT weaken this default without a paired consent audit
+ * and a per-audience explicit opt-in on {@link AudienceSpec}.
  */
 import { getSupabaseAdmin } from "../supabase";
 import { normalizeIndianMobile } from "../phone";
@@ -297,13 +304,13 @@ async function resolveAudienceInner(spec: AudienceSpec): Promise<Recipient[]> {
     // not-registered: everyone with a mobile (buyers + leads) minus registered
     const universe = new Map<string, string | null>();
     for (const [d, b] of bm) universe.set(d, b.name);
-    for (const l of await getLeads()) { const d = norm(l.phone); if (d && !universe.has(d)) universe.set(d, l.name); }
+    for (const l of await getLeads({ includeLegacy: false })) { const d = norm(l.phone); if (d && !universe.has(d)) universe.set(d, l.name); }
     return dedupeRecipients([...universe.entries()].filter(([d]) => !regByPhone.has(d)).map(([d, name]) => attach(d, name, vars, { webinar_id: webinar.id })));
   }
 
   // ----- leads -----
   if (spec.type === "leads") {
-    let leads = await getLeads();
+    let leads = await getLeads({ includeLegacy: false });
     if (spec.source) leads = leads.filter((l) => (l.source || "").toLowerCase() === spec.source!.toLowerCase());
     if (spec.stage) leads = leads.filter((l) => (l.status || "").toLowerCase() === spec.stage!.toLowerCase());
     if (ptf) leads = leads.filter((l) => inPreset(new Date(l.created_at).getTime()));
@@ -322,7 +329,7 @@ async function resolveAudienceInner(spec: AudienceSpec): Promise<Recipient[]> {
   // ----- everyone (guarded) -----
   if (spec.type === "all") {
     const list: Recipient[] = [...bm.entries()].filter(([d]) => buyerInTime(d)).map(([d, b]) => attach(d, b.name, {}, {}));
-    for (const l of await getLeads()) { const d = norm(l.phone); if (d && inPreset(new Date(l.created_at).getTime())) list.push(attach(d, l.name, {}, { lead_id: l.id })); }
+    for (const l of await getLeads({ includeLegacy: false })) { const d = norm(l.phone); if (d && inPreset(new Date(l.created_at).getTime())) list.push(attach(d, l.name, {}, { lead_id: l.id })); }
     return dedupeRecipients(list);
   }
 

@@ -4,11 +4,20 @@ import { requirePermission } from "@/lib/adminGuard";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+/**
+ * Kanban / list endpoint. Legacy-imported rows (`attribution.legacy === true`)
+ * are HIDDEN by default so the CRM doesn't inflate from ~1.3k to ~175k rows
+ * overnight after the backfill runs. Pass `?include_legacy=1` (or `=true`) to
+ * see the legacy universe — used by the future "Show legacy" toggle.
+ */
+export async function GET(req: Request) {
   try {
     if (!(await requirePermission("manage_students_leads"))) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
-    const leads = await getLeads();
-    return NextResponse.json({ ok: true, leads });
+    const url = new URL(req.url);
+    const includeLegacyParam = url.searchParams.get("include_legacy");
+    const includeLegacy = includeLegacyParam === "1" || includeLegacyParam === "true";
+    const leads = await getLeads({ includeLegacy });
+    return NextResponse.json({ ok: true, leads, includeLegacy });
   } catch {
     return NextResponse.json({ ok: false, error: "Failed to load leads." }, { status: 500 });
   }
