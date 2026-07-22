@@ -21,7 +21,12 @@ import { dirname, resolve as pathResolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { getSupabaseAdmin } from "../lib/supabase";
 import { isLegacyImportEnabled } from "../lib/legacy-migration/flags";
-import { runImporter, renderReportMarkdown, buildLegacyAttributionJSON } from "../lib/legacy-migration/importer";
+import {
+  runImporter,
+  renderReportMarkdown,
+  buildLegacyAttributionJSON,
+  mergeCollisionAttribution,
+} from "../lib/legacy-migration/importer";
 import { INCLUDED_TABS, LEGACY_WORKBOOK_SPREADSHEET_ID, type LegacyTab } from "../lib/legacy-migration/tabRegistry";
 import type { StagedLead } from "../lib/legacy-migration/types";
 
@@ -89,21 +94,43 @@ async function commitStagedLeads(staged: StagedLead[], batchSize: number, import
   if (!db) throw new Error("Supabase admin client unavailable — cannot commit.");
   log(`Commit mode: ${staged.length} leads to write in chunks of ${batchSize}.`);
 
-  // Fetch existing (id, phone, attribution) for every phone in the batch so we can distinguish
-  // collision NULL-fills from pure inserts and snapshot the pre-state.
+  // Fetch existing (id, phone, attribution, channel_legacy, external_lead_id, import_source) for
+  // every phone in the batch so we can distinguish collision NULL-fills from pure inserts and
+  // snapshot the pre-state. The extra columns let the collision branch NULL-fill safely — we
+  // only ever fill columns that were already NULL on the pre-existing row.
   const targetPhones = staged.map((s) => s.canonical_phone);
-  const existingByPhone = new Map<string, { id: string; attribution: unknown; source: string | null; channel: string | null }>();
+  interface ExistingRow {
+    id: string;
+    attribution: unknown;
+    source: string | null;
+    channel: string | null;
+    channel_legacy: string | null;
+    external_lead_id: string | null;
+    import_source: string | null;
+  }
+  const existingByPhone = new Map<string, ExistingRow>();
   const chunkFetch = 200;
   for (let i = 0; i < targetPhones.length; i += chunkFetch) {
     const chunk = targetPhones.slice(i, i + chunkFetch);
     const orFilter = chunk.map((v) => `phone.ilike.%${v}`).join(",");
-    const { data, error } = await db.from("leads").select("id, phone, attribution, source, channel").or(orFilter);
+    const { data, error } = await db
+      .from("leads")
+      .select("id, phone, attribution, source, channel, channel_legacy, external_lead_id, import_source")
+      .or(orFilter);
     if (error) throw new Error(`Fetch existing leads failed: ${error.message}`);
-    const rows = (data as Array<{ id: string; phone: string | null; attribution: unknown; source: string | null; channel: string | null }>) ?? [];
+    const rows = (data as Array<ExistingRow & { phone: string | null }>) ?? [];
     for (const r of rows) {
       const last10 = (r.phone ?? "").replace(/\D/g, "").slice(-10);
       if (/^[6-9]\d{9}$/.test(last10) && !existingByPhone.has(last10)) {
-        existingByPhone.set(last10, r);
+        existingByPhone.set(last10, {
+          id: r.id,
+          attribution: r.attribution,
+          source: r.source,
+          channel: r.channel,
+          channel_legacy: r.channel_legacy,
+          external_lead_id: r.external_lead_id,
+          import_source: r.import_source,
+        });
       }
     }
   }
@@ -119,14 +146,25 @@ async function commitStagedLeads(staged: StagedLead[], batchSize: number, import
       const existing = existingByPhone.get(s.canonical_phone);
       if (existing) {
         const preState = existing.attribution;
-        const mergedAttribution =
-          preState && typeof preState === "object" && !Array.isArray(preState)
-            ? { ...(preState as Record<string, unknown>), legacy_touches: attribution.legacy_touches, legacy: true, legacy_source_tab: attribution.legacy_source_tab }
-            : attribution;
-        const { error: uerr } = await db
-          .from("leads")
-          .update({ attribution: mergedAttribution, import_source: "legacy_sheet", import_batch: importBatch, external_lead_id: s.external_lead_id, channel_legacy: s.channel_legacy })
-          .eq("id", existing.id);
+        // Collision branch — pre-existing live row.
+        //   1. Merge legacy_touches[] via the pure helper — NEVER set `legacy:true`
+        //      or `legacy_source_tab`; the row's provenance stays live.
+        //   2. NULL-fill the additive columns ONLY when the pre-existing row had them
+        //      NULL. Never overwrite live values.
+        //   3. Do NOT stamp `import_batch` on the row — rollback still works because
+        //      the snapshot row records `import_batch` for the collision.
+        const mergedAttribution = mergeCollisionAttribution(preState, attribution);
+        const updatePayload: Record<string, unknown> = { attribution: mergedAttribution };
+        if (existing.channel_legacy == null && s.channel_legacy) {
+          updatePayload.channel_legacy = s.channel_legacy;
+        }
+        if (existing.external_lead_id == null && s.external_lead_id) {
+          updatePayload.external_lead_id = s.external_lead_id;
+        }
+        if (existing.import_source == null) {
+          updatePayload.import_source = "legacy_sheet";
+        }
+        const { error: uerr } = await db.from("leads").update(updatePayload).eq("id", existing.id);
         if (uerr) throw new Error(`Update failed for id=${existing.id}: ${uerr.message}`);
         snapshotRows.push({ id: existing.id, import_batch: importBatch, was_collision: true, pre_state: preState ?? null });
         updated += 1;

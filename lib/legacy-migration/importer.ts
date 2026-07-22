@@ -76,6 +76,41 @@ export function buildLegacyAttributionJSON(lead: StagedLead): LegacyAttributionJ
   };
 }
 
+/**
+ * Merge a new legacy touch INTO an existing live lead's attribution.
+ *
+ * Rule: pre-existing rows are NEVER flagged legacy — they get an entry
+ * appended to `attribution.legacy_touches[]` and nothing else. The default
+ * `applyLegacyFilter` treats such rows as LIVE (visible), which is correct
+ * because the row's provenance IS live.
+ *
+ * Concretely, this function:
+ *   1. Preserves every existing top-level attribution key (e.g. `first_touch`,
+ *      `utm_*`, `origin_review_needed`, ...).
+ *   2. APPENDS `incoming.legacy_touches` to any pre-existing `legacy_touches[]`
+ *      (never overwrites — a phone can be observed multiple times across legacy
+ *      tabs, and we retain each observation).
+ *   3. Intentionally does NOT set `legacy: true` or `legacy_source_tab`. Those
+ *      are per-row markers reserved for genuine legacy INSERTs. A live row that
+ *      happens to also appear in the legacy sheet is still live.
+ */
+export function mergeCollisionAttribution(
+  preState: unknown,
+  incoming: Pick<LegacyAttributionJSON, "legacy_touches">,
+): Record<string, unknown> {
+  const isObject = preState !== null && typeof preState === "object" && !Array.isArray(preState);
+  const base: Record<string, unknown> = isObject ? { ...(preState as Record<string, unknown>) } : {};
+  const preTouchesRaw = isObject
+    ? (preState as { legacy_touches?: unknown }).legacy_touches
+    : undefined;
+  const preTouches: unknown[] = Array.isArray(preTouchesRaw) ? preTouchesRaw : [];
+  const incomingTouches: unknown[] = Array.isArray(incoming.legacy_touches) ? incoming.legacy_touches : [];
+  base.legacy_touches = [...preTouches, ...incomingTouches];
+  // Intentionally: no `legacy: true`, no `legacy_source_tab`. Those are
+  // per-row markers for genuine legacy inserts only.
+  return base;
+}
+
 /** All-in-one pipeline the CLI + tests call. */
 export async function runImporter(opts: ImporterOptions): Promise<ImportResult> {
   const log = opts.onLog ?? (() => {});

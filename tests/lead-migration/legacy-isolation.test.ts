@@ -6,6 +6,8 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { applyLegacyFilter, excludeLegacy, hasLegacyFlag } from "../../lib/legacy-migration/legacyFilter";
+import { mergeCollisionAttribution } from "../../lib/legacy-migration/importer";
+import type { LegacyTouchpoint } from "../../lib/legacy-migration/types";
 import type { Lead } from "../../lib/types";
 
 function makeLead(id: string, attribution: unknown): Lead {
@@ -108,4 +110,103 @@ describe("SMS audiences never expose legacy phones by default", () => {
     assert.equal(universe.size, 1);
     assert.equal([...universe.keys()][0], "6000000000");
   });
+});
+
+/**
+ * Regression pin for the batch 2026-07-22T02:54:55.394Z bug — 127 live rows
+ * whose phones matched the legacy sheet were incorrectly stamped
+ * `attribution.legacy=true`, and disappeared from the CRM. These fixtures model
+ * the ACTUAL 127 collision pre-state shapes (majority NULL attribution + a
+ * long tail of `{ first_touch: {...} }` rows from the live Meta / website
+ * flow). After `mergeCollisionAttribution`, none of these rows may trigger
+ * `hasLegacyFlag` — that is what keeps the CRM active-lead count at 948.
+ */
+describe("collision-merge regression pin — 10 masked fixtures modeling the 127 collision shapes", () => {
+  const incoming = {
+    legacy_touches: [
+      { tab: "FB LEADS", winner: true, campaign_clean: "generic-brand" } as LegacyTouchpoint,
+    ],
+  };
+  const fixtures: Array<{ label: string; preState: unknown }> = [
+    { label: "null attribution (Website form, no attribution set)", preState: null },
+    { label: "undefined attribution (defensive)", preState: undefined },
+    { label: "empty object attribution", preState: {} },
+    {
+      label: "Meta first_touch only",
+      preState: {
+        first_touch: { tab: "meta", source: "meta_lead_ads", ts: "2026-07-01T00:00:00Z", winner: true },
+      },
+    },
+    {
+      label: "Website first_touch with utm_source",
+      preState: {
+        first_touch: { tab: "website", source: "direct", winner: true },
+        utm_source: "google",
+        utm_campaign: "brand",
+      },
+    },
+    {
+      label: "Referral first_touch with existing legacy_touches (multi-visit legacy lead)",
+      preState: {
+        first_touch: { tab: "referral", winner: true },
+        legacy_touches: [{ tab: "SEP-OCT LEADS 2024", winner: true }],
+      },
+    },
+    {
+      label: "attribution with origin_review_needed=true (Meta drift-detected row)",
+      preState: {
+        first_touch: { tab: "meta", winner: true },
+        origin_review_needed: true,
+      },
+    },
+    {
+      label: "attribution with utm_* but no first_touch (webinar landing page)",
+      preState: {
+        utm_source: "facebook",
+        utm_medium: "cpc",
+        utm_campaign: "aug-webinar",
+      },
+    },
+    {
+      label: "attribution with campaign_confidence hint",
+      preState: {
+        first_touch: { tab: "meta", winner: true },
+        campaign_confidence: "explicit",
+        platform_hint: "meta",
+      },
+    },
+    {
+      label: "attribution that already had a legacy_touches array from a prior legacy run",
+      preState: {
+        first_touch: { tab: "meta", winner: true },
+        legacy_touches: [
+          { tab: "FB LEADS", winner: true, campaign_clean: "old-brand" },
+          { tab: "SEP-OCT LEADS 2024", winner: false },
+        ],
+      },
+    },
+  ];
+
+  for (const { label, preState } of fixtures) {
+    it(`fixture: ${label} — mergeCollisionAttribution never flips hasLegacyFlag`, () => {
+      const merged = mergeCollisionAttribution(preState, incoming);
+      const asLead = { attribution: merged as unknown as Lead["attribution"] };
+      assert.equal(
+        hasLegacyFlag(asLead),
+        false,
+        `hasLegacyFlag returned true for fixture "${label}" — merged: ${JSON.stringify(merged)}`,
+      );
+      assert.equal(
+        applyLegacyFilter([asLead]).length,
+        1,
+        `applyLegacyFilter dropped a collision-merged row for fixture "${label}"`,
+      );
+      // Never write `legacy` or `legacy_source_tab` on the merged object.
+      assert.equal(Object.prototype.hasOwnProperty.call(merged, "legacy"), false);
+      assert.equal(Object.prototype.hasOwnProperty.call(merged, "legacy_source_tab"), false);
+      // legacy_touches must be an array containing at least the incoming touch.
+      assert.ok(Array.isArray(merged.legacy_touches));
+      assert.ok((merged.legacy_touches as unknown[]).length >= 1);
+    });
+  }
 });
