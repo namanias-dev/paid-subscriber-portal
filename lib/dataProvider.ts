@@ -20,6 +20,7 @@ import {
 } from "./marketing/leadAttribution";
 import { adCaptureStampFromState } from "./marketing/adCaptureStamp";
 import { isFullCaptureEnabled } from "./marketing/adCaptureFlag";
+import { applyLegacyFilter, type LegacyOptions } from "./legacy-migration/legacyFilter";
 import { TRIGGERS } from "./sms/templates";
 import { NON_DUPLICABLE_WEBINAR_FIELDS, buildDuplicateSlug } from "./webinarLifecycle";
 import type {
@@ -1633,23 +1634,33 @@ export async function getEnrollments(studentId?: string): Promise<Enrollment[]> 
 }
 
 // ============================ LEADS / CRM ============================
-export async function getLeads(): Promise<Lead[]> {
-  // De-duplicated view: soft-merged duplicates (merged_into set) are hidden from
-  // every list and downstream segment (SMS, analytics) — only canonical leads
-  // surface, each once, with the latest attribution.
-  if (demoMode()) return mock.leads.filter((l) => !l.merged_into);
+/**
+ * De-duplicated view of the Lead CRM. Soft-merged duplicates (merged_into set)
+ * are hidden from every list and downstream segment (SMS, analytics).
+ *
+ * LEGACY-AWARE (default OFF): rows carrying `attribution.legacy === true` are
+ * ALSO hidden by default. Callers that explicitly want the legacy universe
+ * (an admin "Show legacy" toggle) must pass `{ includeLegacy: true }`. This
+ * safe-by-default posture prevents ~175k historical phones from silently
+ * appearing in the Kanban, SMS audiences, dashboard counter, and campaign
+ * analytics — the plan's non-negotiable protection against a mass-send blast.
+ */
+export async function getLeads(opts?: LegacyOptions): Promise<Lead[]> {
+  if (demoMode()) return applyLegacyFilter(mock.leads.filter((l) => !l.merged_into), opts);
   // Page through ALL rows — the Lead CRM is the source of truth the automation
   // depends on, so it must never be capped at PostgREST's default 1000 rows.
   const rows = await dbSelectAll<Lead>("leads");
-  if (!rows.length) return mock.leads.filter((l) => !l.merged_into);
-  return rows.filter((l) => !l.merged_into);
+  const canonical = (rows.length ? rows : mock.leads).filter((l) => !l.merged_into);
+  return applyLegacyFilter(canonical, opts);
 }
 
-/** All lead rows including soft-merged duplicates (for the merge tooling / audits). */
-export async function getAllLeadsRaw(): Promise<Lead[]> {
-  if (demoMode()) return [...mock.leads];
+/** All lead rows including soft-merged duplicates (for the merge tooling / audits).
+ *
+ * Legacy filter follows the same default-OFF contract as {@link getLeads}. */
+export async function getAllLeadsRaw(opts?: LegacyOptions): Promise<Lead[]> {
+  if (demoMode()) return applyLegacyFilter([...mock.leads], opts);
   const rows = await dbSelectAll<Lead>("leads");
-  return rows.length ? rows : [...mock.leads];
+  return applyLegacyFilter(rows.length ? rows : mock.leads, opts);
 }
 
 /** Candidate stored phone formats for a normalized 10-digit Indian mobile. */

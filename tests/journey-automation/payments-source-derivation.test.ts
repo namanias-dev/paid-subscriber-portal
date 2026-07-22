@@ -101,7 +101,10 @@ describe("(a) derivedChannelFor — payment × leadAttrByPhone → derived CRM c
     const byPhone: Record<string, DerivedChannelAttr> = {
       "9876543210": { channel: "Meta Ads" },
     };
-    const ch = derivedChannelFor(mkPayment({ phone: null }), byPhone);
+    // `Payment.phone` is typed `string`, but the runtime handler must survive a
+    // stored NULL — pre-fix payments rows exist without a phone. Cast to exercise
+    // the null branch without weakening the shared Payment type.
+    const ch = derivedChannelFor(mkPayment({ phone: null as unknown as string }), byPhone);
     assert.equal(ch, UNKNOWN_SOURCE);
   });
 });

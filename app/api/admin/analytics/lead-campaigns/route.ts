@@ -30,7 +30,11 @@ export async function GET(req: Request) {
     const fromMs = new Date(fromISO).getTime();
     const toMs = new Date(toISO).getTime();
 
-    const all = await getAllLeadsRaw();
+    // Explicit `includeLegacy: false` (matches getAllLeadsRaw's safe default) so
+    // legacy-imported rows never inflate the "(no campaign) / (no channel)" bucket
+    // of the Campaign Performance report. Legacy rows carry NULL `channel` +
+    // `utm_campaign` by design; counting them here would silently poison ROI math.
+    const all = await getAllLeadsRaw({ includeLegacy: false });
     const inRange = all.filter((l) => {
       if (l.merged_into) return false;
       const ms = new Date(l.created_at).getTime();
