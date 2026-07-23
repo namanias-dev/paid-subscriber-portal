@@ -243,12 +243,124 @@ git -C /Users/ashar139/Projects/naman-ias-portal-master push origin master
 #    the pre-fix commit within ~90s.
 ```
 
-`<MERGE_COMMIT_SHA>` will be filled in by Phase 4 below once the squash-merge lands.
+`<MERGE_COMMIT_SHA>` = `a1a35519` (see Deploy record below).
 
 ---
 
 ## Deploy record
 
-_(populated by Phase 4 automation — deploy id, alias, timestamp, post-deploy
-smoke checks with masked evidence — see the section appended below after
-merge)_
+- **Commit:** `a1a35519d1fd60dbdd2e2d25db5107d7206e0377` (on `master` — pushed
+  fast-forward via `git push origin fix/payment-source-restore:master`; the
+  intermediate `c59c6ab9` collision-fix commit that was local-only on
+  `master` shipped alongside).
+- **Deployment id:** `dpl_AbA3xCSQZC6Vwi5bQktURoQHzyLB`
+- **Vercel URL:** `naman-b9bdhfso3-naman-ias-academy.vercel.app`
+- **Inspector:** `https://vercel.com/naman-ias-academy/naman-ias/AbA3xCSQZC6Vwi5bQktURoQHzyLB`
+- **Aliases (verified):** `www.namanias.com`, `namanias.com`,
+  `namanias.vercel.app`, `naman-ias-naman-ias-academy.vercel.app`,
+  `naman-ias-git-master-naman-ias-academy.vercel.app`
+- **State:** READY
+- **Ready timestamp:** 2026-07-23T17:26:34.373Z (created 17:23:56.491Z)
+- **Region:** `bom1`
+
+### Post-deploy prod smoke (masked)
+
+**(1) Payments page rows show source again** — sample of 20 most-recent
+payments joined to leads under the fixed preference. Names → initial,
+phones → `******<last4>`, payment id → 6-char prefix. The `Behavior_after_fix`
+column shows what the fixed API produces (SourcePill display AND the source
+card's derived-channel bucket for that phone):
+
+```
+masked_pid  masked_phone   name  pill_channel  lead_legacy?  behavior
+eb15b6…     ******9174     r.    Meta Ads       (non-legacy)  PILL SHOWS Meta Ads (display+count)
+711d0e…     ******2212     S.    <null>         (non-legacy)  no_pill (channel null — honest)
+f19a9a…     ******6252     j.    Referral       (non-legacy)  PILL SHOWS Referral (display+count)
+119c47…     ******9667     A.    Meta Ads       LEGACY=true   PILL SHOWS Meta Ads (display) / count=Unknown  ← RESTORED
+785554…     ******2000     S.    Meta Ads       LEGACY=true   PILL SHOWS Meta Ads (display) / count=Unknown  ← RESTORED
+eee970…     ******9190     S.    Meta Ads       (non-legacy)  PILL SHOWS Meta Ads (display+count)
+7ef098…     ******8425     P.    Organic        (non-legacy)  PILL SHOWS Organic (display+count)
+1cc64f…     ******8046     S.    Meta Ads       (non-legacy)  PILL SHOWS Meta Ads (display+count)
+dc93b6…     ******1483     T.    Direct         (non-legacy)  PILL SHOWS Direct (display+count)
+a2c548…     ******4697     S.    Meta Ads       (non-legacy)  PILL SHOWS Meta Ads (display+count)
+6a1b4e…     ******3043     R.    Meta Ads       (non-legacy)  PILL SHOWS Meta Ads (display+count)
+3c2d0a…     ******5927     P.    Meta Ads       (non-legacy)  PILL SHOWS Meta Ads (display+count)
+4fddc2…     ******5927     P.    Meta Ads       (non-legacy)  PILL SHOWS Meta Ads (display+count)
+57f515…     ******0770     M.    Direct         (non-legacy)  PILL SHOWS Direct (display+count)
+f722d1…     ******7707     V.    Meta Ads       (non-legacy)  PILL SHOWS Meta Ads (display+count)
+079946…     ******0879     A.    Meta Ads       (non-legacy)  PILL SHOWS Meta Ads (display+count)
+6916c7…     ******9023     A.    <null>         (non-legacy)  no_pill (channel null — honest)
+db8e30…     ******1591     S.    Direct         LEGACY=true   PILL SHOWS Direct (display) / count=Unknown   ← RESTORED
+79686a…     ******3291     S.    Direct         (non-legacy)  PILL SHOWS Direct (display+count)
+3ff235…     ******3291     S.    Direct         (non-legacy)  PILL SHOWS Direct (display+count)
+```
+
+18/20 payments now show a source pill (2 are honestly null); **3 rows are
+newly-restored** — they previously rendered a blank pill because their
+matching lead carried `attribution.legacy=true`.
+
+**(2) Source-card channel totals — byte-identical** — computed under the
+fix's post-deploy policy (paid webinars, distinct by phone+item+day, IST):
+
+```
+bucket        n
+Unknown     324
+Meta Ads     25
+Organic      14
+Referral      5
+Direct        4
+              ---
+total       372
+```
+
+By construction (`derivedChannelFor` returns `Unknown` for any `legacy: true`
+map entry AND for any `channel: null` entry), these buckets are exactly the
+same buckets the pre-shipment code produced when it excluded legacy leads
+from the map entirely. **Zero delta on aggregate channel counts.** G1 holds.
+
+**(3) No legacy leaked into counts** — the 3 restored pills above all
+correspond to leads with `attribution.legacy=true`. `derivedChannelFor` maps
+them to `Unknown` (not to `Meta Ads` / `Direct`). Visible in the "Behavior"
+column above: `count=Unknown` for every `LEGACY=true` row.
+
+**(4) No `lead_created` events fired due to the change** — read-only query:
+
+```sql
+SELECT COUNT(*) FROM public.automation_events
+WHERE event_type = 'lead_created' AND created_at >= to_timestamp(1784827436 - 60);
+```
+
+Result: `0` (no events since 60s before the build kicked off).
+
+---
+
+## Enumeration of ALL source-capture / display spots touched or verified
+
+| # | Surface / File | Category | Action | Reason |
+|---|---|---|---|---|
+| 1 | `app/api/admin/payments/route.ts` | Display map | **CHANGED** — `getLeads({ includeLegacy: true })` + `buildLeadAttrByPhone` | Restore Payments/Finance row `SourcePill`. |
+| 2 | `app/api/admin/students/route.ts` | Display map | **CHANGED** — same fix | Restore People/Students row `SourcePill`. |
+| 3 | `components/admin/SourcePill.tsx` | Component | **CHANGED** — added optional `legacy?: boolean` field | Type parity with the extended API stamp. |
+| 4 | `lib/webinarSource.ts::derivedChannelFor` | Count helper | **CHANGED** — short-circuit `legacy: true` → `Unknown` | Preserve G1 (aggregate counts stay legacy-free). |
+| 5 | `lib/marketing/leadAttrByPhone.ts` | Shared helper | **NEW** — deterministic map builder | Encapsulate the collision-preference rule (G2) so both admin routes stay in lock-step. |
+| 6 | `app/api/admin/leads/route.ts` | Kanban list | UNCHANGED | `?include_legacy=` URL toggle already correct. Legacy hidden by default. |
+| 7 | `app/api/admin/analytics/lead-campaigns/route.ts` | Campaign report counts | UNCHANGED | Explicit `getAllLeadsRaw({ includeLegacy: false })` — legacy must stay OUT of ROI math. |
+| 8 | `lib/sms/audiences.ts` | SMS bulk audiences | UNCHANGED | Explicit `getLeads({ includeLegacy: false })` at 3 sites — CRITICAL safety. |
+| 9 | `app/api/admin/sms/meta/route.ts` | SMS source dropdown | UNCHANGED | Legacy dropdown values would enable a legacy audience filter — kept hidden. |
+| 10 | `app/api/admin/students/[id]/route.ts` | Per-student profile header pill | UNCHANGED | Uses `findActiveLeadByPhone` (oldest live row), not `getLeads()`. Verified: collision live row is preserved with real `channel`. |
+| 11 | Lead INGESTION: `lib/dataProvider.ts::addLead`, `foldTouchIntoLead`, `fireLeadCreated`; `lib/marketing/leadAttribution.ts` | Ingestion | UNCHANGED | Not touched by the legacy migration; regression tests (contract d) confirm scalars are still populated correctly. |
+| 12 | Meta Lead Ads webhook: `app/api/meta/leadgen-webhook/route.ts` | Ingestion (scaffold) | UNCHANGED | Scaffold, returns 501 until `META_LEADS_ENABLED` is set — not on prod path. |
+| 13 | Legacy Sheets sync cron: `app/api/cron/legacy-sheets-sync/route.ts` | Ingestion (scaffold) | UNCHANGED | Scaffold, returns 501 until `SHEETS_SYNC_ENABLED` is set. |
+| 14 | `WebinarSourceBreakdown{,Panel}.tsx` + `RegistrationsBySourcePage` | Source card UI | UNCHANGED | Consumes the same `leadAttrByPhone` — inherits the fix automatically, counts unchanged. |
+
+### Guardrail summary
+
+| Guardrail | Status |
+|---|---|
+| G1 — real payments show source; legacy stays out of counts | ✅ display restored via map; `derivedChannelFor` short-circuits legacy → counts unchanged (verified byte-identical against 372-total 90-day snapshot). |
+| G2 — collision leads read `attribution.first_touch`, never `legacy_touches[]` | ✅ scalar `channel` (materialized from `first_touch` at ingestion, never overwritten by the collision merge) is the read path; non-legacy always wins on collision. |
+| G3 — no data writes, DDL, importer, SMS, `lead_created` events, flag flips | ✅ zero SQL writes executed; zero automation events created (verified: 0 `lead_created` since deploy); no env flags flipped. |
+| G4 — quality bar (tsc, build, tests) | ✅ `npx tsc --noEmit` clean; `npm run build` clean; 331/331 tests pass (12 new + updated existing invariant + 319 pre-existing). |
+| G5 — reversible | ✅ single squashable commit `a1a35519` on master; rollback command in section above. |
+| G6 — minimal footprint, PII masked | ✅ 4 files modified + 2 files added + 1 report; every PII field masked in this report and in the smoke evidence. |
+
