@@ -7,8 +7,9 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { applyLegacyFilter, excludeLegacy, hasLegacyFlag } from "../../lib/legacy-migration/legacyFilter";
 import { mergeCollisionAttribution } from "../../lib/legacy-migration/importer";
+import { derivedChannelFor, type DerivedChannelAttr } from "../../lib/webinarSource";
 import type { LegacyTouchpoint } from "../../lib/legacy-migration/types";
-import type { Lead } from "../../lib/types";
+import type { Lead, Payment } from "../../lib/types";
 
 function makeLead(id: string, attribution: unknown): Lead {
   return {
@@ -86,17 +87,56 @@ describe("applyLegacyFilter — safe-by-default", () => {
 });
 
 describe("Source-card / channel counts stay unchanged after a legacy import", () => {
-  it("bucketizing paid webinar registrations excludes legacy phones", async () => {
-    // Simulate a paid Payment for a phone that has a legacy lead — the payment's
-    // channel is derived from `leadAttrByPhone`, which is built from getLeads().
-    // With legacy filter applied, the legacy lead is not in the map → derivedChannelFor
-    // returns "Unknown" (honest), not the legacy tab's channel_legacy.
-    // See lib/webinarSource.ts:derivedChannelFor.
+  it("legacy phones DO populate the derived-channel map (display path), but derivedChannelFor short-circuits legacy entries to Unknown (counts path)", () => {
+    // Post-fix contract (see docs/naman-ai/reports/payment-source-restore.md):
+    //   - The admin payments/students routes now build `leadAttrByPhone` from
+    //     `getLeads({ includeLegacy: true })` so a pure-legacy-only phone can
+    //     still render an honest SourcePill IF the scalar `channel` is set
+    //     (Meta Ads / Google Ads / etc.). Each map entry carries a `legacy`
+    //     boolean captured from `hasLegacyFlag(lead)`.
+    //   - The aggregate source-card path (`derivedChannelFor` /
+    //     `bucketizeSources`) checks that flag and returns "Unknown" for any
+    //     legacy row — so aggregate channel counts stay legacy-free (G1).
+    // This test pins BOTH halves of that contract.
     const legacyLead = makeLead("l1", { legacy: true, legacy_source_tab: "FB LEADS" });
-    const map: Record<string, { channel: string | null }> = {};
-    // Simulate the payments route's map-building loop that runs BEFORE bucketize.
-    for (const l of applyLegacyFilter([legacyLead])) map[l.phone] = { channel: "Meta Ads" };
-    assert.equal(Object.keys(map).length, 0, "no legacy leads should populate the derived-channel map");
+    // Simulate the payments route's post-fix map-building loop.
+    const map: Record<string, DerivedChannelAttr> = {};
+    for (const l of applyLegacyFilter([legacyLead], { includeLegacy: true })) {
+      map[l.phone] = { channel: "Meta Ads", legacy: hasLegacyFlag(l) };
+    }
+    assert.equal(Object.keys(map).length, 1, "display map DOES include legacy leads (post-fix)");
+    assert.equal(map[legacyLead.phone].legacy, true, "legacy flag propagates onto the map entry");
+
+    // Aggregate count path returns Unknown for the legacy entry — same as if
+    // the row had been filtered out entirely. Legacy stays out of counts.
+    const payment = {
+      id: "p1",
+      phone: legacyLead.phone,
+      status: "captured",
+      item_type: "webinar",
+    } as unknown as Payment;
+    assert.equal(
+      derivedChannelFor(payment, map),
+      "Unknown",
+      "legacy-flagged entries must never bucket into a real channel — protects G1",
+    );
+  });
+
+  it("a NON-legacy phone with the same channel string routes to the real channel (isolation is scoped to legacy rows only)", () => {
+    // Regression pin: the legacy short-circuit MUST NOT affect non-legacy rows
+    // that happen to share the same channel string. Only `legacy === true`
+    // triggers the "Unknown" fallback.
+    const liveLead = makeLead("l2", { first_touch: { tab: "meta", winner: true } });
+    const map: Record<string, DerivedChannelAttr> = {
+      [liveLead.phone]: { channel: "Meta Ads", legacy: false },
+    };
+    const payment = {
+      id: "p2",
+      phone: liveLead.phone,
+      status: "captured",
+      item_type: "webinar",
+    } as unknown as Payment;
+    assert.equal(derivedChannelFor(payment, map), "Meta Ads");
   });
 });
 

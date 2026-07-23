@@ -18,6 +18,17 @@ export interface LeadAttrStamp {
   channel: string | null;
   utm_campaign: string | null;
   utm_source: string | null;
+  /**
+   * True when the underlying lead is a legacy-imported row
+   * (`attribution.legacy === true`). Present as informational metadata only —
+   * SourcePill still renders the pill when `channel` is populated, because the
+   * DISPLAY of a real captured source (e.g. `channel` was set at real
+   * ingestion, before the legacy import touched anything) is always honest.
+   * Aggregate counts respect the flag separately via
+   * {@link @/lib/webinarSource.derivedChannelFor}. Optional for backward-compat
+   * with pre-fix API responses.
+   */
+  legacy?: boolean;
 }
 
 /** Loose last-10 digits so a "+91..." phone matches a raw-10 lead-record phone. */

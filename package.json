@@ -8,7 +8,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "test": "node --import tsx --test tests/journey-automation/*.test.ts tests/lead-migration/*.test.ts"
+    "test": "node --import tsx --test tests/journey-automation/*.test.ts tests/lead-migration/*.test.ts tests/payment-source-restore/*.test.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1075.0",

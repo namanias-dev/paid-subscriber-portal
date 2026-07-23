@@ -17,7 +17,7 @@ import {
   isPaidStatus,
   logAccess,
 } from "@/lib/dataProvider";
-import { normPhone } from "@/lib/phone";
+import { buildLeadAttrByPhone } from "@/lib/marketing/leadAttrByPhone";
 import { getAdminSession } from "@/lib/session";
 import { requirePermission } from "@/lib/adminGuard";
 import { getPlan } from "@/lib/config";
@@ -83,7 +83,12 @@ export async function GET() {
       getAllWebinarRegistrations(),
       getWebinars(),
       getAllCourses(),
-      getLeads(),
+      // `includeLegacy: true` so a student whose ONLY lead match is a legacy
+      // row can still surface an honest SourcePill when the scalar `channel`
+      // is set. Non-legacy leads still WIN when both exist (collision-lead
+      // rule G2) — see the same preference-order comment in the payments
+      // route. Aggregate people-area finance is not affected by legacy leads.
+      getLeads({ includeLegacy: true }),
     ]);
 
     const paid = payments.filter((p) => isPaidStatus(p.status));
@@ -193,20 +198,10 @@ export async function GET() {
       .reduce((a, p) => a + (p.amount || 0), 0);
     const finance = { courseFeesCollected, courseFeesOutstanding, webinarReceipts };
 
-    // Read-only phone -> marketing attribution stamp, joined from the existing
-    // lead record so the People/Students row can surface the lead SOURCE without
-    // touching any student / enrolment / payment data. Phone normalized (last-10)
-    // so a raw-10 lead row matches a "+91..." student row and vice versa.
-    const leadAttrByPhone: Record<string, { channel: string | null; utm_campaign: string | null; utm_source: string | null }> = {};
-    for (const l of leads) {
-      const key = normPhone(l.phone);
-      if (!key || leadAttrByPhone[key]) continue;
-      leadAttrByPhone[key] = {
-        channel: l.channel ?? null,
-        utm_campaign: l.utm_campaign ?? null,
-        utm_source: l.utm_source ?? null,
-      };
-    }
+    // Read-only phone -> marketing attribution stamp — same builder as the
+    // payments route so the two admin surfaces stay in lock-step. Non-legacy
+    // lead wins on collision. See {@link buildLeadAttrByPhone}.
+    const leadAttrByPhone = buildLeadAttrByPhone(leads);
 
     return NextResponse.json({ ok: true, students, stats, summaries, catalog, finance, leadAttrByPhone });
   } catch {

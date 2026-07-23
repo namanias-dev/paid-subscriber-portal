@@ -46,9 +46,18 @@ function last10(raw: string | null | undefined): string {
 
 /** Minimal shape of the attribution stamp the admin payments API attaches per
  * normalized phone. Structural match with `SourcePill.LeadAttrStamp` — kept
- * decoupled to avoid pulling a React component into a pure lib. */
+ * decoupled to avoid pulling a React component into a pure lib.
+ *
+ * `legacy` (optional): true when the underlying lead is a legacy-imported row
+ * (`attribution.legacy === true`). Set by the admin payments/students routes so
+ * the aggregate source card / channel counts stay legacy-free even when the
+ * per-phone map includes legacy leads for DISPLAY purposes. See G1 in
+ * `docs/naman-ai/reports/payment-source-restore.md`: "display source ≠
+ * include-legacy-in-counts". Undefined means "not-legacy" (unchanged behavior).
+ */
 export interface DerivedChannelAttr {
   channel: string | null;
+  legacy?: boolean;
 }
 
 /**
@@ -129,6 +138,13 @@ export function derivedChannelFor(
   const key = last10(payment.phone);
   if (!key) return UNKNOWN_SOURCE;
   const attr = byPhone[key];
+  // Legacy leads are DISPLAYED (SourcePill can render `attr.channel` directly)
+  // but never counted in the aggregate source card / channel totals — that
+  // would silently re-pollute analytics with the ~178k backfilled phones and
+  // break G1. Legacy rows bucket into "Unknown" here, identical to their
+  // pre-shipment behavior when `applyLegacyFilter` hid them from the map
+  // entirely. See tests/lead-migration/legacy-isolation.test.ts.
+  if (attr?.legacy === true) return UNKNOWN_SOURCE;
   const ch = (attr?.channel || "").trim();
   if (!ch) return UNKNOWN_SOURCE;
   // Trust the stored channel string as-is: it was produced by `deriveChannel`

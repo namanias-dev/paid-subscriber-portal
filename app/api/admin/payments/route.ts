@@ -3,14 +3,25 @@ import { getPayments, getEnrollments, getBuyers, maybeReconcilePendingPayments, 
 import { getAllProofs, phoneHasAccessToItem } from "@/lib/paymentProofs";
 import { requireAdmin, requireAnyPermission, requirePermission, requireSuperAdmin } from "@/lib/adminGuard";
 import { isPaymentsUiV2Enabled } from "@/lib/marketing/paymentsUiFlag";
-import { normPhone } from "@/lib/phone";
+import { buildLeadAttrByPhone } from "@/lib/marketing/leadAttrByPhone";
 import type { PaymentProof } from "@/lib/types";
 
-/** Read-only per-user marketing attribution stamp shown on the Payments card. */
+/**
+ * Read-only per-user marketing attribution stamp shown on the Payments card.
+ *
+ * `legacy` is set when the underlying lead is a legacy-imported row. The
+ * `SourcePill` still renders `channel` when it's populated (real capture that
+ * PREDATED the legacy backfill is always shown honestly), but the source-card
+ * aggregate counts route through {@link @/lib/webinarSource.derivedChannelFor}
+ * which drops legacy rows to "Unknown" — so the totals stay byte-identical to
+ * the pre-shipment legacy-free numbers (G1 in
+ * docs/naman-ai/reports/payment-source-restore.md).
+ */
 export interface PaymentsLeadAttr {
   channel: string | null;
   utm_campaign: string | null;
   utm_source: string | null;
+  legacy?: boolean;
 }
 
 export const dynamic = "force-dynamic";
@@ -32,7 +43,12 @@ export async function GET() {
       getAllProofs(),
       getWebinars(),
       getAllCourses(),
-      getLeads(),
+      // `includeLegacy: true` so a payment whose ONLY lead match is a legacy row
+      // (pure-legacy insert) can still surface an honest SourcePill when the
+      // scalar `channel` happens to be set. Aggregate source-card counts stay
+      // legacy-free because {@link derivedChannelFor} short-circuits any entry
+      // flagged `legacy: true` back to "Unknown" — see G1 in the report.
+      getLeads({ includeLegacy: true }),
     ]);
     // phone -> login code, so support can resolve "forgot code" escalations.
     const buyerCodes: Record<string, string> = {};
@@ -66,18 +82,9 @@ export async function GET() {
     // lead record so the Payments user card can surface the lead SOURCE without
     // touching any payment/enrolment data or logic. Phone is normalized (last-10
     // digits) so a "+91..." payment row matches a raw-10-digit lead row and vice
-    // versa. First matching lead per normalized phone wins (leads are typically
-    // deduped by phone via addLead()'s fold-by-phone anyway).
-    const leadAttrByPhone: Record<string, PaymentsLeadAttr> = {};
-    for (const l of leads) {
-      const key = normPhone(l.phone);
-      if (!key || leadAttrByPhone[key]) continue;
-      leadAttrByPhone[key] = {
-        channel: l.channel ?? null,
-        utm_campaign: l.utm_campaign ?? null,
-        utm_source: l.utm_source ?? null,
-      };
-    }
+    // versa. See {@link buildLeadAttrByPhone} for the full preference contract
+    // (non-legacy wins on collision — G2 in the payment-source-restore report).
+    const leadAttrByPhone: Record<string, PaymentsLeadAttr> = buildLeadAttrByPhone(leads);
 
     // UI capability flags: who can take staff write actions (manage_payments) and
     // who can see super-admin-only controls (reverse, accountability, history).
