@@ -21,6 +21,7 @@ import { dirname, resolve as pathResolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { getSupabaseAdmin } from "../lib/supabase";
 import { isLegacyImportEnabled } from "../lib/legacy-migration/flags";
+import { checkStorageHealth, preflightDiskCheck } from "../lib/ops/storageGuard";
 import {
   runImporter,
   renderReportMarkdown,
@@ -277,7 +278,29 @@ async function main(): Promise<void> {
   log(`Report written: ${opts.reportOutPath}`);
 
   if (opts.mode === "commit" && result.stagedLeadsForCommit) {
-    await commitStagedLeads(result.stagedLeadsForCommit, opts.batchSize, result.report.import_batch);
+    // PRE-FLIGHT DISK CHECK — the guard that would have prevented the
+    // 2026-07-24 read-only outage. A bulk lead write costs roughly its heap
+    // footprint twice over once WAL is counted, and Postgres goes read-only
+    // when the volume fills. Refuse to start rather than stop halfway with
+    // the job half-applied and the database unable to accept writes.
+    const staged = result.stagedLeadsForCommit;
+    const db = getSupabaseAdmin();
+    const health = await checkStorageHealth(db as unknown as Parameters<typeof checkStorageHealth>[0]);
+    if (health) {
+      log(health.message);
+      // ~2.6 KB/row measured on the existing 179k-row leads table.
+      const pre = preflightDiskCheck({
+        currentUsedBytes: health.usedBytes,
+        rowCount: staged.length,
+        avgRowBytes: 2600,
+      });
+      log(pre.reason);
+      if (!pre.allowed) throw new Error(pre.reason);
+    } else {
+      log("WARNING: could not read database size; pre-flight disk check skipped.");
+    }
+
+    await commitStagedLeads(staged, opts.batchSize, result.report.import_batch);
   }
 }
 

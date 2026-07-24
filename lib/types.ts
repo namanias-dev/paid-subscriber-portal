@@ -897,6 +897,122 @@ export interface Lead {
   merged_count?: number;
 }
 
+// ===================== PHASE 1 — WORKLIST FOUNDATION =====================
+
+/**
+ * Contact-consent state. Defaults to `unknown` for EVERY row, including all
+ * 178,183 legacy-imported leads. A phone appearing in a 2023 Google Sheet is
+ * not evidence that the person agreed to be contacted in 2026, so consent is
+ * never inferred from import provenance — only an explicit, recorded capture
+ * moves a row off `unknown`.
+ */
+export type ConsentStatus = "unknown" | "implied" | "explicit" | "withdrawn";
+
+/**
+ * How a lead entered the CRM as a countable lead. FROZEN at classification
+ * time — see `cohortForLead` in `lib/legacy-migration/legacyFilter.ts` for the
+ * canonical rule and why the 110 `import_source='legacy_sheet'` rows without
+ * `attribution.legacy` are `live_captured`.
+ */
+export type LeadCohort = "live_captured" | "legacy_promoted";
+
+/**
+ * The narrow lead projection the worklist reads.
+ *
+ * Deliberately does NOT include the `attribution` JSONB. That column averages
+ * ~892 bytes across 179k rows; bulk-reading it is what made the
+ * `includeLegacy` full scan cost ~13.2 s. The two attribution values the
+ * worklist genuinely needs (`legacy_source_tab`, `first_touch.campaign_clean`)
+ * are projected out as scalars by the PostgREST `->>` selector instead.
+ */
+export interface LeadWorklistRow {
+  id: string;
+  name: string;
+  phone: string;
+  city: string | null;
+  state: string | null;
+  source: string;
+  /**
+   * CAMPAIGN — read this, NOT `utm_campaign`.
+   *
+   * `utm_*` is populated on 4 of 178,183 legacy rows and `gclid` on 0. Real
+   * legacy campaign data lives in this scalar column and in
+   * `campaign_clean` below (~95.7% coverage combined). A segment builder
+   * wired to `utm_campaign` returns zero rows for the entire legacy universe
+   * while looking perfectly healthy.
+   */
+  campaign: string | null;
+  /** `attribution.first_touch.campaign_clean`, projected as a scalar. */
+  campaign_clean: string | null;
+  /** `attribution.legacy_source_tab`, projected as a scalar. */
+  legacy_source_tab: string | null;
+  status: string;
+  created_at: string;
+  counsellor: string | null;
+  assigned_to: string | null;
+  worklist_queue: string | null;
+  follow_up_at: string | null;
+  last_worked_at: string | null;
+  consent_status: ConsentStatus | null;
+  dnd_status: string | null;
+  last_contacted_at: string | null;
+  contact_attempt_count: number | null;
+  suppression_reason: string | null;
+  cohort: LeadCohort | null;
+  legacy_call_status: string | null;
+}
+
+/**
+ * `getLeadsPaged` request. Every filter is applied SERVER-SIDE; nothing here
+ * is ever satisfied by fetching all rows and filtering in JS.
+ */
+export interface LeadsPageParams {
+  /** `worklist_queue` exact match. */
+  queue?: string | null;
+  /**
+   * Legacy boundary selector:
+   *   `false`  (default) — non-legacy only. The live CRM universe (1,310 rows).
+   *   `true`             — no legacy filter. Everything active (179,170).
+   *   `"only"`           — legacy only (178,183). The re-engagement worklist.
+   *
+   * This widens the plain boolean the rest of the codebase uses because the
+   * worklist needs the third case, and expressing it as `includeLegacy: true`
+   * plus a client-side filter would defeat the whole point of the index.
+   */
+  includeLegacy?: boolean | "only";
+  /** `attribution.legacy_source_tab` exact match (e.g. "FB LEADS"). */
+  sourceTag?: string | null;
+  /**
+   * Status exact match. Typed as `string`, not `LeadStatus`: master's enum has
+   * only the 7 base statuses, while the remap put 10 further values
+   * ("Not Replied", "Wrong No." …) on 115,542 legacy rows. Narrowing this to
+   * `LeadStatus` would make the worklist's most useful filters uncallable.
+   */
+  status?: string | null;
+  assignedTo?: string | null;
+  /** Name / phone substring. Applied server-side via PostgREST `or(ilike)`. */
+  search?: string | null;
+  consentStatus?: ConsentStatus | null;
+  /** Clamped to `LEADS_PAGE_MAX_LIMIT` (100). Values above it are capped, not rejected. */
+  limit?: number;
+  /** Opaque keyset cursor from `LeadsPage.nextCursor`. Takes precedence over `offset`. */
+  cursor?: string | null;
+  /** Deep-page fallback. Prefer `cursor`. */
+  offset?: number;
+  /** Opt-in exact total. Off by default — it doubles the query cost. */
+  withCount?: boolean;
+}
+
+export interface LeadsPage {
+  rows: LeadWorklistRow[];
+  /** Pass back as `cursor` for the next page. Null when the page is the last. */
+  nextCursor: string | null;
+  /** Exact match count, only when `withCount` was requested. */
+  total: number | null;
+  /** The limit actually applied AFTER the hard cap. */
+  limit: number;
+}
+
 /** One touchpoint in a de-duplicated lead's source history. */
 export interface LeadSourceTouch {
   source: string | null;
