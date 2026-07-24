@@ -16,6 +16,21 @@
 
 export interface LeadAttrStamp {
   channel: string | null;
+  /**
+   * Best-effort DISPLAY channel derived from the underlying lead's fullest
+   * available signal (scalar `channel` → `attribution.first_touch` → utm /
+   * form-source fallback). Populated by
+   * `lib/marketing/leadAttrByPhone.buildLeadAttrByPhone` on the server.
+   *
+   * SourcePill renders `displayChannel || channel` — so an older lead that
+   * only ever captured a form `source` ("Webinar", "quiz_public") still
+   * surfaces an honest pill (typically "Other"/"Referral"/"Organic") instead
+   * of hiding. Aggregate source-card counts continue to use the scalar
+   * `channel` via {@link @/lib/webinarSource.derivedChannelFor}, so the totals
+   * are unchanged by the widening. Optional for backward-compat with pre-widen
+   * API responses.
+   */
+  displayChannel?: string | null;
   utm_campaign: string | null;
   utm_source: string | null;
   /**
@@ -58,12 +73,18 @@ interface Props {
 
 /**
  * Read-only marketing source pill (channel + optional utm_campaign).
- * Renders nothing when `attr` is null or the channel is missing.
+ * Renders nothing when `attr` is null or both channel fields are missing.
+ *
+ * Prefers `displayChannel` (widened server-side to include utm/form-source
+ * fallbacks) over the raw scalar `channel`. When both are null, the pill is
+ * hidden — never fabricates a source out of thin air.
  */
 export default function SourcePill({ attr, size = "default" }: Props) {
-  if (!attr || !attr.channel) return null;
-  const isGoogleAds = attr.channel === "Google Ads";
-  const isMetaAds = attr.channel === "Meta Ads";
+  if (!attr) return null;
+  const label = (attr.displayChannel || attr.channel || "").trim();
+  if (!label) return null;
+  const isGoogleAds = label === "Google Ads";
+  const isMetaAds = label === "Meta Ads";
   const tone = isGoogleAds
     ? "border-blue-200 bg-blue-50 text-blue-700"
     : isMetaAds
@@ -78,7 +99,7 @@ export default function SourcePill({ attr, size = "default" }: Props) {
         title="Marketing source captured on the matching lead — read-only, from lead attribution."
       >
         <span aria-hidden="true">•</span>
-        {attr.channel}
+        {label}
       </span>
       {attr.utm_campaign && (
         <span

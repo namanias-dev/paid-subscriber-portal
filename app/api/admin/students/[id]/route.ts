@@ -23,6 +23,7 @@ import { requirePermission } from "@/lib/adminGuard";
 import { computeExpiry, istInputToISO } from "@/lib/dates";
 import { deriveEnrollment, isActiveEnrollment, isAttemptEnrollment } from "@/lib/installments";
 import { getEnrollmentPlanChangeLogs, findActiveLeadByPhone } from "@/lib/dataProvider";
+import { deriveDisplayChannel } from "@/lib/marketing/leadAttrByPhone";
 import type { Student, PlanId, InstallmentItem, PaymentPlan } from "@/lib/types";
 
 const DAY = 86400000;
@@ -359,10 +360,18 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
     // the existing lead record via findActiveLeadByPhone (idempotent, honours
     // the fold-by-phone contract). Never rewritten, never touches student /
     // enrolment / payment data. Renders NOTHING when no lead attribution matches.
+    //
+    // `displayChannel` is derived server-side by the shared
+    // `deriveDisplayChannel` helper — scalar `channel` first, then
+    // `attribution.first_touch`, then utm / form-source fallback. Aggregate
+    // counts are unaffected: this profile page has no aggregate surface, and
+    // the shared payments/students route builds their own map from the same
+    // rule.
     const attributionLead = await findActiveLeadByPhone(phone).catch(() => null);
     const leadAttribution = attributionLead
       ? {
           channel: attributionLead.channel ?? null,
+          displayChannel: deriveDisplayChannel(attributionLead),
           utm_campaign: attributionLead.utm_campaign ?? null,
           utm_source: attributionLead.utm_source ?? null,
         }

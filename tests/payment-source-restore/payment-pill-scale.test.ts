@@ -35,6 +35,11 @@ import {
 import { derivedChannelFor, type DerivedChannelAttr } from "../../lib/webinarSource";
 import type { Lead, Payment } from "../../lib/types";
 
+/**
+ * Signal-less by default so the prune-shrink assertion measures ONLY the
+ * scalar-channel and derived-displayChannel dimensions. Individual tests
+ * that need a form source or utm signal must set it explicitly.
+ */
 function mkLead(over: Partial<Lead> & { phone: string }): Lead {
   return {
     id: over.id ?? "lead-" + over.phone,
@@ -43,8 +48,8 @@ function mkLead(over: Partial<Lead> & { phone: string }): Lead {
     email: null,
     city: null,
     state: null,
-    source: "Website",
-    campaign: null,
+    source: over.source ?? "",
+    campaign: over.campaign ?? null,
     course_interest: null,
     target_year: null,
     mode_pref: null,
@@ -64,12 +69,14 @@ function mkLead(over: Partial<Lead> & { phone: string }): Lead {
     counsellor: null,
     created_at: "2026-07-01T00:00:00Z",
     sources: [],
-    first_source: null,
-    first_campaign: null,
+    first_source: over.first_source ?? null,
+    first_campaign: over.first_campaign ?? null,
     merged_count: 0,
     channel: over.channel ?? null,
     utm_campaign: over.utm_campaign ?? null,
     utm_source: over.utm_source ?? null,
+    utm_medium: over.utm_medium ?? null,
+    gclid: over.gclid ?? null,
     attribution: over.attribution ?? null,
   } as Lead;
 }
@@ -299,9 +306,9 @@ describe("(S2) pruneEmptyChannels shrinks the map at prod-realistic ratios", () 
 
   it("all-channel-carrying input → identical output (pruning never accidentally drops a valid entry)", () => {
     const map: Record<string, LeadAttrByPhoneEntry> = {
-      "5000000060": { channel: "Meta Ads", utm_campaign: null, utm_source: null, legacy: false },
-      "5000000061": { channel: "Google Ads", utm_campaign: "test", utm_source: "google", legacy: false },
-      "5000000062": { channel: "Referral", utm_campaign: null, utm_source: null, legacy: true },
+      "5000000060": { channel: "Meta Ads", displayChannel: "Meta Ads", utm_campaign: null, utm_source: null, legacy: false },
+      "5000000061": { channel: "Google Ads", displayChannel: "Google Ads", utm_campaign: "test", utm_source: "google", legacy: false },
+      "5000000062": { channel: "Referral", displayChannel: "Referral", utm_campaign: null, utm_source: null, legacy: true },
     };
     assert.deepEqual(pruneEmptyChannels(map), map);
   });

@@ -128,6 +128,7 @@ describe("(a) normal payment resolves the correct SourcePill", () => {
     const map = buildLeadAttrByPhone([lead]);
     assert.deepEqual(map["5000000001"], {
       channel: "Google Ads",
+      displayChannel: "Google Ads",
       utm_campaign: "brand-test",
       utm_source: "google",
       legacy: false,
@@ -178,6 +179,7 @@ describe("(b) collision-lead payment shows its ORIGINAL non-legacy source", () =
     const map1 = buildLeadAttrByPhone([live, legacyDup]);
     assert.deepEqual(map1["5000000010"], {
       channel: "Meta Ads",
+      displayChannel: "Meta Ads",
       utm_campaign: "aug-webinar",
       utm_source: null,
       legacy: false,
@@ -185,6 +187,7 @@ describe("(b) collision-lead payment shows its ORIGINAL non-legacy source", () =
     const map2 = buildLeadAttrByPhone([legacyDup, live]);
     assert.deepEqual(map2["5000000010"], {
       channel: "Meta Ads",
+      displayChannel: "Meta Ads",
       utm_campaign: "aug-webinar",
       utm_source: null,
       legacy: false,
