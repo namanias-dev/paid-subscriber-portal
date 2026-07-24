@@ -1635,6 +1635,89 @@ export async function getEnrollments(studentId?: string): Promise<Enrollment[]> 
 
 // ============================ LEADS / CRM ============================
 /**
+ * Paginated live-DB read for the LEADS table. Two shapes:
+ *
+ *   1. `nonLegacyOnly: true`  — the DEFAULT CRM path. Fetches ONLY
+ *      non-soft-merged, non-legacy leads via the partial index
+ *      `idx_leads_active_nonlegacy_created`. Small result set (~987
+ *      rows today) that lands in a single 1000-row page.
+ *   2. `nonLegacyOnly: false` — the admin "Show legacy" path. Pages the
+ *      full active universe (soft-merged still excluded at DB level via
+ *      the `idx_leads_active_created` partial index).
+ *
+ * ERROR PROPAGATION (severity-1 fix, 2026-07-24)
+ * ----------------------------------------------
+ * The prior `dbSelectAll` helper silently swallowed PostgREST errors
+ * (`if (error) break;`) and returned `[]` — which the old `getLeads`
+ * combined with `rows.length ? rows : mock.leads` to serve the demo
+ * fixture set ("Lead Aspirant" phones 9000010000+) to the production
+ * admin CRM whenever a page timed out. At 179k rows after the legacy
+ * backfill the first 1000-row page took ~17 s and hit the PostgREST
+ * statement_timeout, silently swapping fixtures in.
+ *
+ * This helper THROWS on the first PostgREST error. Callers must NOT
+ * catch and fall back to fixtures. See
+ * `docs/naman-ai/reports/crm-fixture-fallback-fix.md`.
+ */
+/**
+ * Test seam. Do NOT call from production code — use `getLeads()` instead. This
+ * exists so `tests/lead-crm-fixture-fallback/*` can inject a stub Supabase-like
+ * builder and pin the two safety invariants that were violated in prod on
+ * 2026-07-24:
+ *
+ *   1. A page-level PostgREST error MUST throw (not silently return []).
+ *   2. When the caller opts out of legacy, the DB query MUST push the
+ *      legacy filter down via `.or("attribution.is.null,attribution->>legacy.is.null,attribution->>legacy.neq.true")`
+ *      so the response is small (~987 rows) and uses
+ *      `idx_leads_active_nonlegacy_created`.
+ */
+export interface _LeadPaginationClient {
+  from(table: string): _LeadPaginationBuilder;
+}
+export interface _LeadPaginationBuilder {
+  select(cols: string): _LeadPaginationBuilder;
+  is(col: string, value: null): _LeadPaginationBuilder;
+  or(filter: string): _LeadPaginationBuilder;
+  order(col: string, opts: { ascending: boolean }): _LeadPaginationBuilder;
+  range(from: number, to: number): Promise<{ data: Lead[] | null; error: { message: string } | null }>;
+}
+
+export async function _dbSelectAllLeadsActive(
+  client: _LeadPaginationClient | null,
+  nonLegacyOnly: boolean,
+  pageSize = 1000,
+): Promise<Lead[]> {
+  if (!client) throw new Error("Supabase admin client unavailable");
+  const out: Lead[] = [];
+  for (let from = 0; ; from += pageSize) {
+    let query = client.from("leads").select("*").is("merged_into", null);
+    if (nonLegacyOnly) {
+      // PostgREST does not expose `IS DISTINCT FROM` directly, so we express
+      // the same "non-legacy" set via OR of the two non-legacy shapes
+      // (`legacy` key missing / null OR its value literally not 'true'). The
+      // partial index `idx_leads_active_nonlegacy_created` was created with
+      // an equivalent predicate (`attribution->>'legacy' IS DISTINCT FROM
+      // 'true'`), so this filter uses that index directly. Verified via
+      // EXPLAIN 2026-07-24: 183 ms for the full 987-row scan.
+      query = query.or("attribution.is.null,attribution->>legacy.is.null,attribution->>legacy.neq.true");
+    }
+    const { data, error } = await query
+      .order("created_at", { ascending: false })
+      .range(from, from + pageSize - 1);
+    if (error) {
+      // NEVER silently return [] — that was the trigger for the
+      // fixture-fallback bug. Bubble the error up so the API surface
+      // renders a real 500 and the operator sees the failure.
+      throw new Error(`getLeads(nonLegacyOnly=${nonLegacyOnly}) failed at offset ${from}: ${error.message}`);
+    }
+    const rows = (data as Lead[]) ?? [];
+    out.push(...rows);
+    if (rows.length < pageSize) break;
+  }
+  return out;
+}
+
+/**
  * De-duplicated view of the Lead CRM. Soft-merged duplicates (merged_into set)
  * are hidden from every list and downstream segment (SMS, analytics).
  *
@@ -1644,14 +1727,24 @@ export async function getEnrollments(studentId?: string): Promise<Enrollment[]> 
  * safe-by-default posture prevents ~175k historical phones from silently
  * appearing in the Kanban, SMS audiences, dashboard counter, and campaign
  * analytics — the plan's non-negotiable protection against a mass-send blast.
+ *
+ * PRODUCTION SAFETY: outside demoMode we NEVER fall back to `mock.leads`.
+ * The old `rows.length ? rows : mock.leads` fallback silently served the
+ * "Lead Aspirant" fixture set whenever the DB query timed out at 179k
+ * scale. A failing DB read now throws — the API renders an honest 500
+ * instead of pretending real leads are 24 seed cards. See
+ * `docs/naman-ai/reports/crm-fixture-fallback-fix.md`.
  */
 export async function getLeads(opts?: LegacyOptions): Promise<Lead[]> {
   if (demoMode()) return applyLegacyFilter(mock.leads.filter((l) => !l.merged_into), opts);
-  // Page through ALL rows — the Lead CRM is the source of truth the automation
-  // depends on, so it must never be capped at PostgREST's default 1000 rows.
-  const rows = await dbSelectAll<Lead>("leads");
-  const canonical = (rows.length ? rows : mock.leads).filter((l) => !l.merged_into);
-  return applyLegacyFilter(canonical, opts);
+  const includeLegacy = !!opts?.includeLegacy;
+  // Push the legacy filter down to the DB by choosing the appropriate
+  // partial index — one 987-row page for the default CRM path, or full
+  // pagination through active rows for the opt-in legacy universe.
+  return _dbSelectAllLeadsActive(
+    getSupabaseAdmin() as unknown as _LeadPaginationClient | null,
+    !includeLegacy,
+  );
 }
 
 /**
@@ -1709,13 +1802,37 @@ export async function getLeadsForPillMap(): Promise<Lead[]> {
   return [...nonLegacy, ...legacyChan];
 }
 
-/** All lead rows including soft-merged duplicates (for the merge tooling / audits).
+/** All lead rows INCLUDING soft-merged duplicates (for the merge tooling / audits).
  *
- * Legacy filter follows the same default-OFF contract as {@link getLeads}. */
+ * Legacy filter follows the same default-OFF contract as {@link getLeads}.
+ *
+ * Same severity-1 no-fixture-fallback contract: outside demoMode a DB failure
+ * throws instead of silently substituting `mock.leads`. Merged rows are
+ * required for this audit shape so we cannot use the paginated helper above;
+ * we still push the legacy filter down when the caller has opted out. */
 export async function getAllLeadsRaw(opts?: LegacyOptions): Promise<Lead[]> {
   if (demoMode()) return applyLegacyFilter([...mock.leads], opts);
-  const rows = await dbSelectAll<Lead>("leads");
-  return applyLegacyFilter(rows.length ? rows : mock.leads, opts);
+  const db = getSupabaseAdmin();
+  if (!db) throw new Error("Supabase admin client unavailable");
+  const includeLegacy = !!opts?.includeLegacy;
+  const pageSize = 1000;
+  const out: Lead[] = [];
+  for (let from = 0; ; from += pageSize) {
+    let query = db.from("leads").select("*");
+    if (!includeLegacy) {
+      query = query.or("attribution.is.null,attribution->>legacy.is.null,attribution->>legacy.neq.true");
+    }
+    const { data, error } = await query
+      .order("created_at", { ascending: false })
+      .range(from, from + pageSize - 1);
+    if (error) {
+      throw new Error(`getAllLeadsRaw(includeLegacy=${includeLegacy}) failed at offset ${from}: ${error.message}`);
+    }
+    const rows = (data as Lead[]) ?? [];
+    out.push(...rows);
+    if (rows.length < pageSize) break;
+  }
+  return out;
 }
 
 /** Candidate stored phone formats for a normalized 10-digit Indian mobile. */

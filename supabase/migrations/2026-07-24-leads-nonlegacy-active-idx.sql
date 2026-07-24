@@ -1,0 +1,55 @@
+-- =====================================================================
+-- Partial covering index for the CRM Kanban / SMS audiences / legacy-aware
+-- reads that filter to non-legacy active leads (the DEFAULT path served by
+-- getLeads({ includeLegacy: false }) — which is the vast majority of the
+-- CRM's live traffic).
+--
+-- WHY
+-- ---
+-- After the 2026-07-22 legacy backfill (~178k rows tagged
+-- attribution.legacy=true) the leads table grew from ~1k rows / ~10 MB to
+-- 179k rows / ~299 MB. The existing `idx_leads_active_created` (partial
+-- index on `merged_into IS NULL` only) still walks the whole active set
+-- (~179k) in created_at DESC order when the caller filters legacy
+-- out-of-band; the filter predicate eliminates ~178k rows tuple-by-tuple.
+--
+-- Measured before this index (2026-07-24):
+--   `select * from leads
+--      where merged_into is null and (attribution->>'legacy') is distinct from 'true'
+--      order by created_at desc limit 1000`
+--   → 50,914 ms  (Seq Scan + Filter Removes 178,506)
+--
+-- Measured after this index (same query, same day):
+--   → 183 ms  (Index Scan on idx_leads_active_nonlegacy_created)
+--
+-- The Vercel serverless request that the deployed
+-- `dbSelectAll<Lead>("leads")` fires from `getLeads()` was hitting a
+-- PostgREST statement_timeout on the first 1000-row page (~17s at 179k
+-- scale) → returning `[]` → the (now-fixed) silent `mock.leads` fallback
+-- served the "Lead Aspirant" fixture set to the admin CRM in production.
+--
+-- WHAT
+-- ----
+-- A partial btree on `(created_at DESC)` covering EXACTLY the rows the
+-- default CRM path returns: non-soft-merged AND not-legacy. `IS DISTINCT
+-- FROM 'true'` correctly treats a missing/null `attribution.legacy` as
+-- "non-legacy" (which is the value returned by `hasLegacyFlag()` in
+-- `lib/legacy-migration/legacyFilter.ts`).
+--
+-- SAFETY
+-- ------
+-- * CONCURRENTLY: does not block writes to the table.
+-- * IF NOT EXISTS: idempotent; safe to re-apply.
+-- * Partial: indexes ~987 rows today (measured 2026-07-24), so the disk
+--   footprint is tiny.
+-- * Additive only. No row mutation, no schema change beyond the index.
+--   Rollback: `DROP INDEX CONCURRENTLY IF EXISTS idx_leads_active_nonlegacy_created;`
+--
+-- Applied in prod on 2026-07-24 via Supabase MCP execute_sql. This file
+-- exists so a fresh dev/test environment picks up the same index when
+-- running `supabase db reset`.
+
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_leads_active_nonlegacy_created
+  ON public.leads (created_at DESC)
+  WHERE merged_into IS NULL
+    AND ((attribution ->> 'legacy') IS DISTINCT FROM 'true');
