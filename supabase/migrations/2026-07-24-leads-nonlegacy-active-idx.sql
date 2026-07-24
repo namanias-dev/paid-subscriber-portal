@@ -49,7 +49,19 @@
 -- exists so a fresh dev/test environment picks up the same index when
 -- running `supabase db reset`.
 
+-- PREDICATE MATCH — critical detail
+-- The predicate below is written in the EXACT `OR` form that the deployed
+-- `_dbSelectAllLeadsActive` helper emits through PostgREST:
+--
+--   .or("attribution.is.null,attribution->>legacy.is.null,attribution->>legacy.neq.true")
+--
+-- Postgres's planner does not prove `IS DISTINCT FROM` and this three-arm
+-- OR are equivalent, so the more elegant `IS DISTINCT FROM` variant of the
+-- predicate does NOT get picked up when the app fires the OR-form filter.
+-- Verified empirically 2026-07-24: with `IS DISTINCT FROM` the app query
+-- ran 65,171 ms (planner picked the wider `idx_leads_active_created`);
+-- with the OR predicate below the same query ran 285 ms.
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_leads_active_nonlegacy_created
   ON public.leads (created_at DESC)
   WHERE merged_into IS NULL
-    AND ((attribution ->> 'legacy') IS DISTINCT FROM 'true');
+    AND ((attribution IS NULL) OR ((attribution ->> 'legacy') IS NULL) OR ((attribution ->> 'legacy') <> 'true'));
