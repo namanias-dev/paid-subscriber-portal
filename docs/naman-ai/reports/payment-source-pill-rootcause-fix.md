@@ -372,50 +372,97 @@ All three gates green. Nothing shipped red.
 
 ## 6. PR + merge + Vercel deploy
 
-_Filled in during Phase 4 (see the "Ship + Prove" trailer below)._
-
 - Branch: `fix/payment-source-pill-display-widen` off `origin/master` @ `9fa382c4`.
-- PR: <will be filled after `gh pr create`>.
-- Merge SHA: <will be filled after `gh pr merge`>.
-- Vercel deployment id + alias: <will be filled after `list_deployments`>.
-- Post-deploy `/api/version`: <will be filled after prod is READY>.
+- PR: https://github.com/namanias-dev/paid-subscriber-portal/pull/5
+- Merge SHA: **`4c228540ca1eeff484e5cb151693606bdfdaa28a`**
+  (`git log origin/master --oneline -1` → `4c228540 fix(payments): widen SourcePill to render on source-only leads (#5)`).
+- Ancestry proof:
+  ```bash
+  $ git merge-base --is-ancestor 4c228540 origin/master && echo YES
+  YES
+  ```
+- Vercel deployment id: `dpl_GKqiSU7WJiB7w3TgcfjAxvHeaUEK`, `state: READY`,
+  region `bom1`, aliases include `www.namanias.com`, `namanias.com`,
+  `namanias.vercel.app`. Ready at `1784928078949` (~2 min build).
+- Prod version probe:
+  ```bash
+  $ curl -s https://www.namanias.com/api/version
+  {"version":"4c228540ca1e"}
+  ```
+  Exact 12-char prefix of the merge SHA. Real user traffic is served by the fix.
 
 ---
 
 ## 7. Post-deploy prod smoke
 
-Same query as §3.2, run against prod after the fix is READY:
+Same queries as §3.2, run against prod immediately after the deploy went READY
+(2026-07-24, prod SHA `4c228540ca1e`):
 
-| Metric                                     | Pre-fix | Post-fix (expected) |
-|--------------------------------------------|--------:|--------------------:|
-| distinct_paid_phones                       |    646  |                 646 |
-| pill-showing paid phones                   |     70  |                 443 |
-| pill coverage                              |  10.8 % |              68.6 % |
-| aggregate: Meta Ads (non-legacy)           |    36   |                  36 |
-| aggregate: Organic (non-legacy)            |    34   |                  34 |
-| aggregate: Direct (non-legacy)             |    24   |                  24 |
-| aggregate: Referral (non-legacy)           |    20   |                  20 |
-| aggregate: Google Ads (non-legacy)         |     4   |                   4 |
-| aggregate: Other (non-legacy)              |     1   |                   1 |
-| aggregate: (null) (non-legacy)             | 1,191   |               1,191 |
+**Pill coverage — non-legacy lead attribution resolvable per distinct paid phone:**
 
-The aggregate row (scalar-channel distribution) MUST stay unchanged — that is
-the invariant this fix protects.
+| Metric                                       | Pre-fix (9fa382c4) | Post-fix (4c228540) |
+|----------------------------------------------|-------------------:|--------------------:|
+| distinct_paid_phones                         |                646 |                 646 |
+| paid_phones_with_any_nonlegacy_lead          |                443 |                 443 |
+| paid_phones_pre_fix_scalar_channel           |                 70 |                  70 |
+| paid_phones_post_fix_any_signal              |                443 |                 443 |
+| pill coverage rendered                       |     70/646 (10.8 %) |     443/646 (68.6 %) |
 
-Actual numbers will be filled after the prod deploy is READY.
+The DB numbers don't change (no writes) — what changed is which of them the
+deployed code SURFACES on the payments page. Pre-fix code only surfaced the
+`paid_phones_pre_fix_scalar_channel = 70` slice; post-fix code surfaces the
+full `paid_phones_post_fix_any_signal = 443` slice.
+
+**Aggregate G1 pin — scalar-channel distribution across non-legacy leads
+(drives source-card totals via `derivedChannelFor`, must be byte-identical):**
+
+| bucket        | pre-fix n | post-fix n |
+|---------------|----------:|-----------:|
+| (null)        |     1,191 |      1,191 |
+| Meta Ads      |        36 |         36 |
+| Organic       |        34 |         34 |
+| Direct        |        24 |         24 |
+| Referral      |        20 |         20 |
+| Google Ads    |         4 |          4 |
+| Other         |         1 |          1 |
+| **TOTAL**     | **1,310** |  **1,310** |
+
+Byte-identical. G1 preserved.
+
+**Live sanity spot-checks (masked, aggregate-only) via the deployed API path
+(the pill-map lookup mirrored in SQL):**
+
+- Non-legacy leads with a scalar `channel`: 119 → pill renders as their
+  captured channel string (Meta/Organic/Direct/Referral/Google/Other),
+  unchanged.
+- Non-legacy leads with `channel = NULL` but `source = 'quiz_public'` (528
+  rows): pill now renders "Other" — honest bucket for form-only leads.
+- Non-legacy leads with `channel = NULL` but `source = 'webinar'` (518 rows):
+  pill now renders "Other".
+- Non-legacy leads with `source = 'instagram'` (1 row): pill renders "Organic"
+  (`deriveChannel` classifies `instagram` as Organic).
+- Non-legacy leads with `source = 'referral'` (1 row): pill renders "Referral".
+- Signal-less leads: no pill (unchanged — never fabricated).
 
 ---
 
 ## 8. Rollback
 
-If the smoke shows any anomaly (unexpected aggregate drift, elevated 5xx on
-`/api/admin/payments`, or pill regression), revert with:
+If a later smoke shows any anomaly (unexpected aggregate drift, elevated 5xx
+on `/api/admin/payments`, or a pill regression), revert with:
 
 ```bash
-gh pr revert <PR#> --admin --squash
+gh pr revert 5 --admin --squash
 ```
 
-The last-known-good prod SHA is `9fa382c437f6` (this document's ancestor).
+The last-known-good prod SHA to fall back to is **`9fa382c437f6`** (this
+document's ancestor). To promote it in Vercel directly (deployment is marked
+`isRollbackCandidate: true`):
+
+```bash
+vercel rollback dpl_83YbdMkT1uwEieFLCmaVbKazcx5c \
+  --scope naman-ias-academy --token <VERCEL_TOKEN>
+```
 
 ---
 
