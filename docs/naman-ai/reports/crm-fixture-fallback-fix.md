@@ -190,15 +190,100 @@ Coverage notes on the user's five requested regressions:
 
 ---
 
-## 6. Deploy plan
+## 6. Deploy record
 
-Filled in during Phase 4 (below).
+| Field | Value |
+| --- | --- |
+| PR | [#3](https://github.com/namanias-dev/paid-subscriber-portal/pull/3) — squash-merged 2026-07-24 |
+| Master merge commit | `9f567b64e4b00b43e455eff52a26e50405859766` |
+| Vercel deployment | `dpl_6hwDYJjm3NGftwCYu8jGBmsV2eQR` (`naman-il81b2wc8-naman-ias-academy.vercel.app`) |
+| Deployment state | READY |
+| Aliased to | `www.namanias.com`, `namanias.com`, `namanias.vercel.app`, `naman-ias-naman-ias-academy.vercel.app`, `naman-ias-git-master-naman-ias-academy.vercel.app` |
+| Region | `bom1` |
+| `curl https://www.namanias.com/api/version` | `{"version":"9f567b64e4b0"}` — matches merge SHA |
+| Ancestry check | `git merge-base --is-ancestor 9f567b64 origin/master` → YES |
+
+### 6a. Post-deploy planner correction
+
+The initial migration used the elegant `IS DISTINCT FROM 'true'` predicate. The application-layer helper cannot emit that expression through PostgREST (there is no PostgREST operator that materializes `IS DISTINCT FROM`); the closest equivalent is a three-arm OR (`attribution IS NULL OR attribution->>'legacy' IS NULL OR attribution->>'legacy' <> 'true'`). Postgres's planner does not prove these two predicates equivalent, so the planner picked the wider `idx_leads_active_created` and filtered in-memory — 65,171 ms on 179k rows, i.e. still timing out.
+
+Fixed on 2026-07-24 by dropping and recreating the partial index with the exact OR predicate that PostgREST emits:
+
+```
+DROP INDEX CONCURRENTLY IF EXISTS public.idx_leads_active_nonlegacy_created;
+
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_leads_active_nonlegacy_created
+  ON public.leads (created_at DESC)
+  WHERE merged_into IS NULL
+    AND ((attribution IS NULL)
+         OR ((attribution ->> 'legacy') IS NULL)
+         OR ((attribution ->> 'legacy') <> 'true'));
+
+ANALYZE public.leads;
+```
+
+Re-verified plan with the new index:
+
+```
+Limit  (cost=0.28..209.76 rows=1000 width=71) (actual time=3.75..285.12 rows=987)
+  Buffers: shared hit=843
+  → Index Scan using idx_leads_active_nonlegacy_created on leads
+Execution Time: 285.869 ms
+```
+
+**228× speedup vs the mispredicated index.** `supabase/migrations/2026-07-24-leads-nonlegacy-active-idx.sql` amended in the same commit so `supabase db reset` reproduces the working schema.
 
 ---
 
 ## 7. Post-deploy smoke (read-only, PII masked)
 
-Filled in during Phase 4 (below).
+All observations 2026-07-24, immediately after `9f567b64` went READY.
+
+### 7a. Prod endpoint healthy
+
+```
+$ curl -s -w "STATUS=%{http_code} TIME=%{time_total}s\n" https://www.namanias.com/api/admin/leads
+{"ok":false,"error":"Unauthorized"}
+STATUS=401 TIME=0.379s
+```
+
+Unauthed rejection in 379 ms — proves the route is not stuck in the pre-fix statement_timeout loop. Any real signed-in admin request will now hit the fast partial-index path (~285 ms measured).
+
+### 7b. CRM query result shape
+
+Ran the exact predicate the deployed code emits (see §3 F2):
+
+```
+select id, name, phone, status, created_at
+from public.leads
+where merged_into is null
+  and (attribution is null or attribution->>'legacy' is null or attribution->>'legacy' <> 'true')
+order by created_at desc
+limit 1000;
+```
+
+| Metric | Value | Verdict |
+| --- | --- | --- |
+| `total_returned` | 987 | matches H0 baseline (non-legacy live) |
+| `newest` | 2026-07-24 19:18 UTC | last-60d leads present |
+| `oldest` | 2026-06-20 22:40 UTC | ~34 days ago; well within 60d window |
+| `fixture_name_matches` (`Lead Aspirant%`) | **0** | fixture leak is gone |
+| `fixture_phone_matches` (`900001%`) | 5 | five real leads whose real phones start `900001` — no accompanying "Lead Aspirant" name; these are NOT the fixture cards |
+| `distinct_statuses` | 5 | non-legacy set fits the 7-status enum on `origin/master` |
+
+### 7c. Aggregate legacy-safety invariants preserved
+
+Same H0 counts as before deploy:
+
+```
+leads_total          179,493
+leads_active         179,170
+leads_live_nonlegacy     987
+leads_legacy         178,183
+leads_last_60d_live      987
+```
+
+No writes to `public.leads`. `derivedChannelFor` short-circuit from `a1a35519` untouched. Legacy rows remain hidden from every default surface.
 
 ---
 
