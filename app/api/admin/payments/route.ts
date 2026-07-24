@@ -16,9 +16,16 @@ import type { PaymentProof } from "@/lib/types";
  * which drops legacy rows to "Unknown" — so the totals stay byte-identical to
  * the pre-shipment legacy-free numbers (G1 in
  * docs/naman-ai/reports/payment-source-restore.md).
+ *
+ * `displayChannel` (2026-07-24 widen) is the best-effort channel derived
+ * server-side from the fullest available lead signal (scalar `channel` first,
+ * then `attribution.first_touch`, then utm/form-source fallback via
+ * `deriveChannel`). SourcePill renders `displayChannel || channel`. Aggregate
+ * counts continue reading `channel` only, so totals stay unchanged.
  */
 export interface PaymentsLeadAttr {
   channel: string | null;
+  displayChannel: string | null;
   utm_campaign: string | null;
   utm_source: string | null;
   legacy?: boolean;
