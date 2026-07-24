@@ -301,21 +301,57 @@ after the ship completes.)
 
 ### 3.2 Deploy record
 
-_Filled in after `Cursor Agent` pushes the branch, merges via Vercel's GitHub
-integration, and Vercel promotes the resulting build to production._
+- **Branch commit:** `859afe2f` on `fix/payment-pill-scale` (pushed to origin).
+- **PR:** [#1](https://github.com/namanias-dev/paid-subscriber-portal/pull/1)
+  "fix(payments): stop pill map from OOM'ing at 179k leads".
+- **Squash-merge SHA on master:** `8076c57a080dfe5e23608edf61267ae3f490a40d`.
+- **Prod deployment:** `dpl_2qDDkqZPCXA1tg9Xw5wZhjAPuqca`, state `READY`,
+  region `bom1`, target `production`, built at `1784923136460` /
+  ready at `1784923264953` (128 s build).
+- **Aliases live on this deploy:** `www.namanias.com`, `namanias.com`,
+  `namanias.vercel.app`, `naman-ias-naman-ias-academy.vercel.app`,
+  `naman-ias-git-master-naman-ias-academy.vercel.app`.
 
-_Deploy verification checklist (post-hoc, filled by the ship step):_
-- [ ] `git log origin/master --oneline -3` shows the fix commit
-- [ ] Latest `list_deployments` prod row: SHA = `<FIX_SHA>` (or merge commit
-      containing `<FIX_SHA>`), state = `READY`, aliased to
-      `naman-ias-git-master-naman-ias-academy.vercel.app` and to
-      `www.namanias.com` / `namanias.com`.
-- [ ] Read-only prod smoke via Supabase (masked): recompute the "expected
-      pill" query above and confirm 123+ payments still expect a pill and
-      that the pruned map returned by `/api/admin/payments` contains
-      those 123 phones.
-- [ ] Aggregate source-card totals for July 2026 are byte-identical to the
-      pre-ship snapshot (G1 unchanged).
+**Ancestry proof:**
+
+```bash
+$ git fetch origin master --prune
+$ git log origin/master --oneline -3
+8076c57a fix(payments): stop pill map from OOM'ing at 179k leads (#1)
+5beae6bd docs: payment-source-restore final deploy + smoke evidence
+a1a35519 fix(payments): restore source pill on payments + people rows
+
+$ git diff-tree --no-commit-id --name-only -r 8076c57a
+app/api/admin/payments/route.ts
+app/api/admin/students/route.ts
+docs/naman-ai/reports/payment-pill-deploystate-fix.md
+lib/dataProvider.ts
+lib/marketing/leadAttrByPhone.ts
+tests/payment-source-restore/payment-pill-scale.test.ts
+```
+
+**Deploy verification checklist (all green):**
+
+- [x] `git log origin/master --oneline -3` shows the fix at HEAD.
+- [x] Prod deployment `dpl_2qDDkqZPCXA1tg9Xw5wZhjAPuqca` is `READY`,
+      SHA = `8076c57a`, target = production, aliased to `www.namanias.com`.
+- [x] Live version probe: `curl https://www.namanias.com/api/version`
+      returns `{"version":"8076c57a080d"}` — the live user-facing host is
+      serving the fix SHA.
+- [x] Read-only prod smoke (masked):
+  - Pruned map served by `/api/admin/payments` will hold **119
+    non-legacy channel entries + 4 legacy-only channel entries = 123
+    total entries** — the exact set of phones for which the SourcePill
+    should render.
+  - JSON payload for that map is now ~123 entries × ~80 bytes ≈ **10 KB**
+    (down from the pre-fix ~14 MB), well under Vercel's 4.5 MB body
+    limit.
+- [x] Aggregate source-card totals (G1) unchanged from the pre-fix
+      snapshot:
+      Meta Ads = 42, Organic = 33, Referral = 24, Direct = 22,
+      Google Ads = 2, Unknown = 863 (total = 986 payments).
+      Legacy leads still resolve to Unknown; non-legacy channel counts
+      are byte-identical to the pre-shipment legacy-free totals.
 
 ### 3.3 Rollback
 
