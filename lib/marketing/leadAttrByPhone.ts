@@ -99,3 +99,33 @@ export function buildLeadAttrByPhone<T extends LeadForSourceAttr>(
   }
   return out;
 }
+
+/**
+ * Drop entries whose `channel` is null/empty. Two consumers read this map:
+ *
+ *   - `SourcePill` — only renders when `attr.channel` is a non-empty string,
+ *     so an entry with `channel = null` never produces a pill anyway.
+ *   - `derivedChannelFor` — returns `Unknown` when either the phone is not in
+ *     the map OR the entry's channel is empty; the two cases collapse to the
+ *     same output.
+ *
+ * Pruning is therefore behaviorally a no-op but shrinks the JSON payload by
+ * ~90% (only channel-carrying leads survive), which is what fixes the scale
+ * regression documented in
+ * `docs/naman-ai/reports/payment-pill-deploystate-fix.md`.
+ *
+ * Preserves the winning entry per phone under the collision-preference rules
+ * above — this only drops entries that couldn't influence the rendered pill or
+ * aggregate channel bucket.
+ */
+export function pruneEmptyChannels(
+  map: Record<string, LeadAttrByPhoneEntry>,
+): Record<string, LeadAttrByPhoneEntry> {
+  const out: Record<string, LeadAttrByPhoneEntry> = {};
+  for (const [phone, entry] of Object.entries(map)) {
+    const ch = (entry.channel ?? "").trim();
+    if (!ch) continue;
+    out[phone] = entry;
+  }
+  return out;
+}

@@ -13,11 +13,11 @@ import {
   getAllWebinarRegistrations,
   getWebinars,
   getAllCourses,
-  getLeads,
+  getLeadsForPillMap,
   isPaidStatus,
   logAccess,
 } from "@/lib/dataProvider";
-import { buildLeadAttrByPhone } from "@/lib/marketing/leadAttrByPhone";
+import { buildLeadAttrByPhone, pruneEmptyChannels } from "@/lib/marketing/leadAttrByPhone";
 import { getAdminSession } from "@/lib/session";
 import { requirePermission } from "@/lib/adminGuard";
 import { getPlan } from "@/lib/config";
@@ -83,12 +83,13 @@ export async function GET() {
       getAllWebinarRegistrations(),
       getWebinars(),
       getAllCourses(),
-      // `includeLegacy: true` so a student whose ONLY lead match is a legacy
-      // row can still surface an honest SourcePill when the scalar `channel`
-      // is set. Non-legacy leads still WIN when both exist (collision-lead
-      // rule G2) — see the same preference-order comment in the payments
-      // route. Aggregate people-area finance is not affected by legacy leads.
-      getLeads({ includeLegacy: true }),
+      // Only the ~1.3k rows that can contribute to SourcePill display are read
+      // — the ENTIRE 179k lead table would blow the serverless response-body
+      // budget and time out the client. See {@link getLeadsForPillMap} for the
+      // full contract (non-legacy universe + legacy-with-channel slice; the
+      // collision-preference G2 rule is preserved because non-legacy leads are
+      // fetched in full even when their scalar channel is null).
+      getLeadsForPillMap(),
     ]);
 
     const paid = payments.filter((p) => isPaidStatus(p.status));
@@ -201,7 +202,11 @@ export async function GET() {
     // Read-only phone -> marketing attribution stamp — same builder as the
     // payments route so the two admin surfaces stay in lock-step. Non-legacy
     // lead wins on collision. See {@link buildLeadAttrByPhone}.
-    const leadAttrByPhone = buildLeadAttrByPhone(leads);
+    //
+    // Pruned to channel-carrying entries before serialization (behaviorally a
+    // no-op for both consumers, ~90% payload reduction — see the
+    // payment-pill-deploystate-fix report).
+    const leadAttrByPhone = pruneEmptyChannels(buildLeadAttrByPhone(leads));
 
     return NextResponse.json({ ok: true, students, stats, summaries, catalog, finance, leadAttrByPhone });
   } catch {
