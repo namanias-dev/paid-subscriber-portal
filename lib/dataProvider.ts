@@ -20,10 +20,18 @@ import {
 } from "./marketing/leadAttribution";
 import { adCaptureStampFromState } from "./marketing/adCaptureStamp";
 import { isFullCaptureEnabled } from "./marketing/adCaptureFlag";
-import { applyLegacyFilter, type LegacyOptions } from "./legacy-migration/legacyFilter";
+import {
+  applyLegacyFilter,
+  excludeLegacy,
+  hasLegacyFlag,
+  type LegacyOptions,
+} from "./legacy-migration/legacyFilter";
 import { TRIGGERS } from "./sms/templates";
 import { NON_DUPLICABLE_WEBINAR_FIELDS, buildDuplicateSlug } from "./webinarLifecycle";
 import type {
+  LeadWorklistRow,
+  LeadsPageParams,
+  LeadsPage,
   Buyer,
   Student,
   ContentItem,
@@ -1744,6 +1752,151 @@ export async function getLeads(opts?: LegacyOptions): Promise<Lead[]> {
   return _dbSelectAllLeadsActive(
     getSupabaseAdmin() as unknown as _LeadPaginationClient | null,
     !includeLegacy,
+  );
+}
+
+// ===================== PHASE 1 — getLeadsPaged =====================
+
+/** Hard server-side page cap. A larger `limit` is clamped, never honoured. */
+export const LEADS_PAGE_MAX_LIMIT = 100;
+
+/**
+ * Keyset cursor over `(created_at DESC, id DESC)`.
+ *
+ * The tiebreaker is NOT optional. 856 distinct `created_at` values are shared
+ * by 2+ active rows and one timestamp is shared by 168 rows (the Google Ads
+ * tab, which imported with no original timestamp). A `created_at`-only cursor
+ * silently skips every row after the first inside a tie group that straddles a
+ * page boundary — a data-loss bug that looks like a working paginator.
+ */
+export function _encodeLeadCursor(createdAt: string, id: string): string {
+  return Buffer.from(`${createdAt}|${id}`, "utf8").toString("base64url");
+}
+
+export function _decodeLeadCursor(cursor: string): { createdAt: string; id: string } | null {
+  try {
+    const raw = Buffer.from(cursor, "base64url").toString("utf8");
+    const sep = raw.indexOf("|");
+    if (sep <= 0) return null;
+    const createdAt = raw.slice(0, sep);
+    const id = raw.slice(sep + 1);
+    if (!createdAt || !id) return null;
+    return { createdAt, id };
+  } catch {
+    return null;
+  }
+}
+
+/** Minimal RPC surface `getLeadsPaged` needs. Test seam — see below. */
+export interface _LeadsPagedClient {
+  rpc(fn: string, args: Record<string, unknown>): Promise<{
+    data: unknown;
+    error: { message: string } | null;
+  }>;
+}
+
+/** Maps the public `includeLegacy` tri-state onto the RPC's text parameter. */
+function _legacyModeFor(includeLegacy: boolean | "only" | undefined): "exclude" | "include" | "only" {
+  if (includeLegacy === "only") return "only";
+  if (includeLegacy === true) return "include";
+  return "exclude";
+}
+
+/**
+ * Test seam for `getLeadsPaged`. Do NOT call from production code.
+ *
+ * Exists so `tests/lead-crm-fixture-fallback/*` can inject a stub builder and
+ * pin the invariants that a live Supabase client cannot be made to violate on
+ * demand: the hard limit cap, the exact legacy predicate spelling, the keyset
+ * shape, and — the severity-1 one — that a PostgREST error THROWS instead of
+ * degrading to `mock.leads`.
+ */
+export async function _dbSelectLeadsPaged(
+  client: _LeadsPagedClient | null,
+  params: LeadsPageParams,
+): Promise<LeadsPage> {
+  if (!client) throw new Error("Supabase admin client unavailable");
+
+  // Hard cap. Clamped here AND again inside the SQL function, so a caller
+  // that reaches the RPC by another route still cannot pull 178k rows.
+  const limit = Math.max(1, Math.min(params.limit ?? 50, LEADS_PAGE_MAX_LIMIT));
+  const cur = params.cursor ? _decodeLeadCursor(params.cursor) : null;
+  const mode = _legacyModeFor(params.includeLegacy);
+
+  const filterArgs = {
+    p_include_legacy: mode,
+    p_queue: params.queue ?? null,
+    p_source_tag: params.sourceTag ?? null,
+    p_status: params.status ?? null,
+    p_assigned_to: params.assignedTo ?? null,
+    p_search: params.search ?? null,
+    p_consent_status: params.consentStatus ?? null,
+  };
+
+  const pageRes = await client.rpc("leads_paged", {
+    ...filterArgs,
+    p_limit: limit,
+    p_cursor_created_at: cur?.createdAt ?? null,
+    p_cursor_id: cur?.id ?? null,
+    // A cursor supersedes offset — mixing them would skip a page.
+    p_offset: cur ? 0 : Math.max(0, params.offset ?? 0),
+  });
+
+  if (pageRes.error) {
+    // NEVER degrade to fixtures. A failing read must surface as a real error
+    // so the operator sees a 500 instead of 24 seed cards labelled as leads.
+    throw new Error(`getLeadsPaged failed: ${pageRes.error.message}`);
+  }
+
+  const rows = (pageRes.data as LeadWorklistRow[] | null) ?? [];
+
+  let total: number | null = null;
+  if (params.withCount) {
+    const countRes = await client.rpc("leads_paged_count", filterArgs);
+    if (countRes.error) throw new Error(`getLeadsPaged count failed: ${countRes.error.message}`);
+    total = typeof countRes.data === "number" ? countRes.data : Number(countRes.data ?? 0);
+  }
+
+  // Only advertise a next page when this one came back full — a short page is
+  // the last page, and handing back a cursor there causes an empty round-trip.
+  const last = rows.length === limit ? rows[rows.length - 1] : undefined;
+  return {
+    rows,
+    nextCursor: last ? _encodeLeadCursor(last.created_at, last.id) : null,
+    total,
+    limit,
+  };
+}
+
+/**
+ * Server-side filtered, sorted, keyset-paginated lead reads for the
+ * re-engagement worklist.
+ *
+ * `getLeads()` is deliberately left untouched — the live CRM Kanban depends on
+ * its exact shape and its 285 ms plan on `idx_leads_active_nonlegacy_created`.
+ * This is an ADDITIVE second reader, not a replacement.
+ *
+ * Every filter is pushed to Postgres. Sorting is `created_at DESC, id DESC`,
+ * matching the index sort key so no page costs a sort. The limit is hard-capped
+ * at {@link LEADS_PAGE_MAX_LIMIT} regardless of what the caller asks for.
+ *
+ * PRODUCTION SAFETY: outside demoMode this NEVER returns `mock.leads`. A DB
+ * error throws.
+ */
+export async function getLeadsPaged(params: LeadsPageParams = {}): Promise<LeadsPage> {
+  const limit = Math.max(1, Math.min(params.limit ?? 50, LEADS_PAGE_MAX_LIMIT));
+  if (demoMode()) {
+    const includeLegacy = params.includeLegacy ?? false;
+    let rows = mock.leads.filter((l) => !l.merged_into);
+    if (includeLegacy === "only") rows = rows.filter((l) => hasLegacyFlag(l));
+    else if (includeLegacy === false) rows = excludeLegacy(rows);
+    if (params.status) rows = rows.filter((l) => l.status === params.status);
+    const page = rows.slice(0, limit) as unknown as LeadWorklistRow[];
+    return { rows: page, nextCursor: null, total: rows.length, limit };
+  }
+  return _dbSelectLeadsPaged(
+    getSupabaseAdmin() as unknown as _LeadsPagedClient | null,
+    params,
   );
 }
 

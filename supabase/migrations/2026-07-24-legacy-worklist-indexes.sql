@@ -85,6 +85,62 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_leads_consent_created
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_lead_notes_lead_created
   ON public.lead_notes (lead_id, created_at DESC);
 
+-- ---------------------------------------------------------------------
+-- 8-11. SEARCH (name / phone substring).
+--
+-- `ilike '%needle%'` cannot use a btree at all — the leading wildcard
+-- defeats it — so the search filter ran a full 178k-row scan at 24,669 ms.
+-- Trigram GIN fixes it.
+--
+-- Both a BROAD (merged_into only) and a LEGACY-SCOPED pair exist, and the
+-- second pair is not redundant. With only the broad indexes the planner
+-- BitmapAnd-ed the trigram hits against the ENTIRE 178k-row legacy set via
+-- idx_leads_legacy_call_status_partial, and that one arm cost 418 ms of an
+-- 807 ms query. Folding the legacy predicate into the index removes the arm
+-- entirely.
+--
+--   MEASURED 2026-07-24, legacy search '9876':
+--     no trigram index            -> 24,669 ms  (seq scan)
+--     broad trigram only          ->    807 ms  (BitmapAnd w/ 178k arm)
+--     legacy-scoped trigram       ->    343 ms  (BitmapOr, 2 arms, 494 rows)
+--
+-- The broad pair is retained to serve `includeLegacy: true` / `false`.
+-- ---------------------------------------------------------------------
+CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA extensions;
+
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_leads_phone_trgm
+  ON public.leads USING gin (phone extensions.gin_trgm_ops)
+  WHERE merged_into IS NULL;
+
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_leads_name_trgm
+  ON public.leads USING gin (name extensions.gin_trgm_ops)
+  WHERE merged_into IS NULL;
+
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_leads_legacy_phone_trgm
+  ON public.leads USING gin (phone extensions.gin_trgm_ops)
+  WHERE merged_into IS NULL AND ((attribution ->> 'legacy') = 'true');
+
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_leads_legacy_name_trgm
+  ON public.leads USING gin (name extensions.gin_trgm_ops)
+  WHERE merged_into IS NULL AND ((attribution ->> 'legacy') = 'true');
+
+-- =====================================================================
+-- ANALYZE AFTER CREATING THESE — NOT BEFORE. THIS IS NOT OPTIONAL.
+-- =====================================================================
+-- An index on an EXPRESSION (idx_leads_legacy_tab_created, and both
+-- trigram pairs) has no planner statistics until the table is analyzed
+-- AFTER the index exists. Without them the planner guesses the
+-- expression's selectivity and routinely picks a worse index.
+--
+-- Observed 2026-07-24 on the source-tag filter: the table had been
+-- VACUUM ANALYZE'd immediately BEFORE index creation, so the new
+-- expression index had no stats. The planner chose the older
+-- idx_leads_legacy_source_tab_partial (tag only, no sort key), read
+-- 83,070 rows and top-N sorted them: 23,693 ms. A bare ANALYZE
+-- afterwards moved it onto idx_leads_legacy_tab_created: 39.9 ms. 594x,
+-- from one missing ANALYZE.
+ANALYZE public.leads;
+
 -- ROLLBACK (code revert FIRST, then these):
 --   DROP INDEX CONCURRENTLY IF EXISTS public.idx_leads_legacy_active_created;
 --   DROP INDEX CONCURRENTLY IF EXISTS public.idx_leads_worklist_queue_created;
@@ -93,3 +149,7 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_lead_notes_lead_created
 --   DROP INDEX CONCURRENTLY IF EXISTS public.idx_leads_legacy_tab_created;
 --   DROP INDEX CONCURRENTLY IF EXISTS public.idx_leads_consent_created;
 --   DROP INDEX CONCURRENTLY IF EXISTS public.idx_lead_notes_lead_created;
+--   DROP INDEX CONCURRENTLY IF EXISTS public.idx_leads_phone_trgm;
+--   DROP INDEX CONCURRENTLY IF EXISTS public.idx_leads_name_trgm;
+--   DROP INDEX CONCURRENTLY IF EXISTS public.idx_leads_legacy_phone_trgm;
+--   DROP INDEX CONCURRENTLY IF EXISTS public.idx_leads_legacy_name_trgm;
