@@ -1654,6 +1654,61 @@ export async function getLeads(opts?: LegacyOptions): Promise<Lead[]> {
   return applyLegacyFilter(canonical, opts);
 }
 
+/**
+ * Small lead slice used by the read-only admin SourcePill map (Payments +
+ * People pages). Returns only rows that CAN contribute source display:
+ *
+ *   (a) every non-legacy, non-soft-merged lead — ~1.3k in prod today,
+ *       preserving the collision-lead contract (G2: a non-legacy row with
+ *       a null channel still WINS over a same-phone legacy row so the pill
+ *       does not silently surface a legacy-touch source).
+ *   (b) legacy-imported rows with a non-empty scalar `channel` — ~4 in prod
+ *       today, ensures a payment whose ONLY lead match is a pure-legacy
+ *       row with a real captured channel still shows its honest pill.
+ *
+ * Total universe: ~1.3k rows even after the 178k legacy backfill — small
+ * enough that the JSON payload stays well under Vercel's 4.5 MB serverless
+ * response-body budget and the route's read latency is fast (single 1000-row
+ * PostgREST hit for the non-legacy slice + a tiny indexed filter for the
+ * legacy-with-channel slice).
+ *
+ * SCALE REGRESSION FIXED
+ * ----------------------
+ * The two admin routes previously called `getLeads({ includeLegacy: true })`
+ * which paged the ENTIRE leads table (~179k rows post-backfill, ~14 MB of
+ * built map JSON). At that scale the serverless invocation exceeded the
+ * response-body budget AND the client `useAdminData` hook silently timed
+ * out, leaving `leadAttrByPhone` null on the client — the visible symptom
+ * being "the pill is missing on every payment row". See
+ * `docs/naman-ai/reports/payment-pill-deploystate-fix.md`.
+ *
+ * G1 unchanged: `derivedChannelFor` short-circuits `legacy === true` entries
+ * to `Unknown` so aggregate source-card counts stay byte-identical to the
+ * pre-shipment legacy-free totals.
+ */
+export async function getLeadsForPillMap(): Promise<Lead[]> {
+  if (demoMode()) return applyLegacyFilter(mock.leads.filter((l) => !l.merged_into), { includeLegacy: false });
+  const db = getSupabaseAdmin();
+  if (!db) return applyLegacyFilter(mock.leads.filter((l) => !l.merged_into), { includeLegacy: false });
+  // (a) Non-legacy universe — small (~1.3k today) and needed IN FULL to
+  //     preserve the collision-preference rule (a non-legacy row with a null
+  //     channel must still win over a same-phone legacy row).
+  const nonLegacyPromise = getLeads({ includeLegacy: false });
+  // (b) Targeted legacy-with-channel slice — a couple of rows in prod today.
+  //     Indexed via idx_leads_channel_legacy; the +legacy filter is cheap.
+  //     limit(5000) is a defensive cap — real prod count is <10.
+  const legacyChanPromise = db
+    .from("leads")
+    .select("*")
+    .not("channel", "is", null)
+    .neq("channel", "")
+    .filter("attribution->>legacy", "eq", "true")
+    .limit(5000);
+  const [nonLegacy, legacyRes] = await Promise.all([nonLegacyPromise, legacyChanPromise]);
+  const legacyChan = ((legacyRes.data as Lead[] | null) ?? []).filter((l) => !l.merged_into);
+  return [...nonLegacy, ...legacyChan];
+}
+
 /** All lead rows including soft-merged duplicates (for the merge tooling / audits).
  *
  * Legacy filter follows the same default-OFF contract as {@link getLeads}. */

@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
-import { getPayments, getEnrollments, getBuyers, maybeReconcilePendingPayments, getWebinars, getAllCourses, getLeads } from "@/lib/dataProvider";
+import { getPayments, getEnrollments, getBuyers, maybeReconcilePendingPayments, getWebinars, getAllCourses, getLeadsForPillMap } from "@/lib/dataProvider";
 import { getAllProofs, phoneHasAccessToItem } from "@/lib/paymentProofs";
 import { requireAdmin, requireAnyPermission, requirePermission, requireSuperAdmin } from "@/lib/adminGuard";
 import { isPaymentsUiV2Enabled } from "@/lib/marketing/paymentsUiFlag";
-import { buildLeadAttrByPhone } from "@/lib/marketing/leadAttrByPhone";
+import { buildLeadAttrByPhone, pruneEmptyChannels } from "@/lib/marketing/leadAttrByPhone";
 import type { PaymentProof } from "@/lib/types";
 
 /**
@@ -43,12 +43,13 @@ export async function GET() {
       getAllProofs(),
       getWebinars(),
       getAllCourses(),
-      // `includeLegacy: true` so a payment whose ONLY lead match is a legacy row
-      // (pure-legacy insert) can still surface an honest SourcePill when the
-      // scalar `channel` happens to be set. Aggregate source-card counts stay
-      // legacy-free because {@link derivedChannelFor} short-circuits any entry
-      // flagged `legacy: true` back to "Unknown" — see G1 in the report.
-      getLeads({ includeLegacy: true }),
+      // Only the ~1.3k rows that can contribute to SourcePill display are read
+      // — the ENTIRE 179k lead table would blow the serverless response-body
+      // budget and time out the client. See {@link getLeadsForPillMap} for the
+      // full contract (non-legacy universe + legacy-with-channel slice; the
+      // collision-preference G2 rule is preserved because non-legacy leads are
+      // fetched in full even when their scalar channel is null).
+      getLeadsForPillMap(),
     ]);
     // phone -> login code, so support can resolve "forgot code" escalations.
     const buyerCodes: Record<string, string> = {};
@@ -84,7 +85,15 @@ export async function GET() {
     // digits) so a "+91..." payment row matches a raw-10-digit lead row and vice
     // versa. See {@link buildLeadAttrByPhone} for the full preference contract
     // (non-legacy wins on collision — G2 in the payment-source-restore report).
-    const leadAttrByPhone: Record<string, PaymentsLeadAttr> = buildLeadAttrByPhone(leads);
+    //
+    // The map is PRUNED to channel-carrying entries before serialization. Both
+    // consumers (`SourcePill` and `derivedChannelFor`) treat a missing-phone
+    // entry and a null-channel entry identically, so the prune is behaviorally
+    // a no-op but shrinks the JSON payload by ~90% (the scale-regression fix
+    // documented in docs/naman-ai/reports/payment-pill-deploystate-fix.md).
+    const leadAttrByPhone: Record<string, PaymentsLeadAttr> = pruneEmptyChannels(
+      buildLeadAttrByPhone(leads),
+    );
 
     // UI capability flags: who can take staff write actions (manage_payments) and
     // who can see super-admin-only controls (reverse, accountability, history).
