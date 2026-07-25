@@ -36,9 +36,10 @@ export const dynamic = "force-dynamic";
  * returns 422, not a silent partial write.
  *
  * It also sends NOTHING. There is no SMS, WhatsApp, email or call trigger on
- * any path here. Marking a lead opted-out sets `consent_status='opted_out'` so
- * the suppression is already correct for whenever sending is eventually
- * enabled.
+ * any path here. Marking a lead opted-out writes the `sms_opt_outs` row that
+ * every send path screens against (`optedOutSet` / `isOptedOut`), so the
+ * suppression is real rather than cosmetic — an earlier version set
+ * `consent_status` alone, which no send path reads.
  */
 
 type Body = {

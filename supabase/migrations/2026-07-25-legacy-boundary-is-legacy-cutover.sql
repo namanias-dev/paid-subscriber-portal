@@ -54,9 +54,33 @@
 -- the cutover — but the cutover is what made it visible, and only the
 -- is_legacy spelling can use this index at all.
 --
+-- KEYED ON `id`, NOT ON `created_at` — AND THAT IS THE WHOLE POINT.
+--
+-- The obvious index here is `(created_at DESC) WHERE NOT is_legacy`, and it
+-- was tried first. It works, but it also becomes a candidate for the LIVE CRM
+-- query, whose predicate (`merged_into IS NULL AND NOT is_legacy`) it also
+-- satisfies. The two cost estimates land within 4 units of each other
+-- (1562.55 vs 1566.43), the planner picked the broader one, and the live CRM
+-- went from 2.5 ms to 13.1 ms — reading 1,282 index entries and discarding
+-- the 282 merged rows instead of reading exactly the 1,000 it needed.
+--
+-- A regression on the most important read in the application, introduced by
+-- an index added for a reporting endpoint. Measured, not theorised:
+--
+--   live CRM, with (created_at) variant   13.1 ms   1,206 buffers, 282 discarded
+--   live CRM, with (id) variant            2.9 ms     974 buffers, none discarded
+--
+-- Keying on `id` removes the competition. This index cannot produce
+-- `created_at` order, so the planner will never prefer it for the live CRM's
+-- ordered LIMIT — v2 supplies that pre-sorted. `getAllLeadsRaw` still gets
+-- what it needs: a 1,350-entry index scan plus a quicksort, which is trivial
+-- at this size and still two orders of magnitude better than the Seq Scan.
+--
+--   getAllLeadsRaw   12,314 ms Seq Scan  ->  78 ms Index Scan + Sort
+--
 -- ~1,350 rows today. Additive, concurrent, reversible.
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_leads_nonlegacy_created_all
-  ON public.leads (created_at DESC)
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_leads_nonlegacy_id
+  ON public.leads (id)
   WHERE NOT is_legacy;
 
 -- Statistics must be refreshed or the planner may keep the Seq Scan it
@@ -95,6 +119,12 @@ ANALYZE public.leads;
 --
 -- Each duplicates a `_v2` equivalent that is predicated on the column.
 --
+-- EXECUTED 2026-07-25, after commit 1730ee10 was confirmed live on
+-- production via /api/version. Counters were still flat across the deploy
+-- at the moment of the drop. Verified afterwards: 0 of the four remain,
+-- 0 invalid indexes on `leads`, and the live CRM still plans onto
+-- idx_leads_nonlegacy_active_created_v2 at 2.9 ms.
+--
 -- DROP INDEX CONCURRENTLY IF EXISTS public.idx_leads_active_nonlegacy_created;
 -- DROP INDEX CONCURRENTLY IF EXISTS public.idx_leads_legacy_flag;
 -- DROP INDEX CONCURRENTLY IF EXISTS public.idx_leads_legacy_status_partial;
@@ -108,7 +138,7 @@ ANALYZE public.leads;
 -- indexes below are only needed by the JSONB spelling, and recreating
 -- them restores the previous plans exactly.
 --
--- DROP INDEX CONCURRENTLY IF EXISTS public.idx_leads_nonlegacy_created_all;
+-- DROP INDEX CONCURRENTLY IF EXISTS public.idx_leads_nonlegacy_id;
 --
 -- CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_leads_active_nonlegacy_created
 --   ON public.leads (created_at DESC)
