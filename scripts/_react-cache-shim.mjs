@@ -29,3 +29,25 @@ if (typeof reactMod.cache !== "function") {
     },
   });
 }
+
+/**
+ * Second shim: a global `React` for JSX in component tests.
+ *
+ * `tsconfig.json` sets `"jsx": "preserve"` because Next.js owns the JSX
+ * transform in the real build. The test loader has no such owner, so it falls
+ * back to the CLASSIC runtime and emits `React.createElement(...)` — while the
+ * components themselves, written for Next's automatic runtime, never import
+ * React. Rendering one in a test then dies with `ReferenceError: React is not
+ * defined`.
+ *
+ * Exposing React globally here fixes that for tests without touching
+ * `tsconfig.json`, which would alter how the production bundle is compiled.
+ * The components under test stay byte-identical to what ships.
+ */
+if (typeof globalThis.React === "undefined") {
+  Object.defineProperty(globalThis, "React", {
+    configurable: true,
+    writable: true,
+    value: reactMod,
+  });
+}

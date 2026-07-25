@@ -28,6 +28,10 @@ export const ADMIN_NAV: AdminNavItem[] = [
   { href: "/admin/navigation", label: "Navigation / Header", icon: "navigation", group: "Website", perm: "manage_settings" },
   { href: "/admin/about", label: "About Page", icon: "about", group: "Website", perm: "manage_settings" },
   { href: "/admin/leads", label: "Lead CRM", icon: "leads", group: "Sales", perm: "manage_students_leads" },
+  // Phase 2. Additive: the Kanban above is untouched and stays the default
+  // sales view. This is the only surface where legacy leads are visible, and
+  // it is gated by the same permission.
+  { href: "/admin/leads/worklist", label: "Lead Worklist", icon: "leads", group: "Sales", perm: "manage_students_leads" },
   { href: "/admin/forms", label: "Lead Forms", icon: "forms", group: "Sales", perm: "manage_students_leads" },
   { href: "/admin/registrations", label: "Landing Pages", icon: "landing", group: "Sales", perm: "manage_students_leads" },
   { href: "/admin/marketing", label: "Marketing", icon: "marketing", group: "Sales", perm: "manage_students_leads" },

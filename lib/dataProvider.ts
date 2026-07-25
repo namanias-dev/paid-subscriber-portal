@@ -30,6 +30,7 @@ import { TRIGGERS } from "./sms/templates";
 import { NON_DUPLICABLE_WEBINAR_FIELDS, buildDuplicateSlug } from "./webinarLifecycle";
 import type {
   LeadWorklistRow,
+  LeadsSortKey,
   LeadsPageParams,
   LeadsPage,
   Buyer,
@@ -1761,27 +1762,46 @@ export async function getLeads(opts?: LegacyOptions): Promise<Lead[]> {
 export const LEADS_PAGE_MAX_LIMIT = 100;
 
 /**
- * Keyset cursor over `(created_at DESC, id DESC)`.
+ * Keyset cursor over `(<sort key> <dir>, id <dir>)`.
  *
  * The tiebreaker is NOT optional. 856 distinct `created_at` values are shared
  * by 2+ active rows and one timestamp is shared by 168 rows (the Google Ads
  * tab, which imported with no original timestamp). A `created_at`-only cursor
  * silently skips every row after the first inside a tie group that straddles a
  * page boundary — a data-loss bug that looks like a working paginator.
+ *
+ * PHASE 2 GENERALISATION
+ * ----------------------
+ * The first component is now the value of whichever column is being sorted on,
+ * not necessarily `created_at`. It is kept under the name `createdAt` in the
+ * decoded shape because that is the overwhelmingly common case and the shipped
+ * contract; `sortValue` is the accurate alias and both always hold the same
+ * string.
+ *
+ * WHY THE FIRST COMPONENT IS PERCENT-ENCODED
+ * ------------------------------------------
+ * The encoding splits on the FIRST `|`, which deliberately allows an `id` to
+ * contain pipes (real ids do). Once `name` became a sort key the first
+ * component could contain a pipe too — and then the split point moves and the
+ * cursor decodes to a different row, silently skipping part of the result set.
+ * Percent-encoding the sort value makes a pipe impossible on the left of the
+ * separator, so the split stays unambiguous for every sort key.
  */
-export function _encodeLeadCursor(createdAt: string, id: string): string {
-  return Buffer.from(`${createdAt}|${id}`, "utf8").toString("base64url");
+export function _encodeLeadCursor(sortValue: string, id: string): string {
+  return Buffer.from(`${encodeURIComponent(sortValue)}|${id}`, "utf8").toString("base64url");
 }
 
-export function _decodeLeadCursor(cursor: string): { createdAt: string; id: string } | null {
+export function _decodeLeadCursor(
+  cursor: string,
+): { createdAt: string; sortValue: string; id: string } | null {
   try {
     const raw = Buffer.from(cursor, "base64url").toString("utf8");
     const sep = raw.indexOf("|");
     if (sep <= 0) return null;
-    const createdAt = raw.slice(0, sep);
+    const sortValue = decodeURIComponent(raw.slice(0, sep));
     const id = raw.slice(sep + 1);
-    if (!createdAt || !id) return null;
-    return { createdAt, id };
+    if (!sortValue || !id) return null;
+    return { createdAt: sortValue, sortValue, id };
   } catch {
     return null;
   }
@@ -1823,6 +1843,12 @@ export async function _dbSelectLeadsPaged(
   const cur = params.cursor ? _decodeLeadCursor(params.cursor) : null;
   const mode = _legacyModeFor(params.includeLegacy);
 
+  const sort = params.sort ?? "created_at";
+  const dir = params.dir ?? "desc";
+
+  // The filter set, and ONLY the filter set. Sort and cursor are deliberately
+  // excluded so the exact same object can drive `leads_paged_count` — a count
+  // that disagreed with its page would render "Showing 1–50 of 0".
   const filterArgs = {
     p_include_legacy: mode,
     p_queue: params.queue ?? null,
@@ -1831,13 +1857,23 @@ export async function _dbSelectLeadsPaged(
     p_assigned_to: params.assignedTo ?? null,
     p_search: params.search ?? null,
     p_consent_status: params.consentStatus ?? null,
+    p_work_status: params.workStatus ?? null,
+    p_assigned_mode: params.assignedMode ?? null,
+    p_contacted: params.contacted ?? null,
+    p_created_from: params.createdFrom ?? null,
+    p_created_to: params.createdTo ?? null,
   };
 
   const pageRes = await client.rpc("leads_paged", {
     ...filterArgs,
     p_limit: limit,
-    p_cursor_created_at: cur?.createdAt ?? null,
+    // Retained for the default sort so the previously shipped call shape keeps
+    // working; `p_cursor_sort_value` is the general form the RPC prefers.
+    p_cursor_created_at: sort === "created_at" ? cur?.createdAt ?? null : null,
     p_cursor_id: cur?.id ?? null,
+    p_cursor_sort_value: cur?.sortValue ?? null,
+    p_sort: sort,
+    p_dir: dir,
     // A cursor supersedes offset — mixing them would skip a page.
     p_offset: cur ? 0 : Math.max(0, params.offset ?? 0),
   });
@@ -1851,10 +1887,21 @@ export async function _dbSelectLeadsPaged(
   const rows = (pageRes.data as LeadWorklistRow[] | null) ?? [];
 
   let total: number | null = null;
+  let totalIsCapped = false;
   if (params.withCount) {
-    const countRes = await client.rpc("leads_paged_count", filterArgs);
+    const cap = params.countCap ?? null;
+    const countRes = await client.rpc("leads_paged_count", { ...filterArgs, p_count_cap: cap });
     if (countRes.error) throw new Error(`getLeadsPaged count failed: ${countRes.error.message}`);
-    total = typeof countRes.data === "number" ? countRes.data : Number(countRes.data ?? 0);
+    const raw = typeof countRes.data === "number" ? countRes.data : Number(countRes.data ?? 0);
+    // The RPC counts up to cap+1 so "more than cap" is distinguishable from
+    // "exactly cap". Report the cap and flag it rather than the cap+1, which
+    // would be a number no filter actually produced.
+    if (cap !== null && raw > cap) {
+      total = cap;
+      totalIsCapped = true;
+    } else {
+      total = raw;
+    }
   }
 
   // Only advertise a next page when this one came back full — a short page is
@@ -1862,10 +1909,36 @@ export async function _dbSelectLeadsPaged(
   const last = rows.length === limit ? rows[rows.length - 1] : undefined;
   return {
     rows,
-    nextCursor: last ? _encodeLeadCursor(last.created_at, last.id) : null,
+    nextCursor: last ? _encodeLeadCursor(_sortValueForRow(last, sort), last.id) : null,
     total,
+    totalIsCapped,
     limit,
   };
+}
+
+/**
+ * The cursor's first component for a row under a given sort key.
+ *
+ * The `'-infinity'` fallback is REQUIRED and must stay character-identical to
+ * the `coalesce(..., '-infinity'::timestamptz)` in both the RPC's sort
+ * expression and the matching index predicate. A row-value comparison whose
+ * left side is NULL evaluates to NULL — not false — so a null sort value in
+ * the cursor drops EVERY subsequent row. `follow_up_at` and
+ * `last_contacted_at` are null on 100% of legacy leads today, so getting this
+ * wrong yields a permanently empty page 2 that reads as "no more results".
+ */
+export function _sortValueForRow(row: LeadWorklistRow, sort: LeadsSortKey): string {
+  switch (sort) {
+    case "name":
+      return row.name;
+    case "follow_up_at":
+      return row.follow_up_at ?? "-infinity";
+    case "last_contacted_at":
+      return row.last_contacted_at ?? "-infinity";
+    case "created_at":
+    default:
+      return row.created_at;
+  }
 }
 
 /**
@@ -1892,7 +1965,7 @@ export async function getLeadsPaged(params: LeadsPageParams = {}): Promise<Leads
     else if (includeLegacy === false) rows = excludeLegacy(rows);
     if (params.status) rows = rows.filter((l) => l.status === params.status);
     const page = rows.slice(0, limit) as unknown as LeadWorklistRow[];
-    return { rows: page, nextCursor: null, total: rows.length, limit };
+    return { rows: page, nextCursor: null, total: rows.length, totalIsCapped: false, limit };
   }
   return _dbSelectLeadsPaged(
     getSupabaseAdmin() as unknown as _LeadsPagedClient | null,
@@ -5930,9 +6003,20 @@ export interface DashboardData {
   funnel: { stage: string; value: number }[];
 }
 
+/**
+ * LEGACY SCOPE: `includeLegacy: false` is spelled EXPLICITLY below.
+ *
+ * The dashboard is a PROTECTED consumer — legacy-imported rows must never
+ * reach its lead counts, source mix, or funnel. It previously relied on the
+ * implicit default of `getLeads()`, so the 178k legacy rows were held out of
+ * every headline metric by a default declared in a different function. Phase 2
+ * introduces an explicit legacy scope control on the CRM, which makes that
+ * implicit reliance unsafe: the exclusion is now stated at the call site.
+ * Enforced by `tests/legacy-crm-phase2/protected-consumers.test.ts`.
+ */
 export async function getDashboard(): Promise<DashboardData> {
   const [leads, students, payments, webinars, enrollments, courses] = await Promise.all([
-    getLeads(),
+    getLeads({ includeLegacy: false }),
     getStudents(),
     getPayments(),
     getWebinars(),
