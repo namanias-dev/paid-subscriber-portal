@@ -37,38 +37,49 @@ export function maskPhone(raw: string | null | undefined): string {
  *
  * The reveal is per row and does not persist anywhere — reloading the page
  * masks everything again.
+ *
+ * BOTH `revealed` AND `onToggle` ARE OPTIONAL, AND THE SAFE STATE IS THE
+ * DEFAULT. A caller that supplies neither gets a masked, inert cell; there is
+ * no prop arrangement — including forgetting the props entirely — that renders
+ * the digits. Making `revealed` required would have meant every future call
+ * site had to opt back INTO masking, which is the wrong direction for a
+ * default that protects 178,183 people's phone numbers.
  */
 export function MaskedPhone({
   phone,
-  revealed,
+  revealed = false,
   onToggle,
   size = "sm",
 }: {
   phone: string | null | undefined;
-  revealed: boolean;
-  onToggle: () => void;
+  revealed?: boolean;
+  /** Omit to render a read-only masked cell with no reveal affordance. */
+  onToggle?: () => void;
   size?: "sm" | "md";
 }) {
   const digits = String(phone ?? "").replace(/\D/g, "");
   if (!digits) return <Dash />;
+  const showFull = revealed && !!onToggle;
   return (
     <span className="inline-flex items-center gap-1.5">
       <span className={`font-mono tabular-nums ${size === "sm" ? "text-[12px]" : "text-sm"}`}>
-        {revealed ? phone : maskPhone(phone)}
+        {showFull ? phone : maskPhone(phone)}
       </span>
-      <button
-        type="button"
-        onClick={(e) => {
-          e.stopPropagation();
-          onToggle();
-        }}
-        className="inline-flex shrink-0 items-center rounded-md p-1 text-muted transition hover:bg-surface hover:text-primary focus:outline-none focus:ring-2 focus:ring-primary/40"
-        title={revealed ? "Hide the phone number again" : "Reveal the full phone number"}
-        aria-label={revealed ? "Hide phone number" : "Reveal phone number"}
-        aria-pressed={revealed}
-      >
-        {revealed ? <EyeOff size={13} strokeWidth={1.75} /> : <Eye size={13} strokeWidth={1.75} />}
-      </button>
+      {onToggle && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggle();
+          }}
+          className="inline-flex shrink-0 items-center rounded-md p-1 text-muted transition hover:bg-surface hover:text-primary focus:outline-none focus:ring-2 focus:ring-primary/40"
+          title={showFull ? "Hide the phone number again" : "Reveal the full phone number"}
+          aria-label={showFull ? "Hide phone number" : "Reveal phone number"}
+          aria-pressed={showFull}
+        >
+          {showFull ? <EyeOff size={13} strokeWidth={1.75} /> : <Eye size={13} strokeWidth={1.75} />}
+        </button>
+      )}
     </span>
   );
 }

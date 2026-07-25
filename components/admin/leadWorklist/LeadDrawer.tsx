@@ -837,10 +837,30 @@ function AuditRow({
   );
 }
 
+/** A touch field worth surfacing, and the label the drawer gives it. */
+const TOUCH_FIELDS: { key: string; label: string; verbatim?: boolean }[] = [
+  { key: "form_name", label: "Form" },
+  { key: "campaign_clean", label: "Campaign" },
+  { key: "campaign_raw", label: "Campaign (raw)" },
+  // Same rule as the table column: the team's own wording, never re-mapped.
+  { key: "calling_status_raw", label: "Call status", verbatim: true },
+  { key: "source_type", label: "Source type" },
+  { key: "platform_hint", label: "Platform" },
+  { key: "winner", label: "Resolver" },
+  { key: "source_row", label: "Sheet row" },
+];
+
 /**
- * Legacy touch history from the side table the JSONB slimming moved it into.
- * The shape is not guaranteed, so each touch is read defensively and anything
- * unrecognised is shown as-is rather than dropped.
+ * Legacy touch history, from the side table the JSONB slimming moved it into.
+ *
+ * The stored shape is the importer's, not a declared contract, so nothing is
+ * assumed: the known keys are read by name and ANY remaining scalar key is
+ * still listed rather than silently dropped. These rows describe where a lead
+ * came from, and quietly discarding a field because this component did not
+ * expect it would lose provenance that exists nowhere else.
+ *
+ * There is no timestamp on a touch — the sheet never carried one — so none is
+ * displayed. `tab` plus `source_row` is the real coordinate.
  */
 function LegacyTouches({ touches, count }: { touches: unknown[]; count: number }) {
   if (count === 0 && touches.length === 0) return null;
@@ -854,15 +874,45 @@ function LegacyTouches({ touches, count }: { touches: unknown[]; count: number }
           {count} {count === 1 ? "touch" : "touches"}
         </span>
       </div>
-      <ol className="max-h-40 space-y-1 overflow-y-auto text-[11px]">
-        {touches.map((t, i) => {
-          const o = (t && typeof t === "object" ? t : {}) as Record<string, unknown>;
-          const label = [o.source, o.campaign, o.status].filter(Boolean).join(" · ");
-          const at = typeof o.at === "string" ? o.at : null;
+      <ol className="max-h-56 space-y-2 overflow-y-auto">
+        {touches.map((touch, i) => {
+          if (!touch || typeof touch !== "object") {
+            return (
+              <li key={i} className="break-all text-[11px] text-ink2">
+                {String(touch)}
+              </li>
+            );
+          }
+          const o = touch as Record<string, unknown>;
+          const known = new Set([...TOUCH_FIELDS.map((f) => f.key), "tab"]);
+          const extras = Object.entries(o).filter(
+            ([k, v]) => !known.has(k) && v !== null && v !== "" && typeof v !== "object",
+          );
           return (
-            <li key={i} className="flex items-center justify-between gap-2">
-              <span className="min-w-0 truncate text-ink2">{label || JSON.stringify(t)}</span>
-              {at && <span className="shrink-0 text-muted">{formatISTDate(at)}</span>}
+            <li key={i} className="rounded-lg border border-line bg-white px-2.5 py-2">
+              <p className="text-[11px] font-semibold text-ink">
+                {typeof o.tab === "string" && o.tab ? o.tab : `Touch ${i + 1}`}
+              </p>
+              <dl className="mt-1 grid grid-cols-[auto,1fr] gap-x-2 gap-y-0.5 text-[11px]">
+                {TOUCH_FIELDS.map(({ key, label, verbatim }) => {
+                  const v = o[key];
+                  if (v === null || v === undefined || v === "") return null;
+                  return (
+                    <div key={key} className="contents">
+                      <dt className="whitespace-nowrap text-muted">{label}</dt>
+                      <dd className={`min-w-0 break-words ${verbatim ? "font-medium text-ink" : "text-ink2"}`}>
+                        {String(v)}
+                      </dd>
+                    </div>
+                  );
+                })}
+                {extras.map(([k, v]) => (
+                  <div key={k} className="contents">
+                    <dt className="whitespace-nowrap text-muted">{k}</dt>
+                    <dd className="min-w-0 break-words text-ink2">{String(v)}</dd>
+                  </div>
+                ))}
+              </dl>
             </li>
           );
         })}
