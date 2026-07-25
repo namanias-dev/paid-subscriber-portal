@@ -32,7 +32,14 @@ import {
  * ephemeral working state for Phase 3 bulk actions, and the other is a PII
  * disclosure that must not survive a page share or a reload.
  */
-export default function LeadWorklistClient({ currentAdmin }: { currentAdmin: string | null }) {
+export default function LeadWorklistClient({
+  currentAdmin,
+  isSuperAdmin = false,
+}: {
+  currentAdmin: string | null;
+  /** Renders the Phase 4 promotion control. The API enforces it independently. */
+  isSuperAdmin?: boolean;
+}) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -240,6 +247,7 @@ export default function LeadWorklistClient({ currentAdmin }: { currentAdmin: str
           key={activeRow.id}
           lead={activeRow}
           currentAdmin={currentAdmin}
+          isSuperAdmin={isSuperAdmin}
           onClose={closeDrawer}
           onRowPatch={patchRow}
         />

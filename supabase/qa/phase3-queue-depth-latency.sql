@@ -130,15 +130,89 @@ rollback;
 -- which is what A and B above measure.
 
 
--- ---------------------------------------------------------------------
--- NOT YET VERIFIED — the honest gap
--- ---------------------------------------------------------------------
--- Staging 60,000 assigned rows (34% of the legacy set) exceeded the
--- transport's transaction budget and is NOT covered here. The argument in
--- section B says total assigned volume should not matter for a
--- per-counsellor queue, and the two data points are consistent with that,
--- but it is reasoning from two small samples rather than a measurement at
--- that scale.
+-- =====================================================================
+-- D. THE REAL THING — 40,000 assigned, measured on production
+-- =====================================================================
 --
--- Re-run section A against a real counsellor once genuine queues exist,
--- cold, and confirm the plan is unchanged.
+-- Sections A–C above staged queues inside rolled-back transactions and
+-- topped out at 6,000 rows, because a bigger transaction outlived the
+-- client's patience. The gap that left — "does this still hold once a
+-- large fraction is assigned?" — was closed by using the Phase 3 feature
+-- itself: 40,000 real assignments, committed in batches of 5,000 through
+-- `commitBulkAssign`, measured, then reverted through `revertAssignBatch`.
+--
+-- That is a better test than the staged one in both directions. The
+-- planner sees genuinely committed rows and fresh statistics, and the
+-- reversal path gets exercised at 40,000 rows instead of the low hundreds
+-- the unit suite covers.
+--
+-- STATE AT MEASUREMENT (2026-07-25)
+--
+--   qa_scale_a       13,336
+--   qa_scale_b       13,336
+--   qa_scale_c       13,328     <- round-robin spread of 8 across 40,000
+--   (unassigned)    138,183     <- 77.5%, down from 100%
+--
+--
+-- D1. My Queue, counsellor holding 13,336
+--
+--   Index Scan using idx_leads_legacy_assigned_created
+--     Index Cond: (assigned_to = 'qa_scale_a')
+--     est 12,977 / 50 returned
+--   Planning 81.1 ms   Execution 7.2 ms   Buffers: hit=53
+--
+-- The index is selected and the estimate is accurate. Execution is an
+-- order of magnitude FASTER than the 224 ms measured at 5,000 depth in
+-- section A, which confirms that reading was dominated by the staging
+-- transaction's freshly-dirtied pages rather than by queue depth.
+--
+--
+-- D2. The unassigned pool at 77.5% selectivity
+--
+--   Index Scan using idx_leads_legacy_unassigned_created
+--     est 140,080 / 50 returned
+--   Planning 15.5 ms   Execution 55.6 ms   Buffers: hit=18 read=35
+--
+-- This is the question about `idx_leads_legacy_unassigned_created`'s
+-- selectivity moving. It moved — from covering 100% of the legacy set to
+-- 77.5% — and the planner still chooses it. The direction is benign: a
+-- partial index matching fewer rows gets smaller and more selective, so
+-- the planner's incentive strengthens as work is handed out.
+--
+--
+-- D3. Mixed filter — assignee AND status
+--
+--   Index Scan using idx_leads_legacy_assigned_created
+--     Index Cond: (assigned_to = 'qa_scale_b')
+--     Filter: (status = 'Not Replied')   Rows Removed by Filter: 403
+--   Planning 2.2 ms   Execution 226.5 ms
+--
+-- The slowest of the three and still 4x inside budget. `status` is a
+-- filter rather than an index condition, so the scan walks the
+-- counsellor's key range discarding non-matches — 403 discarded to return
+-- 50. That ratio is what to watch: it scales with how rare the status is
+-- within one queue, not with the size of the legacy set. A counsellor
+-- filtering on a status that covers 1% of their queue would read ~5,000
+-- rows to fill a page. No index is warranted yet; revisit if per-status
+-- filtering inside a large queue becomes a common path.
+--
+--
+-- VERDICT: all three inside the 1,000 ms ceiling. Not a Phase 4 blocker.
+--
+--   D1  My Queue @ 13,336        88 ms total   PASS
+--   D2  unassigned @ 77.5%       71 ms total   PASS
+--   D3  assignee + status       229 ms total   PASS
+--
+-- Caveat worth keeping: these are warm-ish. D1 read 0 pages from disk and
+-- D2 read 35. Planning time (81 ms in D1) exceeded execution and is the
+-- larger term at this scale.
+--
+--
+-- REVERSAL, AT SCALE
+--
+-- All 40,000 were reverted through `revertAssignBatch` afterwards, and a
+-- separate 200-row A -> B reassignment was committed and reverted to prove
+-- the case the bulk run cannot: every one of those 200 returned to its
+-- PREVIOUS owner by name, none were cleared to unassigned. Restoring to
+-- null would have looked like a successful revert while dispossessing
+-- whoever held the lead before.

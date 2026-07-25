@@ -2036,9 +2036,42 @@ export async function getLeadsForPillMap(): Promise<Lead[]> {
     .neq("channel", "")
     .eq(LEADS_IS_LEGACY_COLUMN, true)
     .limit(5000);
-  const [nonLegacy, legacyRes] = await Promise.all([nonLegacyPromise, legacyChanPromise]);
+  // (c) PROMOTED legacy leads (Phase 4).
+  //
+  //     A promoted lead keeps `is_legacy = true` — provenance does not change
+  //     when someone starts working it — so arm (a) excludes it, and arm (b)
+  //     only catches it if it happens to carry a `channel`, which imported
+  //     sheet rows generally do not.
+  //
+  //     Without this arm a promoted lead who then enrols and pays resolves to
+  //     no pill at all on the Payments page: the map simply has no entry for
+  //     that phone. The failure is silent and looks like a rendering bug,
+  //     which is the worst kind to chase.
+  //
+  //     Bounded by promotion's own caps, and `derivedChannelFor` still routes
+  //     these through the legacy short-circuit, so aggregate live-capture
+  //     channel counts stay byte-identical — the cohort is a dimension, never
+  //     a silent blend.
+  const promotedPromise = db
+    .from("leads")
+    .select("*")
+    .eq(LEADS_IS_LEGACY_COLUMN, true)
+    .not("promoted_at", "is", null)
+    .limit(5000);
+  const [nonLegacy, legacyRes, promotedRes] = await Promise.all([
+    nonLegacyPromise, legacyChanPromise, promotedPromise,
+  ]);
   const legacyChan = ((legacyRes.data as Lead[] | null) ?? []).filter((l) => !l.merged_into);
-  return [...nonLegacy, ...legacyChan];
+  const promoted = ((promotedRes.data as Lead[] | null) ?? []).filter((l) => !l.merged_into);
+  // Arms (b) and (c) can overlap on a promoted lead that also has a channel.
+  const seen = new Set<string>();
+  const extra: Lead[] = [];
+  for (const l of [...legacyChan, ...promoted]) {
+    if (seen.has(l.id)) continue;
+    seen.add(l.id);
+    extra.push(l);
+  }
+  return [...nonLegacy, ...extra];
 }
 
 /** All lead rows INCLUDING soft-merged duplicates (for the merge tooling / audits).

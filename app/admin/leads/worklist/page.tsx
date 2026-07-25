@@ -1,6 +1,7 @@
 import { Suspense } from "react";
 import LeadWorklistClient from "@/components/admin/leadWorklist/LeadWorklistClient";
 import { getAdminSession } from "@/lib/session";
+import { requireSuperAdmin } from "@/lib/adminGuard";
 
 /**
  * PHASE 2 — the lead worklist.
@@ -23,11 +24,20 @@ export const dynamic = "force-dynamic";
 export const metadata = { title: "Lead Worklist — Admin" };
 
 export default async function LeadWorklistPage() {
-  const session = await getAdminSession();
+  const [session, isSuperAdmin] = await Promise.all([
+    getAdminSession(),
+    // Phase 4: decides only whether the promotion control is RENDERED. The
+    // action is gated independently by `requireSuperAdmin` inside the route,
+    // so a forged prop buys nothing.
+    requireSuperAdmin(),
+  ]);
 
   return (
     <Suspense fallback={<div className="skeleton h-96 w-full animate-shimmer" />}>
-      <LeadWorklistClient currentAdmin={session?.username ?? null} />
+      <LeadWorklistClient
+        currentAdmin={session?.username ?? null}
+        isSuperAdmin={isSuperAdmin}
+      />
     </Suspense>
   );
 }
