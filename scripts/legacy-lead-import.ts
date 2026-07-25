@@ -27,6 +27,7 @@ import {
   renderReportMarkdown,
   buildLegacyAttributionJSON,
   mergeCollisionAttribution,
+  splitLegacyTouches,
 } from "../lib/legacy-migration/importer";
 import { INCLUDED_TABS, LEGACY_WORKBOOK_SPREADSHEET_ID, type LegacyTab } from "../lib/legacy-migration/tabRegistry";
 import type { StagedLead } from "../lib/legacy-migration/types";
@@ -136,12 +137,32 @@ async function commitStagedLeads(staged: StagedLead[], batchSize: number, import
     }
   }
 
+  // `legacy_touches[]` lives in `lead_legacy_touches` since 2026-07-24, not in
+  // `attribution`. The collision branch APPENDS to the existing trail, so the
+  // pre-existing touches have to be rehydrated from the side table first —
+  // reading them off the (now touch-free) blob would silently truncate the
+  // audit history of every re-imported phone to just the incoming touch.
+  const existingTouchesById = new Map<string, unknown[]>();
+  const existingIds = [...existingByPhone.values()].map((e) => e.id);
+  for (let i = 0; i < existingIds.length; i += chunkFetch) {
+    const chunk = existingIds.slice(i, i + chunkFetch);
+    const { data, error } = await db
+      .from("lead_legacy_touches")
+      .select("lead_id, touches")
+      .in("lead_id", chunk);
+    if (error) throw new Error(`Fetch existing legacy touches failed: ${error.message}`);
+    for (const r of (data as Array<{ lead_id: string; touches: unknown }> | null) ?? []) {
+      existingTouchesById.set(r.lead_id, Array.isArray(r.touches) ? r.touches : []);
+    }
+  }
+
   let inserted = 0;
   let updated = 0;
   for (let i = 0; i < staged.length; i += batchSize) {
     const chunk = staged.slice(i, i + batchSize);
     const insertRows: Array<Record<string, unknown>> = [];
     const snapshotRows: Array<Record<string, unknown>> = [];
+    const touchRows: Array<Record<string, unknown>> = [];
     for (const s of chunk) {
       const attribution = buildLegacyAttributionJSON(s);
       const existing = existingByPhone.get(s.canonical_phone);
@@ -154,8 +175,15 @@ async function commitStagedLeads(staged: StagedLead[], batchSize: number, import
         //      NULL. Never overwrite live values.
         //   3. Do NOT stamp `import_batch` on the row — rollback still works because
         //      the snapshot row records `import_batch` for the collision.
-        const mergedAttribution = mergeCollisionAttribution(preState, attribution);
-        const updatePayload: Record<string, unknown> = { attribution: mergedAttribution };
+        const preWithTouches = {
+          ...(preState && typeof preState === "object" && !Array.isArray(preState)
+            ? (preState as Record<string, unknown>)
+            : {}),
+          legacy_touches: existingTouchesById.get(existing.id) ?? [],
+        };
+        const mergedAttribution = mergeCollisionAttribution(preWithTouches, attribution);
+        const { attribution: mergedBlob, touches: mergedTouches } = splitLegacyTouches(mergedAttribution);
+        const updatePayload: Record<string, unknown> = { attribution: mergedBlob };
         if (existing.channel_legacy == null && s.channel_legacy) {
           updatePayload.channel_legacy = s.channel_legacy;
         }
@@ -168,10 +196,12 @@ async function commitStagedLeads(staged: StagedLead[], batchSize: number, import
         const { error: uerr } = await db.from("leads").update(updatePayload).eq("id", existing.id);
         if (uerr) throw new Error(`Update failed for id=${existing.id}: ${uerr.message}`);
         snapshotRows.push({ id: existing.id, import_batch: importBatch, was_collision: true, pre_state: preState ?? null });
+        touchRows.push({ lead_id: existing.id, touches: mergedTouches, touch_count: mergedTouches.length });
         updated += 1;
       } else {
         const id = cryptoRandomId();
         const createdAt = s.timestamp_iso ?? importBatch;
+        const { attribution: insertBlob, touches: insertTouches } = splitLegacyTouches(attribution);
         insertRows.push({
           id,
           name: s.name ?? "Legacy Lead",
@@ -209,9 +239,12 @@ async function commitStagedLeads(staged: StagedLead[], batchSize: number, import
           import_batch: importBatch,
           external_lead_id: s.external_lead_id,
           first_seen_at: s.timestamp_iso,
-          attribution,
+          attribution: insertBlob,
         });
         snapshotRows.push({ id, import_batch: importBatch, was_collision: false, pre_state: null });
+        if (insertTouches.length > 0) {
+          touchRows.push({ lead_id: id, touches: insertTouches, touch_count: insertTouches.length });
+        }
       }
     }
     if (snapshotRows.length > 0) {
@@ -222,6 +255,14 @@ async function commitStagedLeads(staged: StagedLead[], batchSize: number, import
       const { error: ierr } = await db.from("leads").insert(insertRows);
       if (ierr) throw new Error(`Insert failed at chunk starting ${i}: ${ierr.message}`);
       inserted += insertRows.length;
+    }
+    // AFTER the lead insert — lead_legacy_touches.lead_id is a FK to leads(id),
+    // so writing the audit trail first would fail for freshly created rows.
+    if (touchRows.length > 0) {
+      const { error: terr } = await db
+        .from("lead_legacy_touches")
+        .upsert(touchRows, { onConflict: "lead_id" });
+      if (terr) throw new Error(`Legacy touch audit write failed at chunk starting ${i}: ${terr.message}`);
     }
     log(`Committed chunk ${Math.floor(i / batchSize) + 1}: inserted so far ${inserted}, updated so far ${updated}`);
   }

@@ -83,7 +83,7 @@ function makeRow(i: number, createdAt = "2026-07-22T05:05:16.405Z"): LeadWorklis
     follow_up_at: null, last_worked_at: null,
     consent_status: "unknown", dnd_status: null, last_contacted_at: null,
     contact_attempt_count: 0, suppression_reason: null,
-    cohort: "legacy_promoted", legacy_call_status: "Not Replied",
+    cohort: "legacy_promoted", is_legacy: true, legacy_call_status: "Not Replied",
   };
 }
 
