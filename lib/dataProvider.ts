@@ -24,6 +24,7 @@ import {
   applyLegacyFilter,
   excludeLegacy,
   hasLegacyFlag,
+  LEADS_IS_LEGACY_COLUMN,
   type LegacyOptions,
 } from "./legacy-migration/legacyFilter";
 import { TRIGGERS } from "./sms/templates";
@@ -1686,6 +1687,13 @@ export interface _LeadPaginationClient {
 export interface _LeadPaginationBuilder {
   select(cols: string): _LeadPaginationBuilder;
   is(col: string, value: null): _LeadPaginationBuilder;
+  /**
+   * Note the boolean value type. `is_legacy` must be compared with `eq` so
+   * PostgREST renders `is_legacy = false`; routing it through `is()` would
+   * render `IS FALSE`, which the planner cannot match to the `NOT is_legacy`
+   * index predicate (2,568 ms vs 13 ms on production).
+   */
+  eq(col: string, value: string | number | boolean): _LeadPaginationBuilder;
   or(filter: string): _LeadPaginationBuilder;
   order(col: string, opts: { ascending: boolean }): _LeadPaginationBuilder;
   range(from: number, to: number): Promise<{ data: Lead[] | null; error: { message: string } | null }>;
@@ -1701,14 +1709,19 @@ export async function _dbSelectAllLeadsActive(
   for (let from = 0; ; from += pageSize) {
     let query = client.from("leads").select("*").is("merged_into", null);
     if (nonLegacyOnly) {
-      // PostgREST does not expose `IS DISTINCT FROM` directly, so we express
-      // the same "non-legacy" set via OR of the two non-legacy shapes
-      // (`legacy` key missing / null OR its value literally not 'true'). The
-      // partial index `idx_leads_active_nonlegacy_created` was created with
-      // an equivalent predicate (`attribution->>'legacy' IS DISTINCT FROM
-      // 'true'`), so this filter uses that index directly. Verified via
-      // EXPLAIN 2026-07-24: 183 ms for the full 987-row scan.
-      query = query.or("attribution.is.null,attribution->>legacy.is.null,attribution->>legacy.neq.true");
+      // The boundary is the COLUMN, not the blob. This used to be a three-arm
+      // OR over `attribution->>'legacy'`, which meant deleting that key —
+      // already planned as item 4 of the JSONB slimming — would have flipped
+      // all 178,183 legacy leads into the live CRM silently. See the note at
+      // the top of `lib/legacy-migration/legacyFilter.ts`.
+      //
+      // `.eq` and not `.is`: only `is_legacy = false` is provably implied by
+      // the `NOT is_legacy` predicate of the index below. `IS FALSE` measures
+      // 2,568 ms against 13 ms. Verified by EXPLAIN on production 2026-07-25:
+      //   Index Scan using idx_leads_nonlegacy_active_created_v2
+      // and the row estimate is now sane (1,438 est / 1,000 actual) where the
+      // JSONB form estimated 178,181 and only survived because LIMIT cut it off.
+      query = query.eq(LEADS_IS_LEGACY_COLUMN, false);
     }
     const { data, error } = await query
       .order("created_at", { ascending: false })
@@ -2021,7 +2034,7 @@ export async function getLeadsForPillMap(): Promise<Lead[]> {
     .select("*")
     .not("channel", "is", null)
     .neq("channel", "")
-    .filter("attribution->>legacy", "eq", "true")
+    .eq(LEADS_IS_LEGACY_COLUMN, true)
     .limit(5000);
   const [nonLegacy, legacyRes] = await Promise.all([nonLegacyPromise, legacyChanPromise]);
   const legacyChan = ((legacyRes.data as Lead[] | null) ?? []).filter((l) => !l.merged_into);
@@ -2046,7 +2059,10 @@ export async function getAllLeadsRaw(opts?: LegacyOptions): Promise<Lead[]> {
   for (let from = 0; ; from += pageSize) {
     let query = db.from("leads").select("*");
     if (!includeLegacy) {
-      query = query.or("attribution.is.null,attribution->>legacy.is.null,attribution->>legacy.neq.true");
+      // Column, not blob — same reasoning as `getLeads` above. Note this path
+      // deliberately does NOT filter `merged_into`, so it cannot use the
+      // active-only partial index; the boundary still has to be correct.
+      query = query.eq(LEADS_IS_LEGACY_COLUMN, false);
     }
     const { data, error } = await query
       .order("created_at", { ascending: false })

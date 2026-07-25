@@ -32,8 +32,8 @@ import {
   type _LeadsPagedClient,
 } from "../../lib/dataProvider";
 import {
-  NON_LEGACY_POSTGREST_OR,
-  LEGACY_POSTGREST_FILTER,
+  LEGACY_COLUMN_FILTER,
+  NON_LEGACY_COLUMN_FILTER,
   cohortForLead,
 } from "../../lib/legacy-migration/legacyFilter";
 import type { LeadWorklistRow } from "../../lib/types";
@@ -182,22 +182,16 @@ describe("(P3) legacy boundary", () => {
     }
   });
 
-  it("pins the exact non-legacy OR spelling the partial index was built with", () => {
-    // Character-identical to the predicate of idx_leads_active_nonlegacy_created.
-    // Rewording this — even to the semantically identical IS DISTINCT FROM —
-    // makes the planner miss the index. That cost 65,171 ms once already.
-    assert.equal(
-      NON_LEGACY_POSTGREST_OR,
-      "attribution.is.null,attribution->>legacy.is.null,attribution->>legacy.neq.true",
-    );
-    assert.ok(!NON_LEGACY_POSTGREST_OR.includes("is distinct from"));
-  });
-
-  it("pins the legacy-only filter as plain equality", () => {
-    assert.deepEqual({ ...LEGACY_POSTGREST_FILTER }, {
-      column: "attribution->>legacy",
-      operator: "eq",
-      value: "true",
+  it("pins the boundary to the column, with the index-selectable operator", () => {
+    // Was the three-arm JSONB OR against idx_leads_active_nonlegacy_created.
+    // Now `is_legacy = false` against idx_leads_nonlegacy_active_created_v2.
+    // The operator is the load-bearing detail: `IS FALSE` does not imply the
+    // index predicate and falls back to a 2,568 ms filtered scan.
+    assert.deepEqual({ ...NON_LEGACY_COLUMN_FILTER }, {
+      column: "is_legacy", operator: "eq", value: false,
+    });
+    assert.deepEqual({ ...LEGACY_COLUMN_FILTER }, {
+      column: "is_legacy", operator: "eq", value: true,
     });
   });
 });
