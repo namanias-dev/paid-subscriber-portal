@@ -302,6 +302,13 @@ describe("(S5) the worklist row shape survives the column promotion", () => {
     cohort: "legacy_promoted",
     is_legacy: true,
     legacy_call_status: "Not Replied",
+    legacy_call_status_raw: "Not Replied ",
+    work_status: null,
+    work_status_at: null,
+    work_status_by: null,
+    import_batch: "legacy_2026_07_21",
+    first_seen_at: "2026-07-22T05:05:16.405Z",
+    promoted_at: null,
   };
 
   it("still exposes campaign and campaign_clean", () => {

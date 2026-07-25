@@ -990,7 +990,86 @@ export interface LeadWorklistRow {
    */
   is_legacy: boolean;
   legacy_call_status: string | null;
+
+  // ---------------- PHASE 2 ----------------
+
+  /**
+   * The team's OWN wording from the source sheet, preserved verbatim on all
+   * 178,183 legacy rows. The team trusts this text, so it is always surfaced
+   * and NEVER parsed, normalised, re-mapped, or written to. It is history.
+   *
+   * Distinct from `legacy_call_status` (the tidied value) and from `status`
+   * (the frozen Phase 0c `LeadStatus` mapping).
+   */
+  legacy_call_status_raw: string | null;
+  /**
+   * The counsellor's working state — a SEPARATE field.
+   *
+   * Writing this must never touch `status` or `legacy_call_status_raw`; both
+   * remain visible as history forever. `null` means no counsellor has worked
+   * the lead yet, which is true for 100% of the legacy set today.
+   */
+  work_status: LeadWorkStatus | null;
+  work_status_at: string | null;
+  work_status_by: string | null;
+  /** Provenance: which import batch created the row. Null for live captures. */
+  import_batch: string | null;
+  /** Provenance: original imported date, distinct from `created_at`. */
+  first_seen_at: string | null;
+  /**
+   * Phase 4 territory, projected in Phase 2 so the table can already render an
+   * already-promoted row honestly instead of showing it as a plain legacy lead.
+   */
+  promoted_at: string | null;
 }
+
+/**
+ * The counsellor working-state vocabulary.
+ *
+ * Mirrors the `leads_work_status_vocab` CHECK constraint exactly. Kept as a
+ * closed union so a typo cannot create a phantom bucket that silently drops
+ * rows out of every filtered view.
+ *
+ * THIS IS NOT `LeadStatus`. It never overwrites `status` (frozen Phase 0c
+ * mapping) or `legacy_call_status_raw` (verbatim source wording).
+ */
+export type LeadWorkStatus =
+  | "new"
+  | "in_progress"
+  | "contacted"
+  | "callback_scheduled"
+  | "interested"
+  | "not_interested"
+  | "not_reachable"
+  | "wrong_number"
+  | "opted_out"
+  | "closed";
+
+/** Every `LeadWorkStatus`, in the order the UI offers them. */
+export const LEAD_WORK_STATUSES: readonly LeadWorkStatus[] = [
+  "new",
+  "in_progress",
+  "contacted",
+  "callback_scheduled",
+  "interested",
+  "not_interested",
+  "not_reachable",
+  "wrong_number",
+  "opted_out",
+  "closed",
+] as const;
+
+/** Sort keys the worklist supports. Each is backed by a matching index. */
+export type LeadsSortKey = "created_at" | "name" | "follow_up_at" | "last_contacted_at";
+
+export const LEADS_SORT_KEYS: readonly LeadsSortKey[] = [
+  "created_at",
+  "name",
+  "follow_up_at",
+  "last_contacted_at",
+] as const;
+
+export type LeadsSortDir = "asc" | "desc";
 
 /**
  * `getLeadsPaged` request. Every filter is applied SERVER-SIDE; nothing here
@@ -1031,14 +1110,58 @@ export interface LeadsPageParams {
   offset?: number;
   /** Opt-in exact total. Off by default — it doubles the query cost. */
   withCount?: boolean;
+
+  // ---------------- PHASE 2 ----------------
+
+  /** Counsellor working-state exact match. Never filters on `status`. */
+  workStatus?: LeadWorkStatus | null;
+  /**
+   * Assignment scope. `"unassigned"` is the default landing segment for the
+   * re-engagement queue and matches 100% of legacy rows today; after Phase 3
+   * bulk assignment it becomes the selective residue.
+   */
+  assignedMode?: "assigned" | "unassigned" | null;
+  /** `"yes"` = has been contacted, `"no"` = never contacted. */
+  contacted?: "yes" | "no" | null;
+  /** Inclusive lower bound on `created_at` (ISO). */
+  createdFrom?: string | null;
+  /** EXCLUSIVE upper bound on `created_at` (ISO) — a half-open range, so a
+   * day-granular filter cannot double-count the boundary instant. */
+  createdTo?: string | null;
+  /** Sort key. Defaults to `created_at`. */
+  sort?: LeadsSortKey;
+  /** Sort direction. Defaults to `desc`. */
+  dir?: LeadsSortDir;
+  /**
+   * Bound the exact count at this many rows.
+   *
+   * An exact `count(*)` walks EVERY matching row. For the indexed filters that
+   * is cheap (12–240 ms via a narrow index-only scan), but a free-text search
+   * is a lossy trigram match whose count cannot be served index-only:
+   * `name ilike '%kumar%'` measured 1,749 ms exact against 108 ms bounded.
+   *
+   * When set and the true total exceeds it, `LeadsPage.total` comes back as
+   * `cap` and `totalIsCapped` is true, so the UI can honestly render
+   * "5,000+ leads" instead of either lying or hanging. Left unset, the count
+   * is exact — which is the default for every non-search path.
+   */
+  countCap?: number | null;
 }
 
 export interface LeadsPage {
   rows: LeadWorklistRow[];
   /** Pass back as `cursor` for the next page. Null when the page is the last. */
   nextCursor: string | null;
-  /** Exact match count, only when `withCount` was requested. */
+  /** Match count, only when `withCount` was requested. Exact unless
+   * {@link LeadsPage.totalIsCapped} is true. */
   total: number | null;
+  /**
+   * True when `total` hit the requested `countCap` and the real total is
+   * therefore "at least `total`", not exactly it. The UI must render this as
+   * "5,000+" — showing a capped number as if it were exact is the kind of
+   * quietly-wrong figure this program has already been burned by twice.
+   */
+  totalIsCapped: boolean;
   /** The limit actually applied AFTER the hard cap. */
   limit: number;
 }

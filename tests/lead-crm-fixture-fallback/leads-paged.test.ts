@@ -84,6 +84,12 @@ function makeRow(i: number, createdAt = "2026-07-22T05:05:16.405Z"): LeadWorklis
     consent_status: "unknown", dnd_status: null, last_contacted_at: null,
     contact_attempt_count: 0, suppression_reason: null,
     cohort: "legacy_promoted", is_legacy: true, legacy_call_status: "Not Replied",
+    // Phase 2 projection. `legacy_call_status_raw` deliberately differs from
+    // the tidied `legacy_call_status` above — the raw source-sheet wording is
+    // preserved verbatim and must survive every write.
+    legacy_call_status_raw: "Not Replied ",
+    work_status: null, work_status_at: null, work_status_by: null,
+    import_batch: "legacy_2026_07_21", first_seen_at: createdAt, promoted_at: null,
   };
 }
 
@@ -205,6 +211,7 @@ describe("(P4) cursor carries BOTH sort keys", () => {
     const cur = _encodeLeadCursor("2023-06-07T03:21:17.000Z", "ee35341a-69e9-48dc-a705-c200c2053998");
     assert.deepEqual(_decodeLeadCursor(cur), {
       createdAt: "2023-06-07T03:21:17.000Z",
+      sortValue: "2023-06-07T03:21:17.000Z",
       id: "ee35341a-69e9-48dc-a705-c200c2053998",
     });
   });
@@ -213,6 +220,29 @@ describe("(P4) cursor carries BOTH sort keys", () => {
     const cur = _encodeLeadCursor("2026-01-01T00:00:00.000Z", "we|ird|id");
     assert.deepEqual(_decodeLeadCursor(cur), {
       createdAt: "2026-01-01T00:00:00.000Z",
+      sortValue: "2026-01-01T00:00:00.000Z",
+      id: "we|ird|id",
+    });
+  });
+
+  it("survives a SORT VALUE containing the separator character", () => {
+    // Once `name` became a sort key the left component could contain a pipe
+    // too. Unencoded, the split point moves and the cursor decodes to a
+    // DIFFERENT row — silently skipping part of the result set. A real lead is
+    // named with a pipe often enough to matter at 178k rows.
+    const cur = _encodeLeadCursor("Anita | Sharma", "id-42");
+    assert.deepEqual(_decodeLeadCursor(cur), {
+      createdAt: "Anita | Sharma",
+      sortValue: "Anita | Sharma",
+      id: "id-42",
+    });
+  });
+
+  it("survives a sort value AND an id both containing separators", () => {
+    const cur = _encodeLeadCursor("A|B", "we|ird|id");
+    assert.deepEqual(_decodeLeadCursor(cur), {
+      createdAt: "A|B",
+      sortValue: "A|B",
       id: "we|ird|id",
     });
   });
@@ -337,7 +367,42 @@ describe("(P6) every filter is pushed to the server", () => {
       p_cursor_created_at: null,
       p_cursor_id: null,
       p_offset: 0,
+      // Phase 2 additions. Every one defaults to a value that reproduces the
+      // pre-Phase-2 behaviour exactly, so the RPC signature could be extended
+      // without a deploy-ordering dependency.
+      p_work_status: null,
+      p_assigned_mode: null,
+      p_contacted: null,
+      p_created_from: null,
+      p_created_to: null,
+      p_sort: "created_at",
+      p_dir: "desc",
+      p_cursor_sort_value: null,
     });
+  });
+
+  it("forwards every Phase 2 filter, still in one round trip", async () => {
+    const { client, calls } = makeRpcStub({ rows: [] });
+    await _dbSelectLeadsPaged(client, {
+      includeLegacy: "only",
+      workStatus: "callback_scheduled",
+      assignedMode: "unassigned",
+      contacted: "no",
+      createdFrom: "2023-01-01T00:00:00.000Z",
+      createdTo: "2024-01-01T00:00:00.000Z",
+      sort: "follow_up_at",
+      dir: "asc",
+      limit: 50,
+    });
+    assert.equal(calls.length, 1, "one RPC call — never fetch-all-then-filter");
+    const a = calls[0]!.args;
+    assert.equal(a.p_work_status, "callback_scheduled");
+    assert.equal(a.p_assigned_mode, "unassigned");
+    assert.equal(a.p_contacted, "no");
+    assert.equal(a.p_created_from, "2023-01-01T00:00:00.000Z");
+    assert.equal(a.p_created_to, "2024-01-01T00:00:00.000Z");
+    assert.equal(a.p_sort, "follow_up_at");
+    assert.equal(a.p_dir, "asc");
   });
 
   it("only issues the count RPC when withCount was requested", async () => {
