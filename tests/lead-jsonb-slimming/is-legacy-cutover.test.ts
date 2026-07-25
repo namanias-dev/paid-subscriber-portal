@@ -29,12 +29,13 @@ import {
   applyLegacyFilter,
   cohortForLead,
   assertLegacyBucketsReconcile,
-  NON_LEGACY_POSTGREST_OR,
-  LEGACY_POSTGREST_FILTER,
   LEADS_IS_LEGACY_COLUMN,
   LEGACY_COLUMN_FILTER,
   NON_LEGACY_COLUMN_FILTER,
 } from "../../lib/legacy-migration/legacyFilter";
+// Namespace import so the removed exports can be asserted absent by name
+// rather than by a compile error, which would just delete the evidence.
+import * as mod from "../../lib/legacy-migration/legacyFilter";
 import { splitLegacyTouches } from "../../lib/legacy-migration/importer";
 import type { Lead, LeadWorklistRow } from "../../lib/types";
 
@@ -177,36 +178,40 @@ describe("(S2) legacy buckets must partition their population", () => {
 // ---------------------------------------------------------------------------
 
 describe("(S3) predicate spellings", () => {
-  it("keeps the three-arm OR character-identical", () => {
-    // STILL load-bearing. `getLeads()` — the live CRM read — deliberately
-    // still fires this against idx_leads_active_nonlegacy_created, which this
-    // migration did not touch. Re-measured after the slimming: same index,
-    // 987 rows, 2.97 ms warm.
-    assert.equal(
-      NON_LEGACY_POSTGREST_OR,
-      "attribution.is.null,attribution->>legacy.is.null,attribution->>legacy.neq.true",
-    );
-    assert.ok(!NON_LEGACY_POSTGREST_OR.includes("is distinct from"));
+  it("the JSONB predicates are gone from the module surface", () => {
+    // Removed 2026-07-25. While these existed, every database read expressed
+    // the legacy boundary as `attribution->>'legacy'`, which quietly made the
+    // blob key load-bearing: dropping it (item 4 of the slimming plan) would
+    // have satisfied the `is.null` arm for every legacy row and floated all
+    // 178,183 of them into the live CRM with nothing raising an error.
+    const surface = mod as Record<string, unknown>;
+    assert.equal(surface.NON_LEGACY_POSTGREST_OR, undefined);
+    assert.equal(surface.LEGACY_POSTGREST_FILTER, undefined);
   });
 
-  it("keeps the legacy-only filter as plain equality", () => {
-    assert.deepEqual({ ...LEGACY_POSTGREST_FILTER }, {
-      column: "attribution->>legacy",
-      operator: "eq",
-      value: "true",
-    });
-  });
-
-  it("exposes the promoted column form for new readers", () => {
+  it("exposes the promoted column as the only database spelling", () => {
     assert.equal(LEADS_IS_LEGACY_COLUMN, "is_legacy");
-    assert.deepEqual({ ...LEGACY_COLUMN_FILTER }, { column: "is_legacy", operator: "is", value: true });
-    assert.deepEqual({ ...NON_LEGACY_COLUMN_FILTER }, { column: "is_legacy", operator: "is", value: false });
+    assert.deepEqual({ ...LEGACY_COLUMN_FILTER }, { column: "is_legacy", operator: "eq", value: true });
+    assert.deepEqual({ ...NON_LEGACY_COLUMN_FILTER }, { column: "is_legacy", operator: "eq", value: false });
+  });
+
+  it("uses `eq` and never `is` — the operator is a 200x performance cliff", () => {
+    // PostgREST renders `.is(col,false)` as `is_legacy IS FALSE` and
+    // `.eq(col,false)` as `is_legacy = false`. Only the second is provably
+    // implied by the `NOT is_legacy` predicate of
+    // idx_leads_nonlegacy_active_created_v2. Measured on production:
+    //   = false   ->  Index Scan on the partial index      13 ms
+    //   IS FALSE  ->  idx_leads_active_created + Filter  2,568 ms
+    // Both triples shipped as `is` and were never called, so the regression
+    // was invisible. Pin the operator so it stays that way by intent.
+    for (const t of [LEGACY_COLUMN_FILTER, NON_LEGACY_COLUMN_FILTER]) {
+      assert.equal(t.operator, "eq", `${t.column} must use eq, not ${t.operator}`);
+    }
   });
 
   it("the column form needs no NULL arm — that is the whole point", () => {
-    // The OR form has three arms purely because the JSONB expression is
-    // three-valued. `is_legacy` is NOT NULL, so one term is total.
-    assert.equal(NON_LEGACY_POSTGREST_OR.split(",").length, 3);
+    // `is_legacy` is NOT NULL, so a single equality is a total partition.
+    // The old OR needed three arms purely because JSONB is three-valued.
     assert.equal(NON_LEGACY_COLUMN_FILTER.column, LEGACY_COLUMN_FILTER.column);
     assert.notEqual(NON_LEGACY_COLUMN_FILTER.value, LEGACY_COLUMN_FILTER.value);
   });

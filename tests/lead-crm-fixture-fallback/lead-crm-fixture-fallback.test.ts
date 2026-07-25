@@ -76,6 +76,11 @@ function makeStubClient(opts: StubOptions): { client: _LeadPaginationClient; cal
     // Each call returns `this`. State is captured in the enclosed `current`.
     select() { return builder; },
     is(col, _v) { current.filters.push(`is:${col}`); return builder; },
+    // Records the VALUE and the operator, not just the column. The legacy
+    // boundary now rides on `eq` specifically — `is` renders as `IS FALSE`,
+    // which misses the partial index — so the assertion has to be able to
+    // tell the two apart.
+    eq(col, v) { current.filters.push(`eq:${col}:${String(v)}`); return builder; },
     or(f) { current.filters.push(`or:${f}`); return builder; },
     order(col, o) { current.filters.push(`order:${col}:${o.ascending ? "asc" : "desc"}`); return builder; },
     range(from, to) {
@@ -196,30 +201,45 @@ describe("(F1) live-mode leads path never substitutes fixtures", () => {
 // ---------------------------------------------------------------------------
 
 describe("(F2) legacy filter is pushed down to DB when nonLegacyOnly=true", () => {
-  it("emits the OR predicate that hits idx_leads_active_nonlegacy_created", async () => {
+  it("emits is_legacy=false, which hits idx_leads_nonlegacy_active_created_v2", async () => {
     const { client, calls } = makeStubClient({ pages: [[]] });
     await _dbSelectAllLeadsActive(client, /* nonLegacyOnly */ true);
     assert.equal(calls.length, 1, "one page for an empty result set");
     const filters = calls[0]!.filters;
-    // Order matters here — the production code applies is(merged_into) →
-    // or(legacy) → order(created_at) → range(from,to). If any step is
-    // missing or reordered, the query plan changes and the index may
-    // not be selected. The `or` string is copied verbatim to catch any
-    // accidental rewording (which would silently break the pushdown).
+    // Order matters — production applies is(merged_into) → eq(is_legacy) →
+    // order(created_at) → range(from,to), and the plan depends on it.
     assert.ok(filters.includes("is:merged_into"), "must filter merged_into IS NULL at DB");
     assert.ok(
-      filters.includes("or:attribution.is.null,attribution->>legacy.is.null,attribution->>legacy.neq.true"),
-      "must emit the exact OR clause aligned with the partial index predicate",
+      filters.includes("eq:is_legacy:false"),
+      "must push the boundary down as the column, with the eq operator",
     );
     assert.ok(filters.includes("order:created_at:desc"), "must order created_at DESC for Kanban newest-first");
   });
 
-  it("omits the OR predicate when nonLegacyOnly=false (opt-in legacy universe)", async () => {
+  it("never reaches for the JSONB blob again", async () => {
+    // The regression this guards is not a slow query, it is a silent scope
+    // leak: while the boundary was `attribution->>'legacy'`, deleting that key
+    // would have matched the `is.null` arm for every legacy row and put all
+    // 178,183 of them in the live CRM without an error anywhere.
+    const { client, calls } = makeStubClient({ pages: [[]] });
+    await _dbSelectAllLeadsActive(client, /* nonLegacyOnly */ true);
+    for (const f of calls[0]!.filters) {
+      assert.ok(
+        !f.includes("attribution"),
+        `the legacy boundary must not touch the blob — found: ${f}`,
+      );
+    }
+  });
+
+  it("omits the boundary entirely when nonLegacyOnly=false (opt-in legacy universe)", async () => {
     const { client, calls } = makeStubClient({ pages: [[]] });
     await _dbSelectAllLeadsActive(client, /* nonLegacyOnly */ false);
     const filters = calls[0]!.filters;
     assert.ok(filters.includes("is:merged_into"), "still exclude soft-merged at DB");
-    assert.ok(!filters.some((f) => f.startsWith("or:")), "must NOT push the legacy filter when includeLegacy=true");
+    assert.ok(
+      !filters.some((f) => f.startsWith("eq:is_legacy") || f.startsWith("or:")),
+      "must NOT push the legacy filter when includeLegacy=true",
+    );
   });
 });
 

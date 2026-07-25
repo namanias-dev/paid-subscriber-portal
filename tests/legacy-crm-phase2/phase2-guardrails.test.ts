@@ -42,14 +42,26 @@ const PHASE2_ROUTES = [
   "app/api/admin/leads/[id]/worklist-detail/route.ts",
 ];
 
-/** Anything that could put a message on a wire. */
+/**
+ * Gateways and mailers: nothing here may ever be reachable.
+ *
+ * Note what is NOT on this list: `lib/sms/store`. Banning everything
+ * sms-shaped was the first version of this rule and it was too blunt to be
+ * correct — it would forbid `addOptOut`, the SUPPRESSION writer, which
+ * `markOptedOut` is obliged to call. The invariant is "cannot transmit", not
+ * "cannot touch anything sms-shaped", so senders are banned BY NAME below and
+ * the suppression path is asserted to be present.
+ */
 const SENDER_MODULES = [
-  "lib/sms", "/sms", "twilio", "msg91", "gupshup", "whatsapp",
+  "twilio", "msg91", "gupshup", "whatsapp", "lib/sms/gateway", "sms/service",
   "nodemailer", "sendgrid", "resend", "@/lib/mailer", "lib/mailer",
 ];
 
+/** The functions that actually put a message on a wire. */
+const SENDER_SYMBOLS = ["sendSms", "sendBatch", "sendTemplate", "dispatchSms", "sendViaGateway"];
+
 describe("Phase 2 guardrail — the write layer cannot send anything", () => {
-  it("imports no messaging module, directly or by alias", () => {
+  it("imports no gateway, mailer or send service", () => {
     const src = read("lib/legacy-crm/writes.ts");
     const imports = src
       .split("\n")
@@ -64,6 +76,16 @@ describe("Phase 2 guardrail — the write layer cannot send anything", () => {
     }
   });
 
+  it("calls no send function", () => {
+    const src = read("lib/legacy-crm/writes.ts");
+    for (const sym of SENDER_SYMBOLS) {
+      assert.ok(
+        !new RegExp(`\\b${sym}\\s*\\(`).test(src),
+        `writes.ts must not call ${sym}()`,
+      );
+    }
+  });
+
   it("the write action routes import no messaging module either", () => {
     for (const route of PHASE2_ROUTES) {
       const imports = read(route)
@@ -74,6 +96,129 @@ describe("Phase 2 guardrail — the write layer cannot send anything", () => {
         assert.equal(hit, undefined, `${route} must not import a sender — found: ${hit?.trim()}`);
       }
     }
+  });
+});
+
+/**
+ * "MARK OPTED OUT" HAS TO ACTUALLY SUPPRESS.
+ *
+ * Every send path screens against the `sms_opt_outs` table (`optedOutSet` /
+ * `isOptedOut` in `lib/sms/store`, re-checked in `sendSms`, `sendBatch` and
+ * `applySuppression`). NOTHING on any send path reads `leads.consent_status`.
+ *
+ * The first version of `markOptedOut` set `consent_status` alone, which meant
+ * the drawer, the audit trail and the counsellor all reported someone as opted
+ * out while the next campaign would still have messaged them. That is the exact
+ * shape of failure this phase is least allowed to have, and it is invisible
+ * until a real person receives a message they refused.
+ */
+describe("Phase 2 guardrail — an opt-out reaches the table that is actually enforced", () => {
+  const src = read("lib/legacy-crm/writes.ts");
+
+  it("markOptedOut writes the sms_opt_outs suppression row", () => {
+    assert.ok(
+      /import\s*\{[^}]*\baddOptOut\b[^}]*\}\s*from\s*["'][^"']*sms\/store["']/.test(src),
+      "writes.ts must import addOptOut from lib/sms/store",
+    );
+    assert.ok(/\baddOptOut\s*\(/.test(src), "markOptedOut must call addOptOut()");
+  });
+
+  it("refuses to report success when the suppression write fails", () => {
+    // addOptOut fails closed by RETURNING false — it never throws — so an
+    // unchecked call would silently degrade to the decorative behaviour above.
+    const fn = src.slice(src.indexOf("export async function markOptedOut"));
+    const body = fn.slice(0, fn.indexOf("\n}\n"));
+    assert.ok(
+      /if\s*\(!\s*suppressed\s*\)/.test(body),
+      "the addOptOut return value must be checked",
+    );
+    assert.ok(/throw new Error/.test(body), "a failed suppression write must throw");
+  });
+
+  it("suppresses BEFORE touching the lead, so a partial failure still protects the person", () => {
+    const fn = src.slice(src.indexOf("export async function markOptedOut"));
+    const body = fn.slice(0, fn.indexOf("\n}\n"));
+    const suppressAt = body.indexOf("addOptOut(");
+    const patchAt = body.indexOf("applyLeadWrite(");
+    assert.ok(suppressAt !== -1 && patchAt !== -1, "both writes must be present");
+    assert.ok(
+      suppressAt < patchAt,
+      "the compliance write must land first; the reverse order fails towards sending",
+    );
+  });
+
+  it("writes a consent_status that exists in the ConsentStatus union", () => {
+    const union = read("lib/types.ts");
+    const declared = /export type ConsentStatus\s*=\s*([^;]+);/.exec(union)?.[1] ?? "";
+    const members = [...declared.matchAll(/"([a-z_]+)"/g)].map((m) => m[1]!);
+    assert.ok(members.length > 0, "could not parse the ConsentStatus union");
+
+    const written = [...src.matchAll(/consent_status:\s*"([a-z_]+)"/g)].map((m) => m[1]!);
+    assert.ok(written.length > 0, "expected at least one consent_status write");
+    for (const v of written) {
+      assert.ok(
+        members.includes(v),
+        `writes.ts sets consent_status="${v}", which is not in ConsentStatus ` +
+          `(${members.join(" | ")}). The column has no CHECK constraint, so this ` +
+          `stores silently and leaves the type lying about its own domain.`,
+      );
+    }
+  });
+});
+
+describe("Phase 2 guardrail — every WriteAction is audited as itself", () => {
+  const src = read("lib/legacy-crm/writes.ts");
+
+  it("a contact attempt is not logged as a work-status change", () => {
+    assert.ok(
+      /action:\s*"contact_attempt"/.test(src),
+      "recordContactAttempt must audit itself as contact_attempt",
+    );
+  });
+
+  it("declares no action the API will reject", () => {
+    // `reveal_phone` sat in this union with no route accepting it, which implied
+    // an audit guarantee for phone reveals that did not exist.
+    const union = /export type WriteAction\s*=\s*([^;]+);/.exec(src)?.[1] ?? "";
+    const declared = [...union.matchAll(/"([a-z_]+)"/g)].map((m) => m[1]!);
+    const route = read("app/api/admin/leads/[id]/worklist-action/route.ts");
+    for (const action of declared) {
+      if (action === "revert") continue; // handled by its own branch name
+      assert.ok(
+        route.includes(`"${action}"`),
+        `WriteAction declares "${action}" but the route never accepts it`,
+      );
+    }
+  });
+
+  it("operator-only actions are reachable from NO route", () => {
+    // `note_retract` deletes a note. Notes are append-only for counsellors
+    // precisely because a record that can be quietly deleted from the UI stops
+    // being evidence. If this ever becomes route-reachable, that guarantee is
+    // gone — so the absence is asserted rather than left to reviewer memory.
+    const union = /export type OperatorAction\s*=\s*([^;]+);/.exec(src)?.[1] ?? "";
+    const declared = [...union.matchAll(/"([a-z_]+)"/g)].map((m) => m[1]!);
+    assert.ok(declared.length > 0, "could not parse the OperatorAction union");
+
+    for (const file of PHASE2_ROUTES) {
+      const body = read(file);
+      for (const action of declared) {
+        assert.ok(
+          !body.includes(`"${action}"`),
+          `${file} references operator-only action "${action}" — it must not be callable over HTTP`,
+        );
+      }
+    }
+  });
+
+  it("retracting a note records what it removed, before removing it", () => {
+    const fn = src.slice(src.indexOf("export async function retractLeadNote"));
+    const body = fn.slice(0, fn.indexOf("\n}\n"));
+    const auditAt = body.indexOf("lead_worklist_audit");
+    const deleteAt = body.indexOf(".delete()");
+    assert.ok(auditAt !== -1 && deleteAt !== -1, "expected both an audit insert and a delete");
+    assert.ok(auditAt < deleteAt, "the audit row must be written before the note is deleted");
+    assert.ok(/requires a written reason/.test(body), "a retraction must demand a reason");
   });
 });
 

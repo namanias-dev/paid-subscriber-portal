@@ -1,0 +1,130 @@
+-- =====================================================================
+-- The legacy boundary moves off the JSONB blob and onto is_legacy.
+-- 2026-07-25
+-- =====================================================================
+--
+-- WHY THIS EXISTS
+--
+-- Until now every database read expressed "is this lead legacy?" as
+-- `attribution->>'legacy'`:
+--
+--   getLeads            .or("attribution.is.null,attribution->>legacy.is.null,
+--                            attribution->>legacy.neq.true")
+--   getLeadsForPillMap  .filter("attribution->>legacy","eq","true")
+--   getAllLeadsRaw      the same three-arm OR
+--
+-- That made the JSONB key load-bearing infrastructure while everyone
+-- believed it was vestigial — and REMOVING IT WAS ALREADY ITEM 4 OF THE
+-- JSONB SLIMMING PLAN. Had that shipped, then for a legacy row
+-- `attribution->>'legacy'` becomes NULL, the `is.null` arm matches, and
+-- all 178,183 legacy leads appear in the live CRM and in the pill map's
+-- "non-legacy universe". Silently: no error, no exception, no red test.
+-- One step from there is a live SMS audience of 178,183 people.
+--
+-- The application now reads `is_legacy` at all three sites.
+--
+--
+-- THE OPERATOR IS LOAD-BEARING: `eq`, NEVER `is`
+--
+-- PostgREST renders `.is(col,false)` as `is_legacy IS FALSE` and
+-- `.eq(col,false)` as `is_legacy = false`. Only the second is provably
+-- implied by a `WHERE NOT is_legacy` index predicate. Measured here:
+--
+--   is_legacy = false   Index Scan idx_leads_nonlegacy_active_created_v2     13 ms
+--   is_legacy IS FALSE  Index Scan idx_leads_active_created + Filter      2,568 ms
+--
+-- Both exported PostgREST triples in lib/legacy-migration/legacyFilter.ts
+-- said `is` and were corrected to `eq` in the same change.
+
+
+-- ---------------------------------------------------------------------
+-- 1. New index: the non-legacy set WITHOUT the merged_into restriction.
+-- ---------------------------------------------------------------------
+-- `getAllLeadsRaw` deliberately includes soft-merged rows (it backs the
+-- merge tooling and the Campaign Performance analytics report), so it
+-- cannot use any of the `merged_into IS NULL` partial indexes. It had no
+-- usable index in EITHER spelling and was doing a full Seq Scan:
+--
+--   before (JSONB OR)     Parallel Seq Scan, 178k rows filtered  12,398 ms
+--   before (is_legacy)    Seq Scan,          178k rows filtered  12,314 ms
+--   after  (this index)   Index Scan                                451 ms
+--
+-- So the Campaign Performance endpoint was exceeding the PostgREST
+-- statement timeout in production. That is pre-existing, not caused by
+-- the cutover — but the cutover is what made it visible, and only the
+-- is_legacy spelling can use this index at all.
+--
+-- ~1,350 rows today. Additive, concurrent, reversible.
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_leads_nonlegacy_created_all
+  ON public.leads (created_at DESC)
+  WHERE NOT is_legacy;
+
+-- Statistics must be refreshed or the planner may keep the Seq Scan it
+-- already costed. (Learned the hard way earlier in this program.)
+ANALYZE public.leads;
+
+
+-- ---------------------------------------------------------------------
+-- 2. Retire the four JSONB-predicate indexes.
+-- ---------------------------------------------------------------------
+-- ORDER OF OPERATIONS — THIS IS NOT OPTIONAL:
+--
+--   deploy the application change FIRST, then run these drops.
+--
+-- Production runs the previous build until the deploy completes, and that
+-- build still emits the JSONB predicates. Dropping these while it is live
+-- takes the live CRM read to a 12-second Seq Scan — a self-inflicted
+-- outage. Section 1 above is safe to run at any time; section 2 is not.
+--
+-- These are safe to drop only because a partial index can be chosen ONLY
+-- by a query whose WHERE clause implies its predicate, and the planner
+-- cannot prove `is_legacy = true` implies `(attribution->>'legacy') =
+-- 'true'` — they are unrelated expressions over different columns. So
+-- once no query emits the JSONB form, these are unselectable by
+-- construction, not merely unused by observation.
+--
+-- Confirmed empirically as well. Counters around a run of the three real
+-- reader functions (getLeads / getLeadsForPillMap / getAllLeadsRaw):
+--
+--   idx_leads_nonlegacy_active_created_v2   66 -> 70   (+4, now chosen)
+--   idx_leads_nonlegacy_created_all          - -> 13   (+13, new)
+--   idx_leads_active_nonlegacy_created     373 -> 373  (0)
+--   idx_leads_legacy_flag                  320 -> 320  (0)
+--   idx_leads_legacy_status_partial         81 -> 81   (0)
+--   idx_leads_legacy_call_status_partial    37 -> 37   (0)
+--
+-- Each duplicates a `_v2` equivalent that is predicated on the column.
+--
+-- DROP INDEX CONCURRENTLY IF EXISTS public.idx_leads_active_nonlegacy_created;
+-- DROP INDEX CONCURRENTLY IF EXISTS public.idx_leads_legacy_flag;
+-- DROP INDEX CONCURRENTLY IF EXISTS public.idx_leads_legacy_status_partial;
+-- DROP INDEX CONCURRENTLY IF EXISTS public.idx_leads_legacy_call_status_partial;
+
+
+-- ---------------------------------------------------------------------
+-- ROLLBACK
+-- ---------------------------------------------------------------------
+-- Reverting the application code is sufficient on its own: the four
+-- indexes below are only needed by the JSONB spelling, and recreating
+-- them restores the previous plans exactly.
+--
+-- DROP INDEX CONCURRENTLY IF EXISTS public.idx_leads_nonlegacy_created_all;
+--
+-- CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_leads_active_nonlegacy_created
+--   ON public.leads (created_at DESC)
+--   WHERE merged_into IS NULL
+--     AND ((attribution IS NULL)
+--      OR ((attribution ->> 'legacy') IS NULL)
+--      OR ((attribution ->> 'legacy') <> 'true'));
+--
+-- CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_leads_legacy_flag
+--   ON public.leads ((attribution ->> 'legacy'))
+--   WHERE (attribution ->> 'legacy') = 'true';
+--
+-- CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_leads_legacy_status_partial
+--   ON public.leads (status)
+--   WHERE merged_into IS NULL AND ((attribution ->> 'legacy') = 'true');
+--
+-- CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_leads_legacy_call_status_partial
+--   ON public.leads (legacy_call_status)
+--   WHERE merged_into IS NULL AND ((attribution ->> 'legacy') = 'true');

@@ -50,26 +50,28 @@ import type { Lead, LeadCohort } from "../types";
 // differently on purpose, and the constants below are the only place
 // that spelling should ever be written.
 
-/**
- * The exact PostgREST `.or()` argument selecting NON-LEGACY rows. Must stay
- * character-identical to the predicate of `idx_leads_active_nonlegacy_created`
- * or that index stops being chosen.
- *
- * STILL LOAD-BEARING after the `is_legacy` promotion. The live CRM read
- * (`getLeads`) deliberately still fires this filter against the untouched
- * `idx_leads_active_nonlegacy_created`, because that path's plan is a
- * non-negotiable invariant of the Phase 1 ship. See
- * `LEADS_IS_LEGACY_COLUMN` for the form new readers use.
- */
-export const NON_LEGACY_POSTGREST_OR =
-  "attribution.is.null,attribution->>legacy.is.null,attribution->>legacy.neq.true";
+// ----------------------------------------------------------------------
+// THE JSONB PREDICATES ARE GONE — deliberately, and they must not come back
+// ----------------------------------------------------------------------
+// `NON_LEGACY_POSTGREST_OR` and `LEGACY_POSTGREST_FILTER` used to live here
+// and were removed on 2026-07-25. They expressed the legacy boundary as
+// `attribution->>'legacy'`, and every database read went through them.
+//
+// That made the JSONB key load-bearing infrastructure while everybody
+// believed it was vestigial — and dropping it was already written down as
+// item 4 of the JSONB slimming plan. Had that landed, then for a legacy row
+// `attribution->>'legacy'` becomes NULL, the `is.null` arm of the OR matches,
+// and all 178,183 legacy leads silently appear in the live CRM and in
+// `getLeadsForPillMap`'s "non-legacy universe". No error, no exception, no
+// failed test — just every legacy human suddenly in the live pipeline, and
+// from there one step from a live SMS audience.
+//
+// The boundary is now the `is_legacy` column at every database call site.
+// Nothing here should ever again encode it as a blob lookup.
 
-/** PostgREST column/operator/value triple selecting LEGACY-ONLY rows. */
-export const LEGACY_POSTGREST_FILTER = {
-  column: "attribution->>legacy",
-  operator: "eq",
-  value: "true",
-} as const;
+// =====================================================================
+// THE PROMOTED COLUMN — the only database spelling of the boundary
+// =====================================================================
 
 // =====================================================================
 // THE PROMOTED COLUMN — what new readers should use
@@ -91,20 +93,40 @@ export const LEGACY_POSTGREST_FILTER = {
 // every insert/update of `attribution`, so the two can never drift and
 // either side can be rebuilt from the other.
 
-/** The promoted boolean column. Prefer this over the JSONB spellings. */
+/** The promoted boolean column. The only database spelling of the boundary. */
 export const LEADS_IS_LEGACY_COLUMN = "is_legacy" as const;
+
+// ----------------------------------------------------------------------
+// USE `eq`, NEVER `is`. THIS IS NOT A STYLE PREFERENCE.
+// ----------------------------------------------------------------------
+// Both triples below said `operator: "is"` until 2026-07-25. PostgREST turns
+// `.is("is_legacy", false)` into `is_legacy IS FALSE` and `.eq("is_legacy",
+// false)` into `is_legacy = false`. Those are different parse nodes, and the
+// planner only proves the second one implies the `NOT is_legacy` predicate of
+// `idx_leads_nonlegacy_active_created_v2`. Measured on production, same row,
+// same moment:
+//
+//   is_legacy = false   -> Index Scan idx_leads_nonlegacy_active_created_v2
+//                          13 ms      (est. 1,438 rows / 1,000 actual)
+//   is_legacy IS FALSE  -> Index Scan idx_leads_active_created + Filter
+//                          2,568 ms   (1,978 rows discarded by the filter)
+//
+// So the constant this file advertised as the correct modern form was itself
+// a 200x pessimisation waiting for its first caller. It never got one, because
+// every read was still on the JSONB path — the bug and its own camouflage.
+// `tests/lead-jsonb-slimming/is-legacy-cutover.test.ts` now pins the operator.
 
 /** PostgREST triple selecting LEGACY-ONLY rows via the promoted column. */
 export const LEGACY_COLUMN_FILTER = {
   column: "is_legacy",
-  operator: "is",
+  operator: "eq",
   value: true,
 } as const;
 
 /** PostgREST triple selecting NON-LEGACY rows via the promoted column. */
 export const NON_LEGACY_COLUMN_FILTER = {
   column: "is_legacy",
-  operator: "is",
+  operator: "eq",
   value: false,
 } as const;
 

@@ -30,6 +30,12 @@
 
 import { randomUUID } from "node:crypto";
 import { getSupabaseAdmin } from "../supabase";
+// The opt-out SUPPRESSION writer — not a sender. `lib/sms/store` holds the
+// compliance table that every send path screens against; `markOptedOut` has to
+// write it or the opt-out is decorative. Nothing that can transmit a message is
+// imported here, and `tests/legacy-crm-phase2/phase2-guardrails.test.ts` pins
+// that distinction by name.
+import { addOptOut } from "../sms/store";
 import type { LeadWorkStatus } from "../types";
 
 /**
@@ -112,9 +118,28 @@ export type WriteAction =
   | "wrong_number"
   | "unreachable"
   | "opt_out"
+  | "contact_attempt"
   | "note"
-  | "reveal_phone"
   | "revert";
+
+/**
+ * Actions an OPERATOR can take from a script, which are deliberately NOT
+ * reachable from any API route.
+ *
+ * The separation is the point. `note_retract` removes a note, and notes are
+ * append-only on purpose — a counsellor's record of what a lead said is
+ * evidence, and evidence that can be quietly deleted from the UI is not
+ * evidence. But an operator still needs a way to pull a note that should never
+ * have existed (QA residue, a note filed against the wrong person, content that
+ * has to come out), and that removal must itself leave a trace.
+ *
+ * `tests/legacy-crm-phase2/phase2-guardrails.test.ts` asserts that no route
+ * accepts any member of this union.
+ */
+export type OperatorAction = "note_retract";
+
+/** Anything that can appear in `lead_worklist_audit.action`. */
+export type AuditAction = WriteAction | OperatorAction;
 
 export interface WriteActor {
   id: string;
@@ -147,7 +172,31 @@ export interface LeadAuditEntry {
   created_at: string;
 }
 
-function db() {
+type AdminClient = NonNullable<ReturnType<typeof getSupabaseAdmin>>;
+
+let _testClient: AdminClient | null = null;
+
+/**
+ * TEST-ONLY seam. Never call this from application code.
+ *
+ * It exists so the write paths can be exercised behaviourally — the emitted
+ * operations, their order, and what happens when one of them fails — without
+ * pointing a test at production. Phase 2 QA verified writes by mutating real
+ * legacy leads and reverting them afterwards; the reverts were complete, but
+ * briefly flipping `wrong_number` or `opt_out` on a real person's record is a
+ * risk worth removing rather than managing.
+ *
+ * Note that `addOptOut`/`optedOutSet` in `lib/sms/store` are NOT routed through
+ * this seam. They fall back to an in-memory store when the Supabase env vars
+ * are absent, so a test run without credentials exercises the real suppression
+ * code against real logic and no real data.
+ */
+export function _setWritesClientForTests(client: unknown): void {
+  _testClient = (client as AdminClient | null) ?? null;
+}
+
+function db(): AdminClient {
+  if (_testClient) return _testClient;
   const c = getSupabaseAdmin();
   if (!c) throw new Error("Supabase admin client unavailable");
   return c;
@@ -316,12 +365,60 @@ export function markUnreachable(leadId: string, actor: WriteActor, batchId?: str
 /**
  * Mark opted out.
  *
- * Sets `consent_status = 'opted_out'`, which is the field every SMS audience
- * already gates on, so this immediately and permanently suppresses the lead
- * from messaging. Phase 2 sends nothing at all, but this must be correct now
- * so the record is already right when sending is eventually enabled.
+ * THE ENFORCEMENT LIVES IN `sms_opt_outs`, NOT IN `leads.consent_status`.
+ * An earlier version of this function set `consent_status` alone, with a comment
+ * claiming that was "the field every SMS audience gates on". That was wrong.
+ * `consent_status` is read by nothing on any send path — every one of them
+ * (`sendSms`, `sendBatch`, and `applySuppression` on every resolved audience)
+ * screens against `sms_opt_outs` via `optedOutSet`/`isOptedOut`. Writing only
+ * the lead column produced the worst possible outcome: the drawer, the audit
+ * trail and the counsellor all reported the person as opted out while the next
+ * campaign would still have sent to them.
+ *
+ * So this writes the suppression row FIRST and refuses to continue if it fails.
+ * The ordering is deliberate: if the suppression lands and the lead update then
+ * fails, the person is still protected and the UI just looks stale. The reverse
+ * order fails towards sending a message to someone who asked not to receive
+ * one, which is not a failure mode this action is allowed to have.
+ *
+ * `consent_status` is set to `'withdrawn'` — the member of `ConsentStatus` that
+ * means this. The previous `'opted_out'` string is not in that union at all, and
+ * because the column carries no CHECK constraint it stored silently, leaving the
+ * type lying about its own domain.
+ *
+ * NOT SYMMETRICAL ON REVERT, BY DESIGN. Reverting this audit entry restores the
+ * lead columns but deliberately leaves the `sms_opt_outs` row in place. Undoing
+ * a consent withdrawal is a compliance decision, not a mis-click correction, and
+ * must go through the SMS opt-out admin surface where it is visible as such.
  */
-export function markOptedOut(leadId: string, actor: WriteActor, batchId?: string) {
+export async function markOptedOut(leadId: string, actor: WriteActor, batchId?: string) {
+  const client = db();
+  const { data, error } = await client
+    .from("leads")
+    .select("phone")
+    .eq("id", leadId)
+    .limit(1);
+  if (error) throw new Error(`markOptedOut: could not read lead ${leadId}: ${error.message}`);
+  const row = (data as { phone: string | null }[] | null)?.[0];
+  if (!row) throw new LeadNotFoundError(leadId);
+
+  // `addOptOut` normalises to the last 10 digits and fails closed by returning
+  // false — it never throws — so the result has to be checked explicitly.
+  const suppressed = await addOptOut(
+    row.phone ?? "",
+    "Opted out from the lead worklist",
+    "lead_worklist",
+    actor.id,
+  );
+  if (!suppressed) {
+    throw new Error(
+      `markOptedOut: refusing to record an opt-out for ${leadId} because the ` +
+        `sms_opt_outs suppression row could not be written. Nothing was changed. ` +
+        `Reporting success here would tell a counsellor this person is protected ` +
+        `when they are not.`,
+    );
+  }
+
   return applyLeadWrite({
     leadId,
     action: "opt_out",
@@ -329,13 +426,14 @@ export function markOptedOut(leadId: string, actor: WriteActor, batchId?: string
       work_status: "opted_out",
       work_status_at: nowIso(),
       work_status_by: actor.id,
-      consent_status: "opted_out",
+      consent_status: "withdrawn",
       opted_out_at: nowIso(),
       suppression_reason: "opted_out",
       last_worked_at: nowIso(),
     },
     actor,
     batchId,
+    metadata: { suppression_table: "sms_opt_outs", suppression_source: "lead_worklist" },
   });
 }
 
@@ -352,7 +450,11 @@ export async function recordContactAttempt(leadId: string, actor: WriteActor) {
   if (!row) throw new LeadNotFoundError(leadId);
   return applyLeadWrite({
     leadId,
-    action: "work_status",
+    // Audited as itself, not as a work-status change. The audit trail is the
+    // artefact this program keeps insisting must be trustworthy, and a logged
+    // call attempt showing up in the drawer's history labelled "work status"
+    // misrepresents what the counsellor actually did.
+    action: "contact_attempt",
     patch: {
       last_contacted_at: nowIso(),
       contact_attempt_count: (row.contact_attempt_count ?? 0) + 1,
@@ -472,6 +574,66 @@ export async function revertWrite(auditId: string, actor: WriteActor): Promise<W
   }
 
   return result;
+}
+
+/**
+ * Retract a note. OPERATOR ONLY — no route reaches this, by design.
+ *
+ * Notes are append-only for counsellors (see `addLeadNote`). This is the escape
+ * hatch for a note that should never have been filed at all, and it is
+ * deliberately awkward to reach: it needs a written reason, and it records what
+ * it removed before removing it.
+ *
+ * The audit entry keeps the note's id, author and timestamp, and a 120-char
+ * excerpt of the body, so the trail shows that something was retracted and by
+ * whom rather than silently losing a row. The excerpt is capped because the
+ * point is accountability, not preserving the content the retraction removed.
+ */
+export async function retractLeadNote(params: {
+  noteId: string;
+  actor: WriteActor;
+  reason: string;
+}): Promise<{ ok: true; leadId: string }> {
+  const reason = params.reason.trim();
+  if (!reason) throw new Error("Retracting a note requires a written reason.");
+
+  const client = db();
+  const { data, error } = await client
+    .from("lead_notes")
+    .select("id, lead_id, author, body, created_at")
+    .eq("id", params.noteId)
+    .limit(1);
+  if (error) throw new Error(`retractLeadNote: ${error.message}`);
+  const note = (data as {
+    id: string; lead_id: string; author: string | null; body: string; created_at: string;
+  }[] | null)?.[0];
+  if (!note) throw new Error(`retractLeadNote: no note ${params.noteId}`);
+
+  // Audit BEFORE the delete. If the delete then fails we have a spurious audit
+  // row, which is noisy but harmless; the reverse order can lose the record of
+  // what was removed entirely, which defeats the purpose of the function.
+  const { error: auditErr } = await client.from("lead_worklist_audit").insert({
+    id: randomUUID(),
+    lead_id: note.lead_id,
+    actor: params.actor.id,
+    action: "note_retract" satisfies OperatorAction,
+    field: "note",
+    before_value: note.body.slice(0, 120),
+    after_value: null,
+    batch_id: randomUUID(),
+    metadata: {
+      note_id: note.id,
+      note_author: note.author,
+      note_created_at: note.created_at,
+      reason,
+    },
+  });
+  if (auditErr) throw new Error(`retractLeadNote: audit failed, nothing removed: ${auditErr.message}`);
+
+  const { error: delErr } = await client.from("lead_notes").delete().eq("id", params.noteId);
+  if (delErr) throw new Error(`retractLeadNote: ${delErr.message}`);
+
+  return { ok: true, leadId: note.lead_id };
 }
 
 /** The audit trail for one lead, newest first. Drives the drawer timeline. */
