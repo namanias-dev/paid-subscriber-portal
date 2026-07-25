@@ -889,6 +889,25 @@ export interface Lead {
   referrer?: string | null;
   attribution?: AttributionState | null;
   /**
+   * THE legacy boundary. Promoted out of `attribution.legacy` on 2026-07-24.
+   *
+   * Read this, not the JSONB key. `(attribution->>'legacy') = 'true'` evaluates
+   * to NULL — not false — whenever `attribution` is null or lacks the key, so
+   * the two obvious bucket predicates both silently drop rows and fail to sum
+   * to the table total. That trap produced two confidently-wrong answers in
+   * this program and forced analytical SQL onto `IS DISTINCT FROM 'true'` while
+   * index predicates needed a literal three-arm OR. This column is NOT NULL in
+   * Postgres, so `is_legacy` / `not is_legacy` is a total, exact partition.
+   *
+   * Optional here only because rows built by fixtures and older callers predate
+   * it; {@link hasLegacyFlag} falls back to the JSONB key when it is absent.
+   */
+  is_legacy?: boolean;
+  /** Promoted from `attribution.legacy_source_tab` (e.g. "FB LEADS"). */
+  legacy_source_tab?: string | null;
+  /** Promoted from `attribution.first_touch.campaign_clean`. */
+  campaign_clean?: string | null;
+  /**
    * Soft-merge pointer. When set, this row is a duplicate folded into the canonical
    * lead with this id and is hidden from every list/segment. Null = active/canonical.
    */
@@ -942,9 +961,9 @@ export interface LeadWorklistRow {
    * while looking perfectly healthy.
    */
   campaign: string | null;
-  /** `attribution.first_touch.campaign_clean`, projected as a scalar. */
+  /** Promoted `leads.campaign_clean` (was `attribution.first_touch.campaign_clean`). */
   campaign_clean: string | null;
-  /** `attribution.legacy_source_tab`, projected as a scalar. */
+  /** Promoted `leads.legacy_source_tab` (was `attribution.legacy_source_tab`). */
   legacy_source_tab: string | null;
   status: string;
   created_at: string;
@@ -959,6 +978,17 @@ export interface LeadWorklistRow {
   contact_attempt_count: number | null;
   suppression_reason: string | null;
   cohort: LeadCohort | null;
+  /**
+   * The promoted legacy boundary, projected straight off the column.
+   *
+   * `cohort` is the FROZEN classification-time answer and must never be
+   * recomputed; `is_legacy` is the live boundary the CRM, worklist,
+   * analytics and SMS audiences all gate on. They agree today and are
+   * deliberately separate fields — see `cohortForLead`, and note the 110
+   * `live_captured` rows whose reclassification would retroactively
+   * rewrite published channel numbers.
+   */
+  is_legacy: boolean;
   legacy_call_status: string | null;
 }
 

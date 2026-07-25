@@ -7,6 +7,7 @@
     { "path": "/api/cron/analytics-rollup", "schedule": "30 19 * * *" },
     { "path": "/api/cron/sms-dispatch", "schedule": "30 4 * * *" },
     { "path": "/api/cron/media-purge", "schedule": "0 20 * * *" },
-    { "path": "/api/cron/journey-engine", "schedule": "*/5 * * * *" }
+    { "path": "/api/cron/journey-engine", "schedule": "*/5 * * * *" },
+    { "path": "/api/cron/auth-attempts-ttl", "schedule": "0 */6 * * *" }
   ]
 }

@@ -77,6 +77,30 @@ export function buildLegacyAttributionJSON(lead: StagedLead): LegacyAttributionJ
 }
 
 /**
+ * Split the touch audit trail out of an attribution blob.
+ *
+ * `legacy_touches[]` moved to the `lead_legacy_touches` side table on
+ * 2026-07-24. It was 66 MB across 178,312 rows — roughly half the entire
+ * `attribution` payload — and no product read path ever touched it, so every
+ * scan of `leads` was paying to carry an audit trail nothing read.
+ *
+ * The builders above still produce it, because they describe the honest
+ * sheet-row -> attribution mapping and are pinned by the transform/dedupe/
+ * collision test suites. This is the seam the WRITE paths use to route it:
+ * the blob keeps everything else, the touches go to the side table.
+ *
+ * Returns the touches even when empty so a caller can tell "no touches" from
+ * "key absent" without re-inspecting the blob.
+ */
+export function splitLegacyTouches(attribution: object): {
+  attribution: Record<string, unknown>;
+  touches: unknown[];
+} {
+  const { legacy_touches: raw, ...rest } = attribution as Record<string, unknown>;
+  return { attribution: rest, touches: Array.isArray(raw) ? raw : [] };
+}
+
+/**
  * Merge a new legacy touch INTO an existing live lead's attribution.
  *
  * Rule: pre-existing rows are NEVER flagged legacy — they get an entry
