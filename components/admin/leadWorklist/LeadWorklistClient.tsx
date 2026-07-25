@@ -2,9 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { X } from "lucide-react";
+import { Users, X } from "lucide-react";
 import { PageHeader } from "@/components/admin/ui";
 import type { LeadWorklistRow, LeadsSortKey } from "@/lib/types";
+import { BulkAssignModal } from "./BulkAssignModal";
 import FilterBar from "./FilterBar";
 import LeadDrawer from "./LeadDrawer";
 import ScopeControl from "./ScopeControl";
@@ -54,6 +55,7 @@ export default function LeadWorklistClient({ currentAdmin }: { currentAdmin: str
   } = useWorklistData(apiSearch);
 
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
+  const [bulkOpen, setBulkOpen] = useState(false);
   const [revealed, setRevealed] = useState<Set<string>>(() => new Set());
   const [activeId, setActiveId] = useState<string | null>(null);
   const restoreFocusRef = useRef<HTMLElement | null>(null);
@@ -179,17 +181,27 @@ export default function LeadWorklistClient({ currentAdmin }: { currentAdmin: str
           <p className="text-sm font-semibold text-primary">
             {selected.size.toLocaleString("en-IN")} selected
             <span className="ml-2 font-normal text-ink2">
-              Bulk actions arrive in Phase 3 — nothing can be changed in bulk yet.
+              Assignment is the only bulk action — status, notes and contact history are never changed in bulk.
             </span>
           </p>
-          <button
-            type="button"
-            onClick={() => setSelected(new Set())}
-            className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-primary transition hover:bg-white focus:outline-none focus:ring-2 focus:ring-primary/40"
-          >
-            <X size={12} strokeWidth={2} aria-hidden="true" />
-            Clear selection
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setBulkOpen(true)}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-white transition hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-primary/40"
+            >
+              <Users size={12} strokeWidth={2} aria-hidden="true" />
+              Assign…
+            </button>
+            <button
+              type="button"
+              onClick={() => setSelected(new Set())}
+              className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium text-primary transition hover:bg-white focus:outline-none focus:ring-2 focus:ring-primary/40"
+            >
+              <X size={12} strokeWidth={2} aria-hidden="true" />
+              Clear selection
+            </button>
+          </div>
         </div>
       )}
 
@@ -232,6 +244,20 @@ export default function LeadWorklistClient({ currentAdmin }: { currentAdmin: str
           onRowPatch={patchRow}
         />
       )}
+
+      <BulkAssignModal
+        open={bulkOpen}
+        onClose={() => setBulkOpen(false)}
+        leadIds={[...selected]}
+        scope={query.scope}
+        onCommitted={() => {
+          // Drop the selection and re-read. The rows on screen now carry a
+          // stale owner, and leaving them selected invites a second bulk
+          // action against a list the operator can no longer see accurately.
+          setSelected(new Set());
+          retry();
+        }}
+      />
     </div>
   );
 }
