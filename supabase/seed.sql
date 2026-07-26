@@ -1,7 +1,28 @@
 -- ============================================================
 -- Naman Sharma IAS Academy — Seed data
--- Run AFTER schema.sql. Mirrors lib/mockData.ts so demo & live look identical.
--- Safe to re-run (uses fixed UUIDs + on conflict do nothing).
+-- Run AFTER schema.sql.
+--
+-- THIS FILE IS NOT PURELY DEMO DATA AND NOT PURELY PRODUCTION DATA.
+-- It mixes two kinds of block, and the difference matters:
+--
+--   Bootstrap, needed in production — `admin_users` (the only way to log in
+--   to a fresh deployment), `courses`, `plans`, `site_settings`.
+--
+--   Demo fixtures, must NEVER reach production — `students`, `bookmarks`,
+--   `content_progress`, `content_items`, `enrollments`, `payments`,
+--   `referrals`. These describe people and money that do not exist.
+--
+-- Re-running is idempotent per id, but "on conflict (id) do nothing" is NOT a
+-- safety property: it only suppresses duplicates. If a row has been deleted
+-- there is no conflict, so a re-run reinstates it. Deleting fixture rows from
+-- the database is therefore never sufficient on its own — the row has to come
+-- out of this file too, or the next run puts it back. That is exactly how the
+-- five `lead-000x` rows survived in production; see the `leads` section.
+--
+-- Before running this against a live database, read the demo-fixture list
+-- above and skip those blocks. Splitting this file into `seed.sql` (bootstrap)
+-- and `seed-demo.sql` (fixtures, production-guarded) is the real fix and is
+-- tracked as follow-up; it is out of scope for this change.
 -- ============================================================
 
 -- ----------------------------- students -----------------------------
@@ -170,14 +191,30 @@ values
 on conflict (id) do nothing;
 
 -- ------------------------------- leads ------------------------------
-insert into public.leads (id, name, phone, city, state, source, campaign, course_interest, target_year, mode_pref, called, status, temperature, demo_booked, demo_attended, admitted, counsellor)
-values
-  ('lead-0001','Aspirant One','9000010001','Chandigarh','Punjab','Instagram','Foundation 2027 Launch','Safalta Online Foundation',2026,'Online',true,'Not Called','Interested',false,false,false,'Counsellor Priya'),
-  ('lead-0002','Aspirant Two','9000010002','Mohali','Haryana','Meta Form','Rs.50 Masterclass','PSIR Optional',2027,'Offline',true,'Interested','Warm',false,false,false,'Counsellor Raj'),
-  ('lead-0003','Aspirant Three','9000010003','Ludhiana','Himachal','Webinar','Foundation 2027 Launch','Ethics & Governance',2028,'Online',true,'Demo Booked','Interested',true,false,false,'Counsellor Priya'),
-  ('lead-0004','Aspirant Four','9000010004','Amritsar','Punjab','Demo','Rs.50 Masterclass','Mains Test Series',2026,'Offline',true,'Demo Attended','Warm',true,true,false,'Counsellor Raj'),
-  ('lead-0005','Aspirant Five','9000010005','Shimla','Himachal','Referral','Foundation 2027 Launch','Saarthi Foundation',2026,'Online',true,'Admission Done','Interested',true,true,true,'Counsellor Priya')
-on conflict (id) do nothing;
+-- DELIBERATELY EMPTY. Do not add lead fixtures here.
+--
+-- This block used to seed five demo leads. Because DEPLOY.md step 2 tells
+-- operators to run this file against the live database, those five rows were
+-- inserted into production and sat in the CRM for about five weeks. They were
+-- not harmless: `leads` is the sales pipeline, so the fixtures were counted as
+-- real prospects. By 2026-07-25 four of the five live leads with any funnel
+-- progress were fixtures — the pipeline reported an admission and a demo
+-- booking that did not exist. They were snapshotted and deleted under batch
+-- `seed-fixture-removal-2026-07-25`; the ids, names and phone numbers are
+-- listed in `migrations/2026-07-25-remove-seed-fixture-leads.sql`, and are
+-- deliberately not repeated here so that the regression guard can assert they
+-- appear nowhere in this file at all.
+--
+-- Removed rather than wrapped in a guard, deliberately. A guard can be
+-- misconfigured, bypassed, or fail open; rows that are not in the file cannot
+-- be re-inserted by any run of it, and `on conflict (id) do nothing` gives no
+-- protection here — once the rows are deleted there is no conflict left to
+-- do nothing about, so the next run silently restores them. Removal is the
+-- only fix that holds.
+--
+-- Local development does not need these: demo mode serves leads from
+-- `lib/mockData.ts` and never reads Supabase. Pinned by
+-- `tests/seed-fixture-removal/seed-has-no-lead-fixtures.test.ts`.
 
 -- ------------------------------ payments ----------------------------
 insert into public.payments (id, student_name, phone, item, item_type, amount, status, razorpay_payment_id, mode)

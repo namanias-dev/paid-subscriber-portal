@@ -377,16 +377,20 @@ describe("no hard-coded status strings outside the source of truth", () => {
     assert.equal(m[1], DEFAULT_LEAD_STATUS);
   });
 
-  test("seed.sql uses only canonical values", () => {
+  // This used to assert the leads seed block spelled canonical statuses. The
+  // block itself is now gone — seeding `public.leads` at all is the defect, not
+  // the vocabulary it used — so the canonicity check has nothing to inspect and
+  // the real invariant is the absence. Enforced by
+  // `tests/seed-fixture-removal/seed-has-no-lead-fixtures.test.ts`.
+  test("seed.sql seeds no leads at all, canonical or otherwise", () => {
     const sql = readFileSync(join(REPO, "supabase", "seed.sql"), "utf8");
-    const leadsBlock = sql.match(/insert into public\.leads[\s\S]*?on conflict/);
-    assert.ok(leadsBlock, "leads seed block not found");
-    for (const retired of RETIRED_LEAD_STATUSES) {
-      assert.ok(
-        !leadsBlock[0].includes(`'${retired}'`),
-        `seed.sql still seeds the retired status "${retired}"`,
-      );
-    }
+    assert.equal(
+      sql.match(/insert\s+into\s+public\.leads/i),
+      null,
+      "supabase/seed.sql inserts into public.leads again. DEPLOY.md tells operators to run " +
+        "this file against the live database, so any row here lands in the production CRM " +
+        "and is counted as a real prospect.",
+    );
   });
 });
 

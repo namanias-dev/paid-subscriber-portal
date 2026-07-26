@@ -52,7 +52,7 @@ The app never crashes on missing env vars — every integration degrades gracefu
 
 ## 🔌 Going LIVE
 
-1. **Database** — create a Supabase project, run `supabase/schema.sql` then `supabase/seed.sql` in the SQL editor.
+1. **Database** — create a Supabase project, run `supabase/schema.sql` in the SQL editor, then run **only the bootstrap blocks** of `supabase/seed.sql` (`admin_users`, `courses`, `plans`, `site_settings`). Skip its demo-fixture blocks — see the header of that file and step 2 of [DEPLOY.md](DEPLOY.md).
 2. Set `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` (presence of the URL flips the app to LIVE mode).
 3. Set strong `JWT_SECRET` and `ADMIN_JWT_SECRET`.
 4. **Payments (Razorpay)** — add `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET`, and per-plan `NEXT_PUBLIC_RAZORPAY_LINK_*`.

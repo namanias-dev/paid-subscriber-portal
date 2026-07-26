@@ -16,8 +16,9 @@ Demo logins:
 ## 2. Set up the database (to go LIVE)
 
 1. Create a project at [supabase.com](https://supabase.com).
-2. SQL Editor → run **`supabase/schema.sql`**, then **`supabase/seed.sql`**.
-3. Project Settings → API → copy the **Project URL**, **anon key**, and **service_role key**.
+2. SQL Editor → run **`supabase/schema.sql`**.
+3. SQL Editor → run **only the bootstrap blocks** of **`supabase/seed.sql`**: `admin_users`, `courses`, `plans`, `site_settings`. Do **not** run the demo-fixture blocks (`students`, `content_items`, `bookmarks`, `content_progress`, `enrollments`, `payments`, `referrals`) — they insert people, enrolments and money that do not exist, into tables the admin panel reports on as if they were real. Running this whole file unfiltered is how five fake leads reached the production CRM and were counted in the sales pipeline for five weeks; the header of `seed.sql` lists exactly which blocks are which.
+4. Project Settings → API → copy the **Project URL**, **anon key**, and **service_role key**.
 
 ## 3. Add environment variables in Vercel
 
