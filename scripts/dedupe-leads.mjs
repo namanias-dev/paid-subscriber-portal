@@ -31,7 +31,38 @@ try {
 const APPLY = process.argv.includes("--apply");
 const NOW = new Date().toISOString();
 
-const STATUS_RANK = { "New": 0, "Contacted": 1, "Demo Booked": 2, "Demo Attended": 3, "Negotiation": 4, "Admitted": 5, "Lost": -1 };
+/**
+ * Pipeline-progress rank: when two rows share a phone, the higher rank wins.
+ *
+ * MIRROR OF `LEAD_STATUS_MERGE_RANK` in `lib/leadStatus.ts`. This file is a
+ * plain `.mjs` ops script run by bare `node`, so it cannot import the
+ * TypeScript source of truth. Instead of letting the two drift,
+ * `tests/lead-status-consolidation/no-hardcoded-status.test.ts` parses this
+ * literal and asserts it is key-for-key and value-for-value identical to the
+ * canonical table. Edit both or the suite fails.
+ *
+ * Note `Not Interested` at -1: it inherits the rank the retired `Lost` value
+ * had, so a merge involving a dead lead still resolves the same way it did
+ * before the consolidation.
+ */
+const STATUS_RANK = {
+  "Wrong No.": -2,
+  "Not Interested": -1,
+  "Not Called": 0,
+  "Not Replied": 1,
+  "Call Back": 2,
+  "Wants Free Seminar": 3,
+  "Interested": 4,
+  "High Potential Lead": 5,
+  "Walk In": 6,
+  "Demo Booked": 7,
+  "Demo Attended": 8,
+  "Repeat": 9,
+  "Admission Done": 10,
+};
+
+/** Mirror of `DEFAULT_LEAD_STATUS`. Pinned by the same test. */
+const DEFAULT_STATUS = "Not Called";
 
 /** Normalize to a 10-digit Indian mobile, or null if not a valid mobile. */
 function normDigits(raw) {
@@ -118,7 +149,7 @@ async function main() {
     const bestStatus = sorted.reduce((best, l) => {
       const r = STATUS_RANK[l.status] ?? 0;
       return r > (STATUS_RANK[best] ?? 0) ? l.status : best;
-    }, canonical.status || "New");
+    }, canonical.status || DEFAULT_STATUS);
 
     const patch = {
       name: pick("name", (v) => v === "New Lead"),

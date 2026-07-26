@@ -14,6 +14,7 @@ import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { getSupabaseAdmin } from "../../lib/supabase";
 import { promoteLead } from "../../lib/legacy-crm/promote";
+import { LEAD_STATUSES } from "../../lib/leadStatus";
 
 const ACTOR = { id: "qa:phase4-rollback", name: "Phase 4 rollback proof" };
 const MARK = "qa-phase4-rollback";
@@ -40,7 +41,9 @@ async function main() {
   let failed = false;
 
   try {
-    const statuses = ["Not Replied", "Interested", "Call Back", "New", "Lost"];
+    // Drawn from the canonical vocabulary rather than spelled out, so this
+    // proof cannot seed a value the CHECK constraint rejects.
+    const statuses = LEAD_STATUSES.slice(0, N);
     for (let i = 0; i < N; i++) {
       const id = randomUUID();
       const { error } = await db().from("leads").insert({

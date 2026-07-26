@@ -40,7 +40,8 @@
  * `status` is in it, deliberately. A legacy lead's `status` is the Phase 0c
  * mapping of the sheet's wording — "Not Replied", "Call Back". Carrying that
  * into the live pipeline would import stale 2023 sheet sentiment straight into
- * this quarter's funnel metrics. Promotion resets it to "New" and records the
+ * this quarter's funnel metrics. Promotion resets it to `PROMOTED_LEAD_STATUS`
+ * ("Not Called") and records the
  * prior value in the audit, which is what makes demote byte-exact. The verbatim
  * source wording is untouched in `legacy_call_status_raw` and is what the UI
  * shows as context.
@@ -49,6 +50,7 @@
 import { randomUUID } from "node:crypto";
 import { getSupabaseAdmin } from "../supabase";
 import { normalizeIndianMobile } from "../phone";
+import { PROMOTED_LEAD_STATUS, type LeadStatus } from "../leadStatus";
 import type { WriteActor } from "./writes";
 
 // ---------------------------------------------------------------------------
@@ -97,7 +99,17 @@ export const PROMOTION_PRESERVED = [
  * is `promoted_at IS NOT NULL`, and only that.
  */
 export const COHORT_LEGACY_PROMOTED = "legacy_promoted";
-export const PROMOTED_STATUS = "New";
+
+/**
+ * The status a promoted legacy lead lands on.
+ *
+ * Re-exported from the single source of truth rather than spelled here. It was
+ * the literal "New" until the 2026-07-25 consolidation renamed that value to
+ * "Not Called"; had this stayed a local literal, promotion would have written a
+ * status the new CHECK constraint rejects and Phase 4 would have failed closed
+ * on its first use after deploy.
+ */
+export const PROMOTED_STATUS: LeadStatus = PROMOTED_LEAD_STATUS;
 
 /** Cap on a single bulk promotion. Blast radius, not throughput. */
 export const BULK_PROMOTE_MAX = 2_000;

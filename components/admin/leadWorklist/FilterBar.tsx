@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Search, SlidersHorizontal, X } from "lucide-react";
 import { LEAD_WORK_STATUSES } from "@/lib/types";
+import { LEAD_STATUS_META } from "@/lib/leadStatus";
 import {
   MIN_SEARCH_CHARS,
   PAGE_SIZES,
@@ -257,14 +258,20 @@ export default function FilterBar({
             />
           </Field>
 
-          <Field label="Status" htmlFor="f-status" hint="Exact pipeline status, e.g. New or Not Replied.">
-            <input
+          <Field label="Status" htmlFor="f-status" hint="Pipeline disposition — not the counsellor's work status.">
+            <select
               id="f-status"
               className="input py-1.5 text-sm"
               value={query.status}
-              placeholder="Any"
               onChange={(e) => set("status", e.target.value)}
-            />
+            >
+              <option value="">Any</option>
+              {LEAD_STATUS_META.map((m) => (
+                <option key={m.value} value={m.value} title={m.description}>
+                  {m.label}
+                </option>
+              ))}
+            </select>
           </Field>
 
           <Field label="Created between" hint="Filters created_at, not the imported date.">

@@ -27,6 +27,7 @@ import {
   LEADS_IS_LEGACY_COLUMN,
   type LegacyOptions,
 } from "./legacy-migration/legacyFilter";
+import { DEFAULT_LEAD_STATUS, LEAD_FUNNEL_STAGES, normalizeLeadStatus } from "./leadStatus";
 import { TRIGGERS } from "./sms/templates";
 import { NON_DUPLICABLE_WEBINAR_FIELDS, buildDuplicateSlug } from "./webinarLifecycle";
 import type {
@@ -2212,7 +2213,7 @@ export async function addLead(input: Partial<Lead>, sourceForm?: string, attribu
     target_year: input.target_year ?? null,
     mode_pref: input.mode_pref ?? null,
     called: false,
-    status: input.status || "New",
+    status: normalizeLeadStatus(input.status) || DEFAULT_LEAD_STATUS,
     temperature: input.temperature || "Interested",
     demo_booked: false,
     demo_attended: false,
@@ -6114,12 +6115,21 @@ export async function getDashboard(): Promise<DashboardData> {
   });
   const leadSources = Object.entries(sourceMap).map(([name, value]) => ({ name, value }));
 
+  // Built entirely from the boolean progress columns, never from `status`.
+  //
+  // The pre-consolidation version counted one stage with
+  // `l.status === "Negotiation"`. `Negotiation` was retired (it held zero rows
+  // and had no owner), and a status-string funnel would have silently reported
+  // 0 forever after the rename. The booleans are also monotonic in a way status
+  // is not: a lead who attended a demo and then declined still attended, so the
+  // funnel keeps counting them where a single mutable status cannot.
   const funnel = [
     { stage: "Leads", value: leads.length },
-    { stage: "Contacted", value: leads.filter((l) => l.called).length },
-    { stage: "Demo", value: leads.filter((l) => l.demo_attended).length },
-    { stage: "Negotiation", value: leads.filter((l) => l.status === "Negotiation").length },
-    { stage: "Admitted", value: admitted },
+    { stage: "Called", value: leads.filter((l) => l.called).length },
+    ...LEAD_FUNNEL_STAGES.map((s) => ({
+      stage: s.label,
+      value: s.key === "admitted" ? admitted : leads.filter((l) => l[s.key]).length,
+    })),
   ];
 
   return {

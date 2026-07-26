@@ -172,11 +172,11 @@ on conflict (id) do nothing;
 -- ------------------------------- leads ------------------------------
 insert into public.leads (id, name, phone, city, state, source, campaign, course_interest, target_year, mode_pref, called, status, temperature, demo_booked, demo_attended, admitted, counsellor)
 values
-  ('lead-0001','Aspirant One','9000010001','Chandigarh','Punjab','Instagram','Foundation 2027 Launch','Safalta Online Foundation',2026,'Online',true,'New','Interested',false,false,false,'Counsellor Priya'),
-  ('lead-0002','Aspirant Two','9000010002','Mohali','Haryana','Meta Form','Rs.50 Masterclass','PSIR Optional',2027,'Offline',true,'Contacted','Warm',false,false,false,'Counsellor Raj'),
+  ('lead-0001','Aspirant One','9000010001','Chandigarh','Punjab','Instagram','Foundation 2027 Launch','Safalta Online Foundation',2026,'Online',true,'Not Called','Interested',false,false,false,'Counsellor Priya'),
+  ('lead-0002','Aspirant Two','9000010002','Mohali','Haryana','Meta Form','Rs.50 Masterclass','PSIR Optional',2027,'Offline',true,'Interested','Warm',false,false,false,'Counsellor Raj'),
   ('lead-0003','Aspirant Three','9000010003','Ludhiana','Himachal','Webinar','Foundation 2027 Launch','Ethics & Governance',2028,'Online',true,'Demo Booked','Interested',true,false,false,'Counsellor Priya'),
   ('lead-0004','Aspirant Four','9000010004','Amritsar','Punjab','Demo','Rs.50 Masterclass','Mains Test Series',2026,'Offline',true,'Demo Attended','Warm',true,true,false,'Counsellor Raj'),
-  ('lead-0005','Aspirant Five','9000010005','Shimla','Himachal','Referral','Foundation 2027 Launch','Saarthi Foundation',2026,'Online',true,'Admitted','Interested',true,true,true,'Counsellor Priya')
+  ('lead-0005','Aspirant Five','9000010005','Shimla','Himachal','Referral','Foundation 2027 Launch','Saarthi Foundation',2026,'Online',true,'Admission Done','Interested',true,true,true,'Counsellor Priya')
 on conflict (id) do nothing;
 
 -- ------------------------------ payments ----------------------------

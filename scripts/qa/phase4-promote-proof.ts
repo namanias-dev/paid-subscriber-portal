@@ -26,6 +26,7 @@
 
 import { randomUUID } from "node:crypto";
 import { getSupabaseAdmin } from "../../lib/supabase";
+import { LEAD_STATUSES, DEFAULT_LEAD_STATUS } from "../../lib/leadStatus";
 import {
   promoteLead, demoteLead, previewPromote,
   PROMOTION_PRESERVED, COHORT_LEGACY_PROMOTED, PROMOTED_STATUS,
@@ -92,7 +93,7 @@ async function main() {
     const legacyId = await insertLead({
       name: "QA Phase4 Subject",
       phone: LEGACY_PHONE,
-      status: "Not Replied",
+      status: LEAD_STATUSES[1],
       is_legacy: true,
       legacy_call_status_raw: "call back after 6pm - sounded keen",
       legacy_source_tab: "QA Source Tab",
@@ -170,7 +171,7 @@ async function main() {
     const collideLegacyId = await insertLead({
       name: "QA Phase4 Collide (legacy)",
       phone: COLLIDE_PHONE,
-      status: "Not Replied",
+      status: LEAD_STATUSES[1],
       is_legacy: true,
       import_batch: TAG,
       import_source: TAG,
@@ -186,7 +187,7 @@ async function main() {
     const liveTwinId = await insertLead({
       name: "QA Phase4 Collide (live)",
       phone: "+91 99990 00022",
-      status: "New",
+      status: DEFAULT_LEAD_STATUS,
       is_legacy: false,
       import_batch: TAG,
       import_source: TAG,

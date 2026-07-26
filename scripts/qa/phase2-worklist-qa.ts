@@ -18,6 +18,7 @@
  */
 
 import { getSupabaseAdmin } from "../../lib/supabase";
+import { DEFAULT_LEAD_STATUS } from "../../lib/leadStatus";
 import { _dbSelectLeadsPaged, _encodeLeadCursor, type _LeadsPagedClient } from "../../lib/dataProvider";
 import type { LeadsPageParams, LeadsSortKey, LeadWorklistRow } from "../../lib/types";
 
@@ -216,15 +217,15 @@ async function main() {
     { label: "assigned", params: { includeLegacy: "only", assignedMode: "assigned" } },
     { label: "never contacted", params: { includeLegacy: "only", contacted: "no" } },
     { label: "has been contacted", params: { includeLegacy: "only", contacted: "yes" } },
-    { label: "status = New", params: { includeLegacy: "only", status: "New" } },
+    { label: `status = ${DEFAULT_LEAD_STATUS}`, params: { includeLegacy: "only", status: DEFAULT_LEAD_STATUS } },
     { label: "work_status = interested", params: { includeLegacy: "only", workStatus: "interested" } },
     { label: "search partial phone '98765'", params: { includeLegacy: "only", search: "98765", countCap: 5000 } },
     { label: "search +91-formatted needle", params: { includeLegacy: "only", search: "+91 98765 43210", countCap: 5000 } },
     { label: "search partial name 'kumar' (capped)", params: { includeLegacy: "only", search: "kumar", countCap: 5000 } },
     { label: "search 1-char needle 'a'", params: { includeLegacy: "only", search: "a", countCap: 5000 } },
-    { label: "combo: status+consent+unassigned", params: { includeLegacy: "only", status: "New", consentStatus: "unknown", assignedMode: "unassigned" } },
+    { label: "combo: status+consent+unassigned", params: { includeLegacy: "only", status: DEFAULT_LEAD_STATUS, consentStatus: "unknown", assignedMode: "unassigned" } },
     { label: "date range 2025", params: { includeLegacy: "only", createdFrom: "2025-01-01T00:00:00Z", createdTo: "2026-01-01T00:00:00Z" } },
-    { label: "ZERO-RESULT combo", params: { includeLegacy: "only", status: "New", search: "zzzzzznotarealname" } },
+    { label: "ZERO-RESULT combo", params: { includeLegacy: "only", status: DEFAULT_LEAD_STATUS, search: "zzzzzznotarealname" } },
   ];
 
   // NETWORK FLOOR. This harness runs on a laptop; the app runs on Vercel in the

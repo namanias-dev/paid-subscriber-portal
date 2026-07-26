@@ -20,6 +20,7 @@ import { writeFileSync, mkdirSync, existsSync, readFileSync } from "node:fs";
 import { dirname, resolve as pathResolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { getSupabaseAdmin } from "../lib/supabase";
+import { DEFAULT_LEAD_STATUS } from "../lib/leadStatus";
 import { isLegacyImportEnabled } from "../lib/legacy-migration/flags";
 import { checkStorageHealth, preflightDiskCheck } from "../lib/ops/storageGuard";
 import {
@@ -214,7 +215,7 @@ async function commitStagedLeads(staged: StagedLead[], batchSize: number, import
           target_year: null,
           mode_pref: null,
           called: false,
-          status: "New",
+          status: DEFAULT_LEAD_STATUS,
           temperature: "Cold",
           demo_booked: false,
           demo_attended: false,

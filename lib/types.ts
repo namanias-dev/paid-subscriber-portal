@@ -1,5 +1,6 @@
 import type { LeaderboardSettings } from "./leaderboardConfig";
 import type { AttributionState } from "./attribution";
+import type { LeadStatus } from "./leadStatus";
 
 export type PlanId = "1m" | "3m" | "6m" | "12m" | "lifetime";
 
@@ -825,14 +826,11 @@ export interface PaymentReceipt {
 }
 
 // ----------------------------- CRM -----------------------------
-export type LeadStatus =
-  | "New"
-  | "Contacted"
-  | "Demo Booked"
-  | "Demo Attended"
-  | "Negotiation"
-  | "Admitted"
-  | "Lost";
+// `LeadStatus` is defined in `lib/leadStatus.ts`, the single source of truth
+// for the 13-value pipeline vocabulary (values, labels, colours, order,
+// retired-value mapping). Re-exported here so the many existing
+// `from "@/lib/types"` imports keep working; do not redeclare it.
+export type { LeadStatus } from "./leadStatus";
 
 export interface Lead {
   id: string;
@@ -1092,12 +1090,15 @@ export interface LeadsPageParams {
   /** `attribution.legacy_source_tab` exact match (e.g. "FB LEADS"). */
   sourceTag?: string | null;
   /**
-   * Status exact match. Typed as `string`, not `LeadStatus`: master's enum has
-   * only the 7 base statuses, while the remap put 10 further values
-   * ("Not Replied", "Wrong No." …) on 115,542 legacy rows. Narrowing this to
-   * `LeadStatus` would make the worklist's most useful filters uncallable.
+   * Status exact match.
+   *
+   * Now that the 2026-07-25 consolidation made `LeadStatus` cover every value
+   * present in the table, this is narrowed to the canonical union — the reason
+   * it was widened to `string` (the old 7-value enum could not express
+   * "Not Replied" / "Wrong No.") no longer applies. The route layer validates
+   * incoming values against `LEAD_STATUSES` before they reach here.
    */
-  status?: string | null;
+  status?: LeadStatus | null;
   assignedTo?: string | null;
   /** Name / phone substring. Applied server-side via PostgREST `or(ilike)`. */
   search?: string | null;

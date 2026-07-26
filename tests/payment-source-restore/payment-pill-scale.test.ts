@@ -54,7 +54,7 @@ function mkLead(over: Partial<Lead> & { phone: string }): Lead {
     target_year: null,
     mode_pref: null,
     called: false,
-    status: "New",
+    status: "Not Called",
     temperature: "Interested",
     demo_booked: false,
     demo_attended: false,
