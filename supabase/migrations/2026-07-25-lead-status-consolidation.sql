@@ -83,65 +83,74 @@ create index if not exists idx_lead_status_snapshot_batch
 
 
 -- ---------------------------------------------------------------------------
--- STEP 2 — snapshot + rewrite, chunked
+-- STEP 2a — snapshot every row this migration will touch, before touching it
 -- ---------------------------------------------------------------------------
--- One DO block so the mapping is declared once and drives both the snapshot
--- and the UPDATE. Chunked by primary key so each statement takes a bounded
--- number of row locks instead of one 63,780-row transaction.
+-- `on conflict do nothing` makes a re-run a no-op rather than an error, and
+-- preserves the ORIGINAL prior value if this is somehow run twice — a second
+-- run must not record the already-migrated value as the thing to roll back to.
+--
+-- This snapshots the WHOLE TABLE, not just active rows. Merged rows
+-- (`merged_into is not null`) carry retired statuses too — 323 of them, all
+-- `New` — and the CHECK constraint in step 3 applies to every row, so leaving
+-- them behind would make VALIDATE fail.
 
-do $$
-declare
-  v_batch   text := 'status-consolidation-2026-07-25';
-  v_chunk   int  := 10000;
-  v_moved   int;
-  v_total   int  := 0;
-begin
-  -- The mapping, as data. Retired value -> canonical replacement.
-  create temporary table _status_map (from_status text primary key, to_status text not null) on commit drop;
-  insert into _status_map (from_status, to_status) values
-    ('New',         'Not Called'),
+insert into public.lead_status_migration_snapshot (batch_id, lead_id, prior_status, new_status, is_legacy)
+select 'status-consolidation-2026-07-25', l.id, l.status, m.to_status, l.is_legacy
+from public.leads l
+join (values
+  ('New',         'Not Called'),
+  ('Admitted',    'Admission Done'),
+  ('Lost',        'Not Interested'),
+  ('Contacted',   'Interested'),
+  ('Paid Rs. 50', 'High Potential Lead'),
+  ('Negotiation', 'Interested')
+) as m(from_status, to_status) on m.from_status = l.status
+on conflict (batch_id, lead_id) do nothing;
+
+-- Executed 2026-07-25: 64,104 rows snapshotted (63,781 active + 323 merged).
+
+
+-- ---------------------------------------------------------------------------
+-- STEP 2b — the rewrite
+-- ---------------------------------------------------------------------------
+-- The five low-volume values go in one set-based statement (117 rows).
+
+update public.leads l
+   set status = m.to_status
+  from (values
     ('Admitted',    'Admission Done'),
     ('Lost',        'Not Interested'),
     ('Contacted',   'Interested'),
     ('Paid Rs. 50', 'High Potential Lead'),
-    ('Negotiation', 'Interested');
+    ('Negotiation', 'Interested')
+  ) as m(from_status, to_status)
+ where l.status = m.from_status;
 
-  -- 2a. Snapshot every row this migration will touch, before touching it.
-  --     `on conflict do nothing` makes a re-run a no-op rather than an error,
-  --     and preserves the ORIGINAL prior value if the migration is somehow
-  --     run twice — the second run must not record the already-migrated value
-  --     as the thing to roll back to.
-  insert into public.lead_status_migration_snapshot (batch_id, lead_id, prior_status, new_status, is_legacy)
-  select v_batch, l.id, l.status, m.to_status, l.is_legacy
-  from public.leads l
-  join _status_map m on m.from_status = l.status
-  on conflict (batch_id, lead_id) do nothing;
+-- `New` is 63,987 rows and must be chunked.
+--
+-- WHY ctid AND NOT A `DO` LOOP — this was tried and failed in production.
+-- The obvious form is a PL/pgSQL loop that keeps updating until row_count is
+-- 0. Do not use it here: the whole DO block is ONE statement as far as the
+-- server is concerned, so it inherits a single statement_timeout for all
+-- 64k rows and is cancelled part-way (it rolled back cleanly, but it never
+-- completes). Each chunk must be its own top-level statement.
+--
+-- Chunk by `ctid`, not by `id`: `... where id in (select id ... order by id
+-- limit N)` re-sorts the whole matching set on every pass, and the sort is
+-- most of the cost. `ctid` is the physical row address, so the subselect is a
+-- cheap scan that stops at the limit.
+--
+-- 12,000 completes comfortably inside the timeout; 20,000 does not. Repeat
+-- until it reports 0 rows:
+--
+--   update public.leads set status = 'Not Called'
+--    where ctid in (select ctid from public.leads where status = 'New' limit 12000);
+--
+-- Then sweep the remainder in one statement:
 
-  raise notice 'snapshot rows for batch %: %', v_batch,
-    (select count(*) from public.lead_status_migration_snapshot where batch_id = v_batch);
+update public.leads set status = 'Not Called' where status = 'New';
 
-  -- 2b. Chunked set-based rewrite. Loops until no retired value remains.
-  loop
-    update public.leads l
-       set status = m.to_status
-      from _status_map m
-     where l.status = m.from_status
-       and l.id in (
-         select l2.id
-         from public.leads l2
-         join _status_map m2 on m2.from_status = l2.status
-         order by l2.id
-         limit v_chunk
-       );
-
-    get diagnostics v_moved = row_count;
-    v_total := v_total + v_moved;
-    exit when v_moved = 0;
-    raise notice 'chunk rewrote % rows (running total %)', v_moved, v_total;
-  end loop;
-
-  raise notice 'consolidation rewrote % rows total', v_total;
-end $$;
+-- Executed 2026-07-25: 64,104 rows rewritten across 6 chunks + a final sweep.
 
 
 -- ---------------------------------------------------------------------------
@@ -204,10 +213,18 @@ alter table public.leads alter column status set default 'Not Called';
 -- the re-engagement worklist depends on for its 285 ms page. REINDEX
 -- CONCURRENTLY rebuilds without blocking reads or writes.
 --
+-- Each REINDEX must be its own top-level statement — batching two of them, or
+-- one plus the ANALYZE, puts them in an implicit transaction block and
+-- Postgres raises 25001.
+--
 --   reindex index concurrently public.idx_leads_status;
 --   reindex index concurrently public.idx_leads_legacy_status_created_v2;
 --   reindex index concurrently public.idx_leads_legacy_count_cover;
 --   analyze public.leads;
+--
+-- Executed 2026-07-25. Post-rebuild plan for the worklist's hottest query
+-- (legacy + status + keyset) confirmed still an Index Scan on
+-- idx_leads_legacy_status_created_v2, 61 ms.
 
 
 -- ===========================================================================
