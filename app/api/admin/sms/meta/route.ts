@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requirePermission, requireSuperAdmin } from "@/lib/adminGuard";
 import { getWebinars, getLeads, getAllCourses } from "@/lib/dataProvider";
+import { LEAD_STATUSES } from "@/lib/leadStatus";
 
 export const dynamic = "force-dynamic";
 
@@ -22,7 +23,12 @@ export async function GET() {
     getAllCourses(),
   ]);
   const leadSources = [...new Set(leads.map((l) => l.source).filter(Boolean))].sort();
-  const leadStages = [...new Set(leads.map((l) => l.status).filter(Boolean))].sort();
+  // The full canonical vocabulary in canonical order — NOT the distinct values
+  // observed in the current rows, alphabetised, which is what this used to do.
+  // Deriving it from the data meant the segment builder offered a different
+  // stage list, in a different order, from the Kanban and the worklist, and
+  // silently dropped any stage that happened to have zero live leads that day.
+  const leadStages = LEAD_STATUSES;
   return NextResponse.json({
     ok: true,
     isSuperAdmin: await requireSuperAdmin(),

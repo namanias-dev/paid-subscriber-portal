@@ -1,4 +1,5 @@
 import { DEMO_ADMIN } from "./config";
+import { LEAD_STATUSES, leadStatusFlags } from "./leadStatus";
 import type {
   Student,
   ContentItem,
@@ -302,12 +303,16 @@ export const enrollments: Enrollment[] = [
 // LEADS (CRM)
 // =================================================================
 const SOURCES = ["Instagram", "Meta Form", "Webinar", "Demo", "Website", "WhatsApp", "Referral"];
-const STATUSES: Lead["status"][] = ["New", "Contacted", "Demo Booked", "Demo Attended", "Negotiation", "Admitted", "Lost"];
+const STATUSES: readonly Lead["status"][] = LEAD_STATUSES;
 const CITIES = ["Chandigarh", "Mohali", "Panchkula", "Ludhiana", "Amritsar", "Ambala", "Shimla", "Delhi"];
 
 export const leads: Lead[] = Array.from({ length: 24 }).map((_, i) => {
   const status = STATUSES[i % STATUSES.length];
-  const admitted = status === "Admitted";
+  // Derived through the source of truth. These three booleans used to be
+  // computed from inline status-string arrays here, which is exactly what the
+  // "Admitted" -> "Admission Done" rename would have broken silently.
+  const flags = leadStatusFlags(status);
+  const admitted = flags.admitted;
   const total = admitted ? [40000, 75000, 45000, 10000][i % 4] : null;
   const collected = admitted ? Math.round((total || 0) * (i % 2 === 0 ? 0.6 : 1)) : null;
   return {
@@ -324,8 +329,8 @@ export const leads: Lead[] = Array.from({ length: 24 }).map((_, i) => {
     called: i % 3 !== 0,
     status,
     temperature: (["Interested", "Warm", "Cold", "Junk"] as const)[i % 4],
-    demo_booked: ["Demo Booked", "Demo Attended", "Negotiation", "Admitted"].includes(status),
-    demo_attended: ["Demo Attended", "Negotiation", "Admitted"].includes(status),
+    demo_booked: flags.demo_booked,
+    demo_attended: flags.demo_attended,
     webinar_registered: i % 2 === 0,
     webinar_attended: i % 4 === 0,
     admitted,

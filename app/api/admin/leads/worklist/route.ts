@@ -9,6 +9,7 @@ import {
   type LeadsSortKey,
   type LeadWorkStatus,
 } from "@/lib/types";
+import { LEAD_STATUSES, normalizeLeadStatus } from "@/lib/leadStatus";
 
 export const dynamic = "force-dynamic";
 
@@ -104,6 +105,19 @@ export async function GET(req: Request) {
     return bad(`Unknown work_status "${workStatus}".`);
   }
 
+  // ---- pipeline status ---------------------------------------------
+  // `work_status` was validated here from the start; `status` was passed
+  // straight through to the RPC's `l.status = %L`. An unknown value produced a
+  // silent empty page that is indistinguishable from "no leads match" — the
+  // same failure mode as the search filter above, which is why that one is
+  // rejected too. Retired values are coerced rather than rejected so a
+  // bookmarked "?status=New" link keeps working.
+  const statusRaw = q("status");
+  const status = statusRaw === null ? null : normalizeLeadStatus(statusRaw);
+  if (statusRaw !== null && status === null) {
+    return bad(`Unknown status "${statusRaw}". Allowed: ${LEAD_STATUSES.join(", ")}.`);
+  }
+
   // ---- assignment / contacted --------------------------------------
   const assignedMode = q("assigned_mode");
   if (assignedMode !== null && assignedMode !== "assigned" && assignedMode !== "unassigned") {
@@ -132,7 +146,7 @@ export async function GET(req: Request) {
       countCap: hasSearch ? SEARCH_COUNT_CAP : null,
       sort,
       dir,
-      status: q("status"),
+      status,
       sourceTag: q("source_tag"),
       assignedTo: q("assigned_to"),
       search,

@@ -12,6 +12,7 @@
  */
 
 import { getSupabaseAdmin } from "../supabase";
+import { DEFAULT_LEAD_STATUS } from "../leadStatus";
 import { INCLUDED_TABS, LEGACY_WORKBOOK_SPREADSHEET_ID, TAB_SPECS, type LegacyTab } from "./tabRegistry";
 import { fetchTabAsRecords, loadServiceAccountAuth, makeSheetsClient } from "./sheetsClient";
 import { transformRow } from "./transform";
@@ -113,7 +114,7 @@ export async function syncOneTab(
       phone: s.canonical_phone,
       source: s.channel_legacy,
       campaign: s.campaign_clean,
-      status: "New",
+      status: DEFAULT_LEAD_STATUS,
       temperature: "Cold",
       created_at: s.timestamp_iso ?? new Date().toISOString(),
       updated_at: new Date().toISOString(),

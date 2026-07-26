@@ -12,6 +12,7 @@
  */
 import { getSupabaseAdmin } from "../supabase";
 import { normalizeIndianMobile } from "../phone";
+import { normalizeLeadStatus } from "../leadStatus";
 import { formatISTTime, resolveTimeframe, type TimeframeValue } from "../dates";
 import {
   getPayments, getLeads, getBuyers, getWebinars, getWebinarBySlug,
@@ -312,7 +313,15 @@ async function resolveAudienceInner(spec: AudienceSpec): Promise<Recipient[]> {
   if (spec.type === "leads") {
     let leads = await getLeads({ includeLegacy: false });
     if (spec.source) leads = leads.filter((l) => (l.source || "").toLowerCase() === spec.source!.toLowerCase());
-    if (spec.stage) leads = leads.filter((l) => (l.status || "").toLowerCase() === spec.stage!.toLowerCase());
+    if (spec.stage) {
+      // Resolve the saved segment's stage through the canonical vocabulary
+      // BEFORE matching. A segment saved as "New" or "Admitted" predates the
+      // 2026-07-25 consolidation; matched literally it would now select zero
+      // leads and the campaign would silently send to nobody. Falling back to
+      // the raw string keeps an unrecognised value behaving as before.
+      const wanted = (normalizeLeadStatus(spec.stage) ?? spec.stage).toLowerCase();
+      leads = leads.filter((l) => (normalizeLeadStatus(l.status) ?? l.status ?? "").toLowerCase() === wanted);
+    }
     if (ptf) leads = leads.filter((l) => inPreset(new Date(l.created_at).getTime()));
     return dedupeRecipients(leads.map((l) => { const d = norm(l.phone); return d ? attach(d, l.name, { item_short: l.course_interest || "" }, { lead_id: l.id }) : null; }).filter((x): x is Recipient => !!x));
   }

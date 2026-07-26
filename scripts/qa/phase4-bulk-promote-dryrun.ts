@@ -11,6 +11,7 @@
  */
 
 import { getSupabaseAdmin } from "../../lib/supabase";
+import { LEAD_STATUSES } from "../../lib/leadStatus";
 import {
   dryRunBulkPromote, BULK_PROMOTE_MAX, PROMOTE_TYPED_CONFIRMATION_THRESHOLD,
   type BulkPromoteFilter,
@@ -97,7 +98,7 @@ async function main() {
     dryRuns.push(await run(`Single source tab: ${topTab}`, { sourceTab: topTab }));
   }
 
-  dryRuns.push(await run("Status = Interested", { status: "Interested" }));
+  dryRuns.push(await run(`Status = ${LEAD_STATUSES[3]}`, { status: LEAD_STATUSES[3] }));
 
   console.log("\n" + "=".repeat(72));
   console.log("TOTALS ACROSS THE SEGMENTS PROJECTED ABOVE");

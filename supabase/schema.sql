@@ -266,7 +266,10 @@ create table if not exists public.leads (
   target_year int,
   mode_pref text,
   called boolean default false,
-  status text default 'New',
+  -- The 13-value pipeline vocabulary. Mirrors `LEAD_STATUSES` in
+  -- `lib/leadStatus.ts` and the `leads_status_vocab` CHECK added by
+  -- `migrations/2026-07-25-lead-status-consolidation.sql`.
+  status text default 'Not Called',
   temperature text default 'Interested',
   demo_booked boolean default false,
   demo_attended boolean default false,

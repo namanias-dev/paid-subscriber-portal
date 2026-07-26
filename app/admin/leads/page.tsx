@@ -15,6 +15,7 @@ import { usePersistentState } from "@/lib/usePersistentState";
 import { formatINR, formatISTDateTime, formatISTShort, istYMD, istTodayYMD, istYMDToMs, resolveTimeframe, type TimeframeValue } from "@/lib/dates";
 import { sortLeads, KANBAN_SORTS, type KanbanSort } from "@/lib/leadsSort";
 import { MARKETING_CHANNELS, GOOGLE_ADS_CHANNEL } from "@/lib/attribution";
+import { DEFAULT_LEAD_STATUS, LEAD_STATUSES, LEAD_STATUS_META, leadStatusFlags, leadStatusLabel, leadStatusPill, normalizeLeadStatus } from "@/lib/leadStatus";
 import type { Lead, LeadStatus, LeadSourceTouch } from "@/lib/types";
 
 const DAY_MS = 86400000;
@@ -25,7 +26,9 @@ const LeadsBarChart = dynamic(() => import("@/components/admin/RegistrationsBarC
   loading: () => <div className="h-full w-full animate-shimmer rounded-xl bg-surface2" />,
 });
 
-const STAGES: LeadStatus[] = ["New", "Contacted", "Demo Booked", "Demo Attended", "Negotiation", "Admitted", "Lost"];
+/** Kanban columns. One per canonical status, in the canonical order — the
+ *  column set is no longer a local list that can drift from the vocabulary. */
+const STAGES: readonly LeadStatus[] = LEAD_STATUSES;
 const SOURCES = ["Instagram", "Meta Form", "Webinar", "Demo", "Website", "WhatsApp", "Referral", "home_popup", "free_download", "quiz_public"];
 
 type LeadSort = "recent" | "activity" | "name";
@@ -107,7 +110,7 @@ export default function LeadsPage() {
         l.demo_booked ? "Demo booked" : null,
         l.demo_attended ? "Demo attended" : null,
         l.webinar_registered ? "Webinar reg." : null,
-        l.admitted ? "Admitted" : null,
+        l.admitted ? "Admission done" : null,
       ].filter(Boolean).join(" · ");
       const nodes = sorted.map((l) => ({
         id: l.id,
@@ -121,7 +124,7 @@ export default function LeadsPage() {
         datetime: l.created_at,
         badge: (
           <span className="flex items-center gap-1.5">
-            <span className="pill pill-blue">{l.status}</span>
+            <span className={`pill ${leadStatusPill(l.status)}`}>{leadStatusLabel(l.status)}</span>
             <span className={`pill ${l.temperature === "Interested" ? "pill-green" : l.temperature === "Warm" ? "pill-amber" : l.temperature === "Junk" ? "pill-red" : "pill-gray"}`}>{l.temperature}</span>
           </span>
         ),
@@ -142,7 +145,7 @@ export default function LeadsPage() {
       summary: (
         <span className="flex items-center gap-1.5">
           <span className="text-[11px] text-muted">{r.count} {r.count === 1 ? "touchpoint" : "touchpoints"}</span>
-          <span className="pill pill-blue">{r.latestStatus}</span>
+          <span className={`pill ${leadStatusPill(r.latestStatus)}`}>{leadStatusLabel(r.latestStatus)}</span>
         </span>
       ),
       nodes: r.nodes,
@@ -158,7 +161,11 @@ export default function LeadsPage() {
     await fetch(`/api/admin/leads/${lead.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status, admitted: status === "Admitted" }),
+      // `admitted` is derived through the source of truth, never from a status
+      // string compared inline. The pre-consolidation code tested
+      // `status === "Admitted"` here, so renaming the value to "Admission Done"
+      // would have silently stopped the flag from ever being set.
+      body: JSON.stringify({ status, admitted: leadStatusFlags(status).admitted }),
     });
     reload();
   }
@@ -166,7 +173,7 @@ export default function LeadsPage() {
   function exportCsv() {
     const rows = [
       ["Name", "Phone", "Email", "City", "State", "Source", "Status", "Course Interest", "Counsellor", "Follow-up", "Created"],
-      ...filtered.map((l) => [l.name, l.phone, l.email ?? "", l.city ?? "", l.state ?? "", l.source, l.status, l.course_interest ?? "", l.counsellor ?? "", l.follow_up_date ?? "", l.created_at ?? ""]),
+      ...filtered.map((l) => [l.name, l.phone, l.email ?? "", l.city ?? "", l.state ?? "", l.source, leadStatusLabel(l.status), l.course_interest ?? "", l.counsellor ?? "", l.follow_up_date ?? "", l.created_at ?? ""]),
     ];
     const csv = rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
     const url = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
@@ -268,11 +275,17 @@ export default function LeadsPage() {
       {view === "kanban" ? (
         <div className="no-scrollbar flex gap-3 overflow-x-auto pb-4">
           {STAGES.map((stage) => {
-            const items = sortLeads(filtered.filter((l) => l.status === stage), kanbanSort);
+            // Compare through `normalizeLeadStatus`, not on the raw string.
+            // During the deploy window a row may still hold a pre-consolidation
+            // value ("New", "Admitted"); a strict equality here would drop it
+            // out of every column and the CRM would look half-empty until the
+            // data migration finished. This is also what lets the code ship
+            // BEFORE the data migration instead of racing it.
+            const items = sortLeads(filtered.filter((l) => normalizeLeadStatus(l.status) === stage), kanbanSort);
             return (
               <div key={stage} className="w-72 shrink-0">
                 <div className="mb-2 flex items-center justify-between px-1">
-                  <span className="text-sm font-semibold">{stage}</span>
+                  <span className={`pill ${leadStatusPill(stage)} text-xs font-semibold`}>{leadStatusLabel(stage)}</span>
                   <span className="pill pill-gray">{items.length}</span>
                 </div>
                 <div className="space-y-2">
@@ -427,7 +440,10 @@ function LeadDetail({
 }) {
   const { toast } = useToast();
   const [note, setNote] = useState("");
-  const [status, setLocalStatus] = useState<LeadStatus>(lead.status);
+  // Normalized so a pre-consolidation value still selects an option instead of
+  // rendering the dropdown blank (a blank select silently reassigns the lead to
+  // whatever the counsellor picks next).
+  const [status, setLocalStatus] = useState<LeadStatus>(normalizeLeadStatus(lead.status) ?? DEFAULT_LEAD_STATUS);
   const [showJourney, setShowJourney] = useState(false);
 
   async function addNote() {
@@ -464,7 +480,7 @@ function LeadDetail({
         <div>
           <label className="label">Pipeline stage</label>
           <select className="input" value={status} onChange={(e) => { const s = e.target.value as LeadStatus; setLocalStatus(s); setStatus(lead, s); onChanged(); }}>
-            {STAGES.map((s) => <option key={s}>{s}</option>)}
+            {LEAD_STATUS_META.map((m) => <option key={m.value} value={m.value} title={m.description}>{m.label}</option>)}
           </select>
         </div>
 
