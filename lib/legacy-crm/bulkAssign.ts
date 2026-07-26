@@ -61,8 +61,65 @@ export const TYPED_CONFIRMATION_THRESHOLD = 1_000;
 /** PostgREST `in` lists ride in the URL, so they have to stay short. */
 const ID_CHUNK = 200;
 
+/**
+ * Ids per UPDATE. Smaller than `ID_CHUNK` because reads and writes cost very
+ * different amounts here: `leads` carries ~30 indexes, so a 200-row update
+ * maintains ~6,000 index entries, and the `authenticator` role runs with
+ * `statement_timeout = 8s`. Under concurrent autovacuum that combination did
+ * time out partway through a 60,000-row run.
+ */
+const UPDATE_CHUNK = 100;
+
+/** One retry for a statement timeout, which here is contention, not a bug. */
+async function withTimeoutRetry<T extends { error: { message: string } | null }>(
+  // PostgREST builders are thenables, not Promises.
+  run: () => PromiseLike<T>,
+): Promise<T> {
+  const first = await run();
+  if (!first.error || !/statement timeout|57014/i.test(first.error.message)) return first;
+  await new Promise((r) => setTimeout(r, 1_500));
+  return run();
+}
+
 /** Rows per audit insert. */
 const AUDIT_CHUNK = 500;
+
+/**
+ * PostgREST caps every response at `db-max-rows` (1,000 on Supabase) and says
+ * nothing when it does. `.limit(5001)` returns 1,000 rows with a 200 and no
+ * marker — the truncation is indistinguishable from "that is all there was".
+ *
+ * That silence broke two things here. `resolveSelectionIds` asked for
+ * `limit + 1` specifically to detect truncation, so it computed
+ * `1000 > 5000 === false` and reported an un-truncated selection of 1,000 when
+ * 178,183 matched. Worse, `revertAssignBatch` read a batch's audit rows with no
+ * limit at all: a 5,000-row batch would restore the first 1,000 owners and
+ * report success, leaving 4,000 leads assigned with their audit rows marked
+ * reverted and no way to tell from the result that anything was left behind.
+ *
+ * So no query whose result size is driven by data may be issued as a single
+ * request. Everything pages through `.range()` until a short page arrives.
+ */
+const PAGE = 1_000;
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+async function fetchAllRows<T>(
+  build: () => any,
+  opts: { max?: number; label: string },
+): Promise<{ rows: T[]; truncated: boolean }> {
+  const max = opts.max ?? Number.POSITIVE_INFINITY;
+  const out: T[] = [];
+  for (let from = 0; out.length < max; from += PAGE) {
+    const { data, error } = await build().range(from, from + PAGE - 1);
+    if (error) throw new BulkAssignError(`${opts.label}: ${error.message}`);
+    const page = (data as T[] | null) ?? [];
+    out.push(...page);
+    // A short page is the only reliable end-of-data signal PostgREST gives.
+    if (page.length < PAGE) return { rows: out.slice(0, max), truncated: false };
+  }
+  return { rows: out.slice(0, max), truncated: true };
+}
+/* eslint-enable @typescript-eslint/no-explicit-any */
 
 /** The phrase the operator must type for a large batch. */
 export function confirmationPhraseFor(count: number): string {
@@ -272,26 +329,32 @@ export async function resolveSelectionIds(
   limit = BULK_ASSIGN_MAX,
 ): Promise<{ ids: string[]; capped: boolean }> {
   const client = db();
-  let q = client.from("leads").select("id").is("merged_into", null);
-  q = applyScope(q, filter.scope ?? "legacy");
+  const build = () => {
+    let q = client.from("leads").select("id").is("merged_into", null);
+    q = applyScope(q, filter.scope ?? "legacy");
 
-  if (filter.assignedMode === "unassigned") q = q.is("assigned_to", null);
-  if (filter.assignedMode === "assigned") q = q.not("assigned_to", "is", null);
-  if (filter.workStatus) q = q.eq("work_status", filter.workStatus);
-  if (filter.status) q = q.eq("status", filter.status);
-  if (filter.sourceTab) q = q.eq("legacy_source_tab", filter.sourceTab);
-  if (filter.createdFrom) q = q.gte("created_at", filter.createdFrom);
-  if (filter.createdTo) q = q.lte("created_at", filter.createdTo);
+    if (filter.assignedMode === "unassigned") q = q.is("assigned_to", null);
+    if (filter.assignedMode === "assigned") q = q.not("assigned_to", "is", null);
+    if (filter.workStatus) q = q.eq("work_status", filter.workStatus);
+    if (filter.status) q = q.eq("status", filter.status);
+    if (filter.sourceTab) q = q.eq("legacy_source_tab", filter.sourceTab);
+    if (filter.createdFrom) q = q.gte("created_at", filter.createdFrom);
+    if (filter.createdTo) q = q.lte("created_at", filter.createdTo);
 
-  // Fetch one extra to detect truncation honestly, rather than reporting
-  // exactly the cap and leaving the operator to guess whether more existed.
-  const { data, error } = await q
-    .order("created_at", { ascending: true })
-    .order("id", { ascending: true })
-    .limit(limit + 1);
-  if (error) throw new BulkAssignError(`resolveSelectionIds: ${error.message}`);
+    return q
+      .order("created_at", { ascending: true })
+      .order("id", { ascending: true });
+  };
 
-  const all = ((data as { id: string }[] | null) ?? []).map((r) => r.id);
+  // One extra row, so truncation is observed rather than inferred: `capped`
+  // must mean "more matched than we took", and the only way to know that is to
+  // successfully read one past the cap.
+  const { rows } = await fetchAllRows<{ id: string }>(build, {
+    max: limit + 1,
+    label: "resolveSelectionIds",
+  });
+
+  const all = rows.map((r) => r.id);
   return { ids: all.slice(0, limit), capped: all.length > limit };
 }
 
@@ -541,41 +604,63 @@ export async function commitBulkAssign(params: {
     byTarget.get(t)!.push(id);
   }
 
-  const auditRows: Record<string, unknown>[] = [];
   let assigned = 0;
 
+  // AUDIT FIRST, PER CHUNK. Both halves of that matter.
+  //
+  // Batching every update and then writing all the audit rows at the end is
+  // faster and was how this ran first. Then a chunk hit the 8s statement
+  // timeout partway through a 5,000-row batch: 1,000 leads had already been
+  // reassigned, the audit insert never ran, and `revertAssignBatch` — which
+  // finds work by reading audit rows — could not see them. Twelve hundred
+  // leads changed owner with nothing recording that it happened and no
+  // supported way to undo it. Recovering them took a hand-written query.
+  //
+  // So the trail is written BEFORE the change it describes, one chunk at a
+  // time. The two failure modes are not symmetric:
+  //
+  //   audit then update, update fails -> an audit row for a change that did
+  //     not happen. `before_value` still equals the row's current value, so
+  //     reverting it writes what is already there. Harmless and idempotent.
+  //   update then audit, audit fails  -> a change nobody can find or undo.
+  //
+  // The first is a cosmetic inaccuracy in the log; the second is lost data
+  // integrity. Always take the first.
   for (const [target, groupIds] of byTarget) {
-    for (const part of chunk(groupIds, ID_CHUNK)) {
-      const { error } = await client
+    for (const part of chunk(groupIds, UPDATE_CHUNK)) {
+      const auditPart = part.map((id) => ({
+        id: randomUUID(),
+        lead_id: id,
+        actor: actor.id,
+        action: "assign",
+        field: PATCH_FIELD,
+        before_value: current.get(id) ?? null,
+        after_value: target,
+        batch_id: plan.batchId,
+        metadata: { bulk: true, distribution_size: changing.length },
+      }));
+
+      const { error: auditErr } = await client.from("lead_worklist_audit").insert(auditPart);
+      if (auditErr) {
+        throw new BulkAssignError(
+          `commitBulkAssign: audit insert failed before applying a chunk of ${part.length} ` +
+            `(batch ${plan.batchId}, ${assigned} already applied): ${auditErr.message}. ` +
+            `Nothing in this chunk was written. Revert the batch to undo what did apply.`,
+        );
+      }
+
+      const { error } = await withTimeoutRetry(() => client
         .from("leads")
         .update({ [PATCH_FIELD]: target })
-        .in("id", part);
-      if (error) throw new BulkAssignError(`commitBulkAssign: update failed for ${target}: ${error.message}`);
-      assigned += part.length;
-
-      for (const id of part) {
-        auditRows.push({
-          id: randomUUID(),
-          lead_id: id,
-          actor: actor.id,
-          action: "assign",
-          field: PATCH_FIELD,
-          before_value: current.get(id) ?? null,
-          after_value: target,
-          batch_id: plan.batchId,
-          metadata: { bulk: true, distribution_size: changing.length },
-        });
+        .in("id", part));
+      if (error) {
+        throw new BulkAssignError(
+          `commitBulkAssign: update failed for ${target} after ${assigned} rows ` +
+            `(batch ${plan.batchId}): ${error.message}. Every row that DID change is ` +
+            `audited under this batch id — revert it to restore previous owners.`,
+        );
       }
-    }
-  }
-
-  for (const part of chunk(auditRows, AUDIT_CHUNK)) {
-    const { error } = await client.from("lead_worklist_audit").insert(part);
-    if (error) {
-      throw new BulkAssignError(
-        `commitBulkAssign: ${assigned} leads WERE REASSIGNED under batch ${plan.batchId} ` +
-          `but the audit insert failed: ${error.message}. Reconcile manually before retrying.`,
-      );
+      assigned += part.length;
     }
   }
 
@@ -598,18 +683,24 @@ export async function revertAssignBatch(batchId: string, actor: WriteActor): Pro
 }> {
   const client = db();
 
-  const { data, error } = await client
-    .from("lead_worklist_audit")
-    .select("id, lead_id, before_value, after_value, reverted_at")
-    .eq("batch_id", batchId)
-    .eq("action", "assign")
-    .eq("field", "assigned_to");
-  if (error) throw new BulkAssignError(`revertAssignBatch: ${error.message}`);
-
-  const rows = (data as {
+  // Must page. Read as a single request this silently stopped at 1,000 audit
+  // rows, so reverting a 5,000-row batch restored 1,000 owners, marked those
+  // 1,000 reverted, and returned ok — a partial revert indistinguishable from a
+  // complete one. `id` ordering keeps paging stable while the loop below
+  // updates `reverted_at` on rows it has already read.
+  const { rows } = await fetchAllRows<{
     id: string; lead_id: string; before_value: string | null;
     after_value: string | null; reverted_at: string | null;
-  }[] | null) ?? [];
+  }>(
+    () => client
+      .from("lead_worklist_audit")
+      .select("id, lead_id, before_value, after_value, reverted_at")
+      .eq("batch_id", batchId)
+      .eq("action", "assign")
+      .eq("field", "assigned_to")
+      .order("id", { ascending: true }),
+    { label: "revertAssignBatch" },
+  );
   if (!rows.length) throw new BulkAssignError(`No assignment batch ${batchId}.`);
 
   const live = rows.filter((r) => !r.reverted_at);
@@ -630,10 +721,16 @@ export async function revertAssignBatch(batchId: string, actor: WriteActor): Pro
   let reverted = 0;
 
   for (const [prevOwner, leadIds] of byPrevOwner) {
-    for (const part of chunk(leadIds, ID_CHUNK)) {
-      const { error: updErr } = await client
-        .from("leads").update({ assigned_to: prevOwner }).in("id", part);
-      if (updErr) throw new BulkAssignError(`revertAssignBatch: restore failed: ${updErr.message}`);
+    for (const part of chunk(leadIds, UPDATE_CHUNK)) {
+      const { error: updErr } = await withTimeoutRetry(() => client
+        .from("leads").update({ assigned_to: prevOwner }).in("id", part));
+      if (updErr) {
+        throw new BulkAssignError(
+          `revertAssignBatch: restore failed after ${reverted} rows: ${updErr.message}. ` +
+            `The rows already restored are NOT marked reverted, so running this again ` +
+            `resumes rather than double-reverting.`,
+        );
+      }
       reverted += part.length;
     }
   }
@@ -674,19 +771,21 @@ export async function listAssignBatches(limit = 20): Promise<{
   batchId: string; actor: string; count: number; at: string; reverted: boolean;
 }[]> {
   const client = db();
-  const { data, error } = await client
-    .from("lead_worklist_audit")
-    .select("batch_id, actor, created_at, reverted_at, metadata")
-    .eq("action", "assign")
-    .eq("field", "assigned_to")
-    .order("created_at", { ascending: false })
-    .limit(2000);
-  if (error) throw new BulkAssignError(`listAssignBatches: ${error.message}`);
-
-  const rows = (data as {
+  // Pages too. This one only drives a display, but a truncated read here shows
+  // a batch with a smaller count than it really has, and a batch that is
+  // partly past the cap would render as "not fully reverted" forever.
+  const { rows } = await fetchAllRows<{
     batch_id: string | null; actor: string; created_at: string;
     reverted_at: string | null; metadata: Record<string, unknown> | null;
-  }[] | null) ?? [];
+  }>(
+    () => client
+      .from("lead_worklist_audit")
+      .select("batch_id, actor, created_at, reverted_at, metadata")
+      .eq("action", "assign")
+      .eq("field", "assigned_to")
+      .order("created_at", { ascending: false }),
+    { max: 100_000, label: "listAssignBatches" },
+  );
 
   const grouped = new Map<string, { actor: string; count: number; at: string; revertedCount: number }>();
   for (const r of rows) {

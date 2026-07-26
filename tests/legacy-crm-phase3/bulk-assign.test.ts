@@ -423,3 +423,192 @@ describe("Phase 3 — ownership is the ONLY thing that changes", () => {
     }
   });
 });
+
+/**
+ * PostgREST caps every response at `db-max-rows` (1,000 on Supabase) and gives
+ * no signal that it did. These are regression tests for two bugs that shipped
+ * because the fake used to return everything that matched, making it strictly
+ * more permissive than the real client.
+ *
+ * Both were found by running the feature against production at 60,000 rows,
+ * not by the suite — which is the whole argument for modelling the cap here.
+ */
+describe("Phase 3 — the 1,000-row response cap", () => {
+  afterEach(() => _setBulkAssignClientForTests(null));
+
+  it("selects the full cap, not the first 1,000 of it", async () => {
+    const db = useDb(makeLeads(BULK_ASSIGN_MAX + 500));
+    const { ids, capped } = await resolveSelectionIds(
+      { scope: "legacy", assignedMode: "unassigned" },
+      BULK_ASSIGN_MAX,
+    );
+
+    assert.equal(
+      ids.length, BULK_ASSIGN_MAX,
+      `expected the full ${BULK_ASSIGN_MAX}-row cap. Reading this as a single ` +
+      `request returns ${db.maxRows} and looks like a complete answer.`,
+    );
+    assert.equal(capped, true, "500 more matched, so the operator must be warned");
+    assert.ok(db.selects.length > 1, "must have paged rather than issued one request");
+  });
+
+  it("does not report a truncated selection as complete", async () => {
+    // The original arithmetic: asked for limit+1 (5001), got 1000, then
+    // computed `1000 > 5000` === false and called it un-truncated.
+    useDb(makeLeads(50_000));
+    const { ids, capped } = await resolveSelectionIds(
+      { scope: "legacy", assignedMode: "unassigned" },
+      BULK_ASSIGN_MAX,
+    );
+    assert.equal(ids.length, BULK_ASSIGN_MAX);
+    assert.equal(capped, true, "45,000 leads matched beyond the cap and must be reported");
+  });
+
+  it("reverts every row of a batch larger than the cap", async () => {
+    // The dangerous one. Reading a batch's audit rows in a single request
+    // restored the first 1,000 owners, marked those 1,000 reverted, and
+    // returned ok — leaving 4,000 leads assigned with nothing to show for it.
+    const total = 3_000;
+    const db = useDb(makeLeads(total));
+    const plan = await planBulkAssign({
+      filter: { scope: "legacy", assignedMode: "unassigned" },
+      distribution: { mode: "single", assignee: PEOPLE[0]! },
+    });
+    const res = await commitBulkAssign({
+      plan, actor: ACTOR,
+      typedConfirmation: confirmationPhraseFor(plan.totalChanging),
+    });
+    assert.equal(res.assigned, total, "all rows should have been assigned");
+    assert.equal(
+      db.leads.filter((l) => l.assigned_to === PEOPLE[0]).length, total,
+    );
+
+    const rev = await revertAssignBatch(plan.batchId, ACTOR);
+    assert.equal(rev.reverted, total, `expected all ${total} restored, got ${rev.reverted}`);
+
+    const stillAssigned = db.leads.filter((l) => l.assigned_to !== null);
+    assert.equal(
+      stillAssigned.length, 0,
+      `${stillAssigned.length} leads stayed assigned after a revert that reported success — ` +
+      `a partial revert indistinguishable from a complete one`,
+    );
+  });
+
+  it("keeps every audit row of an over-cap batch consistent with the leads", async () => {
+    const total = 2_500;
+    const db = useDb(makeLeads(total));
+    const plan = await planBulkAssign({
+      filter: { scope: "legacy", assignedMode: "unassigned" },
+      distribution: { mode: "single", assignee: PEOPLE[0]! },
+    });
+    await commitBulkAssign({
+      plan, actor: ACTOR,
+      typedConfirmation: confirmationPhraseFor(plan.totalChanging),
+    });
+    await revertAssignBatch(plan.batchId, ACTOR);
+
+    const batchRows = db.audit.filter((a) => a.batch_id === plan.batchId);
+    assert.equal(batchRows.length, total, "one audit row per assigned lead");
+    const unreverted = batchRows.filter((a) => !a.reverted_at);
+    assert.equal(
+      unreverted.length, 0,
+      `${unreverted.length} audit rows never got marked reverted, so a second ` +
+      `revert would try to restore them again`,
+    );
+  });
+});
+
+/**
+ * A bulk write that dies partway is not a hypothetical. During a 60,000-row
+ * run against production a chunk hit the 8s statement timeout, and because
+ * every UPDATE ran before any audit row was written, 1,000 leads changed owner
+ * with nothing recording it — invisible to `revertAssignBatch`, which finds
+ * work by reading the audit table. Recovering them needed a hand-written query.
+ *
+ * The invariant these defend: after ANY outcome, success or failure, every lead
+ * whose owner changed has an audit row under the batch, so revert can find it.
+ */
+describe("Phase 3 — a batch that fails partway stays revertable", () => {
+  afterEach(() => _setBulkAssignClientForTests(null));
+
+  it("never leaves a changed lead without an audit row", async () => {
+    const db = useDb(makeLeads(900));
+    db.failLeadUpdateAfter = 300;
+
+    const plan = await planBulkAssign({
+      filter: { scope: "legacy", assignedMode: "unassigned" },
+      distribution: { mode: "single", assignee: PEOPLE[0]! },
+    });
+    await assert.rejects(
+      () => commitBulkAssign({
+        plan, actor: ACTOR,
+        typedConfirmation: confirmationPhraseFor(plan.totalChanging),
+      }),
+      BulkAssignError,
+      "a timeout mid-batch must surface, not be swallowed",
+    );
+
+    const changed = db.leads.filter((l) => l.assigned_to !== null).map((l) => l.id);
+    const audited = new Set(
+      db.audit.filter((a) => a.batch_id === plan.batchId).map((a) => a.lead_id),
+    );
+    assert.ok(changed.length > 0, "the test needs some rows to have been applied");
+
+    const orphans = changed.filter((id) => !audited.has(id));
+    assert.deepEqual(
+      orphans, [],
+      `${orphans.length} leads changed owner with no audit row. Nothing can undo those.`,
+    );
+  });
+
+  it("can fully revert a batch that failed partway", async () => {
+    const db = useDb(makeLeads(900));
+    db.failLeadUpdateAfter = 300;
+
+    const plan = await planBulkAssign({
+      filter: { scope: "legacy", assignedMode: "unassigned" },
+      distribution: { mode: "single", assignee: PEOPLE[0]! },
+    });
+    await commitBulkAssign({
+      plan, actor: ACTOR,
+      typedConfirmation: confirmationPhraseFor(plan.totalChanging),
+    }).catch(() => {});
+
+    db.failLeadUpdateAfter = null;
+    await revertAssignBatch(plan.batchId, ACTOR);
+
+    const stillAssigned = db.leads.filter((l) => l.assigned_to !== null);
+    assert.equal(
+      stillAssigned.length, 0,
+      `${stillAssigned.length} leads still assigned after reverting a partially-applied batch`,
+    );
+  });
+
+  it("writing audit for a change that did not happen reverts harmlessly", async () => {
+    // The cost of audit-first: rows in the failed chunk get an audit entry
+    // describing a change that never landed. Reverting one writes back the
+    // value already there, so the log is slightly generous and nothing breaks.
+    const db = useDb(makeLeads(300));
+    db.failLeadUpdateAfter = 0;
+
+    const plan = await planBulkAssign({
+      filter: { scope: "legacy", assignedMode: "unassigned" },
+      distribution: { mode: "single", assignee: PEOPLE[0]! },
+    });
+    await commitBulkAssign({
+      plan, actor: ACTOR,
+      typedConfirmation: confirmationPhraseFor(plan.totalChanging),
+    }).catch(() => {});
+
+    assert.equal(
+      db.leads.filter((l) => l.assigned_to !== null).length, 0,
+      "no lead should have changed",
+    );
+
+    db.failLeadUpdateAfter = null;
+    await revertAssignBatch(plan.batchId, ACTOR);
+    for (const l of db.leads) {
+      assert.equal(l.assigned_to, null, "revert restored the value that was already there");
+    }
+  });
+});

@@ -9,7 +9,21 @@
  * exactly between the two calls, every time.
  *
  * Supports only what `lib/legacy-crm/bulkAssign.ts` actually emits: select with
- * eq/is/in/not/gte/lte, ordering, limit, head+count, update-by-in, and insert.
+ * eq/is/in/not/gte/lte, ordering, limit, range, head+count, update-by-in, and
+ * insert.
+ *
+ * IT ENFORCES A ROW CAP, and that is not incidental detail.
+ *
+ * PostgREST truncates every response at `db-max-rows` (1,000 on Supabase) and
+ * signals nothing: a request for 5,001 rows returns 1,000 with a 200 and no
+ * marker distinguishing "truncated" from "that was all". The first version of
+ * this fake returned however many rows matched, so it was strictly more
+ * generous than the real thing — and the suite passed while production
+ * silently assigned a fifth of each batch and reverted a fifth of each undo.
+ *
+ * A fake that is more permissive than the system it stands in for does not
+ * merely fail to catch a bug, it actively certifies one. So the cap is modelled
+ * here, at the real default.
  */
 
 export interface FakeLead {
@@ -43,11 +57,26 @@ export interface FakeAudit {
 type Row = Record<string, unknown>;
 type Pred = (r: Row) => boolean;
 
+/** Supabase's `db-max-rows` default. The number that caused the bug. */
+export const PGRST_MAX_ROWS = 1_000;
+
 export class FakeLeadsDb {
   leads: FakeLead[] = [];
   audit: FakeAudit[] = [];
   /** Every update issued, so tests can assert which columns were written. */
   updates: { table: string; patch: Row; ids: string[] }[] = [];
+  /** Mirrors PostgREST's silent truncation. */
+  maxRows: number = PGRST_MAX_ROWS;
+  /** Every select issued, so tests can assert the caller actually paged. */
+  selects: { table: string; from: number; to: number | null; returned: number }[] = [];
+  /**
+   * Fail every `leads` UPDATE once this many have succeeded, imitating the 8s
+   * `statement_timeout` that killed a real run partway through a batch. The
+   * point is not the timeout itself but what the code leaves behind when a
+   * multi-chunk write dies in the middle.
+   */
+  failLeadUpdateAfter: number | null = null;
+  private leadUpdateCount = 0;
 
   constructor(leads: FakeLead[] = []) { this.leads = leads; }
 
@@ -64,6 +93,8 @@ export class FakeLeadsDb {
     let headCount = false;
     const orders: { col: string; asc: boolean }[] = [];
     let limitN: number | null = null;
+    let rangeFrom: number | null = null;
+    let rangeTo: number | null = null;
 
     const resolve = () => {
       let rows = self.rowsFor(table).filter((r) => preds.every((p) => p(r)));
@@ -77,9 +108,17 @@ export class FakeLeadsDb {
           return (av < bv ? -1 : 1) * (o.asc ? 1 : -1);
         });
       }
+      // head+count reports the true total; PostgREST does not cap a count.
       if (headCount) return { data: null, error: null, count: rows.length };
-      const out = limitN === null ? rows : rows.slice(0, limitN);
-      return { data: out.map((r) => ({ ...r })), error: null, count: out.length };
+
+      let out = rows;
+      if (rangeFrom !== null) out = out.slice(rangeFrom, (rangeTo ?? out.length - 1) + 1);
+      if (limitN !== null) out = out.slice(0, limitN);
+
+      // The cap, applied last and silently — exactly as PostgREST does it.
+      const capped = out.slice(0, self.maxRows);
+      self.selects.push({ table, from: rangeFrom ?? 0, to: rangeTo, returned: capped.length });
+      return { data: capped.map((r) => ({ ...r })), error: null, count: capped.length };
     };
 
     const builder: Record<string, unknown> = {
@@ -103,6 +142,13 @@ export class FakeLeadsDb {
         preds.push((r) => set.has(r[col]));
         return builder;
       },
+      like(col: string, pattern: string) {
+        // Only `%`, which is all the callers use.
+        const rx = new RegExp("^" + pattern.split("%").map((s) =>
+          s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join(".*") + "$");
+        preds.push((r) => rx.test(String(r[col] ?? "")));
+        return builder;
+      },
       gte(col: string, v: string) { preds.push((r) => String(r[col]) >= v); return builder; },
       lte(col: string, v: string) { preds.push((r) => String(r[col]) <= v); return builder; },
       order(col: string, o?: { ascending?: boolean }) {
@@ -110,11 +156,24 @@ export class FakeLeadsDb {
         return builder;
       },
       limit(n: number) { limitN = n; return Promise.resolve(resolve()); },
+      range(from: number, to: number) {
+        rangeFrom = from; rangeTo = to;
+        return Promise.resolve(resolve());
+      },
       update(patch: Row) {
         return {
           in(col: string, vs: unknown[]) {
             const set = new Set(vs);
             const target = self.rowsFor(table).filter((r) => set.has(r[col]) && preds.every((p) => p(r)));
+            if (table === "leads" && self.failLeadUpdateAfter !== null) {
+              if (self.leadUpdateCount >= self.failLeadUpdateAfter) {
+                return Promise.resolve({
+                  data: null,
+                  error: { message: "canceling statement due to statement timeout" },
+                });
+              }
+              self.leadUpdateCount += target.length;
+            }
             for (const r of target) Object.assign(r, patch);
             self.updates.push({ table, patch, ids: target.map((r) => String(r.id ?? r.lead_id)) });
             return Promise.resolve({ data: null, error: null });

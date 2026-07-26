@@ -103,12 +103,19 @@ const FOCUSABLE =
 export default function LeadDrawer({
   lead,
   currentAdmin,
+  isSuperAdmin = false,
   onClose,
   onRowPatch,
 }: {
   /** The row that was clicked — renders instantly while the detail loads. */
   lead: LeadWorklistRow;
   currentAdmin: string | null;
+  /**
+   * Gates the promotion affordance only. The server gates the action itself
+   * with `requireSuperAdmin`; hiding the button is a courtesy so nobody
+   * discovers a control they cannot use, not a security boundary.
+   */
+  isSuperAdmin?: boolean;
   onClose: () => void;
   onRowPatch: (id: string, patch: Partial<LeadWorklistRow>) => void;
 }) {
@@ -556,6 +563,23 @@ export default function LeadDrawer({
                 />
               </Section>
 
+              {/* ---------------- promotion (Phase 4) ---------------- */}
+              {isLegacy && isSuperAdmin && (
+                <Section
+                  title="Live pipeline"
+                  hint="Promotion moves this person into the live sales pipeline. Provenance is kept — the lead stays flagged legacy, and its imported history is not rewritten."
+                >
+                  <PromotionPanel
+                    leadId={leadId}
+                    promotedAt={l.promoted_at}
+                    promotedBy={l.promoted_by}
+                    currentStatus={l.status}
+                    legacyCallStatusRaw={l.legacy_call_status_raw}
+                    onDone={load}
+                  />
+                </Section>
+              )}
+
               {/* ---------------- contact history ---------------- */}
               <Section title="Contact history">
                 <Grid>
@@ -677,6 +701,149 @@ export default function LeadDrawer({
  * the state the existing Lead CRM already sends from, and silently changing
  * that rule from a new screen would be a policy change wearing a UI costume.
  */
+/**
+ * Promote / demote, Super Admin only.
+ *
+ * Previews on open rather than on click. The thing most worth knowing — that a
+ * live lead already exists for this person — should be visible before the
+ * operator reaches for the button, not delivered as an error after they commit
+ * to the idea.
+ */
+function PromotionPanel({
+  leadId,
+  promotedAt,
+  promotedBy,
+  currentStatus,
+  legacyCallStatusRaw,
+  onDone,
+}: {
+  leadId: string;
+  promotedAt: string | null;
+  promotedBy: string | null;
+  currentStatus: string | null;
+  legacyCallStatusRaw: string | null;
+  onDone: () => Promise<void> | void;
+}) {
+  const { toast } = useToast();
+  const [preview, setPreview] = useState<{
+    ok: boolean;
+    alreadyPromoted: boolean;
+    blockedReason: string | null;
+    duplicateOf: { leadId: string; name: string | null; maskedPhone: string } | null;
+    changes: { field: string; from: string | null; to: string | null }[];
+  } | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const loadPreview = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/admin/leads/${leadId}/promote`);
+      const data = await res.json().catch(() => null);
+      if (res.ok && data?.ok) setPreview(data.preview);
+      else setPreview(null);
+    } catch {
+      setPreview(null);
+    }
+  }, [leadId]);
+
+  useEffect(() => { void loadPreview(); }, [loadPreview]);
+
+  async function run(method: "POST" | "DELETE", okMessage: string) {
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/admin/leads/${leadId}/promote`, { method });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.ok) {
+        toast(data?.error || `That failed (HTTP ${res.status}).`, "error");
+        return;
+      }
+      toast(data.result?.changed === false ? "Already in that state — nothing changed." : okMessage,
+        data.result?.changed === false ? "info" : "success");
+      await onDone();
+      await loadPreview();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "That failed.", "error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (promotedAt) {
+    return (
+      <div className="space-y-3">
+        <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
+          In the live pipeline since {formatISTDateTime(promotedAt)}
+          {promotedBy ? ` — promoted by ${promotedBy}` : ""}.
+        </div>
+        <p className="text-xs text-muted">
+          Demoting restores the exact pipeline status this lead had before promotion,
+          read back from the audit trail rather than reset to a default.
+        </p>
+        <ActionButton
+          label={busy ? "Demoting…" : "Demote from live pipeline"}
+          onClick={() => run("DELETE", "Demoted. Prior status restored.")}
+          busy={busy}
+        />
+      </div>
+    );
+  }
+
+  const blocked = preview && !preview.ok;
+
+  return (
+    <div className="space-y-3">
+      {legacyCallStatusRaw && (
+        <div className="rounded-md border border-line bg-surface px-3 py-2">
+          <div className="text-[11px] uppercase tracking-wide text-muted">
+            Original sheet wording
+          </div>
+          {/* Shown as CONTEXT. It is never imported into live pipeline metrics —
+              promotion resets the pipeline status to New precisely so 2023
+              sheet sentiment does not land in this quarter's funnel. */}
+          <div className="mt-0.5 text-sm italic text-ink">{legacyCallStatusRaw}</div>
+        </div>
+      )}
+
+      {blocked ? (
+        <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          <div className="font-medium">Cannot promote</div>
+          <div className="mt-0.5">{preview!.blockedReason}</div>
+          {preview!.duplicateOf && (
+            <a
+              href={`/admin/leads?lead=${preview!.duplicateOf.leadId}`}
+              className="mt-1.5 inline-block font-medium underline underline-offset-2"
+            >
+              View the existing live lead ({preview!.duplicateOf.maskedPhone})
+            </a>
+          )}
+        </div>
+      ) : (
+        <div className="rounded-md border border-line bg-surface px-3 py-2 text-sm">
+          <div className="text-[11px] uppercase tracking-wide text-muted">Will change</div>
+          <ul className="mt-1 space-y-0.5">
+            <li>
+              Pipeline status <Mono>{currentStatus || "—"}</Mono> → <Mono>New</Mono>
+            </li>
+            <li>Cohort → <Mono>legacy_promoted</Mono></li>
+            <li>Marked promoted, with your name and the time</li>
+          </ul>
+          <div className="mt-1.5 text-xs text-muted">
+            Everything else — the imported date, source tab, campaign and attribution —
+            is left exactly as it is.
+          </div>
+        </div>
+      )}
+
+      <ActionButton
+        label={busy ? "Promoting…" : "Promote to live pipeline"}
+        onClick={() => run("POST", "Promoted into the live pipeline.")}
+        busy={busy}
+        disabled={!!blocked || !preview}
+        title={blocked ? (preview?.blockedReason ?? undefined) : undefined}
+      />
+    </div>
+  );
+}
+
 function outreachBlockReason(input: {
   isLegacy: boolean;
   consent: string | null;
@@ -927,18 +1094,21 @@ function ActionButton({
   busy,
   danger,
   title,
+  disabled,
 }: {
   label: string;
   onClick: () => void;
   busy: boolean;
   danger?: boolean;
   title?: string;
+  /** Unavailable for a reason other than an in-flight request. */
+  disabled?: boolean;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      disabled={busy}
+      disabled={busy || disabled}
       title={title}
       className="inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-primary/40"
       style={{
