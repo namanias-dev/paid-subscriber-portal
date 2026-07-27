@@ -82,6 +82,9 @@ export async function PUT(req: Request) {
     sentBy: { userId: await currentAdminId(), type: "ADMIN" },
     triggerEvent: "manual_installment_reminder",
     audienceType: "installment_reminder",
+    // Records WHICH installment this was about, so a later payment can be
+    // correlated with this reminder and never with a different line.
+    installmentKey: preview.installmentKey,
     // Staff explicitly confirmed a repeat in the modal; the 24h notice is a
     // warning by design, so don't let the 30-min guard silently swallow it.
     allowRecentOverride: !!body.allowRepeat,

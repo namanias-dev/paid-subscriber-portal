@@ -23,6 +23,7 @@ import type { CourseEnrollment, InstallmentItem } from "../types";
 export type InstallmentBlockReason =
   | "no_active_enrollment"
   | "no_unpaid_installment"
+  | "seat_booking_only"
   | "zero_balance"
   | "missing_phone";
 
@@ -108,12 +109,30 @@ export function resolveInstallmentForEnrollment(
 
   const derived = deriveCollections(enrollment, now);
   const schedule = enrollment.schedule || [];
+  // ONLY `kind: "installment"`. A `seat` booking and a `full` payment are not
+  // installments, and the approved body says "installment no. N", so referring
+  // to either would make the message factually wrong.
   const unpaidInstallments = schedule.filter((s) => s.kind === "installment" && isLineOutstanding(s));
 
   if (unpaidInstallments.length === 0) {
-    return derived.remaining <= 0
-      ? { ok: false, reason: "zero_balance", detail: "This student has nothing left to pay." }
-      : { ok: false, reason: "no_unpaid_installment", detail: "No unpaid installment line on this enrollment." };
+    if (derived.remaining <= 0) {
+      return { ok: false, reason: "zero_balance", detail: "This student has nothing left to pay." };
+    }
+    // The collections-gap case: money is owed and the row shows an outstanding
+    // balance, but the only thing unpaid is a seat booking (or a one-shot full
+    // payment). These students need an admission / seat-booking follow-up, not
+    // an installment reminder, so they get their own reason rather than the
+    // generic one — staff will meet this constantly on the at-risk worklist.
+    const unpaidKinds = [...new Set(schedule.filter(isLineOutstanding).map((s) => s.kind))];
+    if (unpaidKinds.length && unpaidKinds.every((k) => k === "seat" || k === "full")) {
+      const what = unpaidKinds.includes("seat") ? "a seat booking" : "a one-shot full payment";
+      return {
+        ok: false,
+        reason: "seat_booking_only",
+        detail: `The only thing unpaid on this enrollment is ${what}, not an installment — this student needs an admission follow-up, not an installment reminder.`,
+      };
+    }
+    return { ok: false, reason: "no_unpaid_installment", detail: "No unpaid installment line on this enrollment." };
   }
 
   const line = unpaidInstallments[0];

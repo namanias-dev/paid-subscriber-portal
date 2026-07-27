@@ -42,6 +42,19 @@ export interface RelatedEntity {
   student_name?: string | null;
 }
 
+/**
+ * Which installment a reminder is about, persisted on the log so a later payment
+ * can be correlated with it. Composite because installments are JSONB elements
+ * in course_enrollments.schedule with no stable id of their own; the fingerprint
+ * is what keeps the attribution correct across a plan change. Built by
+ * ./installmentAttribution.installmentFingerprint.
+ */
+export interface InstallmentKey {
+  courseEnrollmentId: string;
+  installmentNo: number;
+  fingerprint: string;
+}
+
 export interface SendSmsInput {
   mobile: string;
   templateId: string;
@@ -57,6 +70,10 @@ export interface SendSmsInput {
   allowRecentOverride?: boolean;
   /** Deferred send: gateway "time" format "YYYY-MM-DD HH:MMam/pm" (IST). */
   scheduleTime?: string | null;
+  /** Installment this send is about, recorded for reminder→payment correlation. */
+  installmentKey?: InstallmentKey | null;
+  /** Groups all logs from one bulk job (live status + retry-failed-only). */
+  campaignId?: string | null;
 }
 
 export interface SendSmsResult {
@@ -248,6 +265,10 @@ export async function sendSms(input: SendSmsInput): Promise<SendSmsResult> {
     trigger_event: input.triggerEvent ?? null,
     audience_type: input.audienceType ?? null,
     dedupe_key: input.dedupeKey ?? null,
+    campaign_id: input.campaignId ?? null,
+    course_enrollment_id: input.installmentKey?.courseEnrollmentId ?? null,
+    installment_no: input.installmentKey?.installmentNo ?? null,
+    installment_fingerprint: input.installmentKey?.fingerprint ?? null,
     status: "QUEUED",
   });
   if (!inserted) return { ok: false, skipped: "duplicate" };
@@ -292,6 +313,8 @@ export interface BatchRecipientInput {
   mobile: string;
   variables?: Record<string, string | number | null | undefined>;
   relatedEntity?: RelatedEntity;
+  /** Per-recipient installment attribution — bulk reminders each target their own line. */
+  installmentKey?: InstallmentKey | null;
 }
 export interface BatchResult {
   requested: number;
@@ -311,6 +334,7 @@ interface ScreenedRecipient {
   segments: number;
   variables: Record<string, string | number | null | undefined>;
   relatedEntity?: RelatedEntity;
+  installmentKey?: InstallmentKey | null;
 }
 
 export async function sendBatch(input: {
@@ -323,6 +347,8 @@ export async function sendBatch(input: {
   scheduleTime?: string | null;
   /** Stamps every log in this send so the UI can track per-recipient status + resend-to-failed. */
   campaignId?: string | null;
+  /** Recorded on every log in the job (e.g. "manual_installment_reminder"). */
+  triggerEvent?: string | null;
 }): Promise<BatchResult> {
   const out: BatchResult = { requested: input.recipients.length, sent: 0, failed: 0, skipped: {}, mode: "none", batches: 0, balance: null };
   const skip = (k: string, n = 1) => { out.skipped[k] = (out.skipped[k] || 0) + n; };
@@ -347,14 +373,14 @@ export async function sendBatch(input: {
   const nowMin = istMinutesOfDay();
 
   // Normalize + in-batch dedupe first so batched lookups only query real targets.
-  const normList: { mobile: string; normalized: string; variables: Record<string, string | number | null | undefined>; relatedEntity?: RelatedEntity }[] = [];
+  const normList: { mobile: string; normalized: string; variables: Record<string, string | number | null | undefined>; relatedEntity?: RelatedEntity; installmentKey?: InstallmentKey | null }[] = [];
   const seen = new Set<string>();
   for (const r of input.recipients) {
     const n = normalizeIndianMobile(r.mobile);
     if (!n.ok || !n.digits10) { skip("invalid_mobile"); continue; }
     if (seen.has(n.digits10)) { skip("duplicate_in_batch"); continue; }
     seen.add(n.digits10);
-    normList.push({ mobile: r.mobile, normalized: n.digits10, variables: r.variables || {}, relatedEntity: r.relatedEntity });
+    normList.push({ mobile: r.mobile, normalized: n.digits10, variables: r.variables || {}, relatedEntity: r.relatedEntity, installmentKey: r.installmentKey ?? null });
   }
 
   const numbers = normList.map((r) => r.normalized);
@@ -386,7 +412,7 @@ export async function sendBatch(input: {
     if (settings.perMobileDailyCap > 0 && (perMobileCounts.get(r.normalized) || 0) >= settings.perMobileDailyCap) { skip("per_mobile_cap"); continue; }
     if (recentHits.has(r.normalized)) { skip("recent_duplicate"); continue; }
     usedToday++;
-    eligible.push({ mobile: r.mobile, normalized: r.normalized, text, chars: v.analysis.length, segments: v.analysis.segments, variables: r.variables, relatedEntity: r.relatedEntity });
+    eligible.push({ mobile: r.mobile, normalized: r.normalized, text, chars: v.analysis.length, segments: v.analysis.segments, variables: r.variables, relatedEntity: r.relatedEntity, installmentKey: r.installmentKey ?? null });
   }
   if (eligible.length === 0) return out;
 
@@ -410,8 +436,12 @@ export async function sendBatch(input: {
     sender_id: t.sender_id || SMS_DEFAULT_SENDER_ID, route: t.route || SMS_DEFAULT_ROUTE,
     message_body: e.text, character_count: e.chars, segments: e.segments,
     sent_by_user_id: input.sentBy.userId ?? null, sent_by_type: input.sentBy.type,
-    trigger_event: null, audience_type: input.audienceType ?? null, dedupe_key: null,
-    campaign_id: input.campaignId ?? null, status: "QUEUED" as const,
+    trigger_event: input.triggerEvent ?? null, audience_type: input.audienceType ?? null, dedupe_key: null,
+    campaign_id: input.campaignId ?? null,
+    course_enrollment_id: e.installmentKey?.courseEnrollmentId ?? null,
+    installment_no: e.installmentKey?.installmentNo ?? null,
+    installment_fingerprint: e.installmentKey?.fingerprint ?? null,
+    status: "QUEUED" as const,
   });
 
   // ---- route: identical body → BULK; else per-recipient fan-out ----
