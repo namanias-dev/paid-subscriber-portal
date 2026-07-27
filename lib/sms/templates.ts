@@ -14,7 +14,8 @@
  *  - Live char + segment counting; worst-case (max-length fill) flagged > 155.
  */
 import type { SmsMessageType, SmsUseCase } from "./types";
-import { buildVarIndex, isResolvedValue, lookupVariable, registryKeyFor } from "./variableRegistry";
+import { buildVarIndex, isResolvedValue, lookupVariable } from "./variableRegistry";
+import { replacePlaceholders, uniqueVariables } from "./placeholders";
 
 export const BRAND_LINE = "Naman Sharma IAS Academy";
 export const MAX_RECOMMENDED_CHARS = 155;
@@ -145,60 +146,18 @@ export function seedById(id: string): SeedTemplate | undefined {
   return SEED_TEMPLATES.find((t) => t.id === id);
 }
 
-/**
- * Canonical variable catalogue — the only tokens the send pipeline can resolve
- * (mirrors SmsVariable in ./types + the variable store). A self-serve template
- * body MAY use other {tokens}, but they are flagged as "unknown" (a warning, not
- * a hard block) because nothing fills them, so they would render empty / mark a
- * recipient as missing-vars at send time.
- */
-export const KNOWN_VARIABLES: readonly string[] = [
-  "name", "first_name", "mobile", "login_code", "login_url",
-  "item_name", "item_short", "amount", "payment_status",
-  "webinar_date", "webinar_time", "support_number",
-] as const;
-
-/**
- * Body {tokens} that are NOT in the canonical catalogue (first-seen order).
- * Alias-aware: a DLT-approved spelling such as `{No_of_Installment}` resolves
- * through the registry to a known variable, so it is NOT reported as unknown.
- */
-export function unknownVariables(body: string): string[] {
-  return uniqueVariables(body).filter(
-    (v) => !KNOWN_VARIABLES.includes(v) && registryKeyFor(v) === null,
-  );
-}
-
 // ---------------------------------------------------------------------------
 // Variables
 // ---------------------------------------------------------------------------
 /**
- * THE placeholder pattern — one regex, one place. Matches ANY `{...}` token so
- * a DLT-approved spelling with spaces, capitals, digits or dots is detected.
- *
- * It previously read `/\{([a-z_]+)\}/g`, which silently ignored every token
- * that was not all-lowercase-with-underscores. The DLT-registered "Installment
- * Reminder" body (`{No_of_Installment}`, `{Fee_in_Rs}`) therefore parsed as if
- * it had only three variables, both money tokens were never substituted, and a
- * real student received the raw braces. The token text must keep matching the
- * approved DLT body byte-for-byte, so the fix is here in the parser — resolution
- * of the odd spellings happens through the alias registry, never by editing a body.
+ * The placeholder pattern and the helpers built on it now live in
+ * ./placeholders — see the note there on why they were extracted. They are
+ * re-exported unchanged so every existing importer of this module keeps working.
  */
-const VAR_RE = /\{([^{}]+)\}/g;
-
-/** Ordered list of variable occurrences (DLT slots — duplicates kept in order). */
-export function variableSlots(body: string): string[] {
-  const out: string[] = [];
-  let m: RegExpExecArray | null;
-  VAR_RE.lastIndex = 0;
-  while ((m = VAR_RE.exec(body))) out.push(m[1]);
-  return out;
-}
-
-/** Unique variables in first-seen order (stored on the template). */
-export function uniqueVariables(body: string): string[] {
-  return [...new Set(variableSlots(body))];
-}
+export {
+  PLACEHOLDER_PATTERN, placeholderRe, replacePlaceholders,
+  variableSlots, uniqueVariables, KNOWN_VARIABLES, unknownVariables,
+} from "./placeholders";
 
 /**
  * Render a body with provided values.
@@ -219,7 +178,7 @@ export function uniqueVariables(body: string): string[] {
 export function renderTemplate(body: string, vars: Record<string, string | number | null | undefined>): { text: string; missing: string[] } {
   const missing: string[] = [];
   const index = buildVarIndex(vars);
-  const text = body.replace(VAR_RE, (full, key: string) => {
+  const text = replacePlaceholders(body, (key, full) => {
     const v = lookupVariable(vars, key, index);
     if (!isResolvedValue(v)) {
       if (!missing.includes(key)) missing.push(key);

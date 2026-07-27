@@ -3,7 +3,8 @@
  * portal to get each template registered. Used by /docs/sms-dlt-templates.md and
  * the in-portal "Export DLT Approval Sheet" (Markdown + CSV).
  */
-import { SEED_TEMPLATES, variableSlots, worstCaseFill, BRAND_LINE, MAX_RECOMMENDED_CHARS } from "./templates";
+import { SEED_TEMPLATES, worstCaseFill, BRAND_LINE, MAX_RECOMMENDED_CHARS } from "./templates";
+import { replacePlaceholders, variableSlots } from "./placeholders";
 import { loginUrlSample, SMS_DEFAULT_SENDER_ID, SMS_DEFAULT_ROUTE } from "./config";
 
 const ENTITY = "Naman Sharma IAS Academy";
@@ -22,11 +23,22 @@ export interface DltRow {
   over155: boolean;
 }
 
-/** Convert a portal body ({var}) into DLT body ({#var#}) preserving order. */
+/**
+ * Convert a portal body ({var}) into DLT body ({#var#}) preserving order.
+ *
+ * Uses the shared placeholder matcher. It previously carried its own
+ * `/\{([a-z_]+)\}/g` — the same lowercase-only pattern that caused the send
+ * incident. Here the consequence would have been a self-contradictory approval
+ * sheet: `buildDltRows` derives `mapping` from `variableSlots` (permissive), so
+ * a body with a mixed-case token would have claimed more variables than it had
+ * `{#var#}` placeholders. Submitted like that, the registration is rejected, or
+ * approved with the token baked in as static text — after which every correctly
+ * rendered send mismatches the registered body and the sender ID is blocked.
+ */
 export function toDltBody(body: string): { dltBody: string; mapping: { slot: number; variable: string }[] } {
   const mapping: { slot: number; variable: string }[] = [];
   let slot = 0;
-  const dltBody = body.replace(/\{([a-z_]+)\}/g, (_full, key: string) => {
+  const dltBody = replacePlaceholders(body, (key) => {
     slot += 1;
     mapping.push({ slot, variable: key });
     return "{#var#}";
