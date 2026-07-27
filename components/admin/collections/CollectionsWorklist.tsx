@@ -1,21 +1,39 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { AlertTriangle, Phone, Search } from "lucide-react";
 import { useAdminData, LoadingBlock } from "@/components/admin/ui";
 import InstallmentReminderButton from "@/components/admin/sms/InstallmentReminderButton";
+import BulkInstallmentReminder from "@/components/admin/sms/BulkInstallmentReminder";
+import ReminderStatePill from "@/components/admin/sms/ReminderStatePill";
 import { formatINR, formatISTDate } from "@/lib/dates";
 import { deriveCollections } from "@/lib/installments";
+import { isOutstandingInstallment } from "@/lib/sms/installmentAttribution";
+import { normalizeIndianMobile } from "@/lib/phone";
+import type { TrackingPayload } from "@/lib/sms/installmentTracking";
 import type { CourseEnrollment, Course } from "@/lib/types";
 
 type EnrollmentRow = CourseEnrollment & { student_id: string | null };
 type SortKey = "overdue" | "daysOverdue" | "nextDue" | "name" | "course";
 
+/** Default for the "reminded, still unpaid after N days" filter. */
+const DEFAULT_STALE_DAYS = 3;
+
 /**
- * Collections worklist — powers "Fees at Risk (Collections)". Read-only: chases overdue EMI/fees.
- * Reuses /api/admin/course-enrollments + deriveCollections — the SAME source
- * as the Course EMI cards and cohort drill-in, so every figure reconciles.
+ * Collections worklist — powers "Fees at Risk (Collections)". Read-only on the
+ * money: chases overdue EMI/fees, and can send the DLT-approved installment
+ * reminder in bulk.
+ *
+ * Reuses /api/admin/course-enrollments + deriveCollections — the SAME source as
+ * the Course EMI cards and cohort drill-in, so every figure reconciles, and the
+ * bulk reminder resolves its amounts from that same schedule rather than from
+ * anything computed here.
+ *
+ * DEFAULT VIEW IS UNCHANGED. "Overdue only" starts ON, which is exactly the
+ * filter this page always applied, so with nothing selected the same rows appear
+ * in the same order with the same figures. The additions are a selection column,
+ * a reminder-state column and a header line.
  */
 export default function CollectionsWorklist() {
   const enr = useAdminData<EnrollmentRow[]>("/api/admin/course-enrollments", "enrollments");
@@ -25,36 +43,57 @@ export default function CollectionsWorklist() {
   const [batch, setBatch] = useState("all");
   const [sort, setSort] = useState<SortKey>("overdue");
   const [q, setQ] = useState("");
+  const [overdueOnly, setOverdueOnly] = useState(true);
+  const [staleOnly, setStaleOnly] = useState(false);
+  const [staleDays, setStaleDays] = useState(DEFAULT_STALE_DAYS);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
 
-  // All confirmed, non-cancelled enrollments that are actually overdue.
-  const overdue = useMemo(() => {
+  // Reminder→payment state, computed server-side in ONE indexed query.
+  const [tracking, setTracking] = useState<TrackingPayload | null>(null);
+  const loadTracking = useCallback(() => {
+    fetch("/api/admin/sms/installment-reminder/tracking")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => { if (j?.ok) setTracking(j.tracking as TrackingPayload); })
+      .catch(() => { /* the table still works without pills */ });
+  }, []);
+  useEffect(loadTracking, [loadTracking]);
+
+  // Confirmed, non-cancelled enrollments with money outstanding. Overdue-only is
+  // the default and reproduces this page's original filter exactly.
+  const scoped = useMemo(() => {
     return (enr.data || [])
       .filter((e) => e.amount_paid > 0 && e.status !== "cancelled")
       .map((e) => ({ e, d: deriveCollections(e) }))
-      .filter(({ d }) => d.overdueAmount > 0);
-  }, [enr.data]);
+      .filter(({ d }) => (overdueOnly ? d.overdueAmount > 0 : d.remaining > 0));
+  }, [enr.data, overdueOnly]);
 
   const courseOptions = useMemo(() => {
     const m = new Map<string, string>();
-    for (const { e } of overdue) m.set(e.course_id, e.course_title || courses.data?.find((c) => c.id === e.course_id)?.title || "Course");
+    for (const { e } of scoped) m.set(e.course_id, e.course_title || courses.data?.find((c) => c.id === e.course_id)?.title || "Course");
     return [...m.entries()].sort((a, b) => a[1].localeCompare(b[1]));
-  }, [overdue, courses.data]);
+  }, [scoped, courses.data]);
 
   const batchOptions = useMemo(() => {
     const set = new Set<string>();
-    for (const { e } of overdue) {
+    for (const { e } of scoped) {
       if (courseId !== "all" && e.course_id !== courseId) continue;
       if (e.batch_label) set.add(e.batch_label);
     }
     return [...set].sort();
-  }, [overdue, courseId]);
+  }, [scoped, courseId]);
 
   const rows = useMemo(() => {
     const term = q.trim().toLowerCase();
-    const list = overdue.filter(({ e }) => {
+    const list = scoped.filter(({ e }) => {
       if (courseId !== "all" && e.course_id !== courseId) return false;
       if (batch !== "all" && (e.batch_label || "") !== batch) return false;
       if (term && !`${e.student_name} ${e.phone}`.toLowerCase().includes(term)) return false;
+      if (staleOnly) {
+        // Reminded at least `staleDays` ago and STILL owing on that installment.
+        const s = tracking?.byEnrollment[e.id]?.row;
+        if (!s || s.outstanding <= 0) return false;
+        if (s.daysSinceFirstReminder == null || s.daysSinceFirstReminder < staleDays) return false;
+      }
       return true;
     });
     list.sort((a, b) => {
@@ -76,9 +115,66 @@ export default function CollectionsWorklist() {
       }
     });
     return list;
-  }, [overdue, courseId, batch, q, sort]);
+  }, [scoped, courseId, batch, q, sort, staleOnly, staleDays, tracking]);
 
   const scopeOverdue = rows.reduce((a, { d }) => a + d.overdueAmount, 0);
+
+  // Drop selections that fall outside the current filter, so the sticky bar can
+  // never claim to send to someone who is no longer on screen.
+  const visibleIds = useMemo(() => new Set(rows.map(({ e }) => e.id)), [rows]);
+  useEffect(() => {
+    setSelected((prev) => {
+      const next = new Set([...prev].filter((id) => visibleIds.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [visibleIds]);
+
+  /**
+   * Live pre-check beside the action bar. Deliberately uses the SAME pure
+   * helpers the server resolver uses (isOutstandingInstallment,
+   * normalizeIndianMobile) rather than a second implementation — but the review
+   * screen remains authoritative, because opt-out and template state are only
+   * knowable server-side.
+   */
+  const counts = useMemo(() => {
+    let withPhone = 0, eligible = 0;
+    for (const { e } of rows) {
+      const phoneOk = normalizeIndianMobile(e.phone || "").ok;
+      if (phoneOk) withPhone++;
+      const hasInstallment = (e.schedule || []).some(isOutstandingInstallment);
+      if (phoneOk && hasInstallment) eligible++;
+    }
+    return { total: rows.length, withPhone, excluded: rows.length - eligible };
+  }, [rows]);
+
+  const aggregate = useMemo(() => {
+    if (!tracking) return null;
+    // Recomputed for the CURRENT filter, not the whole table.
+    const states = rows.map(({ e }) => tracking.byEnrollment[e.id]?.row ?? null);
+    let reminded = 0, paidAfter = 0, pending = 0;
+    const days: number[] = [];
+    for (const s of states) {
+      if (!s) continue;
+      const wasReminded = s.reminderCount > 0 || s.kind === "reminded_unattributable";
+      if (wasReminded) reminded++;
+      if (s.kind === "paid_after_reminder") { paidAfter++; if (s.daysToPayment != null) days.push(s.daysToPayment); }
+      if (wasReminded && s.outstanding > 0) pending++;
+    }
+    const sorted = [...days].sort((a, b) => a - b);
+    const mid = Math.floor(sorted.length / 2);
+    const medianDays = sorted.length
+      ? (sorted.length % 2 ? sorted[mid]! : Math.round(((sorted[mid - 1]! + sorted[mid]!) / 2) * 10) / 10)
+      : null;
+    return { reminded, paidAfter, medianDays, pending };
+  }, [rows, tracking]);
+
+  const toggleRow = (id: string) => setSelected((prev) => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
+  const allSelected = rows.length > 0 && rows.every(({ e }) => selected.has(e.id));
+  const someSelected = selected.size > 0 && !allSelected;
 
   if (enr.loading) return <LoadingBlock />;
 
@@ -96,6 +192,13 @@ export default function CollectionsWorklist() {
           <div>
             <p className="font-heading text-2xl font-extrabold tabular-nums text-danger">{formatINR(scopeOverdue)} overdue</p>
             <p className="text-sm text-ink2">across {rows.length} student{rows.length === 1 ? "" : "s"} in {scopeLabel}</p>
+            {/* Correlation only — describes timing, never claims a reminder caused a payment. */}
+            {aggregate && (
+              <p className="mt-1 text-xs text-muted" title="Timing only. A student who paid after a reminder may have paid regardless.">
+                Reminded: {aggregate.reminded} · Paid after reminder: {aggregate.paidAfter}
+                {aggregate.medianDays != null ? ` (median ${aggregate.medianDays}d)` : ""} · Still pending: {aggregate.pending}
+              </p>
+            )}
           </div>
         </div>
         <p className="max-w-xs text-xs text-muted">Collections desk — chase overdue EMIs. Display only; use the student profile to record a payment.</p>
@@ -135,6 +238,31 @@ export default function CollectionsWorklist() {
         </div>
       </div>
 
+      {/* Reminder-specific filters. Overdue-only is ON by default — the safe case. */}
+      <div className="mb-4 flex flex-wrap items-center gap-x-5 gap-y-2 px-1 text-xs text-ink2">
+        <label className="inline-flex items-center gap-2" title="Only students whose next due installment is already past due">
+          <input type="checkbox" checked={overdueOnly} onChange={(e) => setOverdueOnly(e.target.checked)} className="h-3.5 w-3.5 accent-[color:var(--primary)]" />
+          Overdue only
+        </label>
+        <label className="inline-flex items-center gap-2" title="Students already reminded who still have not paid that installment">
+          <input type="checkbox" checked={staleOnly} onChange={(e) => setStaleOnly(e.target.checked)} className="h-3.5 w-3.5 accent-[color:var(--primary)]" />
+          Reminded, still unpaid after
+          <input
+            type="number"
+            min={0}
+            max={365}
+            value={staleDays}
+            onChange={(e) => setStaleDays(Math.max(0, Math.min(365, Number(e.target.value) || 0)))}
+            className="input h-7 w-14 px-2 py-0 text-xs"
+            aria-label="Days since the first reminder"
+          />
+          days
+        </label>
+        <span className="text-muted">
+          {counts.total} student{counts.total === 1 ? "" : "s"} · {counts.withPhone} with valid phone · {counts.excluded} excluded
+        </span>
+      </div>
+
       {rows.length === 0 ? (
         <div className="card flex flex-col items-center justify-center gap-2 py-16 text-center">
           <span className="grid h-12 w-12 place-items-center rounded-full bg-success/10 text-2xl">✅</span>
@@ -143,17 +271,38 @@ export default function CollectionsWorklist() {
         </div>
       ) : (
         <div className="card overflow-x-auto p-0">
-          <table className="w-full min-w-[920px] text-left text-sm">
+          <table className="w-full min-w-[1040px] text-left text-sm">
             <thead>
               <tr className="border-b border-line text-xs uppercase tracking-wide text-muted">
-                {["Student", "Course / Batch", "Overdue", "Days", "Missed", "Balance", "Next due", ""].map((h) => (
+                <th className="w-9 px-3 py-3">
+                  <input
+                    type="checkbox"
+                    checked={allSelected}
+                    ref={(el) => { if (el) el.indeterminate = someSelected; }}
+                    onChange={() => setSelected(allSelected ? new Set() : new Set(rows.map(({ e }) => e.id)))}
+                    className="h-3.5 w-3.5 accent-[color:var(--primary)]"
+                    title="Select all students matching the current filters"
+                    aria-label="Select all students matching the current filters"
+                  />
+                </th>
+                {["Student", "Course / Batch", "Overdue", "Days", "Missed", "Balance", "Next due", "Reminder", ""].map((h) => (
                   <th key={h} className="whitespace-nowrap px-4 py-3 font-semibold">{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {rows.map(({ e, d }) => (
-                <tr key={e.id} className="border-b border-line last:border-0 hover:bg-surface2">
+                <tr key={e.id} className={`border-b border-line last:border-0 hover:bg-surface2 ${selected.has(e.id) ? "bg-primary/5" : ""}`}>
+                  <td className="px-3 py-3">
+                    <input
+                      type="checkbox"
+                      checked={selected.has(e.id)}
+                      onChange={() => toggleRow(e.id)}
+                      onClick={(ev) => ev.stopPropagation()}
+                      className="h-3.5 w-3.5 accent-[color:var(--primary)]"
+                      aria-label={`Select ${e.student_name}`}
+                    />
+                  </td>
                   <td className="px-4 py-3">
                     <div className="font-medium text-ink">{e.student_name}</div>
                     <div className="mt-0.5 flex items-center gap-2 text-xs text-muted">
@@ -171,6 +320,9 @@ export default function CollectionsWorklist() {
                   <td className="px-4 py-3 tabular-nums">{d.missedInstallments}</td>
                   <td className="px-4 py-3 tabular-nums text-ink2">{formatINR(d.remaining)}</td>
                   <td className="px-4 py-3 tabular-nums text-ink2">{d.nextDueDate ? formatISTDate(d.nextDueDate) : "—"}</td>
+                  <td className="px-4 py-3">
+                    <ReminderStatePill state={tracking?.byEnrollment[e.id]?.row ?? null} />
+                  </td>
                   <td className="px-4 py-3 text-right">
                     <div className="flex items-center justify-end gap-3">
                       <InstallmentReminderButton enrollmentId={e.id} />
@@ -187,6 +339,13 @@ export default function CollectionsWorklist() {
           </table>
         </div>
       )}
+
+      <BulkInstallmentReminder
+        selectedIds={[...selected].filter((id) => visibleIds.has(id))}
+        overdueOnly={overdueOnly}
+        onClear={() => setSelected(new Set())}
+        onSent={loadTracking}
+      />
     </div>
   );
 }

@@ -62,6 +62,16 @@ export interface SmsLog {
   dedupe_key: string | null;
   /** Groups all logs from one manual/bulk send (live status + resend-to-failed). Null for auto-SMS. */
   campaign_id: string | null;
+  /**
+   * Which installment this reminder was about. Installments are not rows — they
+   * are JSONB elements in course_enrollments.schedule — so the key is composite
+   * and the fingerprint is what makes it survive a plan change. See
+   * ./installmentAttribution.ts. Null on every non-installment send and on every
+   * row predating these columns.
+   */
+  course_enrollment_id: string | null;
+  installment_no: number | null;
+  installment_fingerprint: string | null;
   error_message: string | null;
   created_at: string;
   sent_at: string | null;

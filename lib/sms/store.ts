@@ -338,6 +338,35 @@ export async function resolveBuyerByPhone(digits10: string): Promise<BuyerResolu
   }
 }
 
+/**
+ * Batched `resolveBuyerByPhone` for a bulk job: ONE query for up to 500 numbers
+ * instead of 500 round-trips, with the identity rule preserved exactly — a phone
+ * shared by more than one buyer resolves to `ambiguous`, so no login_code is
+ * ever attached to a number we cannot tie to a single person. Numbers with no
+ * buyer are simply absent from the map, which callers read as `none`.
+ */
+export async function resolveBuyersByPhones(digits10List: string[]): Promise<Map<string, BuyerResolution>> {
+  const out = new Map<string, BuyerResolution>();
+  const numbers = [...new Set(digits10List.filter(Boolean))];
+  if (!numbers.length) return out;
+  const db = getSupabaseAdmin();
+  if (!db) return out;
+  try {
+    const { data } = await db.from("buyers").select("id,name,login_code,phone").in("phone", numbers);
+    const byPhone = new Map<string, { id: string; name: string | null; login_code: string | null }[]>();
+    for (const r of (data || []) as { id: string; name: string | null; login_code: string | null; phone: string }[]) {
+      const list = byPhone.get(r.phone);
+      if (list) list.push(r); else byPhone.set(r.phone, [r]);
+    }
+    for (const [phone, rows] of byPhone) {
+      out.set(phone, rows.length > 1
+        ? { status: "ambiguous", id: null, name: null, login_code: null }
+        : { status: "ok", id: rows[0]!.id, name: rows[0]!.name, login_code: rows[0]!.login_code });
+    }
+  } catch { /* fail closed: empty map ⇒ no login_code attached */ }
+  return out;
+}
+
 /** Resolve a buyer by its stable id (exact person — safe for shared numbers). */
 export async function getBuyerById(id: string): Promise<{ id: string; name: string | null; login_code: string | null } | null> {
   const db = getSupabaseAdmin();
@@ -594,6 +623,10 @@ export interface NewLog {
   sent_by_user_id?: string | null; sent_by_type: SmsLog["sent_by_type"];
   trigger_event?: string | null; audience_type?: string | null; dedupe_key?: string | null;
   campaign_id?: string | null;
+  /** Installment attribution key — see SmsLog + ./installmentAttribution.ts. */
+  course_enrollment_id?: string | null;
+  installment_no?: number | null;
+  installment_fingerprint?: string | null;
   status?: SmsLog["status"];
 }
 
@@ -613,6 +646,65 @@ export async function insertQueuedLog(input: NewLog): Promise<{ id: string } | n
     if (error) return null; // unique dedupe conflict or transient
     return { id: String(data.id) };
   } catch { return null; }
+}
+
+/** The subset of a log needed for reminder→payment attribution. */
+export type AttributionLogRow = Pick<
+  SmsLog,
+  "id" | "normalized_mobile" | "status" | "sent_at" | "created_at"
+  | "sent_by_user_id" | "sent_by_type" | "template_id"
+  | "course_enrollment_id" | "installment_no" | "installment_fingerprint"
+>;
+
+const ATTRIBUTION_COLS = "id,normalized_mobile,status,sent_at,created_at,sent_by_user_id,sent_by_type,template_id,course_enrollment_id,installment_no,installment_fingerprint";
+
+/** Keep each PostgREST `in.(...)` list well inside the request-line limit. */
+const ATTR_ID_CHUNK = 150;
+
+/**
+ * Reminder logs needed to attribute payments for a given set of enrollments.
+ *
+ * TWO bounded queries per page, not one per row:
+ *   1. KEYED   — `course_enrollment_id in (…)`, which rides
+ *                sms_logs_installment_attr_idx. Scoped to the enrollments on
+ *                screen, so this stays flat as the log grows instead of dragging
+ *                back every reminder ever sent.
+ *   2. KEYLESS — reminders that predate the attribution columns. Included
+ *                deliberately so a historically reminded student renders as
+ *                "installment not recorded" rather than "Not reminded", which
+ *                would be a lie. This set can only shrink relative to the table:
+ *                every new reminder carries a key, so it never grows again.
+ *
+ * Selects only the columns attribution needs — message bodies and names never
+ * leave the database for this read.
+ */
+export async function listAttributionLogs(templateId: string, enrollmentIds: string[]): Promise<AttributionLogRow[]> {
+  const db = getSupabaseAdmin();
+  if (!db) {
+    return demo().logs.filter((l) => l.template_id === templateId) as AttributionLogRow[];
+  }
+  const ids = [...new Set(enrollmentIds.filter(Boolean))];
+  const out: AttributionLogRow[] = [];
+  try {
+    for (let i = 0; i < ids.length; i += ATTR_ID_CHUNK) {
+      const chunk = ids.slice(i, i + ATTR_ID_CHUNK);
+      const { data, error } = await db
+        .from("sms_logs")
+        .select(ATTRIBUTION_COLS)
+        .eq("template_id", templateId)
+        .in("course_enrollment_id", chunk);
+      if (!error && data) out.push(...(data as AttributionLogRow[]));
+    }
+    const { data: legacy, error: legacyErr } = await db
+      .from("sms_logs")
+      .select(ATTRIBUTION_COLS)
+      .eq("template_id", templateId)
+      .is("course_enrollment_id", null)
+      .limit(5000);
+    if (!legacyErr && legacy) out.push(...(legacy as AttributionLogRow[]));
+  } catch { return out; }
+  // Oldest first: "first reminder" and "last reminder" are read off this order.
+  return out.sort((a, b) => String(a.sent_at || a.created_at).localeCompare(String(b.sent_at || b.created_at)));
 }
 
 export async function updateLog(id: string, patch: Partial<SmsLog>): Promise<void> {
