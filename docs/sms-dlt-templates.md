@@ -8,18 +8,18 @@
 - **Brand line (every template):** "Naman Sharma IAS Academy"
 - **Charset:** GSM-7 only · "Rs" not "₹" · no emoji · target < 155 chars worst-case
 
-Paste each registered **DLT Template ID** into the portal before a template can go Active. Portal bodies byte-match the bodies below.
+> Paste each registered **DLT Template ID** into the portal (Templates tab) before a template can go Active. Portal bodies byte-match the bodies below.
 
 ## Payment Pending  `payment_pending`
 
 - **Use case:** PAYMENT · **Category:** service
-- **Worst-case length:** 159 chars · **1 segment(s)**  ⚠️ exceeds 155
+- **Worst-case length:** 164 chars · **2 segment(s)**  ⚠️ exceeds 155
 - **DLT Template ID:** `________________________`
 
 **DLT body:**
 
 ```
-Hi {#var#}, payment for {#var#} is pending. Login {#var#} code {#var#} & upload proof for approval. Naman Sharma IAS Academy
+Hi {#var#}, your course fee for {#var#} is pending. Login: {#var#} Code: {#var#}. Upload payment proof. Naman Sharma IAS Academy.
 ```
 
 **Variable mapping (in order):**
@@ -34,13 +34,13 @@ Hi {#var#}, payment for {#var#} is pending. Login {#var#} code {#var#} & upload 
 ## Proof Received  `proof_received`
 
 - **Use case:** PAYMENT · **Category:** service
-- **Worst-case length:** 137 chars · **1 segment(s)**
+- **Worst-case length:** 147 chars · **1 segment(s)**
 - **DLT Template ID:** `________________________`
 
 **DLT body:**
 
 ```
-Hi {#var#}, we got your payment proof for {#var#}. Our team will verify & approve access shortly. Naman Sharma IAS Academy
+Hi {#var#}, we received your payment proof for the course fee of {#var#}. Our team will verify it shortly. Naman Sharma IAS Academy.
 ```
 
 **Variable mapping (in order):**
@@ -53,13 +53,13 @@ Hi {#var#}, we got your payment proof for {#var#}. Our team will verify & approv
 ## Access Approved  `access_approved`
 
 - **Use case:** PAYMENT · **Category:** service
-- **Worst-case length:** 149 chars · **1 segment(s)**
+- **Worst-case length:** 125 chars · **1 segment(s)**
 - **DLT Template ID:** `________________________`
 
 **DLT body:**
 
 ```
-Hi {#var#}, payment verified! Access for {#var#} is approved. Login {#var#} code {#var#}. Naman Sharma IAS Academy
+Hi {#var#}, your payment for the course fee of {#var#} has been verified. Thank you. Naman Sharma IAS Academy.
 ```
 
 **Variable mapping (in order):**
@@ -68,19 +68,17 @@ Hi {#var#}, payment verified! Access for {#var#} is approved. Login {#var#} code
 |---|---|
 | {#var#} #1 | `first_name` |
 | {#var#} #2 | `item_short` |
-| {#var#} #3 | `login_url` |
-| {#var#} #4 | `login_code` |
 
 ## Payment Successful  `payment_successful`
 
 - **Use case:** PAYMENT · **Category:** service
-- **Worst-case length:** 147 chars · **1 segment(s)**
+- **Worst-case length:** 156 chars · **1 segment(s)**  ⚠️ exceeds 155
 - **DLT Template ID:** `________________________`
 
 **DLT body:**
 
 ```
-Hi {#var#}, you are registered for {#var#}. Login {#var#} code {#var#} to view details. Naman Sharma IAS Academy
+Hi {#var#}, your registration for the course {#var#} is confirmed. Login: {#var#} Code: {#var#}. Naman Sharma IAS Academy
 ```
 
 **Variable mapping (in order):**
@@ -92,16 +90,16 @@ Hi {#var#}, you are registered for {#var#}. Login {#var#} code {#var#} to view d
 | {#var#} #3 | `login_url` |
 | {#var#} #4 | `login_code` |
 
-## Payment Failed  `payment_failed`
+## Payment Failed / Retry  `payment_failed`
 
 - **Use case:** PAYMENT · **Category:** service
-- **Worst-case length:** 146 chars · **1 segment(s)**
+- **Worst-case length:** 168 chars · **2 segment(s)**  ⚠️ exceeds 155
 - **DLT Template ID:** `________________________`
 
 **DLT body:**
 
 ```
-Hi {#var#}, payment for {#var#} did not complete. Login {#var#} code {#var#} to retry. Naman Sharma IAS Academy
+Hi {#var#}, your course fee for {#var#} was not received. Login: {#var#} Code: {#var#} to complete payment. Naman Sharma IAS Academy.
 ```
 
 **Variable mapping (in order):**
@@ -113,16 +111,16 @@ Hi {#var#}, payment for {#var#} did not complete. Login {#var#} code {#var#} to 
 | {#var#} #3 | `login_url` |
 | {#var#} #4 | `login_code` |
 
-## Abandoned Nudge  `abandoned_nudge`
+## Payment Abandoned Nudge  `abandoned_nudge`
 
 - **Use case:** PAYMENT · **Category:** service
-- **Worst-case length:** 145 chars · **1 segment(s)**
+- **Worst-case length:** 177 chars · **2 segment(s)**  ⚠️ exceeds 155
 - **DLT Template ID:** `________________________`
 
 **DLT body:**
 
 ```
-Hi {#var#}, you are almost enrolled in {#var#}! Finish payment: {#var#} code {#var#}. Naman Sharma IAS Academy
+Hi {#var#}, your payment for the course fee of {#var#} is pending. Login: {#var#} Code: {#var#} to complete payment. Naman Sharma IAS Academy.
 ```
 
 **Variable mapping (in order):**
@@ -134,16 +132,36 @@ Hi {#var#}, you are almost enrolled in {#var#}! Finish payment: {#var#} code {#v
 | {#var#} #3 | `login_url` |
 | {#var#} #4 | `login_code` |
 
-## Webinar Registered  `webinar_registered`
+## Webinar Registration Confirmed  `webinar_registered`
 
 - **Use case:** WEBINAR · **Category:** service
-- **Worst-case length:** 144 chars · **1 segment(s)**
+- **Worst-case length:** 129 chars · **1 segment(s)**
 - **DLT Template ID:** `________________________`
 
 **DLT body:**
 
 ```
-Hi {#var#}, your seat for {#var#} is booked! Login {#var#} code {#var#} for details. Naman Sharma IAS Academy
+Hi {#var#}, your webinar registration is confirmed. Login: {#var#} Code: {#var#}. Naman Sharma IAS Academy.
+```
+
+**Variable mapping (in order):**
+
+| Slot | Variable |
+|---|---|
+| {#var#} #1 | `first_name` |
+| {#var#} #2 | `login_url` |
+| {#var#} #3 | `login_code` |
+
+## Starting Soon  `starting_soon_1hr`
+
+- **Use case:** WEBINAR · **Category:** service
+- **Worst-case length:** 150 chars · **1 segment(s)**
+- **DLT Template ID:** `________________________`
+
+**DLT body:**
+
+```
+Hi {#var#}, your webinar {#var#} starts in 1 hour. Login: {#var#} to join the live session. Naman Sharma IAS Academy.
 ```
 
 **Variable mapping (in order):**
@@ -153,7 +171,63 @@ Hi {#var#}, your seat for {#var#} is booked! Login {#var#} code {#var#} for deta
 | {#var#} #1 | `first_name` |
 | {#var#} #2 | `item_short` |
 | {#var#} #3 | `login_url` |
-| {#var#} #4 | `login_code` |
+
+## Zoom / Joining Details Ready  `zoom_ready`
+
+- **Use case:** WEBINAR · **Category:** service
+- **Worst-case length:** 129 chars · **1 segment(s)**
+- **DLT Template ID:** `________________________`
+
+**DLT body:**
+
+```
+Hi {#var#}, your webinar registration is confirmed. Login: {#var#} Code: {#var#}. Naman Sharma IAS Academy.
+```
+
+**Variable mapping (in order):**
+
+| Slot | Variable |
+|---|---|
+| {#var#} #1 | `first_name` |
+| {#var#} #2 | `login_url` |
+| {#var#} #3 | `login_code` |
+
+## General Webinar Invite / Sign-Up  `general_webinar_invite`
+
+- **Use case:** WEBINAR · **Category:** promotional
+- **Worst-case length:** 118 chars · **1 segment(s)**
+- **DLT Template ID:** `________________________`
+
+**DLT body:**
+
+```
+Hi {#var#}, our next UPSC webinar is open! View list and enroll: {#var#}. Naman Sharma IAS Academy
+```
+
+**Variable mapping (in order):**
+
+| Slot | Variable |
+|---|---|
+| {#var#} #1 | `first_name` |
+| {#var#} #2 | `login_url` |
+
+## new webinar enroll  `new_webinar_enroll`
+
+- **Use case:** WEBINAR · **Category:** promotional
+- **Worst-case length:** 151 chars · **1 segment(s)**
+- **DLT Template ID:** `________________________`
+
+**DLT body:**
+
+```
+Confused about UPSC/IAS Preparation Join Naman Sir 2-hr LIVE UPSC Masterclass. Fee Rs.50. Enroll: https://vm.ltd/NAMIAS/fBLiXB Naman Sharma IAS Academy
+```
+
+**Variable mapping (in order):**
+
+| Slot | Variable |
+|---|---|
+| — | (no variables) |
 
 ## Reminder Day Before  `reminder_day_before`
 
@@ -198,47 +272,6 @@ Hi {#var#}, {#var#} is TODAY at {#var#}! Login {#var#} code {#var#} to join. Nam
 | {#var#} #4 | `login_url` |
 | {#var#} #5 | `login_code` |
 
-## Starting Soon (1 hr)  `starting_soon_1hr`
-
-- **Use case:** WEBINAR · **Category:** service
-- **Worst-case length:** 132 chars · **1 segment(s)**
-- **DLT Template ID:** `________________________`
-
-**DLT body:**
-
-```
-Hi {#var#}, {#var#} starts in 1 hour! Login now {#var#} for the live link. Naman Sharma IAS Academy
-```
-
-**Variable mapping (in order):**
-
-| Slot | Variable |
-|---|---|
-| {#var#} #1 | `first_name` |
-| {#var#} #2 | `item_short` |
-| {#var#} #3 | `login_url` |
-
-## Zoom / Joining Ready  `zoom_ready`
-
-- **Use case:** WEBINAR · **Category:** service
-- **Worst-case length:** 138 chars · **1 segment(s)**
-- **DLT Template ID:** `________________________`
-
-**DLT body:**
-
-```
-Hi {#var#}, joining details for {#var#} are ready. Login {#var#} code {#var#}. Naman Sharma IAS Academy
-```
-
-**Variable mapping (in order):**
-
-| Slot | Variable |
-|---|---|
-| {#var#} #1 | `first_name` |
-| {#var#} #2 | `item_short` |
-| {#var#} #3 | `login_url` |
-| {#var#} #4 | `login_code` |
-
 ## Same-Day 10AM Invite (Not Registered)  `sameday_10am_invite`
 
 - **Use case:** WEBINAR · **Category:** promotional
@@ -260,25 +293,6 @@ Hi {#var#}, free UPSC webinar {#var#} is TODAY at {#var#}. Register now: {#var#}
 | {#var#} #3 | `webinar_time` |
 | {#var#} #4 | `login_url` |
 
-## General Webinar Invite  `general_webinar_invite`
-
-- **Use case:** WEBINAR · **Category:** promotional
-- **Worst-case length:** 116 chars · **1 segment(s)**
-- **DLT Template ID:** `________________________`
-
-**DLT body:**
-
-```
-Hi {#var#}, our next UPSC webinar is open! View list & enroll: {#var#}. Naman Sharma IAS Academy
-```
-
-**Variable mapping (in order):**
-
-| Slot | Variable |
-|---|---|
-| {#var#} #1 | `first_name` |
-| {#var#} #2 | `login_url` |
-
 ## Missed Webinar Follow-up  `missed_webinar_followup`
 
 - **Use case:** WEBINAR · **Category:** service
@@ -299,16 +313,37 @@ Hi {#var#}, sorry we missed you at {#var#}. Catch our upcoming sessions: {#var#}
 | {#var#} #2 | `item_short` |
 | {#var#} #3 | `login_url` |
 
-## Post-Webinar Thank You  `post_webinar_thankyou`
+## Webinar Moved  `webinar_moved`
 
-- **Use case:** POST_WEBINAR · **Category:** service
-- **Worst-case length:** 153 chars · **1 segment(s)**
+- **Use case:** WEBINAR · **Category:** service
+- **Worst-case length:** 163 chars · **2 segment(s)**  ⚠️ exceeds 155
 - **DLT Template ID:** `________________________`
 
 **DLT body:**
 
 ```
-Hi {#var#}, thanks for attending {#var#}! Ready for the full course? Explore & enroll: {#var#}. Naman Sharma IAS Academy
+Hi {#var#}, your registration is moved to {#var#} on {#var#}. Your access stays valid. Login {#var#}. Naman Sharma IAS Academy
+```
+
+**Variable mapping (in order):**
+
+| Slot | Variable |
+|---|---|
+| {#var#} #1 | `first_name` |
+| {#var#} #2 | `item_short` |
+| {#var#} #3 | `date` |
+| {#var#} #4 | `login_url` |
+
+## Post-Webinar Thank You  `post_webinar_thankyou`
+
+- **Use case:** POST_WEBINAR · **Category:** service
+- **Worst-case length:** 155 chars · **1 segment(s)**
+- **DLT Template ID:** `________________________`
+
+**DLT body:**
+
+```
+Hi {#var#}, thanks for attending {#var#}! Ready for the full course? Explore and enroll: {#var#}. Naman Sharma IAS Academy
 ```
 
 **Variable mapping (in order):**
@@ -322,13 +357,13 @@ Hi {#var#}, thanks for attending {#var#}! Ready for the full course? Explore & e
 ## Welcome / First Login  `welcome_first_login`
 
 - **Use case:** ONBOARDING · **Category:** service
-- **Worst-case length:** 113 chars · **1 segment(s)**
+- **Worst-case length:** 131 chars · **1 segment(s)**
 - **DLT Template ID:** `________________________`
 
 **DLT body:**
 
 ```
-Hi {#var#}, welcome to Naman Sharma IAS Academy! Open your dashboard: {#var#} code {#var#}.
+Hi {#var#}, welcome to Naman Sharma IAS Academy. Your account has been created. Login: {#var#} Code: {#var#}.
 ```
 
 **Variable mapping (in order):**
@@ -338,6 +373,27 @@ Hi {#var#}, welcome to Naman Sharma IAS Academy! Open your dashboard: {#var#} co
 | {#var#} #1 | `first_name` |
 | {#var#} #2 | `login_url` |
 | {#var#} #3 | `login_code` |
+
+## Course Enrollment Confirmed  `course_enrolled`
+
+- **Use case:** ONBOARDING · **Category:** service
+- **Worst-case length:** 155 chars · **1 segment(s)**
+- **DLT Template ID:** `________________________`
+
+**DLT body:**
+
+```
+Hi {#var#}, your enrollment for the course {#var#} is confirmed. Login: {#var#} Code: {#var#}. Naman Sharma IAS Academy.
+```
+
+**Variable mapping (in order):**
+
+| Slot | Variable |
+|---|---|
+| {#var#} #1 | `first_name` |
+| {#var#} #2 | `item_short` |
+| {#var#} #3 | `login_url` |
+| {#var#} #4 | `login_code` |
 
 ## Login Code Resend  `login_code_resend`
 
@@ -359,16 +415,16 @@ Hi {#var#}, your login code is {#var#}. Login: {#var#}. Naman Sharma IAS Academy
 | {#var#} #2 | `login_code` |
 | {#var#} #3 | `login_url` |
 
-## Course Enrolled  `course_enrolled`
+## Payment Plan Changed  `payment_plan_changed`
 
-- **Use case:** ONBOARDING · **Category:** service
-- **Worst-case length:** 137 chars · **1 segment(s)**
+- **Use case:** PAYMENT · **Category:** service
+- **Worst-case length:** 154 chars · **1 segment(s)**
 - **DLT Template ID:** `________________________`
 
 **DLT body:**
 
 ```
-Hi {#var#}, you are enrolled in {#var#}! Login {#var#} code {#var#} to start. Naman Sharma IAS Academy
+Hi {#var#}, payment plan for {#var#} updated. Login {#var#} code {#var#} to view installments. Naman Sharma IAS Academy
 ```
 
 **Variable mapping (in order):**

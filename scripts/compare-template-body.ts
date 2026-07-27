@@ -9,15 +9,13 @@ import { readFileSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
 import { SEED_TEMPLATES } from "../lib/sms/templates";
+import { fixedSegments } from "../lib/sms/placeholders";
 
 const XLSX_PATH = join(homedir(), "Downloads", "APPROVED SMS TEMPLATES.xlsx");
 const GATEWAY_ID = "1707178280799637109";
 
 const show = (s: string) => JSON.stringify(s);
 /** Split a string into fixed segments around variable markers ({...} or {#var#}). */
-function fixedSegments(s: string, varRe: RegExp): string[] {
-  return s.split(varRe);
-}
 function hexdump(a: string, b: string) {
   const max = Math.max(a.length, b.length);
   for (let i = 0; i < max; i++) {
@@ -51,9 +49,11 @@ function main() {
   if (!seed) { console.log("No seed template with that gateway id."); return; }
   console.log(`\nOur template body [${seed.id}]:\n  ${show(seed.body)}`);
 
-  // Compare fixed segments (mask variables on both sides).
-  const ourFixed = fixedSegments(seed.body, /\{[^}]+\}/g);
-  const apprFixed = fixedSegments(approvedBody, /\{#[^}]*#\}|\{[^}]+\}/g);
+  // Compare fixed segments (mask variables on both sides). The shared helper
+  // covers the approved side too: `{#var#}` has no inner braces, so it matches
+  // the same pattern as a portal `{var}` token.
+  const ourFixed = fixedSegments(seed.body);
+  const apprFixed = fixedSegments(approvedBody);
   console.log("\nFixed segments (ours):", JSON.stringify(ourFixed));
   console.log("Fixed segments (approved):", JSON.stringify(apprFixed));
 

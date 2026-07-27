@@ -7,6 +7,7 @@ import { LoadingBlock } from "@/components/admin/ui";
 import { useToast } from "@/components/ui/Toast";
 import TimeframeFilter from "@/components/admin/TimeframeFilter";
 import { formatISTDateTime, TIMEFRAME_LABELS, type TimeframeValue } from "@/lib/dates";
+import { uniqueVariables, unknownVariables } from "@/lib/sms/placeholders";
 
 // Recharts is heavy and only shown inside the Overview/Analytics tabs — lazy-load
 // the chart bodies so Recharts stays out of the initial Mission Control bundle.
@@ -915,12 +916,14 @@ function AutomationsTab({ canEdit }: { canEdit: boolean }) {
 }
 
 // ============================ TEMPLATES ============================
-// Substitution syntax used by the send pipeline: {token} (lowercase + _). The
-// server re-detects authoritatively on save; this mirrors it for live preview.
-const TPL_VAR_RE = /\{([a-z_]+)\}/g;
-const KNOWN_VARS = new Set(["name", "first_name", "mobile", "login_code", "login_url", "item_name", "item_short", "amount", "payment_status", "webinar_date", "webinar_time", "support_number"]);
-function detectVars(body: string): string[] { return [...new Set([...body.matchAll(TPL_VAR_RE)].map((m) => m[1]))]; }
-function unknownVars(body: string): string[] { return detectVars(body).filter((v) => !KNOWN_VARS.has(v)); }
+// Substitution syntax used by the send pipeline: {token}. This preview MUST use
+// the same matcher and the same catalogue as the server, or staff are told a
+// body has fewer variables than it really does — which is how the Installment
+// Reminder incident stayed invisible in this very editor. Imported from
+// lib/sms/placeholders (not lib/sms/templates) to keep the seed bodies out of
+// the client bundle.
+const detectVars = uniqueVariables;
+const unknownVars = unknownVariables;
 
 /** Compliance banner shown wherever staff add / edit templates. */
 function ComplianceNote() {
@@ -1027,7 +1030,7 @@ function TemplateFieldSet({
         <p className="font-semibold text-ink2">Detected variables</p>
         {vars.length === 0 ? <p className="mt-1 text-muted">None — this body is fully static.</p> : (
           <div className="mt-1 flex flex-wrap gap-1.5">
-            {vars.map((v) => <span key={v} className={`pill text-[10px] ${KNOWN_VARS.has(v) ? "pill-green" : "pill-amber"}`}><span className="font-mono">{`{${v}}`}</span></span>)}
+            {vars.map((v) => <span key={v} className={`pill text-[10px] ${unknown.includes(v) ? "pill-amber" : "pill-green"}`}><span className="font-mono">{`{${v}}`}</span></span>)}
           </div>
         )}
         {unknown.length > 0 && <p className="mt-1.5 text-amber-700">Unknown placeholder(s) {unknown.map((u) => `{${u}}`).join(", ")} — nothing fills these, so they render empty and those recipients are skipped (missing-vars) at send time.</p>}
