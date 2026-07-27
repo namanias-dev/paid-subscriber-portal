@@ -1,0 +1,247 @@
+"use client";
+
+import { useCallback, useState } from "react";
+import { AlertTriangle, IndianRupee, Loader2 } from "lucide-react";
+import { useToast } from "@/components/ui/Toast";
+import { formatINR, formatISTDate } from "@/lib/dates";
+
+/**
+ * THE shared "Send installment reminder" action. Every surface that shows a
+ * student's pending installment mounts this same component — the resolution,
+ * gating, preview and send logic exists once, so a page can't drift into
+ * showing a different amount from the one that gets sent.
+ *
+ * Flow is deliberately two-step: opening the modal only PREVIEWS (the server
+ * resolves and renders but sends nothing); sending needs a second, explicit
+ * click on a button that is disabled whenever the server says the reminder is
+ * not sendable. The server enforces the same rules independently — this UI is
+ * the explanation, not the control.
+ */
+
+interface VariableView {
+  token: string;
+  canonicalKey: string | null;
+  value: string;
+  resolved: boolean;
+}
+
+interface Preview {
+  enrollmentId: string;
+  studentName: string;
+  maskedPhone: string;
+  courseTitle: string;
+  templateName: string;
+  dltTemplateId: string | null;
+  body: string;
+  variables: VariableView[];
+  installmentNo: number | null;
+  amountDue: number | null;
+  dueDate: string | null;
+  isOverdue: boolean;
+  unpaidCount: number;
+  totalRemaining: number | null;
+  characterCount: number;
+  segments: number;
+  sendable: boolean;
+  blockReason: string | null;
+  blockDetail: string | null;
+  warnings: string[];
+  lastSentAt: string | null;
+}
+
+export interface InstallmentReminderButtonProps {
+  /** The specific enrollment being chased. Preferred — never ambiguous. */
+  enrollmentId: string;
+  /** Optional label override; defaults to a compact row action. */
+  label?: string;
+  className?: string;
+  /** Render as a filled button rather than an inline text action. */
+  variant?: "inline" | "button";
+}
+
+const DEFAULT_INLINE = "inline-flex items-center gap-1 text-xs font-semibold text-primary hover:underline";
+const DEFAULT_BUTTON = "btn btn-secondary inline-flex items-center gap-1 text-sm";
+
+export default function InstallmentReminderButton({
+  enrollmentId, label = "Remind", className, variant = "inline",
+}: InstallmentReminderButtonProps) {
+  const { toast } = useToast();
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [preview, setPreview] = useState<Preview | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const loadPreview = useCallback(async () => {
+    setLoading(true); setError(null); setPreview(null);
+    try {
+      const res = await fetch("/api/admin/sms/installment-reminder", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enrollmentId }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) setError(data.error || "Could not build the reminder preview.");
+      else setPreview(data.preview as Preview);
+    } catch {
+      setError("Could not reach the server.");
+    } finally {
+      setLoading(false);
+    }
+  }, [enrollmentId]);
+
+  function openModal() {
+    setOpen(true);
+    void loadPreview();
+  }
+
+  function close() {
+    setOpen(false); setPreview(null); setError(null);
+  }
+
+  async function send() {
+    if (!preview?.sendable) return;
+    setSending(true);
+    try {
+      const res = await fetch("/api/admin/sms/installment-reminder", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enrollmentId, allowRepeat: !!preview.lastSentAt }),
+      });
+      const data = await res.json();
+      if (res.ok && data.ok) {
+        toast(`Reminder sent to ${data.maskedPhone} — installment ${data.installmentNo}.`, "success");
+        close();
+      } else {
+        toast(data.error || "Send failed.", "error");
+      }
+    } catch {
+      toast("Send failed.", "error");
+    } finally {
+      setSending(false);
+    }
+  }
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={openModal}
+        className={className ?? (variant === "button" ? DEFAULT_BUTTON : DEFAULT_INLINE)}
+        title="Preview and send the installment reminder SMS"
+      >
+        <IndianRupee size={variant === "button" ? 15 : 13} /> {label}
+      </button>
+
+      {open && (
+        <div className="fixed inset-0 z-[130] flex items-center justify-center bg-black/40 p-4" onClick={close}>
+          <div
+            className="card max-h-[90vh] w-full max-w-lg overflow-y-auto p-5"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Installment reminder preview"
+          >
+            <h3 className="text-base font-bold">Installment reminder</h3>
+
+            {loading && (
+              <p className="mt-4 inline-flex items-center gap-2 text-sm text-muted">
+                <Loader2 size={14} className="animate-spin" /> Resolving this student&apos;s installment…
+              </p>
+            )}
+
+            {error && !loading && (
+              <p className="mt-3 rounded-xl bg-danger/10 p-3 text-sm text-danger">{error}</p>
+            )}
+
+            {preview && !loading && (
+              <>
+                <p className="mt-0.5 text-sm text-ink2">
+                  {preview.studentName} · <span className="font-mono text-xs text-muted">{preview.maskedPhone}</span>
+                </p>
+                <p className="text-xs text-muted">{preview.courseTitle}</p>
+
+                {/* Resolved facts — what this message is about */}
+                <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                  <Fact label="Installment" value={preview.installmentNo != null ? `No. ${preview.installmentNo}` : "—"} />
+                  <Fact label="Amount due" value={preview.amountDue != null ? formatINR(preview.amountDue) : "—"} tone={preview.isOverdue ? "text-danger" : undefined} />
+                  <Fact label="Due date" value={preview.dueDate ? formatISTDate(preview.dueDate) : "—"} sub={preview.isOverdue ? "overdue" : undefined} />
+                  <Fact label="Segments" value={String(preview.segments)} sub={`${preview.characterCount} chars`} />
+                </div>
+
+                {preview.unpaidCount > 1 && (
+                  <p className="mt-2 text-xs text-ink2">
+                    This student has <strong>{preview.unpaidCount} unpaid installments</strong>. This reminder refers to the
+                    {" "}<strong>oldest unpaid</strong> one (no. {preview.installmentNo}).
+                  </p>
+                )}
+
+                {/* The exact body that will be sent */}
+                <div className="mt-3 rounded-xl bg-surface p-3">
+                  <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted">Message to be sent</p>
+                  <p className="whitespace-pre-wrap text-sm text-ink">{preview.body}</p>
+                </div>
+
+                {/* Per-token resolution, so staff can see nothing is left raw */}
+                <div className="mt-3">
+                  <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted">Resolved variables</p>
+                  <ul className="space-y-1">
+                    {preview.variables.map((v) => (
+                      <li key={v.token} className="flex items-baseline justify-between gap-3 text-xs">
+                        <code className="shrink-0 rounded bg-surface2 px-1 py-0.5 text-[11px] text-ink2">{`{${v.token}}`}</code>
+                        <span className={`truncate text-right font-medium ${v.resolved ? "text-success" : "text-danger"}`}>
+                          {v.resolved ? v.value : "unresolved"}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+
+                <p className="mt-3 text-[11px] text-muted">
+                  Template: {preview.templateName}
+                  {preview.dltTemplateId ? ` · DLT ${preview.dltTemplateId}` : " · no DLT id"}
+                </p>
+
+                {!preview.sendable && (
+                  <p className="mt-3 inline-flex items-start gap-2 rounded-xl bg-danger/10 p-3 text-sm text-danger">
+                    <AlertTriangle size={15} className="mt-0.5 shrink-0" />
+                    <span>{preview.blockDetail || "This reminder cannot be sent."}</span>
+                  </p>
+                )}
+
+                {preview.warnings.map((w) => (
+                  <p key={w} className="mt-2 inline-flex items-start gap-2 rounded-xl bg-warning/10 p-3 text-xs text-amber-700">
+                    <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+                    <span>{w}</span>
+                  </p>
+                ))}
+              </>
+            )}
+
+            <div className="mt-4 flex justify-end gap-2">
+              <button onClick={close} className="btn btn-secondary text-sm">Cancel</button>
+              <button
+                onClick={send}
+                disabled={!preview?.sendable || sending || loading}
+                className="btn btn-primary text-sm"
+                title={preview && !preview.sendable ? (preview.blockDetail ?? undefined) : "Send this reminder now"}
+              >
+                {sending ? "Sending…" : preview?.lastSentAt ? "Send anyway" : "Send reminder"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+function Fact({ label, value, sub, tone }: { label: string; value: string; sub?: string; tone?: string }) {
+  return (
+    <div className="rounded-xl bg-surface2 p-2">
+      <p className="text-[10px] font-medium uppercase tracking-wide text-muted">{label}</p>
+      <p className={`mt-0.5 text-sm font-bold tabular-nums ${tone || "text-ink"}`}>{value}</p>
+      {sub && <p className="text-[10px] text-muted">{sub}</p>}
+    </div>
+  );
+}

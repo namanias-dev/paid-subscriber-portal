@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ChevronRight } from "lucide-react";
 import { PageHeader, useAdminData, LoadingBlock, TableShell, KpiCard } from "@/components/admin/ui";
+import InstallmentReminderButton from "@/components/admin/sms/InstallmentReminderButton";
 import { formatINR, formatISTDate } from "@/lib/dates";
 import { deriveEnrollment } from "@/lib/installments";
 import type { CourseEnrollment, Course } from "@/lib/types";
@@ -244,7 +245,7 @@ export default function CoursePaymentsAdmin() {
         </div>
       )}
 
-      <TableShell headers={["Student", "Phone", "Course", "Plan", "Paid / Total", "Installments", "Status", "Started"]}>
+      <TableShell headers={["Student", "Phone", "Course", "Plan", "Paid / Total", "Installments", "Status", "Started", ""]}>
         {rows.map((e) => {
           const d = deriveEnrollment(e);
           const nextDue = e.schedule.find((s) => !s.paid && s.due);
@@ -285,6 +286,9 @@ export default function CoursePaymentsAdmin() {
               </td>
               <td className="px-4 py-3"><span className={`pill ${STATUS_PILL[e.status] || "pill-gray"}`}>{STATUS_LABEL[e.status] || e.status}</span></td>
               <td className="px-4 py-3 text-xs">{formatISTDate(e.created_at)}</td>
+              <td className="px-4 py-3 text-right" onClick={(ev) => ev.stopPropagation()}>
+                {d.remaining > 0 ? <InstallmentReminderButton enrollmentId={e.id} /> : <span className="text-xs text-muted">—</span>}
+              </td>
             </tr>
           );
         })}

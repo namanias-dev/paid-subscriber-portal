@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { AlertTriangle, Phone, Search } from "lucide-react";
 import { useAdminData, LoadingBlock } from "@/components/admin/ui";
+import InstallmentReminderButton from "@/components/admin/sms/InstallmentReminderButton";
 import { formatINR, formatISTDate } from "@/lib/dates";
 import { deriveCollections } from "@/lib/installments";
 import type { CourseEnrollment, Course } from "@/lib/types";
@@ -171,11 +172,14 @@ export default function CollectionsWorklist() {
                   <td className="px-4 py-3 tabular-nums text-ink2">{formatINR(d.remaining)}</td>
                   <td className="px-4 py-3 tabular-nums text-ink2">{d.nextDueDate ? formatISTDate(d.nextDueDate) : "—"}</td>
                   <td className="px-4 py-3 text-right">
-                    {e.student_id ? (
-                      <Link href={`/admin/students/${e.student_id}?enrollmentId=${e.id}`} className="text-xs font-semibold text-primary hover:underline">View</Link>
-                    ) : (
-                      <span className="text-xs text-muted">—</span>
-                    )}
+                    <div className="flex items-center justify-end gap-3">
+                      <InstallmentReminderButton enrollmentId={e.id} />
+                      {e.student_id ? (
+                        <Link href={`/admin/students/${e.student_id}?enrollmentId=${e.id}`} className="text-xs font-semibold text-primary hover:underline">View</Link>
+                      ) : (
+                        <span className="text-xs text-muted">—</span>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}

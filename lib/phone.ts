@@ -83,6 +83,21 @@ export function whatsappLink(raw: string | null | undefined, message?: string | 
   return msg ? `${base}?text=${encodeURIComponent(msg)}` : base;
 }
 
+/**
+ * PII-safe rendering of a mobile: keeps enough for a human to confirm they are
+ * looking at the right person, not enough to dial. Use in logs, console output
+ * and any staff-facing confirmation surface. Falls back to masking the raw
+ * digits when the number is not a valid Indian mobile, so an unparseable value
+ * is never echoed in full.
+ */
+export function maskMobile(raw: string | null | undefined): string {
+  const n = normalizeIndianMobile(raw);
+  const d = n.ok && n.digits10 ? n.digits10 : (raw || "").replace(/\D/g, "");
+  if (!d) return "—";
+  if (d.length <= 4) return "*".repeat(d.length);
+  return `${d.slice(0, 2)}${"*".repeat(Math.max(0, d.length - 4))}${d.slice(-2)}`;
+}
+
 /** Build a tel: link. Returns null if the number is invalid. */
 export function telLink(raw: string | null | undefined): string | null {
   const n = normalizeIndianMobile(raw);

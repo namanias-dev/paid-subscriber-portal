@@ -6,6 +6,7 @@ import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { ChevronLeft, ChevronRight, Search } from "lucide-react";
 import { useAdminData, LoadingBlock } from "@/components/admin/ui";
 import { HeaderStat, InstallmentSchedule } from "@/components/admin/collections/parts";
+import InstallmentReminderButton from "@/components/admin/sms/InstallmentReminderButton";
 import { formatINR, formatISTDate } from "@/lib/dates";
 import { deriveCollections } from "@/lib/installments";
 import type { CourseEnrollment, Course } from "@/lib/types";
@@ -237,20 +238,30 @@ export default function CohortDrillIn() {
                       </td>
                       <td className="px-4 py-3 tabular-nums text-ink2">{d.nextDueDate ? formatISTDate(d.nextDueDate) : "—"}</td>
                       <td className="px-4 py-3"><span className={`pill ${STATUS_PILL[e.status] || "pill-gray"}`}>{STATUS_LABEL[e.status] || e.status}</span></td>
-                      <td className="px-4 py-3 text-right">
-                        <ChevronRight size={15} className={`text-muted transition ${isOpen ? "rotate-90" : ""}`} />
+                      <td className="px-4 py-3 text-right" onClick={(ev) => ev.stopPropagation()}>
+                        <div className="flex items-center justify-end gap-3">
+                          {d.remaining > 0 && <InstallmentReminderButton enrollmentId={e.id} />}
+                          <ChevronRight
+                            size={15}
+                            className={`cursor-pointer text-muted transition ${isOpen ? "rotate-90" : ""}`}
+                            onClick={() => setExpanded(isOpen ? null : e.id)}
+                          />
+                        </div>
                       </td>
                     </tr>
                     {isOpen && (
                       <tr className="border-b border-line bg-surface2/40">
                         <td colSpan={8} className="px-4 py-3">
-                          <div className="mb-2 flex items-center justify-between">
+                          <div className="mb-2 flex items-center justify-between gap-3">
                             <span className="text-xs font-semibold uppercase tracking-wide text-ink2">Installment schedule</span>
-                            {e.student_id && (
-                              <Link href={`/admin/students/${e.student_id}?enrollmentId=${e.id}`} className="text-xs font-semibold text-primary hover:underline">
-                                Open student profile →
-                              </Link>
-                            )}
+                            <div className="flex items-center gap-3">
+                              {d.remaining > 0 && <InstallmentReminderButton enrollmentId={e.id} label="Send installment reminder" />}
+                              {e.student_id && (
+                                <Link href={`/admin/students/${e.student_id}?enrollmentId=${e.id}`} className="text-xs font-semibold text-primary hover:underline">
+                                  Open student profile →
+                                </Link>
+                              )}
+                            </div>
                           </div>
                           <InstallmentSchedule schedule={e.schedule} />
                         </td>
