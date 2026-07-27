@@ -97,7 +97,13 @@ export function resolveInstallmentForEnrollment(
   now = Date.now(),
 ): InstallmentResolution {
   if (!isReminderEligibleEnrollment(enrollment)) {
-    return { ok: false, reason: "no_active_enrollment", detail: "No confirmed, non-cancelled enrollment." };
+    // These two land on staff constantly: a "pending" enrollment still shows an
+    // outstanding balance in the at-risk lists, so the reason has to explain why
+    // a student who visibly owes money is not reminder-eligible.
+    const detail = enrollment.status === "cancelled"
+      ? "This enrollment is cancelled, so no installment is due."
+      : "This student has not paid anything yet, so there is no installment plan running — they need an admission/seat-booking follow-up, not an installment reminder.";
+    return { ok: false, reason: "no_active_enrollment", detail };
   }
 
   const derived = deriveCollections(enrollment, now);
