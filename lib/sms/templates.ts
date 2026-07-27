@@ -14,6 +14,7 @@
  *  - Live char + segment counting; worst-case (max-length fill) flagged > 155.
  */
 import type { SmsMessageType, SmsUseCase } from "./types";
+import { buildVarIndex, isResolvedValue, lookupVariable, registryKeyFor } from "./variableRegistry";
 
 export const BRAND_LINE = "Naman Sharma IAS Academy";
 export const MAX_RECOMMENDED_CHARS = 155;
@@ -157,15 +158,33 @@ export const KNOWN_VARIABLES: readonly string[] = [
   "webinar_date", "webinar_time", "support_number",
 ] as const;
 
-/** Body {tokens} that are NOT in the canonical catalogue (first-seen order). */
+/**
+ * Body {tokens} that are NOT in the canonical catalogue (first-seen order).
+ * Alias-aware: a DLT-approved spelling such as `{No_of_Installment}` resolves
+ * through the registry to a known variable, so it is NOT reported as unknown.
+ */
 export function unknownVariables(body: string): string[] {
-  return uniqueVariables(body).filter((v) => !KNOWN_VARIABLES.includes(v));
+  return uniqueVariables(body).filter(
+    (v) => !KNOWN_VARIABLES.includes(v) && registryKeyFor(v) === null,
+  );
 }
 
 // ---------------------------------------------------------------------------
 // Variables
 // ---------------------------------------------------------------------------
-const VAR_RE = /\{([a-z_]+)\}/g;
+/**
+ * THE placeholder pattern — one regex, one place. Matches ANY `{...}` token so
+ * a DLT-approved spelling with spaces, capitals, digits or dots is detected.
+ *
+ * It previously read `/\{([a-z_]+)\}/g`, which silently ignored every token
+ * that was not all-lowercase-with-underscores. The DLT-registered "Installment
+ * Reminder" body (`{No_of_Installment}`, `{Fee_in_Rs}`) therefore parsed as if
+ * it had only three variables, both money tokens were never substituted, and a
+ * real student received the raw braces. The token text must keep matching the
+ * approved DLT body byte-for-byte, so the fix is here in the parser — resolution
+ * of the odd spellings happens through the alias registry, never by editing a body.
+ */
+const VAR_RE = /\{([^{}]+)\}/g;
 
 /** Ordered list of variable occurrences (DLT slots — duplicates kept in order). */
 export function variableSlots(body: string): string[] {
@@ -181,14 +200,30 @@ export function uniqueVariables(body: string): string[] {
   return [...new Set(variableSlots(body))];
 }
 
-/** Render a body with provided values. Missing values render empty. */
+/**
+ * Render a body with provided values.
+ *
+ * Lookup order per token is EXACT key first, then the alias registry — so every
+ * body that rendered before renders byte-identically, and only tokens that
+ * previously resolved to nothing gain a value.
+ *
+ * An UNRESOLVED token is left in the text as `{token}` and reported in
+ * `missing`. It used to be replaced with an empty string, which quietly
+ * destroyed the only evidence that anything was wrong: the body came out as
+ * "installment no.  of Rs. is due", brace-free and therefore indistinguishable
+ * from a correct render by the time it reached the gateway. Every send path
+ * aborts on a non-empty `missing`, so no caller's behaviour changes — but the
+ * text now carries the failure with it, which is what lets the last-mile guard
+ * in ./sendGuard catch a body no matter which path produced it.
+ */
 export function renderTemplate(body: string, vars: Record<string, string | number | null | undefined>): { text: string; missing: string[] } {
   const missing: string[] = [];
-  const text = body.replace(VAR_RE, (_full, key: string) => {
-    const v = vars[key];
-    if (v === undefined || v === null || String(v).trim() === "") {
+  const index = buildVarIndex(vars);
+  const text = body.replace(VAR_RE, (full, key: string) => {
+    const v = lookupVariable(vars, key, index);
+    if (!isResolvedValue(v)) {
       if (!missing.includes(key)) missing.push(key);
-      return "";
+      return full;
     }
     return String(v);
   });
@@ -284,6 +319,11 @@ export const WORST_SAMPLE: Record<string, string> = {
   webinar_date: "28 Jun 2026",
   webinar_time: "10:00 AM",
   support_number: "9876543210",
+  // `webinar_moved` uses a bare {date}. Without a sample here the worst-case
+  // fill leaves the token unresolved and under-counts that template's length.
+  date: "28 Jun 2026",
+  no_of_installment: "10",
+  fee_in_rs: "125000",
 };
 
 export function worstCaseFill(body: string, loginUrlSample?: string): { text: string; analysis: BodyAnalysis } {

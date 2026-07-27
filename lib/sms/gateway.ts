@@ -4,6 +4,7 @@
  * format is configurable via SMS_NUMBER_FORMAT (confirm against a JustGoSMS sample).
  */
 import { SMS_API_BASE_URL, SMS_DLR_BASE_URL, SMS_CREDIT_BASE_URL, SMS_DEFAULT_ROUTE, SMS_DEFAULT_SENDER_ID, smsNumberFormat } from "./config";
+import { guardOutboundBody } from "./sendGuard";
 import type { SmsLogStatus } from "./types";
 
 export interface GatewaySendInput {
@@ -61,6 +62,14 @@ function looksSuccessful(httpStatus: number, body: string): boolean {
 }
 
 export async function sendViaGateway(input: GatewaySendInput): Promise<GatewayResult> {
+  // LAST-MILE SEND GUARD. Every outbound path ends here, including ones that
+  // never touch sendSms (retryLog / resendCampaignFailed re-send a STORED body,
+  // so a body saved before the parser fix must not be replayed to a handset).
+  const guard = guardOutboundBody(input.message);
+  if (!guard.ok) {
+    return { ok: false, status: "FAILED", messageId: null, response: { error: `blocked:${guard.reason}` } };
+  }
+
   const authKey = process.env.SMS_API_AUTH_KEY;
   const username = process.env.SMS_API_USERNAME;
   const password = process.env.SMS_API_PASSWORD;
@@ -104,6 +113,13 @@ export async function sendViaGateway(input: GatewaySendInput): Promise<GatewayRe
  * NEVER use this for personalized content — the message is identical for all.
  */
 export async function sendBulkViaGateway(input: GatewayBulkInput): Promise<GatewayResult> {
+  // Same last-mile guard as the single send — one unrendered body here would
+  // reach every number in the chunk at once.
+  const guard = guardOutboundBody(input.message);
+  if (!guard.ok) {
+    return { ok: false, status: "FAILED", messageId: null, response: { error: `blocked:${guard.reason}` } };
+  }
+
   const authKey = process.env.SMS_API_AUTH_KEY;
   const username = process.env.SMS_API_USERNAME;
   const password = process.env.SMS_API_PASSWORD;

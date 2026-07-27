@@ -12,6 +12,7 @@ import { getTemplate, getSettings, insertQueuedLog, updateLog, countSentSince, r
 import { sendViaGateway, sendBulkViaGateway, fetchDeliveryStatuses, checkBalance, type DeliveryLine } from "./gateway";
 import { gatewayConfigured, smsEnvEnabled, loginUrlForTemplate, bulkChunkSize, SMS_DEFAULT_SENDER_ID, SMS_DEFAULT_ROUTE } from "./config";
 import { getResolvedDefaults } from "./variables";
+import { checkRenderedBody } from "./sendGuard";
 import type { SmsLog, SmsLogStatus } from "./types";
 
 const SAME_TRIGGER_WINDOW_MIN = 30;
@@ -152,14 +153,24 @@ async function resolveSendVars(templateId: string, vars: Record<string, string |
   return mergeSendVars(templateId, await getResolvedDefaults(templateId), vars);
 }
 
-/** Render + validate without sending (preview / dispatch dry-run). */
-export async function previewSms(templateId: string, vars: Record<string, string | number | null | undefined>): Promise<{ ok: boolean; text: string; missing: string[]; errors: string[]; warnings: string[]; length: number; segments: number } | null> {
+/**
+ * Render + validate without sending (preview / dispatch dry-run). Runs the SAME
+ * hard send guard the send path runs, so a preview can never look sendable when
+ * the send would be blocked.
+ */
+export async function previewSms(templateId: string, vars: Record<string, string | number | null | undefined>): Promise<{ ok: boolean; text: string; missing: string[]; errors: string[]; warnings: string[]; length: number; segments: number; blocked: string | null } | null> {
   const t = await getTemplate(templateId);
   if (!t) return null;
   const filled = await resolveSendVars(templateId, vars);
   const { text, missing } = renderTemplate(t.body_template, filled);
   const v = validateBody(text);
-  return { ok: v.ok && missing.length === 0, text, missing, errors: v.errors, warnings: v.warnings, length: v.analysis.length, segments: v.analysis.segments };
+  const guard = checkRenderedBody(text, filled);
+  return {
+    ok: v.ok && missing.length === 0 && guard.ok,
+    text, missing, errors: guard.ok ? v.errors : [...v.errors, guard.detail!],
+    warnings: v.warnings, length: v.analysis.length, segments: v.analysis.segments,
+    blocked: guard.reason,
+  };
 }
 
 export async function sendSms(input: SendSmsInput): Promise<SendSmsResult> {
@@ -189,6 +200,12 @@ export async function sendSms(input: SendSmsInput): Promise<SendSmsResult> {
   if (missing.length) return { ok: false, skipped: "missing_vars", error: missing.join(", ") };
   const v = validateBody(text);
   if (!v.ok) return { ok: false, skipped: "invalid_body", error: v.errors.join("; ") };
+  // 4b. HARD SEND GUARD — abort THIS recipient if anything is still unresolved.
+  // `{`/`}` are valid GSM-7, so validateBody above would happily pass a body
+  // that still reads "Rs.{Fee_in_Rs}". Checked again at the gateway boundary;
+  // here so the caller and the UI get a named reason instead of a dead send.
+  const guard = checkRenderedBody(text, filled);
+  if (!guard.ok) return { ok: false, skipped: `blocked_${guard.reason}`, error: guard.detail ?? undefined };
 
   // 5. window (cron autos only)
   if (input.enforceWindow) {
@@ -352,11 +369,18 @@ export async function sendBatch(input: {
   for (const r of normList) {
     // Opt-out / DND suppression — compliance, checked before anything else sends.
     if (optedOut.has(r.normalized)) { skip("opted_out"); continue; }
+    // Per-recipient render: each recipient resolves its OWN values and its own
+    // segment count. No render is ever reused across the batch — the bulk
+    // branch below only fires when every rendered body is already identical.
     const filled = mergeSendVars(input.templateId, varDefaults, r.variables);
     const { text, missing } = renderTemplate(t.body_template, filled);
     if (missing.length) { skip("missing_vars"); continue; }
     const v = validateBody(text);
     if (!v.ok) { skip("invalid_body"); continue; }
+    // HARD SEND GUARD, per recipient — one unresolvable student is dropped from
+    // the batch with a named reason; the rest of the batch still goes.
+    const guard = checkRenderedBody(text, filled);
+    if (!guard.ok) { skip(`blocked_${guard.reason}`); continue; }
     if (input.enforceWindow && (nowMin < hmToMin(settings.windowStart) || nowMin > hmToMin(settings.windowEnd))) { skip("outside_window"); continue; }
     if (settings.dailyCap > 0 && usedToday >= settings.dailyCap) { skip("daily_cap"); continue; }
     if (settings.perMobileDailyCap > 0 && (perMobileCounts.get(r.normalized) || 0) >= settings.perMobileDailyCap) { skip("per_mobile_cap"); continue; }

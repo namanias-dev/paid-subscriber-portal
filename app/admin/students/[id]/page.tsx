@@ -31,6 +31,7 @@ import {
 import { LoadingBlock } from "@/components/admin/ui";
 import JourneyTimeline from "@/components/admin/JourneyTimeline";
 import SendSmsButton from "@/components/admin/sms/SendSmsButton";
+import InstallmentReminderButton from "@/components/admin/sms/InstallmentReminderButton";
 import SourcePill, { type LeadAttrStamp } from "@/components/admin/SourcePill";
 import StatusPill, { statusOf } from "@/components/ui/StatusPill";
 import Modal from "@/components/ui/Modal";
@@ -497,6 +498,9 @@ export default function StudentProfilePage({ params }: { params: { id: string } 
                 <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1.5">
                   {c.source === "course" && c.remaining > 0 && (
                     <button onClick={() => { setPayCourse(c); setModal("pay"); }} className="inline-flex items-center gap-1 text-xs font-semibold text-primary hover:underline"><Wallet size={13} /> Record payment</button>
+                  )}
+                  {c.source === "course" && c.remaining > 0 && (
+                    <InstallmentReminderButton enrollmentId={c.id} label="Send installment reminder" />
                   )}
                   {c.source === "course" && (
                     <button onClick={() => { setPlanCourse(c); setModal("changePlan"); }} className="inline-flex items-center gap-1 text-xs font-semibold text-primary hover:underline"><Repeat size={13} /> Change plan</button>
@@ -1029,6 +1033,10 @@ function ManagePlanModal({ course, onClose, request, onPay, onDone }: {
   const [error, setError] = useState<string | null>(null);
 
   const d = deriveEnrollment({ total_fee: totalFee, schedule: sched });
+  // The reminder always references the OLDEST unpaid installment, so the action
+  // only appears on that row — offering it per-row would imply staff can chase
+  // an arbitrary installment, which the DLT template cannot express.
+  const oldestUnpaidNo = sched.find((s) => s.kind === "installment" && !s.paid && s.status !== "cancelled" && s.status !== "waived")?.no ?? null;
 
   async function run(body: Record<string, unknown>, key: string, okMsg: string) {
     setBusy(key); setError(null);
@@ -1079,6 +1087,7 @@ function ManagePlanModal({ course, onClose, request, onPay, onDone }: {
                     )}
                     <button disabled={!!busy} onClick={() => run({ enrollmentId: course.id, no: item.no, action: "waive", reason: "Waived by admin" }, `w${item.no}`, "Installment waived")} className="inline-flex items-center gap-1 text-xs font-semibold text-muted hover:text-warning"><Ban size={12} /> Waive</button>
                     <button disabled={!!busy} onClick={() => run({ enrollmentId: course.id, no: item.no, action: "cancel", reason: "Cancelled by admin" }, `c${item.no}`, "Installment cancelled")} className="inline-flex items-center gap-1 text-xs font-semibold text-muted hover:text-danger"><XCircle size={12} /> Cancel</button>
+                    {item.no === oldestUnpaidNo && <InstallmentReminderButton enrollmentId={course.id} label="Remind" />}
                   </div>
                 )}
               </div>
