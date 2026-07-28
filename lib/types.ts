@@ -720,7 +720,13 @@ export type CourseEnrollmentStatus =
   | "seat_booked"
   | "partially_paid"
   | "fully_paid"
-  | "cancelled";
+  | "cancelled"
+  /**
+   * Superseded by a batch/course transfer. The row is kept — it still describes
+   * the batch the student actually sat in, and attendance, results and receipts
+   * point at it — but it is no longer the student's live enrollment.
+   */
+  | "transferred_out";
 
 export type CoursePlanType = "full" | "emi";
 
@@ -748,6 +754,14 @@ export interface CourseEnrollment {
   course_title: string;
   /** Snapshot of batch start + timing for receipts/history. */
   batch_label: string | null;
+  /**
+   * The catalog batch this enrollment belongs to (courses.batches[].id).
+   * Populated on 187 of 312 live rows; null on the rest, which predate the link.
+   * Treat null as "batch known only by its free-text label".
+   */
+  batch_id?: string | null;
+  /** How batch_id came to be set (e.g. "checkout", "transfer", "backfill"). */
+  batch_id_source?: string | null;
   plan_type: CoursePlanType;
   /** GST-inclusive total course fee snapshot. */
   total_fee: number;

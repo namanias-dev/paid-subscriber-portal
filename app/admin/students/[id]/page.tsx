@@ -22,6 +22,7 @@ import {
   Plus,
   Wallet,
   Repeat,
+  ArrowLeftRight,
   SlidersHorizontal,
   CalendarClock,
   Ban,
@@ -37,6 +38,7 @@ import StatusPill, { statusOf } from "@/components/ui/StatusPill";
 import Modal from "@/components/ui/Modal";
 import { useToast } from "@/components/ui/Toast";
 import { formatINR, formatISTDate, formatISTDateTime, isoToISTInput } from "@/lib/dates";
+import TransferModal from "@/components/admin/enrollments/TransferModal";
 import { resolveEmiConfig, payInFullTotal, planCourseEnrollment, installmentStatus, deriveEnrollment } from "@/lib/installments";
 import { downloadReceiptPdf, type ReceiptContact } from "@/lib/receiptPdf";
 import type { Student, PaymentReceipt, Course, Webinar, InstallmentItem, PaymentPlan } from "@/lib/types";
@@ -186,6 +188,7 @@ export default function StudentProfilePage({ params }: { params: { id: string } 
   const [modal, setModal] = useState<null | "edit" | "enroll" | "webinar" | "pay" | "changePlan" | "managePlan" | "discount">(null);
   const [showJourney, setShowJourney] = useState(false);
   const [payCourse, setPayCourse] = useState<CourseCard | null>(null);
+  const [transferId, setTransferId] = useState<string | null>(null);
   const [planCourse, setPlanCourse] = useState<CourseCard | null>(null);
   const [catalog, setCatalog] = useState<{ courses: Course[]; webinars: Webinar[] } | null>(null);
 
@@ -509,6 +512,9 @@ export default function StudentProfilePage({ params }: { params: { id: string } 
                     <button onClick={() => { setPlanCourse(c); setModal("managePlan"); }} className="inline-flex items-center gap-1 text-xs font-semibold text-muted hover:text-primary"><SlidersHorizontal size={13} /> Manage installments</button>
                   )}
                   {c.source === "course" && (
+                    <button onClick={() => setTransferId(c.id)} className="inline-flex items-center gap-1 text-xs font-semibold text-muted hover:text-primary"><ArrowLeftRight size={13} /> Change batch / course</button>
+                  )}
+                  {c.source === "course" && (
                     <button onClick={() => { setPlanCourse(c); setModal("discount"); }} className="inline-flex items-center gap-1 text-xs font-semibold text-muted hover:text-success"><TicketPercent size={13} /> Discount</button>
                   )}
                   {c.slug && (
@@ -645,6 +651,14 @@ export default function StudentProfilePage({ params }: { params: { id: string } 
           onDone={(warnings) => { toast(warnings.length ? `Plan updated · ${warnings.join("; ")}` : "Payment plan updated", warnings.length ? "error" : "success"); setModal(null); load(); }}
         />
       )}
+      {transferId && (
+        <TransferModal
+          enrollmentId={transferId}
+          onClose={() => setTransferId(null)}
+          onDone={() => { void load(); }}
+        />
+      )}
+
       {modal === "managePlan" && planCourse && (
         <ManagePlanModal
           course={planCourse}
