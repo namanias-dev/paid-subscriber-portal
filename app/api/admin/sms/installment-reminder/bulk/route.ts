@@ -10,6 +10,7 @@ import {
 } from "@/lib/sms/installmentReminderService";
 import { buildFollowUpPreview, scheduleFollowUp, FOLLOW_UP_DELAY_MINUTES } from "@/lib/sms/installmentFollowUp";
 import { isRemindedStatus } from "@/lib/sms/installmentAttribution";
+import { resolveRetryTargets, retryTargetsAreDisjoint } from "@/lib/sms/retryTargets";
 import type { CourseEnrollment } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -49,11 +50,22 @@ export async function POST(req: Request) {
 /**
  * Send: the explicit SECOND action.
  *
- * IDEMPOTENCY. The client mints a `jobId` and reuses it across retries, a
- * double-click and a refresh. If any log already carries it, this is a replay:
- * we return that job's existing outcome and send nothing. That check is the
- * whole reason the job id is client-supplied rather than generated here — a
- * server-generated id would make every retry a fresh job.
+ * IDEMPOTENCY. The client mints a `jobId` and reuses it across a double-click and
+ * a refresh. If any log already carries it, this is a replay: we return that job's
+ * existing outcome and send nothing. That check is the whole reason the job id is
+ * client-supplied rather than generated here — a server-generated id would make
+ * every attempt a fresh job.
+ *
+ * TWO MUTUALLY EXCLUSIVE MODES.
+ *   normal  — `enrollmentIds`: send to the students the staff member selected.
+ *   retry   — `retryOf`: re-send ONLY to recipients of an earlier campaign whom
+ *             nothing ever reached, derived from the send log.
+ *
+ * A retry deliberately has NO recipient parameter. The caller names the campaign
+ * to repair and the server works out who that means, so a client cannot ask for a
+ * retry "to these people" at all — which is precisely the bug this shape removes.
+ * Supplying both is refused rather than resolved, because guessing which one was
+ * meant is how a retry ends up addressing 86 people instead of 10.
  *
  * The job continues past individual failures: `sendBatch` screens and sends per
  * recipient, so one unresolvable or opted-out student is excluded with a reason
@@ -64,13 +76,23 @@ export async function PUT(req: Request) {
     return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   }
   const body = await req.json().catch(() => ({}));
-  const rawIds = Array.isArray(body.enrollmentIds) ? body.enrollmentIds.filter((x: unknown) => typeof x === "string") : [];
+  const clientIds = Array.isArray(body.enrollmentIds) ? body.enrollmentIds.filter((x: unknown) => typeof x === "string") : [];
+  const retryOf = typeof body.retryOf === "string" && body.retryOf.trim() ? body.retryOf.trim() : null;
   const jobId = typeof body.jobId === "string" && body.jobId.trim() ? body.jobId.trim() : null;
-  if (!rawIds.length) return NextResponse.json({ ok: false, error: "Select at least one student." }, { status: 400 });
+
   if (!jobId) return NextResponse.json({ ok: false, error: "A jobId is required so a replay cannot double-send." }, { status: 400 });
-  if (rawIds.length > MAX_BULK_RECIPIENTS) {
+  if (retryOf && clientIds.length) {
     return NextResponse.json(
-      { ok: false, error: `A single job is capped at ${MAX_BULK_RECIPIENTS} recipients; ${rawIds.length} were selected.` },
+      { ok: false, error: "A retry names a campaign, not recipients. Send either retryOf or enrollmentIds, never both." },
+      { status: 400 },
+    );
+  }
+  if (!retryOf && !clientIds.length) {
+    return NextResponse.json({ ok: false, error: "Select at least one student." }, { status: 400 });
+  }
+  if (clientIds.length > MAX_BULK_RECIPIENTS) {
+    return NextResponse.json(
+      { ok: false, error: `A single job is capped at ${MAX_BULK_RECIPIENTS} recipients; ${clientIds.length} were selected.` },
       { status: 400 },
     );
   }
@@ -90,9 +112,39 @@ export async function PUT(req: Request) {
     });
   }
 
+  // ---- who this job is for ----
+  // In retry mode the target set comes from the log of the campaign being
+  // repaired, and `clientIds` is never consulted.
+  let rawIds = clientIds;
+  let retrySummary: { of: string; targets: number; reached: number; skipped: Record<string, number> } | null = null;
+  if (retryOf) {
+    const priorLogs = await listLogsByCampaign(retryOf).catch(() => []);
+    if (!priorLogs.length) {
+      return NextResponse.json({ ok: false, error: "That campaign has no logs, so there is nothing to retry." }, { status: 404 });
+    }
+    const targets = resolveRetryTargets(priorLogs, { templateId: INSTALLMENT_REMINDER_TEMPLATE_ID });
+    // Enforced HERE, at the point of use, so a future change to the resolver
+    // cannot turn into a duplicate send without tripping this first.
+    if (!retryTargetsAreDisjoint(targets)) {
+      return NextResponse.json(
+        { ok: false, error: "Refusing to retry: the target set overlaps recipients the campaign already reached." },
+        { status: 500 },
+      );
+    }
+    if (!targets.enrollmentIds.length) {
+      return NextResponse.json({
+        ok: true, replay: false, jobId, requested: 0, sent: 0, failed: 0, skipped: targets.skipped,
+        note: "Every recipient in that campaign was reached. Nothing to retry.",
+      });
+    }
+    rawIds = targets.enrollmentIds;
+    retrySummary = { of: retryOf, targets: targets.enrollmentIds.length, reached: targets.reachedEnrollmentIds.length, skipped: targets.skipped };
+  }
+
   const overdueOnly = body.overdueOnly !== false;
   // Re-resolve from scratch. Staff may have excluded rows in the review screen,
-  // so only ids they left selected are considered.
+  // so only ids they left selected are considered. In retry mode this is the
+  // re-validation that catches anyone who paid since the original send.
   const preview = await buildBulkInstallmentReminders(rawIds, { overdueOnly });
   if (preview.blockReason) {
     return NextResponse.json({ ok: false, error: preview.blockDetail, blockReason: preview.blockReason }, { status: 409 });
@@ -137,7 +189,14 @@ export async function PUT(req: Request) {
     campaignId: jobId,
     // Staff confirmed the count explicitly, and a 24h repeat is a warning by
     // design, so don't let the 30-min guard silently swallow a deliberate send.
-    allowRecentOverride: !!body.allowRepeat,
+    //
+    // A RETRY NEVER OVERRIDES IT. It does not need to: the 30-min guard counts
+    // only SENT/DELIVERED/QUEUED, so a recipient whose attempt FAILED is not a
+    // hit and passes freely. The only thing the guard can block on a retry is a
+    // recipient who genuinely received this template from somewhere else in the
+    // last half hour, and refusing that is correct, not an obstacle. Overriding
+    // here is what turned the old retry into 76 duplicates.
+    allowRecentOverride: retryOf ? false : !!body.allowRepeat,
   });
 
   // ---- step 2: one independent job per recipient whose reminder ACTUALLY sent ----
@@ -161,6 +220,7 @@ export async function PUT(req: Request) {
     excludedByReason: preview.excludedByReason,
     followUpsScheduled,
     followUpDelayMinutes: FOLLOW_UP_DELAY_MINUTES,
+    retryOf: retrySummary,
   });
 }
 

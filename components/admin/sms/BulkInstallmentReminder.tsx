@@ -86,6 +86,8 @@ interface SendOutcome {
   followUpDelayMinutes?: number;
   note?: string;
   error?: string;
+  /** Present when this outcome came from a retry, describing what it targeted. */
+  retryOf?: { of: string; targets: number; reached: number; skipped: Record<string, number> } | null;
 }
 
 export default function BulkInstallmentReminder({
@@ -164,24 +166,34 @@ export default function BulkInstallmentReminder({
 
   async function send(retryFailedOnly = false) {
     if (!preview || !jobId || sending) return;
+    if (retryFailedOnly && !outcome?.jobId) return;
     setSending(true);
     setError(null);
     try {
-      // A retry re-uses a FRESH job id: the original id is already logged, so
-      // replaying it would be a no-op. Successes are excluded by id, which is
-      // what makes "retry failed only" unable to re-send anyone who went out.
-      const id = retryFailedOnly
-        ? (globalThis.crypto?.randomUUID?.() ?? `job-${Date.now()}-retry`)
-        : jobId;
+      // A retry names the CAMPAIGN to repair and sends no recipient list at all.
+      // The server reads that campaign's log and targets only recipients nothing
+      // ever reached. This screen deliberately has no say in it: the rows it holds
+      // describe what was selected before the send, so using them here is what
+      // previously let a retry go to everyone, including the ones that arrived.
+      // The new job id is fresh because the original is already logged and would
+      // replay as a no-op.
       const res = await fetch("/api/admin/sms/installment-reminder/bulk", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          enrollmentIds: sendableRows.map((p) => p.enrollmentId),
-          jobId: id,
-          overdueOnly,
-          allowRepeat: sendableRows.some((p) => p.lastSentAt),
-        }),
+        body: JSON.stringify(
+          retryFailedOnly
+            ? {
+                retryOf: outcome!.jobId,
+                jobId: globalThis.crypto?.randomUUID?.() ?? `job-${Date.now()}-retry`,
+                overdueOnly,
+              }
+            : {
+                enrollmentIds: sendableRows.map((p) => p.enrollmentId),
+                jobId,
+                overdueOnly,
+                allowRepeat: sendableRows.some((p) => p.lastSentAt),
+              },
+        ),
       });
       const json = await res.json();
       if (!res.ok || !json.ok) throw new Error(json.error || "The send failed.");
@@ -335,8 +347,17 @@ export default function BulkInstallmentReminder({
                   <p className="text-sm font-semibold text-ink">
                     {outcome.replay
                       ? "This job already ran — nothing was sent again."
-                      : `Sent ${outcome.sent} of ${outcome.requested}${outcome.failed ? ` · ${outcome.failed} failed` : ""}`}
+                      : outcome.note
+                        ? outcome.note
+                        : `Sent ${outcome.sent} of ${outcome.requested}${outcome.failed ? ` · ${outcome.failed} failed` : ""}`}
                   </p>
+                  {outcome.retryOf && (
+                    <p className="mt-0.5 text-xs text-ink2">
+                      Retry targeted the {outcome.retryOf.targets} recipient
+                      {outcome.retryOf.targets === 1 ? "" : "s"} nothing reached.
+                      {" "}The {outcome.retryOf.reached} already reached were not contacted again.
+                    </p>
+                  )}
                   {!outcome.replay && !!outcome.followUpsScheduled && (
                     <p className="mt-0.5 text-xs text-ink2">
                       {outcome.followUpsScheduled} instructions follow-up{outcome.followUpsScheduled === 1 ? "" : "s"} scheduled
