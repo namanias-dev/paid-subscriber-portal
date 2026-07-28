@@ -57,6 +57,7 @@ export type FollowUpCancelReason =
   | "installment_voided"
   | "installment_restructured"
   | "enrollment_cancelled"
+  | "enrollment_superseded"
   | "enrollment_gone"
   | "opted_out"
   | "already_instructed"
@@ -69,6 +70,7 @@ export const CANCEL_REASON_LABELS: Record<FollowUpCancelReason | string, string>
   installment_voided: "installment waived or voided",
   installment_restructured: "payment plan changed",
   enrollment_cancelled: "enrollment cancelled",
+  enrollment_superseded: "moved to another batch",
   enrollment_gone: "enrollment no longer exists",
   opted_out: "opted out",
   already_instructed: "instructions already sent",
@@ -167,6 +169,13 @@ export function evaluateFollowUp(job: ScheduledSend, ctx: FollowUpCheckContext):
   }
   if (!ctx.enrollment) return { send: false, reason: "enrollment_gone" };
   if (ctx.enrollment.status === "cancelled") return { send: false, reason: "enrollment_cancelled" };
+  // A transfer replaces this enrollment with a new one carrying rescheduled due
+  // dates. The line this job was queued against still exists on the superseded
+  // row and still looks unpaid, so without this check the student would be sent
+  // payment instructions for a plan that no longer governs what they owe.
+  if (ctx.enrollment.superseded_by || ctx.enrollment.status === "transferred_out") {
+    return { send: false, reason: "enrollment_superseded" };
+  }
 
   const located = locateFollowUpLine(ctx.enrollment, job);
   if (!located.line) return { send: false, reason: located.reason };

@@ -206,7 +206,7 @@ export function batchTimingLabel(b: { timing?: string | string[] | null } | null
   return batchTimings(b).join(" · ");
 }
 
-function buildBatchLabel(batchStart: string | null, timings?: string[] | null): string | null {
+export function buildBatchLabel(batchStart: string | null, timings?: string[] | null): string | null {
   const parts: string[] = [];
   if (batchStart) parts.push(`Starts ${formatISTDate(batchStart)}`);
   if (timings && timings.length) parts.push(timings.join(" · "));
