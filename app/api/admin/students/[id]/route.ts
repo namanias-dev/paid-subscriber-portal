@@ -145,12 +145,14 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
               : "Pay in full";
       return {
         id: e.id,
-        title: e.course_title,
-        slug: e.course_slug,
-        batch: e.batch_label,
+        // A course row with a null title/fee must still render an openable card —
+        // staff always need to reach the profile. Mirrors the legacy branch below.
+        title: e.course_title || "Course",
+        slug: e.course_slug || null,
+        batch: e.batch_label || null,
         plan: planLabel,
         status: humanizeCourseStatus(e.status),
-        total: e.total_fee,
+        total: e.total_fee ?? 0,
         paid: d.paid,
         remaining: d.remaining,
         progressPct: d.progressPct,

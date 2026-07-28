@@ -149,6 +149,39 @@ async function dbSelectAll<T>(table: string, order = "created_at", pageSize = 10
   }
   return out;
 }
+
+/**
+ * Minimal shape of a PostgREST builder that can still be paged. Kept structural
+ * so callers can apply any filters/ordering they like before handing it over.
+ */
+export interface _RangeablePage {
+  range: (from: number, to: number) => PromiseLike<{ data: unknown; error: unknown }>;
+}
+
+/**
+ * Page through a FILTERED query so PostgREST's 1000-row response cap can never
+ * silently truncate a whole-table read. `build` is called once per page and must
+ * return a fresh builder — reusing one mutates its range and re-reads page 1.
+ *
+ * Callers MUST order by a unique tiebreaker (`id`) in addition to their sort
+ * column. Offset paging over a non-unique sort key is not stable: `payments` has
+ * a tie group of 85 rows sharing one `created_at`, and Postgres may order tied
+ * rows differently per query, so a boundary that lands inside a tie group can
+ * drop and duplicate rows. The tiebreaker makes the sort total and the paging
+ * deterministic.
+ */
+export async function pageThrough<T>(build: () => _RangeablePage, pageSize = 1000): Promise<T[]> {
+  const out: T[] = [];
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await build().range(from, from + pageSize - 1);
+    if (error) break;
+    const rows = (data as T[]) ?? [];
+    out.push(...rows);
+    if (rows.length < pageSize) break;
+  }
+  return out;
+}
+
 async function dbInsert<T>(table: string, row: Record<string, unknown>): Promise<T> {
   const db = getSupabaseAdmin();
   if (!db) throw new Error("No database");
@@ -174,8 +207,12 @@ export async function getStudents(): Promise<Student[]> {
   if (demoMode()) return [...mock.students];
   const db = getSupabaseAdmin();
   if (!db) return [...mock.students];
-  const { data } = await db.from("students").select("*").order("created_at", { ascending: false });
-  return (data as Student[]) ?? [];
+  // Paged: 1194 students today. An unpaged select returns only the newest 1000,
+  // so the oldest students vanish from Students & Enrollments entirely — they
+  // cannot be searched for or opened, which reads to staff as "no profile".
+  return pageThrough<Student>(() =>
+    db.from("students").select("*").order("created_at", { ascending: false }).order("id", { ascending: true }),
+  );
 }
 
 export async function getStudentById(id: string): Promise<Student | null> {
@@ -2613,11 +2650,14 @@ export async function getAllWebinarRegistrations(): Promise<WebinarRegistration[
   const db = getSupabaseAdmin();
   if (!db) return [];
   try {
-    const { data } = await db
-      .from("webinar_registrations")
-      .select("*")
-      .order("created_at", { ascending: false });
-    return (data as WebinarRegistration[]) ?? [];
+    // 744 rows today — inside the cap, but one busy webinar crosses it.
+    return await pageThrough<WebinarRegistration>(() =>
+      db
+        .from("webinar_registrations")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: true }),
+    );
   } catch {
     return [];
   }
@@ -2694,8 +2734,16 @@ export async function getPayments(): Promise<Payment[]> {
   if (!db) return demoPayments().filter((p) => !p.deleted_at);
   // Exclude soft-deleted rows (Trash) from every money/access read. Restore/Trash
   // views use getPaymentById / getDeletedPayments which intentionally include them.
-  const { data } = await db.from("payments").select("*").is("deleted_at", null).order("created_at", { ascending: false });
-  const rows = (data as Payment[]) ?? [];
+  // Paged: 1077 live payments today. An unpaged read dropped the oldest 77, so
+  // their students showed "No payments" and webinar receipts under-reported.
+  const rows = await pageThrough<Payment>(() =>
+    db
+      .from("payments")
+      .select("*")
+      .is("deleted_at", null)
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: true }),
+  );
   return rows.length ? rows : demoPayments().filter((p) => !p.deleted_at);
 }
 
@@ -3665,8 +3713,10 @@ export async function getBuyers(): Promise<Buyer[]> {
   if (demoMode()) return [...demoBuyers()];
   const db = getSupabaseAdmin();
   if (!db) return [...demoBuyers()];
-  const { data } = await db.from("buyers").select("*").order("created_at", { ascending: false });
-  return (data as Buyer[]) ?? [];
+  // Paged: 1220 buyers today — an unpaged read hides the oldest 220 login codes.
+  return pageThrough<Buyer>(() =>
+    db.from("buyers").select("*").order("created_at", { ascending: false }).order("id", { ascending: true }),
+  );
 }
 
 export async function getBuyerByPhone(phone: string): Promise<Buyer | null> {
@@ -4186,8 +4236,11 @@ export async function getAllCourseEnrollments(): Promise<CourseEnrollment[]> {
   if (demoMode()) return [...demoEnrollments()];
   const db = getSupabaseAdmin();
   if (!db) return [...demoEnrollments()];
-  const { data } = await db.from("course_enrollments").select("*").order("created_at", { ascending: false });
-  return (data as CourseEnrollment[]) ?? [];
+  // 312 rows today, but this is the enrolment source of truth — page it so it
+  // does not start silently truncating the day it crosses 1000.
+  return pageThrough<CourseEnrollment>(() =>
+    db.from("course_enrollments").select("*").order("created_at", { ascending: false }).order("id", { ascending: true }),
+  );
 }
 
 export async function updateCourseEnrollment(id: string, patch: Partial<CourseEnrollment>): Promise<CourseEnrollment | null> {
