@@ -5,7 +5,7 @@ import { getRule, getSettings } from "@/lib/sms/store";
 import { sendSms, istMinutesOfDay, pollDeliveryStatuses } from "@/lib/sms/service";
 import { normalizeIndianMobile } from "@/lib/phone";
 import type { SmsAutoRule } from "@/lib/sms/types";
-import { deriveCollections } from "@/lib/installments";
+import { deriveCollections, isSupersededEnrollment } from "@/lib/installments";
 import { fireAutomationEvent } from "@/lib/journey-automation/events";
 
 export const dynamic = "force-dynamic";
@@ -196,6 +196,9 @@ async function run(req: Request) {
       const nowMs = Date.now();
       for (const e of enrollments) {
         if (e.status === "cancelled") continue;
+        // A row superseded by a batch transfer keeps its old unpaid lines, so
+        // dunning it would chase a plan that has already been replaced.
+        if (isSupersededEnrollment(e)) continue;
         const col = deriveCollections(e);
         if (col.missedInstallments <= 0) continue;
         for (const line of e.schedule || []) {

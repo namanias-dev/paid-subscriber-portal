@@ -21,7 +21,7 @@ import {
 import { getAdminSession } from "@/lib/session";
 import { requirePermission } from "@/lib/adminGuard";
 import { computeExpiry, istInputToISO } from "@/lib/dates";
-import { deriveEnrollment, isActiveEnrollment, isAttemptEnrollment } from "@/lib/installments";
+import { deriveEnrollment, isActiveEnrollment, isAttemptEnrollment, isSupersededEnrollment } from "@/lib/installments";
 import { getEnrollmentPlanChangeLogs, findActiveLeadByPhone } from "@/lib/dataProvider";
 import { deriveDisplayChannel } from "@/lib/marketing/leadAttrByPhone";
 import type { Student, PlanId, InstallmentItem, PaymentPlan } from "@/lib/types";
@@ -91,7 +91,11 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
     // PENDING/abandoned ₹0 attempts and cancelled/superseded duplicates are split
     // out so they never inflate the enrolled-courses count or outstanding balance.
     const courseEnrollments = courseEnrollmentsAll.filter(isActiveEnrollment);
-    const attemptEnrollments = courseEnrollmentsAll.filter(isAttemptEnrollment);
+    // A row superseded by a batch transfer is neither live nor an abandoned
+    // attempt, so it belongs in neither bucket — listing it as a "pending
+    // registration" would misdescribe it, and counting it as active would double
+    // its outstanding balance. The transfer history is its record.
+    const attemptEnrollments = courseEnrollmentsAll.filter((e) => isAttemptEnrollment(e) && !isSupersededEnrollment(e));
 
     // ---- Unified course cards (phone-keyed CourseEnrollment + legacy student-keyed Enrollment) ----
     type CourseCard = {
