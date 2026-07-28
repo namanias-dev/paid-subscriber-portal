@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { istHour, istWeekday, istWholeDaysUntil } from "../../lib/sms/accessDays";
 import { pickAccessTemplate } from "../../lib/sms/accessReminderService";
 import type { LectureAccess } from "../../lib/entitlements";
+import type { CourseAccessOverride } from "../../lib/types";
 
 describe("istWholeDaysUntil", () => {
   test("same IST calendar day → 0", () => {
@@ -42,24 +43,57 @@ describe("istWholeDaysUntil", () => {
 });
 
 describe("pickAccessTemplate", () => {
-  test("blocked overdue → blocked template", () => {
-    const access: LectureAccess = { allowed: false, reason: "overdue", status: "blocked", graceEndsAt: "2026-07-01T00:00:00Z" };
-    const p = pickAccessTemplate(access);
+  const blocked: LectureAccess = { allowed: false, reason: "overdue", status: "blocked", graceEndsAt: "2026-07-01T00:00:00Z" };
+  const grace: LectureAccess = { allowed: true, reason: "grace", status: "grace", graceEndsAt: "2026-08-01T00:00:00Z", daysLeft: 5 };
+  const active: LectureAccess = { allowed: true, reason: "active", status: "active" };
+  const grant: CourseAccessOverride = {
+    id: "g1", phone: "9999999999", course_id: "c1", mode: "grant",
+    expires_at: "2026-08-27T00:00:00Z", note: "test", created_by: "admin",
+    created_at: "2026-07-28T00:00:00Z", updated_at: "2026-07-28T00:00:00Z",
+  };
+
+  test("blocked overdue, no grant → blocked template", () => {
+    const p = pickAccessTemplate({ scheduleAccess: blocked, override: null, totalRemaining: 38000 });
     assert.ok("templateId" in p);
     assert.equal(p.templateId, "portal_access_blocked");
   });
 
-  test("grace → expiring template", () => {
-    const access: LectureAccess = { allowed: true, reason: "grace", status: "grace", graceEndsAt: "2026-08-01T00:00:00Z", daysLeft: 5 };
-    const p = pickAccessTemplate(access);
+  test("blocked + active grant → expiring with override end", () => {
+    const p = pickAccessTemplate({ scheduleAccess: blocked, override: grant, totalRemaining: 38000 });
     assert.ok("templateId" in p);
     assert.equal(p.templateId, "portal_access_expiring");
+    assert.equal(p.daysSource, "override");
+    assert.equal(p.daysEndAt, grant.expires_at);
   });
 
-  test("active access → access_restored", () => {
-    const access: LectureAccess = { allowed: true, reason: "active", status: "active" };
-    const p = pickAccessTemplate(access);
+  test("grace → expiring template", () => {
+    const p = pickAccessTemplate({ scheduleAccess: grace, override: null, totalRemaining: 1000 });
+    assert.ok("templateId" in p);
+    assert.equal(p.templateId, "portal_access_expiring");
+    assert.equal(p.daysSource, "grace");
+  });
+
+  test("nothing outstanding → access_restored", () => {
+    const p = pickAccessTemplate({ scheduleAccess: blocked, override: null, totalRemaining: 0 });
     assert.ok("block" in p);
     assert.equal(p.block, "access_restored");
+  });
+
+  test("schedule active (not yet due) → not_access_risk", () => {
+    const p = pickAccessTemplate({ scheduleAccess: active, override: null, totalRemaining: 1000 });
+    assert.ok("block" in p);
+    assert.equal(p.block, "not_access_risk");
+  });
+
+  test("override daysEndAt is the grant expiry (Aman case)", () => {
+    const p = pickAccessTemplate({
+      scheduleAccess: blocked,
+      override: grant,
+      totalRemaining: 38000,
+      now: Date.parse("2026-07-28T12:00:00.000Z"),
+    });
+    assert.ok("templateId" in p);
+    assert.equal(p.daysSource, "override");
+    assert.equal(p.daysEndAt, "2026-08-27T00:00:00Z");
   });
 });

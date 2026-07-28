@@ -33,6 +33,7 @@ import { LoadingBlock } from "@/components/admin/ui";
 import JourneyTimeline from "@/components/admin/JourneyTimeline";
 import SendSmsButton from "@/components/admin/sms/SendSmsButton";
 import InstallmentReminderButton from "@/components/admin/sms/InstallmentReminderButton";
+import AccessReminderButton from "@/components/admin/sms/AccessReminderButton";
 import SourcePill, { type LeadAttrStamp } from "@/components/admin/SourcePill";
 import StatusPill, { statusOf } from "@/components/ui/StatusPill";
 import Modal from "@/components/ui/Modal";
@@ -79,6 +80,9 @@ interface CourseCard {
   discount?: number;
   originalTotal?: number | null;
   planHistory?: { id: string; oldPlan: string | null; newPlan: string | null; oldOutstanding: number; newOutstanding: number; reason: string | null; changedBy: string | null; createdAt: string }[];
+  progressLabel?: string;
+  seatPaid?: boolean;
+  accessGrant?: { expiresAt: string | null; note: string | null; createdBy: string | null } | null;
 }
 interface AttemptCard {
   key: string;
@@ -496,6 +500,15 @@ export default function StudentProfilePage({ params }: { params: { id: string } 
                   <span className="text-ink2">{formatINR(c.paid)} <span className="text-muted">of {formatINR(c.total)}</span></span>
                   {c.remaining > 0 ? <span className="font-semibold text-warning">{formatINR(c.remaining)} due</span> : <span className="font-semibold text-success">Paid in full</span>}
                 </div>
+                {c.progressLabel && (
+                  <p className="mt-1.5 text-xs font-medium text-ink2">{c.progressLabel}</p>
+                )}
+                {c.accessGrant?.expiresAt && (
+                  <p className="mt-1 text-[11px] font-semibold text-primary">
+                    Access granted until {formatISTDate(c.accessGrant.expiresAt)}
+                    {c.accessGrant.note ? ` · ${c.accessGrant.note}` : ""}
+                  </p>
+                )}
                 {(c.discount ?? 0) > 0 && (
                   <p className="mt-1.5 inline-flex items-center gap-1 rounded-md bg-success/10 px-2 py-0.5 text-[11px] font-semibold text-success">
                     <TicketPercent size={12} /> {formatINR(c.discount!)} discount{c.originalTotal ? ` · was ${formatINR(c.originalTotal)}` : ""}
@@ -510,6 +523,9 @@ export default function StudentProfilePage({ params }: { params: { id: string } 
                   )}
                   {c.source === "course" && c.remaining > 0 && (
                     <InstallmentReminderButton enrollmentId={c.id} label="Send installment reminder" />
+                  )}
+                  {c.source === "course" && c.remaining > 0 && (
+                    <AccessReminderButton enrollmentId={c.id} label="Access reminder" />
                   )}
                   {c.source === "course" && (
                     <button onClick={() => { setPlanCourse(c); setModal("changePlan"); }} className="inline-flex items-center gap-1 text-xs font-semibold text-primary hover:underline"><Repeat size={13} /> Change plan</button>

@@ -27,7 +27,8 @@ export type TimelineEventType =
   | "plan_changed"
   | "discount_applied"
   | "access_cap"
-  | "access_exclusion";
+  | "access_exclusion"
+  | "access_override";
 
 export interface TimelineActor {
   /** The username or id recorded against the action. */
@@ -339,14 +340,19 @@ export interface AccessCapRow {
 export function accessCapEvents(row: AccessCapRow): TimelineEvent[] {
   const events: TimelineEvent[] = [];
   if (row.needs_call && row.needs_call_at) {
+    const paymentFailure = row.installment_no === 0 || /FAILED|VERIFYING|Grant expires/i.test(row.excluded_reason || "");
     events.push({
       id: `access_cap:${row.id}`,
       type: "access_cap",
       at: row.needs_call_at,
-      title: `Escalation cap reached — installment ${row.installment_no} flagged for call`,
-      detail: `${row.auto_sequences_used} automated sequences used. Automation stopped for this installment.`,
+      title: paymentFailure
+        ? `Flagged for call — ${row.excluded_reason || "payment issue"}`
+        : `Escalation cap reached — installment ${row.installment_no} flagged for call`,
+      detail: paymentFailure
+        ? "Automated installment SMS suppressed while flagged. Manual send remains available."
+        : `${row.auto_sequences_used} automated sequences used. Automation stopped for this installment.`,
       actor: { id: null, name: "System · automated" },
-      reason: null,
+      reason: row.excluded_reason,
       changes: [],
       snapshot: null,
       courseTitle: null,
@@ -470,4 +476,36 @@ export const TYPE_LABELS: Record<TimelineEventType, string> = {
   discount_applied: "Discount",
   access_cap: "Access cap",
   access_exclusion: "Access automation",
+  access_override: "Access grant",
 };
+
+export interface AccessOverrideEventRow {
+  id: string;
+  created_at: string;
+  kind: string;
+  detail: string | null;
+  reason: string | null;
+  actor: string | null;
+  course_id: string | null;
+}
+
+export function accessOverrideEvent(row: AccessOverrideEventRow): TimelineEvent {
+  const titles: Record<string, string> = {
+    granted: "Access override granted",
+    revoked: "Access override revoked",
+    shortened: "Access override shortened",
+    expired: "Access override expired",
+  };
+  return {
+    id: `access_ovr:${row.id}`,
+    type: "access_override",
+    at: row.created_at,
+    title: titles[row.kind] || "Access override",
+    detail: row.detail,
+    actor: { id: row.actor, name: row.actor || "staff" },
+    reason: row.reason,
+    changes: [],
+    snapshot: null,
+    courseTitle: null,
+  };
+}

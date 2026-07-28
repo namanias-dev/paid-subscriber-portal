@@ -5,44 +5,76 @@ import { lectureAccessForCourse } from "@/lib/entitlements";
 import { resolveInstallmentForEnrollment } from "@/lib/sms/installmentReminder";
 import { listCapsForEnrollments } from "@/lib/sms/accessCapStore";
 import { listLogs } from "@/lib/sms/store";
+import { activeAccessGrant } from "@/lib/sms/accessReminderService";
+import { deriveEnrollment, paymentProgressLabel } from "@/lib/installments";
+import { scanPaymentFailures, applyPaymentFailureFlags } from "@/lib/sms/paymentFailureFlags";
+import { ACCESS_GRANT_EXPIRING_SOON_DAYS } from "@/lib/accessOverridePolicy";
+import { flagNeedsCall } from "@/lib/sms/accessCapStore";
 import {
   ACCESS_BLOCKED_TEMPLATE_ID,
   ACCESS_EXPIRING_TEMPLATE_ID,
 } from "@/lib/sms/accessReminderConstants";
+import { istWholeDaysUntil } from "@/lib/sms/accessDays";
 
 export const dynamic = "force-dynamic";
 
 const DAY = 86_400_000;
 
 /**
- * Proactive money-recovery view: enrolled learners whose lecture access is
- * BLOCKED (past due+15d / expired / revoked) or AT RISK (in grace, or expiring
- * within 7 days). Reuses the SAME lectureAccessForCourse engine as playback.
+ * Access At Risk worklist. Inclusion is driven by SCHEDULE state (grace/blocked)
+ * OR an active access grant with money still owed — grants no longer hide students.
  */
 export async function GET() {
   if (!(await requireAnyPermission(["view_revenue", "manage_payments"]))) {
     return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   }
 
-  const [enrollments, courses, overrides] = await Promise.all([
+  const [enrollments, courses, overrides, failureScan] = await Promise.all([
     getAllCourseEnrollments(),
     getAllCourses(),
     getAllAccessOverrides(),
+    scanPaymentFailures(),
   ]);
+  // Flag payment-failure students (idempotent upsert). Manual SMS stays available.
+  await applyPaymentFailureFlags([
+    ...failureScan.failedAttempts,
+    ...failureScan.verifyingStuck.filter((h) => !failureScan.failedAttempts.some((f) => f.enrollmentId === h.enrollmentId)),
+  ]).catch(() => 0);
+
   const byId = new Map(courses.map((c) => [c.id, c]));
   const now = Date.now();
 
   const riskEnrollments = enrollments.filter((e) => {
     if (e.status === "cancelled") return false;
     const override = overrides.find((o) => o.phone === e.phone && o.course_id === e.course_id);
-    const access = lectureAccessForCourse(byId.get(e.course_id), e, override, false, now);
-    return !access.allowed || access.status === "grace" || access.status === "expiring";
+    const schedule = lectureAccessForCourse(byId.get(e.course_id), e, undefined, false, now);
+    const grant = activeAccessGrant(override, now);
+    const owed = Math.max(0, (e.total_fee || 0) - (e.amount_paid || 0));
+    const scheduleRisk = schedule.status === "blocked" || schedule.status === "grace" || schedule.status === "expiring";
+    const grantHolding = !!grant && owed > 0;
+    return scheduleRisk || grantHolding;
   });
+
+  // Grants within 2 days of expiry + unpaid → needs_call surface.
+  for (const e of riskEnrollments) {
+    const override = overrides.find((o) => o.phone === e.phone && o.course_id === e.course_id);
+    const grant = activeAccessGrant(override, now);
+    if (!grant?.expires_at) continue;
+    const days = istWholeDaysUntil(grant.expires_at, now);
+    const owed = Math.max(0, (e.total_fee || 0) - (e.amount_paid || 0));
+    if (days != null && days > 0 && days <= ACCESS_GRANT_EXPIRING_SOON_DAYS && owed > 0) {
+      await flagNeedsCall({
+        courseEnrollmentId: e.id,
+        installmentNo: 0,
+        reason: `Grant expires in ${days}d · ₹${owed} outstanding`,
+        studentId: e.student_id ?? null,
+      }).catch(() => undefined);
+    }
+  }
 
   const caps = await listCapsForEnrollments(riskEnrollments.map((e) => e.id));
   const capByEnrollment = new Map<string, typeof caps[number]>();
   for (const c of caps) {
-    // Prefer the cap matching the oldest unpaid installment when several exist.
     const prev = capByEnrollment.get(c.course_enrollment_id);
     if (!prev || c.needs_call || c.auto_sequences_used > (prev.auto_sequences_used || 0)) {
       capByEnrollment.set(c.course_enrollment_id, c);
@@ -63,15 +95,28 @@ export async function GET() {
     if (!prev || prev < at) lastByEnrollment.set(l.course_enrollment_id, at);
   }
 
+  const failureByEnrollment = new Map<string, { failed: number; verifying: number }>();
+  for (const h of [...failureScan.failedAttempts, ...failureScan.verifyingStuck]) {
+    const prev = failureByEnrollment.get(h.enrollmentId) || { failed: 0, verifying: 0 };
+    failureByEnrollment.set(h.enrollmentId, {
+      failed: Math.max(prev.failed, h.failedCount),
+      verifying: Math.max(prev.verifying, h.verifyingStuck),
+    });
+  }
+
   const rows = riskEnrollments
     .map((e) => {
       const override = overrides.find((o) => o.phone === e.phone && o.course_id === e.course_id);
-      const access = lectureAccessForCourse(byId.get(e.course_id), e, override, false, now);
-      const dueMs = access.graceEndsAt ? (Date.parse(access.graceEndsAt) - 15 * DAY) : 0;
+      const schedule = lectureAccessForCourse(byId.get(e.course_id), e, undefined, false, now);
+      const live = lectureAccessForCourse(byId.get(e.course_id), e, override, false, now);
+      const grant = activeAccessGrant(override, now);
+      const dueMs = schedule.graceEndsAt ? (Date.parse(schedule.graceEndsAt) - 15 * DAY) : 0;
       const daysOverdue = dueMs && now > dueMs ? Math.floor((now - dueMs) / DAY) : 0;
       const resolved = resolveInstallmentForEnrollment(e, now);
       const installmentNo = resolved.ok ? resolved.resolved.installmentNo : null;
       const cap = capByEnrollment.get(e.id);
+      const d = deriveEnrollment(e, now);
+      const fail = failureByEnrollment.get(e.id);
       return {
         enrollmentId: e.id,
         studentId: e.student_id ?? null,
@@ -83,21 +128,52 @@ export async function GET() {
         batchLabel: e.batch_label,
         planType: e.plan_type,
         enrollmentStatus: e.status,
-        amountDue: access.amountDue ?? Math.max(0, (e.total_fee || 0) - (e.amount_paid || 0)),
+        amountDue: schedule.amountDue ?? Math.max(0, (e.total_fee || 0) - (e.amount_paid || 0)),
+        amountPaid: e.amount_paid,
+        totalFee: e.total_fee,
         daysOverdue,
         installmentNo,
-        access,
+        progressLabel: paymentProgressLabel(d),
+        access: live,
+        scheduleAccess: { status: schedule.status, reason: schedule.reason, graceEndsAt: schedule.graceEndsAt, daysLeft: schedule.daysLeft },
+        grant: grant ? {
+          expiresAt: grant.expires_at,
+          note: grant.note,
+          createdBy: grant.created_by,
+          daysLeft: grant.expires_at ? istWholeDaysUntil(grant.expires_at, now) : null,
+        } : null,
         autoUsed: cap?.auto_sequences_used ?? 0,
         needsCall: !!cap?.needs_call,
+        needsCallReason: cap?.excluded_reason ?? null,
         lastRemindedAt: lastByEnrollment.get(e.id) ?? cap?.last_auto_sent_at ?? null,
+        paymentFailures: fail?.failed ?? 0,
+        verifyingStuck: fail?.verifying ?? 0,
       };
     })
     .sort((a, b) => {
       if (a.needsCall !== b.needsCall) return a.needsCall ? -1 : 1;
+      if (!!a.grant !== !!b.grant) return a.grant ? -1 : 1;
       const rank = (s: string) => (s === "blocked" ? 0 : s === "grace" ? 1 : 2);
-      const d = rank(a.access.status) - rank(b.access.status);
+      const d = rank(a.scheduleAccess.status) - rank(b.scheduleAccess.status);
       return d !== 0 ? d : b.daysOverdue - a.daysOverdue;
     });
 
-  return NextResponse.json({ ok: true, rows });
+  const activeGrants = rows.filter((r) => r.grant).map((r) => ({
+    student: r.student,
+    phone: r.phone,
+    courseTitle: r.courseTitle,
+    expiresAt: r.grant!.expiresAt,
+    createdBy: r.grant!.createdBy,
+    reason: r.grant!.note,
+    amountDue: r.amountDue,
+    scheduleStatus: r.scheduleAccess.status,
+  }));
+
+  return NextResponse.json({
+    ok: true,
+    rows,
+    grants: activeGrants,
+    paymentFailureTotals: failureScan.totals,
+    indefiniteOverrides: overrides.filter((o) => o.mode === "grant" && !o.expires_at).length,
+  });
 }

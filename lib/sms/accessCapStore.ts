@@ -164,6 +164,35 @@ export async function setExcluded(input: {
   }, { onConflict: "course_enrollment_id,installment_no" });
 }
 
+/** Flag needs_call with an explicit reason (payment failures, grant expiring, cap). */
+export async function flagNeedsCall(input: {
+  courseEnrollmentId: string;
+  installmentNo: number;
+  reason: string;
+  fingerprint?: string | null;
+  studentId?: string | null;
+  normalizedMobile?: string | null;
+}): Promise<void> {
+  const db = getSupabaseAdmin();
+  if (!db) return;
+  const now = new Date().toISOString();
+  const existing = await getCap(input.courseEnrollmentId, input.installmentNo);
+  await db.from("access_reminder_caps").upsert({
+    course_enrollment_id: input.courseEnrollmentId,
+    installment_no: input.installmentNo,
+    installment_fingerprint: input.fingerprint ?? existing?.installment_fingerprint ?? null,
+    student_id: input.studentId ?? existing?.student_id ?? null,
+    normalized_mobile: input.normalizedMobile ?? existing?.normalized_mobile ?? null,
+    auto_sequences_used: existing?.auto_sequences_used ?? 0,
+    needs_call: true,
+    needs_call_at: existing?.needs_call_at ?? now,
+    // Payment-failure / grant-expiry flags must NOT blanket-exclude manual Remind.
+    excluded_from_automation: existing?.excluded_from_automation ?? false,
+    excluded_reason: input.reason,
+    updated_at: now,
+  }, { onConflict: "course_enrollment_id,installment_no" });
+}
+
 export async function resetCap(input: {
   courseEnrollmentId: string;
   installmentNo: number;
