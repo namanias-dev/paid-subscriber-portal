@@ -11,6 +11,7 @@
  */
 import { normalizeIndianMobile } from "../phone";
 import { listAttributionLogs, type AttributionLogRow } from "./store";
+import { listFollowUpsForEnrollments } from "./installmentFollowUp";
 import { INSTALLMENT_REMINDER_TEMPLATE_ID } from "./installmentReminderService";
 import {
   aggregateStats, rowReminderState, installmentReminderStates,
@@ -18,12 +19,33 @@ import {
 } from "./installmentAttribution";
 import type { CourseEnrollment } from "../types";
 
+/**
+ * The step-2 leg for one installment, when there is one.
+ *
+ * Kept SEPARATE from InstallmentReminderState rather than folded into it: the
+ * reminder→payment state is a pure function of reminders and payments, and
+ * "Paid Nd after reminder" must keep measuring from the FIRST reminder — step 1
+ * — no matter what the instructions message did. Mixing the two into one shape
+ * is how that invariant would eventually get broken by accident.
+ */
+export interface FollowUpView {
+  id: string;
+  status: string;
+  scheduledAt: string;
+  cancelReason: string | null;
+  finishedAt: string | null;
+  attempts: number;
+  lastError: string | null;
+}
+
 export interface EnrollmentTracking {
   enrollmentId: string;
   /** State for the installment a reminder would target now (oldest unpaid). */
   row: InstallmentReminderState | null;
   /** Every installment's state, so a profile view can list them independently. */
   perInstallment: InstallmentReminderState[];
+  /** Latest instructions follow-up per installment ordinal, keyed by `no`. */
+  followUps: Record<number, FollowUpView>;
 }
 
 export interface TrackingResult {
@@ -46,7 +68,24 @@ export async function buildTracking(
   enrollments: Pick<CourseEnrollment, "id" | "phone" | "schedule" | "payment_plan_changed_at">[],
   now = Date.now(),
 ): Promise<TrackingResult> {
-  const logs = await listAttributionLogs(INSTALLMENT_REMINDER_TEMPLATE_ID, enrollments.map((e) => e.id));
+  const enrollmentIds = enrollments.map((e) => e.id);
+  const [logs, followUps] = await Promise.all([
+    listAttributionLogs(INSTALLMENT_REMINDER_TEMPLATE_ID, enrollmentIds),
+    listFollowUpsForEnrollments(enrollmentIds),
+  ]);
+
+  // Newest first from the query, so the first row seen per (enrollment, line) is
+  // the current one — an older cancelled attempt never masks a live follow-up.
+  const followUpByKey = new Map<string, FollowUpView>();
+  for (const f of followUps) {
+    const key = `${f.course_enrollment_id}#${f.installment_no}`;
+    if (followUpByKey.has(key)) continue;
+    followUpByKey.set(key, {
+      id: f.id, status: f.status, scheduledAt: f.scheduled_at,
+      cancelReason: f.cancel_reason, finishedAt: f.finished_at,
+      attempts: f.attempts, lastError: f.last_error,
+    });
+  }
 
   const byEnrollmentId = new Map<string, AttributionLogRow[]>();
   const keylessByMobile = new Map<string, AttributionLogRow[]>();
@@ -71,7 +110,14 @@ export async function buildTracking(
 
     const perInstallment = installmentReminderStates(e, all, now);
     const row = rowReminderState(e, all, now);
-    byEnrollment.set(e.id, { enrollmentId: e.id, row, perInstallment });
+
+    const forEnrollment: Record<number, FollowUpView> = {};
+    for (const s of perInstallment) {
+      const f = followUpByKey.get(`${e.id}#${s.installmentNo}`);
+      if (f) forEnrollment[s.installmentNo] = f;
+    }
+
+    byEnrollment.set(e.id, { enrollmentId: e.id, row, perInstallment, followUps: forEnrollment });
     rowStates.push(row);
   }
 

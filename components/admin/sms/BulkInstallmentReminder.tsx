@@ -57,6 +57,22 @@ interface BulkPreview {
   overCapDropped: number;
 }
 
+/**
+ * Step 2 of the sequence. IDENTICAL for every recipient — the approved body has
+ * no variables — so the review screen shows it once rather than repeating the
+ * same 160 characters under every student.
+ */
+interface FollowUpPreview {
+  templateName: string;
+  dltTemplateId: string | null;
+  body: string;
+  characterCount: number;
+  segments: number;
+  delayMinutes: number;
+  sendable: boolean;
+  blockDetail: string | null;
+}
+
 interface SendOutcome {
   ok: boolean;
   replay: boolean;
@@ -66,6 +82,8 @@ interface SendOutcome {
   failed: number;
   skipped: Record<string, number>;
   excludedByReason?: Record<string, number>;
+  followUpsScheduled?: number;
+  followUpDelayMinutes?: number;
   note?: string;
   error?: string;
 }
@@ -86,6 +104,7 @@ export default function BulkInstallmentReminder({
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [preview, setPreview] = useState<BulkPreview | null>(null);
+  const [followUp, setFollowUp] = useState<FollowUpPreview | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [excluded, setExcluded] = useState<Set<string>>(new Set());
   const [confirmText, setConfirmText] = useState("");
@@ -103,6 +122,7 @@ export default function BulkInstallmentReminder({
     setLoading(true);
     setError(null);
     setPreview(null);
+    setFollowUp(null);
     setOutcome(null);
     setExcluded(new Set());
     setConfirmText("");
@@ -116,6 +136,7 @@ export default function BulkInstallmentReminder({
       const json = await res.json();
       if (!res.ok || !json.ok) throw new Error(json.error || "Could not build the review.");
       setPreview(json.preview as BulkPreview);
+      setFollowUp((json.followUp as FollowUpPreview) ?? null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not build the review.");
     } finally {
@@ -133,7 +154,11 @@ export default function BulkInstallmentReminder({
     () => (preview?.previews ?? []).filter((p) => !p.sendable),
     [preview],
   );
-  const totalSegments = sendableRows.reduce((a, p) => a + p.segments, 0);
+  const reminderSegments = sendableRows.reduce((a, p) => a + p.segments, 0);
+  // TRUE cost of the sequence: every recipient gets the instructions too, so a
+  // total that counted step 1 alone would understate the bill by half.
+  const followUpSegments = followUp?.sendable ? followUp.segments * sendableRows.length : 0;
+  const totalSegments = reminderSegments + followUpSegments;
   const needsTyping = sendableRows.length > CONFIRM_TYPING_THRESHOLD;
   const confirmOk = !needsTyping || confirmText.trim() === String(sendableRows.length);
 
@@ -178,7 +203,7 @@ export default function BulkInstallmentReminder({
     };
     const sentIds = new Set(outcome ? sendableRows.map((p) => p.enrollmentId) : []);
     const rows = [
-      ["outcome", "enrollment_id", "installment_no", "installment_key", "student", "masked_phone", "course", "batch", "amount_due", "days_overdue", "prior_reminder_count", "segments", "excluded_reason"],
+      ["outcome", "enrollment_id", "installment_no", "installment_key", "student", "masked_phone", "course", "batch", "amount_due", "days_overdue", "prior_reminder_count", "segments", "instructions_followup", "excluded_reason"],
       ...preview.previews.map((p) => [
         p.sendable
           ? (excluded.has(p.enrollmentId) ? "excluded_by_staff" : (outcome ? (sentIds.has(p.enrollmentId) ? "sent" : "not_sent") : "ready"))
@@ -195,6 +220,11 @@ export default function BulkInstallmentReminder({
         p.daysOverdue,
         p.priorReminderCount,
         p.segments,
+        // Only a reminder that went out can have a follow-up, so this mirrors the
+        // outcome rather than claiming a queue entry that does not exist.
+        p.sendable && !excluded.has(p.enrollmentId) && outcome && !outcome.replay && followUp?.sendable
+          ? `scheduled +${followUp.delayMinutes}m`
+          : "",
         p.sendable ? (excluded.has(p.enrollmentId) ? "excluded in review" : "") : reasonLabel(p.blockReason),
       ]),
     ];
@@ -219,7 +249,7 @@ export default function BulkInstallmentReminder({
         <div className="flex items-center gap-2">
           <button onClick={onClear} className="btn btn-secondary text-sm">Clear</button>
           <button onClick={openReview} className="btn btn-primary inline-flex items-center gap-2 text-sm">
-            <Send size={14} /> Send installment reminder ({selectedIds.length} selected)
+            <Send size={14} /> Send reminder + instructions ({selectedIds.length} selected)
           </button>
         </div>
       </div>
@@ -241,8 +271,10 @@ export default function BulkInstallmentReminder({
                   <p className="mt-1 text-xs text-ink2">
                     <strong className="text-ink">{sendableRows.length}</strong> to send ·{" "}
                     <strong>{preview.excludedCount + excluded.size}</strong> excluded ·{" "}
-                    <strong>{totalSegments}</strong> segment{totalSegments === 1 ? "" : "s"}
+                    <strong>{totalSegments}</strong> segment{totalSegments === 1 ? "" : "s"} for both steps
+                    {followUpSegments > 0 && ` (${reminderSegments} + ${followUpSegments})`}
                     {preview.dltTemplateId ? ` · DLT ${preview.dltTemplateId}` : " · no DLT id"}
+                    {followUp?.dltTemplateId ? ` + ${followUp.dltTemplateId}` : ""}
                   </p>
                 )}
                 <p className="mt-1 text-[11px] text-muted">
@@ -276,6 +308,28 @@ export default function BulkInstallmentReminder({
                 </p>
               )}
 
+              {/* Step 2, shown once because it is the same message for everyone */}
+              {followUp && !loading && (
+                <div className={`mb-4 rounded-xl border p-3 ${followUp.sendable ? "border-line bg-surface2/60" : "border-danger/40 bg-danger/5"}`}>
+                  <div className="mb-1 flex flex-wrap items-baseline justify-between gap-2">
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">
+                      <span className="rounded bg-surface px-1.5 py-0.5 text-ink2">+{followUp.delayMinutes} min</span> {followUp.templateName}
+                      {" "}— identical for every recipient
+                    </p>
+                    <p className="text-[10px] text-muted">
+                      {followUp.segments} seg each · {followUp.characterCount} chars
+                      {followUp.dltTemplateId ? ` · DLT ${followUp.dltTemplateId}` : " · no DLT id"}
+                    </p>
+                  </div>
+                  <p className="whitespace-pre-wrap text-xs text-ink">{followUp.body || "—"}</p>
+                  <p className={`mt-1.5 text-[11px] ${followUp.sendable ? "text-muted" : "text-danger"}`}>
+                    {followUp.sendable
+                      ? `Queued per student and re-checked when it fires: anyone who has paid, opted out, or had their plan changed in the meantime is cancelled with a reason instead of being sent this.`
+                      : followUp.blockDetail ?? "This follow-up cannot be sent, so only the reminder will go out."}
+                  </p>
+                </div>
+              )}
+
               {outcome && (
                 <div className="mb-4 rounded-xl border border-line bg-surface p-3">
                   <p className="text-sm font-semibold text-ink">
@@ -283,6 +337,12 @@ export default function BulkInstallmentReminder({
                       ? "This job already ran — nothing was sent again."
                       : `Sent ${outcome.sent} of ${outcome.requested}${outcome.failed ? ` · ${outcome.failed} failed` : ""}`}
                   </p>
+                  {!outcome.replay && !!outcome.followUpsScheduled && (
+                    <p className="mt-0.5 text-xs text-ink2">
+                      {outcome.followUpsScheduled} instructions follow-up{outcome.followUpsScheduled === 1 ? "" : "s"} scheduled
+                      {" "}in {outcome.followUpDelayMinutes ?? 30}m. They can be cancelled from the pending list until they fire.
+                    </p>
+                  )}
                   {!!Object.keys(outcome.skipped || {}).length && (
                     <p className="mt-1 text-xs text-ink2">
                       Skipped: {Object.entries(outcome.skipped).map(([k, n]) => `${reasonLabel(k)} (${n})`).join(" · ")}
@@ -408,7 +468,9 @@ export default function BulkInstallmentReminder({
                       className="btn btn-primary inline-flex items-center gap-2 text-sm"
                       title={!confirmOk ? "Type the count to confirm" : `Send ${sendableRows.length} reminders now`}
                     >
-                      {sending ? <><Loader2 size={14} className="animate-spin" /> Sending…</> : <><Send size={14} /> Send {sendableRows.length} reminder{sendableRows.length === 1 ? "" : "s"}</>}
+                      {sending
+                        ? <><Loader2 size={14} className="animate-spin" /> Sending…</>
+                        : <><Send size={14} /> Send {sendableRows.length} {followUp?.sendable ? "reminder + instructions" : `reminder${sendableRows.length === 1 ? "" : "s"}`}</>}
                     </button>
                   )}
                 </div>

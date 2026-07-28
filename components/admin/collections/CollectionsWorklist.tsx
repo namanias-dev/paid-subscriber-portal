@@ -7,6 +7,7 @@ import { useAdminData, LoadingBlock } from "@/components/admin/ui";
 import InstallmentReminderButton from "@/components/admin/sms/InstallmentReminderButton";
 import BulkInstallmentReminder from "@/components/admin/sms/BulkInstallmentReminder";
 import ReminderStatePill from "@/components/admin/sms/ReminderStatePill";
+import PendingFollowUps from "@/components/admin/sms/PendingFollowUps";
 import { formatINR, formatISTDate } from "@/lib/dates";
 import { deriveCollections } from "@/lib/installments";
 import { isOutstandingInstallment } from "@/lib/sms/installmentAttribution";
@@ -50,6 +51,8 @@ export default function CollectionsWorklist() {
 
   // Reminder→payment state, computed server-side in ONE indexed query.
   const [tracking, setTracking] = useState<TrackingPayload | null>(null);
+  // Bumped after a send so the pending-follow-ups panel re-reads the queue.
+  const [sendCount, setSendCount] = useState(0);
   const loadTracking = useCallback(() => {
     fetch("/api/admin/sms/installment-reminder/tracking")
       .then((r) => (r.ok ? r.json() : null))
@@ -57,6 +60,7 @@ export default function CollectionsWorklist() {
       .catch(() => { /* the table still works without pills */ });
   }, []);
   useEffect(loadTracking, [loadTracking]);
+  const afterSend = useCallback(() => { loadTracking(); setSendCount((n) => n + 1); }, [loadTracking]);
 
   // Confirmed, non-cancelled enrollments with money outstanding. Overdue-only is
   // the default and reproduces this page's original filter exactly.
@@ -263,6 +267,9 @@ export default function CollectionsWorklist() {
         </span>
       </div>
 
+      {/* Queued instructions messages, cancellable until they fire */}
+      <PendingFollowUps refreshKey={sendCount} />
+
       {rows.length === 0 ? (
         <div className="card flex flex-col items-center justify-center gap-2 py-16 text-center">
           <span className="grid h-12 w-12 place-items-center rounded-full bg-success/10 text-2xl">✅</span>
@@ -321,7 +328,13 @@ export default function CollectionsWorklist() {
                   <td className="px-4 py-3 tabular-nums text-ink2">{formatINR(d.remaining)}</td>
                   <td className="px-4 py-3 tabular-nums text-ink2">{d.nextDueDate ? formatISTDate(d.nextDueDate) : "—"}</td>
                   <td className="px-4 py-3">
-                    <ReminderStatePill state={tracking?.byEnrollment[e.id]?.row ?? null} />
+                    {(() => {
+                      // The follow-up shown must be the one for the SAME
+                      // installment as the pill, never just the newest on the row.
+                      const t = tracking?.byEnrollment[e.id];
+                      const row = t?.row ?? null;
+                      return <ReminderStatePill state={row} followUp={row ? (t?.followUps?.[row.installmentNo] ?? null) : null} />;
+                    })()}
                   </td>
                   <td className="px-4 py-3 text-right">
                     <div className="flex items-center justify-end gap-3">
@@ -344,7 +357,7 @@ export default function CollectionsWorklist() {
         selectedIds={[...selected].filter((id) => visibleIds.has(id))}
         overdueOnly={overdueOnly}
         onClear={() => setSelected(new Set())}
-        onSent={loadTracking}
+        onSent={afterSend}
       />
     </div>
   );

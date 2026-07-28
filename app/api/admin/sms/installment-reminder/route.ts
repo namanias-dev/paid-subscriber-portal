@@ -7,6 +7,8 @@ import {
   buildInstallmentReminder,
   INSTALLMENT_REMINDER_TEMPLATE_ID,
 } from "@/lib/sms/installmentReminderService";
+import { buildFollowUpPreview, scheduleFollowUp, FOLLOW_UP_DELAY_MINUTES } from "@/lib/sms/installmentFollowUp";
+import { normalizeIndianMobile } from "@/lib/phone";
 
 export const dynamic = "force-dynamic";
 
@@ -35,8 +37,13 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, error: "Provide an enrollmentId or phone." }, { status: 400 });
   }
 
-  const preview = await buildInstallmentReminder({ enrollmentId, phone });
-  return NextResponse.json({ ok: true, preview });
+  // Both legs of the sequence, so the modal can stack "Now" and "+30 min" and
+  // staff approve the pair rather than discovering the second message later.
+  const [preview, followUp] = await Promise.all([
+    buildInstallmentReminder({ enrollmentId, phone }),
+    buildFollowUpPreview(),
+  ]);
+  return NextResponse.json({ ok: true, preview, followUp });
 }
 
 /**
@@ -97,6 +104,28 @@ export async function PUT(req: Request) {
     );
   }
 
+  // ---- step 2: queue the instructions, ONLY because step 1 actually sent ----
+  // The parent log id is a foreign key on the job row, so a follow-up cannot
+  // exist for a reminder that failed or was excluded. Scheduling is deliberately
+  // not fatal to the response: the reminder is already out, and reporting it as
+  // a failure would invite a staff member to send it twice.
+  const digits = normalizeIndianMobile(enrollment.phone).digits10;
+  let followUpScheduled = false;
+  if (result.logId && digits && preview.installmentKey) {
+    const queued = await scheduleFollowUp({
+      parentSendId: result.logId,
+      normalizedMobile: digits,
+      courseEnrollmentId: preview.installmentKey.courseEnrollmentId,
+      installmentNo: preview.installmentKey.installmentNo,
+      installmentFingerprint: preview.installmentKey.fingerprint,
+      studentName: enrollment.student_name,
+      studentId: enrollment.student_id ?? null,
+      courseId: enrollment.course_id,
+      actorUserId: await currentAdminId(),
+    });
+    followUpScheduled = queued.ok;
+  }
+
   return NextResponse.json({
     ok: true,
     logId: result.logId,
@@ -105,5 +134,7 @@ export async function PUT(req: Request) {
     maskedPhone: maskMobile(enrollment.phone),
     installmentNo: preview.installmentNo,
     amountDue: preview.amountDue,
+    followUpScheduled,
+    followUpDelayMinutes: FOLLOW_UP_DELAY_MINUTES,
   });
 }

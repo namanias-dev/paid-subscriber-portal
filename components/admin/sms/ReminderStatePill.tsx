@@ -2,6 +2,8 @@
 
 import { formatINR, formatISTDateTime } from "@/lib/dates";
 import type { InstallmentReminderState } from "@/lib/sms/installmentAttribution";
+import type { FollowUpView } from "@/lib/sms/installmentTracking";
+import { CANCEL_REASON_LABELS } from "@/lib/sms/installmentFollowUp";
 
 /**
  * Reminder → payment state for ONE installment.
@@ -12,9 +14,77 @@ import type { InstallmentReminderState } from "@/lib/sms/installmentAttribution"
  * may be attributed to a reminder here. A student who was reminded and then paid
  * may well have paid anyway.
  */
-export default function ReminderStatePill({ state }: { state: InstallmentReminderState | null }) {
+export default function ReminderStatePill({
+  state, followUp,
+}: {
+  state: InstallmentReminderState | null;
+  /** The step-2 leg for this same installment, when one was queued. */
+  followUp?: FollowUpView | null;
+}) {
   if (!state) return <span className="text-xs text-muted">—</span>;
 
+  return (
+    <span className="inline-flex flex-wrap items-center gap-1">
+      <ReminderPill state={state} />
+      {followUp && <FollowUpPill followUp={followUp} />}
+    </span>
+  );
+}
+
+/**
+ * Step 2's own state, never merged into the reminder pill above. "Both sent"
+ * describes delivery of a sequence; it says nothing about payment, and the
+ * paid/unpaid reading stays entirely with the reminder pill.
+ */
+function FollowUpPill({ followUp }: { followUp: FollowUpView }) {
+  switch (followUp.status) {
+    case "pending":
+    case "claimed": {
+      const mins = Math.max(0, Math.round((Date.parse(followUp.scheduledAt) - Date.now()) / 60_000));
+      return (
+        <span
+          className="pill whitespace-nowrap text-[11px] text-ink2"
+          title={`Instructions SMS scheduled for ${formatISTDateTime(followUp.scheduledAt)}.\nCancelled automatically if the installment is paid, the student opts out, or the plan changes before then.`}
+        >
+          {mins > 0 ? `instructions in ${mins}m` : "instructions due"}
+        </span>
+      );
+    }
+    case "sent":
+      return (
+        <span
+          className="pill whitespace-nowrap text-[11px] text-ink2"
+          title={followUp.finishedAt ? `Instructions sent ${formatISTDateTime(followUp.finishedAt)}` : "Instructions sent"}
+        >
+          Both sent
+        </span>
+      );
+    case "cancelled": {
+      const why = CANCEL_REASON_LABELS[followUp.cancelReason ?? ""] ?? followUp.cancelReason ?? "cancelled";
+      return (
+        <span
+          className="pill whitespace-nowrap text-[11px] text-muted"
+          title={`The instructions SMS was cancelled before it fired — ${why}.${followUp.finishedAt ? `\n${formatISTDateTime(followUp.finishedAt)}` : ""}`}
+        >
+          Instructions cancelled ({why})
+        </span>
+      );
+    }
+    case "failed":
+      return (
+        <span
+          className="pill pill-red whitespace-nowrap text-[11px]"
+          title={`Instructions failed after ${followUp.attempts} attempt(s).${followUp.lastError ? `\n${followUp.lastError}` : ""}`}
+        >
+          Instructions failed
+        </span>
+      );
+    default:
+      return null;
+  }
+}
+
+function ReminderPill({ state }: { state: InstallmentReminderState }) {
   const hover = buildHover(state);
 
   switch (state.kind) {
