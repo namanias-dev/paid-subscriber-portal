@@ -7,7 +7,7 @@ import { ChevronRight } from "lucide-react";
 import { PageHeader, useAdminData, LoadingBlock, TableShell, KpiCard } from "@/components/admin/ui";
 import InstallmentReminderButton from "@/components/admin/sms/InstallmentReminderButton";
 import { formatINR, formatISTDate } from "@/lib/dates";
-import { deriveEnrollment } from "@/lib/installments";
+import { deriveEnrollment, paymentProgressLabel } from "@/lib/installments";
 import type { CourseEnrollment, Course } from "@/lib/types";
 
 const STATUS_PILL: Record<string, string> = {
@@ -275,9 +275,9 @@ export default function CoursePaymentsAdmin() {
                 {d.remaining > 0 && <div className="text-xs text-muted">Bal {formatINR(d.remaining)}{nextDue ? ` · next ${formatISTDate(nextDue.due)}` : ""}</div>}
               </td>
               <td className="px-4 py-3 text-xs">
-                {e.plan_type === "emi" ? (
+                {e.plan_type === "emi" || d.seatPaid || d.installmentTotal > 0 ? (
                   <>
-                    {d.paidCount}/{d.installmentTotal} paid
+                    {paymentProgressLabel(d)}
                     {d.hasOverdue && <span className="ml-1 font-bold text-danger">· OVERDUE</span>}
                   </>
                 ) : (

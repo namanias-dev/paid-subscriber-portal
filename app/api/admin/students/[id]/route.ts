@@ -17,12 +17,18 @@ import {
   getSiteSettings,
   getAccessLogs,
   logAccess,
+  getAccessOverridesByPhone,
+  getEnrollmentPlanChangeLogs,
+  findActiveLeadByPhone,
 } from "@/lib/dataProvider";
 import { getAdminSession } from "@/lib/session";
 import { requirePermission } from "@/lib/adminGuard";
 import { computeExpiry, istInputToISO } from "@/lib/dates";
-import { deriveEnrollment, isActiveEnrollment, isAttemptEnrollment, isSupersededEnrollment } from "@/lib/installments";
-import { getEnrollmentPlanChangeLogs, findActiveLeadByPhone } from "@/lib/dataProvider";
+import {
+  deriveEnrollment, paymentProgressLabel,
+  isActiveEnrollment, isAttemptEnrollment, isSupersededEnrollment,
+} from "@/lib/installments";
+import { activeAccessGrant } from "@/lib/sms/accessReminderService";
 import { deriveDisplayChannel } from "@/lib/marketing/leadAttrByPhone";
 import type { Student, PlanId, InstallmentItem, PaymentPlan } from "@/lib/types";
 
@@ -128,9 +134,16 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
       originalTotal?: number | null;
       /** Plan-change audit history for this enrollment. */
       planHistory?: { id: string; oldPlan: string | null; newPlan: string | null; oldOutstanding: number; newOutstanding: number; reason: string | null; changedBy: string | null; createdAt: string }[];
+      progressLabel?: string;
+      seatPaid?: boolean;
+      accessGrant?: { expiresAt: string | null; note: string | null; createdBy: string | null } | null;
     };
 
-    const planLogsLists = await Promise.all(courseEnrollments.map((e) => getEnrollmentPlanChangeLogs(e.id).catch(() => [])));
+    const [planLogsLists, overrides] = await Promise.all([
+      Promise.all(courseEnrollments.map((e) => getEnrollmentPlanChangeLogs(e.id).catch(() => []))),
+      getAccessOverridesByPhone(phone).catch(() => []),
+    ]);
+    const now = Date.now();
 
     const courses: CourseCard[] = courseEnrollments.map((e, i) => {
       const d = deriveEnrollment(e);
@@ -143,6 +156,8 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
             : paymentPlan === "EMI"
               ? `EMI · ${e.installment_count || d.installmentTotal} parts`
               : "Pay in full";
+      const ovr = overrides.find((o) => o.course_id === e.course_id) || null;
+      const grant = activeAccessGrant(ovr, now);
       return {
         id: e.id,
         // A course row with a null title/fee must still render an openable card —
@@ -183,6 +198,13 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
           changedBy: l.changed_by,
           createdAt: l.created_at,
         })),
+        progressLabel: paymentProgressLabel(d),
+        seatPaid: d.seatPaid,
+        accessGrant: grant ? {
+          expiresAt: grant.expires_at,
+          note: grant.note,
+          createdBy: grant.created_by,
+        } : null,
       };
     });
 

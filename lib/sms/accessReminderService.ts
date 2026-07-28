@@ -51,6 +51,18 @@ export type AccessReminderBlockReason =
   | "render_blocked"
   | "invalid_body";
 
+/** Active temporary grant holding access open (mode=grant, not expired). */
+export function activeAccessGrant(
+  override: CourseAccessOverride | undefined | null,
+  now = Date.now(),
+): CourseAccessOverride | null {
+  if (!override || override.mode !== "grant") return null;
+  if (!override.expires_at) return override; // indefinite — report separately; still "active"
+  const exp = Date.parse(override.expires_at);
+  if (!Number.isFinite(exp) || exp <= now) return null;
+  return override;
+}
+
 export interface ReminderVariableView {
   token: string;
   canonicalKey: string | null;
@@ -72,7 +84,12 @@ export interface AccessReminderPreview {
   body: string;
   variables: ReminderVariableView[];
   accessStatus: "blocked" | "grace" | string;
+  /** Live playback access (may differ from schedule when a grant is active). */
+  liveAccessAllowed: boolean;
+  scheduleStatus: string;
+  grantExpiresAt: string | null;
   daysLeft: number | null;
+  daysSource: "grace" | "override" | null;
   installmentNo: number | null;
   amountDue: number | null;
   dueDate: string | null;
@@ -100,7 +117,8 @@ function fail(
     enrollmentId: "", studentId: null, studentName: "", maskedPhone: "—", courseTitle: "", batchLabel: null,
     templateId: "", templateName: "Access Reminder",
     dltTemplateId: null, senderId: null, body: "", variables: [],
-    accessStatus: "", daysLeft: null, installmentNo: null, amountDue: null, dueDate: null,
+    accessStatus: "", liveAccessAllowed: false, scheduleStatus: "", grantExpiresAt: null,
+    daysLeft: null, daysSource: null, installmentNo: null, amountDue: null, dueDate: null,
     unpaidCount: 0, totalRemaining: null,
     characterCount: 0, segments: 0,
     sendable: false, blockReason: reason, blockDetail: detail, warnings: [], lastSentAt: null,
@@ -219,18 +237,71 @@ export async function buildAccessReminderContext(
   };
 }
 
-/** Pick template from live access state. Staff never choose. */
-export function pickAccessTemplate(access: LectureAccess): { templateId: string } | { block: AccessReminderBlockReason; detail: string } {
-  if (access.status === "blocked" && access.reason === "overdue") {
-    return { templateId: ACCESS_BLOCKED_TEMPLATE_ID };
+export type AccessTemplatePick =
+  | { templateId: string; daysSource: "grace" | "override"; daysEndAt: string | null; scheduleStatus: string }
+  | { block: AccessReminderBlockReason; detail: string; scheduleStatus: string };
+
+/**
+ * Reminder eligibility follows the SCHEDULE, not a temporary access grant.
+ * Copy stays truthful: blocked+grant → Expiring (days to override end), never
+ * "access paused" while the grant is holding the door open.
+ */
+export function pickAccessTemplate(input: {
+  scheduleAccess: LectureAccess;
+  override: CourseAccessOverride | null | undefined;
+  totalRemaining: number;
+  now?: number;
+}): AccessTemplatePick {
+  const now = input.now ?? Date.now();
+  const schedule = input.scheduleAccess;
+  const grant = activeAccessGrant(input.override, now);
+
+  if (input.totalRemaining <= 0) {
+    return { block: "access_restored", detail: "Nothing outstanding — no access-risk reminder applies.", scheduleStatus: schedule.status };
   }
-  if (access.status === "grace") {
-    return { templateId: ACCESS_EXPIRING_TEMPLATE_ID };
+
+  const scheduleBlocked = schedule.status === "blocked" && schedule.reason === "overdue";
+  const scheduleGrace = schedule.status === "grace";
+
+  if (scheduleBlocked && !grant) {
+    return { templateId: ACCESS_BLOCKED_TEMPLATE_ID, daysSource: "grace", daysEndAt: schedule.graceEndsAt ?? null, scheduleStatus: "blocked" };
   }
-  if (access.allowed) {
-    return { block: "access_restored", detail: "Access is currently allowed — no access-risk reminder applies." };
+  if (scheduleBlocked && grant) {
+    return {
+      templateId: ACCESS_EXPIRING_TEMPLATE_ID,
+      daysSource: "override",
+      daysEndAt: grant.expires_at,
+      scheduleStatus: "blocked_with_grant",
+    };
   }
-  return { block: "not_access_risk", detail: `Access status "${access.status}" (${access.reason}) is not a collections access-risk case.` };
+  if (scheduleGrace && !grant) {
+    return { templateId: ACCESS_EXPIRING_TEMPLATE_ID, daysSource: "grace", daysEndAt: schedule.graceEndsAt ?? null, scheduleStatus: "grace" };
+  }
+  if (scheduleGrace && grant) {
+    // Prefer the nearer of grace-end vs grant expiry for truthful "expires in N days".
+    const graceEnd = schedule.graceEndsAt ? Date.parse(schedule.graceEndsAt) : Infinity;
+    const grantEnd = grant.expires_at ? Date.parse(grant.expires_at) : Infinity;
+    const useGrant = grantEnd <= graceEnd;
+    return {
+      templateId: ACCESS_EXPIRING_TEMPLATE_ID,
+      daysSource: useGrant ? "override" : "grace",
+      daysEndAt: useGrant ? grant.expires_at : (schedule.graceEndsAt ?? null),
+      scheduleStatus: "grace_with_grant",
+    };
+  }
+
+  return {
+    block: "not_access_risk",
+    detail: `Schedule status "${schedule.status}" (${schedule.reason}) is not a collections access-risk case.`,
+    scheduleStatus: schedule.status,
+  };
+}
+
+/** @deprecated — use pickAccessTemplate({ scheduleAccess, override, totalRemaining }). Kept for tests that pass LectureAccess alone. */
+export function pickAccessTemplateLegacy(access: LectureAccess): { templateId: string } | { block: AccessReminderBlockReason; detail: string } {
+  const r = pickAccessTemplate({ scheduleAccess: access, override: null, totalRemaining: 1 });
+  if ("block" in r) return { block: r.block, detail: r.detail };
+  return { templateId: r.templateId };
 }
 
 export function buildAccessReminderFor(
@@ -272,25 +343,38 @@ export function buildAccessReminderFor(
 
   const course = ctx.courses.get(enrollment.course_id);
   const override = ctx.overridesByPhoneCourse.get(`${enrollment.phone}::${enrollment.course_id}`);
-  const access = lectureAccessForCourse(course, enrollment, override, false, now);
-  Object.assign(partial, { accessStatus: access.status });
+  // Schedule state ignores temporary grants — that is what drives collections.
+  const scheduleAccess = lectureAccessForCourse(course, enrollment, undefined, false, now);
+  const liveAccess = lectureAccessForCourse(course, enrollment, override, false, now);
+  const grant = activeAccessGrant(override, now);
+  Object.assign(partial, {
+    accessStatus: scheduleAccess.status,
+    liveAccessAllowed: liveAccess.allowed,
+    scheduleStatus: scheduleAccess.status,
+    grantExpiresAt: grant?.expires_at ?? null,
+  });
 
-  // Paid in full but still blocked = data bug, not a collections SMS.
-  if (!access.allowed && (r.totalRemaining <= 0 || access.reason === "revoked")) {
-    if (r.totalRemaining <= 0 && access.reason === "overdue") {
-      return fail("data_inconsistency", "Balance is cleared but access is still blocked — fix the enrollment, do not SMS.", partial);
-    }
+  if (r.totalRemaining <= 0 && scheduleAccess.status === "blocked" && scheduleAccess.reason === "overdue") {
+    return fail("data_inconsistency", "Balance is cleared but schedule access is still blocked — fix the enrollment, do not SMS.", partial);
   }
 
-  const pick = pickAccessTemplate(access);
-  if ("block" in pick) return fail(pick.block, pick.detail, partial);
+  const pick = pickAccessTemplate({
+    scheduleAccess,
+    override,
+    totalRemaining: r.totalRemaining,
+    now,
+  });
+  if ("block" in pick) return fail(pick.block, pick.detail, { ...partial, scheduleStatus: pick.scheduleStatus });
 
   const template = ctx.templates.get(pick.templateId);
   if (!template) return fail("template_missing", `Template ${pick.templateId} missing from context.`, partial);
 
-  const daysLeft = istWholeDaysUntil(access.graceEndsAt, now);
+  const daysLeft = istWholeDaysUntil(pick.daysEndAt, now);
   Object.assign(partial, {
     daysLeft,
+    daysSource: pick.daysSource,
+    scheduleStatus: pick.scheduleStatus,
+    accessStatus: pick.scheduleStatus.startsWith("blocked") ? "blocked" : pick.scheduleStatus.startsWith("grace") ? "grace" : pick.scheduleStatus,
     templateId: template.id,
     templateName: template.name,
     dltTemplateId: template.gateway_template_id,
@@ -299,10 +383,14 @@ export function buildAccessReminderFor(
 
   if (pick.templateId === ACCESS_EXPIRING_TEMPLATE_ID) {
     if (daysLeft == null) {
-      return fail("days_not_positive", "Grace end date is missing, so days cannot be resolved.", partial);
+      return fail("days_not_positive", pick.daysSource === "override"
+        ? "Override has no expiry date — cannot compute days."
+        : "Grace end date is missing, so days cannot be resolved.", partial);
     }
     if (daysLeft <= 0) {
-      return fail("days_not_positive", "Grace has ended (days ≤ 0) — use the blocked template path, not expiring.", partial);
+      return fail("days_not_positive", pick.daysSource === "override"
+        ? "Override expires today or has expired (days ≤ 0) — do not send Expiring."
+        : "Grace has ended (days ≤ 0) — use the blocked template path, not expiring.", partial);
     }
   }
 
@@ -340,6 +428,9 @@ export function buildAccessReminderFor(
   const warnings = [...validation.warnings];
   if (partial.daysSingularCosmetic) {
     warnings.push('Approved copy reads "1 days" (immutable DLT text) — cosmetic only.');
+  }
+  if (grant?.expires_at) {
+    warnings.push(`Access grant active until ${grant.expires_at.slice(0, 10)} — Expiring template uses days to that date, not "access paused".`);
   }
   if (r.unpaidCount > 1) {
     warnings.push(`${r.unpaidCount} unpaid installments — this reminder refers to the OLDEST one (no. ${r.installmentNo}).`);

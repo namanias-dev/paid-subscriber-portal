@@ -416,6 +416,10 @@ export interface EnrollmentDerived {
   nextPayable: InstallmentItem | null;
   paidCount: number;
   installmentTotal: number;
+  /** True when a seat-deposit line is marked paid (display only — not folded into paidCount). */
+  seatPaid: boolean;
+  /** Rupees on paid seat lines (0 when none). */
+  seatPaidAmount: number;
   progressPct: number;
   isFullyPaid: boolean;
   /** True if any unpaid installment's due date has passed. */
@@ -430,6 +434,7 @@ export function deriveEnrollment(enr: Pick<CourseEnrollment, "total_fee" | "sche
   // Installments that still count toward the plan (paid, or outstanding — not cancelled/waived).
   const installments = schedule.filter((s) => s.kind === "installment" && (s.paid || !isLineCancelledOrWaived(s)));
   const paidInstallments = installments.filter((s) => s.paid).length;
+  const seatLines = schedule.filter((s) => s.kind === "seat" && s.paid);
   const nextPayable = schedule.find((s) => isLineOutstanding(s)) || null;
   const hasOverdue = schedule.some((s) => isLineOutstanding(s) && s.due != null && new Date(s.due).getTime() < now);
   return {
@@ -438,10 +443,28 @@ export function deriveEnrollment(enr: Pick<CourseEnrollment, "total_fee" | "sche
     nextPayable,
     paidCount: paidInstallments,
     installmentTotal: installments.length,
+    seatPaid: seatLines.length > 0,
+    seatPaidAmount: seatLines.reduce((a, s) => a + (s.amount || 0), 0),
     progressPct: enr.total_fee > 0 ? Math.round((paid / enr.total_fee) * 100) : 0,
     isFullyPaid: remaining <= 0,
     hasOverdue,
   };
+}
+
+/**
+ * Staff-facing progress label. Seat deposit is real money and must never read as
+ * "nothing paid". The installment fraction stays installment-only so "1 of 3"
+ * is never ambiguous with the seat line.
+ */
+export function paymentProgressLabel(
+  d: Pick<EnrollmentDerived, "paidCount" | "installmentTotal" | "seatPaid" | "isFullyPaid">,
+): string {
+  if (d.isFullyPaid) return "Fully paid";
+  const frac = d.installmentTotal > 0
+    ? `${d.paidCount} of ${d.installmentTotal} installments paid`
+    : "Awaiting payment";
+  if (d.seatPaid) return `Seat booked · ${frac}`;
+  return frac;
 }
 
 export interface CollectionsDerived extends EnrollmentDerived {
@@ -503,10 +526,11 @@ export function installmentStatus(item: InstallmentItem, now = Date.now()): "pai
 export function installmentsSummary(enr: Pick<CourseEnrollment, "total_fee" | "schedule">, formatMoney: (n: number) => string, formatDate: (iso: string | null) => string): string {
   const d = deriveEnrollment(enr);
   if (d.isFullyPaid) return "Fully Paid";
-  if (d.installmentTotal === 0) return "Awaiting payment";
+  if (d.installmentTotal === 0 && !d.seatPaid) return "Awaiting payment";
   const next = d.nextPayable;
   const nextStr = next ? ` · next ${formatMoney(next.amount)}${next.due ? ` on ${formatDate(next.due)}` : ""}` : "";
-  return `${d.paidCount} of ${d.installmentTotal} paid${nextStr}`;
+  const money = `${formatMoney(d.paid)} of ${formatMoney(enr.total_fee)} received`;
+  return `${paymentProgressLabel(d)} · ${money}${nextStr}`;
 }
 
 /** Compute the enrollment status from its schedule. */

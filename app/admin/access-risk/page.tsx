@@ -2,12 +2,14 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { PageHeader, useAdminData, LoadingBlock, TableShell } from "@/components/admin/ui";
+import { PageHeader, LoadingBlock, TableShell } from "@/components/admin/ui";
 import AtRiskTabs from "@/components/admin/people/AtRiskTabs";
 import { useToast } from "@/components/ui/Toast";
 import AccessReminderButton from "@/components/admin/sms/AccessReminderButton";
 import BulkAccessReminder from "@/components/admin/sms/BulkAccessReminder";
 import { ACCESS_AUTO_CAP_PER_INSTALLMENT } from "@/lib/sms/accessReminderConstants";
+import { ACCESS_GRANT_MAX_DAYS_DEFAULT } from "@/lib/accessOverridePolicy";
+import { formatINR } from "@/lib/dates";
 
 interface RiskRow {
   enrollmentId: string;
@@ -20,65 +22,73 @@ interface RiskRow {
   batchLabel: string | null;
   planType: string;
   amountDue: number;
+  amountPaid: number;
+  totalFee: number;
   daysOverdue: number;
   installmentNo: number | null;
+  progressLabel: string;
   access: { allowed: boolean; status: string; reason: string; daysLeft?: number | null };
+  scheduleAccess: { status: string; reason: string; graceEndsAt?: string | null; daysLeft?: number | null };
+  grant: { expiresAt: string | null; note: string | null; createdBy: string | null; daysLeft: number | null } | null;
   autoUsed: number;
   needsCall: boolean;
+  needsCallReason: string | null;
   lastRemindedAt: string | null;
+  paymentFailures: number;
+  verifyingStuck: number;
 }
 
-interface AutomationState {
-  settings: {
-    killSwitch: boolean;
-    dryRun: boolean;
-    enabled: boolean;
-    rampLimit: number;
-    dailyCeiling: number;
+interface AccessRiskPayload {
+  rows: RiskRow[];
+  grants: {
+    student: string; phone: string; courseTitle: string; expiresAt: string | null;
+    createdBy: string | null; reason: string | null; amountDue: number; scheduleStatus: string;
+  }[];
+  paymentFailureTotals: {
+    failedStudents: number; verifyingStuckStudents: number; failedRows: number; verifyingStuckRows: number;
   };
-  needsCall: { course_enrollment_id: string; installment_no: number; auto_sequences_used: number; student_id: string | null }[];
-  plan: {
-    wouldSend: number;
-    excluded: { reason: string; count: number }[];
-    seatBookingOnly: number;
-    inQuietHours: boolean;
-    haltedReason: string | null;
-    dryRun: boolean;
-  };
+  indefiniteOverrides: number;
 }
 
 const STATUS_PILL: Record<string, string> = { blocked: "pill-red", grace: "pill-amber", expiring: "pill-amber" };
 
 export default function AccessRiskAdmin() {
-  const { data: rows, loading, reload } = useAdminData<RiskRow[]>("/api/admin/access-risk", "rows");
   const { toast } = useToast();
   const [filter, setFilter] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [auto, setAuto] = useState<AutomationState | null>(null);
+  const [grantReason, setGrantReason] = useState("");
+  const [grantTarget, setGrantTarget] = useState<RiskRow | null>(null);
+  const [full, setFull] = useState<AccessRiskPayload | null>(null);
+  const [loading, setLoading] = useState(true);
 
-  const loadAuto = useCallback(async () => {
+  const load = useCallback(async () => {
+    setLoading(true);
     try {
-      const res = await fetch("/api/admin/sms/access-reminder/automation");
+      const res = await fetch("/api/admin/access-risk");
       const json = await res.json();
-      if (res.ok && json.ok) setAuto(json as AutomationState);
+      if (res.ok && json.ok) setFull(json as AccessRiskPayload);
     } catch { /* non-fatal */ }
+    finally { setLoading(false); }
   }, []);
+  useEffect(() => { void load(); }, [load]);
 
-  useEffect(() => { void loadAuto(); }, [loadAuto]);
+  const listSource = full?.rows || [];
+  const reload = load;
 
   const list = useMemo(() => {
-    const all = rows || [];
-    if (filter === "needs_call") return all.filter((r) => r.needsCall);
-    if (!filter) return all;
-    return all.filter((r) => r.access.status === filter || (!r.access.allowed && filter === "blocked"));
-  }, [rows, filter]);
+    if (filter === "needs_call") return listSource.filter((r) => r.needsCall);
+    if (filter === "grants") return listSource.filter((r) => r.grant);
+    if (filter === "payment_fail") return listSource.filter((r) => r.paymentFailures >= 2 || r.verifyingStuck > 0);
+    if (!filter) return listSource;
+    return listSource.filter((r) => r.scheduleAccess?.status === filter || (!r.access.allowed && filter === "blocked"));
+  }, [listSource, filter]);
 
-  const blocked = (rows || []).filter((r) => !r.access.allowed).length;
-  const grace = (rows || []).filter((r) => r.access.status === "grace").length;
-  const expiring = (rows || []).filter((r) => r.access.status === "expiring").length;
-  const needsCallCount = (rows || []).filter((r) => r.needsCall).length || auto?.needsCall.length || 0;
-  const totalDue = (rows || []).reduce((s, r) => s + (r.amountDue || 0), 0);
+  const blocked = listSource.filter((r) => r.scheduleAccess?.status === "blocked").length;
+  const grace = listSource.filter((r) => r.scheduleAccess?.status === "grace").length;
+  const needsCallCount = listSource.filter((r) => r.needsCall).length;
+  const grantCount = listSource.filter((r) => r.grant).length;
+  const totalDue = listSource.reduce((s, r) => s + (r.amountDue || 0), 0);
 
   const visibleIds = useMemo(() => new Set(list.map((r) => r.enrollmentId)), [list]);
 
@@ -90,169 +100,209 @@ export default function AccessRiskAdmin() {
     });
   }
 
-  function toggleAllVisible() {
-    const allSelected = list.length > 0 && list.every((r) => selected.has(r.enrollmentId));
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (allSelected) list.forEach((r) => next.delete(r.enrollmentId));
-      else list.forEach((r) => next.add(r.enrollmentId));
-      return next;
-    });
-  }
-
-  async function override(r: RiskRow, mode: "grant" | "revoke", months?: number) {
+  async function revokeGrant(r: RiskRow) {
     setBusy(r.enrollmentId);
-    const expires_at = mode === "grant" && months ? new Date(Date.now() + months * 30 * 86400000).toISOString() : null;
     const res = await fetch("/api/admin/access-overrides", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ phone: r.phone, course_id: r.courseId, mode, expires_at, note: "Set from Access at Risk" }),
+      body: JSON.stringify({ phone: r.phone, course_id: r.courseId, mode: "revoke", reason: "Revoked from Access at Risk" }),
     });
     setBusy(null);
-    if (res.ok) { toast(mode === "revoke" ? "Access revoked" : "Access granted", "success"); reload(); }
-    else toast("Could not update access", "error");
+    if (res.ok) { toast("Grant revoked — schedule state restored", "success"); reload(); void load(); }
+    else toast("Could not revoke grant", "error");
   }
 
-  if (loading) return <LoadingBlock />;
+  async function submitGrant() {
+    if (!grantTarget) return;
+    const reason = grantReason.trim();
+    if (!reason) { toast("Reason is required", "error"); return; }
+    setBusy(grantTarget.enrollmentId);
+    const expires_at = new Date(Date.now() + ACCESS_GRANT_MAX_DAYS_DEFAULT * 86400000).toISOString();
+    const res = await fetch("/api/admin/access-overrides", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        phone: grantTarget.phone,
+        course_id: grantTarget.courseId,
+        mode: "grant",
+        expires_at,
+        note: reason,
+      }),
+    });
+    setBusy(null);
+    const json = await res.json().catch(() => ({}));
+    if (res.ok) {
+      toast(`Access granted for ${ACCESS_GRANT_MAX_DAYS_DEFAULT} days`, "success");
+      setGrantTarget(null);
+      setGrantReason("");
+      reload();
+      void load();
+    } else toast(json.error || "Could not grant access", "error");
+  }
 
-  const s = auto?.settings;
+  if (loading && !listSource.length) return <LoadingBlock />;
+
+  const failTotals = full?.paymentFailureTotals;
 
   return (
     <div>
-      <PageHeader title="Access at Risk" subtitle="Access lens — learners whose lecture access is blocked or expiring. For chasing overdue fees, use Payment Risk." />
+      <PageHeader title="Access at Risk" subtitle="Schedule lens — blocked/grace students stay visible even when a temporary grant is holding access open." />
       <AtRiskTabs active="access" />
 
-      {/* Automation status — ship defaults: dry-run ON, enabled OFF */}
-      <div className="mb-4 rounded-2xl border border-line bg-surface p-4">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <p className="text-sm font-semibold text-ink">Access reminder automation</p>
-            <p className="mt-0.5 text-xs text-muted">
-              {s
-                ? `${s.enabled ? "Enabled" : "Disabled"} · ${s.dryRun ? "dry-run ON (no real sends)" : "live"} · kill switch ${s.killSwitch ? "ON" : "OFF"} · ramp ${s.rampLimit} · ceiling ${s.dailyCeiling}`
-                : "Loading settings…"}
-              {auto?.plan?.inQuietHours ? " · quiet hours (IST)" : ""}
-              {auto?.plan ? ` · next plan would send ${auto.plan.wouldSend}` : ""}
-            </p>
-          </div>
-          {needsCallCount > 0 && (
-            <button
-              type="button"
-              onClick={() => setFilter("needs_call")}
-              className="pill pill-red text-xs font-semibold"
-            >
-              Call these students · {needsCallCount}
-            </button>
-          )}
-        </div>
-      </div>
-
       <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-5">
-        <Stat label="Blocked" value={blocked} tone="text-danger" />
+        <Stat label="Schedule blocked" value={blocked} tone="text-danger" />
         <Stat label="In grace" value={grace} tone="text-amber-600" />
-        <Stat label="Expiring ≤7d" value={expiring} tone="text-amber-600" />
+        <Stat label="Access granted" value={grantCount} tone="text-primary" />
         <Stat label="Needs call" value={needsCallCount} tone="text-danger" />
         <Stat label="Pending dues" value={`₹${totalDue.toLocaleString("en-IN")}`} tone="text-primary" />
       </div>
 
+      {(failTotals || full?.indefiniteOverrides) ? (
+        <div className="mb-4 rounded-2xl border border-line bg-surface p-3 text-xs text-ink2">
+          Payment failures (14d): <strong>{failTotals?.failedStudents ?? 0}</strong> students ·
+          Stuck VERIFYING (&gt;24h): <strong>{failTotals?.verifyingStuckStudents ?? 0}</strong> ·
+          Indefinite overrides in DB: <strong>{full?.indefiniteOverrides ?? 0}</strong>
+        </div>
+      ) : null}
+
+      {grantCount > 0 && (
+        <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50/50 p-4">
+          <p className="text-sm font-semibold text-ink">Access granted (leakage report)</p>
+          <div className="mt-2 overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead>
+                <tr className="text-muted">
+                  <th className="py-1 pr-3">Student</th>
+                  <th className="py-1 pr-3">Course</th>
+                  <th className="py-1 pr-3">Until</th>
+                  <th className="py-1 pr-3">By</th>
+                  <th className="py-1 pr-3">Outstanding</th>
+                  <th className="py-1">Reason</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(full?.grants || []).map((g) => (
+                  <tr key={`${g.phone}-${g.courseTitle}`} className="border-t border-line/60">
+                    <td className="py-1.5 pr-3 font-medium">{g.student}</td>
+                    <td className="py-1.5 pr-3">{g.courseTitle}</td>
+                    <td className="py-1.5 pr-3">{g.expiresAt ? g.expiresAt.slice(0, 10) : "—"}</td>
+                    <td className="py-1.5 pr-3">{g.createdBy || "—"}</td>
+                    <td className="py-1.5 pr-3">{formatINR(g.amountDue)}</td>
+                    <td className="py-1.5">{g.reason || "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       <div className="mb-3 flex flex-wrap gap-2">
-        {["", "blocked", "grace", "expiring", "needs_call"].map((f) => (
+        {["", "blocked", "grace", "grants", "needs_call", "payment_fail"].map((f) => (
           <button key={f || "all"} onClick={() => setFilter(f)} className={`pill ${filter === f ? "pill-blue" : "pill-gray"}`}>
-            {f === "" ? "All" : f === "needs_call" ? `Needs call (${needsCallCount})` : f[0].toUpperCase() + f.slice(1)}
+            {f === "" ? "All" : f === "needs_call" ? `Needs call (${needsCallCount})`
+              : f === "grants" ? `Access granted (${grantCount})`
+                : f === "payment_fail" ? "Payment failures"
+                  : f[0].toUpperCase() + f.slice(1)}
           </button>
         ))}
       </div>
 
-      <TableShell headers={["", "Student", "Course / Batch", "Inst.", "₹ Due", "Status", "Auto", "Actions"]}>
-        <tr className="border-b border-line bg-surface2/40">
-          <td className="px-3 py-2">
-            <input
-              type="checkbox"
-              checked={list.length > 0 && list.every((r) => selected.has(r.enrollmentId))}
-              onChange={toggleAllVisible}
-              className="h-3.5 w-3.5 accent-[color:var(--primary)]"
-              aria-label="Select all visible"
-            />
-          </td>
-          <td colSpan={7} className="px-4 py-2 text-xs text-muted">
-            {selected.size} selected
-          </td>
-        </tr>
+      <TableShell headers={["", "Student", "Course", "Progress", "₹ Due", "Schedule", "Grant", "Auto", "Actions"]}>
         {list.map((r) => (
           <tr key={r.enrollmentId} className={`border-b border-line last:border-0 hover:bg-surface2 ${selected.has(r.enrollmentId) ? "bg-primary/5" : ""}`}>
             <td className="px-3 py-3">
-              <input
-                type="checkbox"
-                checked={selected.has(r.enrollmentId)}
-                onChange={() => toggleRow(r.enrollmentId)}
-                className="h-3.5 w-3.5 accent-[color:var(--primary)]"
-                aria-label={`Select ${r.student}`}
-              />
+              <input type="checkbox" checked={selected.has(r.enrollmentId)} onChange={() => toggleRow(r.enrollmentId)} className="h-3.5 w-3.5 accent-[color:var(--primary)]" aria-label={`Select ${r.student}`} />
             </td>
             <td className="px-4 py-3">
               <div className="font-medium">{r.student}</div>
               <div className="text-xs text-muted">{r.phone}</div>
+              {r.paymentFailures >= 2 && <div className="text-[10px] font-semibold text-danger">{r.paymentFailures} failed attempts</div>}
+              {r.verifyingStuck > 0 && <div className="text-[10px] font-semibold text-amber-700">VERIFYING stuck</div>}
             </td>
             <td className="px-4 py-3">
               <div>{r.courseTitle}</div>
               {r.batchLabel ? <div className="text-xs text-muted">{r.batchLabel}</div> : null}
             </td>
-            <td className="px-4 py-3 tabular-nums text-xs">
-              {r.installmentNo != null ? `#${r.installmentNo}` : "—"}
+            <td className="px-4 py-3 text-xs">
+              <div>{r.progressLabel}</div>
+              <div className="text-muted">{formatINR(r.amountPaid)} / {formatINR(r.totalFee)}</div>
             </td>
-            <td className="px-4 py-3 font-semibold">₹{(r.amountDue || 0).toLocaleString("en-IN")}</td>
+            <td className="px-4 py-3 font-semibold">{formatINR(r.amountDue)}</td>
             <td className="px-4 py-3">
-              <span className={`pill ${STATUS_PILL[r.access.status] || (!r.access.allowed ? "pill-red" : "pill-gray")} text-[10px]`}>
-                {!r.access.allowed ? "blocked" : r.access.status}
+              <span className={`pill ${STATUS_PILL[r.scheduleAccess?.status] || "pill-gray"} text-[10px]`}>
+                {r.scheduleAccess?.status || "—"}
               </span>
-              {r.access.status === "grace" && r.access.daysLeft != null && (
-                <div className="mt-0.5 text-[10px] text-muted">{r.access.daysLeft}d left</div>
+              {r.scheduleAccess?.status === "grace" && r.scheduleAccess.daysLeft != null && (
+                <div className="mt-0.5 text-[10px] text-muted">{r.scheduleAccess.daysLeft}d left</div>
               )}
-              {r.daysOverdue > 0 && !r.access.allowed && (
+              {r.daysOverdue > 0 && r.scheduleAccess?.status === "blocked" && (
                 <div className="mt-0.5 text-[10px] text-muted">{r.daysOverdue}d overdue</div>
               )}
+            </td>
+            <td className="px-4 py-3 text-xs">
+              {r.grant ? (
+                <>
+                  <span className="pill pill-blue text-[10px]">until {r.grant.expiresAt?.slice(0, 10)}</span>
+                  <div className="mt-0.5 text-[10px] text-muted">{r.grant.createdBy || "staff"}{r.grant.note ? ` · ${r.grant.note}` : ""}</div>
+                </>
+              ) : "—"}
             </td>
             <td className="px-4 py-3 text-xs tabular-nums">
               <span className={r.needsCall ? "font-semibold text-danger" : "text-ink2"}>
                 {r.autoUsed}/{ACCESS_AUTO_CAP_PER_INSTALLMENT}
               </span>
-              {r.needsCall && <div className="text-[10px] text-danger">needs call</div>}
-              {r.lastRemindedAt && (
-                <div className="text-[10px] text-muted" title={r.lastRemindedAt}>
-                  last {new Date(r.lastRemindedAt).toLocaleDateString("en-IN")}
-                </div>
-              )}
+              {r.needsCall && <div className="text-[10px] text-danger">{r.needsCallReason || "needs call"}</div>}
             </td>
             <td className="px-4 py-3">
               <div className="flex flex-wrap items-center justify-end gap-2 text-xs">
                 <AccessReminderButton enrollmentId={r.enrollmentId} />
                 {r.studentId ? (
-                  <Link
-                    href={`/admin/students/${r.studentId}?enrollmentId=${r.enrollmentId}`}
-                    className="text-xs font-semibold text-primary hover:underline"
-                  >
-                    View
-                  </Link>
+                  <Link href={`/admin/students/${r.studentId}?enrollmentId=${r.enrollmentId}`} className="text-xs font-semibold text-primary hover:underline">View</Link>
+                ) : <span className="text-xs text-muted">—</span>}
+                {r.grant ? (
+                  <button disabled={busy === r.enrollmentId} onClick={() => revokeGrant(r)} className="text-danger disabled:opacity-50">Revoke grant</button>
                 ) : (
-                  <span className="text-xs text-muted">—</span>
+                  <button disabled={busy === r.enrollmentId} onClick={() => { setGrantTarget(r); setGrantReason(""); }} className="text-primary disabled:opacity-50">+{ACCESS_GRANT_MAX_DAYS_DEFAULT}d</button>
                 )}
-                <button disabled={busy === r.enrollmentId} onClick={() => override(r, "grant", 1)} className="text-primary disabled:opacity-50">+1m</button>
-                <button disabled={busy === r.enrollmentId} onClick={() => override(r, "revoke")} className="text-danger disabled:opacity-50">Revoke</button>
                 <a href={`tel:${r.phone}`} className="text-ink2">Call</a>
               </div>
             </td>
           </tr>
         ))}
         {list.length === 0 && (
-          <tr><td colSpan={8} className="px-4 py-10 text-center text-sm text-muted">No learners at risk.</td></tr>
+          <tr><td colSpan={9} className="px-4 py-10 text-center text-sm text-muted">No learners at risk.</td></tr>
         )}
       </TableShell>
 
       <BulkAccessReminder
         selectedIds={[...selected].filter((id) => visibleIds.has(id))}
         onClear={() => setSelected(new Set())}
-        onSent={() => { reload(); void loadAuto(); }}
+        onSent={() => { reload(); void load(); }}
       />
+
+      {grantTarget && (
+        <div className="fixed inset-0 z-[130] flex items-center justify-center bg-black/40 p-4" onClick={() => setGrantTarget(null)}>
+          <div className="card w-full max-w-md p-5" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+            <h3 className="text-base font-bold">Grant access · {ACCESS_GRANT_MAX_DAYS_DEFAULT} days</h3>
+            <p className="mt-1 text-sm text-ink2">{grantTarget.student} · does not change fees or due dates.</p>
+            <label className="mt-3 block text-xs font-semibold text-muted">Reason (required)</label>
+            <textarea
+              value={grantReason}
+              onChange={(e) => setGrantReason(e.target.value)}
+              className="mt-1 w-full rounded-xl border border-line bg-surface2 p-2 text-sm"
+              rows={3}
+              placeholder="Why is temporary access needed?"
+            />
+            <div className="mt-4 flex justify-end gap-2">
+              <button onClick={() => setGrantTarget(null)} className="btn btn-secondary text-sm">Cancel</button>
+              <button onClick={submitGrant} disabled={!grantReason.trim() || busy === grantTarget.enrollmentId} className="btn btn-primary text-sm">
+                Grant {ACCESS_GRANT_MAX_DAYS_DEFAULT} days
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -179,11 +179,12 @@ export async function planAccessAutomation(now = Date.now()): Promise<AutoRunRep
   ]);
   const byId = new Map(courses.map((c) => [c.id, c]));
 
+  // Risk follows SCHEDULE state — temporary grants must not remove someone from
+  // the automation pool (they may still be sendable with the Expiring template).
   const risk = enrollments.filter((e) => {
     if (e.status === "cancelled") return false;
-    const ovr = overrides.find((o) => o.phone === e.phone && o.course_id === e.course_id);
-    const access = lectureAccessForCourse(byId.get(e.course_id), e, ovr, false, now);
-    return access.status === "blocked" || access.status === "grace";
+    const access = lectureAccessForCourse(byId.get(e.course_id), e, undefined, false, now);
+    return access.status === "blocked" || access.status === "grace" || access.status === "expiring";
   });
 
   const ctx = await buildAccessReminderContext(risk, { now, courses: byId });
@@ -192,7 +193,12 @@ export async function planAccessAutomation(now = Date.now()): Promise<AutoRunRep
   const caps = await listCapsForEnrollments(risk.map((e) => e.id));
   const capKey = (eId: string, no: number) => `${eId}::${no}`;
   const capMap = new Map<string, AccessCapRow>();
-  for (const c of caps) capMap.set(capKey(c.course_enrollment_id, c.installment_no), c);
+  /** Enrollment-level needs_call (e.g. installment_no 0 payment-failure flags). */
+  const needsCallByEnrollment = new Set<string>();
+  for (const c of caps) {
+    capMap.set(capKey(c.course_enrollment_id, c.installment_no), c);
+    if (c.needs_call) needsCallByEnrollment.add(c.course_enrollment_id);
+  }
 
   const digits = new Set<string>();
   for (const e of risk) {
@@ -241,7 +247,8 @@ export async function planAccessAutomation(now = Date.now()): Promise<AutoRunRep
       candidates.push({ ...base, skipReason: "excluded" });
       continue;
     }
-    if (cap?.needs_call || (cap?.auto_sequences_used ?? 0) >= ACCESS_AUTO_CAP_PER_INSTALLMENT) {
+    // needs_call on any installment (incl. enrollment-level 0 for payment failures) suppresses auto SMS.
+    if (needsCallByEnrollment.has(e.id) || cap?.needs_call || (cap?.auto_sequences_used ?? 0) >= ACCESS_AUTO_CAP_PER_INSTALLMENT) {
       candidates.push({ ...base, skipReason: "cap_reached" });
       continue;
     }

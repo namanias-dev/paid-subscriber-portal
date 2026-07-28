@@ -24,7 +24,7 @@ import { getPlan } from "@/lib/config";
 import { buildWelcomeMessage, buildWhatsAppLink } from "@/lib/whatsapp";
 import { sendAccessCodeEmail } from "@/lib/email";
 import { formatDate, formatINR, istInputToISO } from "@/lib/dates";
-import { deriveEnrollment, deriveCollections, isActiveEnrollment } from "@/lib/installments";
+import { deriveEnrollment, deriveCollections, isActiveEnrollment, paymentProgressLabel } from "@/lib/installments";
 import type { PlanId, Payment, CourseEnrollment, WebinarRegistration } from "@/lib/types";
 
 export interface StudentSummary {
@@ -117,14 +117,11 @@ export async function GET() {
         totalDue += d.remaining;
         courseIds.push(e.course_id);
         if (e.course_slug) courseSlugs.push(e.course_slug);
-        const tag =
-          e.status === "seat_booked"
-            ? " (Seat booked)"
-            : e.plan_type === "emi"
-              ? ` (EMI ${d.paidCount}/${d.installmentTotal})`
-              : d.isFullyPaid
-                ? ""
-                : " (Pay in full)";
+        const tag = d.isFullyPaid
+          ? ""
+          : e.status === "seat_booked" || d.seatPaid || e.plan_type === "emi" || d.installmentTotal > 0
+            ? ` (${paymentProgressLabel(d)})`
+            : " (Pay in full)";
         labels.push(`${e.course_title}${tag}`);
       }
 

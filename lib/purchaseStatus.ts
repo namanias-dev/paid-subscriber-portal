@@ -149,9 +149,11 @@ export function coursePurchaseView(
         remaining: 0,
       };
     }
-    if (enr.status === "seat_booked") {
+    if (enr.status === "seat_booked" || d.seatPaid) {
       return {
-        label: "Seat booked",
+        label: d.installmentTotal > 0
+          ? `Seat booked · ${d.paidCount} of ${d.installmentTotal} installments paid`
+          : "Seat booked",
         cta: "Pay balance",
         href: `/portal/course/${enr.id}`,
         unlocked: true,
@@ -160,7 +162,7 @@ export function coursePurchaseView(
     }
     // partially paid
     return {
-      label: d.installmentTotal > 0 ? `Installment ${d.paidCount} of ${d.installmentTotal} paid` : "Payment in progress",
+      label: d.installmentTotal > 0 ? `${d.paidCount} of ${d.installmentTotal} installments paid` : "Payment in progress",
       cta: "Pay balance",
       href: `/portal/course/${enr.id}`,
       unlocked: true,
