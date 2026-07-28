@@ -1,3 +1,4 @@
+import { Fragment } from "react";
 import Image from "next/image";
 import { ArrowRight, CalendarDays, Sparkles } from "lucide-react";
 import type { HeroConfig } from "@/lib/types";
@@ -152,17 +153,20 @@ export default function CinematicHero({ hero, offers, trust }: CinematicHeroProp
             </ul>
           )}
 
-          {/* ---------- Trust figures. Provenance-gated upstream. ---------- */}
+          {/* ---------- Trust figures. Provenance-gated upstream. ----------
+              `dt`/`dd` are DIRECT children and flow down each column, so the markup
+              stays a valid description list while still laying out as a value-over-
+              label grid. Labels wrap rather than truncate: at 320px a long label must
+              push to a second line, never be clipped. */}
           {trust.length > 0 && (
-            <dl className="mt-10 grid max-w-lg grid-cols-3 gap-x-5 gap-y-5">
+            <dl className="mt-10 grid max-w-lg auto-cols-fr grid-flow-col grid-rows-[auto_auto] gap-x-5 gap-y-1">
               {trust.map((t) => (
-                <div key={t.label} className="min-w-0">
-                  <dt className="sr-only">{t.label}</dt>
+                <Fragment key={t.label}>
                   <dd className="font-heading text-2xl font-extrabold text-white sm:text-3xl">{t.display}</dd>
-                  <p className="mt-1 truncate text-[11px] font-medium uppercase tracking-wide text-[var(--ca-slate-400)]">
+                  <dt className="text-[11px] font-medium uppercase tracking-wide text-[var(--ca-slate-300)]">
                     {t.label}
-                  </p>
-                </div>
+                  </dt>
+                </Fragment>
               ))}
             </dl>
           )}

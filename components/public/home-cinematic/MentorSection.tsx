@@ -3,6 +3,7 @@ import { ArrowRight, Quote } from "lucide-react";
 import type { AboutContent } from "@/lib/types";
 import { DEFAULT_ABOUT } from "@/lib/homeDefaults";
 import TrackedLink from "./TrackedLink";
+import { EYEBROW_ON_LIGHT } from "./content";
 
 /**
  * Naman Sir — editorial mentor section. SERVER component.
@@ -70,7 +71,7 @@ export default function MentorSection({ about, portraitUrl, portraitAlt, ctaHref
         )}
 
         <div className="order-1 lg:order-2">
-          <p className="ca-eyebrow">The mentor</p>
+          <p className={EYEBROW_ON_LIGHT}>The mentor</p>
           <h2
             id="cinematic-mentor-heading"
             className="mt-3 font-heading text-3xl font-extrabold tracking-tight text-[var(--ca-navy-900)] sm:text-4xl"

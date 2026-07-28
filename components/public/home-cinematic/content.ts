@@ -10,6 +10,20 @@ import { Compass, BookOpen, Layers, PenLine, MessagesSquare, Landmark } from "lu
  * page comes from live data through the provenance gate in lib/homeCinematic.
  */
 
+/**
+ * Eyebrow styling for LIGHT sections.
+ *
+ * The shared `.ca-eyebrow` class is `--ca-gold-bright` (#f2c94c), which measures
+ * 1.58:1 on white — well under the 4.5:1 needed at this size. It is correct on the
+ * dark sections it was written for, so it is used unchanged there and is NOT
+ * modified (it is shared with the current-affairs pages).
+ *
+ * This is the same geometry (0.72rem / 700 / 0.2em tracking) in a deep gold that
+ * measures 6.1:1 on white, for the light sections of this preview only.
+ */
+export const EYEBROW_ON_LIGHT =
+  "text-[0.72rem] font-bold uppercase tracking-[0.2em] text-[#7a5c0a]";
+
 export interface JourneyStage {
   /** Short label used for the stage rail and analytics. */
   key: string;

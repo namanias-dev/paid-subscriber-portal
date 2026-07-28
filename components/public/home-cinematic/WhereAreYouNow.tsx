@@ -5,7 +5,7 @@ import { ArrowRight, CheckCircle2 } from "lucide-react";
 import Link from "next/link";
 import type { LiveOffer } from "@/lib/homeCinematic/offers";
 import { rupees } from "@/lib/homeCinematic/offers";
-import { STARTING_POINTS } from "./content";
+import { EYEBROW_ON_LIGHT, STARTING_POINTS } from "./content";
 import { cinematic } from "./analytics";
 import TrackedLink from "./TrackedLink";
 
@@ -45,7 +45,7 @@ export default function WhereAreYouNow({ recommendations, counsellingHref }: Whe
   return (
     <section className="section container-wide" aria-labelledby="cinematic-selector-heading">
       <div className="mx-auto max-w-2xl text-center">
-        <p className="ca-eyebrow">Find your starting point</p>
+        <p className={EYEBROW_ON_LIGHT}>Find your starting point</p>
         <h2
           id="cinematic-selector-heading"
           className="mt-3 font-heading text-3xl font-extrabold tracking-tight text-[var(--ca-navy-900)] sm:text-4xl"
@@ -95,7 +95,7 @@ export default function WhereAreYouNow({ recommendations, counsellingHref }: Whe
             {offer ? (
               <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
                 <div className="min-w-0">
-                  <p className="ca-eyebrow">Recommended for “{point.label}”</p>
+                  <p className={EYEBROW_ON_LIGHT}>Recommended for “{point.label}”</p>
                   <h3 className="mt-1.5 font-heading text-xl font-bold text-[var(--ca-navy-900)]">{offer.label}</h3>
                   <p className="mt-2 flex flex-wrap items-baseline gap-x-2 gap-y-1 text-sm text-[var(--ca-slate-700)]">
                     {offer.price != null && (
@@ -122,7 +122,7 @@ export default function WhereAreYouNow({ recommendations, counsellingHref }: Whe
               // Honest empty state. No invented batch, no "coming soon" urgency.
               <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
                 <div className="min-w-0">
-                  <p className="ca-eyebrow">For “{point.label}”</p>
+                  <p className={EYEBROW_ON_LIGHT}>For “{point.label}”</p>
                   <h3 className="mt-1.5 font-heading text-xl font-bold text-[var(--ca-navy-900)]">
                     {point.offline
                       ? "No offline batch is open for admission right now"

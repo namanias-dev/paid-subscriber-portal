@@ -10,7 +10,9 @@ import {
 import { getPurchaseSnapshot, coursePurchaseMap } from "@/lib/purchaseStatus";
 import { getWhatsNew } from "@/lib/announcements";
 import { whatsappLink } from "@/lib/phone";
+import { buildHomeV2Metadata, buildHomeV2JsonLd } from "@/components/public/home-v2/seo";
 import { isCinematicHomeEnabled } from "@/lib/homeCinematic/flag";
+import { guardCourses } from "@/lib/homeCinematic/fixtureGuard";
 
 /**
  * `/home-cinematic` — the cinematic home PREVIEW route.
@@ -33,15 +35,24 @@ export const dynamic = "force-dynamic";
 
 export async function generateMetadata(): Promise<Metadata> {
   if (!isCinematicHomeEnabled()) return { title: "Not found", robots: { index: false, follow: false } };
+
+  // Reuse the SHARED builder `/` already uses, so title/description/OG/Twitter are
+  // identical and this preview is a faithful switch candidate rather than a page
+  // that would silently drop metadata on promotion. `components/.../seo.ts` was
+  // written for exactly this: "when V2 is only being previewed the caller layers
+  // `robots: { index: false }` on top".
+  const settings = await getSiteSettings();
+  const base = buildHomeV2Metadata(settings);
+
   return {
-    title: "Cinematic home preview — Naman Sharma IAS Academy",
-    description:
-      "Internal preview of the cinematic homepage experience. Not indexed and not linked from the public site.",
+    ...base,
+    // SELF-referential canonical, deliberately NOT the shared builder's "/".
+    // A noindex page canonicalising to `/` is a conflicting signal that can, in
+    // the worst case, propagate the noindex to the production homepage. Pointing
+    // it at itself makes the preview incapable of affecting `/` at all.
+    alternates: { canonical: "/home-cinematic" },
     // Belt and braces: a meta robots tag AND absence from the sitemap.
     robots: { index: false, follow: false, nocache: true, googleBot: { index: false, follow: false } },
-    alternates: { canonical: undefined },
-    openGraph: undefined,
-    twitter: undefined,
   };
 }
 
@@ -71,15 +82,32 @@ export default async function CinematicHomePreviewPage() {
     "Hi, I have a question about your courses / webinars.",
   );
 
+  // Structured data, composed from the SAME builder `/` uses — minus its FAQPage
+  // node. This preview does not render an FAQ, and FAQ markup for questions that
+  // are not on the page is a claim the page cannot support; the honest-numbers rule
+  // applies to machine-readable claims too. Organization and the Course ItemList
+  // both describe content that IS rendered here, so both are kept.
+  // The course list fed to JSON-LD goes through the SAME fixture guard as the
+  // rendered list, so a mock fallback can never be published as structured data
+  // either.
+  const graph = buildHomeV2JsonLd(settings, guardCourses(courses).rows) as {
+    "@context": string;
+    "@graph": { "@type"?: string }[];
+  };
+  const jsonLd = { ...graph, "@graph": graph["@graph"].filter((n) => n["@type"] !== "FAQPage") };
+
   return (
-    <CinematicHome
-      settings={settings}
-      courses={courses}
-      webinars={webinars}
-      purchaseMap={purchaseMap}
-      homeCa={homeCa}
-      whatsNewItems={whatsNew.barItems}
-      waLink={waLink}
-    />
+    <>
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }} />
+      <CinematicHome
+        settings={settings}
+        courses={courses}
+        webinars={webinars}
+        purchaseMap={purchaseMap}
+        homeCa={homeCa}
+        whatsNewItems={whatsNew.barItems}
+        waLink={waLink}
+      />
+    </>
   );
 }
