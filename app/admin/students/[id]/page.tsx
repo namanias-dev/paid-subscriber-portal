@@ -39,6 +39,7 @@ import Modal from "@/components/ui/Modal";
 import { useToast } from "@/components/ui/Toast";
 import { formatINR, formatISTDate, formatISTDateTime, isoToISTInput } from "@/lib/dates";
 import TransferModal from "@/components/admin/enrollments/TransferModal";
+import StudentHistory from "@/components/admin/students/StudentHistory";
 import { resolveEmiConfig, payInFullTotal, planCourseEnrollment, installmentStatus, deriveEnrollment } from "@/lib/installments";
 import { downloadReceiptPdf, type ReceiptContact } from "@/lib/receiptPdf";
 import type { Student, PaymentReceipt, Course, Webinar, InstallmentItem, PaymentPlan } from "@/lib/types";
@@ -431,6 +432,11 @@ export default function StudentProfilePage({ params }: { params: { id: string } 
             </details>
           )}
         </div>
+      </Card>
+
+      {/* ---------------- EVENT HISTORY (transfers, payments, SMS) ---------------- */}
+      <Card title="History" icon={<History size={17} />}>
+        <StudentHistory studentId={params.id} />
       </Card>
 
       {/* ---------------- CUSTOMER JOURNEY (analytics) ---------------- */}
