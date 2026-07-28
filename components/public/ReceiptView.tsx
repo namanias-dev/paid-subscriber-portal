@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { ArrowLeft, Download, Printer } from "lucide-react";
+import PrintIsolate from "@/components/ui/PrintIsolate";
 import { formatINR } from "@/lib/dates";
 import { downloadReceiptPdf, type ReceiptContact } from "@/lib/receiptPdf";
 import type { PaymentReceipt } from "@/lib/types";
@@ -35,6 +36,7 @@ export default function ReceiptView({ receipt, contact }: { receipt: PaymentRece
 
   return (
     <div className="container-wide section">
+      <PrintIsolate />
       {/* On-screen controls (hidden when printing) */}
       <div className="receipt-controls mx-auto mb-4 flex max-w-2xl items-center justify-between">
         <Link href="/portal" className="inline-flex items-center gap-1.5 text-sm font-semibold text-primary">

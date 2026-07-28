@@ -65,6 +65,7 @@ export default function LogoutFlow() {
 
   return (
     <div
+      data-print-hide
       className="nsa-logout-backdrop"
       role="dialog"
       aria-modal="true"

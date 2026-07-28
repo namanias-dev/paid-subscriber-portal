@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
+import PrintIsolate from "@/components/ui/PrintIsolate";
 import { formatINR, formatISTDate } from "@/lib/dates";
 import { metaPixelInitiateCheckout, metaPixelPurchase } from "@/lib/analytics/metaPixel";
 import { ga4ConversionEvent } from "@/lib/analytics/ga4";
@@ -401,6 +402,7 @@ function ReceiptDoc({
   const portalUrl = `${siteOrigin()}/portal`;
   return (
     <div className="receipt-print" style={{ color: "#0a0a0a", WebkitPrintColorAdjust: "exact", printColorAdjust: "exact" }}>
+      <PrintIsolate />
       <div style={{ maxWidth: 640, margin: "0 auto", padding: 32, fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, sans-serif" }}>
         {/* Header */}
         <div style={{ display: "flex", alignItems: "center", gap: 12, borderBottom: "3px solid #0057FF", paddingBottom: 16 }}>
