@@ -177,9 +177,32 @@ export async function pageThrough<T>(build: () => _RangeablePage, pageSize = 100
     if (error) break;
     const rows = (data as T[]) ?? [];
     out.push(...rows);
+    // PostgREST's default max-rows is 1000. A full page means "there may be
+    // more" — continuing is the point of this helper. If a caller bypasses
+    // pageThrough and gets exactly 1000, that is the silent-truncation bug;
+    // keep this log so a future unpaged read that somehow lands here is loud.
+    if (rows.length === pageSize && process.env.NODE_ENV !== "production") {
+      // eslint-disable-next-line no-console
+      console.debug(`[pageThrough] full page at offset ${from} (size ${pageSize}); fetching next`);
+    }
     if (rows.length < pageSize) break;
   }
   return out;
+}
+
+/**
+ * Dev/test assertion: a plain select that returns exactly 1000 rows is almost
+ * certainly truncated by PostgREST. Call after any non-paged read that is
+ * supposed to be complete. No-op in production so dashboards stay quiet.
+ */
+export function assertNotCapped(rows: unknown[], label: string): void {
+  if (process.env.NODE_ENV === "production") return;
+  if (rows.length === 1000) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[row-cap] ${label} returned exactly 1000 rows — PostgREST may have truncated. Use pageThrough() with an id tiebreaker.`,
+    );
+  }
 }
 
 async function dbInsert<T>(table: string, row: Record<string, unknown>): Promise<T> {
@@ -6616,15 +6639,18 @@ export async function getAttemptsByQuiz(quizId: string): Promise<QuizAttempt[]> 
   if (demoMode()) return mock.quizAttempts.filter((a) => a.quiz_id === quizId);
   const db = getSupabaseAdmin();
   if (!db) return [];
-  const { data } = await db.from("quiz_attempts").select("*").eq("quiz_id", quizId).order("created_at", { ascending: false });
-  return (data as QuizAttempt[]) ?? [];
+  // Unique tiebreaker on id — created_at alone can tie across attempts.
+  return pageThrough<QuizAttempt>(() =>
+    db.from("quiz_attempts").select("*").eq("quiz_id", quizId).order("created_at", { ascending: false }).order("id", { ascending: true }),
+  );
 }
 export async function getAllAttempts(): Promise<QuizAttempt[]> {
   if (demoMode()) return [...mock.quizAttempts];
   const db = getSupabaseAdmin();
   if (!db) return [];
-  const { data } = await db.from("quiz_attempts").select("*").order("created_at", { ascending: false });
-  return (data as QuizAttempt[]) ?? [];
+  return pageThrough<QuizAttempt>(() =>
+    db.from("quiz_attempts").select("*").order("created_at", { ascending: false }).order("id", { ascending: true }),
+  );
 }
 export async function getAttemptsByUser(userId: string): Promise<QuizAttempt[]> {
   if (demoMode()) return mock.quizAttempts.filter((a) => a.user_id === userId);
@@ -6749,8 +6775,11 @@ export async function getAllAnswers(): Promise<QuizAnswer[]> {
   if (demoMode()) return [...mock.quizAnswers];
   const db = getSupabaseAdmin();
   if (!db) return [];
-  const { data } = await db.from("quiz_answers").select("*");
-  return (data as QuizAnswer[]) ?? [];
+  // Whole-table read — must page. Order by id alone (unique) so pages never
+  // drop/duplicate at a non-unique created_at boundary.
+  return pageThrough<QuizAnswer>(() =>
+    db.from("quiz_answers").select("*").order("id", { ascending: true }),
+  );
 }
 /**
  * Answers for a set of attempts in one query — used to aggregate a single
@@ -7481,6 +7510,7 @@ export async function getResourceEvents(): Promise<{ id: string; type: string; r
   if (demoMode()) return [];
   const db = getSupabaseAdmin();
   if (!db) return [];
-  const { data } = await db.from("resource_events").select("*").order("created_at", { ascending: false }).limit(5000);
-  return (data as { id: string; type: string; ref: string | null; created_at: string }[]) ?? [];
+  return pageThrough(() =>
+    db.from("resource_events").select("*").order("created_at", { ascending: false }).order("id", { ascending: true }),
+  );
 }
