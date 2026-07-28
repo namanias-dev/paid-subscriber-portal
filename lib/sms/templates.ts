@@ -84,6 +84,19 @@ export const SEED_TEMPLATES: SeedTemplate[] = [
     gateway_template_id: "1707178281225847541",
     body: "Hi {first_name}, your payment for the course fee of {item_short} is pending. Login: {login_url} Code: {login_code} to complete payment. Naman Sharma IAS Academy." },
 
+  /**
+   * Step 2 of the installment reminder sequence, sent 30 minutes after the
+   * reminder itself. NO PLACEHOLDERS BY DESIGN: the approved DLT content is a
+   * fixed string, and the login URL is part of that string rather than a
+   * variable. Writing it literally means the wire body cannot drift if the
+   * login-url config changes, and there is no token left that could fail to
+   * resolve. Byte-exact with the approved registration — do not retouch the
+   * spacing around ">" or the period straight after "/login".
+   */
+  { id: "installment_instructions", name: "Installment Instructions", use_case: "PAYMENT", message_type: "service", trigger_event: null, audience_type: "installment_reminder",
+    gateway_template_id: "1777178519743722233",
+    body: "To pay your installment, login: https://www.namanias.com/login. Open Course Card > View & Pay > select Installment > Pay. Confirmation will follow. Naman Sharma IAS Academy." },
+
   // ---------------- WEBINAR ----------------
   { id: "webinar_registered", name: "Webinar Registration Confirmed", use_case: "WEBINAR", message_type: "service", trigger_event: TRIGGERS.registration_created, audience_type: "webinar_registered",
     gateway_template_id: "1707178280743194991",

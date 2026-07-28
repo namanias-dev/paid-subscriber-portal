@@ -8,6 +8,8 @@ import {
   INSTALLMENT_REMINDER_TEMPLATE_ID,
   MAX_BULK_RECIPIENTS,
 } from "@/lib/sms/installmentReminderService";
+import { buildFollowUpPreview, scheduleFollowUp, FOLLOW_UP_DELAY_MINUTES } from "@/lib/sms/installmentFollowUp";
+import { isRemindedStatus } from "@/lib/sms/installmentAttribution";
 import type { CourseEnrollment } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -35,8 +37,13 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, error: "Select at least one student." }, { status: 400 });
   }
   const overdueOnly = body.overdueOnly !== false;
-  const preview = await buildBulkInstallmentReminders(ids, { overdueOnly });
-  return NextResponse.json({ ok: true, preview, maxRecipients: MAX_BULK_RECIPIENTS });
+  // The instructions message is identical for every recipient, so the review
+  // screen shows it once alongside the per-student reminders.
+  const [preview, followUp] = await Promise.all([
+    buildBulkInstallmentReminders(ids, { overdueOnly }),
+    buildFollowUpPreview(),
+  ]);
+  return NextResponse.json({ ok: true, preview, followUp, maxRecipients: MAX_BULK_RECIPIENTS });
 }
 
 /**
@@ -133,6 +140,13 @@ export async function PUT(req: Request) {
     allowRecentOverride: !!body.allowRepeat,
   });
 
+  // ---- step 2: one independent job per recipient whose reminder ACTUALLY sent ----
+  // The send log is the source of truth for that, not the intent list: sendBatch
+  // reports aggregate counts, and a recipient it dropped at the last moment must
+  // not get a follow-up. Reading the logs this job just wrote gives the parent
+  // send id, the number and the installment key that really went out.
+  const followUpsScheduled = await scheduleFollowUpsForJob(jobId, sendable);
+
   return NextResponse.json({
     ok: result.sent > 0 || result.requested === 0,
     replay: false,
@@ -145,5 +159,44 @@ export async function PUT(req: Request) {
     balance: result.balance,
     // Everything excluded before the job even started, with its reason.
     excludedByReason: preview.excludedByReason,
+    followUpsScheduled,
+    followUpDelayMinutes: FOLLOW_UP_DELAY_MINUTES,
   });
+}
+
+/**
+ * Queue an instructions follow-up for every log in this job that reached the
+ * gateway. Keyed off the log's own installment columns, so the follow-up is
+ * provably about the same line the reminder named — and the unique index means a
+ * re-run of this function schedules nothing new.
+ */
+async function scheduleFollowUpsForJob(
+  jobId: string,
+  sendable: { enrollmentId: string; studentName: string; installmentKey: { courseEnrollmentId: string; installmentNo: number; fingerprint: string } | null }[],
+): Promise<number> {
+  const logs = await listLogsByCampaign(jobId).catch(() => []);
+  const actorUserId = await currentAdminId();
+  const byEnrollment = new Map(sendable.map((p) => [p.enrollmentId, p]));
+
+  let scheduled = 0;
+  for (const log of logs) {
+    if (!isRemindedStatus(log.status)) continue;
+    if (log.template_id !== INSTALLMENT_REMINDER_TEMPLATE_ID) continue;
+    if (!log.course_enrollment_id || log.installment_no == null) continue;
+    const source = byEnrollment.get(log.course_enrollment_id);
+    const queued = await scheduleFollowUp({
+      parentSendId: log.id,
+      normalizedMobile: log.normalized_mobile,
+      courseEnrollmentId: log.course_enrollment_id,
+      installmentNo: log.installment_no,
+      installmentFingerprint: log.installment_fingerprint ?? null,
+      studentName: log.student_name ?? source?.studentName ?? null,
+      studentId: log.user_id ?? null,
+      courseId: log.course_id ?? null,
+      jobId,
+      actorUserId,
+    });
+    if (queued.ok && !queued.duplicate) scheduled++;
+  }
+  return scheduled;
 }

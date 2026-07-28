@@ -16,6 +16,10 @@ import { formatINR, formatISTDate } from "@/lib/dates";
  * click on a button that is disabled whenever the server says the reminder is
  * not sendable. The server enforces the same rules independently — this UI is
  * the explanation, not the control.
+ *
+ * ONE CLICK SENDS A SEQUENCE, so the modal shows BOTH messages stacked, "Now"
+ * and "+30 min", each with its own body, segment count and DLT id. Staff should
+ * never learn about the second message from a student asking about it.
  */
 
 interface VariableView {
@@ -49,6 +53,18 @@ interface Preview {
   lastSentAt: string | null;
 }
 
+/** Step 2 — identical for every student, so it is described once. */
+interface FollowUpPreview {
+  templateName: string;
+  dltTemplateId: string | null;
+  body: string;
+  characterCount: number;
+  segments: number;
+  delayMinutes: number;
+  sendable: boolean;
+  blockDetail: string | null;
+}
+
 export interface InstallmentReminderButtonProps {
   /** The specific enrollment being chased. Preferred — never ambiguous. */
   enrollmentId: string;
@@ -70,10 +86,11 @@ export default function InstallmentReminderButton({
   const [loading, setLoading] = useState(false);
   const [sending, setSending] = useState(false);
   const [preview, setPreview] = useState<Preview | null>(null);
+  const [followUp, setFollowUp] = useState<FollowUpPreview | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const loadPreview = useCallback(async () => {
-    setLoading(true); setError(null); setPreview(null);
+    setLoading(true); setError(null); setPreview(null); setFollowUp(null);
     try {
       const res = await fetch("/api/admin/sms/installment-reminder", {
         method: "POST",
@@ -82,7 +99,10 @@ export default function InstallmentReminderButton({
       });
       const data = await res.json();
       if (!res.ok || !data.ok) setError(data.error || "Could not build the reminder preview.");
-      else setPreview(data.preview as Preview);
+      else {
+        setPreview(data.preview as Preview);
+        setFollowUp((data.followUp as FollowUpPreview) ?? null);
+      }
     } catch {
       setError("Could not reach the server.");
     } finally {
@@ -96,7 +116,7 @@ export default function InstallmentReminderButton({
   }
 
   function close() {
-    setOpen(false); setPreview(null); setError(null);
+    setOpen(false); setPreview(null); setFollowUp(null); setError(null);
   }
 
   async function send() {
@@ -110,7 +130,12 @@ export default function InstallmentReminderButton({
       });
       const data = await res.json();
       if (res.ok && data.ok) {
-        toast(`Reminder sent to ${data.maskedPhone} — installment ${data.installmentNo}.`, "success");
+        toast(
+          data.followUpScheduled
+            ? `Reminder sent to ${data.maskedPhone} — installment ${data.installmentNo}. Instructions scheduled in ${data.followUpDelayMinutes}m.`
+            : `Reminder sent to ${data.maskedPhone} — installment ${data.installmentNo}.`,
+          "success",
+        );
         close();
       } else {
         toast(data.error || "Send failed.", "error");
@@ -176,10 +201,32 @@ export default function InstallmentReminderButton({
                   </p>
                 )}
 
-                {/* The exact body that will be sent */}
-                <div className="mt-3 rounded-xl bg-surface p-3">
-                  <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted">Message to be sent</p>
-                  <p className="whitespace-pre-wrap text-sm text-ink">{preview.body}</p>
+                {/* Both legs of the sequence, in the order the student gets them */}
+                <div className="mt-3 space-y-2">
+                  <MessageCard
+                    when="Now"
+                    title={preview.templateName}
+                    body={preview.body}
+                    segments={preview.segments}
+                    characterCount={preview.characterCount}
+                    dltTemplateId={preview.dltTemplateId}
+                  />
+                  {followUp && (
+                    <MessageCard
+                      when={`+${followUp.delayMinutes} min`}
+                      title={followUp.templateName}
+                      body={followUp.body}
+                      segments={followUp.segments}
+                      characterCount={followUp.characterCount}
+                      dltTemplateId={followUp.dltTemplateId}
+                      note={
+                        followUp.sendable
+                          ? "Cancelled automatically if this installment is paid, the student opts out, or the plan changes before it fires."
+                          : followUp.blockDetail ?? "This follow-up cannot be sent."
+                      }
+                      tone={followUp.sendable ? "muted" : "danger"}
+                    />
+                  )}
                 </div>
 
                 {/* Per-token resolution, so staff can see nothing is left raw */}
@@ -196,11 +243,6 @@ export default function InstallmentReminderButton({
                     ))}
                   </ul>
                 </div>
-
-                <p className="mt-3 text-[11px] text-muted">
-                  Template: {preview.templateName}
-                  {preview.dltTemplateId ? ` · DLT ${preview.dltTemplateId}` : " · no DLT id"}
-                </p>
 
                 {!preview.sendable && (
                   <p className="mt-3 inline-flex items-start gap-2 rounded-xl bg-danger/10 p-3 text-sm text-danger">
@@ -226,13 +268,49 @@ export default function InstallmentReminderButton({
                 className="btn btn-primary text-sm"
                 title={preview && !preview.sendable ? (preview.blockDetail ?? undefined) : "Send this reminder now"}
               >
-                {sending ? "Sending…" : preview?.lastSentAt ? "Send anyway" : "Send reminder"}
+                {sending
+                  ? "Sending…"
+                  : preview?.lastSentAt
+                    ? "Send anyway"
+                    : followUp?.sendable ? "Send reminder + instructions" : "Send reminder"}
               </button>
             </div>
           </div>
         </div>
       )}
     </>
+  );
+}
+
+/**
+ * One message in the sequence. Carries its own DLT id because the two legs are
+ * separate registrations — showing a single id would misrepresent what goes out.
+ */
+function MessageCard({
+  when, title, body, segments, characterCount, dltTemplateId, note, tone,
+}: {
+  when: string;
+  title: string;
+  body: string;
+  segments: number;
+  characterCount: number;
+  dltTemplateId: string | null;
+  note?: string;
+  tone?: "muted" | "danger";
+}) {
+  return (
+    <div className="rounded-xl bg-surface p-3">
+      <div className="mb-1 flex flex-wrap items-baseline justify-between gap-2">
+        <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">
+          <span className="rounded bg-surface2 px-1.5 py-0.5 text-ink2">{when}</span> {title}
+        </p>
+        <p className="text-[10px] text-muted">
+          {segments} seg · {characterCount} chars{dltTemplateId ? ` · DLT ${dltTemplateId}` : " · no DLT id"}
+        </p>
+      </div>
+      <p className="whitespace-pre-wrap text-sm text-ink">{body || "—"}</p>
+      {note && <p className={`mt-1.5 text-[11px] ${tone === "danger" ? "text-danger" : "text-muted"}`}>{note}</p>}
+    </div>
   );
 }
 
