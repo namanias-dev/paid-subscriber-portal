@@ -893,19 +893,22 @@ a {
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8);
 }
 
-/* ---- Printable receipt: hidden on screen, the only thing shown when printing ---- */
+/* ---- Printable receipt: hidden on screen, the only thing shown when printing ----
+   Receipt isolation is opt-in per page: a page renders <PrintIsolate /> to set
+   body.print-isolate. The gate matters — ungated, `body *` blanks the printed
+   output of every page in the app, not just the receipt ones. */
 .receipt-print {
   display: none;
 }
 @media print {
-  body * {
+  body.print-isolate * {
     visibility: hidden;
   }
-  .receipt-print,
-  .receipt-print * {
+  body.print-isolate .receipt-print,
+  body.print-isolate .receipt-print * {
     visibility: visible;
   }
-  .receipt-print {
+  body.print-isolate .receipt-print {
     display: block;
     position: absolute;
     left: 0;
@@ -916,17 +919,24 @@ a {
 
 /* ---- On-screen + printable receipt (visible always; only it prints) ---- */
 @media print {
-  .receipt-doc,
-  .receipt-doc * {
+  body.print-isolate .receipt-doc,
+  body.print-isolate .receipt-doc * {
     visibility: visible;
   }
-  .receipt-doc {
+  body.print-isolate .receipt-doc {
     position: absolute;
     left: 0;
     top: 0;
     width: 100%;
   }
   .receipt-controls {
+    display: none !important;
+  }
+}
+
+/* ---- App chrome never reaches paper: overlays, banners, toasts, tooltips ---- */
+@media print {
+  [data-print-hide] {
     display: none !important;
   }
 }

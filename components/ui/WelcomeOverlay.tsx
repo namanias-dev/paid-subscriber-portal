@@ -70,6 +70,7 @@ export default function WelcomeOverlay() {
 
   return (
     <div
+      data-print-hide
       className={`nsa-welcome ${leaving ? "nsa-welcome--leaving" : ""}`}
       onClick={dismiss}
       role="status"

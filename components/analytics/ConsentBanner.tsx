@@ -44,6 +44,7 @@ export default function ConsentBanner() {
         <motion.div
           role="dialog"
           aria-label="Cookie & privacy preferences"
+          data-print-hide
           initial={reduce ? false : { y: 24, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
           exit={reduce ? { opacity: 0 } : { y: 24, opacity: 0 }}

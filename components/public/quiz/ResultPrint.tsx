@@ -37,8 +37,31 @@ export default function ResultPrint({ attemptId }: { attemptId: string }) {
       .finally(() => setLoading(false));
   }, [attemptId]);
 
+  // Open the print dialog only once the report is actually paintable: web fonts
+  // resolved, images decoded, and a frame rendered. Printing earlier can capture
+  // a half-laid-out page. Bounded so a slow asset can never strand the user.
   useEffect(() => {
-    if (data) { const t = setTimeout(() => window.print(), 600); return () => clearTimeout(t); }
+    if (!data) return;
+    let cancelled = false;
+
+    const assetsSettled = Promise.all([
+      document.fonts ? document.fonts.ready : Promise.resolve(),
+      ...Array.from(document.images)
+        .filter((img) => !img.complete)
+        .map(
+          (img) =>
+            new Promise<void>((resolve) => {
+              img.addEventListener("load", () => resolve(), { once: true });
+              img.addEventListener("error", () => resolve(), { once: true });
+            })
+        ),
+    ]);
+
+    Promise.race([assetsSettled, new Promise((resolve) => setTimeout(resolve, 3000))])
+      .then(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+      .then(() => { if (!cancelled) window.print(); });
+
+    return () => { cancelled = true; };
   }, [data]);
 
   if (loading) return <div style={{ padding: 40, fontFamily: "system-ui" }}>Preparing report…</div>;
@@ -48,10 +71,12 @@ export default function ResultPrint({ attemptId }: { attemptId: string }) {
   const pct = attempt.max_score ? Math.round((attempt.score / attempt.max_score) * 100) : 0;
 
   return (
-    <div style={{ position: "relative", maxWidth: 820, margin: "0 auto", padding: 28, fontFamily: "system-ui, sans-serif", color: "#0f172a" }}>
+    <div className="quiz-print-root" style={{ position: "relative", maxWidth: 820, margin: "0 auto", padding: 28, fontFamily: "system-ui, sans-serif", color: "#0f172a" }}>
+      {/* This <style> is mounted only by this route, so none of it can reach
+          another page's print output. */}
       <style>{`
-        @media print { .no-print { display: none } * { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
-        @page { margin: 14mm }
+        @page { size: A4 portrait; margin: 14mm; }
+
         /* Render statement formatting correctly: keep ordered/unordered list
            markers visible (overriding the global list-style reset) AND preserve
            literal numbered lines for plain-text questions. */
@@ -60,10 +85,46 @@ export default function ResultPrint({ attemptId }: { attemptId: string }) {
         .pdf-rich ol { list-style: decimal outside; padding-left: 1.6em; margin: 0.4em 0; white-space: normal; }
         .pdf-rich ul { list-style: disc outside; padding-left: 1.6em; margin: 0.4em 0; white-space: normal; }
         .pdf-rich li { margin: 0.2em 0; }
+        .pdf-rich img { max-width: 100%; height: auto; }
+
+        @media print {
+          /* Paper is always light, whatever the device or OS prefers, so dark
+             surfaces can never come out as black blocks. */
+          html, body {
+            background-color: #fff !important;
+            color: #0f172a !important;
+            color-scheme: light !important;
+            margin: 0 !important;
+            padding: 0 !important;
+          }
+          * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+
+          .no-print { display: none !important; }
+
+          /* @page owns the margins now; the on-screen padding would double them. */
+          .quiz-print-root { max-width: none !important; margin: 0 !important; padding: 0 !important; }
+
+          /* A single absolutely-positioned overlay only paints on page one, so
+             let the page box carry the watermark instead — it then tiles across
+             every sheet. */
+          .quiz-print-watermark { display: none !important; }
+          body {
+            background-image: ${WATERMARK} !important;
+            background-repeat: repeat !important;
+          }
+
+          .qp-question { break-inside: avoid; page-break-inside: avoid; }
+          .qp-explanation { break-inside: avoid; page-break-inside: avoid; }
+          .qp-footer { break-inside: avoid; page-break-inside: avoid; }
+          h1, h2 { break-after: avoid; page-break-after: avoid; }
+          table { break-inside: auto; }
+          thead { display: table-header-group; }
+          tr { break-inside: avoid; page-break-inside: avoid; }
+        }
       `}</style>
 
-      {/* Watermark layer — behind content, tiles down every page */}
-      <div style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, zIndex: 0, pointerEvents: "none", backgroundImage: WATERMARK, backgroundRepeat: "repeat" }} aria-hidden />
+      {/* Watermark layer — behind content (screen only; print uses the page box) */}
+      <div className="quiz-print-watermark" style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, zIndex: 0, pointerEvents: "none", backgroundImage: WATERMARK, backgroundRepeat: "repeat" }} aria-hidden />
 
       <div style={{ position: "relative", zIndex: 1 }}>
         <div className="no-print" style={{ marginBottom: 16, textAlign: "right" }}>
@@ -101,7 +162,7 @@ export default function ResultPrint({ attemptId }: { attemptId: string }) {
 
         <h2 style={{ fontSize: 15, color: "#1e3a8a" }}>Question-wise review</h2>
         {data.questions.map((qq, i) => (
-          <div key={i} style={{ borderBottom: "1px solid #e2e8f0", padding: "10px 0", fontSize: 13, breakInside: "avoid" }}>
+          <div key={i} className="qp-question" style={{ borderBottom: "1px solid #e2e8f0", padding: "10px 0", fontSize: 13, breakInside: "avoid" }}>
             <div style={{ display: "flex", gap: 6 }}>
               <b>Q{qq.order}.</b>
               <span className="pdf-rich" style={{ flex: 1 }} dangerouslySetInnerHTML={{ __html: qq.question_html }} />
@@ -117,14 +178,14 @@ export default function ResultPrint({ attemptId }: { attemptId: string }) {
               {qq.is_unattempted ? "Skipped" : qq.is_correct ? `Correct (+${qq.marks_awarded})` : `Incorrect (-${qq.negative_marks_deducted})`}
             </p>
             {qq.explanation_html && (
-              <div style={{ margin: "4px 0 0 18px", fontSize: 12, background: "#f8fafc", padding: 8, borderRadius: 6 }}>
+              <div className="qp-explanation" style={{ margin: "4px 0 0 18px", fontSize: 12, background: "#f8fafc", padding: 8, borderRadius: 6 }}>
                 <b>Explanation:</b> <span className="pdf-rich" dangerouslySetInnerHTML={{ __html: qq.explanation_html }} />
               </div>
             )}
           </div>
         ))}
 
-        <div style={{ marginTop: 24, borderTop: "2px solid #1e3a8a", paddingTop: 12, textAlign: "center", fontSize: 13, lineHeight: 1.6 }}>
+        <div className="qp-footer" style={{ marginTop: 24, borderTop: "2px solid #1e3a8a", paddingTop: 12, textAlign: "center", fontSize: 13, lineHeight: 1.6 }}>
           <p style={{ margin: 0, fontWeight: 700, color: "#1e3a8a", letterSpacing: 0.3 }}>NAMAN SHARMA IAS ACADEMY</p>
           <p style={{ margin: "2px 0 0", color: "#334155" }}>Address: SCO 173-174, Sec-17C, Chandigarh</p>
           <p style={{ margin: "2px 0 0", color: "#334155" }}>Call/WhatsApp: +91-843-768-6541</p>

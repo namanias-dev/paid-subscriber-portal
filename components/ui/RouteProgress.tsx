@@ -71,7 +71,7 @@ export default function RouteProgress() {
 
   if (!visible) return null;
   return (
-    <div className="nsa-progress" aria-hidden="true">
+    <div className="nsa-progress" aria-hidden="true" data-print-hide>
       <div className="nsa-progress__bar" style={{ width: `${width}%` }} />
     </div>
   );
