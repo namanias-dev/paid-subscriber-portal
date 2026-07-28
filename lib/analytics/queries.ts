@@ -7,7 +7,7 @@
  * funnel and source attribution only.
  */
 import { getSupabaseAdmin } from "../supabase";
-import { getPayments, getAdminAccounts, getAllAttempts, getAllQuizzes, getWebinars, getAllWebinarRegistrations } from "../dataProvider";
+import { getPayments, getAdminAccounts, getAllAttempts, getAllQuizzes, getWebinars, getAllWebinarRegistrations, pageThrough } from "../dataProvider";
 import { isPaidStatus, dedupePaidRows, dedupedPaidTotal, distinctRegistrations, itemKey } from "../paymentsAgg";
 import { normPhone } from "../phone";
 import { istInputToISO } from "../dates";
@@ -65,20 +65,21 @@ export function sourceOfPayment(p: Payment): string {
   return p.attribution_source ? p.attribution_source.toLowerCase() : UNTRACKED;
 }
 
-const EVENT_FETCH_CAP = 50000;
-
 export async function fetchEvents(fromISO: string, toISO: string): Promise<EventLite[]> {
   const db = getSupabaseAdmin();
   if (!db) return [];
-  const { data } = await db
-    .from("analytics_events")
-    .select("event_id,event_name,visitor_id,buyer_id,phone,session_id,occurred_at,page_path,device,attribution,props")
-    .gte("occurred_at", fromISO)
-    .lte("occurred_at", toISO)
-    .eq("is_bot", false)
-    .order("occurred_at", { ascending: false })
-    .limit(EVENT_FETCH_CAP);
-  return (data as EventLite[]) || [];
+  // Date-filtered, but busy days still exceed PostgREST's 1000-row cap.
+  // Page with a unique event_id tiebreaker so dashboard KPIs are complete.
+  return pageThrough<EventLite>(() =>
+    db
+      .from("analytics_events")
+      .select("event_id,event_name,visitor_id,buyer_id,phone,session_id,occurred_at,page_path,device,attribution,props")
+      .gte("occurred_at", fromISO)
+      .lte("occurred_at", toISO)
+      .eq("is_bot", false)
+      .order("occurred_at", { ascending: false })
+      .order("event_id", { ascending: true }),
+  );
 }
 
 function dayKeyIST(iso: string): string {
@@ -319,13 +320,17 @@ export async function getSegment(key: SegmentKey): Promise<SegmentRow[]> {
   // Helper: phones with a given event (e.g. login, zoom_link_clicked).
   async function phonesWithEvent(eventName: string): Promise<Set<string>> {
     const set = new Set<string>();
-    const { data } = await db!
-      .from("analytics_events")
-      .select("phone")
-      .eq("event_name", eventName)
-      .not("phone", "is", null)
-      .limit(20000);
-    for (const r of (data as { phone: string }[]) || []) { const ph = normPhone(r.phone); if (ph) set.add(ph); }
+    // analytics_events is 250k+ rows; a single select is capped at PostgREST's
+    // 1000. Page with a unique id tiebreaker so segments see every phone.
+    const rows = await pageThrough<{ phone: string }>(() =>
+      db!
+        .from("analytics_events")
+        .select("phone,id")
+        .eq("event_name", eventName)
+        .not("phone", "is", null)
+        .order("id", { ascending: true }),
+    );
+    for (const r of rows) { const ph = normPhone(r.phone); if (ph) set.add(ph); }
     return set;
   }
 
@@ -344,13 +349,15 @@ export async function getSegment(key: SegmentKey): Promise<SegmentRow[]> {
     // phone+webinar_slug. A phone stays listed only while it has >=1 paid webinar
     // it has never joined.
     const zoomSet = new Set<string>(); // `${phone}|${slug}`
-    const { data } = await db
-      .from("analytics_events")
-      .select("phone,props")
-      .eq("event_name", "zoom_link_clicked")
-      .not("phone", "is", null)
-      .limit(20000);
-    for (const r of (data as { phone: string; props: { webinar_slug?: string } | null }[]) || []) {
+    const zoomRows = await pageThrough<{ phone: string; props: { webinar_slug?: string } | null }>(() =>
+      db
+        .from("analytics_events")
+        .select("phone,props,id")
+        .eq("event_name", "zoom_link_clicked")
+        .not("phone", "is", null)
+        .order("id", { ascending: true }),
+    );
+    for (const r of zoomRows) {
       const ph = normPhone(r.phone);
       const slug = String(r.props?.webinar_slug || "").toLowerCase();
       if (ph) zoomSet.add(`${ph}|${slug}`);
@@ -798,8 +805,10 @@ async function phonesWithEventAllTime(eventName: string): Promise<Set<string>> {
   const db = getSupabaseAdmin();
   const set = new Set<string>();
   if (!db) return set;
-  const { data } = await db.from("analytics_events").select("phone").eq("event_name", eventName).not("phone", "is", null).limit(20000);
-  for (const r of (data as { phone: string }[]) || []) { const ph = normPhone(r.phone); if (ph) set.add(ph); }
+  const rows = await pageThrough<{ phone: string }>(() =>
+    db.from("analytics_events").select("phone,id").eq("event_name", eventName).not("phone", "is", null).order("id", { ascending: true }),
+  );
+  for (const r of rows) { const ph = normPhone(r.phone); if (ph) set.add(ph); }
   return set;
 }
 

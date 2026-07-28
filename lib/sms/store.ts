@@ -695,13 +695,23 @@ export async function listAttributionLogs(templateId: string, enrollmentIds: str
         .in("course_enrollment_id", chunk);
       if (!error && data) out.push(...(data as AttributionLogRow[]));
     }
-    const { data: legacy, error: legacyErr } = await db
-      .from("sms_logs")
-      .select(ATTRIBUTION_COLS)
-      .eq("template_id", templateId)
-      .is("course_enrollment_id", null)
-      .limit(5000);
-    if (!legacyErr && legacy) out.push(...(legacy as AttributionLogRow[]));
+    // PostgREST caps at 1000 regardless of .limit(5000). Page with a unique
+    // id tiebreaker so pre-attribution reminders are not silently dropped.
+    const PAGE = 1000;
+    for (let from = 0; ; from += PAGE) {
+      const { data: legacy, error: legacyErr } = await db
+        .from("sms_logs")
+        .select(ATTRIBUTION_COLS)
+        .eq("template_id", templateId)
+        .is("course_enrollment_id", null)
+        .order("created_at", { ascending: true })
+        .order("id", { ascending: true })
+        .range(from, from + PAGE - 1);
+      if (legacyErr) break;
+      const rows = (legacy as AttributionLogRow[]) ?? [];
+      out.push(...rows);
+      if (rows.length < PAGE) break;
+    }
   } catch { return out; }
   // Oldest first: "first reminder" and "last reminder" are read off this order.
   return out.sort((a, b) => String(a.sent_at || a.created_at).localeCompare(String(b.sent_at || b.created_at)));

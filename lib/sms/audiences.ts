@@ -17,7 +17,7 @@ import { formatISTTime, resolveTimeframe, type TimeframeValue } from "../dates";
 import {
   getPayments, getLeads, getBuyers, getWebinars, getWebinarBySlug,
   getWebinarRegistrationsByWebinar, getWebinarPaymentStatusesForSlug,
-  getAllCourses, getAllCourseEnrollments,
+  getAllCourses, getAllCourseEnrollments, pageThrough,
 } from "../dataProvider";
 import { isPaidStatus } from "../paymentsAgg";
 import { firstNamesMatch, optedOutSet } from "./store";
@@ -142,8 +142,10 @@ async function zoomClickedPhones(webinarSlug: string | null): Promise<Set<string
   const db = getSupabaseAdmin();
   if (!db || !webinarSlug) return set;
   try {
-    const { data } = await db.from("analytics_events").select("phone,props").eq("event_name", "zoom_link_clicked").not("phone", "is", null).limit(20000);
-    for (const r of (data as { phone: string; props: { webinar_slug?: string } | null }[]) || []) {
+    const rows = await pageThrough<{ phone: string; props: { webinar_slug?: string } | null }>(() =>
+      db.from("analytics_events").select("phone,props,id").eq("event_name", "zoom_link_clicked").not("phone", "is", null).order("id", { ascending: true }),
+    );
+    for (const r of rows) {
       if (String(r.props?.webinar_slug || "").toLowerCase() === webinarSlug.toLowerCase()) {
         const d = norm(r.phone);
         if (d) set.add(d);
