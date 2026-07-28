@@ -382,7 +382,21 @@ export function isLineCancelledOrWaived(item: Pick<InstallmentItem, "status">): 
  */
 export function isActiveEnrollment(e: Pick<CourseEnrollment, "status" | "amount_paid">): boolean {
   if (e.status === "cancelled") return false;
+  // A transferred-out row is kept for history and still carries the money the
+  // student paid, so without this it reads as active and its outstanding balance
+  // is counted a second time alongside the row that replaced it.
+  if (e.status === "transferred_out") return false;
   return (e.amount_paid || 0) > 0 || e.status === "fully_paid";
+}
+
+/**
+ * Superseded by a transfer: kept as history, but no longer the live enrollment.
+ * Anything that chases money or scopes a student to a batch must skip these, or
+ * the student appears in two batches at once and is dunned for a plan that has
+ * been replaced.
+ */
+export function isSupersededEnrollment(e: Pick<CourseEnrollment, "status"> & { superseded_by?: string | null }): boolean {
+  return e.status === "transferred_out" || !!e.superseded_by;
 }
 
 /** Inverse of isActiveEnrollment — a payment attempt / intent, not a real enrollment. */
