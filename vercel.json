@@ -9,6 +9,7 @@
     { "path": "/api/cron/media-purge", "schedule": "0 20 * * *" },
     { "path": "/api/cron/journey-engine", "schedule": "*/5 * * * *" },
     { "path": "/api/cron/sms-followups", "schedule": "*/2 * * * *" },
+    { "path": "/api/cron/access-reminders", "schedule": "*/15 * * * *" },
     { "path": "/api/cron/auth-attempts-ttl", "schedule": "0 */6 * * *" }
   ]
 }

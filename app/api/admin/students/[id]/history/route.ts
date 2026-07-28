@@ -3,7 +3,7 @@ import { requirePermission } from "@/lib/adminGuard";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { getStudentById } from "@/lib/dataProvider";
 import {
-  transferEvent, paymentEvent, smsEvent, enrollmentEvents, sortTimeline,
+  transferEvent, paymentEvent, smsEvent, enrollmentEvents, accessCapEvents, sortTimeline,
   type TimelineEvent, type TimelineEventType,
 } from "@/lib/studentTimeline";
 
@@ -34,7 +34,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   const phone = student.phone;
 
   const started = Date.now();
-  const [transfers, enrollments, payments, sms] = await Promise.all([
+  const [transfers, enrollments, payments, sms, caps] = await Promise.all([
     db.from("enrollment_transfers").select("*").eq("student_phone", phone).order("created_at", { ascending: false }),
     db.from("course_enrollments")
       .select("id, created_at, course_title, batch_label, total_fee, plan_type, status, payment_plan_changed_at, payment_plan_changed_by, payment_plan_change_reason, discount_amount, discount_applied_at, discount_applied_by, discount_reason, original_total_fee")
@@ -45,6 +45,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     db.from("sms_logs")
       .select("id, created_at, sent_at, template_name, status, sent_by_type, installment_no, course_id")
       .eq("normalized_mobile", normalize(phone)).order("created_at", { ascending: false }).limit(200),
+    db.from("access_reminder_caps").select("*").eq("student_id", id),
   ]);
 
   const events: TimelineEvent[] = [
@@ -52,6 +53,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     ...(enrollments.data ?? []).flatMap((e) => enrollmentEvents(e as never)),
     ...(payments.data ?? []).map((p) => paymentEvent(p as never)),
     ...(sms.data ?? []).map((s) => smsEvent(s as never)),
+    ...(caps.data ?? []).flatMap((c) => accessCapEvents(c as never)),
   ];
 
   const sorted = sortTimeline(events);

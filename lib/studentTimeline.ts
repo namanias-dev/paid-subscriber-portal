@@ -25,7 +25,9 @@ export type TimelineEventType =
   | "receipt"
   | "sms"
   | "plan_changed"
-  | "discount_applied";
+  | "discount_applied"
+  | "access_cap"
+  | "access_exclusion";
 
 export interface TimelineActor {
   /** The username or id recorded against the action. */
@@ -298,18 +300,87 @@ export interface SmsRow {
 export function smsEvent(s: SmsRow): TimelineEvent {
   const when = s.sent_at ?? s.created_at;
   const name = s.template_name ?? "SMS";
+  const actorName = s.sent_by_type === "ADMIN"
+    ? "staff"
+    : s.sent_by_type === "SYSTEM"
+      ? "System · automated"
+      : "automated";
   return {
     id: `sms:${s.id}`,
     type: "sms",
     at: when,
     title: `SMS sent — ${name}${s.installment_no != null ? ` (installment ${s.installment_no})` : ""}`,
     detail: `Delivery status: ${s.status}`,
-    actor: { id: null, name: s.sent_by_type === "ADMIN" ? "staff" : "automated" },
+    actor: { id: null, name: actorName },
     reason: null,
     changes: [],
     snapshot: null,
     courseTitle: null,
   };
+}
+
+export interface AccessCapRow {
+  id: string;
+  course_enrollment_id: string;
+  installment_no: number;
+  auto_sequences_used: number;
+  needs_call: boolean;
+  needs_call_at: string | null;
+  excluded_from_automation: boolean;
+  excluded_reason: string | null;
+  excluded_at: string | null;
+  excluded_by: string | null;
+  reset_at: string | null;
+  reset_by: string | null;
+  reset_reason: string | null;
+}
+
+/** Cap reached / exclusion / reset — surfaced from access_reminder_caps. */
+export function accessCapEvents(row: AccessCapRow): TimelineEvent[] {
+  const events: TimelineEvent[] = [];
+  if (row.needs_call && row.needs_call_at) {
+    events.push({
+      id: `access_cap:${row.id}`,
+      type: "access_cap",
+      at: row.needs_call_at,
+      title: `Escalation cap reached — installment ${row.installment_no} flagged for call`,
+      detail: `${row.auto_sequences_used} automated sequences used. Automation stopped for this installment.`,
+      actor: { id: null, name: "System · automated" },
+      reason: null,
+      changes: [],
+      snapshot: null,
+      courseTitle: null,
+    });
+  }
+  if (row.excluded_from_automation && row.excluded_at) {
+    events.push({
+      id: `access_excl:${row.id}`,
+      type: "access_exclusion",
+      at: row.excluded_at,
+      title: `Excluded from access automation — installment ${row.installment_no}`,
+      detail: row.excluded_reason,
+      actor: { id: row.excluded_by, name: row.excluded_by ? "staff" : null },
+      reason: row.excluded_reason,
+      changes: [],
+      snapshot: null,
+      courseTitle: null,
+    });
+  }
+  if (row.reset_at && row.reset_reason) {
+    events.push({
+      id: `access_reset:${row.id}`,
+      type: "access_exclusion",
+      at: row.reset_at,
+      title: `Access automation cap reset — installment ${row.installment_no}`,
+      detail: row.reset_reason,
+      actor: { id: row.reset_by, name: row.reset_by ? "staff" : null },
+      reason: row.reset_reason,
+      changes: [],
+      snapshot: null,
+      courseTitle: null,
+    });
+  }
+  return events;
 }
 
 export interface EnrollmentRow {
@@ -397,4 +468,6 @@ export const TYPE_LABELS: Record<TimelineEventType, string> = {
   sms: "SMS",
   plan_changed: "Schedule change",
   discount_applied: "Discount",
+  access_cap: "Access cap",
+  access_exclusion: "Access automation",
 };

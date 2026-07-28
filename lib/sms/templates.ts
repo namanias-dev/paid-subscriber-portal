@@ -97,6 +97,17 @@ export const SEED_TEMPLATES: SeedTemplate[] = [
     gateway_template_id: "1777178519743722233",
     body: "To pay your installment, login: https://www.namanias.com/login. Open Course Card > View & Pay > select Installment > Pay. Confirmation will follow. Naman Sharma IAS Academy." },
 
+  // Portal Access — Access At Risk sequences. Named tokens map onto DLT {#var#}
+  // positions; bodies are byte-exact with the approved registrations.
+  // DLT registrations use positional {#var#}; portal bodies use named tokens in
+  // the same order (name → first_name, then installment number / days).
+  { id: "portal_access_blocked", name: "Portal Access Blocked", use_case: "PAYMENT", message_type: "service", trigger_event: null, audience_type: "access_risk",
+    gateway_template_id: "1777178527476051073",
+    body: "Hi {first_name}, your portal access is temporarily paused. Pay installment {No of Installment} to restore access. Naman Sharma IAS Academy." },
+  { id: "portal_access_expiring", name: "Portal Access Expiring", use_case: "PAYMENT", message_type: "service", trigger_event: null, audience_type: "access_risk",
+    gateway_template_id: "1777178527489267737",
+    body: "Hi {first_name}, your portal access expires in {days} days. Pay installment {No of Installment} to continue access. Naman Sharma IAS Academy." },
+
   // ---------------- WEBINAR ----------------
   { id: "webinar_registered", name: "Webinar Registration Confirmed", use_case: "WEBINAR", message_type: "service", trigger_event: TRIGGERS.registration_created, audience_type: "webinar_registered",
     gateway_template_id: "1707178280743194991",
@@ -296,6 +307,7 @@ export const WORST_SAMPLE: Record<string, string> = {
   date: "28 Jun 2026",
   no_of_installment: "10",
   fee_in_rs: "125000",
+  days: "14",
 };
 
 export function worstCaseFill(body: string, loginUrlSample?: string): { text: string; analysis: BodyAnalysis } {

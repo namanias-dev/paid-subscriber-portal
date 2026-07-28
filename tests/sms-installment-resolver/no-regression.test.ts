@@ -112,16 +112,18 @@ describe("template metadata is unchanged", () => {
   test("no seed template body or DLT id was touched", () => {
     // A body edit is a DLT violation. Pin the seeds' variable extraction so an
     // accidental body change is loud.
-    // 23 seeds in code; the live table also holds `installment_reminder` and
-    // `same_day_morning_reminder`, which were created through the admin UI.
+    // 25 seeds in code (+2 Portal Access templates); the live table also holds
+    // `installment_reminder` and `same_day_morning_reminder` from the admin UI.
     const fingerprint = SEED_TEMPLATES.map((t) => `${t.id}:${t.gateway_template_id ?? "none"}:${uniqueVariables(t.body).join("|")}`);
-    assert.equal(fingerprint.length, 23);
+    assert.equal(fingerprint.length, 25);
     assert.ok(fingerprint.includes("new_webinar_enroll:1707178358697914131:"));
     assert.ok(fingerprint.includes("payment_pending:1707178279936988815:first_name|item_short|login_url|login_code"));
     // Step 2 of the reminder sequence: an approved DLT id and NO variables. The
     // empty tail is the assertion — a placeholder creeping into this body is how
     // a static registration starts going out with a brace in it.
     assert.ok(fingerprint.includes("installment_instructions:1777178519743722233:"));
+    assert.ok(fingerprint.includes("portal_access_blocked:1777178527476051073:first_name|No of Installment"));
+    assert.ok(fingerprint.includes("portal_access_expiring:1777178527489267737:first_name|days|No of Installment"));
   });
 
   test("worst-case fill still produces a brace-free body for every seed", () => {
