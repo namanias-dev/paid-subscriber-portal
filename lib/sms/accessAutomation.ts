@@ -273,7 +273,9 @@ export async function planAccessAutomation(now = Date.now()): Promise<AutoRunRep
       }
     }
 
-    if (quiet) {
+    // Dry-run must still show who WOULD send once the window opens — quiet hours
+    // only block live sends, not the report.
+    if (quiet && !settings.dryRun) {
       candidates.push({ ...base, skipReason: "quiet_hours" });
       continue;
     }
