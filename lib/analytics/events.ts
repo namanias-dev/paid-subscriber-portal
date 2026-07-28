@@ -50,7 +50,29 @@ export type EventName =
   | "ai_payment_recovery_click"
   | "ai_resource_click"
   | "ai_offer_click"
-  | "ai_conversion_attributed";
+  | "ai_conversion_attributed"
+  // cinematic home PREVIEW (/home-cinematic) — PII-free funnel + diagnostics.
+  // Every one of these is emitted ONLY from the flag-gated preview route, so with
+  // NEXT_PUBLIC_CINEMATIC_HOME_ENABLED unset none of them is reachable.
+  | "cinematic_home_view"
+  | "cinematic_mode_loaded"
+  | "cinematic_fallback_used"
+  | "hero_masterclass_click"
+  | "hero_course_click"
+  | "hero_quiz_click"
+  | "journey_stage_viewed"
+  | "journey_selector_completed"
+  | "journey_recommendation_clicked"
+  | "mentor_cta_clicked"
+  | "course_card_clicked"
+  | "result_card_clicked"
+  | "portal_showcase_clicked"
+  | "whatsapp_clicked"
+  | "final_cta_clicked"
+  | "scroll_depth_25"
+  | "scroll_depth_50"
+  | "scroll_depth_75"
+  | "scroll_depth_100";
 
 /**
  * Events the CLIENT beacon (/api/track) is allowed to emit. Anything that
@@ -88,6 +110,28 @@ export const CLIENT_ALLOWED_EVENTS: ReadonlySet<EventName> = new Set<EventName>(
   "ai_resource_click",
   "ai_offer_click",
   "ai_conversion_attributed",
+  // Cinematic home preview. All are view/click signals with no PII and no
+  // access/money semantics, so the browser is allowed to emit them — same
+  // classification the AI-agent funnel events above already carry.
+  "cinematic_home_view",
+  "cinematic_mode_loaded",
+  "cinematic_fallback_used",
+  "hero_masterclass_click",
+  "hero_course_click",
+  "hero_quiz_click",
+  "journey_stage_viewed",
+  "journey_selector_completed",
+  "journey_recommendation_clicked",
+  "mentor_cta_clicked",
+  "course_card_clicked",
+  "result_card_clicked",
+  "portal_showcase_clicked",
+  "whatsapp_clicked",
+  "final_cta_clicked",
+  "scroll_depth_25",
+  "scroll_depth_50",
+  "scroll_depth_75",
+  "scroll_depth_100",
 ]);
 
 /** High-volume traffic events that the retention job may prune after 90 days. */
