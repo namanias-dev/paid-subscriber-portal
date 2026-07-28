@@ -18,6 +18,8 @@ const FILTERS: { key: TimelineEventType | "all"; label: string }[] = [
   { key: "enrollment_created", label: "Enrolments" },
   { key: "plan_changed", label: "Schedule" },
   { key: "discount_applied", label: "Discounts" },
+  { key: "access_cap", label: "Access cap" },
+  { key: "access_exclusion", label: "Access automation" },
 ];
 
 function typePill(t: TimelineEventType): string {
@@ -27,6 +29,8 @@ function typePill(t: TimelineEventType): string {
     case "sms": return "pill-amber";
     case "discount_applied": return "pill-green";
     case "plan_changed": return "pill-amber";
+    case "access_cap": return "pill-red";
+    case "access_exclusion": return "pill-amber";
     default: return "pill";
   }
 }

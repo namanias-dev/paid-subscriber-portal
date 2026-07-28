@@ -84,6 +84,12 @@ export const VARIABLE_REGISTRY: readonly RegisteredVariable[] = [
     aliases: ["No of Installment", "No_of_Installment", "installment_no", "installment_number"],
   },
   {
+    key: "days",
+    label: "Days remaining",
+    description: "Whole IST days until grace ends, computed at send time. IST calendar days, not raw hours.",
+    aliases: ["Days", "days_left", "days_remaining"],
+  },
+  {
     key: "fee_in_rs",
     label: "Amount due (Rs)",
     description: "Outstanding amount on that installment, digits only (the body already prints \"Rs.\").",
