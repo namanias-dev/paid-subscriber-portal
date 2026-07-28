@@ -95,6 +95,78 @@ describe("the route enforces disjointness at the point of use", () => {
   });
 });
 
+describe("the operator retry route cannot become a broadcast tool", () => {
+  const opsSrc = readFileSync(join(root, "app/api/ops/sms/retry-campaign/route.ts"), "utf8");
+
+  test("it has no recipient parameter at all", () => {
+    assert.ok(!opsSrc.includes("enrollmentIds:") || opsSrc.includes("enrollmentIds: targets.enrollmentIds"),
+      "the only enrollment list it may pass is the one it derived itself");
+    assert.ok(!/body\.enrollmentIds/.test(opsSrc), "it must never read a recipient list from the request");
+    assert.ok(!/body\.mobile|body\.recipients|body\.phones/.test(opsSrc));
+  });
+
+  test("targets are derived from the campaign log by the shared resolver", () => {
+    assert.match(opsSrc, /listLogsByCampaign\(campaignId\)/);
+    assert.match(opsSrc, /resolveRetryTargets\(priorLogs/);
+    assert.match(opsSrc, /retryTargetsAreDisjoint\(targets\)/);
+  });
+
+  test("it requires an explicit expected count and refuses a mismatch", () => {
+    assert.match(opsSrc, /expect is required/i);
+    assert.match(opsSrc, /targets\.enrollmentIds\.length !== expect/);
+  });
+
+  test("it defaults to a dry run", () => {
+    assert.match(opsSrc, /dryRun\s*=\s*body\.dryRun !== false/, "sending must be opt-in, not the default");
+  });
+
+  test("it never overrides the same-template guard", () => {
+    assert.match(opsSrc, /allowRecentOverride:\s*false/);
+    assert.ok(!/allowRecentOverride:\s*(true|!!)/.test(opsSrc));
+  });
+
+  test("it is capped and authenticated", () => {
+    assert.match(opsSrc, /HARD_CAP\s*=\s*\d+/);
+    assert.match(opsSrc, /exceeds the \$\{HARD_CAP\}/);
+    assert.match(opsSrc, /authorizeCron\(req, process\.env\.CRON_SECRET\)/);
+  });
+
+  test("a repeat call for the same campaign is a no-op", () => {
+    assert.match(opsSrc, /jobId = `retry:\$\{campaignId\}`/, "the job id must derive from the campaign so a replay is detectable");
+    assert.match(opsSrc, /replay: true/);
+  });
+
+  test("it sends through the shared batch function, not its own send", () => {
+    assert.match(opsSrc, /sendInstallmentReminderBatch/);
+    assert.ok(!/sendBatch\(/.test(opsSrc), "it must not call the gateway layer directly");
+    assert.ok(!/sendViaGateway|sendSms\(/.test(opsSrc));
+  });
+
+  test("it reports recipients masked", () => {
+    assert.match(opsSrc, /maskMobile/);
+    assert.ok(!/l\?\.mobile\b(?!.*maskMobile)/.test(opsSrc.replace(/maskMobile\([^)]*\)/g, "MASKED")),
+      "a raw number must never appear in the response");
+  });
+});
+
+describe("both entry points share one send implementation", () => {
+  const sendSrc = readFileSync(join(root, "lib/sms/installmentReminderSend.ts"), "utf8");
+
+  test("the bulk route delegates rather than sending itself", () => {
+    assert.match(routeSrc, /sendInstallmentReminderBatch/);
+    assert.ok(!/sendBatch\(\{/.test(routeSrc), "the route must not hold its own copy of the send");
+  });
+
+  test("the shared function schedules step 2 from the log, not the intent list", () => {
+    assert.match(sendSrc, /listLogsByCampaign\(jobId\)/);
+    assert.match(sendSrc, /isRemindedStatus\(log\.status\)/);
+  });
+
+  test("step 2 can be suppressed but defaults to on", () => {
+    assert.match(sendSrc, /scheduleFollowUps === false/, "the default must be current product behaviour");
+  });
+});
+
 describe("the misleading comment is gone", () => {
   test("no comment claims successes are excluded by id", () => {
     assert.ok(
