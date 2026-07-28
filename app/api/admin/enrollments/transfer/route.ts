@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { requirePermission, currentAdminId } from "@/lib/adminGuard";
+import { requirePermission, currentAdminId, getActionActor } from "@/lib/adminGuard";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { getCourseEnrollmentById, getAllCourses } from "@/lib/dataProvider";
 import { planTransfer, transferIsPermitted } from "@/lib/enrollmentTransfer";
@@ -41,6 +42,20 @@ function batchOptions(course: Course) {
     capacity: b.capacity ?? null,
     seatsLeft: b.seats_left ?? null,
   }));
+}
+
+/**
+ * How many Class Hub items each side of the transfer carries. Counted rather
+ * than described, so the history can say what access actually changed instead of
+ * asserting vaguely that "content may differ".
+ */
+async function contentCounts(db: SupabaseClient, fromCourseId: string, toCourseId: string) {
+  const one = async (id: string) => {
+    const { count } = await db.from("content_items").select("*", { count: "exact", head: true }).eq("course_id", id);
+    return count ?? null;
+  };
+  const [beforeItems, afterItems] = await Promise.all([one(fromCourseId), one(toCourseId)]);
+  return { beforeItems, afterItems };
 }
 
 export async function POST(req: Request) {
@@ -127,6 +142,29 @@ export async function PUT(req: Request) {
   const db = getSupabaseAdmin();
   if (!db) return NextResponse.json({ ok: false, error: "Database not configured." }, { status: 500 });
 
+  // The structured before/after the history renders from. Captured here because
+  // several of these figures (batch start provenance, outstanding, seat counts)
+  // are derived and could not be reconstructed from the row afterwards.
+  const actor = await getActionActor();
+  const contentAccess = await contentCounts(db, enrollment.course_id, targetCourse.id);
+  const snapshot = {
+    before: {
+      courseId: enrollment.course_id, courseTitle: enrollment.course_title,
+      batchId: enrollment.batch_id ?? null, batchLabel: enrollment.batch_label ?? null,
+      batchStart: plan.source.start.iso, batchStartProvenance: plan.source.start.provenance,
+      totalFee: plan.money.oldTotal, amountPaid: plan.money.amountPaid, outstanding: plan.money.oldOutstanding,
+      schedule: plan.schedule.before, seatsLeft: plan.seats.source.seatsLeft,
+    },
+    after: {
+      courseId: targetCourse.id, courseTitle: targetCourse.title,
+      batchId: targetBatchId, batchLabel: plan.target.batchLabel,
+      batchStart: plan.target.start.iso, batchStartProvenance: plan.target.start.provenance,
+      totalFee: plan.money.newTotal, amountPaid: plan.money.amountPaid, outstanding: plan.money.newOutstanding,
+      schedule: plan.schedule.after, seatsLeft: plan.seats.target.seatsLeft,
+    },
+    contentAccess,
+  };
+
   const { data, error } = await db.rpc("transfer_enrollment", {
     p_enrollment_id: enrollmentId,
     p_to_course_id: targetCourse.id,
@@ -142,6 +180,8 @@ export async function PUT(req: Request) {
     p_capacity_overridden: overrideCapacity,
     // The guard against the money moving while a human was reading the preview.
     p_expected_amount_paid: enrollment.amount_paid ?? 0,
+    p_actor_name: actor?.name ?? null,
+    p_snapshot: snapshot,
   });
 
   if (error) {
