@@ -1596,20 +1596,111 @@ a {
   z-index: -1;
   pointer-events: none;
 }
+/* 50s per revolution: slow enough to stay dignified, quick enough to read as
+   alive rather than static. Positive rotation = clockwise.
+   Deliberately NO `will-change`: this animation runs from first paint, so both
+   Chrome and WebKit already give the node its own compositor layer without being
+   asked (verified — it keeps drawing while the main thread is fully blocked).
+   Measured either way and LCP was identical, so the hint is simply redundant. */
 .hv2-chakra-ambient__spin {
-  animation: hv2Spin 140s linear infinite;
+  animation: hv2Spin 50s linear infinite;
   transform-origin: 50% 50%;
   opacity: 0.1;
   filter: drop-shadow(0 0 26px rgba(242, 201, 76, 0.14));
 }
 .hv2-chakra-ambient__spin svg { width: 820px; height: 820px; }
 
-/* Mobile: keep it even more subtle and static so it never competes with the
-   portrait or costs anything on low-power devices. */
+/* Warm gold bloom behind the Chakra. Soft radial-gradients only — no `filter:
+   blur`, which would cost a large offscreen pass on mobile for the same look.
+   The base opacity is what remains when the bloom animation is switched off. */
+.hv2-chakra-aura {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  z-index: -1;
+  width: 120%;
+  aspect-ratio: 1 / 1;
+  transform: translate3d(-50%, -50%, 0);
+  border-radius: 9999px;
+  opacity: 0.85;
+  background:
+    radial-gradient(closest-side, rgba(242, 201, 76, 0.13), rgba(242, 201, 76, 0.05) 40%, transparent 70%),
+    radial-gradient(closest-side, rgba(252, 233, 168, 0.07), transparent 52%);
+  animation: hv2AuraBloom 15s ease-in-out infinite;
+}
+@keyframes hv2AuraBloom {
+  0%, 100% { opacity: 0.7; }
+  50% { opacity: 1; }
+}
+
+/* Gold knowledge-motes drifting outward from the Chakra. One shared keyframe for
+   all of them; the per-mote variance comes from the custom properties in the
+   `:nth-child` block below, so the field never looks mechanical. Opacity is 0 at
+   both ends of the cycle, so the loop restart is invisible, and the base
+   opacity of 0 means that with the animation off the motes are simply absent. */
+.hv2-chakra-motes {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+}
+.hv2-mote {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: var(--hv2-mote-size, 3px);
+  height: var(--hv2-mote-size, 3px);
+  border-radius: 9999px;
+  opacity: 0;
+  background: radial-gradient(circle, rgba(252, 233, 168, 0.95), rgba(242, 201, 76, 0.6) 55%, transparent 75%);
+  box-shadow: 0 0 6px rgba(242, 201, 76, 0.35);
+  animation: hv2MoteDrift var(--hv2-mote-dur, 13s) ease-out var(--hv2-mote-delay, 0s) infinite;
+}
+/* Translate + opacity ONLY — deliberately no `scale`. Scaling a composited layer
+   makes Chrome re-rasterise it as the raster scale drifts, which showed up as
+   ~57 extra Paints per 5s across the field. Size variety comes from
+   `--hv2-mote-size` instead, which costs nothing per frame. */
+@keyframes hv2MoteDrift {
+  0% { opacity: 0; transform: translate3d(-50%, -50%, 0); }
+  16% { opacity: var(--hv2-mote-peak, 0.42); }
+  64% { opacity: calc(var(--hv2-mote-peak, 0.42) * 0.4); }
+  100% {
+    opacity: 0;
+    transform: translate3d(calc(-50% + var(--hv2-mote-x, 0px)), calc(-50% + var(--hv2-mote-y, 0px)), 0);
+  }
+}
+
+/* Per-mote variance, laid out on a golden-angle spiral so the field reads as
+   organic rather than ringed. Kept in the stylesheet instead of inline styles:
+   as markup these values cost ~9.5KB per response (echoed in the RSC payload
+   too) — about 45ms of transfer on a 1.6Mbps link — whereas here they ride along
+   in an already-cached file. Generated; mirrors MOTE_COUNT in HeroBackdrop.tsx. */
+.hv2-mote:nth-child(1) { left: calc(50% + 46px); top: calc(50% + 0px); --hv2-mote-x: 64.0px; --hv2-mote-y: -10.0px; --hv2-mote-size: 2px; --hv2-mote-dur: 11s; --hv2-mote-delay: 0s; --hv2-mote-peak: 0.34; }
+.hv2-mote:nth-child(2) { left: calc(50% - 61.2px); top: calc(50% + 56.1px); --hv2-mote-x: -68.6px; --hv2-mote-y: 62.8px; --hv2-mote-size: 5px; --hv2-mote-dur: 18s; --hv2-mote-delay: -13s; --hv2-mote-peak: 0.44; }
+.hv2-mote:nth-child(3) { left: calc(50% + 10.5px); top: calc(50% - 119.5px); --hv2-mote-x: 30.6px; --hv2-mote-y: -119.8px; --hv2-mote-size: 4px; --hv2-mote-dur: 16s; --hv2-mote-delay: -7s; --hv2-mote-peak: 0.37; }
+.hv2-mote:nth-child(4) { left: calc(50% + 95.5px); top: calc(50% + 124.6px); --hv2-mote-x: 111.7px; --hv2-mote-y: 104.6px; --hv2-mote-size: 3px; --hv2-mote-dur: 14s; --hv2-mote-delay: -1s; --hv2-mote-peak: 0.47; }
+.hv2-mote:nth-child(5) { left: calc(50% - 191px); top: calc(50% - 33.8px); --hv2-mote-x: -82.7px; --hv2-mote-y: -14.6px; --hv2-mote-size: 2px; --hv2-mote-dur: 12s; --hv2-mote-delay: -14s; --hv2-mote-peak: 0.39; }
+.hv2-mote:nth-child(6) { left: calc(50% + 194.9px); top: calc(50% - 124px); --hv2-mote-x: 105.5px; --hv2-mote-y: -44.6px; --hv2-mote-size: 5px; --hv2-mote-dur: 19s; --hv2-mote-delay: -8s; --hv2-mote-peak: 0.49; }
+.hv2-mote:nth-child(7) { left: calc(50% - 13.8px); top: calc(50% + 51.2px); --hv2-mote-x: -13.7px; --hv2-mote-y: 143.4px; --hv2-mote-size: 4px; --hv2-mote-dur: 17s; --hv2-mote-delay: -2s; --hv2-mote-peak: 0.42; }
+.hv2-mote:nth-child(8) { left: calc(50% - 41.5px); top: calc(50% - 79.9px); --hv2-mote-x: -34.6px; --hv2-mote-y: -66.6px; --hv2-mote-size: 3px; --hv2-mote-dur: 15s; --hv2-mote-delay: -15s; --hv2-mote-peak: 0.34; }
+.hv2-mote:nth-child(9) { left: calc(50% + 119.3px); top: calc(50% + 43.6px); --hv2-mote-x: 91.5px; --hv2-mote-y: 52.6px; --hv2-mote-size: 2px; --hv2-mote-dur: 13s; --hv2-mote-delay: -9s; --hv2-mote-peak: 0.44; }
+.hv2-mote:nth-child(10) { left: calc(50% - 151.6px); top: calc(50% + 62.6px); --hv2-mote-x: -114.2px; --hv2-mote-y: 72.0px; --hv2-mote-size: 5px; --hv2-mote-dur: 11s; --hv2-mote-delay: -3s; --hv2-mote-peak: 0.37; }
+.hv2-mote:nth-child(11) { left: calc(50% + 85.2px); top: calc(50% - 182px); --hv2-mote-x: 28.0px; --hv2-mote-y: -59.8px; --hv2-mote-size: 4px; --hv2-mote-dur: 18s; --hv2-mote-delay: -16s; --hv2-mote-peak: 0.47; }
+.hv2-mote:nth-child(12) { left: calc(50% + 71.2px); top: calc(50% + 227.1px); --hv2-mote-x: 12.2px; --hv2-mote-y: 95.7px; --hv2-mote-size: 3px; --hv2-mote-dur: 16s; --hv2-mote-delay: -10s; --hv2-mote-peak: 0.39; }
+.hv2-mote:nth-child(13) { left: calc(50% - 51.9px); top: calc(50% - 30.1px); --hv2-mote-x: -118.3px; --hv2-mote-y: -43.1px; --hv2-mote-size: 2px; --hv2-mote-dur: 14s; --hv2-mote-delay: -4s; --hv2-mote-peak: 0.49; }
+.hv2-mote:nth-child(14) { left: calc(50% + 94.7px); top: calc(50% - 20.8px); --hv2-mote-x: 149.4px; --hv2-mote-y: -32.8px; --hv2-mote-size: 5px; --hv2-mote-dur: 12s; --hv2-mote-delay: -17s; --hv2-mote-peak: 0.42; }
+.hv2-mote:nth-child(15) { left: calc(50% - 77.1px); top: calc(50% + 109.6px); --hv2-mote-x: -62.6px; --hv2-mote-y: 61.1px; --hv2-mote-size: 4px; --hv2-mote-dur: 19s; --hv2-mote-delay: -11s; --hv2-mote-peak: 0.34; }
+.hv2-mote:nth-child(16) { left: calc(50% - 22px); top: calc(50% - 169.6px); --hv2-mote-x: -35.6px; --hv2-mote-y: -111.3px; --hv2-mote-size: 3px; --hv2-mote-dur: 17s; --hv2-mote-delay: -5s; --hv2-mote-peak: 0.44; }
+.hv2-mote:nth-child(17) { left: calc(50% + 159px); top: calc(50% + 134.1px); --hv2-mote-x: 110.1px; --hv2-mote-y: 92.8px; --hv2-mote-size: 2px; --hv2-mote-dur: 15s; --hv2-mote-delay: -18s; --hv2-mote-peak: 0.37; }
+.hv2-mote:nth-child(18) { left: calc(50% - 244.8px); top: calc(50% + 10.1px); --hv2-mote-x: -77.6px; --hv2-mote-y: -11.8px; --hv2-mote-size: 5px; --hv2-mote-dur: 13s; --hv2-mote-delay: -12s; --hv2-mote-peak: 0.47; }
+
+/* Mobile: keep the watermark subtle and drop the mote field entirely (bloom +
+   rotation only), so nothing costs frames or battery on a low-power device. */
 @media (max-width: 640px) {
   .hv2-chakra-ambient { top: clamp(-160px, -22vw, -60px); }
-  .hv2-chakra-ambient__spin { opacity: 0.055; animation: none; }
+  .hv2-chakra-ambient__spin { opacity: 0.055; }
   .hv2-chakra-ambient__spin svg { width: 460px; height: 460px; }
+  .hv2-chakra-motes { display: none; }
+  .hv2-chakra-aura { opacity: 0.6; animation: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1618,6 +1709,10 @@ a {
   .hv2-float--slow,
   .hv2-spin,
   .hv2-spin--rev,
-  .hv2-chakra-ambient__spin { animation: none !important; }
+  .hv2-chakra-ambient__spin,
+  .hv2-chakra-aura,
+  .hv2-mote { animation: none !important; }
+  /* No rotation and no motes, but the warm bloom stays as a static glow. */
+  .hv2-chakra-aura { opacity: 0.8 !important; }
   .hv2-reveal { opacity: 1 !important; transform: none !important; animation: none !important; }
 }
