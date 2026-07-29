@@ -9,53 +9,32 @@ import { formatINR, formatISTDateTime } from "@/lib/dates";
 
 export const metadata = { title: "Webinars — Naman Sharma IAS Academy" };
 
-export const revalidate = 60;
-export const maxDuration = 10;
-
-async function withBudget<T>(work: Promise<T>, ms: number, fallback: T): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    return await Promise.race([
-      work,
-      new Promise<T>((resolve) => {
-        timer = setTimeout(() => resolve(fallback), ms);
-      }),
-    ]);
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
-}
+// ISR: ordinary visits served from cache → zero live Postgres on a warm path.
+export const revalidate = 300;
+export const maxDuration = 20;
 
 export default async function WebinarsPage() {
   let webinars: Awaited<ReturnType<typeof getPublicWebinars>> = [];
   let snapshot: Awaited<ReturnType<typeof getPurchaseSnapshot>> = null;
   let regCounts = new Map<string, number>();
+  let dbFailed = false;
   try {
-    const loaded = await withBudget(
-      Promise.all([
-        getPublicWebinars(),
-        getPurchaseSnapshot(),
-      ]).then(async ([w, s]) => {
-        const counts = await withBudget(getWebinarRegisteredCounts(w), 2500, new Map<string, number>());
-        return { w, s, counts };
-      }),
-      6000,
-      { w: [] as Awaited<ReturnType<typeof getPublicWebinars>>, s: null, counts: new Map<string, number>() },
-    );
-    webinars = loaded.w;
-    snapshot = loaded.s;
-    regCounts = loaded.counts;
+    webinars = await getPublicWebinars();
+    snapshot = await getPurchaseSnapshot().catch(() => null);
+    regCounts = await getWebinarRegisteredCounts(webinars).catch(() => new Map());
   } catch {
-    webinars = [];
-    snapshot = null;
-    regCounts = new Map();
+    dbFailed = true;
   }
 
-  // Ad landing target: feature the soonest still-open (registerable) session so a
-  // click from a Google Ads campaign can convert right here. The registration form
-  // runs through the SAME capture path (→ /api/public/webinar-register →
-  // registerWebinar) that creates the CRM lead, fires lead_created
-  // (source_form=webinar_registration) and stamps first-party attribution.
+  if (dbFailed) {
+    return (
+      <div className="container-wide py-16 text-center">
+        <h1 className="font-heading text-2xl font-bold">Webinars temporarily unavailable</h1>
+        <p className="mt-2 text-sm text-[var(--ca-slate-700)]">Please refresh in a moment.</p>
+      </div>
+    );
+  }
+
   const featured =
     webinars
       .filter((w) => w.status !== "completed" && canRegisterForWebinar(w))
@@ -64,7 +43,6 @@ export default async function WebinarsPage() {
 
   return (
     <div className="bg-[var(--ca-slate-50)]">
-      {/* Premium hero */}
       <header className="ca-dark ca-grain relative overflow-hidden">
         <div className="ca-orb" style={{ width: 320, height: 320, top: -130, right: -70, background: "rgba(212,175,55,0.16)" }} />
         <div className="ca-orb" style={{ width: 260, height: 260, bottom: -150, left: -60, background: "rgba(30,58,138,0.5)" }} />
@@ -79,15 +57,12 @@ export default async function WebinarsPage() {
         </div>
       </header>
 
-      {/* Content */}
       <div className="relative z-10 -mt-10 rounded-t-[2rem] bg-[var(--ca-slate-50)] sm:-mt-12">
-        {/* Featured registration — the ad landing target. */}
         {featured && (
           <div className="container-wide pt-10 sm:pt-12">
             <Reveal>
               <section id="register" className="scroll-mt-24 overflow-hidden rounded-2xl border border-[var(--ca-slate-200)] bg-white shadow-soft">
                 <div className="grid gap-0 md:grid-cols-2">
-                  {/* Summary */}
                   <div className="ca-dark relative flex flex-col justify-center gap-3 p-6 sm:p-8">
                     <span className="inline-flex w-fit items-center gap-1.5 rounded-full bg-[rgba(212,175,55,0.95)] px-2.5 py-1 text-[11px] font-extrabold text-[#1a1304]">
                       {featured.price === 0 ? "Free webinar" : formatINR(featured.price)}
@@ -101,7 +76,6 @@ export default async function WebinarsPage() {
                       <span className="inline-flex items-center gap-1.5"><Clock size={15} aria-hidden="true" /> Live + recording</span>
                     </div>
                   </div>
-                  {/* Form */}
                   <div className="p-6 sm:p-8">
                     {featuredRegistered ? (
                       <div className="flex h-full flex-col justify-center text-center">

@@ -2449,30 +2449,22 @@ export const getPublicWebinars = cache(async function getPublicWebinars(): Promi
   if (demoMode()) return mock.webinars.filter((w) => w.active !== false);
   const db = getSupabasePublic() || getSupabaseAdmin();
   if (!db) return mock.webinars.filter((w) => w.active !== false);
-  try {
-    const { data, error } = await db
-      .from("webinars")
-      .select("*")
-      .neq("active", false)
-      .order("datetime", { ascending: true });
-    if (error) throw error;
-    const rows = (data as Webinar[]) ?? [];
-    return rows.length ? rows : mock.webinars.filter((w) => w.active !== false);
-  } catch {
-    return [];
-  }
+  const { data, error } = await db
+    .from("webinars")
+    .select("*")
+    .neq("active", false)
+    .order("datetime", { ascending: true });
+  if (error) throw new Error(`getPublicWebinars: ${error.message}`);
+  const rows = (data as Webinar[]) ?? [];
+  return rows;
 });
 export async function getWebinarBySlug(slug: string): Promise<Webinar | null> {
   if (demoMode()) return mock.webinars.find((w) => w.slug === slug) ?? null;
   const db = getSupabasePublic() || getSupabaseAdmin();
   if (!db) return mock.webinars.find((w) => w.slug === slug) ?? null;
-  try {
-    const { data, error } = await db.from("webinars").select("*").eq("slug", slug).maybeSingle();
-    if (error) throw error;
-    return (data as Webinar | null) ?? null;
-  } catch {
-    return null;
-  }
+  const { data, error } = await db.from("webinars").select("*").eq("slug", slug).maybeSingle();
+  if (error) throw new Error(`getWebinarBySlug: ${error.message}`);
+  return (data as Webinar | null) ?? null;
 }
 
 /**

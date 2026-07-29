@@ -15,7 +15,7 @@ import { buildLandingView } from "@/lib/landingView";
 import { formatINR, formatISTRange } from "@/lib/dates";
 import { SITE_URL, ACADEMY } from "@/lib/config";
 
-export const revalidate = 60;
+export const revalidate = 300;
 export const maxDuration = 10;
 
 async function withBudget<T>(work: Promise<T>, ms: number, fallback: T): Promise<T> {
@@ -35,7 +35,8 @@ async function withBudget<T>(work: Promise<T>, ms: number, fallback: T): Promise
 export async function generateMetadata({ params }: { params: { slug: string } }): Promise<Metadata> {
   try {
     const w = await withBudget(getWebinarBySlug(params.slug), 2500, null);
-    if (!w || w.active === false) return { title: "Webinar not found" };
+    if (!w) return { title: "Webinar not found" };
+    if (w.active === false && w.status !== "completed") return { title: "Webinar not found" };
     const seo = w.seo || {};
     const canonicalSlug = seo.canonical_slug?.trim() || w.slug;
     const url = `${SITE_URL}/webinars/${canonicalSlug}`;
@@ -59,17 +60,36 @@ export async function generateMetadata({ params }: { params: { slug: string } })
 
 export default async function WebinarDetail({ params }: { params: { slug: string } }) {
   let w: Awaited<ReturnType<typeof getWebinarBySlug>> = null;
+  let dbFailed = false;
   try {
-    w = await withBudget(getWebinarBySlug(params.slug), 4000, null);
+    w = await getWebinarBySlug(params.slug);
   } catch {
-    w = null;
+    dbFailed = true;
   }
-  if (!w || w.active === false) {
-    // Prefer soft empty over hard 5xx when DB is unavailable.
+  if (dbFailed) {
     return (
       <div className="container-wide py-16 text-center">
         <h1 className="font-heading text-2xl font-bold">Webinar temporarily unavailable</h1>
         <p className="mt-2 text-sm text-[var(--ca-slate-700)]">Please refresh in a moment, or browse other sessions.</p>
+        <a href="/webinars" className="btn btn-primary mt-6 inline-flex">All webinars</a>
+      </div>
+    );
+  }
+  // List hides inactive; detail still serves completed/disabled rows so old links & recordings work.
+  if (!w) {
+    return (
+      <div className="container-wide py-16 text-center">
+        <h1 className="font-heading text-2xl font-bold">Webinar not found</h1>
+        <p className="mt-2 text-sm text-[var(--ca-slate-700)]">This session may have been removed or the link is outdated.</p>
+        <a href="/webinars" className="btn btn-primary mt-6 inline-flex">All webinars</a>
+      </div>
+    );
+  }
+  if (w.active === false && w.status !== "completed") {
+    return (
+      <div className="container-wide py-16 text-center">
+        <h1 className="font-heading text-2xl font-bold">Webinar not found</h1>
+        <p className="mt-2 text-sm text-[var(--ca-slate-700)]">This session may have been removed or the link is outdated.</p>
         <a href="/webinars" className="btn btn-primary mt-6 inline-flex">All webinars</a>
       </div>
     );
