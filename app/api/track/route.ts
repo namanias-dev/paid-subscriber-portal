@@ -30,6 +30,13 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: "event not allowed" }, { status: 400 });
     }
 
+    // Sample page_view writes — #1 CPU consumer was analytics_events INSERT.
+    // Keep conversions/leads at 100%; sample anonymous page views at 10%.
+    const sampleRate = Number(process.env.TRACK_PAGEVIEW_SAMPLE_RATE || "0.1");
+    if (eventName === "page_view" && Math.random() > sampleRate) {
+      return NextResponse.json({ ok: true, skipped: "sampled" });
+    }
+
     const jar = cookies();
     const visitorId = jar.get(VISITOR_COOKIE)?.value || (typeof body.visitor_id === "string" ? body.visitor_id : null);
     const sessionId = jar.get(SESSION_COOKIE)?.value || (typeof body.session_id === "string" ? body.session_id : null);
@@ -37,15 +44,17 @@ export async function POST(req: Request) {
 
     let buyerId: string | null = null;
     let phone: string | null = null;
-    try {
-      const session = await getBuyerSession();
-      if (session) { buyerId = session.buyer_id; phone = session.phone; }
-    } catch { /* anon */ }
+    // Skip buyer session DB version check for high-volume page_view beacons.
+    if (eventName !== "page_view") {
+      try {
+        const session = await getBuyerSession();
+        if (session) { buyerId = session.buyer_id; phone = session.phone; }
+      } catch { /* anon */ }
+    }
 
     const props = (body.props && typeof body.props === "object" ? body.props : {}) as Record<string, unknown>;
 
     // Respond immediately; do DB work in the background with a hard budget.
-    // navigator.sendBeacon / page unload must not wait on Supabase.
     void (async () => {
       const limited = await withDbBudget(rateLimited(`track-ip:${ip}`, 240, 60), 1500, "track_rate");
       if (limited.ok && limited.value) return;

@@ -21,7 +21,7 @@ import HomeV2 from "@/components/public/home-v2/HomeV2";
 import { buildHomeV2Metadata } from "@/components/public/home-v2/seo";
 
 // ISR: ordinary visits should not hammer Postgres while marketing content is fresh enough.
-export const revalidate = 60;
+export const revalidate = 300;
 export const maxDuration = 20;
 
 async function withBudget<T>(work: Promise<T>, ms: number, fallback: T): Promise<T> {

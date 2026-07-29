@@ -22,10 +22,12 @@ import {
   nextUnpaidDatedLine,
   classifyAccessAtRisk,
 } from "@/lib/accessAtRisk";
+import { ttlCached } from "@/lib/ttlCache";
 
 export const dynamic = "force-dynamic";
 
 const DAY = 86_400_000;
+const ACCESS_RISK_CACHE_MS = 30_000;
 
 /**
  * Access At Risk worklist. ONE shared definition with the reminder gate:
@@ -36,6 +38,11 @@ export async function GET() {
     return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   }
 
+  const cached = await ttlCached("admin:access-risk:v1", ACCESS_RISK_CACHE_MS, () => buildAccessRiskPayload());
+  return NextResponse.json({ ...cached.value, cache: cached.cache });
+}
+
+async function buildAccessRiskPayload() {
   const [enrollments, courses, overrides, failureScan] = await Promise.all([
     getAllCourseEnrollments(),
     getAllCourses(),
@@ -192,8 +199,8 @@ export async function GET() {
 
   const settings = await getAccessReminderSettings();
 
-  return NextResponse.json({
-    ok: true,
+  return {
+    ok: true as const,
     rows,
     grants: activeGrants,
     paymentFailureTotals: failureScan.totals,
@@ -211,5 +218,5 @@ export async function GET() {
       dailyCeiling: settings.dailyCeiling,
       quietHours: accessInQuietHours(now),
     },
-  });
+  };
 }

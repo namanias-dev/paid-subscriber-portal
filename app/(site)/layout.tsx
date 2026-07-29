@@ -2,50 +2,23 @@ import PublicNav from "@/components/public/PublicNav";
 import PublicFooter from "@/components/public/PublicFooter";
 import FloatingWhatsApp from "@/components/public/FloatingWhatsApp";
 import AiCounselorMount from "@/components/ai-agent/AiCounselorMount";
-import { getSiteSettings, hasUpcomingWebinars } from "@/lib/dataProvider";
 import { mergeSiteSettings } from "@/lib/homeDefaults";
 import { getStudentSession, getBuyerSession } from "@/lib/session";
 import { resolveNavTabs } from "@/lib/navConfig";
 import { whatsappLink } from "@/lib/phone";
-import { getWhatsNew } from "@/lib/announcements";
-
-async function withBudget<T>(work: Promise<T>, ms: number, fallback: T): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    return await Promise.race([
-      work,
-      new Promise<T>((resolve) => {
-        timer = setTimeout(() => resolve(fallback), ms);
-      }),
-    ]);
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
-}
 
 /**
- * SEV1: layout runs on EVERY public page. It must never wait on a saturated DB
- * long enough to 504 the route. Budget all shell data; fall back to defaults.
+ * SEV1 CPU rule: the public layout must NEVER touch Postgres.
+ * Site chrome uses static defaults; live site_settings / webinars / What's New
+ * are fetched only on pages that need them (home / webinars), under ISR.
+ * Sessions are JWT cookie verifies — buyer version check is fail-open and rare.
  */
 export default async function SiteLayout({ children }: { children: React.ReactNode }) {
-  const emptyWhatsNew = { barItems: [] as Awaited<ReturnType<typeof getWhatsNew>>["barItems"] };
-  const settings = await withBudget(getSiteSettings(), 1500, mergeSiteSettings(null));
-
-  const [session, buyerSession, upcomingWebinars, whatsNew] = await withBudget(
-    Promise.all([
-      getStudentSession().catch(() => null),
-      getBuyerSession().catch(() => null),
-      hasUpcomingWebinars().catch(() => false),
-      getWhatsNew().catch(() => emptyWhatsNew),
-    ]),
-    2000,
-    [null, null, false, emptyWhatsNew] as [
-      Awaited<ReturnType<typeof getStudentSession>>,
-      Awaited<ReturnType<typeof getBuyerSession>>,
-      boolean,
-      typeof emptyWhatsNew,
-    ],
-  );
+  const settings = mergeSiteSettings(null);
+  const [session, buyerSession] = await Promise.all([
+    getStudentSession().catch(() => null),
+    getBuyerSession().catch(() => null),
+  ]);
   const userName = session?.name || buyerSession?.name || null;
   const waLink = whatsappLink(
     settings.brand.whatsapp || settings.brand.support_phone,
@@ -64,13 +37,12 @@ export default async function SiteLayout({ children }: { children: React.ReactNo
         portalLoggedIn={!!buyerSession}
         userName={userName}
         links={resolveNavTabs(settings.nav)}
-        hasUpcomingWebinars={upcomingWebinars}
-        announcements={whatsNew.barItems}
+        hasUpcomingWebinars={false}
+        announcements={[]}
       />
       <main className="flex-1">{children}</main>
       <PublicFooter brand={settings.brand} />
       <FloatingWhatsApp waLink={waLink} />
-      {/* AI counsellor widget — renders ONLY when AI_AGENT_PUBLIC_WIDGET=true (ship dark). */}
       <AiCounselorMount waLink={waLink} />
     </div>
   );
