@@ -655,11 +655,11 @@ export async function pollDeliveryStatuses(opts: { sinceDays?: number; limit?: n
 
 /**
  * Resend a campaign's FAILED messages (from live status OR campaign history).
- * Re-sends each failed recipient's STORED body (faithful, personalized) to a new
- * campaign-tagged QUEUED log so the live panel updates. Honours kill-switch,
- * opt-out/DND and the daily cap; intentionally bypasses the 30-min guard (that's
- * the whole point of a resend). Deduped by number; delivered/sent are never
- * re-touched. Runs bounded-parallel.
+ * Re-RENDERS each failed recipient through {@link prepareAndRenderSms} (current
+ * short-title pipeline) — does NOT replay the stored body, which may still
+ * contain a DLT-failing 51-char title. Honours kill-switch, opt-out/DND and the
+ * daily cap; intentionally bypasses the 30-min guard (that's the point of a
+ * resend). Deduped by number; delivered/sent are never re-touched.
  */
 export async function resendCampaignFailed(campaignId: string): Promise<{ resent: number; failed: number; skipped: Record<string, number> }> {
   const out = { resent: 0, failed: 0, skipped: {} as Record<string, number> };
@@ -669,6 +669,7 @@ export async function resendCampaignFailed(campaignId: string): Promise<{ resent
   if (!gatewayConfigured()) { out.skipped.gateway_not_configured = 1; return out; }
 
   const { listLogsByCampaign } = await import("./store");
+  const { resolveResendMessage } = await import("./resendBody");
   const logs = await listLogsByCampaign(campaignId);
   // one row per failed number (latest wins) — never resend to already delivered/sent
   const delivered = new Set(logs.filter((l) => l.status === "DELIVERED" || l.status === "SENT").map((l) => l.normalized_mobile));
@@ -691,18 +692,20 @@ export async function resendCampaignFailed(campaignId: string): Promise<{ resent
   await mapPool(targets, SEND_CONCURRENCY, async (l) => {
     if (optedOut.has(l.normalized_mobile)) { bump("opted_out"); return; }
     if (settings.dailyCap > 0 && used >= settings.dailyCap) { bump("daily_cap"); return; }
+    const body = await resolveResendMessage(l);
+    if (!body.ok) { bump(body.skip); return; }
     used++;
     const inserted = await insertQueuedLog({
       mobile: l.mobile, normalized_mobile: l.normalized_mobile, student_name: l.student_name,
       user_id: l.user_id, lead_id: l.lead_id, registration_id: l.registration_id, payment_id: l.payment_id,
       course_id: l.course_id, webinar_id: l.webinar_id, template_id: l.template_id || "", template_name: l.template_name || "",
       gateway_template_id: l.gateway_template_id, sender_id: l.sender_id || SMS_DEFAULT_SENDER_ID, route: l.route || SMS_DEFAULT_ROUTE,
-      message_body: l.message_body, character_count: l.character_count || l.message_body.length, segments: l.segments || 1,
+      message_body: body.text, character_count: body.length, segments: body.segments,
       sent_by_type: "ADMIN", audience_type: l.audience_type, campaign_id: campaignId, status: "QUEUED",
     });
     if (!inserted) { bump("duplicate"); return; }
     const res = await sendViaGateway({
-      digits10: l.normalized_mobile, message: l.message_body, templateId: l.gateway_template_id || "",
+      digits10: l.normalized_mobile, message: body.text, templateId: l.gateway_template_id || "",
       senderId: l.sender_id || SMS_DEFAULT_SENDER_ID, route: l.route || SMS_DEFAULT_ROUTE,
     });
     await updateLog(inserted.id, {
@@ -714,15 +717,22 @@ export async function resendCampaignFailed(campaignId: string): Promise<{ resent
   return out;
 }
 
-/** Retry a previously-failed log by re-sending its stored body (new attempt). */
+/**
+ * Retry a previously-failed log by RE-RENDERING through the current pipeline
+ * (not replaying the stored body — that still embeds the 51-char title for the
+ * July 29 abandoned_nudge failures).
+ */
 export async function retryLog(logId: string): Promise<SendSmsResult> {
   const { getLog } = await import("./store");
+  const { resolveResendMessage } = await import("./resendBody");
   const log = await getLog(logId);
   if (!log) return { ok: false, skipped: "log_missing" };
   if (!gatewayConfigured()) return { ok: false, skipped: "gateway_not_configured" };
+  const body = await resolveResendMessage(log);
+  if (!body.ok) return { ok: false, skipped: body.skip, error: body.detail };
   const res = await sendViaGateway({
     digits10: log.normalized_mobile,
-    message: log.message_body,
+    message: body.text,
     templateId: log.gateway_template_id || "",
     senderId: log.sender_id || SMS_DEFAULT_SENDER_ID,
     route: log.route || SMS_DEFAULT_ROUTE,
@@ -732,6 +742,10 @@ export async function retryLog(logId: string): Promise<SendSmsResult> {
     gateway_response: res.response as unknown,
     gateway_message_id: res.messageId,
     error_message: res.ok ? null : (res.response.error || "send_failed"),
+    // Persist the re-rendered body so the log detail matches what was transmitted.
+    message_body: body.text,
+    character_count: body.length,
+    segments: body.segments,
     sent_at: new Date().toISOString(),
   });
   return { ok: res.ok, logId, status: res.status, error: res.ok ? undefined : "send_failed" };
