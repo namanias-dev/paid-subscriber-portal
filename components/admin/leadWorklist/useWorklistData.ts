@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { LeadWorklistRow } from "@/lib/types";
+import type { LegacyLeadMatch } from "@/lib/marketing/legacyLeadMatch";
 
 /**
  * The reader for `GET /api/admin/leads/worklist`.
@@ -24,26 +25,20 @@ interface WorklistResponse {
   nextCursor?: string | null;
   total?: number | null;
   totalIsCapped?: boolean;
+  legacyLeadByPhone?: Record<string, LegacyLeadMatch>;
 }
 
 export interface WorklistData {
   rows: LeadWorklistRow[];
   nextCursor: string | null;
-  /**
-   * Match count, or null when the server did not compute one. Read together
-   * with `totalIsCapped` — never rendered as an exact figure when capped.
-   */
   total: number | null;
-  /** True when `total` is a floor ("5,000+"), not an exact count. */
   totalIsCapped: boolean;
-  /** First page in flight: the query changed, so the old rows are gone. */
   loading: boolean;
-  /** A later page is in flight; the rows already on screen stay put. */
   loadingMore: boolean;
   error: string | null;
+  legacyLeadByPhone: Record<string, LegacyLeadMatch>;
   loadMore: () => void;
   retry: () => void;
-  /** Apply a mutation's result to one loaded row without refetching the list. */
   patchRow: (id: string, patch: Partial<LeadWorklistRow>) => void;
 }
 
@@ -57,9 +52,8 @@ export function useWorklistData(apiSearch: string): WorklistData {
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [legacyLeadByPhone, setLegacyLeadByPhone] = useState<Record<string, LegacyLeadMatch>>({});
 
-  // Monotonic request id. A response from a superseded query is dropped rather
-  // than merged, so a slow "live" page can never land on top of "legacy".
   const requestRef = useRef(0);
   const cursorRef = useRef<string | null>(null);
   const inFlightRef = useRef(false);
@@ -73,8 +67,6 @@ export function useWorklistData(apiSearch: string): WorklistData {
       const params = new URLSearchParams(apiSearch);
       if (cursor) {
         params.set("cursor", cursor);
-        // The total was already counted for this query on the first page;
-        // recounting on every load-more doubles the cost for no new answer.
         params.set("count", "0");
         setLoadingMore(true);
       } else {
@@ -82,6 +74,7 @@ export function useWorklistData(apiSearch: string): WorklistData {
         setNextCursor(null);
         setTotal(null);
         setTotalIsCapped(false);
+        setLegacyLeadByPhone({});
         setLoading(true);
       }
       setError(null);
@@ -100,6 +93,11 @@ export function useWorklistData(apiSearch: string): WorklistData {
         setRows((prev) => (cursor ? [...prev, ...page] : page));
         setNextCursor(data.nextCursor ?? null);
         cursorRef.current = data.nextCursor ?? null;
+        if (data.legacyLeadByPhone) {
+          setLegacyLeadByPhone((prev) =>
+            cursor ? { ...prev, ...data.legacyLeadByPhone } : (data.legacyLeadByPhone || {}),
+          );
+        }
         if (!cursor) {
           setTotal(data.total ?? null);
           setTotalIsCapped(!!data.totalIsCapped);
@@ -120,8 +118,6 @@ export function useWorklistData(apiSearch: string): WorklistData {
 
   useEffect(() => {
     cursorRef.current = null;
-    // A query change invalidates any page in flight; clearing the guard lets
-    // the new first page start immediately instead of being swallowed.
     inFlightRef.current = false;
     void fetchPage(null);
   }, [fetchPage]);
@@ -153,6 +149,7 @@ export function useWorklistData(apiSearch: string): WorklistData {
     loading,
     loadingMore,
     error,
+    legacyLeadByPhone,
     loadMore,
     retry,
     patchRow,

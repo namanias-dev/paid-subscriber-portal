@@ -30,6 +30,7 @@ import {
 } from "@/lib/installments";
 import { activeAccessGrant } from "@/lib/sms/accessReminderService";
 import { deriveDisplayChannel } from "@/lib/marketing/leadAttrByPhone";
+import { lookupLegacyLeadsByPhones } from "@/lib/marketing/legacyLeadMatch";
 import type { Student, PlanId, InstallmentItem, PaymentPlan } from "@/lib/types";
 
 const DAY = 86400000;
@@ -404,6 +405,8 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
           utm_source: attributionLead.utm_source ?? null,
         }
       : null;
+    const legacyMap = await lookupLegacyLeadsByPhones([phone]);
+    const legacyLeadMatch = Object.values(legacyMap)[0] || null;
 
     const { brand, logo_url, logo_alt } = settings;
     const contact = {
@@ -422,6 +425,7 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
         student,
         buyerCode: buyer?.login_code || null,
         leadAttribution,
+        legacyLeadMatch,
         courses,
         attempts: attemptCards,
         webinars: webinarRows,

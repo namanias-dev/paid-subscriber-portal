@@ -18,6 +18,7 @@ import {
   logAccess,
 } from "@/lib/dataProvider";
 import { buildLeadAttrByPhone, pruneEmptyChannels } from "@/lib/marketing/leadAttrByPhone";
+import { lookupLegacyLeadsByPhones } from "@/lib/marketing/legacyLeadMatch";
 import { getAdminSession } from "@/lib/session";
 import { requirePermission } from "@/lib/adminGuard";
 import { getPlan } from "@/lib/config";
@@ -204,8 +205,9 @@ export async function GET() {
     // no-op for both consumers, ~90% payload reduction — see the
     // payment-pill-deploystate-fix report).
     const leadAttrByPhone = pruneEmptyChannels(buildLeadAttrByPhone(leads));
+    const legacyLeadByPhone = await lookupLegacyLeadsByPhones(students.map((s) => s.phone));
 
-    return NextResponse.json({ ok: true, students, stats, summaries, catalog, finance, leadAttrByPhone });
+    return NextResponse.json({ ok: true, students, stats, summaries, catalog, finance, leadAttrByPhone, legacyLeadByPhone });
   } catch {
     return NextResponse.json({ ok: false, error: "Failed to load students." }, { status: 500 });
   }

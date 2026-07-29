@@ -16,6 +16,8 @@ import {
   formatTotal,
 } from "./cells";
 import { useWindowedRows } from "./useWindowedRows";
+import LegacyLeadPill from "@/components/admin/LegacyLeadPill";
+import { lookupLegacyMatch, type LegacyLeadMatch } from "@/lib/marketing/legacyLeadMatch";
 
 /**
  * The dense, windowed, server-paginated worklist table.
@@ -98,6 +100,8 @@ export interface WorklistTableProps {
   activeId: string | null;
   /** Bumped by the parent whenever the query changes, to reset the scroll. */
   resetToken: string;
+  /** Historical legacy match for live rows (phone_key → match). */
+  legacyLeadByPhone?: Record<string, LegacyLeadMatch>;
 }
 
 export default function WorklistTable(props: WorklistTableProps) {
@@ -123,6 +127,7 @@ export default function WorklistTable(props: WorklistTableProps) {
     onOpen,
     activeId,
     resetToken,
+    legacyLeadByPhone = {},
   } = props;
 
   const { scrollRef, onScroll, startIndex, endIndex, padTop, padBottom, scrollToTop } =
@@ -267,6 +272,7 @@ export default function WorklistTable(props: WorklistTableProps) {
                     onToggleRow={onToggleRow}
                     onToggleReveal={onToggleReveal}
                     onOpen={onOpen}
+                    legacyMatch={row.is_legacy ? null : lookupLegacyMatch(legacyLeadByPhone, row.phone)}
                   />
                 ))}
                 {padBottom > 0 && (
@@ -355,6 +361,7 @@ const Row = memo(function Row({
   onToggleRow,
   onToggleReveal,
   onOpen,
+  legacyMatch,
 }: {
   row: LeadWorklistRow;
   rowIndex: number;
@@ -364,6 +371,7 @@ const Row = memo(function Row({
   onToggleRow: (id: string) => void;
   onToggleReveal: (id: string) => void;
   onOpen: (row: LeadWorklistRow) => void;
+  legacyMatch: LegacyLeadMatch | null;
 }) {
   const cell = "border-b border-line px-3 align-middle";
   return (
@@ -414,12 +422,15 @@ const Row = memo(function Row({
       </td>
 
       <td className={`${cell} py-0`}>
-        <span className="flex min-w-0 items-center gap-1">
+        <span className="flex min-w-0 flex-wrap items-center gap-1">
           <SourceTag
             legacySourceTab={row.legacy_source_tab}
             source={row.source}
             isLegacy={row.is_legacy}
           />
+          {!row.is_legacy && (
+            <LegacyLeadPill match={legacyMatch} size="compact" />
+          )}
         </span>
       </td>
 

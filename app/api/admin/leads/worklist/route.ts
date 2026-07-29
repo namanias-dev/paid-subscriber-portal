@@ -158,6 +158,15 @@ export async function GET(req: Request) {
       createdTo,
     });
 
+    // LIVE / ALL pages: attach historical legacy match for non-legacy rows on
+    // this page only (set-based). Legacy-scope rows ARE the legacy record.
+    let legacyLeadByPhone: Record<string, import("@/lib/marketing/legacyLeadMatch").LegacyLeadMatch> = {};
+    if (scopeParam !== "legacy") {
+      const { lookupLegacyLeadsByPhones } = await import("@/lib/marketing/legacyLeadMatch");
+      const livePhones = page.rows.filter((r) => !r.is_legacy).map((r) => r.phone);
+      legacyLeadByPhone = await lookupLegacyLeadsByPhones(livePhones);
+    }
+
     return NextResponse.json({
       ok: true,
       scope: scopeParam,
@@ -168,6 +177,7 @@ export async function GET(req: Request) {
       limit: page.limit,
       sort,
       dir,
+      legacyLeadByPhone,
     });
   } catch (e) {
     // HONEST FAILURE. Never a fixture, never an empty list dressed up as "no

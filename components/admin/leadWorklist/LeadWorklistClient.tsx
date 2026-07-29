@@ -56,6 +56,7 @@ export default function LeadWorklistClient({
     loading,
     loadingMore,
     error,
+    legacyLeadByPhone,
     loadMore,
     retry,
     patchRow,
@@ -234,6 +235,7 @@ export default function LeadWorklistClient({
         onOpen={openLead}
         activeId={activeId}
         resetToken={apiSearch}
+        legacyLeadByPhone={legacyLeadByPhone}
       />
 
       <p className="mt-2 px-1 text-[11px] leading-relaxed text-muted">

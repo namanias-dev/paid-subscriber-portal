@@ -35,6 +35,8 @@ import SendSmsButton from "@/components/admin/sms/SendSmsButton";
 import InstallmentReminderButton from "@/components/admin/sms/InstallmentReminderButton";
 import AccessReminderButton from "@/components/admin/sms/AccessReminderButton";
 import SourcePill, { type LeadAttrStamp } from "@/components/admin/SourcePill";
+import LegacyLeadPill from "@/components/admin/LegacyLeadPill";
+import type { LegacyLeadMatch } from "@/lib/marketing/legacyLeadMatch";
 import StatusPill, { statusOf } from "@/components/ui/StatusPill";
 import Modal from "@/components/ui/Modal";
 import { useToast } from "@/components/ui/Toast";
@@ -104,6 +106,7 @@ interface Profile {
   buyerCode: string | null;
   /** Read-only marketing attribution stamp; absent when no lead matches. */
   leadAttribution: LeadAttrStamp | null;
+  legacyLeadMatch?: LegacyLeadMatch | null;
   courses: CourseCard[];
   attempts: AttemptCard[];
   webinars: WebinarRow[];
@@ -328,9 +331,10 @@ export default function StudentProfilePage({ params }: { params: { id: string } 
               <span className="inline-flex items-center gap-1.5 uppercase"><GraduationCap size={14} className="opacity-60" />{s.plan}</span>
               <SendSmsButton phone={s.phone} name={s.name} />
             </div>
-            {profile.leadAttribution?.channel && (
+            {(profile.leadAttribution || profile.legacyLeadMatch) && (
               <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                 <SourcePill attr={profile.leadAttribution} />
+                <LegacyLeadPill match={profile.legacyLeadMatch || null} />
               </div>
             )}
             <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
