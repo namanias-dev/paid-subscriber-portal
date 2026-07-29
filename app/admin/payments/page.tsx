@@ -11,6 +11,7 @@ import PaymentAccountability from "@/components/admin/payments/PaymentAccountabi
 import SortControl from "@/components/admin/SortControl";
 import SourcePill, { lastDigits10, lookupLeadAttr, type LeadAttrStamp } from "@/components/admin/SourcePill";
 import LegacyLeadPill from "@/components/admin/LegacyLeadPill";
+import LegacyCampaignFunnelCard from "@/components/admin/LegacyCampaignFunnelCard";
 import { lookupLegacyMatch, type LegacyLeadMatch } from "@/lib/marketing/legacyLeadMatch";
 import FilterSection from "@/components/admin/payments/FilterSection";
 import SourceFilter, { decodeSourceFilter, encodeSourceFilter } from "@/components/admin/payments/SourceFilter";
@@ -725,6 +726,12 @@ export default function PaymentsAdmin() {
           payments={payments}
           leadAttrByPhone={paymentsUiV2 ? leadAttrByPhone : null}
         />
+      </div>
+
+      {/* Additive read-only legacy campaign → seat/installment funnel.
+          Own endpoint + TTL — does not touch /api/admin/payments payload. */}
+      <div className="mb-4">
+        <LegacyCampaignFunnelCard />
       </div>
 
       {isSuper && <PaymentAccountability />}
