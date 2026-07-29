@@ -22,7 +22,7 @@ import { buildHomeV2Metadata } from "@/components/public/home-v2/seo";
 
 // ISR: ordinary visits should not hammer Postgres while marketing content is fresh enough.
 export const revalidate = 60;
-export const maxDuration = 10;
+export const maxDuration = 20;
 
 async function withBudget<T>(work: Promise<T>, ms: number, fallback: T): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -116,7 +116,7 @@ export default async function HomePage({ searchParams }: { searchParams?: Search
         getSiteSettings(),
         getPublicCaArticles(),
       ]).then(([c, w, s, a]) => ({ c, w, s, a })),
-      6000,
+      4000,
       null as {
         c: Awaited<ReturnType<typeof getPublishedCourses>>;
         w: Awaited<ReturnType<typeof getPublicWebinars>>;

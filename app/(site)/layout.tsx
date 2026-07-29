@@ -29,7 +29,7 @@ async function withBudget<T>(work: Promise<T>, ms: number, fallback: T): Promise
  */
 export default async function SiteLayout({ children }: { children: React.ReactNode }) {
   const emptyWhatsNew = { barItems: [] as Awaited<ReturnType<typeof getWhatsNew>>["barItems"] };
-  const settings = await withBudget(getSiteSettings(), 2500, mergeSiteSettings(null));
+  const settings = await withBudget(getSiteSettings(), 1500, mergeSiteSettings(null));
 
   const [session, buyerSession, upcomingWebinars, whatsNew] = await withBudget(
     Promise.all([
@@ -38,7 +38,7 @@ export default async function SiteLayout({ children }: { children: React.ReactNo
       hasUpcomingWebinars().catch(() => false),
       getWhatsNew().catch(() => emptyWhatsNew),
     ]),
-    3000,
+    2000,
     [null, null, false, emptyWhatsNew] as [
       Awaited<ReturnType<typeof getStudentSession>>,
       Awaited<ReturnType<typeof getBuyerSession>>,
