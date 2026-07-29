@@ -479,6 +479,11 @@ export interface Course {
   id: string;
   slug: string;
   title: string;
+  /**
+   * SMS-ONLY short title for DLT `{item_short}` slots. Never shown on the
+   * public site, SEO, invoices, email, or WhatsApp. Null → auto-shorten(title).
+   */
+  sms_short_title?: string | null;
   category: CourseCategory;
   description: string;
   long_description: string | null;
@@ -1239,6 +1244,11 @@ export interface Webinar {
   id: string;
   slug: string;
   title: string;
+  /**
+   * SMS-ONLY short title for DLT `{item_short}` slots. Never shown on the
+   * public site, SEO, invoices, email, or WhatsApp. Null → auto-shorten(title).
+   */
+  sms_short_title?: string | null;
   description: string;
   datetime: string;
   link: string | null;
