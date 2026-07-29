@@ -17,6 +17,16 @@ import {
   ACCESS_BLOCKED_TEMPLATE_ID,
   ACCESS_EXPIRING_TEMPLATE_ID,
 } from "./accessReminderConstants";
+import {
+  accessPhonesSentToday,
+  enrollmentNeedsCallSet,
+  logManualAccessBulkRun,
+  remainingAccessDailyBudget,
+  templateBreakdown,
+} from "./accessBulkGuards";
+import { normalizeIndianMobile } from "../phone";
+import { getActionActor } from "../adminGuard";
+import { getSupabaseAdmin } from "../supabase";
 import type { CourseEnrollment } from "../types";
 
 const ACCESS_TEMPLATE_SET = new Set([ACCESS_BLOCKED_TEMPLATE_ID, ACCESS_EXPIRING_TEMPLATE_ID]);
@@ -116,18 +126,63 @@ export async function sendAccessReminderBatch(input: {
   actorUserId: string | null;
   allowRecentOverride?: boolean;
   scheduleFollowUps?: boolean;
+  now?: number;
 }): Promise<AccessSendResult | AccessSendRefusal> {
-  const preview = await buildBulkAccessReminders(input.enrollmentIds);
+  const now = input.now ?? Date.now();
+  const budget = await remainingAccessDailyBudget(now);
+
+  if (budget.killSwitch) {
+    return {
+      ok: false, kind: "none_sendable", reason: "kill_switch",
+      detail: "Access reminder kill switch is ON — bulk send is disabled.",
+      excludedByReason: { kill_switch: input.enrollmentIds.length },
+    };
+  }
+  if (budget.quiet) {
+    return {
+      ok: false, kind: "none_sendable", reason: "quiet_hours",
+      detail: "Quiet hours (outside 09:00–20:00 IST) — bulk access SMS will not send.",
+      excludedByReason: { quiet_hours: input.enrollmentIds.length },
+    };
+  }
+
+  const preview = await buildBulkAccessReminders(input.enrollmentIds, { now });
   if (preview.blockReason) {
     return { ok: false, kind: "template", reason: preview.blockReason, detail: preview.blockDetail, excludedByReason: preview.excludedByReason };
   }
 
-  const sendable = preview.previews.filter((p) => p.sendable && p.templateId);
+  const needsCall = await enrollmentNeedsCallSet(input.enrollmentIds);
+  const phonesToday = await accessPhonesSentToday(now);
+  const excludedByReason: Record<string, number> = { ...preview.excludedByReason };
+  const bump = (k: string) => { excludedByReason[k] = (excludedByReason[k] || 0) + 1; };
+
+  const enrollments = new Map<string, CourseEnrollment>();
+  for (const e of await Promise.all(input.enrollmentIds.map((id) => getCourseEnrollmentById(id)))) {
+    if (e) enrollments.set(e.id, e);
+  }
+
+  let sendable = preview.previews.filter((p) => p.sendable && p.templateId);
+  const afterSilencers: AccessReminderPreview[] = [];
+  for (const p of sendable) {
+    if (needsCall.has(p.enrollmentId)) { bump("needs_call"); continue; }
+    const e = enrollments.get(p.enrollmentId);
+    const digits = e ? normalizeIndianMobile(e.phone).digits10 : null;
+    if (digits && phonesToday.has(digits)) { bump("already_sent_today"); continue; }
+    afterSilencers.push(p);
+  }
+  sendable = afterSilencers;
+
+  if (sendable.length > budget.remaining) {
+    const kept = sendable.slice(0, budget.remaining);
+    for (let i = budget.remaining; i < sendable.length; i++) bump("daily_ceiling");
+    sendable = kept;
+  }
+
   if (!sendable.length) {
     return {
       ok: false, kind: "none_sendable", reason: null,
       detail: "None of the selected students can be sent an access reminder.",
-      excludedByReason: preview.excludedByReason,
+      excludedByReason,
     };
   }
 
@@ -139,15 +194,12 @@ export async function sendAccessReminderBatch(input: {
     byTemplate.set(p.templateId, list);
   }
 
-  const enrollments = new Map<string, CourseEnrollment>();
-  for (const e of await Promise.all(sendable.map((p) => getCourseEnrollmentById(p.enrollmentId)))) {
-    if (e) enrollments.set(e.id, e);
-  }
-
   let requested = 0, sent = 0, failed = 0;
   const skipped: Record<string, number> = {};
   let mode = "live";
   let balance: number | null = null;
+  const actor = await getActionActor();
+  const actorLabel = actor?.name || actor?.id || input.actorUserId || "staff";
 
   for (const [templateId, group] of byTemplate) {
     const recipients = group.flatMap((p) => {
@@ -172,7 +224,8 @@ export async function sendAccessReminderBatch(input: {
       audienceType: "access_risk",
       triggerEvent: "manual_access_reminder",
       campaignId: input.jobId,
-      allowRecentOverride: !!input.allowRecentOverride,
+      // Same-day already filtered above — do not let a 30-min override bypass daily cap.
+      allowRecentOverride: false,
     });
     requested += result.requested;
     sent += result.sent;
@@ -182,18 +235,73 @@ export async function sendAccessReminderBatch(input: {
     for (const [k, v] of Object.entries(result.skipped)) skipped[k] = (skipped[k] || 0) + v;
   }
 
+  // Timeline: sms_logs (surfaced on profile) + explicit override-events row with admin actor.
+  await writeAccessReminderTimelineEvents(
+    sendable,
+    enrollments,
+    actorLabel,
+    input.actorUserId || actor?.id || null,
+    input.jobId,
+  );
+
   const followUpsScheduled = input.scheduleFollowUps === false
     ? 0
     : await scheduleAccessFollowUpsForJob(input.jobId, sendable, input.actorUserId);
 
+  await logManualAccessBulkRun({
+    requested,
+    sent,
+    excluded: Object.values(excludedByReason).reduce((a, b) => a + b, 0),
+    haltedReason: "manual_bulk",
+    detail: {
+      jobId: input.jobId,
+      templates: templateBreakdown(sendable),
+      actor: actorLabel,
+    },
+  });
+
   return {
     ok: true,
     requested, sent, failed, skipped, mode, balance,
-    excludedByReason: preview.excludedByReason,
+    excludedByReason,
     followUpsScheduled,
     previews: preview.previews,
     sendablePreviews: sendable,
   };
+}
+
+async function writeAccessReminderTimelineEvents(
+  sendable: AccessReminderPreview[],
+  enrollments: Map<string, CourseEnrollment>,
+  actorLabel: string,
+  actorUserId: string | null,
+  jobId: string,
+): Promise<void> {
+  const db = getSupabaseAdmin();
+  if (!db || !sendable.length) return;
+  const rows = sendable.flatMap((p) => {
+    const e = enrollments.get(p.enrollmentId);
+    if (!e) return [];
+    return [{
+      phone: e.phone,
+      course_id: e.course_id,
+      enrollment_id: p.enrollmentId,
+      student_id: e.student_id ?? null,
+      event_type: "reminder_sent",
+      mode: "grant",
+      expires_at: null,
+      previous_expires_at: null,
+      reason: `Access reminder SMS (${p.templateId}) — installment ${p.installmentNo ?? "?"} · job ${jobId.slice(0, 8)}`,
+      actor_user_id: actorUserId,
+      actor_name: actorLabel,
+      elevated: false,
+    }];
+  });
+  // Chunk inserts; failures must not roll back SMS that already left.
+  for (let i = 0; i < rows.length; i += 40) {
+    const chunk = rows.slice(i, i + 40);
+    await db.from("access_override_events").insert(chunk).then(() => undefined, () => undefined);
+  }
 }
 
 export async function scheduleAccessFollowUpsForJob(

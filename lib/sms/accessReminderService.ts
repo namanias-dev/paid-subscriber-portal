@@ -49,7 +49,12 @@ export type AccessReminderBlockReason =
   | "access_restored"
   | "data_inconsistency"
   | "render_blocked"
-  | "invalid_body";
+  | "invalid_body"
+  | "kill_switch"
+  | "quiet_hours"
+  | "already_sent_today"
+  | "daily_ceiling"
+  | "needs_call";
 
 /** Active temporary grant holding access open (mode=grant, not expired). */
 export function activeAccessGrant(

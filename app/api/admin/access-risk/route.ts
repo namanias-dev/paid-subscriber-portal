@@ -3,7 +3,8 @@ import { requireAnyPermission } from "@/lib/adminGuard";
 import { getAllCourseEnrollments, getAllCourses, getAllAccessOverrides } from "@/lib/dataProvider";
 import { lectureAccessForCourse } from "@/lib/entitlements";
 import { resolveInstallmentForEnrollment } from "@/lib/sms/installmentReminder";
-import { listCapsForEnrollments } from "@/lib/sms/accessCapStore";
+import { getAccessReminderSettings, listCapsForEnrollments } from "@/lib/sms/accessCapStore";
+import { accessInQuietHours } from "@/lib/sms/accessBulkGuards";
 import { listLogs } from "@/lib/sms/store";
 import { activeAccessGrant, buildBulkAccessReminders } from "@/lib/sms/accessReminderService";
 import { deriveEnrollment, paymentProgressLabel } from "@/lib/installments";
@@ -189,6 +190,8 @@ export async function GET() {
     scheduleStatus: r.scheduleAccess.status,
   }));
 
+  const settings = await getAccessReminderSettings();
+
   return NextResponse.json({
     ok: true,
     rows,
@@ -199,6 +202,14 @@ export async function GET() {
       total: rows.length,
       remindEnabled: rows.filter((r) => r.remindEnabled).length,
       notActionable: rows.filter((r) => !r.remindEnabled).length,
+    },
+    automation: {
+      killSwitch: settings.killSwitch,
+      enabled: settings.enabled,
+      dryRun: settings.dryRun,
+      rampLimit: settings.rampLimit,
+      dailyCeiling: settings.dailyCeiling,
+      quietHours: accessInQuietHours(now),
     },
   });
 }

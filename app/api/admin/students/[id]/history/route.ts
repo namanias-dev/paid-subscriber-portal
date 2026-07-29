@@ -44,7 +44,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
       .select("id, created_at, amount, status, item, payment_kind, installment_no, mode, reference_no, receipt_no")
       .eq("phone", phone).eq("status", "PAID").order("created_at", { ascending: false }).limit(200),
     db.from("sms_logs")
-      .select("id, created_at, sent_at, template_name, status, sent_by_type, installment_no, course_id")
+      .select("id, created_at, sent_at, template_name, status, sent_by_type, sent_by_user_id, installment_no, course_id")
       .eq("normalized_mobile", normalize(phone)).order("created_at", { ascending: false }).limit(200),
     db.from("access_reminder_caps").select("*").eq("student_id", id),
     db.from("access_override_events").select("*").eq("phone", phone).order("created_at", { ascending: false }).limit(100),

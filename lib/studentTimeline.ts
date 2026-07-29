@@ -296,14 +296,15 @@ export function paymentEvent(p: PaymentRow): TimelineEvent {
 
 export interface SmsRow {
   id: string; created_at: string; sent_at: string | null; template_name: string | null;
-  status: string; sent_by_type: string | null; installment_no: number | null; course_id: string | null;
+  status: string; sent_by_type: string | null; sent_by_user_id?: string | null;
+  installment_no: number | null; course_id: string | null;
 }
 
 export function smsEvent(s: SmsRow): TimelineEvent {
   const when = s.sent_at ?? s.created_at;
   const name = s.template_name ?? "SMS";
   const actorName = s.sent_by_type === "ADMIN"
-    ? "staff"
+    ? (s.sent_by_user_id || "staff")
     : s.sent_by_type === "SYSTEM"
       ? "System · automated"
       : "automated";
@@ -313,7 +314,7 @@ export function smsEvent(s: SmsRow): TimelineEvent {
     at: when,
     title: `SMS sent — ${name}${s.installment_no != null ? ` (installment ${s.installment_no})` : ""}`,
     detail: `Delivery status: ${s.status}`,
-    actor: { id: null, name: actorName },
+    actor: { id: s.sent_by_user_id ?? null, name: actorName },
     reason: null,
     changes: [],
     snapshot: null,
@@ -524,27 +525,35 @@ export function scheduleReanchorEvent(row: ScheduleReanchorRow, courseTitle?: st
 export interface AccessOverrideEventRow {
   id: string;
   created_at: string;
-  kind: string;
-  detail: string | null;
+  /** Live column — prefer this. */
+  event_type?: string | null;
+  /** Legacy / mistyped insert shape still seen in some writers. */
+  kind?: string | null;
+  detail?: string | null;
   reason: string | null;
-  actor: string | null;
+  actor?: string | null;
+  actor_name?: string | null;
+  actor_user_id?: string | null;
   course_id: string | null;
 }
 
 export function accessOverrideEvent(row: AccessOverrideEventRow): TimelineEvent {
+  const kind = row.event_type || row.kind || "";
   const titles: Record<string, string> = {
     granted: "Access override granted",
     revoked: "Access override revoked",
     shortened: "Access override shortened",
     expired: "Access override expired",
+    reminder_sent: "Access reminder SMS sent",
   };
+  const actorName = row.actor_name || row.actor || "staff";
   return {
     id: `access_ovr:${row.id}`,
     type: "access_override",
     at: row.created_at,
-    title: titles[row.kind] || "Access override",
-    detail: row.detail,
-    actor: { id: row.actor, name: row.actor || "staff" },
+    title: titles[kind] || "Access override",
+    detail: row.detail ?? row.reason,
+    actor: { id: row.actor_user_id ?? row.actor ?? null, name: actorName },
     reason: row.reason,
     changes: [],
     snapshot: null,
