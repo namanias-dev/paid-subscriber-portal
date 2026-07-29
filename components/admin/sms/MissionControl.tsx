@@ -780,7 +780,7 @@ function LiveStatusPanel({ campaignId, onClose, onResend, busy }: { campaignId: 
               </tbody>
             </table>
           </div>
-          <p className="text-xs text-muted">Resend-to-failed re-runs the same audience for just the failed numbers — all caps, the DLT/approved-template gate, the kill-switch, the balance guard and in-batch dedupe still apply (a delivered number is never re-texted).</p>
+          <p className="text-xs text-muted">Resend-to-failed re-renders through the current short-title pipeline (never replays a stored body that may still have a &gt;50-char title). Caps, DLT gate, kill-switch, balance guard and in-batch dedupe still apply — delivered numbers are never re-texted.</p>
         </>
       )}
     </div>
@@ -800,7 +800,7 @@ function CampaignsTab({ canResend }: { canResend: boolean }) {
   useEffect(() => { load(); }, [load]);
 
   async function resend(id: string) {
-    if (!confirm("Resend this campaign's message to every FAILED number? Delivered/sent numbers are never re-texted; opt-outs, kill-switch and the daily cap still apply.")) return;
+    if (!confirm("Resend to every FAILED number with a FRESH render of the current template (short-title pipeline — does NOT replay the stored body)? Delivered/sent numbers are never re-texted; opt-outs, kill-switch and the daily cap still apply.")) return;
     setBusy(true);
     try {
       const r = await fetch("/api/admin/sms/campaign", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, action: "resend_failed" }) }).then((x) => x.json());
@@ -1435,8 +1435,10 @@ function LogsTab() {
   useEffect(() => { load(); }, [load]);
 
   async function retry(id: string) {
+    if (!confirm("Retry with a FRESH render of the current template (short-title pipeline — will not replay a stored body that still has a >50-char title)?")) return;
     const r = await fetch("/api/admin/sms/logs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "retry", id }) }).then((x) => x.json());
-    toast(r.ok ? "Resent." : "Retry failed.", r.ok ? "success" : "error"); load();
+    const detail = r.result?.error || r.result?.skipped || r.error;
+    toast(r.ok ? "Resent (re-rendered)." : (detail || "Retry failed."), r.ok ? "success" : "error"); load();
   }
 
   return (
