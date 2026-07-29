@@ -27,7 +27,7 @@ describe("renderTemplate clamps item_short only", () => {
   const body =
     "Hi {first_name}, your payment for the course fee of {item_short} is pending. Login: {login_url} Code: {login_code} to complete payment. Naman Sharma IAS Academy.";
 
-  test("long item_short is clamped; short item_short and other vars unchanged", () => {
+  test("long item_short is auto-shortened (year kept) then clamped", () => {
     const { text, missing } = renderTemplate(body, {
       first_name: "Faika",
       item_short: "UPSC Full Masterclass By Naman Sir - 01 August 2026",
@@ -36,7 +36,7 @@ describe("renderTemplate clamps item_short only", () => {
     });
     assert.deepEqual(missing, []);
     assert.ok(!text.includes("01 August 2026"));
-    assert.ok(text.includes("01 August"));
+    assert.ok(text.includes("01 Aug 2026"));
     assert.ok(text.includes("https://www.namanias.com/login"));
     assert.ok(text.includes("43TJXM9"));
   });

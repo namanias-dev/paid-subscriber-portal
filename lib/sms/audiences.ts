@@ -21,6 +21,7 @@ import {
 } from "../dataProvider";
 import { isPaidStatus } from "../paymentsAgg";
 import { firstNamesMatch, optedOutSet } from "./store";
+import { resolveSmsItemShort } from "./smsTitle";
 import type { RelatedEntity } from "./service";
 import type { Payment } from "../types";
 
@@ -156,7 +157,9 @@ async function zoomClickedPhones(webinarSlug: string | null): Promise<Set<string
 }
 
 function paymentVars(p: Payment): Record<string, string> {
-  return { item_short: p.item || p.item_slug || "your purchase", item_name: p.item || "", amount: String(p.amount ?? ""), payment_status: p.status };
+  // Both DLT free-text slots get the SMS short title — never the public full title.
+  const short = resolveSmsItemShort({ fallback: p.item || p.item_slug || "your purchase" });
+  return { item_short: short, item_name: short, amount: String(p.amount ?? ""), payment_status: p.status };
 }
 
 function dedupeRecipients(list: Recipient[]): Recipient[] {
@@ -280,7 +283,8 @@ async function resolveAudienceInner(spec: AudienceSpec): Promise<Recipient[]> {
   if (spec.type.startsWith("webinar_")) {
     const webinar = spec.webinarSlug ? await getWebinarBySlug(spec.webinarSlug) : (await getWebinars()).find((w) => w.id === spec.webinarId) || null;
     if (!webinar) return [];
-    const vars = { item_short: webinar.title, item_name: webinar.title, webinar_time: formatISTTime(webinar.datetime), webinar_date: webinar.datetime };
+    const short = resolveSmsItemShort({ smsShortTitle: webinar.sms_short_title, fullTitle: webinar.title });
+    const vars = { item_short: short, item_name: short, webinar_time: formatISTTime(webinar.datetime), webinar_date: webinar.datetime };
     const regs = await getWebinarRegistrationsByWebinar(webinar.id);
     const regByPhone = new Map<string, { name: string | null; id: string; attended: boolean; createdMs: number }>();
     for (const r of regs) { const d = norm(r.phone); if (d) regByPhone.set(d, { name: r.name, id: r.id, attended: !!r.attended, createdMs: new Date(r.created_at).getTime() }); }
@@ -438,7 +442,8 @@ export async function resolveFilteredAudience(f: FilterSpec): Promise<Recipient[
     const webinar = await getWebinarBySlug(f.webinarSlug!);
     webinarDim = new Map();
     if (webinar) {
-      webinarVars = { item_short: webinar.title, item_name: webinar.title, webinar_time: formatISTTime(webinar.datetime), webinar_date: webinar.datetime };
+      const short = resolveSmsItemShort({ smsShortTitle: webinar.sms_short_title, fullTitle: webinar.title });
+      webinarVars = { item_short: short, item_name: short, webinar_time: formatISTTime(webinar.datetime), webinar_date: webinar.datetime };
       const isPaidWebinar = (webinar.price ?? 0) > 0;
       const payByPhone = isPaidWebinar ? await getWebinarPaymentStatusesForSlug(webinar.slug) : null;
       const payRowDate = new Map<string, number>(); // phone -> latest webinar payment ms
@@ -487,7 +492,8 @@ export async function resolveFilteredAudience(f: FilterSpec): Promise<Recipient[
   let candidates = new Set<string>(active[0].keys());
   for (let i = 1; i < active.length; i++) candidates = new Set([...candidates].filter((d) => active[i].has(d)));
 
-  const courseTitle = wantCourse ? (await getAllCourses()).find((c) => c.slug === f.courseSlug)?.title ?? null : null;
+  const courses = wantCourse ? await getAllCourses() : [];
+  const course = wantCourse ? courses.find((c) => c.slug === f.courseSlug) ?? null : null;
 
   const out: Recipient[] = [];
   for (const d of candidates) {
@@ -500,7 +506,11 @@ export async function resolveFilteredAudience(f: FilterSpec): Promise<Recipient[
     }
     if (!ok) continue;
     const vars: Record<string, string | number | null | undefined> = { ...webinarVars };
-    if (courseTitle && !vars.item_short) { vars.item_short = courseTitle; vars.item_name = courseTitle; }
+    if (course && !vars.item_short) {
+      const short = resolveSmsItemShort({ smsShortTitle: course.sms_short_title, fullTitle: course.title });
+      vars.item_short = short;
+      vars.item_name = short;
+    }
     out.push(attach(d, name, vars, {
       webinar_id: wantWebinar ? f.webinarSlug : null,
       course_id: wantCourse ? f.courseSlug : null,

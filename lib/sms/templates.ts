@@ -16,6 +16,7 @@
 import type { SmsMessageType, SmsUseCase } from "./types";
 import { buildVarIndex, isResolvedValue, lookupVariable } from "./variableRegistry";
 import { replacePlaceholders, uniqueVariables } from "./placeholders";
+import { resolveSmsItemShort } from "./smsTitle";
 
 export const BRAND_LINE = "Naman Sharma IAS Academy";
 export const MAX_RECOMMENDED_CHARS = 155;
@@ -236,8 +237,12 @@ export function renderTemplate(body: string, vars: Record<string, string | numbe
       return full;
     }
     const raw = String(v);
-    // DLT free-text slots reject oversize values post-accept (`dlr:Other`).
-    if (DLT_LENGTH_CLAMPED_VARS.has(key)) return clampDltFreeTextVar(raw);
+    // Free-text DLT slots: auto-shorten (keeps year) then clamp as last-mile.
+    // Manual sms_short_title is applied upstream when building vars; this path
+    // also covers payment.item / audience leftovers that never saw an entity.
+    if (DLT_LENGTH_CLAMPED_VARS.has(key)) {
+      return resolveSmsItemShort({ fallback: raw, max: DLT_FREE_TEXT_VAR_MAX });
+    }
     return raw;
   });
   return { text, missing };
