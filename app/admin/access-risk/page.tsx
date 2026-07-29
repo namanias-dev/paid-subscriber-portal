@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { PageHeader, LoadingBlock, TableShell } from "@/components/admin/ui";
 import AtRiskTabs from "@/components/admin/people/AtRiskTabs";
+import StudentNameLink from "@/components/admin/StudentNameLink";
 import { useToast } from "@/components/ui/Toast";
 import AccessReminderButton from "@/components/admin/sms/AccessReminderButton";
 import BulkAccessReminder from "@/components/admin/sms/BulkAccessReminder";
@@ -29,6 +30,7 @@ interface RiskRow {
   progressLabel: string;
   access: { allowed: boolean; status: string; reason: string; daysLeft?: number | null };
   scheduleAccess: { status: string; reason: string; graceEndsAt?: string | null; daysLeft?: number | null };
+  riskKind?: string | null;
   grant: { expiresAt: string | null; note: string | null; createdBy: string | null; daysLeft: number | null } | null;
   autoUsed: number;
   needsCall: boolean;
@@ -36,6 +38,8 @@ interface RiskRow {
   lastRemindedAt: string | null;
   paymentFailures: number;
   verifyingStuck: number;
+  remindEnabled?: boolean;
+  inactionReason?: string | null;
 }
 
 interface AccessRiskPayload {
@@ -78,16 +82,19 @@ export default function AccessRiskAdmin() {
 
   const list = useMemo(() => {
     if (filter === "needs_call") return listSource.filter((r) => r.needsCall);
-    if (filter === "grants") return listSource.filter((r) => r.grant);
+    if (filter === "grants") return listSource.filter((r) => !!r.grant);
+    if (filter === "not_actionable") return listSource.filter((r) => !r.remindEnabled);
+    if (filter === "blocked") return listSource.filter((r) => r.scheduleAccess?.status === "blocked");
+    if (filter === "grace") return listSource.filter((r) => r.scheduleAccess?.status === "grace");
     if (filter === "payment_fail") return listSource.filter((r) => r.paymentFailures >= 2 || r.verifyingStuck > 0);
-    if (!filter) return listSource;
-    return listSource.filter((r) => r.scheduleAccess?.status === filter || (!r.access.allowed && filter === "blocked"));
+    return listSource;
   }, [listSource, filter]);
 
   const blocked = listSource.filter((r) => r.scheduleAccess?.status === "blocked").length;
   const grace = listSource.filter((r) => r.scheduleAccess?.status === "grace").length;
   const needsCallCount = listSource.filter((r) => r.needsCall).length;
   const grantCount = listSource.filter((r) => r.grant).length;
+  const notActionable = listSource.filter((r) => !r.remindEnabled).length;
   const totalDue = listSource.reduce((s, r) => s + (r.amountDue || 0), 0);
 
   const visibleIds = useMemo(() => new Set(list.map((r) => r.enrollmentId)), [list]);
@@ -198,12 +205,15 @@ export default function AccessRiskAdmin() {
       )}
 
       <div className="mb-3 flex flex-wrap gap-2">
-        {["", "blocked", "grace", "grants", "needs_call", "payment_fail"].map((f) => (
+        {(["", "blocked", "grace", "grants", "needs_call", "not_actionable"] as const).map((f) => (
           <button key={f || "all"} onClick={() => setFilter(f)} className={`pill ${filter === f ? "pill-blue" : "pill-gray"}`}>
-            {f === "" ? "All" : f === "needs_call" ? `Needs call (${needsCallCount})`
-              : f === "grants" ? `Access granted (${grantCount})`
-                : f === "payment_fail" ? "Payment failures"
-                  : f[0].toUpperCase() + f.slice(1)}
+            {f === "" ? "All"
+              : f === "needs_call" ? `Needs call (${needsCallCount})`
+                : f === "grants" ? `Access granted (${grantCount})`
+                  : f === "not_actionable" ? `Not actionable (${notActionable})`
+                    : f === "blocked" ? `Blocked (${blocked})`
+                      : f === "grace" ? `In grace (${grace})`
+                        : f}
           </button>
         ))}
       </div>
@@ -215,8 +225,11 @@ export default function AccessRiskAdmin() {
               <input type="checkbox" checked={selected.has(r.enrollmentId)} onChange={() => toggleRow(r.enrollmentId)} className="h-3.5 w-3.5 accent-[color:var(--primary)]" aria-label={`Select ${r.student}`} />
             </td>
             <td className="px-4 py-3">
-              <div className="font-medium">{r.student}</div>
+              <StudentNameLink studentId={r.studentId} enrollmentId={r.enrollmentId} name={r.student} />
               <div className="text-xs text-muted">{r.phone}</div>
+              {r.inactionReason && !r.remindEnabled && (
+                <div className="mt-0.5 text-[10px] font-semibold text-amber-800">{r.inactionReason}</div>
+              )}
               {r.paymentFailures >= 2 && <div className="text-[10px] font-semibold text-danger">{r.paymentFailures} failed attempts</div>}
               {r.verifyingStuck > 0 && <div className="text-[10px] font-semibold text-amber-700">VERIFYING stuck</div>}
             </td>
@@ -256,7 +269,10 @@ export default function AccessRiskAdmin() {
             </td>
             <td className="px-4 py-3">
               <div className="flex flex-wrap items-center justify-end gap-2 text-xs">
-                <AccessReminderButton enrollmentId={r.enrollmentId} />
+                <AccessReminderButton
+                  enrollmentId={r.enrollmentId}
+                  disabledReason={!r.remindEnabled ? (r.inactionReason || "Not actionable") : null}
+                />
                 {r.studentId ? (
                   <Link href={`/admin/students/${r.studentId}?enrollmentId=${r.enrollmentId}`} className="text-xs font-semibold text-primary hover:underline">View</Link>
                 ) : <span className="text-xs text-muted">—</span>}

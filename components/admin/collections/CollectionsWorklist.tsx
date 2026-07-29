@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { AlertTriangle, Phone, Search } from "lucide-react";
 import { useAdminData, LoadingBlock } from "@/components/admin/ui";
+import StudentNameLink from "@/components/admin/StudentNameLink";
 import InstallmentReminderButton from "@/components/admin/sms/InstallmentReminderButton";
 import BulkInstallmentReminder from "@/components/admin/sms/BulkInstallmentReminder";
 import ReminderStatePill from "@/components/admin/sms/ReminderStatePill";
@@ -311,7 +312,7 @@ export default function CollectionsWorklist() {
                     />
                   </td>
                   <td className="px-4 py-3">
-                    <div className="font-medium text-ink">{e.student_name}</div>
+                    <StudentNameLink studentId={e.student_id} enrollmentId={e.id} name={e.student_name} />
                     <div className="mt-0.5 flex items-center gap-2 text-xs text-muted">
                       <a href={`tel:${e.phone}`} className="inline-flex items-center gap-1 hover:text-primary" onClick={(ev) => ev.stopPropagation()}>
                         <Phone size={11} /> {e.phone}

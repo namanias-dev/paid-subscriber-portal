@@ -1,0 +1,134 @@
+/**
+ * ONE shared Access At Risk definition used by the admin list AND the reminder
+ * gate / automation. A student must never appear on the list with no actionable
+ * reason — pending ₹0 attempts are not collections cases.
+ */
+import { isActiveEnrollment } from "./installments";
+import { formatISTDate } from "./dates";
+import type { CourseEnrollment, CourseAccessOverride, InstallmentItem } from "./types";
+import type { LectureAccess } from "./entitlements";
+import { activeAccessGrant } from "./sms/accessReminderService";
+
+export type AccessAtRiskKind =
+  | "schedule_blocked"
+  | "schedule_grace"
+  | "grant_holding";
+
+export interface AccessAtRiskDecision {
+  onList: boolean;
+  kind: AccessAtRiskKind | null;
+  /** Schedule status used for the decision (ignores temporary grants). */
+  scheduleStatus: string;
+  /** Why Remind may be disabled even when the row stays visible. */
+  inactionReason: string | null;
+}
+
+/** Collections risk from schedule alone (grace / overdue-blocked). Not "expiring" full-pay windows. */
+export function isScheduleCollectionsRisk(access: Pick<LectureAccess, "status" | "reason">): boolean {
+  if (access.status === "grace") return true;
+  if (access.status === "blocked" && access.reason === "overdue") return true;
+  return false;
+}
+
+export function outstandingAmount(e: Pick<CourseEnrollment, "total_fee" | "amount_paid">): number {
+  return Math.max(0, (e.total_fee || 0) - (e.amount_paid || 0));
+}
+
+/**
+ * Shared list predicate. Requires a real paid enrollment; pending ₹0 rows with
+ * phantom schedules must never appear.
+ */
+export function isAccessAtRiskEnrollment(input: {
+  enrollment: CourseEnrollment;
+  scheduleAccess: LectureAccess;
+  override?: CourseAccessOverride | null;
+  now?: number;
+}): boolean {
+  const e = input.enrollment;
+  if (!isActiveEnrollment(e)) return false;
+  if (e.status === "cancelled" || e.status === "transferred_out") return false;
+  const owed = outstandingAmount(e);
+  if (owed <= 0) return false;
+  if (isScheduleCollectionsRisk(input.scheduleAccess)) return true;
+  const grant = activeAccessGrant(input.override, input.now);
+  return !!grant && owed > 0;
+}
+
+export function classifyAccessAtRisk(input: {
+  enrollment: CourseEnrollment;
+  scheduleAccess: LectureAccess;
+  override?: CourseAccessOverride | null;
+  now?: number;
+}): AccessAtRiskDecision {
+  const e = input.enrollment;
+  const scheduleStatus = input.scheduleAccess.status;
+  if (!isActiveEnrollment(e)) {
+    return { onList: false, kind: null, scheduleStatus, inactionReason: "No paid enrollment — not a collections case" };
+  }
+  const owed = outstandingAmount(e);
+  if (owed <= 0) {
+    return { onList: false, kind: null, scheduleStatus, inactionReason: null };
+  }
+  const grant = activeAccessGrant(input.override, input.now);
+  const scheduleRisk = isScheduleCollectionsRisk(input.scheduleAccess);
+  const grantHolding = !!grant && owed > 0;
+  if (!scheduleRisk && !grantHolding) {
+    return { onList: false, kind: null, scheduleStatus, inactionReason: null };
+  }
+  const kind: AccessAtRiskKind = scheduleRisk
+    ? (input.scheduleAccess.status === "grace" ? "schedule_grace" : "schedule_blocked")
+    : "grant_holding";
+  return { onList: true, kind, scheduleStatus, inactionReason: null };
+}
+
+/** Next unpaid dated installment (installment/seat/full), for staff copy. */
+export function nextUnpaidDatedLine(schedule: InstallmentItem[] | null | undefined): InstallmentItem | null {
+  const items = (schedule || [])
+    .filter((s) => !s.paid && s.status !== "cancelled" && s.status !== "waived" && s.due)
+    .slice()
+    .sort((a, b) => Date.parse(a.due as string) - Date.parse(b.due as string));
+  return items[0] ?? null;
+}
+
+/**
+ * Human reason when Remind should be disabled on a row. Prefer concrete next-due
+ * / grant / opt-out / needs_call copy over a bare "excluded".
+ */
+export function humanRemindInaction(input: {
+  blockReason: string | null | undefined;
+  blockDetail?: string | null;
+  needsCall?: boolean;
+  needsCallReason?: string | null;
+  grantExpiresAt?: string | null;
+  nextUnpaid?: InstallmentItem | null;
+  scheduleStatus?: string | null;
+}): string | null {
+  if (input.needsCall) {
+    return input.needsCallReason
+      ? `Flagged for call — ${input.needsCallReason}`
+      : "Flagged for call — payment failures";
+  }
+  const br = input.blockReason || "";
+  if (br === "opted_out") return "Opted out";
+  if (br === "missing_phone" || br === "invalid_mobile") return "No phone on record";
+  if (br === "cap_reached" || br === "needs_call") {
+    return input.needsCallReason || "Reminder cap reached";
+  }
+  if (br === "not_access_risk" || br === "no_unpaid_installment") {
+    const next = input.nextUnpaid;
+    if (next?.due) {
+      return `Not due yet — ${next.label} due ${formatISTDate(next.due)}`;
+    }
+    return "Not due yet — current on plan";
+  }
+  if (br === "no_active_enrollment") return "No paid enrollment — not a collections case";
+  if (br === "days_not_positive" && input.grantExpiresAt) {
+    return `Access granted until ${formatISTDate(input.grantExpiresAt)}`;
+  }
+  if (input.grantExpiresAt && input.scheduleStatus === "active") {
+    return `Access granted until ${formatISTDate(input.grantExpiresAt)}`;
+  }
+  if (input.blockDetail) return input.blockDetail;
+  if (br) return br.replace(/_/g, " ");
+  return null;
+}

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { ChevronLeft, ChevronRight, Search } from "lucide-react";
 import { useAdminData, LoadingBlock } from "@/components/admin/ui";
+import StudentNameLink from "@/components/admin/StudentNameLink";
 import { HeaderStat, InstallmentSchedule } from "@/components/admin/collections/parts";
 import InstallmentReminderButton from "@/components/admin/sms/InstallmentReminderButton";
 import { formatINR, formatISTDate } from "@/lib/dates";
@@ -222,7 +223,7 @@ export default function CohortDrillIn() {
                       className="cursor-pointer border-b border-line last:border-0 hover:bg-surface2"
                     >
                       <td className="px-4 py-3">
-                        <div className="font-medium text-ink">{e.student_name}</div>
+                        <StudentNameLink studentId={e.student_id} enrollmentId={e.id} name={e.student_name} />
                         <div className="mt-0.5 flex items-center gap-2 text-xs text-muted">
                           <span>{e.phone}</span>
                           {e.plan_type === "emi" && <span className="uppercase">EMI ×{e.installment_count}</span>}
