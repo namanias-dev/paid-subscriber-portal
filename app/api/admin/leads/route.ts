@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getLeads, addLead } from "@/lib/dataProvider";
 import { requirePermission } from "@/lib/adminGuard";
+import { lookupLegacyLeadsByPhones } from "@/lib/marketing/legacyLeadMatch";
 
 export const dynamic = "force-dynamic";
 
@@ -17,7 +18,11 @@ export async function GET(req: Request) {
     const includeLegacyParam = url.searchParams.get("include_legacy");
     const includeLegacy = includeLegacyParam === "1" || includeLegacyParam === "true";
     const leads = await getLeads({ includeLegacy });
-    return NextResponse.json({ ok: true, leads, includeLegacy });
+    // Additive historical match for the CURRENT live set only (~1.1k phones).
+    const legacyLeadByPhone = includeLegacy
+      ? {}
+      : await lookupLegacyLeadsByPhones(leads.map((l) => l.phone));
+    return NextResponse.json({ ok: true, leads, includeLegacy, legacyLeadByPhone });
   } catch {
     return NextResponse.json({ ok: false, error: "Failed to load leads." }, { status: 500 });
   }

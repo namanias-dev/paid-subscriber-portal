@@ -4,6 +4,7 @@ import { getAllProofs, buildProofAccessSnapshot, phoneHasAccessToItemSync } from
 import { requireAdmin, requireAnyPermission, requirePermission, requireSuperAdmin } from "@/lib/adminGuard";
 import { isPaymentsUiV2Enabled } from "@/lib/marketing/paymentsUiFlag";
 import { buildLeadAttrByPhone, pruneEmptyChannels } from "@/lib/marketing/leadAttrByPhone";
+import { lookupLegacyLeadsByPhones } from "@/lib/marketing/legacyLeadMatch";
 import type { PaymentProof } from "@/lib/types";
 
 /**
@@ -104,6 +105,10 @@ export async function GET() {
       buildLeadAttrByPhone(leads),
     );
 
+    // Additive historical match — CURRENT payment phones only (set-based).
+    // Never mutates source/status; never runs on the payment write path.
+    const legacyLeadByPhone = await lookupLegacyLeadsByPhones(payments.map((p) => p.phone));
+
     // UI capability flags: who can take staff write actions (manage_payments) and
     // who can see super-admin-only controls (reverse, accountability, history).
     const [canManage, isSuper] = await Promise.all([requirePermission("manage_payments"), requireSuperAdmin()]);
@@ -113,7 +118,7 @@ export async function GET() {
     // back to the pre-shipment card + filter layout without a redeploy.
     const paymentsUiV2 = isPaymentsUiV2Enabled();
 
-    return NextResponse.json({ ok: true, payments, enrollments, buyerCodes, proofs, itemNames, leadAttrByPhone, canManage, isSuper, paymentsUiV2 });
+    return NextResponse.json({ ok: true, payments, enrollments, buyerCodes, proofs, itemNames, leadAttrByPhone, legacyLeadByPhone, canManage, isSuper, paymentsUiV2 });
   } catch {
     return NextResponse.json({ ok: false, error: "Failed to load payments." }, { status: 500 });
   }

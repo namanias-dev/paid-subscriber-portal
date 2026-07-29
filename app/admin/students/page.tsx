@@ -6,6 +6,8 @@ import { RefreshCw, Search, Users } from "lucide-react";
 import { PageHeader, LoadingBlock, KpiCard } from "@/components/admin/ui";
 import PeopleTabs from "@/components/admin/people/PeopleTabs";
 import SourcePill, { lookupLeadAttr, type LeadAttrStamp } from "@/components/admin/SourcePill";
+import LegacyLeadPill from "@/components/admin/LegacyLeadPill";
+import { lookupLegacyMatch, type LegacyLeadMatch } from "@/lib/marketing/legacyLeadMatch";
 import CourseFeesStrip from "@/components/admin/students/CourseFeesStrip";
 import StatusPill, { statusOf } from "@/components/ui/StatusPill";
 import { useToast } from "@/components/ui/Toast";
@@ -41,6 +43,8 @@ interface ApiResponse {
   finance?: { courseFeesCollected: number; courseFeesOutstanding: number; webinarReceipts: number };
   /** Read-only phone -> marketing attribution; absent for legacy environments. */
   leadAttrByPhone?: Record<string, LeadAttrStamp>;
+  /** Additive historical legacy match by phone — never mutates current source. */
+  legacyLeadByPhone?: Record<string, LegacyLeadMatch>;
 }
 
 const EMPTY_SUMMARY: Summary = {
@@ -136,6 +140,7 @@ export default function StudentsAdmin() {
   const summaries = data?.summaries ?? {};
   const catalog = data?.catalog ?? { courses: [], webinars: [] };
   const leadAttrByPhone = data?.leadAttrByPhone ?? {};
+  const legacyLeadByPhone = data?.legacyLeadByPhone ?? {};
 
   const rows = useMemo(() => {
     const term = q.trim().toLowerCase();
@@ -329,10 +334,12 @@ export default function StudentsAdmin() {
                       </div>
                       {(() => {
                         const attr = lookupLeadAttr(leadAttrByPhone, s.phone);
-                        if (!attr?.channel) return null;
+                        const legacy = lookupLegacyMatch(legacyLeadByPhone, s.phone);
+                        if (!attr?.channel && !attr?.displayChannel && !legacy) return null;
                         return (
                           <div className="mt-1 flex flex-wrap items-center gap-1">
                             <SourcePill attr={attr} size="compact" />
+                            <LegacyLeadPill match={legacy} size="compact" />
                           </div>
                         );
                       })()}
@@ -376,10 +383,12 @@ export default function StudentsAdmin() {
                     <p className="mt-0.5 text-xs text-muted">{s.phone} · <span className="font-mono text-primary">{s.access_code}</span></p>
                     {(() => {
                       const attr = lookupLeadAttr(leadAttrByPhone, s.phone);
-                      if (!attr?.channel) return null;
+                      const legacy = lookupLegacyMatch(legacyLeadByPhone, s.phone);
+                      if (!attr?.channel && !attr?.displayChannel && !legacy) return null;
                       return (
                         <div className="mt-1 flex flex-wrap items-center gap-1">
                           <SourcePill attr={attr} size="compact" />
+                          <LegacyLeadPill match={legacy} size="compact" />
                         </div>
                       );
                     })()}

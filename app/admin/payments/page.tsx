@@ -10,6 +10,8 @@ import SendSmsButton from "@/components/admin/sms/SendSmsButton";
 import PaymentAccountability from "@/components/admin/payments/PaymentAccountability";
 import SortControl from "@/components/admin/SortControl";
 import SourcePill, { lastDigits10, lookupLeadAttr, type LeadAttrStamp } from "@/components/admin/SourcePill";
+import LegacyLeadPill from "@/components/admin/LegacyLeadPill";
+import { lookupLegacyMatch, type LegacyLeadMatch } from "@/lib/marketing/legacyLeadMatch";
 import FilterSection from "@/components/admin/payments/FilterSection";
 import SourceFilter, { decodeSourceFilter, encodeSourceFilter } from "@/components/admin/payments/SourceFilter";
 import SearchBar from "@/components/ui/SearchBar";
@@ -119,6 +121,10 @@ export default function PaymentsAdmin() {
   const leadAttrByPhone = useAdminData<Record<string, LeadAttrStamp>>(
     "/api/admin/payments",
     "leadAttrByPhone",
+  ).data || {};
+  const legacyLeadByPhone = useAdminData<Record<string, LegacyLeadMatch>>(
+    "/api/admin/payments",
+    "legacyLeadByPhone",
   ).data || {};
   const canManage = useAdminData<boolean>("/api/admin/payments", "canManage").data || false;
   const isSuper = useAdminData<boolean>("/api/admin/payments", "isSuper").data || false;
@@ -364,7 +370,12 @@ export default function PaymentsAdmin() {
       name: r.name,
       phone: r.phone || undefined,
       tag: r.code ? <span className="font-mono text-[11px] font-semibold text-primary">{r.code}</span> : undefined,
-      meta: <SourcePill attr={lookupLeadAttr(leadAttrByPhone, r.phone)} />,
+      meta: (
+        <span className="inline-flex flex-wrap items-center gap-1">
+          <SourcePill attr={lookupLeadAttr(leadAttrByPhone, r.phone)} />
+          <LegacyLeadPill match={lookupLegacyMatch(legacyLeadByPhone, r.phone)} size="compact" />
+        </span>
+      ),
       summary: (
         <div className="flex flex-col items-end gap-1">
           <span className="text-sm font-bold text-ink">{formatINR(r.paidTotal)}</span>
@@ -382,7 +393,7 @@ export default function PaymentsAdmin() {
       ),
       nodes: r.nodes,
     }));
-  }, [visibleGroups, sort, buyerCodes, proofs, reverifying, canManage, showSuperseded, itemNames, leadAttrByPhone]);
+  }, [visibleGroups, sort, buyerCodes, proofs, reverifying, canManage, showSuperseded, itemNames, leadAttrByPhone, legacyLeadByPhone]);
 
   const matchOpenIds = useMemo(
     () => (q.trim() ? new Set(userGroups.map((g) => g.id)) : undefined),

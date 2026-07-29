@@ -17,6 +17,8 @@ import { sortLeads, KANBAN_SORTS, type KanbanSort } from "@/lib/leadsSort";
 import { MARKETING_CHANNELS, GOOGLE_ADS_CHANNEL } from "@/lib/attribution";
 import { DEFAULT_LEAD_STATUS, LEAD_STATUSES, LEAD_STATUS_META, leadStatusFlags, leadStatusLabel, leadStatusPill, normalizeLeadStatus } from "@/lib/leadStatus";
 import type { Lead, LeadStatus, LeadSourceTouch } from "@/lib/types";
+import LegacyLeadPill from "@/components/admin/LegacyLeadPill";
+import { lookupLegacyMatch, type LegacyLeadMatch } from "@/lib/marketing/legacyLeadMatch";
 
 const DAY_MS = 86400000;
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -55,6 +57,7 @@ interface LeadAccount { id: string; name: string | null; phone: string; login_co
 
 export default function LeadsPage() {
   const { data: leads, loading, reload } = useAdminData<Lead[]>("/api/admin/leads", "leads");
+  const { data: legacyLeadByPhone } = useAdminData<Record<string, LegacyLeadMatch>>("/api/admin/leads", "legacyLeadByPhone");
   const { data: leadAccounts } = useAdminData<LeadAccount[]>("/api/admin/leads/accounts", "leads");
   const { toast } = useToast();
   const [view, setView] = useState<"kanban" | "list">("kanban");
@@ -300,6 +303,7 @@ export default function LeadsPage() {
                       <div className="mt-1.5 flex flex-wrap items-center gap-1">
                         <span className="pill pill-gray text-[10px] font-medium">{l.source || "—"}</span>
                         <ChannelPill channel={l.channel} campaign={l.utm_campaign} />
+                        <LegacyLeadPill match={lookupLegacyMatch(legacyLeadByPhone, l.phone)} size="compact" />
                       </div>
                       <div className="mt-1 flex items-center justify-end">
                         <span className="whitespace-nowrap text-[11px] text-muted" title={formatISTDateTime(l.created_at)}>
@@ -328,6 +332,7 @@ export default function LeadsPage() {
       {active && (
         <LeadDetail
           lead={active}
+          legacyMatch={lookupLegacyMatch(legacyLeadByPhone, active.phone)}
           onClose={() => setActive(null)}
           onChanged={() => { reload(); }}
           setStatus={setStatus}
@@ -427,12 +432,14 @@ function AddLeadModal({ open, onClose, onAdded }: { open: boolean; onClose: () =
 
 function LeadDetail({
   lead,
+  legacyMatch,
   onClose,
   onChanged,
   setStatus,
   waLink,
 }: {
   lead: Lead;
+  legacyMatch: LegacyLeadMatch | null;
   onClose: () => void;
   onChanged: () => void;
   setStatus: (l: Lead, s: LeadStatus) => void;
@@ -465,6 +472,9 @@ function LeadDetail({
           <Info label="Email" value={lead.email || "—"} />
           <Info label="City" value={lead.city || "—"} />
           <Info label="Source (latest)" value={lead.source} />
+          <div className="col-span-2">
+            <LegacyLeadPill match={legacyMatch} />
+          </div>
           <Info label="Counsellor" value={lead.counsellor || "—"} />
           <Info label="Interest" value={lead.course_interest || "—"} />
           <Info label="Target" value={lead.target_year ? String(lead.target_year) : "—"} />
