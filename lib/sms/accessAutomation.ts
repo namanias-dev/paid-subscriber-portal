@@ -43,9 +43,12 @@ import {
   type AccessCapRow,
   type AccessReminderSettings,
 } from "./accessCapStore";
+import { heavyCronHalted } from "../incidentHalt";
+import { dbCircuitOpen } from "../dbCircuit";
 
 export type AutoSkipReason =
   | "kill_switch"
+  | "db_circuit_open"
   | "disabled"
   | "quiet_hours"
   | "not_cadence_day"
@@ -166,7 +169,8 @@ export async function planAccessAutomation(now = Date.now()): Promise<AutoRunRep
     seatBookingOnly: 0, haltedReason, sent: 0, dryRun: settings.dryRun,
   });
 
-  if (settings.killSwitch) return empty("kill_switch");
+  if (settings.killSwitch || heavyCronHalted()) return empty("kill_switch");
+  if (dbCircuitOpen()) return empty("db_circuit_open");
   if (!settings.enabled && !settings.dryRun) return empty("disabled");
   // Dry-run still plans even when enabled=false so staff can see the table.
   if (quiet && !settings.dryRun) return empty("quiet_hours");
@@ -372,7 +376,10 @@ export async function runAccessAutomation(now = Date.now()): Promise<AutoRunRepo
   }
 
   let sent = 0;
+  // Hard cap: never more than 5 concurrent DB/SMS ops in one tick (sequential loop
+  // already serializes; circuit check aborts mid-run on pool pressure).
   for (const c of plan.wouldSend) {
+    if (dbCircuitOpen() || heavyCronHalted()) break;
     if (!c.preview?.installmentKey || !c.preview.templateId) continue;
     const e = await getCourseEnrollmentById(c.enrollmentId);
     if (!e) continue;

@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { notFound } from "next/navigation";
 import Countdown from "@/components/public/Countdown";
 import WebinarRegister from "@/components/public/WebinarRegister";
 import CoverImage from "@/components/public/CoverImage";
@@ -16,36 +15,65 @@ import { buildLandingView } from "@/lib/landingView";
 import { formatINR, formatISTRange } from "@/lib/dates";
 import { SITE_URL, ACADEMY } from "@/lib/config";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 60;
+export const maxDuration = 15;
 
 export async function generateMetadata({ params }: { params: { slug: string } }): Promise<Metadata> {
-  const w = await getWebinarBySlug(params.slug);
-  if (!w || w.active === false) return { title: "Webinar not found" };
-  const seo = w.seo || {};
-  const canonicalSlug = seo.canonical_slug?.trim() || w.slug;
-  const url = `${SITE_URL}/webinars/${canonicalSlug}`;
-  const priceLabel = w.price === 0 ? "Free" : formatINR(w.price);
-  const title = seo.title?.trim() || `${w.title} — ${priceLabel} ${w.status === "completed" ? "Recording" : "Webinar"}`;
-  const desc = (seo.description?.trim() || w.description || `Register for ${w.title} with ${ACADEMY.name}.`).slice(0, 170);
-  const ogImage = seo.og_image?.trim() || w.cover_image_url || undefined;
-  const images = ogImage ? [{ url: ogImage, width: 1200, height: 630, alt: w.title }] : [];
-  return {
-    title,
-    description: desc,
-    keywords: seo.keywords?.trim() || undefined,
-    alternates: { canonical: url },
-    openGraph: { title, description: desc, url, type: "website", siteName: ACADEMY.name, images },
-    twitter: { card: "summary_large_image", title, description: desc, images: images.map((i) => i.url) },
-  };
+  try {
+    const w = await getWebinarBySlug(params.slug);
+    if (!w || w.active === false) return { title: "Webinar not found" };
+    const seo = w.seo || {};
+    const canonicalSlug = seo.canonical_slug?.trim() || w.slug;
+    const url = `${SITE_URL}/webinars/${canonicalSlug}`;
+    const priceLabel = w.price === 0 ? "Free" : formatINR(w.price);
+    const title = seo.title?.trim() || `${w.title} — ${priceLabel} ${w.status === "completed" ? "Recording" : "Webinar"}`;
+    const desc = (seo.description?.trim() || w.description || `Register for ${w.title} with ${ACADEMY.name}.`).slice(0, 170);
+    const ogImage = seo.og_image?.trim() || w.cover_image_url || undefined;
+    const images = ogImage ? [{ url: ogImage, width: 1200, height: 630, alt: w.title }] : [];
+    return {
+      title,
+      description: desc,
+      keywords: seo.keywords?.trim() || undefined,
+      alternates: { canonical: url },
+      openGraph: { title, description: desc, url, type: "website", siteName: ACADEMY.name, images },
+      twitter: { card: "summary_large_image", title, description: desc, images: images.map((i) => i.url) },
+    };
+  } catch {
+    return { title: "Webinars — Naman Sharma IAS Academy" };
+  }
 }
 
 export default async function WebinarDetail({ params }: { params: { slug: string } }) {
-  const w = await getWebinarBySlug(params.slug);
-  if (!w || w.active === false) notFound();
+  let w: Awaited<ReturnType<typeof getWebinarBySlug>> = null;
+  try {
+    w = await getWebinarBySlug(params.slug);
+  } catch {
+    w = null;
+  }
+  if (!w || w.active === false) {
+    // Prefer soft empty over hard 5xx when DB is unavailable.
+    return (
+      <div className="container-wide py-16 text-center">
+        <h1 className="font-heading text-2xl font-bold">Webinar temporarily unavailable</h1>
+        <p className="mt-2 text-sm text-[var(--ca-slate-700)]">Please refresh in a moment, or browse other sessions.</p>
+        <a href="/webinars" className="btn btn-primary mt-6 inline-flex">All webinars</a>
+      </div>
+    );
+  }
 
   const view = buildLandingView(w);
-  const brochures = await getLibraryDocsByIds(w.brochure_ids);
-  const snapshot = await getPurchaseSnapshot();
+  let brochures: Awaited<ReturnType<typeof getLibraryDocsByIds>> = [];
+  let snapshot: Awaited<ReturnType<typeof getPurchaseSnapshot>> = null;
+  let regCount = 0;
+  try {
+    brochures = await getLibraryDocsByIds(w.brochure_ids);
+    snapshot = await getPurchaseSnapshot();
+    regCount = await getWebinarRegisteredCount(w);
+  } catch {
+    brochures = [];
+    snapshot = null;
+    regCount = 0;
+  }
   const regStatus = webinarStatus(w, snapshot);
   const registered = regStatus === "registered";
   const paymentPending = regStatus === "pending";
@@ -55,7 +83,6 @@ export default async function WebinarDetail({ params }: { params: { slug: string
   const startLabel = formatISTRange(w.datetime, w.end_datetime);
 
   // Honest, threshold-gated registration count (never the seeded column).
-  const regCount = await getWebinarRegisteredCount(w);
   const regDisplay = webinarRegCountDisplay({ count: regCount, showToggle: w.show_registration_count, completed });
 
   // Lifecycle: registration auto-closes once the session passes (unless it's a
@@ -64,8 +91,12 @@ export default async function WebinarDetail({ params }: { params: { slug: string
   const closed = !canRegister && !registered;
   let nextWebinarSlug: string | null = null;
   if (closed && w.next_webinar_id) {
-    const next = await getWebinarById(w.next_webinar_id);
-    nextWebinarSlug = next && next.active !== false ? next.slug : null;
+    try {
+      const next = await getWebinarById(w.next_webinar_id);
+      nextWebinarSlug = next && next.active !== false ? next.slug : null;
+    } catch {
+      nextWebinarSlug = null;
+    }
   }
   const closedCtaHref = nextWebinarSlug ? `/webinars/${nextWebinarSlug}` : "/webinars";
   const closedCtaLabel = nextWebinarSlug ? EXPIRED_COPY.ctaNext : EXPIRED_COPY.ctaUpcoming;

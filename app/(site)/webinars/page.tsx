@@ -9,14 +9,23 @@ import { formatINR, formatISTDateTime } from "@/lib/dates";
 
 export const metadata = { title: "Webinars — Naman Sharma IAS Academy" };
 
-// Always render fresh so newly created/edited webinars appear immediately
-// (otherwise this listing is statically prerendered at build time and goes stale).
-export const dynamic = "force-dynamic";
+// ISR: ordinary visits should not hammer Postgres. Fresh enough for marketing.
+export const revalidate = 60;
+export const maxDuration = 15;
 
 export default async function WebinarsPage() {
-  const webinars = await getPublicWebinars();
-  const snapshot = await getPurchaseSnapshot();
-  const regCounts = await getWebinarRegisteredCounts(webinars);
+  let webinars: Awaited<ReturnType<typeof getPublicWebinars>> = [];
+  let snapshot: Awaited<ReturnType<typeof getPurchaseSnapshot>> = null;
+  let regCounts = new Map<string, number>();
+  try {
+    webinars = await getPublicWebinars();
+    snapshot = await getPurchaseSnapshot();
+    regCounts = await getWebinarRegisteredCounts(webinars);
+  } catch {
+    webinars = [];
+    snapshot = null;
+    regCounts = new Map();
+  }
 
   // Ad landing target: feature the soonest still-open (registerable) session so a
   // click from a Google Ads campaign can convert right here. The registration form

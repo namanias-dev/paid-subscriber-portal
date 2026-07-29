@@ -20,8 +20,9 @@ import { directionsUrl, mapEmbedUrl } from "@/lib/maps";
 import HomeV2 from "@/components/public/home-v2/HomeV2";
 import { buildHomeV2Metadata } from "@/components/public/home-v2/seo";
 
-// Render fresh so newly published courses / upcoming webinars surface here too.
-export const dynamic = "force-dynamic";
+// ISR: ordinary visits should not hammer Postgres while marketing content is fresh enough.
+export const revalidate = 60;
+export const maxDuration = 15;
 
 type SearchParams = Record<string, string | string[] | undefined>;
 
@@ -89,18 +90,29 @@ const FAQ = [
 ];
 
 export default async function HomePage({ searchParams }: { searchParams?: SearchParams }) {
-  const [courses, webinars, settings, caArticles] = await Promise.all([
-    getPublishedCourses(),
-    getPublicWebinars(),
-    getSiteSettings(),
-    getPublicCaArticles(),
-  ]);
+  let courses: Awaited<ReturnType<typeof getPublishedCourses>> = [];
+  let webinars: Awaited<ReturnType<typeof getPublicWebinars>> = [];
+  let settings: Awaited<ReturnType<typeof getSiteSettings>>;
+  let caArticles: Awaited<ReturnType<typeof getPublicCaArticles>> = [];
+  try {
+    [courses, webinars, settings, caArticles] = await Promise.all([
+      getPublishedCourses(),
+      getPublicWebinars(),
+      getSiteSettings(),
+      getPublicCaArticles(),
+    ]);
+  } catch {
+    courses = [];
+    webinars = [];
+    caArticles = [];
+    settings = await getSiteSettings();
+  }
   // Single source of truth for purchase awareness — identical to /courses + detail.
-  const snapshot = await getPurchaseSnapshot();
+  const snapshot = await getPurchaseSnapshot().catch(() => null);
   const purchaseMap = coursePurchaseMap(courses, snapshot);
   const homeCa = (caArticles.filter((a) => a.show_on_home).length ? caArticles.filter((a) => a.show_on_home) : caArticles).slice(0, 3);
   const upcoming = webinars.filter((w) => w.status === "upcoming").slice(0, 2);
-  const upcomingRegCounts = await getWebinarRegisteredCounts(upcoming);
+  const upcomingRegCounts = await getWebinarRegisteredCounts(upcoming).catch(() => new Map<string, number>());
   const c = settings.content;
   const trustBar = c.trust_bar?.length ? c.trust_bar : [];
 
