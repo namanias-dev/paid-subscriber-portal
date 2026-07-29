@@ -1,9 +1,13 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { AlertTriangle, Download, Loader2, Send, X } from "lucide-react";
 import { formatINR, formatISTDate } from "@/lib/dates";
 import type { AccessReminderPreview } from "@/lib/sms/accessReminderService";
+import {
+  ACCESS_BLOCKED_TEMPLATE_ID,
+  ACCESS_EXPIRING_TEMPLATE_ID,
+} from "@/lib/sms/accessReminderConstants";
 
 /**
  * Bulk access reminders: sticky action bar → review screen → explicit send.
@@ -36,6 +40,13 @@ const REASON_LABELS: Record<string, string> = {
   zero_balance: "Nothing left to pay",
   render_blocked: "Could not resolve the message safely",
   invalid_body: "Rendered message failed validation",
+  kill_switch: "Kill switch is ON",
+  quiet_hours: "Quiet hours (outside 09:00–20:00 IST)",
+  already_sent_today: "Already messaged today (IST)",
+  daily_ceiling: "Daily volume ceiling reached",
+  needs_call: "Flagged for call — not bulk-selectable",
+  days_not_positive: "Days ≤ 0 — no Expiring send",
+  not_access_risk: "Not an access-risk case",
   unknown: "Excluded",
 };
 
@@ -92,11 +103,16 @@ export default function BulkAccessReminder({
   selectedIds,
   onClear,
   onSent,
+  killSwitch = false,
+  quietHours = false,
 }: {
   selectedIds: string[];
   onClear: () => void;
   /** Called after a send so the table can refresh. */
   onSent: () => void;
+  /** From Access At Risk list payload — disables the sticky send button. */
+  killSwitch?: boolean;
+  quietHours?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -113,8 +129,13 @@ export default function BulkAccessReminder({
    * server treats a job id it has already logged as a no-op replay.
    */
   const [jobId, setJobId] = useState<string | null>(null);
+  const [templateCounts, setTemplateCounts] = useState<{ expiring: number; blocked: number }>({ expiring: 0, blocked: 0 });
+  const [liveNote, setLiveNote] = useState<string | null>(null);
+  const [guardsQuiet, setGuardsQuiet] = useState(quietHours);
+  useEffect(() => { setGuardsQuiet(quietHours); }, [quietHours]);
 
   const openReview = useCallback(async () => {
+    if (killSwitch) return;
     setOpen(true);
     setLoading(true);
     setError(null);
@@ -134,12 +155,18 @@ export default function BulkAccessReminder({
       if (!res.ok || !json.ok) throw new Error(json.error || "Could not build the review.");
       setPreview(json.preview as BulkPreview);
       setFollowUp((json.followUp as FollowUpPreview) ?? null);
+      setGuardsQuiet(!!json.guards?.quietHours);
+      setTemplateCounts(json.templateBreakdown || { expiring: 0, blocked: 0 });
+      setLiveNote(typeof json.liveNote === "string" ? json.liveNote : null);
+      if (json.guards?.killSwitch) {
+        setError("Kill switch is ON — bulk send is disabled.");
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not build the review.");
     } finally {
       setLoading(false);
     }
-  }, [selectedIds]);
+  }, [selectedIds, killSwitch]);
 
   const close = () => { if (!sending) setOpen(false); };
 
@@ -151,6 +178,15 @@ export default function BulkAccessReminder({
     () => (preview?.previews ?? []).filter((p) => !p.sendable),
     [preview],
   );
+  const liveTemplateCounts = useMemo(() => {
+    let expiring = 0;
+    let blocked = 0;
+    for (const p of sendableRows) {
+      if (p.templateId === ACCESS_EXPIRING_TEMPLATE_ID) expiring++;
+      else if (p.templateId === ACCESS_BLOCKED_TEMPLATE_ID) blocked++;
+    }
+    return { expiring, blocked };
+  }, [sendableRows]);
   const reminderSegments = sendableRows.reduce((a, p) => a + p.segments, 0);
   // TRUE cost of the sequence: every recipient gets the instructions too, so a
   // total that counted step 1 alone would understate the bill by half.
@@ -160,32 +196,32 @@ export default function BulkAccessReminder({
   const confirmOk = !needsTyping || confirmText.trim() === String(sendableRows.length);
 
   async function send(retryFailedOnly = false) {
-    if (!preview || !jobId || sending) return;
+    if (!preview || !jobId || sending || killSwitch) return;
     if (retryFailedOnly && !outcome?.jobId) return;
     setSending(true);
     setError(null);
     try {
-      // A retry names the CAMPAIGN to repair and sends no recipient list at all.
-      // The server reads that campaign's log and targets only recipients nothing
-      // ever reached. This screen deliberately has no say in it: the rows it holds
-      // describe what was selected before the send, so using them here is what
-      // previously let a retry go to everyone, including the ones that arrived.
-      // The new job id is fresh because the original is already logged and would
-      // replay as a no-op.
+      // Retry names the CAMPAIGN only — never re-posts the review list (that
+      // previously re-texted students who already got the message).
       const res = await fetch("/api/admin/sms/access-reminder/bulk", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          enrollmentIds: sendableRows.map((p) => p.enrollmentId),
-          jobId: retryFailedOnly
-            ? (globalThis.crypto?.randomUUID?.() ?? `job-${Date.now()}-retry`)
-            : jobId,
-          allowRepeat: sendableRows.some((p) => p.lastSentAt),
-        }),
+        body: JSON.stringify(
+          retryFailedOnly
+            ? {
+                retryOf: outcome!.jobId,
+                jobId: globalThis.crypto?.randomUUID?.() ?? `job-${Date.now()}-retry`,
+              }
+            : {
+                enrollmentIds: sendableRows.map((p) => p.enrollmentId),
+                jobId,
+              },
+        ),
       });
       const json = await res.json();
       if (!res.ok || !json.ok) throw new Error(json.error || "The send failed.");
       setOutcome(json as SendOutcome);
+      if (json.templateBreakdown) setTemplateCounts(json.templateBreakdown);
       onSent();
     } catch (e) {
       setError(e instanceof Error ? e.message : "The send failed.");
@@ -239,17 +275,35 @@ export default function BulkAccessReminder({
 
   if (!selectedIds.length) return null;
 
+  const sendDisabled = killSwitch || selectedIds.length === 0;
+  const sendTitle = killSwitch
+    ? "Kill switch is ON — bulk access SMS is disabled"
+    : `Review and send reminders to ${selectedIds.length} selected`;
+
   return (
     <>
       {/* Sticky action bar — only exists once something is selected */}
       <div className="sticky bottom-0 z-40 -mx-1 mt-3 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-line bg-surface/95 p-3 shadow-lg backdrop-blur">
-        <p className="text-sm text-ink2">
-          <strong className="text-ink">{selectedIds.length}</strong> selected
-        </p>
+        <div>
+          <p className="text-sm text-ink2">
+            <strong className="text-ink">{selectedIds.length}</strong> selected
+          </p>
+          {killSwitch && (
+            <p className="mt-0.5 text-[11px] font-semibold text-danger">Kill switch ON — bulk send disabled</p>
+          )}
+          {!killSwitch && guardsQuiet && (
+            <p className="mt-0.5 text-[11px] text-amber-700">Quiet hours — review will show skips, not silent drops</p>
+          )}
+        </div>
         <div className="flex items-center gap-2">
           <button onClick={onClear} className="btn btn-secondary text-sm">Clear</button>
-          <button onClick={openReview} className="btn btn-primary inline-flex items-center gap-2 text-sm">
-            <Send size={14} /> Send reminder + instructions ({selectedIds.length} selected)
+          <button
+            onClick={openReview}
+            disabled={sendDisabled}
+            title={sendTitle}
+            className="btn btn-primary inline-flex items-center gap-2 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Send size={14} /> Send reminders ({selectedIds.length})
           </button>
         </div>
       </div>
@@ -279,6 +333,18 @@ export default function BulkAccessReminder({
                 <p className="mt-1 text-[11px] text-muted">
                   Each reminder refers to that student&apos;s <strong>oldest unpaid installment</strong>. Nothing sends until you press Send below.
                 </p>
+                {preview && (
+                  <p className="mt-1 text-[11px] text-ink2">
+                    Templates: <strong className="text-ink">{liveTemplateCounts.expiring}</strong> × Expiring ·{" "}
+                    <strong className="text-ink">{liveTemplateCounts.blocked}</strong> × Blocked
+                    {(preview.excludedCount > 0 || excluded.size > 0) && (
+                      <> · <strong>{preview.excludedCount + excluded.size}</strong> skipped</>
+                    )}
+                  </p>
+                )}
+                {liveNote && (
+                  <p className="mt-1 text-[11px] font-semibold text-danger">{liveNote}</p>
+                )}
               </div>
               <button onClick={close} aria-label="Close" className="rounded-lg p-1 text-muted hover:text-ink"><X size={18} /></button>
             </div>
@@ -422,9 +488,11 @@ export default function BulkAccessReminder({
                       <span>{p.amountDue != null ? formatINR(p.amountDue) : "—"}</span>
                       <span>{p.dueDate ? `due ${formatISTDate(p.dueDate)}` : "no due date"}</span>
                       <span className={p.accessStatus === "blocked" ? "text-danger" : "text-amber-700"}>
-                        {p.accessStatus === "grace" && p.daysLeft != null
-                          ? `grace · ${p.daysLeft}d left`
-                          : p.accessStatus || "—"}
+                        {p.templateId === ACCESS_EXPIRING_TEMPLATE_ID
+                          ? `Expiring · ${p.daysLeft ?? "?"}d`
+                          : p.templateId === ACCESS_BLOCKED_TEMPLATE_ID
+                            ? "Blocked"
+                            : (p.accessStatus || "—")}
                       </span>
                       <span>{p.segments} seg</span>
                       {p.priorReminderCount > 0 && <span className="text-amber-700">{p.priorReminderCount} prior reminder{p.priorReminderCount === 1 ? "" : "s"}</span>}

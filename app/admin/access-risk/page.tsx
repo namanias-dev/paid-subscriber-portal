@@ -2,12 +2,13 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { PageHeader, LoadingBlock, TableShell } from "@/components/admin/ui";
+import { PageHeader, LoadingBlock } from "@/components/admin/ui";
 import AtRiskTabs from "@/components/admin/people/AtRiskTabs";
 import StudentNameLink from "@/components/admin/StudentNameLink";
 import { useToast } from "@/components/ui/Toast";
 import AccessReminderButton from "@/components/admin/sms/AccessReminderButton";
 import BulkAccessReminder from "@/components/admin/sms/BulkAccessReminder";
+import { useSelectableRows } from "@/lib/hooks/useSelectableRows";
 import { ACCESS_AUTO_CAP_PER_INSTALLMENT } from "@/lib/sms/accessReminderConstants";
 import { ACCESS_GRANT_MAX_DAYS_DEFAULT } from "@/lib/accessOverridePolicy";
 import { formatINR } from "@/lib/dates";
@@ -52,6 +53,14 @@ interface AccessRiskPayload {
     failedStudents: number; verifyingStuckStudents: number; failedRows: number; verifyingStuckRows: number;
   };
   indefiniteOverrides: number;
+  automation?: {
+    killSwitch: boolean;
+    enabled: boolean;
+    dryRun: boolean;
+    rampLimit: number;
+    dailyCeiling: number;
+    quietHours: boolean;
+  };
 }
 
 const STATUS_PILL: Record<string, string> = { blocked: "pill-red", grace: "pill-amber", expiring: "pill-amber" };
@@ -60,7 +69,6 @@ export default function AccessRiskAdmin() {
   const { toast } = useToast();
   const [filter, setFilter] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
-  const [selected, setSelected] = useState<Set<string>>(new Set());
   const [grantReason, setGrantReason] = useState("");
   const [grantTarget, setGrantTarget] = useState<RiskRow | null>(null);
   const [full, setFull] = useState<AccessRiskPayload | null>(null);
@@ -97,15 +105,20 @@ export default function AccessRiskAdmin() {
   const notActionable = listSource.filter((r) => !r.remindEnabled).length;
   const totalDue = listSource.reduce((s, r) => s + (r.amountDue || 0), 0);
 
-  const visibleIds = useMemo(() => new Set(list.map((r) => r.enrollmentId)), [list]);
-
-  function toggleRow(id: string) {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      return next;
-    });
-  }
+  // Select-all / selection only covers actionable rows in the current filter.
+  const selectableIds = useMemo(
+    () => list.filter((r) => r.remindEnabled).map((r) => r.enrollmentId),
+    [list],
+  );
+  const {
+    selectedVisibleIds,
+    toggleRow,
+    toggleAllVisible,
+    clear,
+    allSelected,
+    someSelected,
+    selected,
+  } = useSelectableRows(selectableIds);
 
   async function revokeGrant(r: RiskRow) {
     setBusy(r.enrollmentId);
@@ -218,83 +231,127 @@ export default function AccessRiskAdmin() {
         ))}
       </div>
 
-      <TableShell headers={["", "Student", "Course", "Progress", "₹ Due", "Schedule", "Grant", "Auto", "Actions"]}>
-        {list.map((r) => (
-          <tr key={r.enrollmentId} className={`border-b border-line last:border-0 hover:bg-surface2 ${selected.has(r.enrollmentId) ? "bg-primary/5" : ""}`}>
-            <td className="px-3 py-3">
-              <input type="checkbox" checked={selected.has(r.enrollmentId)} onChange={() => toggleRow(r.enrollmentId)} className="h-3.5 w-3.5 accent-[color:var(--primary)]" aria-label={`Select ${r.student}`} />
-            </td>
-            <td className="px-4 py-3">
-              <StudentNameLink studentId={r.studentId} enrollmentId={r.enrollmentId} name={r.student} />
-              <div className="text-xs text-muted">{r.phone}</div>
-              {r.inactionReason && !r.remindEnabled && (
-                <div className="mt-0.5 text-[10px] font-semibold text-amber-800">{r.inactionReason}</div>
-              )}
-              {r.paymentFailures >= 2 && <div className="text-[10px] font-semibold text-danger">{r.paymentFailures} failed attempts</div>}
-              {r.verifyingStuck > 0 && <div className="text-[10px] font-semibold text-amber-700">VERIFYING stuck</div>}
-            </td>
-            <td className="px-4 py-3">
-              <div>{r.courseTitle}</div>
-              {r.batchLabel ? <div className="text-xs text-muted">{r.batchLabel}</div> : null}
-            </td>
-            <td className="px-4 py-3 text-xs">
-              <div>{r.progressLabel}</div>
-              <div className="text-muted">{formatINR(r.amountPaid)} / {formatINR(r.totalFee)}</div>
-            </td>
-            <td className="px-4 py-3 font-semibold">{formatINR(r.amountDue)}</td>
-            <td className="px-4 py-3">
-              <span className={`pill ${STATUS_PILL[r.scheduleAccess?.status] || "pill-gray"} text-[10px]`}>
-                {r.scheduleAccess?.status || "—"}
-              </span>
-              {r.scheduleAccess?.status === "grace" && r.scheduleAccess.daysLeft != null && (
-                <div className="mt-0.5 text-[10px] text-muted">{r.scheduleAccess.daysLeft}d left</div>
-              )}
-              {r.daysOverdue > 0 && r.scheduleAccess?.status === "blocked" && (
-                <div className="mt-0.5 text-[10px] text-muted">{r.daysOverdue}d overdue</div>
-              )}
-            </td>
-            <td className="px-4 py-3 text-xs">
-              {r.grant ? (
-                <>
-                  <span className="pill pill-blue text-[10px]">until {r.grant.expiresAt?.slice(0, 10)}</span>
-                  <div className="mt-0.5 text-[10px] text-muted">{r.grant.createdBy || "staff"}{r.grant.note ? ` · ${r.grant.note}` : ""}</div>
-                </>
-              ) : "—"}
-            </td>
-            <td className="px-4 py-3 text-xs tabular-nums">
-              <span className={r.needsCall ? "font-semibold text-danger" : "text-ink2"}>
-                {r.autoUsed}/{ACCESS_AUTO_CAP_PER_INSTALLMENT}
-              </span>
-              {r.needsCall && <div className="text-[10px] text-danger">{r.needsCallReason || "needs call"}</div>}
-            </td>
-            <td className="px-4 py-3">
-              <div className="flex flex-wrap items-center justify-end gap-2 text-xs">
-                <AccessReminderButton
-                  enrollmentId={r.enrollmentId}
-                  disabledReason={!r.remindEnabled ? (r.inactionReason || "Not actionable") : null}
+      <div className="card overflow-x-auto p-0">
+        <table className="w-full min-w-[640px] text-left text-sm">
+          <thead>
+            <tr className="border-b border-line text-xs uppercase tracking-wide text-muted">
+              <th className="w-9 px-3 py-3">
+                <input
+                  type="checkbox"
+                  checked={allSelected}
+                  ref={(el) => { if (el) el.indeterminate = someSelected; }}
+                  onChange={toggleAllVisible}
+                  disabled={selectableIds.length === 0}
+                  className="h-3.5 w-3.5 accent-[color:var(--primary)] disabled:opacity-40"
+                  title={selectableIds.length === 0
+                    ? "No actionable students in this filter"
+                    : "Select all actionable students matching the current filters"}
+                  aria-label="Select all actionable students matching the current filters"
                 />
-                {r.studentId ? (
-                  <Link href={`/admin/students/${r.studentId}?enrollmentId=${r.enrollmentId}`} className="text-xs font-semibold text-primary hover:underline">View</Link>
-                ) : <span className="text-xs text-muted">—</span>}
-                {r.grant ? (
-                  <button disabled={busy === r.enrollmentId} onClick={() => revokeGrant(r)} className="text-danger disabled:opacity-50">Revoke grant</button>
-                ) : (
-                  <button disabled={busy === r.enrollmentId} onClick={() => { setGrantTarget(r); setGrantReason(""); }} className="text-primary disabled:opacity-50">+{ACCESS_GRANT_MAX_DAYS_DEFAULT}d</button>
-                )}
-                <a href={`tel:${r.phone}`} className="text-ink2">Call</a>
-              </div>
-            </td>
-          </tr>
-        ))}
-        {list.length === 0 && (
-          <tr><td colSpan={9} className="px-4 py-10 text-center text-sm text-muted">No learners at risk.</td></tr>
-        )}
-      </TableShell>
+              </th>
+              {["Student", "Course", "Progress", "₹ Due", "Schedule", "Grant", "Auto", "Actions"].map((h) => (
+                <th key={h} className="whitespace-nowrap px-4 py-3 font-semibold">{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {list.map((r) => {
+              const selectable = !!r.remindEnabled;
+              return (
+                <tr key={r.enrollmentId} className={`border-b border-line last:border-0 hover:bg-surface2 ${selected.has(r.enrollmentId) ? "bg-primary/5" : ""}`}>
+                  <td className="px-3 py-3">
+                    <input
+                      type="checkbox"
+                      checked={selected.has(r.enrollmentId)}
+                      onChange={() => toggleRow(r.enrollmentId)}
+                      onClick={(ev) => ev.stopPropagation()}
+                      disabled={!selectable}
+                      className="h-3.5 w-3.5 accent-[color:var(--primary)] disabled:cursor-not-allowed disabled:opacity-40"
+                      aria-label={selectable ? `Select ${r.student}` : `${r.student}: ${r.inactionReason || "Not actionable"}`}
+                      title={selectable ? `Select ${r.student}` : (r.inactionReason || "Not actionable — cannot bulk-remind")}
+                    />
+                  </td>
+                  <td className="px-4 py-3">
+                    <StudentNameLink studentId={r.studentId} enrollmentId={r.enrollmentId} name={r.student} />
+                    <div className="text-xs text-muted">{r.phone}</div>
+                    {r.inactionReason && !r.remindEnabled && (
+                      <div className="mt-0.5 text-[10px] font-semibold text-amber-800" title={r.inactionReason}>{r.inactionReason}</div>
+                    )}
+                    {r.paymentFailures >= 2 && <div className="text-[10px] font-semibold text-danger">{r.paymentFailures} failed attempts</div>}
+                    {r.verifyingStuck > 0 && <div className="text-[10px] font-semibold text-amber-700">VERIFYING stuck</div>}
+                  </td>
+                  <td className="px-4 py-3">
+                    <div>{r.courseTitle}</div>
+                    {r.batchLabel ? <div className="text-xs text-muted">{r.batchLabel}</div> : null}
+                  </td>
+                  <td className="px-4 py-3 text-xs">
+                    <div>{r.progressLabel}</div>
+                    <div className="text-muted">{formatINR(r.amountPaid)} / {formatINR(r.totalFee)}</div>
+                  </td>
+                  <td className="px-4 py-3 font-semibold">{formatINR(r.amountDue)}</td>
+                  <td className="px-4 py-3">
+                    <span className={`pill ${STATUS_PILL[r.scheduleAccess?.status] || "pill-gray"} text-[10px]`}>
+                      {r.scheduleAccess?.status || "—"}
+                    </span>
+                    {r.scheduleAccess?.status === "grace" && r.scheduleAccess.daysLeft != null && (
+                      <div className="mt-0.5 text-[10px] text-muted">{r.scheduleAccess.daysLeft}d left</div>
+                    )}
+                    {r.daysOverdue > 0 && r.scheduleAccess?.status === "blocked" && (
+                      <div className="mt-0.5 text-[10px] text-muted">{r.daysOverdue}d overdue</div>
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-xs">
+                    {r.grant ? (
+                      <>
+                        <span className="pill pill-blue text-[10px]">until {r.grant.expiresAt?.slice(0, 10)}</span>
+                        <div className="mt-0.5 text-[10px] text-muted">{r.grant.createdBy || "staff"}{r.grant.note ? ` · ${r.grant.note}` : ""}</div>
+                      </>
+                    ) : "—"}
+                  </td>
+                  <td className="px-4 py-3 text-xs tabular-nums">
+                    <span className={r.needsCall ? "font-semibold text-danger" : "text-ink2"}>
+                      {r.autoUsed}/{ACCESS_AUTO_CAP_PER_INSTALLMENT}
+                    </span>
+                    {r.needsCall && <div className="text-[10px] text-danger">{r.needsCallReason || "needs call"}</div>}
+                  </td>
+                  <td className="px-4 py-3">
+                    <div className="flex flex-wrap items-center justify-end gap-2 text-xs">
+                      <AccessReminderButton
+                        enrollmentId={r.enrollmentId}
+                        // needs_call: bulk unselectable, but single Remind stays available (e.g. Aman).
+                        disabledReason={
+                          !r.remindEnabled && !r.needsCall
+                            ? (r.inactionReason || "Not actionable")
+                            : null
+                        }
+                      />
+                      {r.studentId ? (
+                        <Link href={`/admin/students/${r.studentId}?enrollmentId=${r.enrollmentId}`} className="text-xs font-semibold text-primary hover:underline">View</Link>
+                      ) : <span className="text-xs text-muted">—</span>}
+                      {r.grant ? (
+                        <button disabled={busy === r.enrollmentId} onClick={() => revokeGrant(r)} className="text-danger disabled:opacity-50">Revoke grant</button>
+                      ) : (
+                        <button disabled={busy === r.enrollmentId} onClick={() => { setGrantTarget(r); setGrantReason(""); }} className="text-primary disabled:opacity-50">+{ACCESS_GRANT_MAX_DAYS_DEFAULT}d</button>
+                      )}
+                      <a href={`tel:${r.phone}`} className="text-ink2">Call</a>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+            {list.length === 0 && (
+              <tr><td colSpan={9} className="px-4 py-10 text-center text-sm text-muted">No learners at risk.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
 
       <BulkAccessReminder
-        selectedIds={[...selected].filter((id) => visibleIds.has(id))}
-        onClear={() => setSelected(new Set())}
+        selectedIds={selectedVisibleIds}
+        onClear={clear}
         onSent={() => { reload(); void load(); }}
+        killSwitch={!!full?.automation?.killSwitch}
+        quietHours={!!full?.automation?.quietHours}
       />
 
       {grantTarget && (

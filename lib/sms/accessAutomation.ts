@@ -294,18 +294,24 @@ export async function planAccessAutomation(now = Date.now()): Promise<AutoRunRep
   const eligible = candidates.filter((c) => !c.skipReason);
   const ramp = settings.rampLimit || ACCESS_RAMP_FIRST_RUN;
   const ceiling = settings.dailyCeiling || ACCESS_DAILY_VOLUME_CEILING;
+  // Manual bulk + prior auto sends today consume the same daily ceiling.
+  const { countAccessSmsSentToday } = await import("./accessBulkGuards");
+  const sentToday = await countAccessSmsSentToday(now);
+  const remainingCeiling = Math.max(0, ceiling - sentToday);
+  const cap = Math.min(ramp, remainingCeiling);
 
   let haltedReason: string | null = null;
   let wouldSend = eligible;
 
-  if (eligible.length > ceiling) {
+  if (remainingCeiling === 0 && eligible.length > 0) {
     haltedReason = "daily_ceiling";
     wouldSend = [];
     for (const c of eligible) c.skipReason = "daily_ceiling";
-  } else if (eligible.length > ramp) {
-    // Backlog: take ramp, mark the rest.
-    wouldSend = eligible.slice(0, ramp);
-    for (const c of eligible.slice(ramp)) c.skipReason = "ramp_limit";
+  } else if (eligible.length > cap) {
+    wouldSend = eligible.slice(0, cap);
+    for (let i = cap; i < eligible.length; i++) {
+      eligible[i]!.skipReason = i >= remainingCeiling ? "daily_ceiling" : "ramp_limit";
+    }
   }
 
   const reasonCounts = new Map<string, number>();
