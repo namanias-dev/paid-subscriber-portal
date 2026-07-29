@@ -15,12 +15,12 @@ function readEnv(key: string): string | undefined {
 }
 
 /** Default statement/request budget for public traffic (ms). */
-export const PUBLIC_DB_TIMEOUT_MS = Number(process.env.PUBLIC_DB_TIMEOUT_MS || 5_000);
+export const PUBLIC_DB_TIMEOUT_MS = Number(process.env.PUBLIC_DB_TIMEOUT_MS || 2_500);
 /**
  * Admin/cron budget. Kept tight during SEV1 so hung queries release the pool
  * instead of stacking 504s. Raise via ADMIN_DB_TIMEOUT_MS after stability returns.
  */
-export const ADMIN_DB_TIMEOUT_MS = Number(process.env.ADMIN_DB_TIMEOUT_MS || 8_000);
+export const ADMIN_DB_TIMEOUT_MS = Number(process.env.ADMIN_DB_TIMEOUT_MS || 5_000);
 
 /**
  * supabase-js calls global fetch. In the Next.js App Router, fetch responses

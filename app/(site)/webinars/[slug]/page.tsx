@@ -16,11 +16,25 @@ import { formatINR, formatISTRange } from "@/lib/dates";
 import { SITE_URL, ACADEMY } from "@/lib/config";
 
 export const revalidate = 60;
-export const maxDuration = 15;
+export const maxDuration = 10;
+
+async function withBudget<T>(work: Promise<T>, ms: number, fallback: T): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      work,
+      new Promise<T>((resolve) => {
+        timer = setTimeout(() => resolve(fallback), ms);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
 
 export async function generateMetadata({ params }: { params: { slug: string } }): Promise<Metadata> {
   try {
-    const w = await getWebinarBySlug(params.slug);
+    const w = await withBudget(getWebinarBySlug(params.slug), 2500, null);
     if (!w || w.active === false) return { title: "Webinar not found" };
     const seo = w.seo || {};
     const canonicalSlug = seo.canonical_slug?.trim() || w.slug;
@@ -46,7 +60,7 @@ export async function generateMetadata({ params }: { params: { slug: string } })
 export default async function WebinarDetail({ params }: { params: { slug: string } }) {
   let w: Awaited<ReturnType<typeof getWebinarBySlug>> = null;
   try {
-    w = await getWebinarBySlug(params.slug);
+    w = await withBudget(getWebinarBySlug(params.slug), 4000, null);
   } catch {
     w = null;
   }
@@ -66,9 +80,18 @@ export default async function WebinarDetail({ params }: { params: { slug: string
   let snapshot: Awaited<ReturnType<typeof getPurchaseSnapshot>> = null;
   let regCount = 0;
   try {
-    brochures = await getLibraryDocsByIds(w.brochure_ids);
-    snapshot = await getPurchaseSnapshot();
-    regCount = await getWebinarRegisteredCount(w);
+    const extras = await withBudget(
+      Promise.all([
+        getLibraryDocsByIds(w.brochure_ids),
+        getPurchaseSnapshot(),
+        getWebinarRegisteredCount(w),
+      ]).then(([b, s, c]) => ({ b, s, c })),
+      4000,
+      { b: [] as Awaited<ReturnType<typeof getLibraryDocsByIds>>, s: null, c: 0 },
+    );
+    brochures = extras.b;
+    snapshot = extras.s;
+    regCount = extras.c;
   } catch {
     brochures = [];
     snapshot = null;
