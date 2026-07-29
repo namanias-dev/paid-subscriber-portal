@@ -179,12 +179,12 @@ export async function planAccessAutomation(now = Date.now()): Promise<AutoRunRep
   ]);
   const byId = new Map(courses.map((c) => [c.id, c]));
 
-  // Risk follows SCHEDULE state — temporary grants must not remove someone from
-  // the automation pool (they may still be sendable with the Expiring template).
+  // ONE shared at-risk definition with the admin list (active paid + schedule risk / grant).
+  const { isAccessAtRiskEnrollment } = await import("../accessAtRisk");
   const risk = enrollments.filter((e) => {
-    if (e.status === "cancelled") return false;
+    const ovr = overrides.find((o) => o.phone === e.phone && o.course_id === e.course_id);
     const access = lectureAccessForCourse(byId.get(e.course_id), e, undefined, false, now);
-    return access.status === "blocked" || access.status === "grace" || access.status === "expiring";
+    return isAccessAtRiskEnrollment({ enrollment: e, scheduleAccess: access, override: ovr, now });
   });
 
   const ctx = await buildAccessReminderContext(risk, { now, courses: byId });

@@ -74,13 +74,15 @@ export interface AccessReminderButtonProps {
   className?: string;
   /** Render as a filled button rather than an inline text action. */
   variant?: "inline" | "button";
+  /** When set, the button is disabled and shows this as the tooltip (never bare "excluded"). */
+  disabledReason?: string | null;
 }
 
 const DEFAULT_INLINE = "inline-flex items-center gap-1 text-xs font-semibold text-primary hover:underline";
 const DEFAULT_BUTTON = "btn btn-secondary inline-flex items-center gap-1 text-sm";
 
 export default function AccessReminderButton({
-  enrollmentId, label = "Remind", className, variant = "inline",
+  enrollmentId, label = "Remind", className, variant = "inline", disabledReason = null,
 }: AccessReminderButtonProps) {
   const { toast } = useToast();
   const [open, setOpen] = useState(false);
@@ -148,13 +150,16 @@ export default function AccessReminderButton({
     }
   }
 
+  const disabled = !!disabledReason;
+
   return (
     <>
       <button
         type="button"
         onClick={openModal}
-        className={className ?? (variant === "button" ? DEFAULT_BUTTON : DEFAULT_INLINE)}
-        title="Preview and send the access reminder SMS"
+        disabled={disabled}
+        className={`${className ?? (variant === "button" ? DEFAULT_BUTTON : DEFAULT_INLINE)} ${disabled ? "cursor-not-allowed opacity-50 no-underline" : ""}`}
+        title={disabledReason || "Preview and send the access reminder SMS"}
       >
         <IndianRupee size={variant === "button" ? 15 : 13} /> {label}
       </button>

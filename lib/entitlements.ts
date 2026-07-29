@@ -11,6 +11,7 @@ import {
 } from "./dataProvider";
 import { studentBlockReason } from "./studentAccess";
 import { isLineOutstanding } from "./installments";
+import { resolveEnrollmentBatchStart } from "./batchStart";
 import type { Course, Quiz, CaPdf, ContentItem, CourseEnrollment, CourseAccessOverride } from "./types";
 
 /**
@@ -326,13 +327,29 @@ export function lectureAccessForCourse(
     return { allowed: true, reason: "active", status: daysLeft <= EXPIRING_SOON_DAYS ? "expiring" : "active", expiresAt: new Date(exp).toISOString(), daysLeft };
   }
 
-  // 4) Seat-booked / partial / pending → tied to the installment schedule + 15-day grace.
+  // 4) Seat-booked / partial / pending → tied to the NEXT UNPAID installment + 15-day grace.
   const unpaid = earliestUnpaidDue(enrollment);
   if (!unpaid) {
     // No dated outstanding installment yet (e.g. only the due-today seat item, or
     // an EMI→FULL remaining balance with no due date) → access stays active.
     return { allowed: true, reason: "active", status: "active" };
   }
+
+  // HARD INVARIANT: never grace/block a learner before their batch starts.
+  // Pre-batch due dates are a scheduling bug; access must stay active until then.
+  const batchStart = resolveEnrollmentBatchStart(course, enrollment);
+  const batchStartMs = batchStart.iso ? Date.parse(batchStart.iso) : NaN;
+  if (Number.isFinite(batchStartMs) && now < batchStartMs) {
+    return {
+      allowed: true,
+      reason: "active",
+      status: "active",
+      amountDue: unpaid.amount,
+      graceEndsAt: new Date(unpaid.grace ?? unpaid.due + GRACE_DAYS * DAY_MS).toISOString(),
+      daysLeft: daysBetween(batchStartMs, now),
+    };
+  }
+
   // Explicit grace-end (if an admin set one) overrides due+15d, but it's the SAME
   // single grace window — not a parallel mechanism.
   const graceEnds = unpaid.grace ?? unpaid.due + GRACE_DAYS * DAY_MS;

@@ -15,6 +15,30 @@ export const EMI_DEFAULTS = {
   interval_months: 1,
 };
 
+/**
+ * Days after batch start when installment 1 may first fall due.
+ * Default 0 = on the batch start day (never before the course begins).
+ */
+export const BATCH_START_INSTALLMENT_OFFSET_DAYS = 0;
+
+/**
+ * Installment 1 due = MAX(booking + firstIntervalDays, batchStart + offset).
+ * Falls back to booking-based date when batch start is null/unreliable.
+ */
+export function firstInstallmentDueISO(
+  bookingISO: string,
+  firstIntervalDays: number,
+  batchStartISO?: string | null,
+  batchOffsetDays: number = BATCH_START_INSTALLMENT_OFFSET_DAYS,
+): string {
+  const bookingBased = addDaysISO(bookingISO, firstIntervalDays);
+  if (!batchStartISO) return bookingBased;
+  const batchMs = Date.parse(batchStartISO);
+  if (!Number.isFinite(batchMs)) return bookingBased;
+  const batchBased = addDaysISO(batchStartISO, batchOffsetDays);
+  return Date.parse(bookingBased) >= Date.parse(batchBased) ? bookingBased : batchBased;
+}
+
 export interface ResolvedEmiConfig {
   enabled: boolean;
   allowFull: boolean;
@@ -70,13 +94,15 @@ export interface BuildScheduleOpts {
   firstIntervalDays: number;
   intervalMonths: number;
   seatLabel?: string;
+  /** When set, installment 1 never falls before this (batch start). */
+  batchStartISO?: string | null;
 }
 
 /**
  * Build the full payment schedule for a seat + EMI plan.
  * Guarantees: seat + sum(installments) === total exactly (remainder on the LAST
- * installment). Due dates: installment 1 = booking + firstIntervalDays, then
- * each subsequent + intervalMonths (IST calendar).
+ * installment). Due dates: installment 1 = MAX(booking + firstIntervalDays,
+ * batch start), then each subsequent + intervalMonths (IST calendar).
  */
 export function buildSchedule(opts: BuildScheduleOpts): InstallmentItem[] {
   const total = Math.max(0, Math.round(opts.total));
@@ -98,7 +124,7 @@ export function buildSchedule(opts: BuildScheduleOpts): InstallmentItem[] {
     },
   ];
 
-  const firstDue = addDaysISO(opts.bookingISO, opts.firstIntervalDays);
+  const firstDue = firstInstallmentDueISO(opts.bookingISO, opts.firstIntervalDays, opts.batchStartISO);
   for (let i = 1; i <= count; i++) {
     const isLast = i === count;
     items.push({
@@ -140,13 +166,18 @@ export function buildFullWithSeatSchedule(opts: {
   bookingISO: string;
   firstIntervalDays: number;
   seatLabel?: string;
+  batchStartISO?: string | null;
 }): InstallmentItem[] {
   const total = Math.max(0, Math.round(opts.payInFull));
   const seat = Math.min(Math.max(0, Math.round(opts.seatAmount)), Math.max(0, total - 1));
   const balance = total - seat;
   return [
     { no: 0, kind: "seat", label: opts.seatLabel || "Book Your Seat", amount: seat, due: null, paid: false },
-    { no: 1, kind: "installment", label: "Remaining balance", amount: balance, due: addDaysISO(opts.bookingISO, opts.firstIntervalDays), paid: false },
+    {
+      no: 1, kind: "installment", label: "Remaining balance", amount: balance,
+      due: firstInstallmentDueISO(opts.bookingISO, opts.firstIntervalDays, opts.batchStartISO),
+      paid: false,
+    },
   ];
 }
 
@@ -326,7 +357,14 @@ export function planCourseEnrollment(
         bookingISO,
         firstIntervalDays: cfg.firstIntervalDays,
         intervalMonths: cfg.intervalMonths,
+        batchStartISO: course.batch_start,
       });
+      if (!course.batch_start) {
+        // Callers may log; we keep building so checkout never crashes.
+        console.info("[buildSchedule] batch_start missing — fell back to booking + firstIntervalDays", {
+          courseId: course.id, bookingISO,
+        });
+      }
       firstAmount = seat;
       firstKind = "seat";
       firstInstallmentNo = 0;
@@ -344,7 +382,11 @@ export function planCourseEnrollment(
     if (input.bookSeat && seatConfigured) {
       const seat = resolveSeat(payInFull);
       if (typeof seat === "string") return { ok: false, error: seat };
-      schedule = buildFullWithSeatSchedule({ payInFull, seatAmount: seat, bookingISO, firstIntervalDays: cfg.firstIntervalDays });
+      schedule = buildFullWithSeatSchedule({
+        payInFull, seatAmount: seat, bookingISO,
+        firstIntervalDays: cfg.firstIntervalDays,
+        batchStartISO: course.batch_start,
+      });
       firstAmount = seat;
       firstKind = "seat";
       firstInstallmentNo = 0;
