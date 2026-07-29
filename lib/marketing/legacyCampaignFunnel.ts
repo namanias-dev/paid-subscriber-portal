@@ -16,8 +16,8 @@ export const NO_CAMPAIGN_LABEL = "No campaign recorded";
 /** Campaigns with matched < this get a low-sample flag (rates are noisy). */
 export const LOW_SAMPLE_THRESHOLD = 5;
 
-/** Long-tail campaigns beyond this rank collapse into "Other". */
-export const TOP_CAMPAIGNS_PREVIEW = 8;
+/** Campaigns shown on the collapsed Payments card before "Show all". */
+export const TOP_CAMPAIGNS_PREVIEW = 5;
 
 export type FunnelSort = "paid" | "matched" | "seat_rate" | "paid_rate";
 

@@ -133,12 +133,12 @@ describe("mapRpcRows + sort + long tail", () => {
         excl_paid: i % 2,
       })),
     );
-    const { head, other, hidden } = collapseLongTail(rows, 8);
-    assert.equal(head.length, 8);
+    const { head, other, hidden } = collapseLongTail(rows, 5);
+    assert.equal(head.length, 5);
     assert.ok(other);
-    assert.equal(hidden.length, 4);
+    assert.equal(hidden.length, 7);
     assert.equal(assertFunnelReconciles(other!), true);
-    assert.equal(other!.matched, 4);
+    assert.equal(other!.matched, 7);
   });
 });
 
