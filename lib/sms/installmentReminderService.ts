@@ -17,9 +17,9 @@
  */
 import { getCourseEnrollmentById, getCourseEnrollmentsByPhone } from "../dataProvider";
 import { maskMobile, normalizeIndianMobile } from "../phone";
-import { renderTemplate, uniqueVariables, validateBody } from "./templates";
+import { uniqueVariables } from "./templates";
 import { isResolvedValue, lookupVariable, registryKeyFor } from "./variableRegistry";
-import { checkRenderedBody } from "./sendGuard";
+import { prepareAndRenderSms } from "./renderPipeline";
 import {
   getTemplate, listLogs, firstNamesMatch, optedOutSet, resolveBuyersByPhones,
   type BuyerResolution,
@@ -282,25 +282,24 @@ export function buildReminderFor(enrollment: CourseEnrollment, ctx: ReminderCont
   const filled = mergeSendVars(INSTALLMENT_REMINDER_TEMPLATE_ID, ctx.varDefaults, recipientVars);
 
   // ---- render + guard (identical to the send path) ----
-  const { text, missing } = renderTemplate(template.body_template, filled);
-  const validation = validateBody(text);
-  const guard = checkRenderedBody(text, filled);
+  const rendered = prepareAndRenderSms(template.body_template, INSTALLMENT_REMINDER_TEMPLATE_ID, filled);
 
   Object.assign(partial, {
-    body: text,
-    variables: buildVariableView(template.body_template, filled),
-    characterCount: validation.analysis.length,
-    segments: validation.analysis.segments,
+    body: rendered.text,
+    variables: buildVariableView(template.body_template, rendered.vars),
+    characterCount: rendered.length,
+    segments: rendered.segments,
   });
 
-  if (!guard.ok || missing.length) {
-    const detail = guard.detail || `Could not resolve: ${missing.join(", ")}.`;
+  if (!rendered.ok || rendered.missing.length) {
+    const detail = rendered.errors.join("; ") || `Could not resolve: ${rendered.missing.join(", ")}.`;
     return fail("render_blocked", detail, partial);
   }
-  if (!validation.ok) return fail("invalid_body", validation.errors.join("; "), partial);
+  if (!rendered.ok) {
+    return fail("invalid_body", rendered.errors.join("; "), partial);
+  }
 
-  // ---- non-blocking warnings ----
-  const warnings = [...validation.warnings];
+  const warnings = [...rendered.warnings];
   if (!r.matchesPageNextPayable) {
     warnings.push("This enrollment's next payable line is not an installment, so the reminder targets the oldest unpaid installment instead.");
   }

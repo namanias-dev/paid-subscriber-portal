@@ -329,7 +329,12 @@ async function resolveAudienceInner(spec: AudienceSpec): Promise<Recipient[]> {
       leads = leads.filter((l) => (normalizeLeadStatus(l.status) ?? l.status ?? "").toLowerCase() === wanted);
     }
     if (ptf) leads = leads.filter((l) => inPreset(new Date(l.created_at).getTime()));
-    return dedupeRecipients(leads.map((l) => { const d = norm(l.phone); return d ? attach(d, l.name, { item_short: l.course_interest || "" }, { lead_id: l.id }) : null; }).filter((x): x is Recipient => !!x));
+    return dedupeRecipients(leads.map((l) => {
+      const d = norm(l.phone);
+      if (!d) return null;
+      const short = resolveSmsItemShort({ fallback: l.course_interest || "" });
+      return attach(d, l.name, { item_short: short, item_name: short }, { lead_id: l.id });
+    }).filter((x): x is Recipient => !!x));
   }
 
   // buyer signup dates (only needed when a preset timeframe scopes buyers).
