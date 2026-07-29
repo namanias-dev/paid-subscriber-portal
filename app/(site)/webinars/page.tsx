@@ -9,18 +9,42 @@ import { formatINR, formatISTDateTime } from "@/lib/dates";
 
 export const metadata = { title: "Webinars — Naman Sharma IAS Academy" };
 
-// ISR: ordinary visits should not hammer Postgres. Fresh enough for marketing.
 export const revalidate = 60;
-export const maxDuration = 15;
+export const maxDuration = 10;
+
+async function withBudget<T>(work: Promise<T>, ms: number, fallback: T): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      work,
+      new Promise<T>((resolve) => {
+        timer = setTimeout(() => resolve(fallback), ms);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
 
 export default async function WebinarsPage() {
   let webinars: Awaited<ReturnType<typeof getPublicWebinars>> = [];
   let snapshot: Awaited<ReturnType<typeof getPurchaseSnapshot>> = null;
   let regCounts = new Map<string, number>();
   try {
-    webinars = await getPublicWebinars();
-    snapshot = await getPurchaseSnapshot();
-    regCounts = await getWebinarRegisteredCounts(webinars);
+    const loaded = await withBudget(
+      Promise.all([
+        getPublicWebinars(),
+        getPurchaseSnapshot(),
+      ]).then(async ([w, s]) => {
+        const counts = await withBudget(getWebinarRegisteredCounts(w), 2500, new Map<string, number>());
+        return { w, s, counts };
+      }),
+      6000,
+      { w: [] as Awaited<ReturnType<typeof getPublicWebinars>>, s: null, counts: new Map<string, number>() },
+    );
+    webinars = loaded.w;
+    snapshot = loaded.s;
+    regCounts = loaded.counts;
   } catch {
     webinars = [];
     snapshot = null;

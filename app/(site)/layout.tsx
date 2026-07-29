@@ -3,21 +3,49 @@ import PublicFooter from "@/components/public/PublicFooter";
 import FloatingWhatsApp from "@/components/public/FloatingWhatsApp";
 import AiCounselorMount from "@/components/ai-agent/AiCounselorMount";
 import { getSiteSettings, hasUpcomingWebinars } from "@/lib/dataProvider";
+import { mergeSiteSettings } from "@/lib/homeDefaults";
 import { getStudentSession, getBuyerSession } from "@/lib/session";
 import { resolveNavTabs } from "@/lib/navConfig";
 import { whatsappLink } from "@/lib/phone";
 import { getWhatsNew } from "@/lib/announcements";
 
+async function withBudget<T>(work: Promise<T>, ms: number, fallback: T): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      work,
+      new Promise<T>((resolve) => {
+        timer = setTimeout(() => resolve(fallback), ms);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+/**
+ * SEV1: layout runs on EVERY public page. It must never wait on a saturated DB
+ * long enough to 504 the route. Budget all shell data; fall back to defaults.
+ */
 export default async function SiteLayout({ children }: { children: React.ReactNode }) {
-  const settings = await getSiteSettings();
-  // Auto NEW badge on the Webinars nav item when any webinar is scheduled (not
-  // completed). Uses a lightweight, cached check instead of fetching every webinar.
-  const [session, buyerSession, upcomingWebinars, whatsNew] = await Promise.all([
-    getStudentSession(),
-    getBuyerSession(),
-    hasUpcomingWebinars(),
-    getWhatsNew(),
-  ]);
+  const emptyWhatsNew = { barItems: [] as Awaited<ReturnType<typeof getWhatsNew>>["barItems"] };
+  const settings = await withBudget(getSiteSettings(), 2500, mergeSiteSettings(null));
+
+  const [session, buyerSession, upcomingWebinars, whatsNew] = await withBudget(
+    Promise.all([
+      getStudentSession().catch(() => null),
+      getBuyerSession().catch(() => null),
+      hasUpcomingWebinars().catch(() => false),
+      getWhatsNew().catch(() => emptyWhatsNew),
+    ]),
+    3000,
+    [null, null, false, emptyWhatsNew] as [
+      Awaited<ReturnType<typeof getStudentSession>>,
+      Awaited<ReturnType<typeof getBuyerSession>>,
+      boolean,
+      typeof emptyWhatsNew,
+    ],
+  );
   const userName = session?.name || buyerSession?.name || null;
   const waLink = whatsappLink(
     settings.brand.whatsapp || settings.brand.support_phone,

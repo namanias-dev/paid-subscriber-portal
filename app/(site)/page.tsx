@@ -22,7 +22,21 @@ import { buildHomeV2Metadata } from "@/components/public/home-v2/seo";
 
 // ISR: ordinary visits should not hammer Postgres while marketing content is fresh enough.
 export const revalidate = 60;
-export const maxDuration = 15;
+export const maxDuration = 10;
+
+async function withBudget<T>(work: Promise<T>, ms: number, fallback: T): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      work,
+      new Promise<T>((resolve) => {
+        timer = setTimeout(() => resolve(fallback), ms);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
 
 type SearchParams = Record<string, string | string[] | undefined>;
 
@@ -95,24 +109,48 @@ export default async function HomePage({ searchParams }: { searchParams?: Search
   let settings: Awaited<ReturnType<typeof getSiteSettings>>;
   let caArticles: Awaited<ReturnType<typeof getPublicCaArticles>> = [];
   try {
-    [courses, webinars, settings, caArticles] = await Promise.all([
-      getPublishedCourses(),
-      getPublicWebinars(),
-      getSiteSettings(),
-      getPublicCaArticles(),
-    ]);
+    const loaded = await withBudget(
+      Promise.all([
+        getPublishedCourses(),
+        getPublicWebinars(),
+        getSiteSettings(),
+        getPublicCaArticles(),
+      ]).then(([c, w, s, a]) => ({ c, w, s, a })),
+      6000,
+      null as {
+        c: Awaited<ReturnType<typeof getPublishedCourses>>;
+        w: Awaited<ReturnType<typeof getPublicWebinars>>;
+        s: Awaited<ReturnType<typeof getSiteSettings>>;
+        a: Awaited<ReturnType<typeof getPublicCaArticles>>;
+      } | null,
+    );
+    if (loaded) {
+      courses = loaded.c;
+      webinars = loaded.w;
+      settings = loaded.s;
+      caArticles = loaded.a;
+    } else {
+      courses = [];
+      webinars = [];
+      caArticles = [];
+      settings = await withBudget(getSiteSettings(), 1500, await import("@/lib/homeDefaults").then((m) => m.mergeSiteSettings(null)));
+    }
   } catch {
     courses = [];
     webinars = [];
     caArticles = [];
-    settings = await getSiteSettings();
+    settings = await withBudget(getSiteSettings(), 1500, await import("@/lib/homeDefaults").then((m) => m.mergeSiteSettings(null)));
   }
   // Single source of truth for purchase awareness — identical to /courses + detail.
-  const snapshot = await getPurchaseSnapshot().catch(() => null);
+  const snapshot = await withBudget(getPurchaseSnapshot().catch(() => null), 2000, null);
   const purchaseMap = coursePurchaseMap(courses, snapshot);
   const homeCa = (caArticles.filter((a) => a.show_on_home).length ? caArticles.filter((a) => a.show_on_home) : caArticles).slice(0, 3);
   const upcoming = webinars.filter((w) => w.status === "upcoming").slice(0, 2);
-  const upcomingRegCounts = await getWebinarRegisteredCounts(upcoming).catch(() => new Map<string, number>());
+  const upcomingRegCounts = await withBudget(
+    getWebinarRegisteredCounts(upcoming).catch(() => new Map<string, number>()),
+    2000,
+    new Map<string, number>(),
+  );
   const c = settings.content;
   const trustBar = c.trust_bar?.length ? c.trust_bar : [];
 

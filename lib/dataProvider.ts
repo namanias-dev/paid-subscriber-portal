@@ -2427,17 +2427,17 @@ export async function hasUpcomingWebinars(): Promise<boolean> {
   if (demoMode()) {
     v = mock.webinars.some(_isUpcomingWebinar);
   } else {
-    const db = getSupabaseAdmin();
+    const db = getSupabasePublic() || getSupabaseAdmin();
     if (!db) {
       v = mock.webinars.some(_isUpcomingWebinar);
     } else {
       try {
-        const { data } = await db.from("webinars").select("status,datetime");
+        const { data } = await db.from("webinars").select("status,datetime").limit(50);
         const rows = (data as { status: string | null; datetime: string | null }[]) ?? [];
         // Parity with getWebinars(): an empty table falls back to the mock set.
         v = rows.length ? rows.some(_isUpcomingWebinar) : mock.webinars.some(_isUpcomingWebinar);
       } catch {
-        v = mock.webinars.some(_isUpcomingWebinar);
+        v = false;
       }
     }
   }
@@ -6337,7 +6337,7 @@ const demoSettings = (() => {
  */
 export const getSiteSettings = cache(async function getSiteSettings(): Promise<SiteSettings> {
   if (demoMode()) return mergeSiteSettings(demoSettings);
-  const db = getSupabaseAdmin();
+  const db = getSupabasePublic() || getSupabaseAdmin();
   if (!db) return mergeSiteSettings(null);
   try {
     const { data } = await db.from("site_settings").select("*").eq("id", "home").maybeSingle();
