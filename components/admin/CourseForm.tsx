@@ -23,6 +23,7 @@ import {
 import RichTextEditor from "./RichTextEditor";
 import LibraryPicker from "./LibraryPicker";
 import OrientationVideoPicker from "./OrientationVideoPicker";
+import { SmsShortTitleField } from "./SmsShortTitleField";
 import { useToast } from "@/components/ui/Toast";
 import { COURSE_CATEGORIES, LEARNING_MODES } from "@/lib/config";
 import { istInputToISO, isoToISTInput, formatINR, formatISTDate } from "@/lib/dates";
@@ -127,6 +128,13 @@ export default function CourseForm({ course }: { course?: Course }) {
                   <Field label="Title" full>
                     <input className="input" value={c.title || ""} onChange={(e) => set("title", e.target.value)} placeholder="e.g. GS Foundation 2027" />
                   </Field>
+                  <div className="sm:col-span-2">
+                    <SmsShortTitleField
+                      fullTitle={c.title || ""}
+                      value={c.sms_short_title || ""}
+                      onChange={(v) => set("sms_short_title", v)}
+                    />
+                  </div>
                   <Field label="Category">
                     <select className="input" value={c.category} onChange={(e) => set("category", e.target.value as CourseCategory)}>
                       {COURSE_CATEGORIES.map((x) => <option key={x}>{x}</option>)}
