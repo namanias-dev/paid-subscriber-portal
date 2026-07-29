@@ -20,6 +20,33 @@ import { replacePlaceholders, uniqueVariables } from "./placeholders";
 export const BRAND_LINE = "Naman Sharma IAS Academy";
 export const MAX_RECOMMENDED_CHARS = 155;
 
+/**
+ * Max characters per DLT `{#var#}` slot for free-text fields we fill
+ * (`item_short` / `item_name`). Empirically on this JustGoSMS account:
+ *   • 47 chars → Delivered
+ *   • 51 chars ("…01 August 2026") → 100% `dlr:Other` after gateway accept
+ * Gateway returns "Message Submitted Successfully"; the operator then scrubs.
+ * Shorter values are always legal; oversize values are not.
+ */
+export const DLT_FREE_TEXT_VAR_MAX = 50;
+
+/** Keys whose values are free-text product/course titles (not codes/URLs). */
+const DLT_LENGTH_CLAMPED_VARS = new Set(["item_short", "item_name"]);
+
+/**
+ * Clamp a free-text DLT variable to {@link DLT_FREE_TEXT_VAR_MAX}. Prefers a
+ * word boundary so we do not leave a dangling partial word when possible.
+ */
+export function clampDltFreeTextVar(value: string, max = DLT_FREE_TEXT_VAR_MAX): string {
+  const s = String(value);
+  const chars = [...s];
+  if (chars.length <= max) return s;
+  const sliced = chars.slice(0, max).join("");
+  const sp = sliced.lastIndexOf(" ");
+  const cut = sp >= Math.floor(max * 0.6) ? sliced.slice(0, sp) : sliced;
+  return cut.replace(/\s+$/g, "");
+}
+
 /** Stable trigger keys (also used as sms_auto_rules.trigger). */
 export const TRIGGERS = {
   payment_success: "payment_success",
@@ -208,7 +235,10 @@ export function renderTemplate(body: string, vars: Record<string, string | numbe
       if (!missing.includes(key)) missing.push(key);
       return full;
     }
-    return String(v);
+    const raw = String(v);
+    // DLT free-text slots reject oversize values post-accept (`dlr:Other`).
+    if (DLT_LENGTH_CLAMPED_VARS.has(key)) return clampDltFreeTextVar(raw);
+    return raw;
   });
   return { text, missing };
 }
