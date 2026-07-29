@@ -1,5 +1,5 @@
 import { cache } from "react";
-import { getSupabaseAdmin } from "./supabase";
+import { getSupabaseAdmin, getSupabasePublic } from "./supabase";
 import * as mock from "./mockData";
 import { computeExpiry, isExpired, isExpiringSoon, yesterdayISODate, todayISODate, formatINR, formatISTDate } from "./dates";
 import { generateAccessCode } from "./codeGenerator";
@@ -2446,12 +2446,33 @@ export async function hasUpcomingWebinars(): Promise<boolean> {
 }
 /** Public webinars only — hides disabled items (Task 7). Request-deduped via React.cache. */
 export const getPublicWebinars = cache(async function getPublicWebinars(): Promise<Webinar[]> {
-  const all = await getWebinars();
-  return all.filter((w) => w.active !== false);
+  if (demoMode()) return mock.webinars.filter((w) => w.active !== false);
+  const db = getSupabasePublic() || getSupabaseAdmin();
+  if (!db) return mock.webinars.filter((w) => w.active !== false);
+  try {
+    const { data, error } = await db
+      .from("webinars")
+      .select("*")
+      .neq("active", false)
+      .order("datetime", { ascending: true });
+    if (error) throw error;
+    const rows = (data as Webinar[]) ?? [];
+    return rows.length ? rows : mock.webinars.filter((w) => w.active !== false);
+  } catch {
+    return [];
+  }
 });
 export async function getWebinarBySlug(slug: string): Promise<Webinar | null> {
-  const all = await getWebinars();
-  return all.find((w) => w.slug === slug) ?? null;
+  if (demoMode()) return mock.webinars.find((w) => w.slug === slug) ?? null;
+  const db = getSupabasePublic() || getSupabaseAdmin();
+  if (!db) return mock.webinars.find((w) => w.slug === slug) ?? null;
+  try {
+    const { data, error } = await db.from("webinars").select("*").eq("slug", slug).maybeSingle();
+    if (error) throw error;
+    return (data as Webinar | null) ?? null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -2461,66 +2482,92 @@ export async function getWebinarBySlug(slug: string): Promise<Webinar | null> {
  * registration rows. Returns 0 (not a fabricated number) when there's nothing.
  */
 export async function getWebinarRegisteredCount(w: Pick<Webinar, "id" | "slug" | "price">): Promise<number> {
-  const db = demoMode() ? null : getSupabaseAdmin();
+  const db = demoMode() ? null : (getSupabasePublic() || getSupabaseAdmin());
   if (!db) return 0;
-  if ((w.price ?? 0) > 0) {
-    const { data } = await db
-      .from("payments")
-      .select("phone")
-      .eq("item_type", "webinar")
-      .eq("item_slug", w.slug)
-      .in("status", ["PAID", "captured"]);
-    const phones = new Set<string>();
-    for (const r of (data as { phone: string | null }[]) ?? []) {
-      const p = (r.phone || "").trim();
-      if (p) phones.add(p);
+  try {
+    if ((w.price ?? 0) > 0) {
+      const payRows = await pageThrough<{ phone: string | null }>(() =>
+        db
+          .from("payments")
+          .select("phone,id")
+          .eq("item_type", "webinar")
+          .eq("item_slug", w.slug)
+          .in("status", ["PAID", "captured"])
+          .order("id", { ascending: true }),
+      );
+      const phones = new Set<string>();
+      for (const r of payRows) {
+        const p = (r.phone || "").trim();
+        if (p) phones.add(p);
+      }
+      return phones.size;
     }
-    return phones.size;
+    const { count } = await db
+      .from("webinar_registrations")
+      .select("id", { count: "exact", head: true })
+      .eq("webinar_id", w.id);
+    return count ?? 0;
+  } catch {
+    return 0;
   }
-  const { count } = await db
-    .from("webinar_registrations")
-    .select("id", { count: "exact", head: true })
-    .eq("webinar_id", w.id);
-  return count ?? 0;
 }
 
 /**
- * Batch version of getWebinarRegisteredCount for listings/home — two queries
- * total regardless of how many webinars. Returns a Map keyed by webinar id.
+ * Batch version of getWebinarRegisteredCount for listings/home — scoped to the
+ * webinars on the page (never whole-table scans). Returns a Map keyed by webinar id.
  */
 export async function getWebinarRegisteredCounts(
   webinars: Pick<Webinar, "id" | "slug" | "price">[],
 ): Promise<Map<string, number>> {
   const out = new Map<string, number>();
   for (const w of webinars) out.set(w.id, 0);
-  const db = demoMode() ? null : getSupabaseAdmin();
+  const db = demoMode() ? null : (getSupabasePublic() || getSupabaseAdmin());
   if (!db || webinars.length === 0) return out;
 
-  // Paid-distinct by slug (for paid webinars).
-  const { data: payRows } = await db
-    .from("payments")
-    .select("phone,item_slug")
-    .eq("item_type", "webinar")
-    .in("status", ["PAID", "captured"]);
-  const paidBySlug = new Map<string, Set<string>>();
-  for (const r of (payRows as { phone: string | null; item_slug: string | null }[]) ?? []) {
-    const slug = (r.item_slug || "").trim();
-    const phone = (r.phone || "").trim();
-    if (!slug || !phone) continue;
-    (paidBySlug.get(slug) || paidBySlug.set(slug, new Set()).get(slug)!).add(phone);
-  }
+  try {
+    const paid = webinars.filter((w) => (w.price ?? 0) > 0);
+    const free = webinars.filter((w) => (w.price ?? 0) <= 0);
+    const paidBySlug = new Map<string, Set<string>>();
+    if (paid.length) {
+      const slugs = paid.map((w) => w.slug);
+      const payRows = await pageThrough<{ phone: string | null; item_slug: string | null }>(() =>
+        db
+          .from("payments")
+          .select("phone,item_slug,id")
+          .eq("item_type", "webinar")
+          .in("item_slug", slugs)
+          .in("status", ["PAID", "captured"])
+          .order("id", { ascending: true }),
+      );
+      for (const r of payRows) {
+        const slug = (r.item_slug || "").trim();
+        const phone = (r.phone || "").trim();
+        if (!slug || !phone) continue;
+        (paidBySlug.get(slug) || paidBySlug.set(slug, new Set()).get(slug)!).add(phone);
+      }
+    }
+    const regsById = new Map<string, number>();
+    if (free.length) {
+      const ids = free.map((w) => w.id);
+      const regRows = await pageThrough<{ webinar_id: string | null }>(() =>
+        db
+          .from("webinar_registrations")
+          .select("webinar_id,id")
+          .in("webinar_id", ids)
+          .order("id", { ascending: true }),
+      );
+      for (const r of regRows) {
+        const id = (r.webinar_id || "").trim();
+        if (!id) continue;
+        regsById.set(id, (regsById.get(id) || 0) + 1);
+      }
+    }
 
-  // Registration rows by webinar id (for free webinars).
-  const { data: regRows } = await db.from("webinar_registrations").select("webinar_id");
-  const regsById = new Map<string, number>();
-  for (const r of (regRows as { webinar_id: string | null }[]) ?? []) {
-    const id = (r.webinar_id || "").trim();
-    if (!id) continue;
-    regsById.set(id, (regsById.get(id) || 0) + 1);
-  }
-
-  for (const w of webinars) {
-    out.set(w.id, (w.price ?? 0) > 0 ? (paidBySlug.get(w.slug)?.size ?? 0) : (regsById.get(w.id) ?? 0));
+    for (const w of webinars) {
+      out.set(w.id, (w.price ?? 0) > 0 ? (paidBySlug.get(w.slug)?.size ?? 0) : (regsById.get(w.id) ?? 0));
+    }
+  } catch {
+    /* degrade to zeros — public pages must still render */
   }
   return out;
 }
