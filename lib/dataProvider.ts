@@ -2116,11 +2116,16 @@ export async function getLeadsForPillMap(): Promise<Lead[]> {
   //     these through the legacy short-circuit, so aggregate live-capture
   //     channel counts stay byte-identical — the cohort is a dimension, never
   //     a silent blend.
+  // Push merged_into IS NULL into SQL so Postgres can use idx_leads_promoted_active
+  // (partial index WHERE merged_into IS NULL AND promoted_at IS NOT NULL). Without
+  // that predicate this arm Seq-Scans all ~180k leads (~2.2s) even when zero
+  // promoted rows exist. JS still filters !merged_into below — identical output.
   const promotedPromise = db
     .from("leads")
     .select("*")
     .eq(LEADS_IS_LEGACY_COLUMN, true)
     .not("promoted_at", "is", null)
+    .is("merged_into", null)
     .limit(5000);
   const [nonLegacy, legacyRes, promotedRes] = await Promise.all([
     nonLegacyPromise, legacyChanPromise, promotedPromise,

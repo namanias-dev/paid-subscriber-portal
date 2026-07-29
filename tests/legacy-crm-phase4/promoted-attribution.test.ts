@@ -151,6 +151,10 @@ describe("Phase 4f — the read path includes promoted leads", () => {
       "getLeadsForPillMap must select promoted legacy leads explicitly",
     );
     assert.ok(
+      /\.is\("merged_into",\s*null\)/.test(fn),
+      "promoted arm must push merged_into IS NULL so idx_leads_promoted_active is used (no 179k seq scan)",
+    );
+    assert.ok(
       /seen|Set</.test(fn),
       "arms (b) and (c) overlap on a promoted lead with a channel; dedupe required",
     );
