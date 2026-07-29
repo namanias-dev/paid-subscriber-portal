@@ -90,6 +90,9 @@ import type {
   Announcement,
 } from "./types";
 import { deriveEnrollment, enrollmentStatusFromSchedule, installmentsSummary, planCourseEnrollment, resolveEmiConfig, isLineCancelledOrWaived, isLineOutstanding, isActiveEnrollment, isAttemptEnrollment } from "./installments";
+import { scheduleAsCheckoutIntent } from "./enrollmentScope";
+import { materializeScheduleDues, needsDueMaterialization } from "./scheduleDues";
+import { resolveEnrollmentBatchStart } from "./batchStart";
 import { changePlan, type ChangePlanTarget, type ConvertOptions } from "./paymentPlanChange";
 import { mergeSiteSettings } from "./homeDefaults";
 import { normalizeLeaderboardSettings, type LeaderboardSettings } from "./leaderboardConfig";
@@ -4372,7 +4375,18 @@ export async function finalizeCoursePaymentByReference(
   const kind = (payment.payment_kind || "full") as "seat" | "installment" | "full";
   const gatewayRef = payment.gateway_ref || payment.razorpay_payment_id || null;
   const paidAt = new Date().toISOString();
-  const schedule = [...(enrollment.schedule || [])];
+  let schedule = [...(enrollment.schedule || [])];
+
+  // Checkout intents persist amounts without dues — materialize dates on first money.
+  if (needsDueMaterialization({ ...enrollment, amount_paid: Math.max(enrollment.amount_paid || 0, 1) })) {
+    const course = (await getAllCourses().catch(() => [] as Course[])).find((c) => c.id === enrollment.course_id) || null;
+    const batch = resolveEnrollmentBatchStart(course || undefined, enrollment);
+    schedule = materializeScheduleDues(schedule, {
+      bookingISO: enrollment.created_at,
+      course,
+      batchStartISO: batch.iso,
+    });
+  }
 
   const markPaid = (i: number) => {
     schedule[i] = { ...schedule[i], paid: true, paid_at: paidAt, reference_no: referenceNo, gateway_ref: gatewayRef };
@@ -4553,15 +4567,15 @@ export async function enrollStudentInCourse(
 
   if (attemptToReuse) {
     // Re-plan the abandoned attempt to the new selection (no duplicate row). It
-    // stays an attempt (₹0) until a payment is recorded, which activates it.
+    // stays an attempt (₹0, undated schedule) until a payment is recorded.
     const enrollment = await updateCourseEnrollment(attemptToReuse.id, {
       batch_label: planned.plan.batchLabel,
       plan_type: planned.plan.planType,
       total_fee: planned.plan.totalFee,
       amount_paid: 0,
       installment_count: planned.plan.installmentCount,
-      status: "pending",
-      schedule: planned.plan.schedule,
+      status: "checkout_intent",
+      schedule: scheduleAsCheckoutIntent(planned.plan.schedule),
     });
     await ensureBuyer(phone, input.name).catch(() => null);
     return { ok: true, enrollment: enrollment || attemptToReuse };
@@ -4579,8 +4593,8 @@ export async function enrollStudentInCourse(
     total_fee: planned.plan.totalFee,
     amount_paid: 0,
     installment_count: planned.plan.installmentCount,
-    status: "pending",
-    schedule: planned.plan.schedule,
+    status: "checkout_intent",
+    schedule: scheduleAsCheckoutIntent(planned.plan.schedule),
   });
   await ensureBuyer(phone, input.name).catch(() => null);
   return { ok: true, enrollment };

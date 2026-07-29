@@ -3,11 +3,13 @@
  * gate / automation. A student must never appear on the list with no actionable
  * reason — pending ₹0 attempts are not collections cases.
  */
-import { isActiveEnrollment } from "./installments";
+import { countsTowardCapacity, isActiveEnrollment } from "./enrollmentScope";
 import { formatISTDate } from "./dates";
 import type { CourseEnrollment, CourseAccessOverride, InstallmentItem } from "./types";
 import type { LectureAccess } from "./entitlements";
 import { activeAccessGrant } from "./sms/accessReminderService";
+
+export { countsTowardCapacity, isPhantomEnrollment, isActiveEnrollment } from "./enrollmentScope";
 
 export type AccessAtRiskKind =
   | "schedule_blocked"

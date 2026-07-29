@@ -160,3 +160,30 @@ export function normalizeLandingInput(body: Record<string, unknown>): LandingNor
 
   return { ok: true, value: out };
 }
+
+/** New courses / newly added batches must carry a structured start_date. */
+export function assertBatchesHaveStartDates(
+  batches: unknown,
+  opts?: { previousIds?: Set<string>; requireAll?: boolean },
+): { ok: true } | { ok: false; error: string } {
+  if (!Array.isArray(batches)) return { ok: true };
+  const prev = opts?.previousIds;
+  const requireAll = opts?.requireAll === true;
+  for (let i = 0; i < batches.length; i++) {
+    const b = batches[i] as Record<string, unknown>;
+    const id = String(b.id || "");
+    const isNew = requireAll || !prev || !prev.has(id);
+    if (!isNew) continue;
+    const start = b.start_date == null || b.start_date === "" ? null : String(b.start_date);
+    if (!start) {
+      return {
+        ok: false,
+        error: `Batch ${i + 1}: a structured start date is required. Free-text labels cannot replace it.`,
+      };
+    }
+    if (!Number.isFinite(Date.parse(start))) {
+      return { ok: false, error: `Batch ${i + 1}: start date is invalid.` };
+    }
+  }
+  return { ok: true };
+}

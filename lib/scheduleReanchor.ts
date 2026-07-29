@@ -4,7 +4,7 @@
  * confirmation and is unused at ship.
  */
 import { addMonthsISO } from "./dates";
-import { resolveEnrollmentBatchStart } from "./batchStart";
+import { isTrustedBatchStartForReanchor, resolveEnrollmentBatchStart } from "./batchStart";
 import {
   BATCH_START_INSTALLMENT_OFFSET_DAYS,
   firstInstallmentDueISO,
@@ -85,6 +85,10 @@ export function previewReanchorEnrollment(
   }
   if (!batch.iso) {
     return { ...base, skipReason: "batch_start_unknown" };
+  }
+  // Only catalog / earliest-class — never re-anchor off a free-text label parse.
+  if (!isTrustedBatchStartForReanchor(batch.provenance)) {
+    return { ...base, skipReason: "batch_start_untrusted" };
   }
 
   const schedule = enrollment.schedule || [];
@@ -190,6 +194,25 @@ export function applyReanchorToSchedule(
     const proposed = proposedByNo.get(s.no);
     return proposed ? { ...s, due: proposed } : s;
   });
+}
+
+/** Build the proposed-by-no map from a preview (for apply / revert helpers). */
+export function proposedDueMapFromPreview(preview: ReanchorEnrollmentPreview): Map<number, string> {
+  const m = new Map<number, string>();
+  for (const line of preview.lines) {
+    if (line.proposedDue && line.kind === "installment" && !line.paid) {
+      m.set(line.no, line.proposedDue);
+    }
+  }
+  return m;
+}
+
+/** Apply preview dues onto a schedule. Amounts/paid flags untouched. */
+export function scheduleFromReanchorPreview(
+  schedule: InstallmentItem[],
+  preview: ReanchorEnrollmentPreview,
+): InstallmentItem[] {
+  return applyReanchorToSchedule(schedule, proposedDueMapFromPreview(preview));
 }
 
 /** Offset helper for tests / callers that already have batch start. */

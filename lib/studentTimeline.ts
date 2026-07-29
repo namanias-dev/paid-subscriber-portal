@@ -25,6 +25,7 @@ export type TimelineEventType =
   | "receipt"
   | "sms"
   | "plan_changed"
+  | "schedule_reanchor"
   | "discount_applied"
   | "access_cap"
   | "access_exclusion"
@@ -417,7 +418,9 @@ export function enrollmentEvents(e: EnrollmentRow): TimelineEvent[] {
   // are told apart.
   const planReason = e.payment_plan_change_reason ?? "";
   const isTransferPlanChange = planReason.startsWith("Batch/course transfer:");
-  if (e.payment_plan_changed_at && !isTransferPlanChange) {
+  const isReanchorPlanChange = planReason.startsWith("Schedule re-anchor");
+  const isPhantomNeutralize = planReason.includes("neutralized phantom");
+  if (e.payment_plan_changed_at && !isTransferPlanChange && !isReanchorPlanChange && !isPhantomNeutralize) {
     events.push({
       id: `plan:${e.id}`,
       type: "plan_changed",
@@ -473,11 +476,50 @@ export const TYPE_LABELS: Record<TimelineEventType, string> = {
   receipt: "Receipt",
   sms: "SMS",
   plan_changed: "Schedule change",
+  schedule_reanchor: "Schedule re-anchor",
   discount_applied: "Discount",
   access_cap: "Access cap",
   access_exclusion: "Access automation",
   access_override: "Access grant",
 };
+
+export interface ScheduleReanchorRow {
+  id: string;
+  created_at: string;
+  enrollment_id: string;
+  course_id: string | null;
+  batch_start: string | null;
+  reason: string | null;
+  actor: string | null;
+  schedule_before: InstallmentItem[];
+  schedule_after: InstallmentItem[];
+  lines: { no: number; label: string; currentDue: string | null; proposedDue: string | null; daysShifted: number | null; paid: boolean }[];
+  reverted_at: string | null;
+}
+
+export function scheduleReanchorEvent(row: ScheduleReanchorRow, courseTitle?: string | null): TimelineEvent {
+  const moves = dueDateMoves(row.schedule_before || [], row.schedule_after || []);
+  const changes: TimelineChange[] = moves.map((m) => ({
+    label: `Due date — ${m.label}`,
+    before: istDayMonth(m.oldDue),
+    after: istDayMonth(m.newDue),
+    emphasis: true,
+  }));
+  return {
+    id: `reanchor:${row.id}`,
+    type: "schedule_reanchor",
+    at: row.created_at,
+    title: row.reverted_at
+      ? `Schedule re-anchor reverted — ${courseTitle ?? "course"}`
+      : `Schedule re-anchored to batch start — ${courseTitle ?? "course"}`,
+    detail: row.batch_start ? `Batch start ${istDate(row.batch_start)}. Amounts unchanged.` : "Amounts unchanged.",
+    actor: { id: row.actor, name: row.actor || "System · re-anchor" },
+    reason: row.reason,
+    changes,
+    snapshot: { before: row.schedule_before, after: row.schedule_after, lines: row.lines },
+    courseTitle: courseTitle ?? null,
+  };
+}
 
 export interface AccessOverrideEventRow {
   id: string;

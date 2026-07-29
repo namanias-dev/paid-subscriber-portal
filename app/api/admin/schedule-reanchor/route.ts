@@ -3,15 +3,14 @@ import { getAdminSession } from "@/lib/session";
 import { requireAnyPermission, currentAdminId } from "@/lib/adminGuard";
 import { getAllCourseEnrollments, getAllCourses, getCourseEnrollmentById } from "@/lib/dataProvider";
 import { previewReanchorEnrollment } from "@/lib/scheduleReanchor";
-import { getSupabaseAdmin } from "@/lib/supabase";
+import { applyReanchorEnrollment, revertReanchorSnapshot, REANCHOR_ACTOR } from "@/lib/scheduleReanchorApply";
 import { maskMobile } from "@/lib/phone";
 
 export const dynamic = "force-dynamic";
 
 /**
  * GET — preview-only re-anchoring report. NEVER mutates schedules.
- * POST — apply for a single enrollment behind explicit confirmation.
- *         Left UNUSED at ship; requires confirmApply: true.
+ * POST — apply one enrollment (confirmApply) or revert one snapshot (confirmRevert).
  */
 export async function GET() {
   if (!(await requireAnyPermission(["view_revenue", "manage_payments"]))) {
@@ -44,13 +43,21 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   }
   const body = await req.json().catch(() => ({}));
+  const actor = REANCHOR_ACTOR;
+
+  if (body.confirmRevert === true && body.snapshotId) {
+    const rev = await revertReanchorSnapshot(String(body.snapshotId), `${actor} revert`);
+    if (!rev.ok) return NextResponse.json({ ok: false, error: rev.error }, { status: 400 });
+    return NextResponse.json({ ok: true, reverted: true, enrollmentId: rev.enrollmentId, actor });
+  }
+
   if (body.confirmApply !== true) {
     return NextResponse.json({
       ok: false,
-      error: "Apply path is gated. Pass confirmApply: true only after human approval. Preview via GET.",
+      error: "Apply path is gated. Pass confirmApply: true. Preview via GET. Revert via confirmRevert + snapshotId.",
     }, { status: 400 });
   }
-  // Ship leaves this unused — still implemented so approval can flip it on later.
+
   const enrollmentId = String(body.enrollmentId || "");
   if (!enrollmentId) return NextResponse.json({ ok: false, error: "enrollmentId required" }, { status: 400 });
 
@@ -58,45 +65,19 @@ export async function POST(req: Request) {
   if (!enrollment) return NextResponse.json({ ok: false, error: "Not found" }, { status: 404 });
   const courses = await getAllCourses();
   const course = courses.find((c) => c.id === enrollment.course_id);
-  const preview = previewReanchorEnrollment(enrollment, course);
-  if (preview.skipReason || !preview.wouldChange) {
-    return NextResponse.json({ ok: false, error: preview.skipReason || "Nothing to change" }, { status: 400 });
+  const applied = await applyReanchorEnrollment({ enrollment, course, actor });
+  if (!applied.ok) {
+    return NextResponse.json({ ok: false, error: applied.error, preview: applied.preview }, { status: 400 });
   }
-
-  const before = JSON.stringify(enrollment.schedule);
-  const proposedByNo = new Map<number, string>();
-  for (const line of preview.lines) {
-    if (line.proposedDue && line.kind === "installment" && !line.paid) {
-      proposedByNo.set(line.no, line.proposedDue);
-    }
-  }
-  const nextSchedule = (enrollment.schedule || []).map((s) => {
-    if (s.kind !== "installment" || s.paid || s.status === "cancelled" || s.status === "waived") return s;
-    const due = proposedByNo.get(s.no);
-    return due ? { ...s, due } : s;
+  return NextResponse.json({
+    ok: true,
+    applied: true,
+    enrollmentId,
+    snapshotId: applied.snapshotId,
+    actor: actor || (await currentAdminId()),
+    accessBefore: applied.preview.accessBefore,
+    accessAfter: applied.preview.accessAfter,
+    rupeesMovingOutOfMonth: applied.preview.rupeesMovingOutOfMonth,
+    lines: applied.preview.lines,
   });
-  // Amounts must be byte-identical.
-  const amountBefore = (enrollment.schedule || []).reduce((a, s) => a + (s.amount || 0), 0);
-  const amountAfter = nextSchedule.reduce((a, s) => a + (s.amount || 0), 0);
-  if (amountBefore !== amountAfter) {
-    return NextResponse.json({ ok: false, error: "Amount drift refused" }, { status: 500 });
-  }
-
-  const db = getSupabaseAdmin();
-  if (!db) return NextResponse.json({ ok: false, error: "DB unavailable" }, { status: 500 });
-  const actor = session.username || (await currentAdminId()) || "admin";
-  const { error } = await db.from("course_enrollments").update({ schedule: nextSchedule }).eq("id", enrollmentId);
-  if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
-
-  await db.from("access_override_events").insert({
-    phone: enrollment.phone,
-    course_id: enrollment.course_id,
-    actor,
-    kind: "shortened", // reuse kind space; detail carries the real event
-    detail: "Due dates re-anchored to batch start (amounts unchanged)",
-    reason: "schedule_reanchor_apply",
-    meta: { beforeFingerprint: before.slice(0, 200), lines: preview.lines },
-  }).then(() => undefined, () => undefined);
-
-  return NextResponse.json({ ok: true, applied: true, enrollmentId, actor });
 }

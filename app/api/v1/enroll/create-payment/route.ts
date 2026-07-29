@@ -18,6 +18,7 @@ import {
   PAYMENT_GATEWAY,
 } from "@/lib/eazypay";
 import { planCourseEnrollment, deriveEnrollment } from "@/lib/installments";
+import { scheduleAsCheckoutIntent } from "@/lib/enrollmentScope";
 import type { CourseEnrollment } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -119,7 +120,10 @@ export async function POST(req: Request) {
     } else if (existing) {
       // No money yet — safe to RE-PLAN the same enrollment to the latest selection
       // and abandon its stale open attempts, so a re-click reuses one row.
+      // Intent schedules keep amounts but NEVER dated dues (phantoms must not
+      // grace/block or inflate collections).
       await cancelStalePendingPayments(existing.id).catch(() => null);
+      const intentSchedule = scheduleAsCheckoutIntent(schedule);
       enrollment =
         (await updateCourseEnrollment(existing.id, {
           student_name: name,
@@ -129,8 +133,8 @@ export async function POST(req: Request) {
           total_fee: totalFee,
           amount_paid: 0,
           installment_count: installmentCount,
-          status: "pending",
-          schedule,
+          status: "checkout_intent",
+          schedule: intentSchedule,
         })) || existing;
     } else {
       enrollment = await addCourseEnrollment({
@@ -145,8 +149,8 @@ export async function POST(req: Request) {
         total_fee: totalFee,
         amount_paid: 0,
         installment_count: installmentCount,
-        status: "pending",
-        schedule,
+        status: "checkout_intent",
+        schedule: scheduleAsCheckoutIntent(schedule),
       });
     }
 

@@ -25,6 +25,10 @@ export type StartProvenance =
   | "catalog"
   /** Recovered by parsing a free-text batch_label. Correct only if the label is. */
   | "parsed_label"
+  /** Earliest scheduled class / content date for the course. */
+  | "earliest_class"
+  /** Batch/course created_at + course lead-time days. */
+  | "created_plus_lead"
   /** No usable source. Due dates cannot be recalculated. */
   | "unknown";
 
