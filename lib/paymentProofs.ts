@@ -13,14 +13,23 @@ import {
   ensureBuyer,
   bumpBuyerSessionVersion,
   finalizeCoursePaymentByReference,
+  getAllCourseEnrollments,
+  getAdminAccounts,
+  getAllStaffAccessGrants,
+  webinarPayClass,
 } from "./dataProvider";
 import { formatISTDateTime } from "./dates";
+import { normalizeIndianMobile } from "./phone";
 import type {
   Payment,
   PaymentProof,
   PaymentProofFile,
   PaymentProofStatus,
   PaymentProofAudit,
+  Webinar,
+  Course,
+  CourseEnrollment,
+  StaffAccessGrant,
 } from "./types";
 
 /**
@@ -140,6 +149,141 @@ export async function phoneHasAccessToItem(
   }
 
   return false;
+}
+
+/**
+ * In-memory twin of {@link phoneHasAccessToItem} for batch callers (admin
+ * Payments). Same rules — PAID-per-slug for webinars, free-reg for ₹0 webinars,
+ * paidCourseIds (+ staff) for courses — without per-target DB round trips.
+ */
+export function phoneHasAccessToItemSync(
+  phone: string,
+  itemType: string | null | undefined,
+  itemSlug: string | null | undefined,
+  snap: {
+    webinarPaidByPhone: Map<string, Map<string, boolean>>;
+    webinarRegsByPhone: Map<string, Set<string>>;
+    webinarsBySlug: Map<string, { id: string; price?: number | null }>;
+    coursesBySlug: Map<string, { id: string }>;
+    paidCourseIdsByPhone: Map<string, Set<string>>;
+  },
+): boolean {
+  const p = (phone || "").trim();
+  const slug = (itemSlug || "").trim();
+  if (!p) return false;
+
+  if (itemType === "webinar") {
+    if (!slug) return false;
+    if (snap.webinarPaidByPhone.get(p)?.get(slug)) return true;
+    const w = snap.webinarsBySlug.get(slug);
+    if (w && (w.price ?? 0) <= 0 && snap.webinarRegsByPhone.get(p)?.has(w.id)) return true;
+    return false;
+  }
+
+  if (itemType === "course") {
+    if (!slug) return false;
+    const c = snap.coursesBySlug.get(slug);
+    if (c && snap.paidCourseIdsByPhone.get(p)?.has(c.id)) return true;
+    return false;
+  }
+
+  return false;
+}
+
+/**
+ * Build the snapshot for {@link phoneHasAccessToItemSync} from data the
+ * Payments route already loaded, plus a few bulk reads instead of ~100
+ * per-target queries.
+ */
+export async function buildProofAccessSnapshot(input: {
+  payments: Payment[];
+  webinars: Webinar[];
+  courses: Course[];
+  proofPhones: string[];
+}): Promise<Parameters<typeof phoneHasAccessToItemSync>[3]> {
+  const phones = [...new Set(input.proofPhones.map((p) => (p || "").trim()).filter(Boolean))];
+  const db = getSupabaseAdmin();
+
+  // webinar_registrations for free-webinar access (one read, ~784 rows).
+  const regsByPhone = new Map<string, Set<string>>();
+  if (db && phones.length) {
+    const { data } = await db.from("webinar_registrations").select("phone,webinar_id").in("phone", phones);
+    for (const r of (data as { phone: string; webinar_id: string }[] | null) ?? []) {
+      const p = (r.phone || "").trim();
+      if (!p || !r.webinar_id) continue;
+      const set = regsByPhone.get(p) || new Set<string>();
+      set.add(r.webinar_id);
+      regsByPhone.set(p, set);
+    }
+  }
+
+  const [enrollments, admins, grants] = await Promise.all([
+    getAllCourseEnrollments(),
+    getAdminAccounts(),
+    getAllStaffAccessGrants(),
+  ]);
+
+  const webinarPaidByPhone = new Map<string, Map<string, boolean>>();
+  for (const pay of input.payments) {
+    if (pay.item_type !== "webinar") continue;
+    const p = (pay.phone || "").trim();
+    const slug = (pay.item_slug || "").trim();
+    if (!p || !slug) continue;
+    if ((pay.status || "").toUpperCase() === "INITIATED") continue;
+    if (webinarPayClass(pay.status) !== "PAID") continue;
+    const m = webinarPaidByPhone.get(p) || new Map<string, boolean>();
+    m.set(slug, true);
+    webinarPaidByPhone.set(p, m);
+  }
+
+  const webinarsBySlug = new Map(input.webinars.filter((w) => w.slug).map((w) => [w.slug, w]));
+  const coursesBySlug = new Map(input.courses.filter((c) => c.slug).map((c) => [c.slug!, c]));
+
+  // Mirror paidCourseIdsForPhone: amount_paid>0 or fully_paid, not cancelled + staff comps.
+  const paidCourseIdsByPhone = new Map<string, Set<string>>();
+  for (const e of enrollments as CourseEnrollment[]) {
+    const p = (e.phone || "").trim();
+    if (!p) continue;
+    if (e.status === "cancelled") continue;
+    if (!(e.amount_paid > 0 || e.status === "fully_paid")) continue;
+    const set = paidCourseIdsByPhone.get(p) || new Set<string>();
+    set.add(e.course_id);
+    paidCourseIdsByPhone.set(p, set);
+  }
+
+  const now = Date.now();
+  const grantActive = (g: StaffAccessGrant) => !g.expires_at || Date.parse(g.expires_at) > now;
+  const adminByPhone = new Map<string, string>();
+  for (const a of admins) {
+    const n = normalizeIndianMobile(a.phone || "");
+    if (n.ok && n.digits10) adminByPhone.set(n.digits10, a.id);
+  }
+  const courseGrantsByAdmin = new Map<string, string[]>();
+  for (const g of grants) {
+    if (g.kind !== "course" || !grantActive(g)) continue;
+    const list = courseGrantsByAdmin.get(g.admin_id) || [];
+    list.push(g.ref_id);
+    courseGrantsByAdmin.set(g.admin_id, list);
+  }
+  for (const p of phones) {
+    const n = normalizeIndianMobile(p);
+    const digits = n.ok ? n.digits10 : null;
+    const adminId = digits ? adminByPhone.get(digits) : undefined;
+    if (!adminId) continue;
+    const ids = courseGrantsByAdmin.get(adminId) || [];
+    if (!ids.length) continue;
+    const set = paidCourseIdsByPhone.get(p) || new Set<string>();
+    for (const id of ids) set.add(id);
+    paidCourseIdsByPhone.set(p, set);
+  }
+
+  return {
+    webinarPaidByPhone,
+    webinarRegsByPhone: regsByPhone,
+    webinarsBySlug,
+    coursesBySlug,
+    paidCourseIdsByPhone,
+  };
 }
 
 // ----------------------------- Recovery items (student) -----------------------------

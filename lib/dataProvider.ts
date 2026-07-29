@@ -2105,7 +2105,7 @@ export async function getLeadsForPillMap(): Promise<Lead[]> {
         .order("created_at", { ascending: false })
         .range(from, from + 999);
       if (error) throw new Error(`getLeadsForPillMap(nonLegacy) failed at ${from}: ${error.message}`);
-      const rows = (data as Lead[] | null) ?? [];
+      const rows = (data as unknown as Lead[] | null) ?? [];
       out.push(...rows);
       if (rows.length < 1000) break;
     }
