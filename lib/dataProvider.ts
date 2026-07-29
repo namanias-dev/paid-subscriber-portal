@@ -2086,16 +2086,37 @@ export async function getLeadsForPillMap(): Promise<Lead[]> {
   if (demoMode()) return applyLegacyFilter(mock.leads.filter((l) => !l.merged_into), { includeLegacy: false });
   const db = getSupabaseAdmin();
   if (!db) return applyLegacyFilter(mock.leads.filter((l) => !l.merged_into), { includeLegacy: false });
+  // Columns required by buildLeadAttrByPhone / hasLegacyFlag / arm dedupe only.
+  // SELECT * here pulled ~1.7KB/row across ~1.1k non-legacy leads for fields the
+  // Payments SourcePill never reads. Narrowing is output-identical for leadAttrByPhone.
+  const PILL_COLS =
+    "id,phone,channel,utm_campaign,utm_source,utm_medium,gclid,source,first_source,campaign,first_campaign,attribution,is_legacy,merged_into,promoted_at,created_at";
   // (a) Non-legacy universe — small (~1.3k today) and needed IN FULL to
   //     preserve the collision-preference rule (a non-legacy row with a null
   //     channel must still win over a same-phone legacy row).
-  const nonLegacyPromise = getLeads({ includeLegacy: false });
+  const nonLegacyPromise = (async () => {
+    const out: Lead[] = [];
+    for (let from = 0; ; from += 1000) {
+      const { data, error } = await db
+        .from("leads")
+        .select(PILL_COLS)
+        .is("merged_into", null)
+        .eq(LEADS_IS_LEGACY_COLUMN, false)
+        .order("created_at", { ascending: false })
+        .range(from, from + 999);
+      if (error) throw new Error(`getLeadsForPillMap(nonLegacy) failed at ${from}: ${error.message}`);
+      const rows = (data as unknown as Lead[] | null) ?? [];
+      out.push(...rows);
+      if (rows.length < 1000) break;
+    }
+    return out;
+  })();
   // (b) Targeted legacy-with-channel slice — a couple of rows in prod today.
-  //     Indexed via idx_leads_channel_legacy; the +legacy filter is cheap.
+  //     Indexed via idx_leads_channel; the +legacy filter is cheap.
   //     limit(5000) is a defensive cap — real prod count is <10.
   const legacyChanPromise = db
     .from("leads")
-    .select("*")
+    .select(PILL_COLS)
     .not("channel", "is", null)
     .neq("channel", "")
     .eq(LEADS_IS_LEGACY_COLUMN, true)
@@ -2116,11 +2137,16 @@ export async function getLeadsForPillMap(): Promise<Lead[]> {
   //     these through the legacy short-circuit, so aggregate live-capture
   //     channel counts stay byte-identical — the cohort is a dimension, never
   //     a silent blend.
+  // Push merged_into IS NULL into SQL so Postgres can use idx_leads_promoted_active
+  // (partial index WHERE merged_into IS NULL AND promoted_at IS NOT NULL). Without
+  // that predicate this arm Seq-Scans all ~180k leads (~2.2s) even when zero
+  // promoted rows exist. JS still filters !merged_into below — identical output.
   const promotedPromise = db
     .from("leads")
-    .select("*")
+    .select(PILL_COLS)
     .eq(LEADS_IS_LEGACY_COLUMN, true)
     .not("promoted_at", "is", null)
+    .is("merged_into", null)
     .limit(5000);
   const [nonLegacy, legacyRes, promotedRes] = await Promise.all([
     nonLegacyPromise, legacyChanPromise, promotedPromise,

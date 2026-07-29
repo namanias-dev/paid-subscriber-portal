@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getPayments, getEnrollments, getBuyers, maybeReconcilePendingPayments, getWebinars, getAllCourses, getLeadsForPillMap } from "@/lib/dataProvider";
-import { getAllProofs, phoneHasAccessToItem } from "@/lib/paymentProofs";
+import { getAllProofs, buildProofAccessSnapshot, phoneHasAccessToItemSync } from "@/lib/paymentProofs";
 import { requireAdmin, requireAnyPermission, requirePermission, requireSuperAdmin } from "@/lib/adminGuard";
 import { isPaymentsUiV2Enabled } from "@/lib/marketing/paymentsUiFlag";
 import { buildLeadAttrByPhone, pruneEmptyChannels } from "@/lib/marketing/leadAttrByPhone";
@@ -75,16 +75,18 @@ export async function GET() {
     // it ONCE per distinct target instead of once per proof (avoids repeating the
     // same entitlement lookups when a phone has several proofs for one item).
     const proofs: Record<string, PaymentProof & { hasAccess: boolean }> = {};
-    const accessKey = (pr: PaymentProof) => `${pr.phone}|${pr.item_type ?? ""}|${pr.item_slug ?? ""}`;
-    const uniqueTargets = new Map<string, { phone: string; item_type: string | null; item_slug: string | null }>();
-    for (const pr of proofList) if (!uniqueTargets.has(accessKey(pr))) uniqueTargets.set(accessKey(pr), { phone: pr.phone, item_type: pr.item_type, item_slug: pr.item_slug });
-    const accessByKey = new Map<string, boolean>();
-    await Promise.all(
-      [...uniqueTargets].map(async ([k, t]) => {
-        accessByKey.set(k, await phoneHasAccessToItem(t.phone, t.item_type, t.item_slug).catch(() => false));
-      }),
-    );
-    for (const pr of proofList) proofs[pr.payment_id] = { ...pr, hasAccess: accessByKey.get(accessKey(pr)) ?? false };
+    const snap = await buildProofAccessSnapshot({
+      payments,
+      webinars,
+      courses,
+      proofPhones: proofList.map((pr) => pr.phone),
+    });
+    for (const pr of proofList) {
+      proofs[pr.payment_id] = {
+        ...pr,
+        hasAccess: phoneHasAccessToItemSync(pr.phone, pr.item_type, pr.item_slug, snap),
+      };
+    }
 
     // Read-only phone -> marketing attribution stamp, joined from the existing
     // lead record so the Payments user card can surface the lead SOURCE without
