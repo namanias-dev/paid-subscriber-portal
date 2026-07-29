@@ -550,7 +550,14 @@ function makeStarterBatch(seed?: Partial<Course>): CourseBatch {
 /** Read the single mode/timing off a batch (tolerates legacy array shape). */
 const oneMode = (b: CourseBatch): string => (Array.isArray(b.mode) ? b.mode[0] : b.mode) || "";
 const oneTiming = (b: CourseBatch): string => (Array.isArray(b.timing) ? b.timing[0] : b.timing) || "";
-const autoLabel = (m: string, t: string): string | null => [m, t].filter(Boolean).join(" · ") || null;
+/** Label always derives from structured start date (+ mode/timing). Never typed independently. */
+const derivedLabel = (start: string | null | undefined, m: string, t: string): string | null => {
+  const parts: string[] = [];
+  if (start) parts.push(`Starts ${formatISTDate(start)}`);
+  const mt = [m, t].filter(Boolean).join(" · ");
+  if (mt) parts.push(mt);
+  return parts.length ? parts.join(" · ") : null;
+};
 
 /** Read-only summary of the default batch's schedule (shown in Basic Details). */
 function DerivedScheduleSummary({ batch }: { batch: CourseBatch | null }) {
@@ -617,36 +624,45 @@ function BatchesEditor({
   const [qaModes, setQaModes] = useState<string[]>(["Online"]);
   const [qaTimings, setQaTimings] = useState<string[]>(["Morning", "Evening"]);
 
-  const blank = (mode?: string, timing?: string): CourseBatch => ({
-    id: genBatchId(),
-    label: autoLabel(mode || "", timing || ""),
-    mode: ((mode ?? (course.modes?.[0] as string) ?? "Online")) as LearningMode,
-    timing: timing ?? (course.batch_timings?.[0] ?? ""),
-    start_date: course.batch_start ?? null,
-    end_date: null,
-    price: course.price ?? 0,
-    original_price: course.original_price ?? null,
-    pay_in_full_price: course.pay_in_full_price ?? null,
-    emi_config: (course.emi_config || {}) as CourseEmiConfig,
-    capacity: course.capacity ?? null,
-    seats_left: course.seats_left ?? null,
-  });
+  const blank = (mode?: string, timing?: string): CourseBatch => {
+    const m = (mode ?? (course.modes?.[0] as string) ?? "Online") as LearningMode;
+    const t = timing ?? (course.batch_timings?.[0] ?? "");
+    const start = course.batch_start ?? null;
+    return {
+      id: genBatchId(),
+      label: derivedLabel(start, m, t),
+      mode: m,
+      timing: t,
+      start_date: start,
+      end_date: null,
+      price: course.price ?? 0,
+      original_price: course.original_price ?? null,
+      pay_in_full_price: course.pay_in_full_price ?? null,
+      emi_config: (course.emi_config || {}) as CourseEmiConfig,
+      capacity: course.capacity ?? null,
+      seats_left: course.seats_left ?? null,
+    };
+  };
 
   const update = (i: number, patch: Partial<CourseBatch>) =>
-    onChange(batches.map((b, j) => (j === i ? { ...b, ...patch } : b)), defaultId);
+    onChange(batches.map((b, j) => {
+      if (j !== i) return b;
+      const next = { ...b, ...patch };
+      // Keep label derived from structured start (new edits only — existing labels
+      // left alone until start/mode/timing change in this session).
+      if ("start_date" in patch || "mode" in patch || "timing" in patch) {
+        next.label = derivedLabel(next.start_date, oneMode(next), oneTiming(next));
+      }
+      return next;
+    }), defaultId);
 
-  // Changing mode/timing also refreshes the label when it was still auto-generated
-  // (never clobbers a label the admin typed manually).
   const changeMode = (i: number, m: string) => {
-    const b = batches[i];
-    const wasAuto = !b.label || b.label === autoLabel(oneMode(b), oneTiming(b));
-    update(i, { mode: m as LearningMode, ...(wasAuto ? { label: autoLabel(m, oneTiming(b)) } : {}) });
+    update(i, { mode: m as LearningMode });
   };
   const changeTiming = (i: number, t: string) => {
     const b = batches[i];
     const next = oneTiming(b) === t ? "" : t; // click active timing to clear
-    const wasAuto = !b.label || b.label === autoLabel(oneMode(b), oneTiming(b));
-    update(i, { timing: next, ...(wasAuto ? { label: autoLabel(oneMode(b), next) } : {}) });
+    update(i, { timing: next });
   };
 
   const addNew = () => {
@@ -750,8 +766,8 @@ function BatchesEditor({
             </div>
 
             <div className="mt-3 grid gap-3 sm:grid-cols-2">
-              <Field label="Batch label" hint="Shown to students in the picker, e.g. “Online · Morning”. Auto-fills from mode + timing." full>
-                <input className="input" value={b.label || ""} onChange={(e) => update(i, { label: e.target.value || null })} placeholder="e.g. Online · Morning" />
+              <Field label="Batch label (derived)" hint="Derived from start date + mode + timing. Not typed independently." full>
+                <input className="input bg-surface2/50" value={b.label || derivedLabel(b.start_date, oneMode(b), oneTiming(b)) || ""} readOnly />
               </Field>
 
               <Field label="Mode" hint="One mode per batch.">
@@ -770,8 +786,16 @@ function BatchesEditor({
                 </div>
               </Field>
 
-              <Field label="Batch start date (IST)">
-                <input type="date" className="input" value={b.start_date ? isoToISTInput(b.start_date).slice(0, 10) : ""} onChange={(e) => update(i, { start_date: e.target.value ? istInputToISO(`${e.target.value}T00:00`) : null })} />
+              <Field label="Batch start date (IST)" hint="Required for new batches. Structured date wins over free-text labels.">
+                <input
+                  type="date"
+                  className="input"
+                  value={b.start_date ? isoToISTInput(b.start_date).slice(0, 10) : ""}
+                  onChange={(e) => update(i, { start_date: e.target.value ? istInputToISO(`${e.target.value}T00:00`) : null })}
+                />
+                {!b.start_date && (
+                  <p className="mt-1 text-xs text-amber-700">Missing structured start — new batches cannot be saved without one. UNKNOWN starts never block students.</p>
+                )}
               </Field>
               <Field label="Batch end date (IST)" hint="Optional.">
                 <input type="date" className="input" value={b.end_date ? isoToISTInput(b.end_date).slice(0, 10) : ""} onChange={(e) => update(i, { end_date: e.target.value ? istInputToISO(`${e.target.value}T00:00`) : null })} />

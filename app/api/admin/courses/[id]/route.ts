@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { updateCourse, deleteCourse } from "@/lib/dataProvider";
+import { updateCourse, deleteCourse, getAllCourses } from "@/lib/dataProvider";
 import { requirePermission } from "@/lib/adminGuard";
-import { normalizeLandingInput } from "@/lib/landing";
+import { assertBatchesHaveStartDates, normalizeLandingInput } from "@/lib/landing";
 
 export const dynamic = "force-dynamic";
 
@@ -11,6 +11,10 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
     const body = await req.json().catch(() => ({}));
     const norm = normalizeLandingInput(body);
     if (!norm.ok) return NextResponse.json({ ok: false, error: norm.error }, { status: 400 });
+    const existing = (await getAllCourses()).find((c) => c.id === params.id);
+    const previousIds = new Set((existing?.batches || []).map((b) => b.id));
+    const batchCheck = assertBatchesHaveStartDates((norm.value as { batches?: unknown })?.batches, { previousIds });
+    if (!batchCheck.ok) return NextResponse.json({ ok: false, error: batchCheck.error }, { status: 400 });
     const course = await updateCourse(params.id, norm.value!);
     if (!course) return NextResponse.json({ ok: false, error: "Not found." }, { status: 404 });
     return NextResponse.json({ ok: true, course });

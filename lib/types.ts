@@ -717,6 +717,12 @@ export interface InstallmentItem {
 
 export type CourseEnrollmentStatus =
   | "pending"
+  /**
+   * Checkout opened / payment failed / abandoned — ₹0, no dated schedule.
+   * Never seats, never access risk, never collections. Shared helper:
+   * `isPhantomEnrollment` / `isAttemptEnrollment`.
+   */
+  | "checkout_intent"
   | "seat_booked"
   | "partially_paid"
   | "fully_paid"

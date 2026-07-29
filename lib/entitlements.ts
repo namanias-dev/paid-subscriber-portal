@@ -10,7 +10,7 @@ import {
   getActiveStaffCourseIdsByPhone,
 } from "./dataProvider";
 import { studentBlockReason } from "./studentAccess";
-import { isLineOutstanding } from "./installments";
+import { isActiveEnrollment, isLineOutstanding } from "./installments";
 import { resolveEnrollmentBatchStart } from "./batchStart";
 import type { Course, Quiz, CaPdf, ContentItem, CourseEnrollment, CourseAccessOverride } from "./types";
 
@@ -313,7 +313,14 @@ export function lectureAccessForCourse(
       ? { allowed: true, reason: "active", status: "active" }
       : { allowed: false, reason: "not_enrolled", status: "blocked" };
   }
-  if (enrollment.status === "cancelled") return { allowed: false, reason: "not_enrolled", status: "blocked" };
+  if (enrollment.status === "cancelled" || enrollment.status === "transferred_out") {
+    return { allowed: false, reason: "not_enrolled", status: "blocked" };
+  }
+  // Checkout phantoms / unpaid attempts never influence access (even if a dated
+  // schedule was accidentally persisted on an older row).
+  if (!isActiveEnrollment(enrollment)) {
+    return { allowed: false, reason: "not_enrolled", status: "blocked" };
+  }
 
   // 3) Fully paid → full-payment access window from the course's own entitlements.
   if (enrollment.status === "fully_paid") {
@@ -337,9 +344,18 @@ export function lectureAccessForCourse(
 
   // HARD INVARIANT: never grace/block a learner before their batch starts.
   // Pre-batch due dates are a scheduling bug; access must stay active until then.
+  // UNKNOWN batch start → fail SAFE: never lock a student out for OUR missing data.
   const batchStart = resolveEnrollmentBatchStart(course, enrollment);
   const batchStartMs = batchStart.iso ? Date.parse(batchStart.iso) : NaN;
-  if (Number.isFinite(batchStartMs) && now < batchStartMs) {
+  if (!Number.isFinite(batchStartMs)) {
+    return {
+      allowed: true,
+      reason: "active",
+      status: "active",
+      amountDue: unpaid.amount,
+    };
+  }
+  if (now < batchStartMs) {
     return {
       allowed: true,
       reason: "active",
