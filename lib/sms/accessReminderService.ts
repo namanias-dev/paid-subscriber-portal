@@ -7,9 +7,9 @@
 import { getCourseEnrollmentById, getAllCourses, getAccessOverridesByPhone } from "../dataProvider";
 import { lectureAccessForCourse, type LectureAccess } from "../entitlements";
 import { maskMobile, normalizeIndianMobile } from "../phone";
-import { renderTemplate, uniqueVariables, validateBody } from "./templates";
+import { uniqueVariables } from "./templates";
 import { isResolvedValue, lookupVariable, registryKeyFor } from "./variableRegistry";
-import { checkRenderedBody } from "./sendGuard";
+import { prepareAndRenderSms } from "./renderPipeline";
 import {
   getTemplate, listLogs, firstNamesMatch, optedOutSet, resolveBuyersByPhones,
   type BuyerResolution,
@@ -413,24 +413,21 @@ export function buildAccessReminderFor(
   };
   const filled = mergeSendVars(template.id, ctx.varDefaults.get(template.id) || {}, recipientVars);
 
-  const { text, missing } = renderTemplate(template.body_template, filled);
-  const validation = validateBody(text);
-  const guard = checkRenderedBody(text, filled);
+  const rendered = prepareAndRenderSms(template.body_template, template.id, filled);
 
   Object.assign(partial, {
-    body: text,
-    variables: buildVariableView(template.body_template, filled),
-    characterCount: validation.analysis.length,
-    segments: validation.analysis.segments,
+    body: rendered.text,
+    variables: buildVariableView(template.body_template, rendered.vars),
+    characterCount: rendered.length,
+    segments: rendered.segments,
     daysSingularCosmetic: pick.templateId === ACCESS_EXPIRING_TEMPLATE_ID && daysLeft === 1,
   });
 
-  if (!guard.ok || missing.length) {
-    return fail("render_blocked", guard.detail || `Could not resolve: ${missing.join(", ")}.`, partial);
+  if (!rendered.ok || rendered.missing.length) {
+    return fail("render_blocked", rendered.errors.join("; ") || `Could not resolve: ${rendered.missing.join(", ")}.`, partial);
   }
-  if (!validation.ok) return fail("invalid_body", validation.errors.join("; "), partial);
 
-  const warnings = [...validation.warnings];
+  const warnings = [...rendered.warnings];
   if (partial.daysSingularCosmetic) {
     warnings.push('Approved copy reads "1 days" (immutable DLT text) — cosmetic only.');
   }

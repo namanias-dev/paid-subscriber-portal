@@ -192,10 +192,12 @@ describe("the guard is structurally present at every outbound call", () => {
     const { readFileSync } = await import("node:fs");
     const { join } = await import("node:path");
     const src = readFileSync(join(import.meta.dirname, "..", "..", "lib", "sms", "service.ts"), "utf8");
-    const hits = src.match(/checkRenderedBody\(/g) || [];
+    // sendSms + sendBatch (+ previewSms) must go through the shared pipeline,
+    // which runs checkRenderedBody / prepareDltFreeTextVars internally.
+    const hits = src.match(/prepareAndRenderSms\(/g) || [];
     assert.ok(
       hits.length >= 2,
-      "Both sendSms and the sendBatch screening loop must run checkRenderedBody so a " +
+      "Both sendSms and the sendBatch screening loop must run prepareAndRenderSms so a " +
         "blocked recipient is reported to the UI instead of failing silently at the gateway.",
     );
   });

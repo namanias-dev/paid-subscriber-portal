@@ -7,12 +7,11 @@
  * Fire-and-forget friendly; never throws into a caller.
  */
 import { normalizeIndianMobile } from "../phone";
-import { renderTemplate, validateBody } from "./templates";
 import { getTemplate, getSettings, insertQueuedLog, updateLog, countSentSince, recentSameTemplate, recentTemplateHits, countsByMobileSince, listLogs, isOptedOut, optedOutSet } from "./store";
 import { sendViaGateway, sendBulkViaGateway, fetchDeliveryStatuses, checkBalance, type DeliveryLine } from "./gateway";
 import { gatewayConfigured, smsEnvEnabled, loginUrlForTemplate, bulkChunkSize, SMS_DEFAULT_SENDER_ID, SMS_DEFAULT_ROUTE } from "./config";
 import { getResolvedDefaults } from "./variables";
-import { checkRenderedBody } from "./sendGuard";
+import { prepareAndRenderSms } from "./renderPipeline";
 import type { SmsLog, SmsLogStatus } from "./types";
 
 const SAME_TRIGGER_WINDOW_MIN = 30;
@@ -175,18 +174,22 @@ async function resolveSendVars(templateId: string, vars: Record<string, string |
  * hard send guard the send path runs, so a preview can never look sendable when
  * the send would be blocked.
  */
-export async function previewSms(templateId: string, vars: Record<string, string | number | null | undefined>): Promise<{ ok: boolean; text: string; missing: string[]; errors: string[]; warnings: string[]; length: number; segments: number; blocked: string | null } | null> {
+export async function previewSms(templateId: string, vars: Record<string, string | number | null | undefined>): Promise<{ ok: boolean; text: string; missing: string[]; errors: string[]; warnings: string[]; length: number; segments: number; blocked: string | null; gsm: boolean; vars: Record<string, string | number | null | undefined> } | null> {
   const t = await getTemplate(templateId);
   if (!t) return null;
-  const filled = await resolveSendVars(templateId, vars);
-  const { text, missing } = renderTemplate(t.body_template, filled);
-  const v = validateBody(text);
-  const guard = checkRenderedBody(text, filled);
+  const filled0 = await resolveSendVars(templateId, vars);
+  const rendered = prepareAndRenderSms(t.body_template, templateId, filled0);
   return {
-    ok: v.ok && missing.length === 0 && guard.ok,
-    text, missing, errors: guard.ok ? v.errors : [...v.errors, guard.detail!],
-    warnings: v.warnings, length: v.analysis.length, segments: v.analysis.segments,
-    blocked: guard.reason,
+    ok: rendered.ok,
+    text: rendered.text,
+    missing: rendered.missing,
+    errors: rendered.errors,
+    warnings: rendered.warnings,
+    length: rendered.length,
+    segments: rendered.segments,
+    blocked: rendered.blocked,
+    gsm: rendered.gsm,
+    vars: rendered.vars,
   };
 }
 
@@ -211,18 +214,19 @@ export async function sendSms(input: SendSmsInput): Promise<SendSmsResult> {
   // 3b. opt-out / DND suppression — compliance, enforced on EVERY send path.
   if (await isOptedOut(normalized)) return { ok: false, skipped: "opted_out" };
 
-  // 4. render + validate (variable store: global + per-template overrides)
-  const filled = await resolveSendVars(input.templateId, input.variables || {});
-  const { text, missing } = renderTemplate(t.body_template, filled);
-  if (missing.length) return { ok: false, skipped: "missing_vars", error: missing.join(", ") };
-  const v = validateBody(text);
-  if (!v.ok) return { ok: false, skipped: "invalid_body", error: v.errors.join("; ") };
-  // 4b. HARD SEND GUARD — abort THIS recipient if anything is still unresolved.
-  // `{`/`}` are valid GSM-7, so validateBody above would happily pass a body
-  // that still reads "Rs.{Fee_in_Rs}". Checked again at the gateway boundary;
-  // here so the caller and the UI get a named reason instead of a dead send.
-  const guard = checkRenderedBody(text, filled);
-  if (!guard.ok) return { ok: false, skipped: `blocked_${guard.reason}`, error: guard.detail ?? undefined };
+  // 4. render + validate via the SINGLE shared pipeline (preview uses the same).
+  const filled0 = await resolveSendVars(input.templateId, input.variables || {});
+  const rendered = prepareAndRenderSms(t.body_template, input.templateId, filled0);
+  if (rendered.missing.length) return { ok: false, skipped: "missing_vars", error: rendered.missing.join(", ") };
+  if (rendered.dltViolations.length) {
+    return { ok: false, skipped: "dlt_var_too_long", error: rendered.errors.join("; ") };
+  }
+  if (rendered.blocked) {
+    return { ok: false, skipped: `blocked_${rendered.blocked}`, error: rendered.errors.join("; ") || undefined };
+  }
+  if (!rendered.ok) return { ok: false, skipped: "invalid_body", error: rendered.errors.join("; ") };
+  const text = rendered.text;
+  const v = { analysis: { length: rendered.length, segments: rendered.segments } };
 
   // 5. window (cron autos only)
   if (input.enforceWindow) {
@@ -324,6 +328,11 @@ export interface BatchResult {
   mode: "single" | "bulk" | "per-recipient" | "none";
   batches: number;
   balance: number | null;
+  /** True when a hard DLT/GSM/skeleton violation aborted the WHOLE batch before any send. */
+  aborted?: boolean;
+  abortReason?: string | null;
+  /** Per-recipient hard violations that caused the abort (never silent). */
+  violations?: { mobile: string; reason: string; detail: string; item_short?: string; item_short_len?: number }[];
 }
 
 interface ScreenedRecipient {
@@ -350,7 +359,18 @@ export async function sendBatch(input: {
   /** Recorded on every log in the job (e.g. "manual_installment_reminder"). */
   triggerEvent?: string | null;
 }): Promise<BatchResult> {
-  const out: BatchResult = { requested: input.recipients.length, sent: 0, failed: 0, skipped: {}, mode: "none", batches: 0, balance: null };
+  const out: BatchResult = {
+    requested: input.recipients.length,
+    sent: 0,
+    failed: 0,
+    skipped: {},
+    mode: "none",
+    batches: 0,
+    balance: null,
+    aborted: false,
+    abortReason: null,
+    violations: [],
+  };
   const skip = (k: string, n = 1) => { out.skipped[k] = (out.skipped[k] || 0) + n; };
 
   // ---- global gates (reject whole batch) ----
@@ -392,27 +412,63 @@ export async function sendBatch(input: {
   ]);
 
   const eligible: ScreenedRecipient[] = [];
+  const hardViolations: NonNullable<BatchResult["violations"]> = [];
   for (const r of normList) {
     // Opt-out / DND suppression — compliance, checked before anything else sends.
     if (optedOut.has(r.normalized)) { skip("opted_out"); continue; }
-    // Per-recipient render: each recipient resolves its OWN values and its own
-    // segment count. No render is ever reused across the batch — the bulk
-    // branch below only fires when every rendered body is already identical.
-    const filled = mergeSendVars(input.templateId, varDefaults, r.variables);
-    const { text, missing } = renderTemplate(t.body_template, filled);
-    if (missing.length) { skip("missing_vars"); continue; }
-    const v = validateBody(text);
-    if (!v.ok) { skip("invalid_body"); continue; }
-    // HARD SEND GUARD, per recipient — one unresolvable student is dropped from
-    // the batch with a named reason; the rest of the batch still goes.
-    const guard = checkRenderedBody(text, filled);
-    if (!guard.ok) { skip(`blocked_${guard.reason}`); continue; }
+    // Per-recipient render via the SINGLE shared pipeline (same as preview/sendSms).
+    const filled0 = mergeSendVars(input.templateId, varDefaults, r.variables);
+    const rendered = prepareAndRenderSms(t.body_template, input.templateId, filled0);
+    if (rendered.missing.length || rendered.blocked || rendered.dltViolations.length || !rendered.ok) {
+      const reason = rendered.dltViolations.length
+        ? "dlt_var_too_long"
+        : rendered.missing.length
+          ? "missing_vars"
+          : rendered.blocked
+            ? `blocked_${rendered.blocked}`
+            : "invalid_body";
+      const item = rendered.vars.item_short != null ? String(rendered.vars.item_short) : undefined;
+      hardViolations.push({
+        mobile: r.normalized,
+        reason,
+        detail: rendered.errors.join("; ") || rendered.missing.join(", ") || reason,
+        item_short: item,
+        item_short_len: item ? [...item].length : undefined,
+      });
+      console.error(
+        `[SMS DLT] BATCH PREFLIGHT FAIL template=${input.templateId} mobile=${r.normalized} reason=${reason}` +
+          (item ? ` item_short_len=${[...item].length} item_short="${item}"` : ""),
+      );
+      continue;
+    }
     if (input.enforceWindow && (nowMin < hmToMin(settings.windowStart) || nowMin > hmToMin(settings.windowEnd))) { skip("outside_window"); continue; }
     if (settings.dailyCap > 0 && usedToday >= settings.dailyCap) { skip("daily_cap"); continue; }
     if (settings.perMobileDailyCap > 0 && (perMobileCounts.get(r.normalized) || 0) >= settings.perMobileDailyCap) { skip("per_mobile_cap"); continue; }
     if (recentHits.has(r.normalized)) { skip("recent_duplicate"); continue; }
     usedToday++;
-    eligible.push({ mobile: r.mobile, normalized: r.normalized, text, chars: v.analysis.length, segments: v.analysis.segments, variables: r.variables, relatedEntity: r.relatedEntity, installmentKey: r.installmentKey ?? null });
+    eligible.push({
+      mobile: r.mobile,
+      normalized: r.normalized,
+      text: rendered.text,
+      chars: rendered.length,
+      segments: rendered.segments,
+      variables: rendered.vars,
+      relatedEntity: r.relatedEntity,
+      installmentKey: r.installmentKey ?? null,
+    });
+  }
+
+  // HARD RULE: any DLT / GSM / skeleton violation aborts the WHOLE batch.
+  // Never send a partial batch that silently drops violators.
+  if (hardViolations.length) {
+    out.aborted = true;
+    out.abortReason = "preflight_dlt_or_body_violation";
+    out.violations = hardViolations;
+    skip("batch_aborted_preflight", input.recipients.length);
+    console.error(
+      `[SMS DLT] BATCH ABORTED template=${input.templateId} violators=${hardViolations.length}/${input.recipients.length} — zero messages sent`,
+    );
+    return out;
   }
   if (eligible.length === 0) return out;
 

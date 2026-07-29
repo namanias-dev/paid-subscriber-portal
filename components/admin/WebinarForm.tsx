@@ -23,6 +23,7 @@ import {
 import RichTextEditor from "./RichTextEditor";
 import LibraryPicker from "./LibraryPicker";
 import OrientationVideoPicker from "./OrientationVideoPicker";
+import { SmsShortTitleField } from "./SmsShortTitleField";
 import { useToast } from "@/components/ui/Toast";
 import { istInputToISO, isoToISTInput } from "@/lib/dates";
 import type {
@@ -60,6 +61,7 @@ export default function WebinarForm({ webinar }: { webinar?: Webinar }) {
 
   const [title, setTitle] = useState(webinar?.title || "");
   const [slug, setSlug] = useState(webinar?.slug || "");
+  const [smsShortTitle, setSmsShortTitle] = useState(webinar?.sms_short_title || "");
   const [description, setDescription] = useState(webinar?.description || "");
   const [datetime, setDatetime] = useState(toLocalInput(webinar?.datetime));
   const [price, setPrice] = useState<number>(webinar?.price ?? 0);
@@ -114,6 +116,7 @@ export default function WebinarForm({ webinar }: { webinar?: Webinar }) {
     const payload = {
       title: title.trim(),
       slug: slug.trim() || undefined,
+      sms_short_title: smsShortTitle.trim() || null,
       description,
       long_description: longDescription || null,
       datetime: datetime ? istInputToISO(datetime) : new Date().toISOString(),
@@ -188,6 +191,7 @@ export default function WebinarForm({ webinar }: { webinar?: Webinar }) {
                   <Field label="Slug (URL)" hint="Leave blank to auto-generate from the title.">
                     <input className="input" value={slug} onChange={(e) => setSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]+/g, "-"))} placeholder="upsc-2027-strategy" />
                   </Field>
+                  <SmsShortTitleField fullTitle={title} value={smsShortTitle} onChange={setSmsShortTitle} />
                   <Field label="Status">
                     <select className="input" value={status} onChange={(e) => setStatus(e.target.value as Webinar["status"])}>
                       <option value="upcoming">Upcoming</option>

@@ -5,6 +5,7 @@ import {
   applyMoveRegistrations,
 } from "@/lib/dataProvider";
 import { fireAutoSms } from "@/lib/sms/dispatch";
+import { resolveSmsItemShort } from "@/lib/sms/smsTitle";
 import { TRIGGERS } from "@/lib/sms/templates";
 import { formatISTDateTime } from "@/lib/dates";
 
@@ -61,7 +62,7 @@ export async function POST(req: Request) {
         trigger: TRIGGERS.webinar_moved,
         phone: m.phone,
         name: m.name,
-        vars: { item_short: res.target.title, date: whenLabel },
+        vars: { item_short: resolveSmsItemShort({ smsShortTitle: (res.target as { sms_short_title?: string | null }).sms_short_title, fullTitle: res.target.title }), date: whenLabel },
         entity: { webinar_id: res.target.id, registration_id: m.registration_id },
         entityId: m.registration_id,
       });

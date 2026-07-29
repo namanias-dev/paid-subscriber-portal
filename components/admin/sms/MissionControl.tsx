@@ -330,14 +330,28 @@ function SendTab({ meta }: { meta: Meta | null }) {
   async function doSend(restrictTo?: string[], label?: string) {
     if (!templateId) return toast("Pick a template.", "error");
     if (!preview && !restrictTo) { await runPreview(); return; }
+    if (preview && preview.preflightOk === false && !restrictTo) {
+      const n = preview.preflightViolations?.length || 0;
+      toast(`Preflight blocked: ${n} recipient(s) fail DLT/GSM/body checks. Nothing will be sent until fixed.`, "error");
+      return;
+    }
     const n = restrictTo ? restrictTo.length : preview?.count;
+    const pf = preview?.preflight;
     const when = scheduleAt && !restrictTo ? ` (scheduled ${scheduleAt.replace("T", " ")} IST)` : "";
-    if (!confirm(`Send "${templates.find((t) => t.id === templateId)?.name}" to ${n} ${label || "recipient(s)"}${when}?`)) return;
+    const preflightLines = pf
+      ? `\n\nPreflight:\n• ${pf.recipientCount} recipients\n• ${pf.chars} chars · ${pf.segments} seg · ${pf.encoding}\n• item_short: ${pf.item_short || "—"} (${pf.item_short_len ?? "?"} chars)\n• ~${pf.estimatedCredits} credits (Rs ${pf.estimatedCost})`
+      : "";
+    if (!confirm(`Send "${templates.find((t) => t.id === templateId)?.name}" to ${n} ${label || "recipient(s)"}${when}?${preflightLines}\n\nSample:\n${pf?.sampleBody || preview?.preview?.text || "(run preview)"}`)) return;
     setBusy(true);
     try {
       const res = await fetch("/api/admin/sms/send", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ audience: buildAudience(restrictTo), templateId, allowRecentOverride: allowOverride, scheduleAt: restrictTo ? undefined : (scheduleAt || undefined) }) });
       if (!res.ok) throw new Error(`Send failed (HTTP ${res.status}). ${res.status === 504 ? "The batch took too long — try a smaller audience or retry." : "Please retry."}`);
       const r = await res.json();
+      if (r.aborted) {
+        const first = (r.violations || []).slice(0, 3).map((v: { mobile: string; reason: string; detail: string }) => `${v.mobile}: ${v.reason}`).join("; ");
+        toast(r.error || `Batch aborted (${(r.violations || []).length} violations). ${first}`, "error");
+        return;
+      }
       if (r.ok) {
         const skipTxt = Object.keys(r.skipped || {}).length ? " Skipped: " + Object.entries(r.skipped).map(([k, v]) => `${k}:${v}`).join(", ") : "";
         const modeTxt = r.mode && r.mode !== "single" ? ` [${r.mode}${r.batches ? ` ×${r.batches}` : ""}]` : "";
@@ -506,7 +520,7 @@ function SendTab({ meta }: { meta: Meta | null }) {
 
         <div className="flex gap-2 pt-1">
           <button onClick={() => { runPreview(); runRich(0); }} disabled={busy} className="btn btn-secondary">{busy ? "…" : "Preview"}</button>
-          <button onClick={() => doSend()} disabled={busy || !templateId || !!preview?.blocked || (preview?.count ?? 0) === 0} className="btn btn-primary"><Send size={15} /> {preview ? `Send to ${preview.count}` : "Preview & send"}</button>
+          <button onClick={() => doSend()} disabled={busy || !templateId || !!preview?.blocked || preview?.preflightOk === false || (preview?.count ?? 0) === 0} className="btn btn-primary"><Send size={15} /> {preview ? `Send to ${preview.count}` : "Preview & send"}</button>
         </div>
       </div>
 
@@ -527,7 +541,25 @@ function SendTab({ meta }: { meta: Meta | null }) {
             ) : preview.preview ? (
               <div className="rounded-xl bg-surface p-3 text-sm">
                 <p className="whitespace-pre-wrap">{preview.preview.text}</p>
-                <p className="mt-2 text-xs text-muted">{preview.preview.length} chars · {preview.preview.segments} segment(s)</p>
+                <p className="mt-2 text-xs text-muted">
+                  {preview.preview.length} chars · {preview.preview.segments} segment(s) ·{" "}
+                  <span className={preview.preview.gsm === false ? "font-semibold text-danger" : "text-success"}>
+                    {preview.preview.encoding || (preview.preview.gsm === false ? "UCS-2" : "GSM-7")}
+                  </span>
+                  {preview.preview.item_short != null && (
+                    <> · item_short=<code className="font-mono">{preview.preview.item_short}</code> ({preview.preview.item_short_len})</>
+                  )}
+                </p>
+                {preview.preflight && (
+                  <p className="mt-1 text-xs text-muted">
+                    Preflight: {preview.preflight.recipientCount} recipients · ~{preview.preflight.estimatedCredits} credits (Rs {preview.preflight.estimatedCost})
+                    {preview.preflightOk === false && (
+                      <span className="ml-1 font-semibold text-danger">
+                        · BLOCKED ({(preview.preflightViolations || []).length} violator(s)) — send disabled
+                      </span>
+                    )}
+                  </p>
+                )}
                 {preview.preview.errors?.length > 0 && <p className="mt-1 text-xs text-danger">{preview.preview.errors.join("; ")}</p>}
                 {preview.preview.missing?.length > 0 && <p className="mt-1 text-xs text-amber-700">Missing: {preview.preview.missing.join(", ")}</p>}
                 {preview.preview.warnings?.length > 0 && <p className="mt-1 text-xs text-amber-700">{preview.preview.warnings.join("; ")}</p>}

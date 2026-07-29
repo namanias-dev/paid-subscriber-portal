@@ -10,6 +10,7 @@ import { recordPaymentPaid, recordPaymentInitiated, recordPaymentStatusChanged, 
 import type { AttributionState } from "./attribution";
 import { flattenForStamp, metaIdentityFromState } from "./attribution";
 import { fireAutoSms } from "./sms/dispatch";
+import { resolveSmsItemShort } from "./sms/smsTitle";
 import { fireAutomationEvent } from "./journey-automation/events";
 import { normalizeSourceForm } from "./journey-automation/leadSources";
 import {
@@ -1525,6 +1526,7 @@ export async function addCourse(input: Partial<Course>): Promise<Course> {
     display_order,
     slug: input.slug || (input.title || "course").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, ""),
     title: input.title || "Untitled Course",
+    sms_short_title: input.sms_short_title ?? null,
     category: input.category || "Foundation",
     description: input.description || "",
     long_description: input.long_description ?? null,
@@ -2594,6 +2596,7 @@ export async function addWebinar(input: Partial<Webinar>): Promise<Webinar> {
     id: uuid(),
     slug: input.slug || (input.title || "webinar").toLowerCase().replace(/[^a-z0-9]+/g, "-"),
     title: input.title || "New Webinar",
+    sms_short_title: input.sms_short_title ?? null,
     description: input.description || "",
     datetime: input.datetime || new Date().toISOString(),
     link: input.link ?? null,
@@ -2667,7 +2670,7 @@ export async function registerWebinar(webinarId: string, name: string, phone: st
     // also push into CRM as a lead
     await addLead({ name, phone, source: "Webinar", webinar_registered: true, campaign: w?.title }, "webinar_registration", leadAttributionFromState(attr ?? null));
     await ensureBuyer(phone, name).catch(() => null);
-    fireAutoSms({ trigger: TRIGGERS.registration_created, phone, name, vars: { item_short: w?.title || "your webinar" }, entity: { webinar_id: webinarId }, entityId: webinarId });
+    fireAutoSms({ trigger: TRIGGERS.registration_created, phone, name, vars: { item_short: resolveSmsItemShort({ smsShortTitle: w?.sms_short_title, fullTitle: w?.title || "your webinar" }) }, entity: { webinar_id: webinarId }, entityId: webinarId });
     return { ok: true };
   }
   const db = getSupabaseAdmin();
@@ -2708,7 +2711,8 @@ export async function registerWebinar(webinarId: string, name: string, phone: st
   let webinarTitle: string | null = null;
   let webinarSlug: string | null = null;
   let webinarPrice = 0;
-  if (db) { try { const { data } = await db.from("webinars").select("title, slug, price").eq("id", webinarId).maybeSingle(); webinarTitle = (data?.title as string) ?? null; webinarSlug = (data as { slug?: string } | null)?.slug ?? null; webinarPrice = Number((data as { price?: number } | null)?.price ?? 0) || 0; } catch { /* ignore */ } }
+  let webinarSmsShort: string | null = null;
+  if (db) { try { const { data } = await db.from("webinars").select("title, slug, price, sms_short_title").eq("id", webinarId).maybeSingle(); webinarTitle = (data?.title as string) ?? null; webinarSlug = (data as { slug?: string } | null)?.slug ?? null; webinarPrice = Number((data as { price?: number } | null)?.price ?? 0) || 0; webinarSmsShort = (data as { sms_short_title?: string | null } | null)?.sms_short_title ?? null; } catch { /* ignore */ } }
   const isFreeWebinar = webinarPrice <= 0;
   // Analytics (best-effort, idempotent): a webinar registration milestone. The
   // attribution snapshot (from the nsa_attr cookie, passed by the route) rides the
@@ -2720,7 +2724,7 @@ export async function registerWebinar(webinarId: string, name: string, phone: st
   // verified PAID payment (recordPaymentPaid → registration_created), so unpaid /
   // failed / abandoned checkouts are never texted.
   if (isFreeWebinar) {
-    fireAutoSms({ trigger: TRIGGERS.registration_created, phone, name, vars: { item_short: webinarTitle || "your webinar" }, entity: { webinar_id: webinarId }, entityId: webinarId });
+    fireAutoSms({ trigger: TRIGGERS.registration_created, phone, name, vars: { item_short: resolveSmsItemShort({ smsShortTitle: webinarSmsShort, fullTitle: webinarTitle || "your webinar" }) }, entity: { webinar_id: webinarId }, entityId: webinarId });
   }
   await addLead({ name, phone, source: "Webinar", webinar_registered: true }, "webinar_registration", leadAttributionFromState(attr ?? null));
   // UNIFIED IDENTITY: a webinar registrant (free or paid) becomes a first-class
@@ -5799,7 +5803,7 @@ export async function changeEnrollmentPaymentPlan(
     trigger: TRIGGERS.payment_plan_changed,
     phone: enrollment.phone,
     name: enrollment.student_name,
-    vars: { item_short: enrollment.course_title },
+    vars: { item_short: resolveSmsItemShort({ fullTitle: enrollment.course_title }) },
     entity: { course_id: enrollment.course_id },
     entityId: `${enrollment.id}:${changedAt}`,
   });

@@ -58,10 +58,16 @@ export async function POST(req: Request) {
     campaignId,
   });
   return NextResponse.json({
-    ok: true,
+    ok: !res.aborted,
     campaignId,
     requested: res.requested, sent: res.sent, failed: res.failed, skipped: res.skipped,
     mode: res.mode, batches: res.batches, balance: res.balance,
     scheduledFor: scheduleTime,
+    aborted: !!res.aborted,
+    abortReason: res.abortReason || null,
+    violations: res.violations || [],
+    error: res.aborted
+      ? `Batch aborted before any send: ${res.violations?.length || 0} recipient(s) failed DLT/GSM/body preflight. Fix and retry — nothing was sent.`
+      : undefined,
   });
 }

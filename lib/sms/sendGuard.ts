@@ -21,11 +21,17 @@
  * going to catch this — only an explicit placeholder check does.
  */
 import { isResolvedValue } from "./variableRegistry";
+import { isGsm7Text, resolveSmsItemShort } from "./smsTitle";
+import { DLT_FREE_TEXT_VAR_MAX } from "./templates";
 
 /** Any leftover brace means a token was not substituted. */
 const LEFTOVER_BRACE_RE = /[{}]/;
 
-export type SendBlockReason = "unresolved_placeholder" | "unresolved_variable" | "empty_body";
+export type SendBlockReason =
+  | "unresolved_placeholder"
+  | "unresolved_variable"
+  | "empty_body"
+  | "non_gsm7_body";
 
 export interface SendGuardResult {
   ok: boolean;
@@ -37,6 +43,44 @@ export interface SendGuardResult {
 }
 
 const PASS: SendGuardResult = { ok: true, reason: null, detail: null, offenders: [] };
+
+const FREE_TEXT_KEYS = ["item_short", "item_name"] as const;
+
+/**
+ * Prepare free-text DLT vars before render: apply sms short-title resolution
+ * (manual → auto-shorten → clamp) and emit a LOUD warning whenever a value
+ * changes. Never silent.
+ */
+export function prepareDltFreeTextVars(
+  vars: Record<string, string | number | null | undefined>,
+  templateId?: string,
+): { vars: Record<string, string | number | null | undefined>; warnings: string[] } {
+  const out: Record<string, string | number | null | undefined> = { ...vars };
+  const warnings: string[] = [];
+  for (const key of FREE_TEXT_KEYS) {
+    if (out[key] === undefined || out[key] === null) continue;
+    const raw = String(out[key]);
+    if (!raw.trim()) continue;
+    const next = resolveSmsItemShort({ fallback: raw });
+    if (next !== raw) {
+      const msg =
+        `[SMS DLT] template=${templateId || "?"} var=${key} ` +
+        `shortened ${[...raw].length}→${[...next].length} (max ${DLT_FREE_TEXT_VAR_MAX}): ` +
+        `"${raw}" → "${next}"`;
+      console.warn(msg);
+      warnings.push(msg);
+    }
+    if ([...next].length > DLT_FREE_TEXT_VAR_MAX) {
+      const msg =
+        `[SMS DLT] BLOCK template=${templateId || "?"} var=${key} still over max ` +
+        `after shorten (${[...next].length}>${DLT_FREE_TEXT_VAR_MAX}): "${next}"`;
+      console.error(msg);
+      warnings.push(msg);
+    }
+    out[key] = next;
+  }
+  return { vars: out, warnings };
+}
 
 /** The `{...}` tokens still present in a rendered body (first-seen order). */
 export function leftoverPlaceholders(text: string): string[] {
@@ -91,6 +135,22 @@ export function checkRenderedBody(
         offenders: bad,
       };
     }
+  }
+
+  if (!isGsm7Text(text)) {
+    const offenders: string[] = [];
+    for (const ch of text) {
+      if (!isGsm7Text(ch) && !offenders.includes(ch)) offenders.push(ch);
+      if (offenders.length >= 8) break;
+    }
+    return {
+      ok: false,
+      reason: "non_gsm7_body",
+      detail:
+        `Rendered SMS is not GSM-7 (would force UCS-2 / 70-char segments). ` +
+        `Offending char(s): ${offenders.map((c) => JSON.stringify(c)).join(", ")}.`,
+      offenders,
+    };
   }
 
   return PASS;
