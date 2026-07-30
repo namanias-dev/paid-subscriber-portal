@@ -536,6 +536,3 @@ export function buildStaffStatusPatch(input: {
   }
   return patch;
 }
-
-// silence unused import in type-only paths
-void isLeadStatus;
