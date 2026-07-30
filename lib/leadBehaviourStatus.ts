@@ -177,6 +177,7 @@ type PayRow = {
   payment_kind: string | null;
   created_at: string | null;
   item_name: string | null;
+  item: string | null;
 };
 
 type RegRow = {
@@ -276,7 +277,7 @@ export function deriveBehaviourStageFromEvents(input: {
     }
     if (p.item_type === "webinar") {
       bump("Webinar Registered", p.created_at);
-      if (!webinarTitle && p.item_name) webinarTitle = p.item_name;
+      if (!webinarTitle && (p.item_name || p.item)) webinarTitle = p.item_name || p.item;
     }
   }
 
@@ -319,7 +320,7 @@ export async function deriveBehaviourForPhone(phoneRaw: string): Promise<Behavio
 
   const [ens, pays, regs] = await Promise.all([
     db.from("course_enrollments").select("id,phone_key,status,amount_paid,created_at,schedule,course_title").eq("phone_key", phoneKey),
-    db.from("payments").select("id,phone_key,status,amount,item_type,payment_kind,created_at,item_name").eq("phone_key", phoneKey),
+    db.from("payments").select("id,phone_key,status,amount,item_type,payment_kind,created_at,item").eq("phone_key", phoneKey),
     db.from("webinar_registrations").select("id,phone_key,webinar_id,created_at").eq("phone_key", phoneKey),
   ]);
 

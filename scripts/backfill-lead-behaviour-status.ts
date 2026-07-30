@@ -52,6 +52,7 @@ type PayRow = {
   payment_kind: string | null;
   created_at: string | null;
   item_name: string | null;
+  item: string | null;
 };
 type RegRow = {
   id: string;
@@ -70,7 +71,8 @@ async function fetchAll<T>(
   const out: T[] = [];
   const page = 1000;
   for (let from = 0; ; from += page) {
-    let q = db.from(table).select(select).range(from, from + page - 1);
+    // Stable order is required — unordered range pagination silently skips rows.
+    let q = db.from(table).select(select).order("id").range(from, from + page - 1);
     if (opts?.mergedIntoNull) q = q.is("merged_into", null);
     const { data, error } = await q;
     if (error) throw new Error(`${table}: ${error.message}`);
@@ -127,7 +129,7 @@ async function main() {
   console.log("Loading enrollments / payments / webinar_registrations…");
   const [enrollments, payments, registrations] = await Promise.all([
     fetchAll<EnrRow>("course_enrollments", "id,phone_key,status,amount_paid,created_at,schedule,course_title"),
-    fetchAll<PayRow>("payments", "id,phone_key,status,amount,item_type,payment_kind,created_at,item_name"),
+    fetchAll<PayRow>("payments", "id,phone_key,status,amount,item_type,payment_kind,created_at,item"),
     fetchAll<RegRow>("webinar_registrations", "id,phone_key,webinar_id,created_at"),
   ]);
   console.log(`Enrollments=${enrollments.length} Payments=${payments.length} Regs=${registrations.length}`);
@@ -239,22 +241,26 @@ async function main() {
     return;
   }
 
-  // Apply in batches
+  // Apply in batches (bounded concurrency — avoid pool/timeout storms)
   let written = 0;
   let errors = 0;
+  const CONCURRENCY = 25;
   for (let i = 0; i < planned.length; i += BATCH) {
     const chunk = planned.slice(i, i + BATCH);
-    await Promise.all(
-      chunk.map(async (row) => {
-        const { error } = await db.from("leads").update(row.patch).eq("id", row.id);
-        if (error) {
-          errors++;
-          console.error(`FAIL ${row.id}: ${error.message}`);
-        } else {
-          written++;
-        }
-      }),
-    );
+    for (let j = 0; j < chunk.length; j += CONCURRENCY) {
+      const slice = chunk.slice(j, j + CONCURRENCY);
+      await Promise.all(
+        slice.map(async (row) => {
+          const { error } = await db.from("leads").update(row.patch).eq("id", row.id);
+          if (error) {
+            errors++;
+            console.error(`FAIL ${row.id}: ${error.message}`);
+          } else {
+            written++;
+          }
+        }),
+      );
+    }
     console.log(`  wrote ${Math.min(i + chunk.length, planned.length)}/${planned.length}`);
   }
 

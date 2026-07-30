@@ -101,7 +101,7 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
           .order("created_at", { ascending: true }),
         db
           .from("payments")
-          .select("id,status,amount,item_type,item_name,payment_kind,created_at,reference_no")
+          .select("id,status,amount,item_type,item,payment_kind,created_at,reference_no")
           .eq("phone_key", phoneKey)
           .is("deleted_at", null)
           .order("created_at", { ascending: true }),
@@ -141,7 +141,7 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
         const st = (p.status || "").toUpperCase();
         const kind = (p.payment_kind || "").toLowerCase();
         const amt = Number(p.amount || 0);
-        const item = p.item_name || p.item_type || "payment";
+        const item = p.item || p.item_type || "payment";
         let title = "Payment";
         if (st === "FAILED" || st === "ABANDONED" || st === "REFUNDED") title = `Payment ${st.toLowerCase()}`;
         else if (st === "PAID" || st === "CAPTURED") {
