@@ -32,6 +32,7 @@ export const ADMIN_NAV: AdminNavItem[] = [
   // sales view. This is the only surface where legacy leads are visible, and
   // it is gated by the same permission.
   { href: "/admin/leads/worklist", label: "Lead Worklist", icon: "leads", group: "Sales", perm: "manage_students_leads" },
+  { href: "/admin/leads/disparity", label: "Status Disparity", icon: "leads", group: "Sales", perm: "manage_students_leads" },
   { href: "/admin/forms", label: "Lead Forms", icon: "forms", group: "Sales", perm: "manage_students_leads" },
   { href: "/admin/registrations", label: "Landing Pages", icon: "landing", group: "Sales", perm: "manage_students_leads" },
   { href: "/admin/marketing", label: "Marketing", icon: "marketing", group: "Sales", perm: "manage_students_leads" },
