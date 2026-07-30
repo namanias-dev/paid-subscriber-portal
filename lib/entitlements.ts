@@ -415,7 +415,30 @@ export function canAccessLecture(
 
   const courseIds = recordingCourseIds(recording);
   const byCourse = new Map(ctx.courses.map((c) => [c.id, c]));
-  const enrByCourse = new Map(ctx.enrollments.filter((e) => e.status !== "cancelled").map((e) => [e.course_id, e]));
+  // Prefer ACTIVE (paid) enrollments over checkout phantoms / unpaid attempts.
+  // getCourseEnrollmentsByPhone returns newest-first; a naive Map last-write-wins
+  // would let an older checkout_intent overwrite a fully_paid sibling and lock
+  // lectures for a student who has paid in full (seen on co-safalta / 8490085511).
+  const enrByCourse = new Map<string, CourseEnrollment>();
+  for (const e of ctx.enrollments) {
+    if (e.status === "cancelled" || e.status === "transferred_out") continue;
+    const prev = enrByCourse.get(e.course_id);
+    if (!prev) {
+      enrByCourse.set(e.course_id, e);
+      continue;
+    }
+    const prevActive = isActiveEnrollment(prev);
+    const nextActive = isActiveEnrollment(e);
+    if (nextActive && !prevActive) {
+      enrByCourse.set(e.course_id, e);
+    } else if (nextActive === prevActive) {
+      const pa = prev.amount_paid || 0;
+      const na = e.amount_paid || 0;
+      if (na > pa) enrByCourse.set(e.course_id, e);
+      else if (na === pa && (e.created_at || "") > (prev.created_at || "")) enrByCourse.set(e.course_id, e);
+    }
+    // else keep prev (active beats phantom)
+  }
   const ovrByCourse = new Map(ctx.overrides.map((o) => [o.course_id, o]));
 
   // Unassigned hosted recording → treat as general library for any learner with valid access.
