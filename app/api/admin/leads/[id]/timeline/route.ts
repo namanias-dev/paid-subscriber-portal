@@ -7,7 +7,15 @@ import { leadStatusLabel } from "@/lib/leadStatus";
 
 export const dynamic = "force-dynamic";
 
-export type LeadTimelineOrigin = "system" | "staff" | "payment" | "registration" | "enrollment" | "historical" | "unknown";
+export type LeadTimelineOrigin =
+  | "system"
+  | "staff"
+  | "payment"
+  | "registration"
+  | "enrollment"
+  | "historical"
+  | "meta"
+  | "unknown";
 
 export interface LeadTimelineEvent {
   at: string;
@@ -33,7 +41,7 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
     const { data: lead, error: leadErr } = await db
       .from("leads")
       .select(
-        "id,phone,phone_key,status,status_origin,status_system_verified_at,manual_status,manual_status_at,manual_status_by,manual_status_by_role,manual_status_note,is_legacy,campaign_clean,campaign,legacy_source_tab,created_at",
+        "id,phone,phone_key,status,status_origin,status_system_verified_at,manual_status,manual_status_at,manual_status_by,manual_status_by_role,manual_status_note,is_legacy,campaign_clean,campaign,legacy_source_tab,created_at,meta_leadgen_id,meta_ingested_at",
       )
       .eq("id", params.id)
       .maybeSingle();
@@ -190,6 +198,31 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
             .filter(Boolean)
             .join(" · "),
           origin: "historical",
+        });
+      }
+    }
+
+    // Meta Lead Ads ingestions for this lead (or matching leadgen_id)
+    {
+      let metaQ = db
+        .from("meta_lead_ingestions")
+        .select("leadgen_id,campaign_name,form_name,platform,outcome,meta_created_at,ingested_at")
+        .order("ingested_at", { ascending: true })
+        .limit(20);
+      metaQ = lead.meta_leadgen_id
+        ? metaQ.or(`lead_id.eq.${params.id},leadgen_id.eq.${lead.meta_leadgen_id}`)
+        : metaQ.eq("lead_id", params.id);
+      const { data: metaRows } = await metaQ;
+      for (const m of metaRows || []) {
+        const at = m.meta_created_at || m.ingested_at;
+        if (!at) continue;
+        if (m.outcome !== "created" && m.outcome !== "attached_existing") continue;
+        events.push({
+          at,
+          kind: "meta_lead_ad",
+          title: m.outcome === "attached_existing" ? "Meta Ads lead submitted" : "Meta Ads lead created",
+          detail: [m.campaign_name, m.form_name, m.platform].filter(Boolean).join(" · ") || m.leadgen_id,
+          origin: "meta",
         });
       }
     }

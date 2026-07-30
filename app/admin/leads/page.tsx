@@ -33,7 +33,7 @@ const LeadsBarChart = dynamic(() => import("@/components/admin/RegistrationsBarC
 /** Kanban columns. One per canonical status, in the canonical order — the
  *  column set is no longer a local list that can drift from the vocabulary. */
 const STAGES: readonly LeadStatus[] = LEAD_STATUSES;
-const SOURCES = ["Instagram", "Meta Form", "Webinar", "Demo", "Website", "WhatsApp", "Referral", "home_popup", "free_download", "quiz_public"];
+const SOURCES = ["Instagram", "Meta Ads", "Meta Form", "Webinar", "Demo", "Website", "WhatsApp", "Referral", "home_popup", "free_download", "quiz_public"];
 
 type LeadSort = "recent" | "activity" | "name";
 const LEAD_SORTS: { value: LeadSort; label: string }[] = [

@@ -18,6 +18,7 @@ const ORIGIN_PILL: Record<string, string> = {
   registration: "pill-slate",
   enrollment: "pill-amber",
   historical: "pill-gray",
+  meta: "pill-blue",
   unknown: "pill-gray",
 };
 
