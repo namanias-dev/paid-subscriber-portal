@@ -5,8 +5,7 @@
 import { createHmac } from "node:crypto";
 import { strict as assert } from "node:assert";
 import { describe, it, before, after } from "node:test";
-import { mapFieldData, verifyMetaSignature } from "../../lib/meta/leadAds";
-import { extractLeadgenPayloads } from "../../app/api/meta/leadgen-webhook/route";
+import { mapFieldData, verifyMetaSignature, extractLeadgenPayloads } from "../../lib/meta/leadAds";
 import { normalizeIndianMobile, normPhone } from "../../lib/phone";
 import { phoneKeyFromRaw } from "../../lib/marketing/legacyLeadMatch";
 

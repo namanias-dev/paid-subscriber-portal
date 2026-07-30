@@ -95,6 +95,42 @@ function firstValue(
   return null;
 }
 
+/** Parse Meta leadgen webhook JSON into typed payloads (pure). */
+export function extractLeadgenPayloads(body: unknown): MetaLeadgenPayload[] {
+  if (!body || typeof body !== "object") return [];
+  const entries = (body as { entry?: unknown[] }).entry;
+  if (!Array.isArray(entries)) return [];
+  const out: MetaLeadgenPayload[] = [];
+  for (const e of entries) {
+    if (!e || typeof e !== "object") continue;
+    const changes = (e as { changes?: unknown[] }).changes;
+    if (!Array.isArray(changes)) continue;
+    for (const c of changes) {
+      if (!c || typeof c !== "object") continue;
+      const field = (c as { field?: string }).field;
+      if (field && field !== "leadgen") continue;
+      const v = (c as { value?: unknown }).value;
+      if (!v || typeof v !== "object") continue;
+      const val = v as Record<string, unknown>;
+      const leadgenId = typeof val.leadgen_id === "string" ? val.leadgen_id : String(val.leadgen_id ?? "");
+      const pageId = typeof val.page_id === "string" ? val.page_id : String(val.page_id ?? "");
+      const formId = typeof val.form_id === "string" ? val.form_id : String(val.form_id ?? "");
+      const createdTime = typeof val.created_time === "number" ? val.created_time : Number(val.created_time ?? 0);
+      if (!leadgenId || !pageId || !formId) continue;
+      out.push({
+        leadgen_id: leadgenId,
+        page_id: pageId,
+        form_id: formId,
+        created_time: Number.isFinite(createdTime) ? createdTime : 0,
+        ad_id: typeof val.ad_id === "string" ? val.ad_id : undefined,
+        adgroup_id: typeof val.adgroup_id === "string" ? val.adgroup_id : undefined,
+        campaign_id: typeof val.campaign_id === "string" ? val.campaign_id : undefined,
+      });
+    }
+  }
+  return out;
+}
+
 export function mapFieldData(
   fieldData: Array<{ name: string; values?: string[] }> | null | undefined,
 ): MetaLeadFieldSet {
