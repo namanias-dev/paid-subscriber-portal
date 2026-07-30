@@ -950,6 +950,10 @@ export interface Lead {
   merged_into?: string | null;
   /** How many duplicate rows were merged into this canonical lead. */
   merged_count?: number;
+  /** Latest Meta Lead Ad leadgen_id attached to this lead (nullable). */
+  meta_leadgen_id?: string | null;
+  /** When this lead was last ingested/updated from a Meta Lead Ad. */
+  meta_ingested_at?: string | null;
 }
 
 // ===================== PHASE 1 — WORKLIST FOUNDATION =====================

@@ -1,24 +1,47 @@
 /**
- * Phase 2C — Meta Lead Ads webhook stub.
+ * Meta Lead Ads webhook — realtime leadgen receiver.
  *
- * Meta's webhook subscription requires:
- *   - GET  handshake: echo `hub.challenge` when `hub.verify_token` matches ours.
- *   - POST notification: JSON body with `entry[].changes[].value.leadgen_id`.
+ * GET  = hub.verify_token handshake (needed before META_LEADS_ENABLED).
+ * POST = signed leadgen notification → Graph fetch → CRM ingest.
  *
- * This route implements ONLY the handshake gate. The POST path is 501 until
- * META_LEADS_ENABLED=true AND all required env vars are set, in which case it
- * forwards to lib/meta/leadAds.ts (also a scaffold — the actual Graph API fetch
- * is deliberately unimplemented).
- *
- * NEVER enable in production without: (a) App Review pass for `leads_retrieval`,
- * (b) a stable long-lived-token refresh cron, and (c) a per-page opt-in check.
+ * Always ACK 200 for valid signatures after processing (including duplicates /
+ * Graph failures stored as pending_retry) so Meta does not retry forever.
  */
 
 import { NextResponse } from "next/server";
 import { isMetaLeadsEnabled } from "@/lib/legacy-migration/flags";
-import { fetchLeadgenRecord, missingMetaConfig, type MetaLeadgenPayload } from "@/lib/meta/leadAds";
+import {
+  missingMetaConfig,
+  verifyMetaSignature,
+  type MetaLeadgenPayload,
+} from "@/lib/meta/leadAds";
+import { ingestMetaLeadFromWebhook } from "@/lib/meta/ingestMetaLead";
 
 export const dynamic = "force-dynamic";
+/** Allow Graph + DB headroom; still aim for << 5s. */
+export const maxDuration = 30;
+
+const rateMap = new Map<string, { n: number; reset: number }>();
+
+function rateLimit(ip: string, limit = 60, windowMs = 60_000): boolean {
+  const now = Date.now();
+  const cur = rateMap.get(ip);
+  if (!cur || now > cur.reset) {
+    rateMap.set(ip, { n: 1, reset: now + windowMs });
+    return true;
+  }
+  if (cur.n >= limit) return false;
+  cur.n += 1;
+  return true;
+}
+
+function clientIp(req: Request): string {
+  return (
+    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+    req.headers.get("x-real-ip") ||
+    "unknown"
+  );
+}
 
 /** GET = handshake. Meta sends hub.mode=subscribe + hub.verify_token + hub.challenge. */
 export async function GET(request: Request) {
@@ -41,34 +64,75 @@ export async function GET(request: Request) {
   return new Response(challenge, { status: 200, headers: { "content-type": "text/plain" } });
 }
 
-/** POST = notification. Only opens a Graph fetch when the full config is present. */
+/** POST = notification. Signature required. */
 export async function POST(request: Request) {
-  if (!isMetaLeadsEnabled()) {
-    return NextResponse.json(
-      { ok: false, status: "disabled", missing: missingMetaConfig() },
-      { status: 501 },
-    );
+  const started = Date.now();
+  const ip = clientIp(request);
+  if (!rateLimit(ip)) {
+    return NextResponse.json({ ok: false, error: "Rate limit" }, { status: 429 });
   }
+
+  const rawBody = await request.text();
+  const sig = request.headers.get("x-hub-signature-256");
+  const signatureValid = verifyMetaSignature(rawBody, sig);
+  if (!signatureValid) {
+    console.warn("[meta-leadgen] invalid signature", { ip, ms: Date.now() - started });
+    return NextResponse.json({ ok: false, error: "Invalid signature" }, { status: 401 });
+  }
+
+  if (!isMetaLeadsEnabled()) {
+    // ACK so subscription setup does not retry-storm while secrets are being filled.
+    return NextResponse.json({
+      ok: true,
+      status: "disabled",
+      missing: missingMetaConfig(),
+      ms: Date.now() - started,
+    });
+  }
+
   let body: unknown;
   try {
-    body = await request.json();
+    body = JSON.parse(rawBody);
   } catch {
     return NextResponse.json({ ok: false, error: "Invalid JSON" }, { status: 400 });
   }
-  const payloads = extractLeadgenPayloads(body);
-  if (payloads.length === 0) return NextResponse.json({ ok: true, processed: 0 });
 
-  // Not implemented — the fetch throws until an operator wires the Graph fetch.
-  try {
-    for (const p of payloads) await fetchLeadgenRecord(p);
-    return NextResponse.json({ ok: true, processed: payloads.length });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    return NextResponse.json({ ok: false, error: message }, { status: 501 });
+  const payloads = extractLeadgenPayloads(body);
+  if (payloads.length === 0) {
+    return NextResponse.json({ ok: true, processed: 0, ms: Date.now() - started });
   }
+
+  const results = [];
+  for (const p of payloads) {
+    const r = await ingestMetaLeadFromWebhook(p, {
+      rawWebhook: body,
+      signatureValid: true,
+      startedAt: started,
+    });
+    results.push({
+      leadgen_id: r.leadgenId,
+      outcome: r.outcome,
+      lead_id: r.leadId,
+      ms: r.handlerMs,
+      // phone last-4 only if present in error-free path — omit PII
+    });
+    console.info("[meta-leadgen]", {
+      leadgen_id: r.leadgenId,
+      outcome: r.outcome,
+      ms: r.handlerMs,
+      err: r.error ? r.error.slice(0, 120) : undefined,
+    });
+  }
+
+  return NextResponse.json({
+    ok: true,
+    processed: results.length,
+    results,
+    ms: Date.now() - started,
+  });
 }
 
-function extractLeadgenPayloads(body: unknown): MetaLeadgenPayload[] {
+export function extractLeadgenPayloads(body: unknown): MetaLeadgenPayload[] {
   if (!body || typeof body !== "object") return [];
   const entries = (body as { entry?: unknown[] }).entry;
   if (!Array.isArray(entries)) return [];
@@ -79,6 +143,8 @@ function extractLeadgenPayloads(body: unknown): MetaLeadgenPayload[] {
     if (!Array.isArray(changes)) continue;
     for (const c of changes) {
       if (!c || typeof c !== "object") continue;
+      const field = (c as { field?: string }).field;
+      if (field && field !== "leadgen") continue;
       const v = (c as { value?: unknown }).value;
       if (!v || typeof v !== "object") continue;
       const val = v as Record<string, unknown>;
@@ -91,7 +157,7 @@ function extractLeadgenPayloads(body: unknown): MetaLeadgenPayload[] {
         leadgen_id: leadgenId,
         page_id: pageId,
         form_id: formId,
-        created_time: createdTime,
+        created_time: Number.isFinite(createdTime) ? createdTime : 0,
         ad_id: typeof val.ad_id === "string" ? val.ad_id : undefined,
         adgroup_id: typeof val.adgroup_id === "string" ? val.adgroup_id : undefined,
         campaign_id: typeof val.campaign_id === "string" ? val.campaign_id : undefined,
