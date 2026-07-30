@@ -37,10 +37,18 @@
  * them. (`contact_attempt_count` cannot arbitrate this: it reads 0 for ALL
  * legacy rows including every `Not Replied`, because it tracks portal-era
  * contact and the import never populated it.)
+ *
+ * ---------------------------------------------------------------------------
+ * BEHAVIOUR LADDER (2026-07-30)
+ * ---------------------------------------------------------------------------
+ * `Webinar Registered` and `Seat Booked` sit on the behaviour ladder between
+ * demo attendance and admission. Staff judgement values (Not Interested, etc.)
+ * remain fully usable but never block a behaviour-driven flip — see
+ * `lib/leadBehaviourStatus.ts`.
  */
 
 // ============================================================================
-// THE 13 CANONICAL VALUES
+// THE 15 CANONICAL VALUES
 // ============================================================================
 
 export type LeadStatus =
@@ -53,6 +61,8 @@ export type LeadStatus =
   | "Walk In"
   | "Demo Booked"
   | "Demo Attended"
+  | "Webinar Registered"
+  | "Seat Booked"
   | "Admission Done"
   | "Repeat"
   | "Not Interested"
@@ -70,7 +80,9 @@ export type LeadStatusPill =
   | "pill-saffron"
   | "pill-green"
   | "pill-gold"
-  | "pill-red";
+  | "pill-red"
+  | "pill-slate"
+  | "pill-emerald";
 
 export interface LeadStatusMeta {
   /** The exact string persisted in `public.leads.status`. */
@@ -105,10 +117,12 @@ export const LEAD_STATUS_META: readonly LeadStatusMeta[] = [
   { value: "Walk In",             label: "Walk In",             pill: "pill-saffron", order: 7,  description: "Visited the centre in person." },
   { value: "Demo Booked",         label: "Demo Booked",         pill: "pill-blue",    order: 8,  description: "A demo class is scheduled." },
   { value: "Demo Attended",       label: "Demo Attended",       pill: "pill-blue",    order: 9,  description: "Attended the demo class." },
-  { value: "Admission Done",      label: "Admission Done",      pill: "pill-green",   order: 10, description: "Admitted and enrolled." },
-  { value: "Repeat",              label: "Repeat",              pill: "pill-gold",    order: 11, description: "A returning student or repeat enquiry." },
-  { value: "Not Interested",      label: "Not Interested",      pill: "pill-red",     order: 12, description: "Declined — includes leads previously marked Lost." },
-  { value: "Wrong No.",           label: "Wrong No.",           pill: "pill-red",     order: 13, description: "The number does not belong to the lead." },
+  { value: "Webinar Registered",  label: "Webinar Registered",  pill: "pill-slate",   order: 10, description: "Confirmed webinar registration (free, or paid after successful payment)." },
+  { value: "Seat Booked",         label: "Seat Booked",         pill: "pill-amber",   order: 11, description: "Course seat deposit paid — reserved a seat." },
+  { value: "Admission Done",      label: "Admission Done",      pill: "pill-emerald", order: 12, description: "Admitted — installment or full course payment received." },
+  { value: "Repeat",              label: "Repeat",              pill: "pill-gold",    order: 13, description: "A returning student or repeat enquiry." },
+  { value: "Not Interested",      label: "Not Interested",      pill: "pill-red",     order: 14, description: "Declined — includes leads previously marked Lost." },
+  { value: "Wrong No.",           label: "Wrong No.",           pill: "pill-red",     order: 15, description: "The number does not belong to the lead." },
 ] as const;
 
 /** Every canonical status, in display/sort order. */
@@ -241,8 +255,10 @@ export const LEAD_STATUS_MERGE_RANK: Readonly<Record<LeadStatus, number>> = {
   "Walk In": 6,
   "Demo Booked": 7,
   "Demo Attended": 8,
-  "Repeat": 9,
-  "Admission Done": 10,
+  "Webinar Registered": 9,
+  "Seat Booked": 10,
+  "Repeat": 11,
+  "Admission Done": 12,
 } as const;
 
 // ============================================================================
@@ -292,12 +308,16 @@ export function leadStatusFlags(value: string | null | undefined): {
   demo_booked: boolean;
   demo_attended: boolean;
   admitted: boolean;
+  webinar_registered: boolean;
 } {
   const s = normalizeLeadStatus(value);
-  const attended = s === "Demo Attended" || s === "Admission Done";
+  const attended = s === "Demo Attended" || s === "Admission Done" || s === "Seat Booked";
+  const webinar =
+    s === "Webinar Registered" || s === "Seat Booked" || s === "Admission Done";
   return {
     demo_booked: attended || s === "Demo Booked",
     demo_attended: attended,
     admitted: s === "Admission Done",
+    webinar_registered: webinar,
   };
 }
