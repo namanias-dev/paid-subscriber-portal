@@ -21,7 +21,6 @@
 import { getSupabaseAdmin } from "./supabase";
 import { phoneKeyFromRaw } from "./marketing/legacyLeadMatch";
 import {
-  isLeadStatus,
   leadStatusFlags,
   normalizeLeadStatus,
   type LeadStatus,
@@ -58,17 +57,42 @@ export interface ManualVerdict {
   note: string | null;
 }
 
-export interface LeadStatusAttribution {
-  origin: StatusOrigin | null;
-  systemVerifiedAt: string | null;
-  manual: ManualVerdict | null;
-}
-
 /** Negative / terminal staff judgements used by the disparity report. */
 export const NEGATIVE_MANUAL_STATUSES: readonly LeadStatus[] = [
   "Not Interested",
   "Wrong No.",
 ];
+
+/** Columns added by 2026-07-30-lead-behaviour-status.sql */
+export const BEHAVIOUR_SCHEMA_COLS = [
+  "status_origin",
+  "status_system_verified_at",
+  "manual_status",
+  "manual_status_at",
+  "manual_status_by",
+  "manual_status_by_role",
+  "manual_status_note",
+] as const;
+
+let behaviourSchemaReady: boolean | null = null;
+
+/** True once the additive behaviour-status columns exist (cached). */
+export async function hasBehaviourStatusSchema(): Promise<boolean> {
+  if (behaviourSchemaReady != null) return behaviourSchemaReady;
+  const db = getSupabaseAdmin();
+  if (!db) {
+    behaviourSchemaReady = false;
+    return false;
+  }
+  const { error } = await db.from("leads").select("id,status_origin").limit(1);
+  behaviourSchemaReady = !error;
+  return behaviourSchemaReady;
+}
+
+/** Test helper — reset the schema probe cache. */
+export function resetBehaviourSchemaCache(): void {
+  behaviourSchemaReady = null;
+}
 
 export function isBehaviourStage(value: string | null | undefined): value is BehaviourStage {
   return value === "Webinar Registered" || value === "Seat Booked" || value === "Admission Done";
@@ -183,40 +207,30 @@ export function deriveBehaviourStageFromEvents(input: {
   let failedPaymentAt: string | null = null;
 
   const bump = (next: BehaviourStage, at: string | null) => {
-    const prev = stage;
-    stage = furthestBehaviourStage(stage, next);
-    if (stage !== next) return;
-    if (next === "Webinar Registered" && (!webinarRegisteredAt || (at && at < webinarRegisteredAt))) {
-      webinarRegisteredAt = at;
+    const prevRank = behaviourStageRank(stage);
+    const nextRank = BEHAVIOUR_STAGE_RANK[next];
+    if (nextRank < prevRank) return;
+    stage = next;
+    if (next === "Webinar Registered") {
+      if (!webinarRegisteredAt || (at && at < webinarRegisteredAt)) webinarRegisteredAt = at;
     }
-    if (next === "Seat Booked" && (!seatBookedAt || (at && at < seatBookedAt))) {
-      seatBookedAt = at;
+    if (next === "Seat Booked") {
+      if (!seatBookedAt || (at && at < seatBookedAt)) seatBookedAt = at;
     }
-    if (next === "Admission Done" && (!admissionAt || (at && at < admissionAt))) {
-      admissionAt = at;
-    }
-    // Keep earliest timestamps for lower stages even when we bump higher
-    if (prev && BEHAVIOUR_STAGE_RANK[prev] < BEHAVIOUR_STAGE_RANK[next]) {
-      /* lower-stage timestamps already set */
+    if (next === "Admission Done") {
+      if (!admissionAt || (at && at < admissionAt)) admissionAt = at;
     }
   };
 
-  // Course enrollments — seat vs admission
   for (const e of input.enrollments) {
     if (e.status === "cancelled" || e.status === "transferred_out") continue;
     const paid = Number(e.amount_paid || 0);
-    const derived = deriveEnrollment({
-      total_fee: 0, // only seat/installment flags matter here
-      schedule: Array.isArray(e.schedule) ? e.schedule : [],
-    });
-    // Reconstruct with a positive fee so remaining math is sane when schedule exists
     const withFee = deriveEnrollment({
-      total_fee: Math.max(paid, derived.paid, 1),
+      total_fee: Math.max(paid, 1),
       schedule: Array.isArray(e.schedule) ? e.schedule : [],
     });
 
     if (e.status === "fully_paid" || e.status === "partially_paid") {
-      // Installment or full payment received → Admission Done
       const firstInstallmentPaid = (Array.isArray(e.schedule) ? e.schedule : [])
         .filter((s) => (s.kind === "installment" || s.kind === "full") && s.paid)
         .map((s) => s.paid_at || e.created_at)
@@ -234,15 +248,17 @@ export function deriveBehaviourStageFromEvents(input: {
       continue;
     }
 
-    if (e.status === "seat_booked" || (isActiveEnrollment({ status: e.status as CourseEnrollment["status"], amount_paid: paid }) && withFee.seatPaid && withFee.paidCount === 0 && !withFee.isFullyPaid)) {
+    if (
+      e.status === "seat_booked" ||
+      (isActiveEnrollment({ status: e.status as CourseEnrollment["status"], amount_paid: paid }) &&
+        withFee.seatPaid &&
+        withFee.paidCount === 0 &&
+        !withFee.isFullyPaid)
+    ) {
       bump("Seat Booked", e.created_at);
-      continue;
     }
-
-    // checkout_intent / pending with ₹0 — attempt only (timeline)
   }
 
-  // Paid course payments as a belt-and-braces signal
   for (const p of input.payments) {
     if (!isPaidStatus(p.status) || Number(p.amount || 0) <= 0) {
       const st = (p.status || "").toUpperCase();
@@ -256,7 +272,7 @@ export function deriveBehaviourStageFromEvents(input: {
     if (p.item_type === "course") {
       const kind = (p.payment_kind || "").toLowerCase();
       if (kind === "seat") bump("Seat Booked", p.created_at);
-      else bump("Admission Done", p.created_at); // installment / full / null on course
+      else bump("Admission Done", p.created_at);
     }
     if (p.item_type === "webinar") {
       bump("Webinar Registered", p.created_at);
@@ -264,25 +280,18 @@ export function deriveBehaviourStageFromEvents(input: {
     }
   }
 
-  // Webinar registrations
   for (const r of input.registrations) {
     const w = r.webinar_id ? input.webinarsById.get(r.webinar_id) : undefined;
     const price = Number(w?.price ?? 0);
     if (price <= 0) {
-      // Free webinar: registration == confirmation
       bump("Webinar Registered", r.created_at);
       if (!webinarTitle && w?.title) webinarTitle = w.title;
     } else {
-      // Paid webinar: only count if we already have a PAID payment (handled above).
-      // Bare registration without payment = attempted.
       if (behaviourStageRank(stage) < 1) {
         if (!attemptedWebinarAt || (r.created_at && r.created_at < attemptedWebinarAt)) {
           attemptedWebinarAt = r.created_at;
         }
-      } else if (!webinarTitle && w?.title) {
-        webinarTitle = w.title;
       }
-      // If a paid payment already bumped Webinar Registered, attach title
       if (isBehaviourStage(stage) && BEHAVIOUR_STAGE_RANK[stage] >= 1 && !webinarTitle && w?.title) {
         webinarTitle = w.title;
       }
@@ -352,6 +361,8 @@ export function buildBehaviourPatch(input: {
   manualStatus: string | null | undefined;
   derived: BehaviourStage;
   nowIso?: string;
+  /** When false, omit additive columns (pre-migration deploy safety). */
+  includeAttributionCols?: boolean;
 }): {
   patch: Record<string, unknown>;
   changed: boolean;
@@ -359,6 +370,7 @@ export function buildBehaviourPatch(input: {
   skippedReason?: string;
 } {
   const now = input.nowIso || new Date().toISOString();
+  const includeAttrs = input.includeAttributionCols !== false;
   const current = normalizeLeadStatus(input.currentStatus) ?? input.currentStatus ?? null;
   const currentRank = behaviourStageRank(current);
   const derivedRank = BEHAVIOUR_STAGE_RANK[input.derived];
@@ -370,7 +382,9 @@ export function buildBehaviourPatch(input: {
     return { patch: {}, changed: false, preservedManual: false, skippedReason: "already_system" };
   }
   if (current === input.derived && input.statusOrigin !== "staff") {
-    // Same value but not yet marked system — stamp origin only
+    if (!includeAttrs) {
+      return { patch: {}, changed: false, preservedManual: false, skippedReason: "already_same" };
+    }
     return {
       patch: {
         status_origin: "system",
@@ -384,18 +398,18 @@ export function buildBehaviourPatch(input: {
   const flags = leadStatusFlags(input.derived);
   const patch: Record<string, unknown> = {
     status: input.derived,
-    status_origin: "system",
-    status_system_verified_at: now,
-    webinar_registered: flags.webinar_registered || undefined,
-    admitted: flags.admitted || undefined,
     updated_at: now,
   };
-  // Only turn flags ON
-  if (!flags.webinar_registered) delete patch.webinar_registered;
-  if (!flags.admitted) delete patch.admitted;
+  if (includeAttrs) {
+    patch.status_origin = "system";
+    patch.status_system_verified_at = now;
+  }
+  if (flags.webinar_registered) patch.webinar_registered = true;
+  if (flags.admitted) patch.admitted = true;
 
   let preservedManual = false;
   const shouldPreserve =
+    includeAttrs &&
     !input.manualStatus &&
     current &&
     current !== input.derived &&
@@ -405,12 +419,7 @@ export function buildBehaviourPatch(input: {
       input.statusOrigin === "unknown" ||
       !isBehaviourStage(current));
 
-  if (shouldPreserve && isLeadStatus(current)) {
-    patch.manual_status = current;
-    patch.manual_status_at = now;
-    // Attribution unknown for historical rows — leave by/role null honestly
-    preservedManual = true;
-  } else if (shouldPreserve && current) {
+  if (shouldPreserve && current) {
     patch.manual_status = current;
     patch.manual_status_at = now;
     preservedManual = true;
@@ -424,6 +433,10 @@ export function buildBehaviourPatch(input: {
  * Safe to call fire-and-forget — never throws to caller when wrapped in void.
  */
 export async function applyBehaviourStatusForPhone(phoneRaw: string): Promise<ApplyBehaviourResult[]> {
+  const schemaOk = await hasBehaviourStatusSchema();
+  // Without the new CHECK values, writing Webinar Registered / Seat Booked fails.
+  if (!schemaOk) return [];
+
   const evidence = await deriveBehaviourForPhone(phoneRaw);
   if (!evidence?.stage || !evidence.phoneKey) return [];
 
@@ -445,6 +458,7 @@ export async function applyBehaviourStatusForPhone(phoneRaw: string): Promise<Ap
       statusOrigin: (lead.status_origin as StatusOrigin | null) ?? null,
       manualStatus: lead.manual_status,
       derived: evidence.stage,
+      includeAttributionCols: true,
     });
     if (!changed) {
       results.push({
@@ -493,6 +507,8 @@ export function scheduleBehaviourStatusApply(phoneRaw: string | null | undefined
 
 /**
  * Staff PATCH: write pipeline status + stamp manual verdict attribution.
+ * When the additive columns are not yet migrated, omit them so CRM edits
+ * keep working against the pre-migration schema.
  */
 export function buildStaffStatusPatch(input: {
   status: LeadStatus;
@@ -500,19 +516,26 @@ export function buildStaffStatusPatch(input: {
   actorRole: string | null;
   note?: string | null;
   nowIso?: string;
+  includeAttributionCols?: boolean;
 }): Record<string, unknown> {
   const now = input.nowIso || new Date().toISOString();
   const flags = leadStatusFlags(input.status);
-  return {
+  const patch: Record<string, unknown> = {
     status: input.status,
-    status_origin: "staff" satisfies StatusOrigin,
-    manual_status: input.status,
-    manual_status_at: now,
-    manual_status_by: input.actorName,
-    manual_status_by_role: input.actorRole,
-    manual_status_note: input.note ?? null,
     admitted: flags.admitted,
-    webinar_registered: flags.webinar_registered || undefined,
     updated_at: now,
   };
+  if (flags.webinar_registered) patch.webinar_registered = true;
+  if (input.includeAttributionCols !== false) {
+    patch.status_origin = "staff" satisfies StatusOrigin;
+    patch.manual_status = input.status;
+    patch.manual_status_at = now;
+    patch.manual_status_by = input.actorName;
+    patch.manual_status_by_role = input.actorRole;
+    patch.manual_status_note = input.note ?? null;
+  }
+  return patch;
 }
+
+// silence unused import in type-only paths
+void isLeadStatus;

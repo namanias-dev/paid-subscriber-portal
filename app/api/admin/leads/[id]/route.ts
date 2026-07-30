@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { updateLead, deleteLead, getLeadActivities, addLeadActivity } from "@/lib/dataProvider";
 import { getActionActor, requirePermission } from "@/lib/adminGuard";
-import { buildStaffStatusPatch } from "@/lib/leadBehaviourStatus";
+import { buildStaffStatusPatch, hasBehaviourStatusSchema } from "@/lib/leadBehaviourStatus";
 import { isLeadStatus, normalizeLeadStatus } from "@/lib/leadStatus";
 
 export const dynamic = "force-dynamic";
@@ -37,11 +37,13 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
         return NextResponse.json({ ok: false, error: `Invalid status: ${String(body.status)}` }, { status: 400 });
       }
       const actor = await getActionActor();
+      const schemaOk = await hasBehaviourStatusSchema();
       const staffPatch = buildStaffStatusPatch({
         status: normalized,
         actorName: actor?.name ?? null,
         actorRole: actor?.role ?? null,
         note: typeof body.manual_status_note === "string" ? body.manual_status_note : null,
+        includeAttributionCols: schemaOk,
       });
       // Staff patch owns status / admitted / webinar_registered / manual_* / origin.
       // Other body fields (counsellor, follow_up_date, …) still merge through.
