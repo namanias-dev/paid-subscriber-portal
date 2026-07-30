@@ -40,7 +40,7 @@ type EnrRow = {
   status: string | null;
   amount_paid: number | null;
   created_at: string | null;
-  schedule: unknown;
+  schedule: import("../lib/types").InstallmentItem[] | null;
   course_title: string | null;
 };
 type PayRow = {
