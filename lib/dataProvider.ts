@@ -29,6 +29,7 @@ import {
   type LegacyOptions,
 } from "./legacy-migration/legacyFilter";
 import { DEFAULT_LEAD_STATUS, LEAD_FUNNEL_STAGES, normalizeLeadStatus } from "./leadStatus";
+import { scheduleBehaviourStatusApply } from "./leadBehaviourStatus";
 import { TRIGGERS } from "./sms/templates";
 import { NON_DUPLICABLE_WEBINAR_FIELDS, buildDuplicateSlug } from "./webinarLifecycle";
 import type {
@@ -2669,6 +2670,7 @@ export async function registerWebinar(webinarId: string, name: string, phone: st
     if (w) w.registrations += 1;
     // also push into CRM as a lead
     await addLead({ name, phone, source: "Webinar", webinar_registered: true, campaign: w?.title }, "webinar_registration", leadAttributionFromState(attr ?? null));
+    scheduleBehaviourStatusApply(phone);
     await ensureBuyer(phone, name).catch(() => null);
     fireAutoSms({ trigger: TRIGGERS.registration_created, phone, name, vars: { item_short: resolveSmsItemShort({ smsShortTitle: w?.sms_short_title, fullTitle: w?.title || "your webinar" }) }, entity: { webinar_id: webinarId }, entityId: webinarId });
     return { ok: true };
@@ -2727,6 +2729,7 @@ export async function registerWebinar(webinarId: string, name: string, phone: st
     fireAutoSms({ trigger: TRIGGERS.registration_created, phone, name, vars: { item_short: resolveSmsItemShort({ smsShortTitle: webinarSmsShort, fullTitle: webinarTitle || "your webinar" }) }, entity: { webinar_id: webinarId }, entityId: webinarId });
   }
   await addLead({ name, phone, source: "Webinar", webinar_registered: true }, "webinar_registration", leadAttributionFromState(attr ?? null));
+  scheduleBehaviourStatusApply(phone);
   // UNIFIED IDENTITY: a webinar registrant (free or paid) becomes a first-class
   // student + buyer so they appear in Students & Enrollments and can open their
   // portal (webinar materials). Idempotent — one person stays one student.
@@ -3269,8 +3272,11 @@ export async function createPayment(input: CreatePaymentInput): Promise<Payment>
     await ensureBuyer(saved.phone, saved.student_name).catch(() => null);
     // Analytics (best-effort, idempotent, never throws): a brand-new PAID row is a
     // completed purchase; a PENDING row is an initiated checkout.
-    if (isPaidStatus(saved.status)) void recordPaymentPaid(saved, "checkout").catch(() => {});
-    else if (saved.status === "INITIATED" || saved.status === "PENDING") void recordPaymentInitiated(saved).catch(() => {});
+    if (isPaidStatus(saved.status)) {
+      void recordPaymentPaid(saved, "checkout").catch(() => {});
+      // Paid webinar created as PAID (offline/cash) → behaviour ladder.
+      if (saved.item_type === "webinar") scheduleBehaviourStatusApply(saved.phone);
+    } else if (saved.status === "INITIATED" || saved.status === "PENDING") void recordPaymentInitiated(saved).catch(() => {});
     return saved;
   } catch {
     // Best-effort: fall back to in-memory so the flow still works pre-migration.
@@ -3326,7 +3332,11 @@ export async function updatePaymentByReference(
   };
   if (demoMode()) {
     const row = updateDemo();
-    if (row && isPaidStatus(patch.status)) await ensureBuyer(row.phone, row.student_name).catch(() => null);
+    if (row && isPaidStatus(patch.status)) {
+      await ensureBuyer(row.phone, row.student_name).catch(() => null);
+      // Paid webinar confirmation → behaviour ladder (fire-and-forget).
+      if (row.item_type === "webinar") scheduleBehaviourStatusApply(row.phone);
+    }
     return row;
   }
   const db = getSupabaseAdmin();
@@ -3345,6 +3355,10 @@ export async function updatePaymentByReference(
       if (patch.status) {
         if (isPaidStatus(patch.status)) void recordPaymentPaid(row, "verify").catch(() => {});
         else void recordPaymentStatusChanged(row, String(patch.status), "verify").catch(() => {});
+      }
+      // Paid webinar → behaviour ladder. Fire-and-forget; never await.
+      if (isPaidStatus(patch.status) && row.item_type === "webinar") {
+        scheduleBehaviourStatusApply(row.phone);
       }
       return row;
     }
@@ -4438,6 +4452,8 @@ export async function finalizeCoursePaymentByReference(
   // Idempotency: a receipt already exists for this reference => already finalized.
   const existing = await getReceiptByReference(referenceNo);
   if (existing) {
+    // Still nudge behaviour status (idempotent apply) — fire-and-forget only.
+    scheduleBehaviourStatusApply(payment.phone || enrollment.phone);
     return { enrollment, receipt: existing };
   }
 
@@ -4534,6 +4550,9 @@ export async function finalizeCoursePaymentByReference(
       )
       .catch(() => null);
   }
+
+  // Behaviour status — fire-and-forget ONLY. Never await on the payment path.
+  scheduleBehaviourStatusApply(payment.phone || enrollment.phone);
 
   return { enrollment: updated, receipt: saved };
 }

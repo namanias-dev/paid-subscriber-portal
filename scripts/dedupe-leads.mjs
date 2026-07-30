@@ -57,8 +57,10 @@ const STATUS_RANK = {
   "Walk In": 6,
   "Demo Booked": 7,
   "Demo Attended": 8,
-  "Repeat": 9,
-  "Admission Done": 10,
+  "Webinar Registered": 9,
+  "Seat Booked": 10,
+  "Repeat": 11,
+  "Admission Done": 12,
 };
 
 /** Mirror of `DEFAULT_LEAD_STATUS`. Pinned by the same test. */

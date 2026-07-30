@@ -871,6 +871,19 @@ export interface Lead {
   mode_pref: string | null;
   called: boolean;
   status: LeadStatus;
+  /**
+   * Who last wrote `status`: staff PATCH → staff; behaviour engine → system;
+   * import/unknown for historical rows. See `lib/leadBehaviourStatus.ts`.
+   */
+  status_origin?: "staff" | "system" | "import" | "unknown" | null;
+  /** When the behaviour engine last verified/wrote `status`. */
+  status_system_verified_at?: string | null;
+  /** Preserved staff (or pre-system) verdict — never deleted by behaviour flips. */
+  manual_status?: string | null;
+  manual_status_at?: string | null;
+  manual_status_by?: string | null;
+  manual_status_by_role?: string | null;
+  manual_status_note?: string | null;
   temperature: "Interested" | "Warm" | "Cold" | "Junk";
   demo_booked: boolean;
   demo_attended: boolean;

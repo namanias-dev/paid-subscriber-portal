@@ -52,10 +52,12 @@ const SOURCE_OF_TRUTH = "lib/leadStatus.ts";
  */
 const ALLOWED: Readonly<Record<string, string>> = {
   [SOURCE_OF_TRUTH]: "the source of truth itself",
+  "lib/leadBehaviourStatus.ts": "behaviour engine; ladder/negative literals are LeadStatus via satisfies / typed arrays",
   "scripts/dedupe-leads.mjs": "bare-node ops script; cannot import TS. Pinned key-for-key below.",
   "supabase/seed.sql": "local fixture data; asserted canonical below.",
   "supabase/schema.sql": "table DDL default + CHECK vocabulary.",
   "supabase/migrations/2026-07-25-lead-status-consolidation.sql": "the migration that performs the rename.",
+  "supabase/migrations/2026-07-30-lead-behaviour-status.sql": "extends vocabulary with Webinar Registered + Seat Booked.",
 };
 
 /** Directories that are not application code. */
@@ -112,7 +114,7 @@ function stringLiterals(line: string, isSql: boolean): string[] {
  * a pipeline status.
  */
 const OTHER_STATUS_FIELDS =
-  /temperature|work_status|consent_status|dnd_status|upload_status|verify_status|settlement_status|registration_status|payout_status|payment_status|template.?status|log.?status|access.?status|enrollment.?status/i;
+  /temperature|work_status|consent_status|dnd_status|upload_status|verify_status|settlement_status|registration_status|payout_status|payment_status|template.?status|log.?status|access.?status|enrollment.?status|receipt\.status|seat_booked|Fully Paid|Partially Paid/i;
 
 function isStatusContext(line: string): boolean {
   if (OTHER_STATUS_FIELDS.test(line)) return false;
@@ -146,16 +148,16 @@ const fmt = (o: Offender[]) => o.map((x) => `${x.file}:${x.line} -> "${x.literal
 // ===========================================================================
 
 describe("lead status — the vocabulary itself", () => {
-  test("has exactly 13 values", () => {
-    assert.equal(LEAD_STATUSES.length, 13);
-    assert.equal(LEAD_STATUS_META.length, 13);
+  test("has exactly 15 values", () => {
+    assert.equal(LEAD_STATUSES.length, 15);
+    assert.equal(LEAD_STATUS_META.length, 15);
   });
 
   test("values are unique", () => {
     assert.equal(new Set(LEAD_STATUSES).size, LEAD_STATUSES.length);
   });
 
-  test("sort order is 1..13 with no gaps, matching array position", () => {
+  test("sort order is 1..15 with no gaps, matching array position", () => {
     LEAD_STATUS_META.forEach((m, i) => {
       assert.equal(m.order, i + 1, `${m.value} declares order ${m.order} but sits at index ${i}`);
     });
@@ -172,6 +174,8 @@ describe("lead status — the vocabulary itself", () => {
       "Walk In",
       "Demo Booked",
       "Demo Attended",
+      "Webinar Registered",
+      "Seat Booked",
       "Admission Done",
       "Repeat",
       "Not Interested",
@@ -266,9 +270,9 @@ describe("lead status — lookups degrade safely", () => {
 });
 
 describe("lead status — derived boolean columns", () => {
-  test("Admission Done implies admitted, and the whole demo chain", () => {
+  test("Admission Done implies admitted, webinar, and the whole demo chain", () => {
     const f = leadStatusFlags("Admission Done");
-    assert.deepEqual(f, { demo_booked: true, demo_attended: true, admitted: true });
+    assert.deepEqual(f, { demo_booked: true, demo_attended: true, admitted: true, webinar_registered: true });
   });
 
   test("the retired 'Admitted' string still derives admitted", () => {
@@ -277,13 +281,40 @@ describe("lead status — derived boolean columns", () => {
     assert.equal(leadStatusFlags("Admitted").admitted, true);
   });
 
-  test("Demo Attended implies Demo Booked but not admitted", () => {
-    assert.deepEqual(leadStatusFlags("Demo Attended"), { demo_booked: true, demo_attended: true, admitted: false });
+  test("Demo Attended implies Demo Booked but not admitted or webinar", () => {
+    assert.deepEqual(leadStatusFlags("Demo Attended"), {
+      demo_booked: true,
+      demo_attended: true,
+      admitted: false,
+      webinar_registered: false,
+    });
+  });
+
+  test("Seat Booked implies webinar + demo chain but not admitted", () => {
+    assert.deepEqual(leadStatusFlags("Seat Booked"), {
+      demo_booked: true,
+      demo_attended: true,
+      admitted: false,
+      webinar_registered: true,
+    });
+  });
+
+  test("Webinar Registered implies webinar only", () => {
+    assert.deepEqual(leadStatusFlags("Webinar Registered"), {
+      demo_booked: false,
+      demo_attended: false,
+      admitted: false,
+      webinar_registered: true,
+    });
   });
 
   test("cold statuses derive nothing", () => {
     for (const s of ["Not Called", "Not Replied", "Call Back", "Wrong No."] as LeadStatus[]) {
-      assert.deepEqual(leadStatusFlags(s), { demo_booked: false, demo_attended: false, admitted: false }, s);
+      assert.deepEqual(
+        leadStatusFlags(s),
+        { demo_booked: false, demo_attended: false, admitted: false, webinar_registered: false },
+        s,
+      );
     }
   });
 });
@@ -350,13 +381,13 @@ describe("no hard-coded status strings outside the source of truth", () => {
     assert.equal(dflt[1], DEFAULT_LEAD_STATUS, "dedupe-leads.mjs DEFAULT_STATUS has drifted");
   });
 
-  test("the DB CHECK constraint in the migration lists exactly the 13 values", () => {
+  test("the DB CHECK constraint in the behaviour-status migration lists exactly the 15 values", () => {
     const sql = readFileSync(
-      join(REPO, "supabase", "migrations", "2026-07-25-lead-status-consolidation.sql"),
+      join(REPO, "supabase", "migrations", "2026-07-30-lead-behaviour-status.sql"),
       "utf8",
     );
     const check = sql.match(/add constraint leads_status_vocab check \(([\s\S]*?)\) not valid;/);
-    assert.ok(check, "leads_status_vocab CHECK not found");
+    assert.ok(check, "leads_status_vocab CHECK not found in 2026-07-30-lead-behaviour-status.sql");
     const listed = [...check[1].matchAll(/'((?:[^']|'')*)'::text/g)].map((m) => m[1]);
     assert.deepEqual(
       listed,

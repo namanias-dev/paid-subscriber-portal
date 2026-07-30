@@ -1,10 +1,11 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
 import { PageHeader, useAdminData, LoadingBlock, TableShell } from "@/components/admin/ui";
 import Modal from "@/components/ui/Modal";
 import JourneyTimeline from "@/components/admin/JourneyTimeline";
+import LeadEventTimeline from "@/components/admin/LeadEventTimeline";
 import SendSmsButton from "@/components/admin/sms/SendSmsButton";
 import SearchBar from "@/components/ui/SearchBar";
 import GroupedTimeline, { type TimelineGroup } from "@/components/admin/GroupedTimeline";
@@ -15,7 +16,8 @@ import { usePersistentState } from "@/lib/usePersistentState";
 import { formatINR, formatISTDateTime, formatISTShort, istYMD, istTodayYMD, istYMDToMs, resolveTimeframe, type TimeframeValue } from "@/lib/dates";
 import { sortLeads, KANBAN_SORTS, type KanbanSort } from "@/lib/leadsSort";
 import { MARKETING_CHANNELS, GOOGLE_ADS_CHANNEL } from "@/lib/attribution";
-import { DEFAULT_LEAD_STATUS, LEAD_STATUSES, LEAD_STATUS_META, leadStatusFlags, leadStatusLabel, leadStatusPill, normalizeLeadStatus } from "@/lib/leadStatus";
+import { DEFAULT_LEAD_STATUS, LEAD_STATUSES, LEAD_STATUS_META, leadStatusLabel, leadStatusPill, normalizeLeadStatus } from "@/lib/leadStatus";
+import { formatStaffVerdictLabel, formatSystemVerifiedLabel } from "@/lib/leadBehaviourStatus";
 import type { Lead, LeadStatus, LeadSourceTouch } from "@/lib/types";
 import LegacyLeadPill from "@/components/admin/LegacyLeadPill";
 import { lookupLegacyMatch, type LegacyLeadMatch } from "@/lib/marketing/legacyLeadMatch";
@@ -56,10 +58,15 @@ function waLink(phone: string, text: string) {
 interface LeadAccount { id: string; name: string | null; phone: string; login_code: string; created_at: string }
 
 export default function LeadsPage() {
-  const { data: leads, loading, reload } = useAdminData<Lead[]>("/api/admin/leads", "leads");
+  const { data: leadsRemote, loading, reload } = useAdminData<Lead[]>("/api/admin/leads", "leads");
   const { data: legacyLeadByPhone } = useAdminData<Record<string, LegacyLeadMatch>>("/api/admin/leads", "legacyLeadByPhone");
   const { data: leadAccounts } = useAdminData<LeadAccount[]>("/api/admin/leads/accounts", "leads");
   const { toast } = useToast();
+  // Local mirror so status PATCH can update without reload() → LoadingBlock unmount.
+  const [leads, setLeads] = useState<Lead[]>([]);
+  useEffect(() => {
+    if (leadsRemote) setLeads(leadsRemote);
+  }, [leadsRemote]);
   const [view, setView] = useState<"kanban" | "list">("kanban");
   const [sort, setSort] = usePersistentState<LeadSort>("nsa.leads.sort", "recent");
   const [kanbanSort, setKanbanSort] = usePersistentState<KanbanSort>("nsa.leads.kanbanSort", "newest");
@@ -160,17 +167,26 @@ export default function LeadsPage() {
     [q, leadGroups],
   );
 
-  async function setStatus(lead: Lead, status: LeadStatus) {
-    await fetch(`/api/admin/leads/${lead.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      // `admitted` is derived through the source of truth, never from a status
-      // string compared inline. The pre-consolidation code tested
-      // `status === "Admitted"` here, so renaming the value to "Admission Done"
-      // would have silently stopped the flag from ever being set.
-      body: JSON.stringify({ status, admitted: leadStatusFlags(status).admitted }),
-    });
-    reload();
+  /** Patch status without reload()/LoadingBlock unmount. Returns updated lead or null. */
+  async function setStatus(lead: Lead, status: LeadStatus): Promise<Lead | null> {
+    try {
+      const res = await fetch(`/api/admin/leads/${lead.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json.ok || !json.lead) {
+        throw new Error(json.error || "Failed to update status.");
+      }
+      const updated = json.lead as Lead;
+      setLeads((prev) => prev.map((l) => (l.id === updated.id ? { ...l, ...updated } : l)));
+      setActive((cur) => (cur?.id === updated.id ? { ...cur, ...updated } : cur));
+      return updated;
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Failed to update status.", "error");
+      return null;
+    }
   }
 
   function exportCsv() {
@@ -188,7 +204,7 @@ export default function LeadsPage() {
     toast("Exported leads.csv", "success");
   }
 
-  if (loading) return <LoadingBlock />;
+  if (loading && leads.length === 0) return <LoadingBlock />;
 
   return (
     <div>
@@ -334,7 +350,6 @@ export default function LeadsPage() {
           lead={active}
           legacyMatch={lookupLegacyMatch(legacyLeadByPhone, active.phone)}
           onClose={() => setActive(null)}
-          onChanged={() => { reload(); }}
           setStatus={setStatus}
           waLink={waLink}
         />
@@ -434,15 +449,13 @@ function LeadDetail({
   lead,
   legacyMatch,
   onClose,
-  onChanged,
   setStatus,
   waLink,
 }: {
   lead: Lead;
   legacyMatch: LegacyLeadMatch | null;
   onClose: () => void;
-  onChanged: () => void;
-  setStatus: (l: Lead, s: LeadStatus) => void;
+  setStatus: (l: Lead, s: LeadStatus) => Promise<Lead | null>;
   waLink: (p: string, t: string) => string;
 }) {
   const { toast } = useToast();
@@ -452,6 +465,20 @@ function LeadDetail({
   // whatever the counsellor picks next).
   const [status, setLocalStatus] = useState<LeadStatus>(normalizeLeadStatus(lead.status) ?? DEFAULT_LEAD_STATUS);
   const [showJourney, setShowJourney] = useState(false);
+  const [savingStatus, setSavingStatus] = useState(false);
+
+  useEffect(() => {
+    setLocalStatus(normalizeLeadStatus(lead.status) ?? DEFAULT_LEAD_STATUS);
+  }, [lead.id, lead.status]);
+
+  async function onStatusChange(next: LeadStatus) {
+    const prev = status;
+    setLocalStatus(next);
+    setSavingStatus(true);
+    const updated = await setStatus(lead, next);
+    setSavingStatus(false);
+    if (!updated) setLocalStatus(prev);
+  }
 
   async function addNote() {
     if (!note.trim()) return;
@@ -463,6 +490,22 @@ function LeadDetail({
     setNote("");
     toast("Note added", "success");
   }
+
+  const systemLabel =
+    lead.status_origin === "system"
+      ? formatSystemVerifiedLabel(lead.status)
+      : null;
+  const staffLabel = formatStaffVerdictLabel(
+    lead.manual_status
+      ? {
+          status: lead.manual_status,
+          at: lead.manual_status_at ?? null,
+          by: lead.manual_status_by ?? null,
+          byRole: lead.manual_status_by_role ?? null,
+          note: lead.manual_status_note ?? null,
+        }
+      : null,
+  );
 
   return (
     <Modal open onClose={onClose} title={lead.name} maxWidth="max-w-lg">
@@ -489,9 +532,24 @@ function LeadDetail({
 
         <div>
           <label className="label">Pipeline stage</label>
-          <select className="input" value={status} onChange={(e) => { const s = e.target.value as LeadStatus; setLocalStatus(s); setStatus(lead, s); onChanged(); }}>
+          <select
+            className="input"
+            value={status}
+            disabled={savingStatus}
+            onChange={(e) => { void onStatusChange(e.target.value as LeadStatus); }}
+          >
             {LEAD_STATUS_META.map((m) => <option key={m.value} value={m.value} title={m.description}>{m.label}</option>)}
           </select>
+          {(systemLabel || staffLabel) && (
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {systemLabel && (
+                <span className="pill pill-origin-system text-[10px]" title={systemLabel}>{systemLabel}</span>
+              )}
+              {staffLabel && (
+                <span className="pill pill-origin-staff text-[10px]" title={staffLabel}>{staffLabel}</span>
+              )}
+            </div>
+          )}
         </div>
 
         <div className="flex gap-2">
@@ -506,6 +564,11 @@ function LeadDetail({
             <input className="input" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Called, sent brochure..." />
             <button onClick={addNote} className="btn btn-primary text-sm">Log</button>
           </div>
+        </div>
+
+        <div className="rounded-xl border border-line bg-surface p-3">
+          <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted">Status &amp; events</p>
+          <LeadEventTimeline leadId={lead.id} />
         </div>
 
         <div className="border-t border-line pt-3">

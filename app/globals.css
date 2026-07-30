@@ -262,6 +262,10 @@ a {
     background: #fff1e3;
     color: #d97316;
   }
+  .pill-slate { background: #e8eef4; color: #3d4f63; }
+  .pill-emerald { background: #e4f2ea; color: #1f6b45; }
+  .pill-origin-system { background: #e4f2ea; color: #1f6b45; border: 1px solid #b7d8c4; }
+  .pill-origin-staff { background: #f3e8e8; color: #7a4545; border: 1px solid #e0c4c4; }
 
   .chip {
     @apply inline-flex items-center whitespace-nowrap rounded-full border px-3.5 py-2 text-sm font-medium transition;
