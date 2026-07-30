@@ -63,7 +63,7 @@ type RegRow = {
 async function fetchAll<T>(
   table: string,
   select: string,
-  filter?: (q: ReturnType<NonNullable<ReturnType<typeof getSupabaseAdmin>>["from"]>) => unknown,
+  opts?: { mergedIntoNull?: boolean },
 ): Promise<T[]> {
   const db = getSupabaseAdmin();
   if (!db) throw new Error("No supabase");
@@ -71,7 +71,7 @@ async function fetchAll<T>(
   const page = 1000;
   for (let from = 0; ; from += page) {
     let q = db.from(table).select(select).range(from, from + page - 1);
-    if (filter) q = filter(q as never) as typeof q;
+    if (opts?.mergedIntoNull) q = q.is("merged_into", null);
     const { data, error } = await q;
     if (error) throw new Error(`${table}: ${error.message}`);
     if (!data?.length) break;
@@ -120,7 +120,7 @@ async function main() {
   const leads = await fetchAll<LeadRow>(
     "leads",
     "id,phone_key,status,status_origin,manual_status,is_legacy",
-    (q) => (q as { is: (c: string, v: null) => unknown }).is("merged_into", null),
+    { mergedIntoNull: true },
   );
   console.log(`Leads: ${leads.length}`);
 
