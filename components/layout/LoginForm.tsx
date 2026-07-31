@@ -1,13 +1,31 @@
 "use client";
 
+/**
+ * Public unified login form (buyer + student).
+ *
+ * VISUAL POLISH ONLY — do not change:
+ *  - /api/auth/login payload ({ phone, code })
+ *  - validation rules beyond what already existed
+ *  - redirect targets from the API response
+ *  - forgot-code flow (/api/portal/forgot)
+ *
+ * Login codes are intentionally a single free-text field: buyer codes are
+ * 7–9 alphanumeric, student access codes keep dashes (NS-XXXX-XXXX). Segmented
+ * OTP-style boxes would break student login — never add them here.
+ */
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Smartphone, KeyRound, Lock } from "lucide-react";
+import { Smartphone, KeyRound, Lock, Check } from "lucide-react";
 import { isDemoMode } from "@/lib/config";
 import { triggerWelcome } from "@/lib/welcome";
 
 type Mode = "login" | "forgot";
 type Factor = "ref" | "date";
+
+function prefersReducedMotion(): boolean {
+  if (typeof window === "undefined") return true;
+  return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
 
 export default function LoginForm() {
   const router = useRouter();
@@ -16,6 +34,8 @@ export default function LoginForm() {
   const [phone, setPhone] = useState("");
   const [code, setCode] = useState("");
   const [loading, setLoading] = useState(false);
+  const [success, setSuccess] = useState(false);
+  const [shake, setShake] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Forgot-code state
@@ -24,10 +44,18 @@ export default function LoginForm() {
   const [payDate, setPayDate] = useState("");
   const [revealed, setRevealed] = useState<string | null>(null);
 
+  function flashError(msg: string) {
+    setError(msg);
+    setSuccess(false);
+    setShake(true);
+    window.setTimeout(() => setShake(false), 450);
+  }
+
   async function doLogin(p = phone, c = code) {
     setError(null);
+    setSuccess(false);
     if (!p.trim() || !c.trim()) {
-      setError("Please enter both your mobile number and login code.");
+      flashError("Please enter both your mobile number and login code.");
       return;
     }
     setLoading(true);
@@ -39,14 +67,18 @@ export default function LoginForm() {
       });
       const data = await res.json();
       if (data.ok) {
+        // Visual confirmation only — after backend success, ≤500ms, then same redirect.
+        setSuccess(true);
         triggerWelcome(data.student?.name ?? data.name);
+        const pause = prefersReducedMotion() ? 0 : 420;
+        if (pause) await new Promise((r) => setTimeout(r, pause));
         router.push(data.redirect || "/dashboard");
         router.refresh();
       } else {
-        setError(data.error || "Login failed.");
+        flashError(data.error || "Login failed.");
       }
     } catch {
-      setError("Something went wrong. Please try again.");
+      flashError("Something went wrong. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -56,15 +88,15 @@ export default function LoginForm() {
     setError(null);
     setRevealed(null);
     if (!/^\d{10}$/.test(phone)) {
-      setError("Enter your 10-digit mobile number.");
+      flashError("Enter your 10-digit mobile number.");
       return;
     }
     if (factor === "ref" && refLast4.replace(/[^a-zA-Z0-9]/g, "").length < 4) {
-      setError("Enter the last 4 characters of your payment reference.");
+      flashError("Enter the last 4 characters of your payment reference.");
       return;
     }
     if (factor === "date" && !payDate) {
-      setError("Select the date you made the payment.");
+      flashError("Select the date you made the payment.");
       return;
     }
     setLoading(true);
@@ -79,18 +111,26 @@ export default function LoginForm() {
         setRevealed(data.loginCode);
         setCode(data.loginCode);
       } else {
-        setError(data.error || "We couldn't verify those details.");
+        flashError(data.error || "We couldn't verify those details.");
       }
     } catch {
-      setError("Something went wrong. Please try again.");
+      flashError("Something went wrong. Please try again.");
     } finally {
       setLoading(false);
     }
   }
 
+  const cardClass = [
+    "lp-card mx-auto max-w-md p-7 sm:p-8",
+    shake ? "lp-card--shake lp-card--error" : "",
+    success ? "lp-card--success" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+
   if (mode === "forgot") {
     return (
-      <div className="lp-card mx-auto max-w-md p-7 sm:p-8">
+      <div className={cardClass}>
         <h3 className="text-xl font-bold text-[var(--navy)]">Recover your login code</h3>
         <p className="mt-1 text-sm text-ink2">Verify it&apos;s you and we&apos;ll show your code instantly.</p>
 
@@ -161,18 +201,18 @@ export default function LoginForm() {
             </div>
           )}
 
-          {error && <p className="rounded-xl border border-danger/20 bg-[#fdeaea] px-3 py-2 text-sm text-danger">{error}</p>}
+          {error && <p className="rounded-xl border border-danger/20 bg-[#fdeaea] px-3 py-2 text-sm text-danger" role="alert">{error}</p>}
 
           {revealed ? (
             <div className="lp-panel-success p-4 text-center">
               <p className="text-xs text-muted">Your login code</p>
               <p className="mt-1 font-mono text-2xl font-extrabold tracking-[0.3em] text-success">{revealed}</p>
-              <button onClick={() => doLogin(phone, revealed)} disabled={loading} className="lp-btn mt-3">
-                {loading ? "Logging in…" : "Log in now →"}
+              <button onClick={() => doLogin(phone, revealed)} disabled={loading || success} className={`lp-btn mt-3 ${loading ? "lp-btn--loading" : ""} ${success ? "lp-btn--success" : ""}`}>
+                {success ? (<><span className="lp-success-check"><Check size={14} strokeWidth={3} aria-hidden /></span> Welcome back</>) : loading ? "Logging in…" : "Log in now →"}
               </button>
             </div>
           ) : (
-            <button onClick={doForgot} disabled={loading} className="lp-btn">
+            <button onClick={doForgot} disabled={loading} className={`lp-btn ${loading ? "lp-btn--loading" : ""}`}>
               {loading ? "Verifying…" : "Reveal my code"}
             </button>
           )}
@@ -184,8 +224,9 @@ export default function LoginForm() {
             setMode("login");
             setError(null);
             setRevealed(null);
+            setShake(false);
           }}
-          className="mt-5 text-sm font-semibold text-primary hover:underline"
+          className="lp-forgot mt-5 text-sm font-semibold text-primary hover:underline"
         >
           ← Back to login
         </button>
@@ -194,14 +235,27 @@ export default function LoginForm() {
   }
 
   return (
-    <div className="lp-card mx-auto max-w-md p-7 sm:p-8">
-      <h3 className="text-xl font-bold text-[var(--navy)]">Login</h3>
-      <p className="mt-1 text-sm text-ink2">Use your registered mobile number and the login code from your payment receipt.</p>
+    <div className={cardClass}>
+      <h3 className="flex items-center gap-2 text-xl font-bold text-[var(--navy)]">
+        {success ? (
+          <>
+            <span className="lp-success-check"><Check size={14} strokeWidth={3} aria-hidden /></span>
+            Welcome back
+          </>
+        ) : (
+          "Login"
+        )}
+      </h3>
+      <p className="mt-1 text-sm text-ink2">
+        {success
+          ? "Login verified — taking you in…"
+          : "Use your registered mobile number and the login code from your payment receipt."}
+      </p>
 
       <form
         onSubmit={(e) => {
           e.preventDefault();
-          doLogin();
+          if (!loading && !success) doLogin();
         }}
         className="mt-6 space-y-4"
       >
@@ -217,6 +271,7 @@ export default function LoginForm() {
               placeholder="10-digit mobile"
               className="lp-input lp-input--icon"
               autoComplete="tel"
+              disabled={loading || success}
             />
           </div>
         </div>
@@ -231,14 +286,26 @@ export default function LoginForm() {
               placeholder="e.g. K7P2QXR"
               className="lp-input lp-input--icon font-mono tracking-[0.2em]"
               autoComplete="off"
+              disabled={loading || success}
+              spellCheck={false}
             />
           </div>
         </div>
 
-        {error && <p className="rounded-xl border border-danger/20 bg-[#fdeaea] px-3 py-2 text-sm text-danger">{error}</p>}
+        {error && <p className="rounded-xl border border-danger/20 bg-[#fdeaea] px-3 py-2 text-sm text-danger" role="alert">{error}</p>}
 
-        <button type="submit" disabled={loading} className="lp-btn mt-1">
-          {loading ? "Logging in..." : (<><Lock size={16} aria-hidden /> Log in →</>)}
+        <button
+          type="submit"
+          disabled={loading || success}
+          className={`lp-btn mt-1 ${loading ? "lp-btn--loading" : ""} ${success ? "lp-btn--success" : ""}`}
+        >
+          {success ? (
+            <><span className="lp-success-check"><Check size={14} strokeWidth={3} aria-hidden /></span> Login verified</>
+          ) : loading ? (
+            "Logging in..."
+          ) : (
+            <><Lock size={16} aria-hidden /> Log in →</>
+          )}
         </button>
       </form>
 
@@ -247,8 +314,10 @@ export default function LoginForm() {
         onClick={() => {
           setMode("forgot");
           setError(null);
+          setShake(false);
         }}
-        className="mt-5 text-sm font-semibold text-primary hover:underline"
+        className="lp-forgot mt-5 text-sm font-semibold text-primary hover:underline"
+        disabled={loading || success}
       >
         Forgot your code?
       </button>

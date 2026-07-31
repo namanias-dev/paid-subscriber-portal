@@ -750,6 +750,7 @@ a {
    PORTAL LOGIN — premium light glassmorphism (VISUAL ONLY)
    Scoped with .lp- prefixes so no other module is affected. Reuses the
    existing color tokens (--primary royal blue, --navy, --gold).
+   Auth / payloads / redirects are untouched — presentation layer only.
    ===================================================================== */
 .lp-shell {
   position: relative;
@@ -758,7 +759,8 @@ a {
   background:
     radial-gradient(60% 48% at 50% -8%, rgba(0, 87, 255, 0.1), transparent 70%),
     radial-gradient(42% 42% at 100% 102%, rgba(61, 139, 255, 0.08), transparent 70%),
-    #ffffff;
+    linear-gradient(180deg, #ffffff 0%, #f7f9fc 100%);
+  animation: lp-shell-in 0.35s ease both;
 }
 .lp-glow {
   position: absolute;
@@ -766,6 +768,7 @@ a {
   filter: blur(90px);
   pointer-events: none;
   z-index: -1;
+  animation: lp-glow-soft 8s ease-in-out infinite alternate;
 }
 .lp-glow-1 {
   width: 380px;
@@ -781,25 +784,64 @@ a {
   bottom: -120px;
   right: -70px;
   background: rgba(201, 162, 39, 0.1);
+  animation-delay: -3s;
 }
 
 .lp-card {
   position: relative;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(245, 248, 255, 0.74));
-  border: 1px solid rgba(255, 255, 255, 0.9);
+  background: linear-gradient(165deg, rgba(255, 255, 255, 0.94) 0%, rgba(248, 250, 255, 0.82) 55%, rgba(245, 248, 255, 0.78) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.95);
   border-radius: 28px;
-  backdrop-filter: saturate(180%) blur(20px);
-  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  backdrop-filter: saturate(180%) blur(22px);
+  -webkit-backdrop-filter: saturate(180%) blur(22px);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    inset 0 1px 0 rgba(255, 255, 255, 0.95),
     0 1px 2px rgba(10, 26, 63, 0.04),
-    0 30px 60px -26px rgba(10, 26, 63, 0.24),
-    0 0 0 1px rgba(0, 87, 255, 0.04);
+    0 18px 40px -22px rgba(10, 26, 63, 0.18),
+    0 40px 80px -36px rgba(10, 26, 63, 0.22),
+    0 0 0 1px rgba(11, 31, 77, 0.04);
+  animation: lp-card-rise 0.35s cubic-bezier(0.22, 1, 0.36, 1) both;
+  transition: box-shadow 0.25s ease, transform 0.25s ease, border-color 0.25s ease;
+}
+@media (hover: hover) and (pointer: fine) {
+  .lp-card:hover {
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.98),
+      0 1px 2px rgba(10, 26, 63, 0.05),
+      0 22px 48px -20px rgba(10, 26, 63, 0.2),
+      0 48px 90px -40px rgba(10, 26, 63, 0.26),
+      0 0 0 1px rgba(201, 162, 39, 0.12);
+  }
+}
+.lp-card--shake {
+  animation: lp-shake 0.42s ease;
+}
+.lp-card--success {
+  border-color: rgba(22, 163, 74, 0.28);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.95),
+    0 0 0 1px rgba(22, 163, 74, 0.12),
+    0 18px 40px -22px rgba(10, 26, 63, 0.16),
+    0 0 0 4px rgba(22, 163, 74, 0.08);
+}
+.lp-card--error .lp-input {
+  border-color: rgba(220, 38, 38, 0.35);
+}
+.lp-card--error .lp-input:focus {
+  border-color: rgba(220, 38, 38, 0.55);
+  box-shadow: 0 0 0 4px rgba(220, 38, 38, 0.1), inset 0 1px 2px rgba(10, 26, 63, 0.04);
 }
 
 .lp-field {
   position: relative;
+  animation: lp-field-in 0.35s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
+.lp-card form > div:nth-child(1) .lp-field,
+.lp-card form > div:nth-child(1) { animation-delay: 0.05s; }
+.lp-card form > div:nth-child(2) .lp-field,
+.lp-card form > div:nth-child(2) { animation-delay: 0.1s; }
+.lp-card form > button { animation: lp-field-in 0.35s cubic-bezier(0.22, 1, 0.36, 1) 0.15s both; }
+
 .lp-field-icon {
   position: absolute;
   left: 14px;
@@ -807,33 +849,57 @@ a {
   transform: translateY(-50%);
   color: var(--ink2);
   pointer-events: none;
+  transition: color 0.2s ease, transform 0.2s ease;
 }
+.lp-field:focus-within .lp-field-icon {
+  color: var(--gold);
+  transform: translateY(-50%) scale(1.06);
+}
+
 .lp-input {
   width: 100%;
   border-radius: 16px;
   min-height: 54px;
-  background: rgba(255, 255, 255, 0.72);
-  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.78);
+  border: 1px solid rgba(11, 31, 77, 0.1);
   padding: 0.9rem 1rem;
   color: var(--ink);
   font-size: 15px;
   box-shadow: inset 0 1px 2px rgba(10, 26, 63, 0.04);
   outline: none;
-  transition: border-color 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
+  transition:
+    border-color 0.22s ease,
+    box-shadow 0.22s ease,
+    background 0.22s ease,
+    transform 0.22s ease;
 }
 .lp-input--icon {
   padding-left: 2.9rem;
 }
 .lp-input::placeholder {
   color: var(--muted);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+.lp-input:hover:not(:focus):not(:disabled) {
+  border-color: rgba(11, 31, 77, 0.16);
+  background: rgba(255, 255, 255, 0.9);
 }
 .lp-input:focus {
-  border-color: var(--primary);
+  border-color: var(--gold);
   background: #fff;
-  box-shadow: 0 0 0 4px rgba(0, 87, 255, 0.12), inset 0 1px 2px rgba(10, 26, 63, 0.04);
+  transform: translateY(-1px);
+  box-shadow:
+    0 0 0 4px rgba(201, 162, 39, 0.16),
+    0 8px 20px -12px rgba(11, 31, 77, 0.18),
+    inset 0 1px 2px rgba(10, 26, 63, 0.03);
+}
+.lp-input:focus::placeholder {
+  opacity: 0.55;
+  transform: translateX(2px);
 }
 
 .lp-btn {
+  position: relative;
   width: 100%;
   display: inline-flex;
   align-items: center;
@@ -844,22 +910,99 @@ a {
   font-weight: 700;
   font-size: 15px;
   color: #fff;
-  background: linear-gradient(135deg, #0057ff, #3d8bff);
-  box-shadow: 0 1px 2px rgba(0, 87, 255, 0.3), 0 14px 30px -10px rgba(0, 87, 255, 0.5);
-  transition: transform 0.18s ease, box-shadow 0.18s ease, filter 0.18s ease;
+  overflow: hidden;
+  isolation: isolate;
+  background: linear-gradient(135deg, #0b1f4d 0%, #0057ff 48%, #3d8bff 100%);
+  background-size: 160% 160%;
+  box-shadow:
+    0 1px 2px rgba(11, 31, 77, 0.28),
+    0 14px 30px -10px rgba(0, 87, 255, 0.48),
+    inset 0 1px 0 rgba(255, 255, 255, 0.22);
+  transition: transform 0.18s ease, box-shadow 0.18s ease, filter 0.18s ease, background-position 0.35s ease;
+}
+.lp-btn::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(105deg, transparent 40%, rgba(255, 255, 255, 0.22) 50%, transparent 60%);
+  transform: translateX(-120%);
+  pointer-events: none;
+  z-index: 0;
+}
+.lp-btn > * {
+  position: relative;
+  z-index: 1;
 }
 .lp-btn:hover {
   transform: translateY(-1px);
   filter: brightness(1.04);
+  background-position: 100% 50%;
+  box-shadow:
+    0 1px 2px rgba(11, 31, 77, 0.3),
+    0 18px 36px -12px rgba(0, 87, 255, 0.55),
+    inset 0 1px 0 rgba(255, 255, 255, 0.28);
+}
+.lp-btn:hover::before {
+  animation: lp-btn-shine 0.75s ease;
 }
 .lp-btn:active {
-  transform: scale(0.99);
+  transform: scale(0.985);
 }
 .lp-btn:disabled {
   opacity: 0.6;
   cursor: not-allowed;
   transform: none;
   filter: none;
+}
+.lp-btn:disabled::before {
+  animation: none;
+}
+.lp-btn--loading {
+  opacity: 1;
+  cursor: wait;
+}
+.lp-btn--loading::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 2px;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.65), transparent);
+  background-size: 200% 100%;
+  animation: lp-btn-progress 1.1s linear infinite;
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+  z-index: 2;
+}
+.lp-btn--success {
+  background: linear-gradient(135deg, #0f766e, #16a34a 55%, #22c55e);
+  box-shadow:
+    0 1px 2px rgba(22, 163, 74, 0.28),
+    0 14px 30px -10px rgba(22, 163, 74, 0.45),
+    inset 0 1px 0 rgba(255, 255, 255, 0.25);
+}
+
+.lp-forgot {
+  transition: color 0.18s ease, letter-spacing 0.18s ease, opacity 0.18s ease;
+}
+.lp-forgot:hover {
+  color: var(--navy);
+  letter-spacing: 0.01em;
+}
+
+.lp-success-check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.35rem;
+  height: 1.35rem;
+  border-radius: 9999px;
+  background: rgba(22, 163, 74, 0.12);
+  color: #15803d;
+  animation: lp-check-pop 0.35s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 /* Forgot-mode glass toggle */
@@ -895,6 +1038,63 @@ a {
   border: 1px solid rgba(22, 163, 74, 0.28);
   background: rgba(231, 246, 236, 0.7);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8);
+}
+
+@keyframes lp-shell-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes lp-card-rise {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes lp-field-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes lp-glow-soft {
+  from { opacity: 0.75; }
+  to { opacity: 1; }
+}
+@keyframes lp-shake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-6px); }
+  40% { transform: translateX(5px); }
+  60% { transform: translateX(-4px); }
+  80% { transform: translateX(3px); }
+}
+@keyframes lp-btn-shine {
+  to { transform: translateX(120%); }
+}
+@keyframes lp-btn-progress {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+@keyframes lp-check-pop {
+  from { opacity: 0; transform: scale(0.7); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lp-shell,
+  .lp-card,
+  .lp-field,
+  .lp-card form > div,
+  .lp-card form > button,
+  .lp-glow,
+  .lp-success-check {
+    animation: none !important;
+  }
+  .lp-card--shake {
+    animation: none !important;
+  }
+  .lp-btn:hover::before,
+  .lp-btn--loading::after {
+    animation: none !important;
+  }
+  .lp-input:focus {
+    transform: none;
+  }
 }
 
 /* ---- Printable receipt: hidden on screen, the only thing shown when printing ----
