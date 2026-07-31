@@ -47,11 +47,11 @@ function wireNumber(digits10: string): string {
   return smsNumberFormat() === "91prefix" ? `91${digits10}` : digits10;
 }
 
-/** Best-effort message-id extraction from common aggregator responses. */
 function extractMessageId(body: string): string | null {
-  const m =
-    body.match(/(?:message-?id|msgid|id)["':=\s]+([A-Za-z0-9._-]{4,})/i) ||
-    body.match(/\b([0-9]{8,})\b/);
+  // Prefer base64-ish ids with optional padding (JustGoSMS: "msg-id : MzQwMjU1MA==").
+  const labeled = body.match(/(?:message-?id|msgid|msg-id|id)\s*[:=]\s*([A-Za-z0-9._+/-]+=*)/i);
+  if (labeled?.[1]) return labeled[1].replace(/<[^>]*>/g, "").trim();
+  const m = body.match(/\b([0-9]{8,})\b/);
   return m ? m[1] : null;
 }
 

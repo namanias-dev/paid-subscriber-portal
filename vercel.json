@@ -21,6 +21,10 @@
       "schedule": "30 4 * * *"
     },
     {
+      "path": "/api/cron/sms-dlr",
+      "schedule": "20 * * * *"
+    },
+    {
       "path": "/api/cron/media-purge",
       "schedule": "0 20 * * *"
     },

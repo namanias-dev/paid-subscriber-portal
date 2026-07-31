@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
 import { requirePermission } from "@/lib/adminGuard";
 import { listLogs, type LogFilters } from "@/lib/sms/store";
-import { retryLog } from "@/lib/sms/service";
+import { retryLog, pollDeliveryStatuses } from "@/lib/sms/service";
 import type { SmsLog } from "@/lib/sms/types";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
 function filtersFromUrl(url: URL): LogFilters {
   return {
@@ -30,11 +31,20 @@ function toCsv(rows: SmsLog[]): string {
 export async function GET(req: Request) {
   if (!(await requirePermission("send_sms"))) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   const url = new URL(req.url);
+  // Pull JustGoSMS DLR for open SENT rows so Logs show DELIVERED/FAILED, not stuck SENT.
+  // Skip for CSV downloads to keep exports snappy; staff can refresh the table first.
+  let dlr: { scanned: number; delivered: number; failed: number } | null = null;
+  if (url.searchParams.get("format") !== "csv") {
+    try {
+      const r = await pollDeliveryStatuses({ sinceDays: 3, limit: 250 });
+      dlr = { scanned: r.scanned, delivered: r.delivered, failed: r.failed };
+    } catch { /* non-fatal — still return stored logs */ }
+  }
   const logs = await listLogs(filtersFromUrl(url));
   if (url.searchParams.get("format") === "csv") {
     return new NextResponse(toCsv(logs), { headers: { "Content-Type": "text/csv", "Content-Disposition": "attachment; filename=sms-logs.csv" } });
   }
-  return NextResponse.json({ ok: true, logs });
+  return NextResponse.json({ ok: true, logs, dlr });
 }
 
 export async function POST(req: Request) {
@@ -43,6 +53,13 @@ export async function POST(req: Request) {
   if (body.action === "retry" && body.id) {
     const res = await retryLog(String(body.id));
     return NextResponse.json({ ok: res.ok, result: res });
+  }
+  if (body.action === "poll_dlr") {
+    const r = await pollDeliveryStatuses({
+      sinceDays: Number(body.sinceDays) || 3,
+      limit: Math.min(500, Number(body.limit) || 250),
+    });
+    return NextResponse.json({ ok: true, dlr: r });
   }
   return NextResponse.json({ ok: false, error: "Unknown action" }, { status: 400 });
 }

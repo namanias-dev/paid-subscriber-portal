@@ -28,7 +28,8 @@ interface TemplateRow {
 interface RuleRow {
   trigger: string; template_id: string | null; template_name: string | null; template_ready: boolean;
   enabled: boolean; delay_minutes: number | null; schedule_time: string | null; offset_minutes: number | null;
-  audience_type: string | null; last_run_at: string | null; sends_today?: number;
+  audience_type: string | null; last_run_at: string | null;
+  sends_today?: number; delivered_today?: number; failed_today?: number; pending_today?: number;
 }
 interface LogRow {
   id: string; created_at: string; normalized_mobile: string; student_name: string | null; template_name: string | null;
@@ -58,8 +59,15 @@ const TABS = [
 type TabId = (typeof TABS)[number]["id"];
 
 const STATUS_TONE: Record<string, string> = {
-  SENT: "text-success", DELIVERED: "text-success", FAILED: "text-danger", QUEUED: "text-muted", UNKNOWN: "text-muted",
+  SENT: "text-amber-700", DELIVERED: "text-success", FAILED: "text-danger", QUEUED: "text-muted", UNKNOWN: "text-muted",
   draft: "pill-gray", pending: "pill-amber", approved: "pill-blue", active: "pill-green", inactive: "pill-gray",
+};
+const LOG_STATUS_PILL: Record<string, string> = {
+  DELIVERED: "pill-green",
+  FAILED: "pill-red",
+  SENT: "pill-amber",
+  QUEUED: "pill-gray",
+  UNKNOWN: "pill-gray",
 };
 
 export default function MissionControl() {
@@ -934,7 +942,18 @@ function AutomationsTab({ canEdit }: { canEdit: boolean }) {
                 ) : (r.audience_type || "—")}
               </td>
               <td className="px-4 py-3 text-xs text-muted">{r.last_run_at ? formatISTDateTime(r.last_run_at) : "—"}</td>
-              <td className="px-4 py-3 text-right tabular-nums font-medium text-ink">{r.sends_today ?? 0}</td>
+              <td className="px-4 py-3 text-right">
+                <div className="tabular-nums font-medium text-ink">{r.sends_today ?? 0}</div>
+                {(r.sends_today ?? 0) > 0 && (
+                  <div className="mt-1.5 flex flex-wrap justify-end gap-1">
+                    <span className="pill pill-green text-[10px]" title="Handset-confirmed via DLR">{r.delivered_today ?? 0} delivered</span>
+                    <span className="pill pill-red text-[10px]" title="Failed / undelivered (DLR Other etc.)">{r.failed_today ?? 0} failed</span>
+                    {(r.pending_today ?? 0) > 0 && (
+                      <span className="pill pill-amber text-[10px]" title="Accepted by gateway; DLR not terminal yet">{r.pending_today} pending</span>
+                    )}
+                  </div>
+                )}
+              </td>
               <td className="px-4 py-3 text-right">
                 {/* ITEM 3: unambiguous toggle */}
                 <ToggleSwitch on={r.enabled} disabled={!canEdit || !r.template_ready} onChange={() => patch(r.trigger, { enabled: !r.enabled })} />
@@ -1462,7 +1481,9 @@ function LogsTab() {
                   <td className="px-4 py-2.5 text-xs text-muted">{formatISTDateTime(l.created_at)}</td>
                   <td className="px-4 py-2.5 font-mono text-xs">{l.normalized_mobile}</td>
                   <td className="px-4 py-2.5">{l.template_name}</td>
-                  <td className={`px-4 py-2.5 font-semibold ${STATUS_TONE[l.status] || ""}`}>{l.status}</td>
+                  <td className="px-4 py-2.5">
+                    <span className={`pill text-[10px] font-semibold ${LOG_STATUS_PILL[l.status] || "pill-gray"}`}>{l.status}</span>
+                  </td>
                   <td className="px-4 py-2.5 text-xs">{l.sent_by_type}{l.trigger_event ? ` · ${l.trigger_event}` : ""}</td>
                   <td className="px-4 py-2.5 text-right">
                     <button onClick={() => setOpen(l)} className="btn btn-secondary text-xs">View</button>

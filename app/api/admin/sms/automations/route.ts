@@ -1,27 +1,33 @@
 import { NextResponse } from "next/server";
 import { requirePermission, requireSuperAdmin, currentAdminId } from "@/lib/adminGuard";
 import { listRules, upsertRule, listTemplates, getAutomationActivityStats } from "@/lib/sms/store";
+import { pollDeliveryStatuses } from "@/lib/sms/service";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
 export async function GET() {
   if (!(await requirePermission("send_sms"))) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+  // Settle recent SENT → DELIVERED/FAILED before counting so Today pills are honest.
+  try { await pollDeliveryStatuses({ sinceDays: 2, limit: 150 }); } catch { /* non-fatal */ }
   const [rules, templates] = await Promise.all([listRules(), listTemplates()]);
   const activity = await getAutomationActivityStats(rules.map((r) => r.trigger));
   const tName = new Map(templates.map((t) => [t.id, t.name]));
   const tReady = new Map(templates.map((t) => [t.id, (t.status === "active" || t.status === "approved") && !!t.gateway_template_id]));
+  const empty = { last_run_at: null as string | null, sends_today: 0, delivered_today: 0, failed_today: 0, pending_today: 0 };
   const enriched = rules.map((r) => {
-    const stats = activity[r.trigger] || { last_run_at: null, sends_today: 0 };
+    const stats = activity[r.trigger] || empty;
     return {
       ...r,
-      // Prefer live log-derived last run; fall back to stored column if present.
       last_run_at: stats.last_run_at || r.last_run_at,
       sends_today: stats.sends_today,
+      delivered_today: stats.delivered_today,
+      failed_today: stats.failed_today,
+      pending_today: stats.pending_today,
       template_name: r.template_id ? tName.get(r.template_id) || r.template_id : null,
       template_ready: r.template_id ? !!tReady.get(r.template_id) : false,
     };
   });
-  // Highest today's volume first; then most recently active; then trigger name.
   enriched.sort((a, b) => {
     if (b.sends_today !== a.sends_today) return b.sends_today - a.sends_today;
     const aRun = a.last_run_at || "";

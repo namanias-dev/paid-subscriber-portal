@@ -884,42 +884,67 @@ function istMidnightISO(): string {
   return new Date(`${ymd}T00:00:00+05:30`).toISOString();
 }
 
-export type AutomationActivity = { last_run_at: string | null; sends_today: number };
+export type AutomationActivity = {
+  last_run_at: string | null;
+  sends_today: number;
+  delivered_today: number;
+  failed_today: number;
+  /** Gateway-accepted, DLR not yet terminal (still in flight). */
+  pending_today: number;
+};
 
 /**
  * Per-automation activity from sms_logs (source of truth). The rules.last_run_at
  * column was never written by send paths, so the Automations UI reads logs:
- * last_run_at = latest log for that trigger_event; sends_today = IST-day count.
+ * last_run_at = latest log for that trigger_event; today counts = IST-day breakdown.
  */
 export async function getAutomationActivityStats(triggers: string[]): Promise<Record<string, AutomationActivity>> {
+  const empty = (): AutomationActivity => ({
+    last_run_at: null, sends_today: 0, delivered_today: 0, failed_today: 0, pending_today: 0,
+  });
   const out: Record<string, AutomationActivity> = {};
-  for (const t of triggers) out[t] = { last_run_at: null, sends_today: 0 };
+  for (const t of triggers) out[t] = empty();
   if (!triggers.length) return out;
 
   const since = istMidnightISO();
   const db = getSupabaseAdmin();
+
+  const bump = (t: string, status: string) => {
+    const row = out[t];
+    if (!row) return;
+    row.sends_today++;
+    if (status === "DELIVERED") row.delivered_today++;
+    else if (status === "FAILED") row.failed_today++;
+    else if (status === "SENT" || status === "QUEUED") row.pending_today++;
+  };
 
   if (!db) {
     for (const l of demo().logs) {
       const t = l.trigger_event;
       if (!t || !out[t]) continue;
       if (!out[t].last_run_at || l.created_at > out[t].last_run_at!) out[t].last_run_at = l.created_at;
-      if (l.created_at >= since) out[t].sends_today++;
+      if (l.created_at >= since) bump(t, l.status);
     }
     return out;
   }
 
   try {
-    await Promise.all(triggers.map(async (t) => {
-      const [countRes, lastRes] = await Promise.all([
-        db.from("sms_logs").select("id", { count: "exact", head: true })
-          .eq("trigger_event", t).gte("created_at", since),
+    const [{ data: todayRows }, ...lastRows] = await Promise.all([
+      db.from("sms_logs").select("trigger_event, status")
+        .in("trigger_event", triggers).gte("created_at", since).limit(10000),
+      ...triggers.map((t) =>
         db.from("sms_logs").select("created_at")
           .eq("trigger_event", t).order("created_at", { ascending: false }).limit(1).maybeSingle(),
-      ]);
-      out[t].sends_today = countRes.count ?? 0;
-      if (lastRes.data?.created_at) out[t].last_run_at = String(lastRes.data.created_at);
-    }));
+      ),
+    ]);
+    for (const r of todayRows || []) {
+      const t = String((r as Row).trigger_event || "");
+      bump(t, String((r as Row).status || ""));
+    }
+    triggers.forEach((t, i) => {
+      const created = (lastRows[i] as { data?: { created_at?: string } | null })?.data?.created_at;
+      if (created) out[t].last_run_at = String(created);
+    });
   } catch { /* ignore — UI falls back to empty stats */ }
   return out;
 }

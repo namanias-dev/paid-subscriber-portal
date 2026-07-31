@@ -46,7 +46,8 @@ A table of automatic rules: `Trigger`, `Template`, `Schedule`, `Audience`, `Last
 - ⚠️ **All automations are OFF by default.** Turning one **`ON`** lets the system auto-send that template when the event happens (e.g. payment success, webinar reminder).
 - Only a **Super Admin** can toggle them (`Only a Super Admin can toggle or edit automations.`).
 - A rule can't be enabled until its template is Approved/Active with a DLT ID (shows `no DLT/active`).
-- **Last run** and **Today** come from SMS Logs (`trigger_event`): last send timestamp, and total sends since midnight IST. Rows are sorted by today's sends (highest first).
+- **Last run** and **Today** come from SMS Logs (`trigger_event`): last send timestamp, and total sends since midnight IST. Under Today: color pills for **delivered** / **failed** / **pending** (pending = gateway-accepted, DLR not settled). Rows are sorted by today's sends (highest first).
+- Opening **Logs** (or Automations) pulls JustGoSMS delivery reports for open `SENT` rows so status updates to `DELIVERED` / `FAILED`. A dedicated hourly cron (`/api/cron/sms-dlr`) does the same in the background.
 
 The default rules cover: payment success/pending/failed/abandoned, proof received, access approved, webinar registered, day-before reminder (6 PM IST), same-day 10 AM reminder, starting-soon, Zoom ready, same-day invite (10 AM), post-webinar thank-you (4 h after end), first login welcome, course enrolled, and **new Lead CRM row** (`lead_created` — fires instantly on genuine INSERT only; pick an approved template before enabling).
 
