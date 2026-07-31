@@ -67,6 +67,8 @@ export const TRIGGERS = {
   course_enrolled: "course_enrolled",
   payment_plan_changed: "payment_plan_changed",
   webinar_moved: "webinar_moved",
+  /** New Lead CRM row (genuine INSERT only — phone folds do not fire). */
+  lead_created: "lead_created",
 } as const;
 
 export interface SeedTemplate {

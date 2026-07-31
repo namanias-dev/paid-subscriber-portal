@@ -2342,9 +2342,9 @@ export async function addLead(input: Partial<Lead>, sourceForm?: string, attribu
 }
 
 /**
- * Fire-and-forget `lead_created` capture for Journey Automation. Non-blocking and
- * idempotent (dedupe_key per lead id); a failure can never break lead creation.
- * Only fires for GENUINELY NEW leads (dedup-folded touches don't re-fire).
+ * Fire-and-forget fan-out for a GENUINELY NEW lead (INSERT only — phone folds
+ * never call this). Journey Automation capture + Mission Control auto-SMS.
+ * Both are non-blocking; a failure can never break lead creation.
  */
 function fireLeadCreated(lead: Lead, sourceForm?: string | null, attribution?: LeadAttribution): void {
   const first = String(lead.name || "").trim().split(/\s+/)[0] || "";
@@ -2370,6 +2370,16 @@ function fireLeadCreated(lead: Lead, sourceForm?: string | null, attribution?: L
       utm_source: attribution?.utm_source ?? lead.utm_source ?? null,
       gclid: attribution?.gclid ?? lead.gclid ?? null,
     },
+  });
+  // Mission Control auto-SMS (rule OFF by default). Instant via fireAutoSms —
+  // same kill switch / DLT / opt-out / dedupe gates as every other auto rule.
+  fireAutoSms({
+    trigger: TRIGGERS.lead_created,
+    phone: lead.phone,
+    name: lead.name,
+    vars: { first_name: first, name: lead.name },
+    entity: { lead_id: lead.id },
+    entityId: lead.id,
   });
 }
 export async function updateLead(id: string, patch: Partial<Lead>): Promise<Lead | null> {

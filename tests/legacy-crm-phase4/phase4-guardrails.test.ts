@@ -94,11 +94,10 @@ describe("Phase 4 guardrail — promotion cannot send anything", () => {
     });
   }
 
-  it("layer 3: no lead-lifecycle trigger exists to fire even if one were called", () => {
-    // Every auto-SMS rule is keyed to a trigger. There is no lead_created,
-    // lead_promoted or status_change trigger in the set, so a stray
-    // fireAutoSms on a promotion would find no rule and return at
-    // lib/sms/dispatch.ts:26 before touching sendSms.
+  it("layer 3: only INSERT-path lead_created may exist; promotion triggers stay banned", () => {
+    // Mission Control may auto-SMS on genuine lead INSERT via lead_created
+    // (wired only inside fireLeadCreated → addLead). Promotion / status /
+    // fold paths must still have no trigger to fire even if called.
     const dispatch = read("lib/sms/dispatch.ts");
     assert.ok(
       /if \(!rule \|\| !rule\.enabled \|\| !rule\.template_id\) return;/.test(dispatch),
@@ -115,13 +114,37 @@ describe("Phase 4 guardrail — promotion cannot send anything", () => {
     );
     const triggers = [...block.matchAll(/^\s*(\w+)\s*:/gm)].map((m) => m[1]!);
     assert.ok(triggers.length > 10, "expected to have found the trigger list");
+    assert.ok(triggers.includes("lead_created"), "lead_created Mission Control trigger must exist");
 
+    const ALLOWED_LEAD = new Set(["lead_created"]);
     for (const t of triggers) {
+      if (ALLOWED_LEAD.has(t)) continue;
       assert.ok(
         !/^lead_/.test(t) && !/^promot/.test(t),
-        `a lead-lifecycle SMS trigger "${t}" now exists — re-derive the zero-send proof`,
+        `a banned lead-lifecycle SMS trigger "${t}" now exists — re-derive the zero-send proof`,
       );
     }
+
+    // fireLeadCreated is the only place that may call fireAutoSms for leads.
+    const dp = read("lib/dataProvider.ts");
+    const fireBody = dp.slice(
+      dp.indexOf("function fireLeadCreated"),
+      dp.indexOf("export async function updateLead"),
+    );
+    assert.ok(
+      /fireAutoSms\(\s*\{[\s\S]*?trigger:\s*TRIGGERS\.lead_created/.test(fireBody),
+      "fireLeadCreated must wire Mission Control lead_created auto-SMS",
+    );
+    const fold = dp.slice(
+      dp.indexOf("async function foldTouchIntoLead") >= 0
+        ? dp.indexOf("async function foldTouchIntoLead")
+        : dp.indexOf("function foldTouchIntoLead"),
+      dp.indexOf("export async function addLead"),
+    );
+    assert.ok(
+      !/fireAutoSms|fireLeadCreated/.test(fold),
+      "phone-fold path must not fan out SMS or lead_created",
+    );
   });
 
   it("promotion only ever writes its four declared columns", () => {

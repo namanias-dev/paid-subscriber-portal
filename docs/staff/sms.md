@@ -47,7 +47,7 @@ A table of automatic rules: `Trigger`, `Template`, `Schedule`, `Audience`, `Last
 - Only a **Super Admin** can toggle them (`Only a Super Admin can toggle or edit automations.`).
 - A rule can't be enabled until its template is Approved/Active with a DLT ID (shows `no DLT/active`).
 
-The 15 default rules cover: payment success/pending/failed/abandoned, proof received, access approved, webinar registered, day-before reminder (6 PM IST), same-day 10 AM reminder, starting-soon, Zoom ready, same-day invite (10 AM), post-webinar thank-you (4 h after end), first login welcome, and course enrolled.
+The default rules cover: payment success/pending/failed/abandoned, proof received, access approved, webinar registered, day-before reminder (6 PM IST), same-day 10 AM reminder, starting-soon, Zoom ready, same-day invite (10 AM), post-webinar thank-you (4 h after end), first login welcome, course enrolled, and **new Lead CRM row** (`lead_created` — fires instantly on genuine INSERT only; pick an approved template before enabling).
 
 ### 4) Templates
 List with `Template`, `Use`, `Status`, `DLT ID`, `Worst-case`, `Edit`.

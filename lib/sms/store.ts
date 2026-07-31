@@ -11,7 +11,7 @@ import type { SmsTemplate, SmsLog, SmsAutoRule, SmsSettings, SmsTemplateStatus }
 // ---------------------------------------------------------------------------
 // Default auto-rules (ALL disabled). One rule per auto-sendable trigger.
 // ---------------------------------------------------------------------------
-interface RuleSeed { trigger: string; template_id: string; delay_minutes?: number; schedule_time?: string; offset_minutes?: number; audience_type?: string }
+interface RuleSeed { trigger: string; template_id: string | null; delay_minutes?: number; schedule_time?: string; offset_minutes?: number; audience_type?: string }
 export const DEFAULT_RULES: RuleSeed[] = [
   { trigger: TRIGGERS.payment_success, template_id: "payment_successful" },
   { trigger: TRIGGERS.payment_pending, template_id: "payment_pending", delay_minutes: 60 },
@@ -29,6 +29,9 @@ export const DEFAULT_RULES: RuleSeed[] = [
   { trigger: TRIGGERS.first_login, template_id: "welcome_first_login" },
   { trigger: TRIGGERS.course_enrolled, template_id: "course_enrolled" },
   { trigger: TRIGGERS.payment_plan_changed, template_id: "payment_plan_changed" },
+  // Instant on Lead CRM INSERT. No default template — Super Admin must pick an
+  // approved DLT template before the toggle can turn on (same fail-closed gate).
+  { trigger: TRIGGERS.lead_created, template_id: null },
 ];
 
 export const DEFAULT_SETTINGS = (): SmsSettings => ({
