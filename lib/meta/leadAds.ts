@@ -1,8 +1,9 @@
 /**
  * Meta Lead Ads — Graph client + signature verification.
  *
- * Enabled only when META_LEADS_ENABLED=true and all required secrets are set.
- * Page token must be a LONG-LIVED Page access token (server-side only).
+ * Enabled only when META_LEADS_ENABLED=true and required secrets are set.
+ * Leadgen_id fetch uses META_LONG_LIVED_TOKEN (System User).
+ * Page-scoped list calls use META_PAGE_ACCESS_TOKEN (Page token).
  */
 
 import { createHmac, timingSafeEqual } from "node:crypto";
@@ -56,6 +57,11 @@ export function missingMetaConfig(): string[] {
   if (!process.env.META_LONG_LIVED_TOKEN) missing.push("META_LONG_LIVED_TOKEN");
   if (!isMetaLeadsEnabled()) missing.push("META_LEADS_ENABLED=true");
   return missing;
+}
+
+/** Page-scoped Graph (leadgen_forms / form leads / reconcile). Not required for webhook leadgen_id fetch. */
+export function missingMetaPageToken(): string[] {
+  return process.env.META_PAGE_ACCESS_TOKEN ? [] : ["META_PAGE_ACCESS_TOKEN"];
 }
 
 export function graphVersion(): string {
@@ -146,8 +152,25 @@ export function mapFieldData(
   };
 }
 
-async function graphGet(path: string, fields?: string): Promise<Record<string, unknown>> {
-  const token = process.env.META_LONG_LIVED_TOKEN!;
+type GraphTokenKind = "system" | "page";
+
+function tokenFor(kind: GraphTokenKind): string {
+  if (kind === "page") {
+    const t = process.env.META_PAGE_ACCESS_TOKEN;
+    if (!t) throw new MetaLeadsNotConfiguredError(["META_PAGE_ACCESS_TOKEN"]);
+    return t;
+  }
+  const t = process.env.META_LONG_LIVED_TOKEN;
+  if (!t) throw new MetaLeadsNotConfiguredError(["META_LONG_LIVED_TOKEN"]);
+  return t;
+}
+
+async function graphGet(
+  path: string,
+  fields?: string,
+  kind: GraphTokenKind = "system",
+): Promise<Record<string, unknown>> {
+  const token = tokenFor(kind);
   const secret = process.env.META_APP_SECRET!;
   const version = graphVersion();
   const url = new URL(`https://graph.facebook.com/${version}/${path.replace(/^\//, "")}`);
@@ -216,14 +239,14 @@ export async function fetchLeadgenRecord(payload: MetaLeadgenPayload): Promise<C
   };
 }
 
-/** List lead forms on a Page (historical import / reconcile). */
+/** List lead forms on a Page (historical import / reconcile). Requires META_PAGE_ACCESS_TOKEN. */
 export async function listPageLeadForms(pageId: string): Promise<Array<{ id: string; name: string }>> {
-  const missing = missingMetaConfig();
+  const missing = [...missingMetaConfig(), ...missingMetaPageToken()];
   if (missing.length > 0) throw new MetaLeadsNotConfiguredError(missing);
   const out: Array<{ id: string; name: string }> = [];
   let after: string | null = null;
   for (let i = 0; i < 20; i++) {
-    const token = process.env.META_LONG_LIVED_TOKEN!;
+    const token = tokenFor("page");
     const secret = process.env.META_APP_SECRET!;
     const version = graphVersion();
     const url = new URL(`https://graph.facebook.com/${version}/${pageId}/leadgen_forms`);
@@ -248,18 +271,18 @@ export async function listPageLeadForms(pageId: string): Promise<Array<{ id: str
   return out;
 }
 
-/** Page leads for one form (newest first). Caps pages for safety. */
+/** Page leads for one form (newest first). Caps pages for safety. Requires META_PAGE_ACCESS_TOKEN. */
 export async function listFormLeads(
   formId: string,
   opts?: { maxPages?: number; sinceUnix?: number },
 ): Promise<Array<Record<string, unknown>>> {
-  const missing = missingMetaConfig();
+  const missing = [...missingMetaConfig(), ...missingMetaPageToken()];
   if (missing.length > 0) throw new MetaLeadsNotConfiguredError(missing);
   const maxPages = opts?.maxPages ?? 10;
   const out: Array<Record<string, unknown>> = [];
   let after: string | null = null;
   for (let i = 0; i < maxPages; i++) {
-    const token = process.env.META_LONG_LIVED_TOKEN!;
+    const token = tokenFor("page");
     const secret = process.env.META_APP_SECRET!;
     const version = graphVersion();
     const url = new URL(`https://graph.facebook.com/${version}/${formId}/leads`);
@@ -289,4 +312,46 @@ export async function listFormLeads(
     if (!after || !(json.data || []).length) break;
   }
   return out;
+}
+
+/** Manual / admin reconcile: list recent form leads and ingest missing (idempotent on leadgen_id). */
+export async function reconcileMetaLeadsLastHours(hours = 24): Promise<{
+  hours: number;
+  forms: number;
+  scanned: number;
+  created: number;
+  attached_existing: number;
+  duplicate: number;
+  failed: number;
+  pending_retry: number;
+}> {
+  const pageId = process.env.META_PAGE_ID;
+  if (!pageId) throw new Error("META_PAGE_ID not set");
+  const h = Math.min(Math.max(Number(hours) || 24, 1), 168);
+  const sinceUnix = Math.floor(Date.now() / 1000) - h * 3600;
+  const { ingestCapturedGraphLead } = await import("./ingestMetaLead");
+  const forms = await listPageLeadForms(pageId);
+  const summary = {
+    hours: h,
+    forms: forms.length,
+    scanned: 0,
+    created: 0,
+    attached_existing: 0,
+    duplicate: 0,
+    failed: 0,
+    pending_retry: 0,
+  };
+  for (const form of forms) {
+    const leads = await listFormLeads(form.id, { maxPages: 3, sinceUnix });
+    for (const g of leads) {
+      summary.scanned += 1;
+      const r = await ingestCapturedGraphLead(pageId, { ...g, form_id: form.id }, {
+        source: "admin_reconcile",
+      });
+      if (r.outcome in summary) {
+        (summary as Record<string, number>)[r.outcome] += 1;
+      }
+    }
+  }
+  return summary;
 }

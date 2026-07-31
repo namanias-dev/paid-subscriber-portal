@@ -2,6 +2,9 @@
  * Admin: Meta Lead Ads ingestion observability + manual reconcile / retry.
  * GET  — recent ingestions + counts + token/config health
  * POST — { action: "reconcile" | "retry_pending" }
+ *
+ * Reconcile/retry also accept Authorization: Bearer $CRON_SECRET for ops runs
+ * (same pattern as other cron routes).
  */
 
 import { NextResponse } from "next/server";
@@ -9,14 +12,11 @@ import { requirePermission } from "@/lib/adminGuard";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { isMetaLeadsEnabled } from "@/lib/legacy-migration/flags";
 import {
-  listFormLeads,
-  listPageLeadForms,
   missingMetaConfig,
+  missingMetaPageToken,
+  reconcileMetaLeadsLastHours,
 } from "@/lib/meta/leadAds";
-import {
-  ingestCapturedGraphLead,
-  retryPendingMetaIngestions,
-} from "@/lib/meta/ingestMetaLead";
+import { retryPendingMetaIngestions } from "@/lib/meta/ingestMetaLead";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -26,19 +26,31 @@ function tokenHealth(): {
   missing: string[];
   enabled: boolean;
   pageIdSet: boolean;
+  pageTokenSet: boolean;
 } {
   const missing = missingMetaConfig().filter((m) => m !== "META_LEADS_ENABLED=true");
   return {
     configured: missing.length === 0,
-    missing: missingMetaConfig(),
+    missing: [...missingMetaConfig(), ...missingMetaPageToken()],
     enabled: isMetaLeadsEnabled(),
     pageIdSet: !!process.env.META_PAGE_ID,
+    pageTokenSet: missingMetaPageToken().length === 0,
   };
 }
 
-export async function GET() {
+async function allowMetaOps(request: Request): Promise<boolean> {
+  if (await requirePermission("manage_students_leads")) return true;
+  const secret = process.env.CRON_SECRET;
+  if (!secret) return false;
+  const provided =
+    new URL(request.url).searchParams.get("secret") ||
+    request.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
+  return !!provided && provided === secret;
+}
+
+export async function GET(request: Request) {
   try {
-    if (!(await requirePermission("manage_students_leads"))) {
+    if (!(await allowMetaOps(request))) {
       return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
     }
     const db = getSupabaseAdmin();
@@ -94,7 +106,7 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    if (!(await requirePermission("manage_students_leads"))) {
+    if (!(await allowMetaOps(request))) {
       return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
     }
     const body = (await request.json().catch(() => ({}))) as { action?: string; hours?: number };
@@ -106,35 +118,8 @@ export async function POST(request: Request) {
     }
 
     if (action === "reconcile") {
-      const pageId = process.env.META_PAGE_ID;
-      if (!pageId) {
-        return NextResponse.json({ ok: false, error: "META_PAGE_ID not set" }, { status: 400 });
-      }
-      const hours = Math.min(Math.max(Number(body.hours) || 24, 1), 168);
-      const sinceUnix = Math.floor(Date.now() / 1000) - hours * 3600;
-      const forms = await listPageLeadForms(pageId);
-      const summary = {
-        forms: forms.length,
-        scanned: 0,
-        created: 0,
-        attached_existing: 0,
-        duplicate: 0,
-        failed: 0,
-        pending_retry: 0,
-      };
-      for (const form of forms) {
-        const leads = await listFormLeads(form.id, { maxPages: 3, sinceUnix });
-        for (const g of leads) {
-          summary.scanned += 1;
-          const r = await ingestCapturedGraphLead(pageId, { ...g, form_id: form.id }, {
-            source: "admin_reconcile",
-          });
-          if (r.outcome in summary) {
-            (summary as Record<string, number>)[r.outcome] += 1;
-          }
-        }
-      }
-      return NextResponse.json({ ok: true, action, hours, summary });
+      const summary = await reconcileMetaLeadsLastHours(body.hours || 24);
+      return NextResponse.json({ ok: true, action, hours: summary.hours, summary });
     }
 
     return NextResponse.json({ ok: false, error: "Unknown action" }, { status: 400 });
