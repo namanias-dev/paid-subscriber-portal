@@ -11,10 +11,15 @@ import { triggerWelcome } from "@/lib/welcome";
 
 type Mode = "login" | "forgot";
 type Factor = "ref" | "date";
+type SuccessPhase = "idle" | "verified" | "welcome";
 
 function prefersReducedMotion(): boolean {
   if (typeof window === "undefined") return true;
   return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
 }
 
 export default function PortalLoginForm() {
@@ -24,7 +29,7 @@ export default function PortalLoginForm() {
   const [phone, setPhone] = useState("");
   const [code, setCode] = useState("");
   const [loading, setLoading] = useState(false);
-  const [success, setSuccess] = useState(false);
+  const [phase, setPhase] = useState<SuccessPhase>("idle");
   const [shake, setShake] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -34,16 +39,39 @@ export default function PortalLoginForm() {
   const [payDate, setPayDate] = useState("");
   const [revealed, setRevealed] = useState<string | null>(null);
 
+  const locked = loading || phase !== "idle";
+  const verified = phase === "verified" || phase === "welcome";
+  const welcomed = phase === "welcome";
+
   function flashError(msg: string) {
     setError(msg);
-    setSuccess(false);
+    setPhase("idle");
     setShake(true);
     window.setTimeout(() => setShake(false), 450);
   }
 
+  async function finishSuccess(name: string | undefined) {
+    setLoading(false);
+    if (prefersReducedMotion()) {
+      setPhase("welcome");
+      triggerWelcome(name);
+      router.push("/portal");
+      router.refresh();
+      return;
+    }
+    setPhase("verified");
+    await sleep(900);
+    setPhase("welcome");
+    await sleep(650);
+    triggerWelcome(name);
+    await sleep(280);
+    router.push("/portal");
+    router.refresh();
+  }
+
   async function doLogin(p = phone, c = code) {
     setError(null);
-    setSuccess(false);
+    setPhase("idle");
     if (!/^\d{10}$/.test(p) || !c.trim()) {
       flashError("Enter your 10-digit mobile number and login code.");
       return;
@@ -57,12 +85,7 @@ export default function PortalLoginForm() {
       });
       const data = await res.json();
       if (data.ok) {
-        setSuccess(true);
-        triggerWelcome(data.name);
-        const pause = prefersReducedMotion() ? 0 : 420;
-        if (pause) await new Promise((r) => setTimeout(r, pause));
-        router.push("/portal");
-        router.refresh();
+        await finishSuccess(data.name);
       } else {
         flashError(data.error || "Login failed.");
       }
@@ -112,7 +135,8 @@ export default function PortalLoginForm() {
   const cardClass = [
     "lp-card mx-auto max-w-md p-7 sm:p-8",
     shake ? "lp-card--shake lp-card--error" : "",
-    success ? "lp-card--success" : "",
+    verified ? "lp-card--success" : "",
+    welcomed ? "lp-card--welcome" : "",
   ]
     .filter(Boolean)
     .join(" ");
@@ -121,26 +145,33 @@ export default function PortalLoginForm() {
     <div className={cardClass}>
       {mode === "login" ? (
         <>
-          <h1 className="flex items-center gap-2 text-xl font-bold text-[var(--navy)]">
-            {success ? (
+          <h1 key={phase} className={`flex items-center gap-2 text-xl font-bold text-[var(--navy)] ${verified ? "lp-heading-swap" : ""}`}>
+            {welcomed ? (
               <>
                 <span className="lp-success-check"><Check size={14} strokeWidth={3} aria-hidden /></span>
                 Welcome back
+              </>
+            ) : verified ? (
+              <>
+                <span className="lp-success-check"><Check size={14} strokeWidth={3} aria-hidden /></span>
+                Verified
               </>
             ) : (
               "Access your purchases"
             )}
           </h1>
           <p className="mt-1 text-sm text-ink2">
-            {success
-              ? "Login verified — opening your portal…"
-              : "Enter your mobile number and the login code from your payment receipt."}
+            {welcomed
+              ? "Opening your portal…"
+              : verified
+                ? "Login confirmed — just a moment…"
+                : "Enter your mobile number and the login code from your payment receipt."}
           </p>
 
           <form
             onSubmit={(e) => {
               e.preventDefault();
-              if (!loading && !success) doLogin();
+              if (!locked) doLogin();
             }}
             className="mt-6 space-y-4"
           >
@@ -156,7 +187,7 @@ export default function PortalLoginForm() {
                   placeholder="10-digit mobile"
                   className="lp-input lp-input--icon"
                   autoComplete="tel"
-                  disabled={loading || success}
+                  disabled={locked}
                 />
               </div>
             </div>
@@ -171,7 +202,7 @@ export default function PortalLoginForm() {
                   placeholder="e.g. K7P2QXR"
                   className="lp-input lp-input--icon font-mono tracking-[0.2em]"
                   autoComplete="off"
-                  disabled={loading || success}
+                  disabled={locked}
                   spellCheck={false}
                 />
               </div>
@@ -181,10 +212,12 @@ export default function PortalLoginForm() {
 
             <button
               type="submit"
-              disabled={loading || success}
-              className={`lp-btn mt-1 ${loading ? "lp-btn--loading" : ""} ${success ? "lp-btn--success" : ""}`}
+              disabled={locked}
+              className={`lp-btn mt-1 ${loading ? "lp-btn--loading" : ""} ${verified ? "lp-btn--success" : ""}`}
             >
-              {success ? (
+              {welcomed ? (
+                <><span className="lp-success-check"><Check size={14} strokeWidth={3} aria-hidden /></span> Welcome back</>
+              ) : verified ? (
                 <><span className="lp-success-check"><Check size={14} strokeWidth={3} aria-hidden /></span> Login verified</>
               ) : loading ? (
                 "Logging in…"
@@ -202,7 +235,7 @@ export default function PortalLoginForm() {
               setShake(false);
             }}
             className="lp-forgot mt-5 text-sm font-semibold text-primary hover:underline"
-            disabled={loading || success}
+            disabled={locked}
           >
             Forgot your code?
           </button>
@@ -285,8 +318,8 @@ export default function PortalLoginForm() {
               <div className="lp-panel-success p-4 text-center">
                 <p className="text-xs text-muted">Your login code</p>
                 <p className="mt-1 font-mono text-2xl font-extrabold tracking-[0.3em] text-success">{revealed}</p>
-                <button onClick={() => doLogin(phone, revealed)} disabled={loading || success} className={`lp-btn mt-3 ${loading ? "lp-btn--loading" : ""} ${success ? "lp-btn--success" : ""}`}>
-                  {success ? (<><span className="lp-success-check"><Check size={14} strokeWidth={3} aria-hidden /></span> Welcome back</>) : loading ? "Logging in…" : "Log in now →"}
+                <button onClick={() => doLogin(phone, revealed)} disabled={locked} className={`lp-btn mt-3 ${loading ? "lp-btn--loading" : ""} ${verified ? "lp-btn--success" : ""}`}>
+                  {welcomed ? (<><span className="lp-success-check"><Check size={14} strokeWidth={3} aria-hidden /></span> Welcome back</>) : verified ? (<><span className="lp-success-check"><Check size={14} strokeWidth={3} aria-hidden /></span> Login verified</>) : loading ? "Logging in…" : "Log in now →"}
                 </button>
               </div>
             ) : (
@@ -303,6 +336,7 @@ export default function PortalLoginForm() {
               setError(null);
               setRevealed(null);
               setShake(false);
+              setPhase("idle");
             }}
             className="lp-forgot mt-4 text-sm font-semibold text-primary hover:underline"
           >

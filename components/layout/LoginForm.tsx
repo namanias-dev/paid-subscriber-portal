@@ -21,10 +21,16 @@ import { triggerWelcome } from "@/lib/welcome";
 
 type Mode = "login" | "forgot";
 type Factor = "ref" | "date";
+/** Staged post-auth UI only — never changes the API call. */
+type SuccessPhase = "idle" | "verified" | "welcome";
 
 function prefersReducedMotion(): boolean {
   if (typeof window === "undefined") return true;
   return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
 }
 
 export default function LoginForm() {
@@ -34,7 +40,7 @@ export default function LoginForm() {
   const [phone, setPhone] = useState("");
   const [code, setCode] = useState("");
   const [loading, setLoading] = useState(false);
-  const [success, setSuccess] = useState(false);
+  const [phase, setPhase] = useState<SuccessPhase>("idle");
   const [shake, setShake] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -44,16 +50,43 @@ export default function LoginForm() {
   const [payDate, setPayDate] = useState("");
   const [revealed, setRevealed] = useState<string | null>(null);
 
+  const locked = loading || phase !== "idle";
+  const verified = phase === "verified" || phase === "welcome";
+  const welcomed = phase === "welcome";
+
   function flashError(msg: string) {
     setError(msg);
-    setSuccess(false);
+    setPhase("idle");
     setShake(true);
     window.setTimeout(() => setShake(false), 450);
   }
 
+  /**
+   * After backend confirms success: green verify → Welcome back → overlay flag → redirect.
+   * Auth already completed; this only spaces presentation so each beat is visible.
+   */
+  async function finishSuccess(name: string | undefined, redirect: string) {
+    setLoading(false);
+    if (prefersReducedMotion()) {
+      setPhase("welcome");
+      triggerWelcome(name);
+      router.push(redirect);
+      router.refresh();
+      return;
+    }
+    setPhase("verified");
+    await sleep(900);
+    setPhase("welcome");
+    await sleep(650);
+    triggerWelcome(name);
+    await sleep(280);
+    router.push(redirect);
+    router.refresh();
+  }
+
   async function doLogin(p = phone, c = code) {
     setError(null);
-    setSuccess(false);
+    setPhase("idle");
     if (!p.trim() || !c.trim()) {
       flashError("Please enter both your mobile number and login code.");
       return;
@@ -67,13 +100,7 @@ export default function LoginForm() {
       });
       const data = await res.json();
       if (data.ok) {
-        // Visual confirmation only — after backend success, ≤500ms, then same redirect.
-        setSuccess(true);
-        triggerWelcome(data.student?.name ?? data.name);
-        const pause = prefersReducedMotion() ? 0 : 420;
-        if (pause) await new Promise((r) => setTimeout(r, pause));
-        router.push(data.redirect || "/dashboard");
-        router.refresh();
+        await finishSuccess(data.student?.name ?? data.name, data.redirect || "/dashboard");
       } else {
         flashError(data.error || "Login failed.");
       }
@@ -123,7 +150,8 @@ export default function LoginForm() {
   const cardClass = [
     "lp-card mx-auto max-w-md p-7 sm:p-8",
     shake ? "lp-card--shake lp-card--error" : "",
-    success ? "lp-card--success" : "",
+    verified ? "lp-card--success" : "",
+    welcomed ? "lp-card--welcome" : "",
   ]
     .filter(Boolean)
     .join(" ");
@@ -207,8 +235,8 @@ export default function LoginForm() {
             <div className="lp-panel-success p-4 text-center">
               <p className="text-xs text-muted">Your login code</p>
               <p className="mt-1 font-mono text-2xl font-extrabold tracking-[0.3em] text-success">{revealed}</p>
-              <button onClick={() => doLogin(phone, revealed)} disabled={loading || success} className={`lp-btn mt-3 ${loading ? "lp-btn--loading" : ""} ${success ? "lp-btn--success" : ""}`}>
-                {success ? (<><span className="lp-success-check"><Check size={14} strokeWidth={3} aria-hidden /></span> Welcome back</>) : loading ? "Logging in…" : "Log in now →"}
+              <button onClick={() => doLogin(phone, revealed)} disabled={locked} className={`lp-btn mt-3 ${loading ? "lp-btn--loading" : ""} ${verified ? "lp-btn--success" : ""}`}>
+                {welcomed ? (<><span className="lp-success-check"><Check size={14} strokeWidth={3} aria-hidden /></span> Welcome back</>) : verified ? (<><span className="lp-success-check"><Check size={14} strokeWidth={3} aria-hidden /></span> Login verified</>) : loading ? "Logging in…" : "Log in now →"}
               </button>
             </div>
           ) : (
@@ -225,6 +253,7 @@ export default function LoginForm() {
             setError(null);
             setRevealed(null);
             setShake(false);
+            setPhase("idle");
           }}
           className="lp-forgot mt-5 text-sm font-semibold text-primary hover:underline"
         >
@@ -236,26 +265,33 @@ export default function LoginForm() {
 
   return (
     <div className={cardClass}>
-      <h3 className="flex items-center gap-2 text-xl font-bold text-[var(--navy)]">
-        {success ? (
+      <h3 key={phase} className={`flex items-center gap-2 text-xl font-bold text-[var(--navy)] ${welcomed || verified ? "lp-heading-swap" : ""}`}>
+        {welcomed ? (
           <>
             <span className="lp-success-check"><Check size={14} strokeWidth={3} aria-hidden /></span>
             Welcome back
+          </>
+        ) : verified ? (
+          <>
+            <span className="lp-success-check"><Check size={14} strokeWidth={3} aria-hidden /></span>
+            Verified
           </>
         ) : (
           "Login"
         )}
       </h3>
       <p className="mt-1 text-sm text-ink2">
-        {success
-          ? "Login verified — taking you in…"
-          : "Use your registered mobile number and the login code from your payment receipt."}
+        {welcomed
+          ? "Taking you to your dashboard…"
+          : verified
+            ? "Login confirmed — just a moment…"
+            : "Use your registered mobile number and the login code from your payment receipt."}
       </p>
 
       <form
         onSubmit={(e) => {
           e.preventDefault();
-          if (!loading && !success) doLogin();
+          if (!locked) doLogin();
         }}
         className="mt-6 space-y-4"
       >
@@ -271,7 +307,7 @@ export default function LoginForm() {
               placeholder="10-digit mobile"
               className="lp-input lp-input--icon"
               autoComplete="tel"
-              disabled={loading || success}
+              disabled={locked}
             />
           </div>
         </div>
@@ -286,7 +322,7 @@ export default function LoginForm() {
               placeholder="e.g. K7P2QXR"
               className="lp-input lp-input--icon font-mono tracking-[0.2em]"
               autoComplete="off"
-              disabled={loading || success}
+              disabled={locked}
               spellCheck={false}
             />
           </div>
@@ -296,10 +332,12 @@ export default function LoginForm() {
 
         <button
           type="submit"
-          disabled={loading || success}
-          className={`lp-btn mt-1 ${loading ? "lp-btn--loading" : ""} ${success ? "lp-btn--success" : ""}`}
+          disabled={locked}
+          className={`lp-btn mt-1 ${loading ? "lp-btn--loading" : ""} ${verified ? "lp-btn--success" : ""}`}
         >
-          {success ? (
+          {welcomed ? (
+            <><span className="lp-success-check"><Check size={14} strokeWidth={3} aria-hidden /></span> Welcome back</>
+          ) : verified ? (
             <><span className="lp-success-check"><Check size={14} strokeWidth={3} aria-hidden /></span> Login verified</>
           ) : loading ? (
             "Logging in..."
@@ -317,7 +355,7 @@ export default function LoginForm() {
           setShake(false);
         }}
         className="lp-forgot mt-5 text-sm font-semibold text-primary hover:underline"
-        disabled={loading || success}
+        disabled={locked}
       >
         Forgot your code?
       </button>
