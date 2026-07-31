@@ -398,8 +398,30 @@ export async function reconcileMetaLeadsLastHours(hours = 24): Promise<{
       const r = await ingestCapturedGraphLead(pageId, { ...g, form_id: formId }, {
         source: "admin_reconcile",
       });
-      if (r.outcome in per) (per as Record<string, number>)[r.outcome] += 1;
-      if (r.outcome in summary) (summary as Record<string, number>)[r.outcome] += 1;
+      switch (r.outcome) {
+        case "created":
+          per.created += 1;
+          summary.created += 1;
+          break;
+        case "attached_existing":
+          per.attached_existing += 1;
+          summary.attached_existing += 1;
+          break;
+        case "duplicate":
+          per.duplicate += 1;
+          summary.duplicate += 1;
+          break;
+        case "failed":
+          per.failed += 1;
+          summary.failed += 1;
+          break;
+        case "pending_retry":
+          per.pending_retry += 1;
+          summary.pending_retry += 1;
+          break;
+        default:
+          break;
+      }
     }
     summary.perForm.push(per);
   }
