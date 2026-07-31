@@ -1445,20 +1445,37 @@ function LogsTab() {
   const [q, setQ] = useState("");
   const [open, setOpen] = useState<LogRow | null>(null);
 
-  const load = useCallback(() => {
+  const load = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
     const params = new URLSearchParams();
     if (status) params.set("status", status);
     if (q.trim()) params.set("q", q.trim());
-    fetch(`/api/admin/sms/logs?${params.toString()}`).then((r) => r.json()).then((d) => setLogs(d.ok ? d.logs : [])).finally(() => setLoading(false));
+    try {
+      const r = await fetch(`/api/admin/sms/logs?${params.toString()}`, { signal });
+      const d = await r.json();
+      if (signal?.aborted) return;
+      setLogs(d.ok ? d.logs : []);
+    } catch (e) {
+      if ((e as { name?: string })?.name === "AbortError") return;
+      if (!signal?.aborted) setLogs([]);
+    } finally {
+      if (!signal?.aborted) setLoading(false);
+    }
   }, [status, q]);
-  useEffect(() => { load(); }, [load]);
+
+  // Debounce typing so partial keystrokes don't race; empty q / status change apply ASAP.
+  useEffect(() => {
+    const ac = new AbortController();
+    const delay = q.trim() ? 320 : 0;
+    const t = window.setTimeout(() => { void load(ac.signal); }, delay);
+    return () => { ac.abort(); window.clearTimeout(t); };
+  }, [load, q]);
 
   async function retry(id: string) {
     if (!confirm("Retry with a FRESH render of the current template (short-title pipeline — will not replay a stored body that still has a >50-char title)?")) return;
     const r = await fetch("/api/admin/sms/logs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "retry", id }) }).then((x) => x.json());
     const detail = r.result?.error || r.result?.skipped || r.error;
-    toast(r.ok ? "Resent (re-rendered)." : (detail || "Retry failed."), r.ok ? "success" : "error"); load();
+    toast(r.ok ? "Resent (re-rendered)." : (detail || "Retry failed."), r.ok ? "success" : "error"); void load();
   }
 
   const csvQs = new URLSearchParams({ format: "csv" });
@@ -1469,8 +1486,14 @@ function LogsTab() {
     <div className="space-y-3">
       <div className="flex flex-wrap items-end gap-2">
         <select className="input w-40" value={status} onChange={(e) => setStatus(e.target.value)}><option value="">All statuses</option>{["QUEUED", "SENT", "DELIVERED", "FAILED", "UNKNOWN"].map((s) => <option key={s}>{s}</option>)}</select>
-        <input className="input w-56" placeholder="name or mobile…" value={q} onChange={(e) => setQ(e.target.value)} />
-        <button onClick={load} className="btn btn-secondary text-sm"><RefreshCw size={14} /> Apply</button>
+        <input
+          className="input w-56"
+          placeholder="name or mobile…"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") void load(); }}
+        />
+        <button onClick={() => void load()} className="btn btn-secondary text-sm"><RefreshCw size={14} /> Apply</button>
         <a href={`/api/admin/sms/logs?${csvQs.toString()}`} className="btn btn-secondary text-sm"><Download size={14} /> CSV</a>
       </div>
       {loading ? <LoadingBlock /> : (

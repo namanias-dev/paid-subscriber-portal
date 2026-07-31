@@ -737,16 +737,73 @@ export interface LogFilters {
   trigger?: string; sentByType?: string; audienceType?: string; limit?: number;
 }
 
+/** Strip PostgREST / LIKE metacharacters from a user search token. */
+function sanitizeSearchToken(t: string): string {
+  return t.replace(/[%_,.()"'\\]/g, "").trim();
+}
+
+/**
+ * Parse a Logs search box value into phone digits + name tokens.
+ * Case is ignored by callers (ilike / toLowerCase).
+ */
+function parseLogSearch(raw: string): { digits: string; nameTokens: string[] } {
+  const trimmed = raw.trim();
+  const digits = trimmed.replace(/\D/g, "").slice(-10);
+  const namePart = trimmed.replace(/[0-9+()\-]/g, " ").replace(/\s+/g, " ").trim();
+  const nameTokens = namePart
+    .split(/\s+/)
+    .map(sanitizeSearchToken)
+    .filter((t) => t.length >= 2)
+    .slice(0, 5);
+  return { digits, nameTokens };
+}
+
 function matchesNameOrMobile(row: { normalized_mobile: string; student_name?: string | null }, query: string): boolean {
-  const raw = query.trim();
-  if (!raw) return true;
-  const digits = raw.replace(/\D/g, "");
+  const { digits, nameTokens } = parseLogSearch(query);
+  if (digits.length >= 3 && row.normalized_mobile.includes(digits)) return true;
+  if (!nameTokens.length) return digits.length >= 3;
   const name = (row.student_name || "").toLowerCase();
-  const needle = raw.toLowerCase();
-  if (digits.length >= 3 && row.normalized_mobile.includes(digits.slice(-10))) return true;
-  if (name.includes(needle)) return true;
-  // Digits-only typing still matches name if someone typed a substring of a stored phone-like name — rare.
-  return false;
+  // Every token must appear (order-independent, case-insensitive).
+  return nameTokens.every((t) => name.includes(t.toLowerCase()));
+}
+
+/**
+ * Resolve name tokens → distinct 10-digit mobiles so Logs returns *all* SMS for
+ * those people, not only rows whose stored student_name spelling matched.
+ * Sources: sms_logs, payments, students (case-insensitive ilike).
+ */
+async function resolveMobilesForNameSearch(
+  db: NonNullable<ReturnType<typeof getSupabaseAdmin>>,
+  nameTokens: string[],
+): Promise<string[]> {
+  const mobiles = new Set<string>();
+  const addPhone = (v: unknown) => {
+    const n = norm10(String(v || ""));
+    if (n.length === 10) mobiles.add(n);
+  };
+
+  try {
+    let logQ = db.from("sms_logs").select("normalized_mobile").not("student_name", "is", null).limit(2000);
+    for (const t of nameTokens) logQ = logQ.ilike("student_name", `%${t}%`);
+    const { data } = await logQ;
+    for (const r of data || []) addPhone((r as Row).normalized_mobile);
+  } catch { /* ignore */ }
+
+  try {
+    let payQ = db.from("payments").select("phone").is("deleted_at", null).limit(1000);
+    for (const t of nameTokens) payQ = payQ.ilike("student_name", `%${t}%`);
+    const { data } = await payQ;
+    for (const r of data || []) addPhone((r as Row).phone);
+  } catch { /* ignore */ }
+
+  try {
+    let stuQ = db.from("students").select("phone").limit(1000);
+    for (const t of nameTokens) stuQ = stuQ.ilike("name", `%${t}%`);
+    const { data } = await stuQ;
+    for (const r of data || []) addPhone((r as Row).phone);
+  } catch { /* ignore */ }
+
+  return [...mobiles];
 }
 
 export async function listLogs(f: LogFilters = {}): Promise<SmsLog[]> {
@@ -760,7 +817,21 @@ export async function listLogs(f: LogFilters = {}): Promise<SmsLog[]> {
     if (f.trigger) rows = rows.filter((r) => r.trigger_event === f.trigger);
     if (f.sentByType) rows = rows.filter((r) => r.sent_by_type === f.sentByType);
     if (f.audienceType) rows = rows.filter((r) => r.audience_type === f.audienceType);
-    if (search) rows = rows.filter((r) => matchesNameOrMobile(r, search));
+    if (search) {
+      const { digits, nameTokens } = parseLogSearch(search);
+      // Demo: expand name hits → all rows for those mobiles (mirrors prod behaviour).
+      if (nameTokens.length) {
+        const hitMobiles = new Set(
+          rows.filter((r) => matchesNameOrMobile(r, search)).map((r) => r.normalized_mobile),
+        );
+        rows = rows.filter((r) =>
+          hitMobiles.has(r.normalized_mobile) ||
+          (digits.length >= 3 && r.normalized_mobile.includes(digits)),
+        );
+      } else if (digits.length >= 3) {
+        rows = rows.filter((r) => r.normalized_mobile.includes(digits));
+      }
+    }
     return rows.slice(0, limit);
   }
   try {
@@ -773,15 +844,19 @@ export async function listLogs(f: LogFilters = {}): Promise<SmsLog[]> {
     if (f.sentByType) q = q.eq("sent_by_type", f.sentByType);
     if (f.audienceType) q = q.eq("audience_type", f.audienceType);
     if (search) {
-      const digits = search.replace(/\D/g, "").slice(-10);
-      // Sanitize for PostgREST or()/ilike — strip pattern/filter metachars.
-      const safe = search.replace(/[%_,.()]/g, " ").trim().slice(0, 80);
-      if (digits.length >= 3 && safe) {
-        q = q.or(`normalized_mobile.ilike.%${digits}%,student_name.ilike.%${safe}%`);
-      } else if (digits.length >= 3) {
-        q = q.ilike("normalized_mobile", `%${digits}%`);
-      } else if (safe) {
-        q = q.ilike("student_name", `%${safe}%`);
+      const { digits, nameTokens } = parseLogSearch(search);
+      const mobiles = new Set<string>();
+      if (digits.length >= 3) mobiles.add(digits);
+      if (nameTokens.length) {
+        for (const m of await resolveMobilesForNameSearch(db, nameTokens)) mobiles.add(m);
+      }
+      if (mobiles.size === 0) return [];
+      // Cap IN list — rare for a name search to hit >200 people.
+      const list = [...mobiles].slice(0, 200);
+      if (list.length === 1 && digits.length >= 3 && nameTokens.length === 0) {
+        q = q.ilike("normalized_mobile", `%${list[0]}%`);
+      } else {
+        q = q.in("normalized_mobile", list);
       }
     }
     const { data } = await q;
