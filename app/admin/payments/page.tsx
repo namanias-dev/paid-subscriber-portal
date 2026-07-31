@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { PageHeader, useAdminData, LoadingBlock, KpiCard } from "@/components/admin/ui";
+import { PageHeader, useAdminData, LoadingBlock } from "@/components/admin/ui";
 import WebinarRegistrationsTrend from "@/components/admin/WebinarRegistrationsTrend";
 import WebinarRegistrationsByWebinarTrend from "@/components/admin/WebinarRegistrationsByWebinarTrend";
 import WebinarSourceBreakdown from "@/components/admin/WebinarSourceBreakdown";
@@ -29,7 +29,7 @@ import {
 } from "@/lib/paymentGroups";
 import { derivedChannelFor } from "@/lib/webinarSource";
 import { SOURCE_DEFINITIONS, type SourceDisplayKey } from "@/lib/marketing/sourceDefinitions";
-import type { Payment, Enrollment, PaymentProof, PaymentProofFile, PaymentProofStatus, PaymentActionLog } from "@/lib/types";
+import type { Payment, PaymentProof, PaymentProofFile, PaymentProofStatus, PaymentActionLog } from "@/lib/types";
 
 type PaymentSort = "recent" | "spent" | "count" | "name";
 const PAYMENT_SORTS: { value: PaymentSort; label: string }[] = [
@@ -113,10 +113,13 @@ function lastDayOfMonth(year: number, month1: number): string {
 
 export default function PaymentsAdmin() {
   const full = useAdminData<Payment[]>("/api/admin/payments", "payments");
-  const enr = useAdminData<Enrollment[]>("/api/admin/payments", "enrollments");
   const codes = useAdminData<Record<string, string>>("/api/admin/payments", "buyerCodes");
   const proofsHook = useAdminData<Record<string, ProofWithAccess>>("/api/admin/payments", "proofs");
   const itemNames = useAdminData<Record<string, string>>("/api/admin/payments", "itemNames").data || {};
+  const webinarMeta = useAdminData<{ slug: string; title: string; datetime: string }[]>(
+    "/api/admin/payments",
+    "webinarMeta",
+  ).data || [];
   // Read-only lead attribution per phone (last-10 normalized) — for the Source
   // pill on the Payments user card. Never enables edits, never touches payments.
   const leadAttrByPhone = useAdminData<Record<string, LeadAttrStamp>>(
@@ -178,7 +181,6 @@ export default function PaymentsAdmin() {
   }, [sourceSel]);
 
   const payments = useMemo(() => full.data || [], [full.data]);
-  const enrollments = enr.data || [];
   const buyerCodes = codes.data || {};
   const proofs = useMemo(() => proofsHook.data || {}, [proofsHook.data]);
   const proofStatusByPayment = useMemo(() => {
@@ -433,11 +435,7 @@ export default function PaymentsAdmin() {
     };
   }, [payments, todayYMD]);
 
-  if (full.loading || enr.loading) return <LoadingBlock />;
-
-  const captured = dedupedPaidTotal(payments.filter((p) => isPaid(p.status)));
-  const refunded = payments.filter((p) => p.status === "refunded").reduce((a, p) => a + p.amount, 0);
-  const pending = enrollments.reduce((a, e) => a + (e.pending || 0), 0);
+  if (full.loading) return <LoadingBlock />;
 
   const years = Array.from(
     new Set(payments.map((p) => istYMD(p.created_at)?.slice(0, 4)).filter(Boolean) as string[])
@@ -715,7 +713,7 @@ export default function PaymentsAdmin() {
       {/* Per-webinar registrations trend — directly below the all-webinars card,
           same styling/interaction, with an added webinar selector. */}
       <div className="mb-4">
-        <WebinarRegistrationsByWebinarTrend payments={payments} />
+        <WebinarRegistrationsByWebinarTrend payments={payments} webinars={webinarMeta} />
       </div>
 
       {/* Paid registrations broken down by acquisition source, per webinar.
@@ -735,13 +733,6 @@ export default function PaymentsAdmin() {
       </div>
 
       {isSuper && <PaymentAccountability />}
-
-      <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <KpiCard label="Captured" value={formatINR(captured)} tone="green" />
-        <KpiCard label="Pending Collections" value={formatINR(pending)} tone="red" />
-        <KpiCard label="Refunded" value={formatINR(refunded)} tone="amber" />
-        <KpiCard label="Transactions" value={payments.length} />
-      </div>
 
       {/* Filter bar — v1 (unchanged when PAYMENTS_UI_V2=false). Kept intact so a
           server env flip restores the exact pre-shipment cramped-wall layout
@@ -898,12 +889,12 @@ export default function PaymentsAdmin() {
       )}
 
       {/* Filter bar — v2: elegant, collapsible sections (Status / Payment type /
-          Date / Source). Status expands by default (most-used); the rest collapse
-          with an active-count badge so the wall never feels cramped. Reuses the
-          same handlers as v1 above; no filter state is duplicated. */}
+          Date / Source). All sections start collapsed; active-count badges keep
+          the wall scannable. Reuses the same handlers as v1 above; no filter
+          state is duplicated. */}
       {paymentsUiV2 && (
         <div className="card mb-4 divide-y divide-line px-5">
-          <FilterSection title="Status" activeCount={statuses.size + (onlyProof ? 1 : 0) + (needsActionOnly ? 1 : 0) + (paidWithDup ? 1 : 0) + (proofPending ? 1 : 0) + (showSuperseded ? 1 : 0)} defaultOpen>
+          <FilterSection title="Status" activeCount={statuses.size + (onlyProof ? 1 : 0) + (needsActionOnly ? 1 : 0) + (paidWithDup ? 1 : 0) + (proofPending ? 1 : 0) + (showSuperseded ? 1 : 0)}>
             <div className="flex flex-wrap gap-2">
               {STATUS_DEFS.map((s) => {
                 const active = statuses.has(s.key);

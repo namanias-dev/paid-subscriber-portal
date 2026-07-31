@@ -24,6 +24,8 @@ export default function SplitPreviewCard({
   maxRows = 6,
   hint,
   emptyText = "No registrations in the last 7 days.",
+  /** When true, show only the hero total — no mini-bars / split rows. */
+  totalOnly = false,
 }: {
   label: string;
   href: string;
@@ -32,6 +34,7 @@ export default function SplitPreviewCard({
   maxRows?: number;
   hint?: string;
   emptyText?: string;
+  totalOnly?: boolean;
 }) {
   const shown = rows.slice(0, maxRows);
   const more = Math.max(0, rows.length - shown.length);
@@ -55,7 +58,7 @@ export default function SplitPreviewCard({
 
       {total === 0 ? (
         <p className="mt-3 text-xs text-muted">{emptyText}</p>
-      ) : (
+      ) : totalOnly ? null : (
         <div className="mt-3 space-y-1.5">
           {shown.map((r) => {
             const color = r.color || "#0057FF";

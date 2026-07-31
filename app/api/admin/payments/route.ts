@@ -118,7 +118,15 @@ export async function GET() {
     // back to the pre-shipment card + filter layout without a redeploy.
     const paymentsUiV2 = isPaymentsUiV2Enabled();
 
-    return NextResponse.json({ ok: true, payments, enrollments, buyerCodes, proofs, itemNames, leadAttrByPhone, legacyLeadByPhone, canManage, isSuper, paymentsUiV2 });
+    // Slim webinar catalogue for the collapsed "Registrations by webinar" card
+    // (pick chronologically latest). Display-only — no payment logic depends on it.
+    const webinarMeta = webinars.map((w) => ({
+      slug: w.slug,
+      title: w.title,
+      datetime: w.datetime,
+    }));
+
+    return NextResponse.json({ ok: true, payments, enrollments, buyerCodes, proofs, itemNames, leadAttrByPhone, legacyLeadByPhone, canManage, isSuper, paymentsUiV2, webinarMeta });
   } catch {
     return NextResponse.json({ ok: false, error: "Failed to load payments." }, { status: 500 });
   }

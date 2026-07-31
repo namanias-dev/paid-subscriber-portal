@@ -87,7 +87,7 @@ export function webinarSplit(payments: Payment[], inSel: (ymd: string) => boolea
   return { rows, total };
 }
 
-/** Distinct webinars that have paid registrations → selector options, most first. */
+/** Distinct paid webinars that have registrations → selector options, most first. */
 export function listPaidWebinars(payments: Payment[]): PaidWebinarOption[] {
   const totals = new Map<string, PaidWebinarOption>();
   for (const p of payments) {
@@ -100,4 +100,87 @@ export function listPaidWebinars(payments: Payment[]): PaidWebinarOption[] {
     totals.set(key, cur);
   }
   return [...totals.values()].sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
+}
+
+export interface WebinarMeta {
+  slug: string;
+  title?: string | null;
+  datetime?: string | null;
+}
+
+/**
+ * Lifetime distinct paid registrations for one webinar (phone×day), same
+ * granularity as {@link webinarSplit} / the opened trend view.
+ */
+export function webinarLifetimeDistinct(payments: Payment[], webinarKey: string): {
+  key: string;
+  label: string;
+  count: number;
+} | null {
+  const key = webinarKey.trim().toLowerCase();
+  if (!key) return null;
+  const set = new Set<string>();
+  let label = key;
+  for (const p of payments) {
+    if (!isPaid(p.status) || p.item_type !== "webinar") continue;
+    if (itemKey(p) !== key) continue;
+    const ymd = istYMD(p.created_at);
+    if (!ymd) continue;
+    if (p.item && (label === key || !label)) label = p.item;
+    set.add(`${(p.phone || "").trim()}|${ymd}`);
+  }
+  if (set.size === 0) return null;
+  return { key, label, count: set.size };
+}
+
+/**
+ * Pick the chronologically latest webinar that has paid registrations.
+ * Prefers `webinars[].datetime` when provided; otherwise falls back to the
+ * webinar with the most recent paid registration timestamp.
+ */
+export function latestPaidWebinar(
+  payments: Payment[],
+  webinars?: WebinarMeta[] | null,
+): { key: string; label: string; count: number } | null {
+  const paidKeys = new Set<string>();
+  const latestPayAt = new Map<string, number>();
+  const labels = new Map<string, string>();
+  for (const p of payments) {
+    if (!isPaid(p.status) || p.item_type !== "webinar") continue;
+    const key = itemKey(p);
+    if (!key) continue;
+    paidKeys.add(key);
+    const t = new Date(p.created_at).getTime();
+    if (!Number.isFinite(t)) continue;
+    if ((latestPayAt.get(key) || 0) < t) latestPayAt.set(key, t);
+    if (p.item) labels.set(key, p.item);
+  }
+  if (paidKeys.size === 0) return null;
+
+  const dtBySlug = new Map<string, number>();
+  const titleBySlug = new Map<string, string>();
+  for (const w of webinars || []) {
+    const slug = (w.slug || "").trim().toLowerCase();
+    if (!slug) continue;
+    if (w.title) titleBySlug.set(slug, w.title);
+    if (w.datetime) {
+      const t = new Date(w.datetime).getTime();
+      if (Number.isFinite(t)) dtBySlug.set(slug, t);
+    }
+  }
+
+  let bestKey = "";
+  let bestScore = -Infinity;
+  for (const key of paidKeys) {
+    const score = dtBySlug.get(key) ?? latestPayAt.get(key) ?? 0;
+    if (score > bestScore || (score === bestScore && key.localeCompare(bestKey) < 0)) {
+      bestScore = score;
+      bestKey = key;
+    }
+  }
+  if (!bestKey) return null;
+  const hit = webinarLifetimeDistinct(payments, bestKey);
+  if (!hit) return null;
+  const titled = titleBySlug.get(bestKey) || labels.get(bestKey);
+  return titled ? { ...hit, label: titled } : hit;
 }
