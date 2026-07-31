@@ -59,9 +59,20 @@ export function missingMetaConfig(): string[] {
   return missing;
 }
 
-/** Page-scoped Graph (leadgen_forms / form leads / reconcile). Not required for webhook leadgen_id fetch. */
+/** Page-scoped Graph (optional; form discovery may not work for System User tokens). */
 export function missingMetaPageToken(): string[] {
   return process.env.META_PAGE_ACCESS_TOKEN ? [] : ["META_PAGE_ACCESS_TOKEN"];
+}
+
+/** Comma-separated lead form IDs for reconcile (skips /{page}/leadgen_forms discovery). */
+export function configuredLeadFormIds(): string[] {
+  const raw = (process.env.META_LEAD_FORM_IDS || "").trim();
+  if (!raw) return [];
+  return [...new Set(raw.split(/[,\s]+/).map((s) => s.trim()).filter(Boolean))];
+}
+
+export function missingMetaLeadFormIds(): string[] {
+  return configuredLeadFormIds().length > 0 ? [] : ["META_LEAD_FORM_IDS"];
 }
 
 export function graphVersion(): string {
@@ -271,18 +282,21 @@ export async function listPageLeadForms(pageId: string): Promise<Array<{ id: str
   return out;
 }
 
-/** Page leads for one form (newest first). Caps pages for safety. Requires META_PAGE_ACCESS_TOKEN. */
+/**
+ * Leads for one form (newest first). Uses META_LONG_LIVED_TOKEN (System User with
+ * leads_retrieval) — Page token is not required for /{form_id}/leads.
+ */
 export async function listFormLeads(
   formId: string,
   opts?: { maxPages?: number; sinceUnix?: number },
 ): Promise<Array<Record<string, unknown>>> {
-  const missing = [...missingMetaConfig(), ...missingMetaPageToken()];
+  const missing = missingMetaConfig();
   if (missing.length > 0) throw new MetaLeadsNotConfiguredError(missing);
   const maxPages = opts?.maxPages ?? 10;
   const out: Array<Record<string, unknown>> = [];
   let after: string | null = null;
   for (let i = 0; i < maxPages; i++) {
-    const token = tokenFor("page");
+    const token = tokenFor("system");
     const secret = process.env.META_APP_SECRET!;
     const version = graphVersion();
     const url = new URL(`https://graph.facebook.com/${version}/${formId}/leads`);
@@ -298,26 +312,42 @@ export async function listFormLeads(
     const json = (await res.json()) as {
       data?: Array<Record<string, unknown>>;
       paging?: { cursors?: { after?: string } };
-      error?: { message?: string };
+      error?: { message?: string; code?: number; type?: string };
     };
-    if (!res.ok) throw new Error(json.error?.message || `leads ${res.status}`);
+    if (!res.ok) {
+      const err = json.error;
+      const msg = err?.message || `leads ${res.status}`;
+      const code = err?.code != null ? ` (#${err.code})` : "";
+      throw new Error(`${msg}${code}`);
+    }
+    let hitOlder = false;
     for (const row of json.data || []) {
       if (opts?.sinceUnix && typeof row.created_time === "string") {
         const t = Math.floor(new Date(row.created_time).getTime() / 1000);
-        if (t < opts.sinceUnix) continue;
+        if (t < opts.sinceUnix) {
+          hitOlder = true;
+          continue;
+        }
       }
       out.push(row);
     }
     after = json.paging?.cursors?.after || null;
-    if (!after || !(json.data || []).length) break;
+    // Newest-first: once we see older-than-window rows, further pages are older.
+    if (hitOlder || !after || !(json.data || []).length) break;
   }
   return out;
 }
 
-/** Manual / admin reconcile: list recent form leads and ingest missing (idempotent on leadgen_id). */
+/**
+ * Manual / admin reconcile: iterate configured META_LEAD_FORM_IDS (no Page
+ * leadgen_forms discovery), fetch recent leads with System User token, ingest
+ * missing via leadgen_id (idempotent).
+ */
 export async function reconcileMetaLeadsLastHours(hours = 24): Promise<{
   hours: number;
   forms: number;
+  formIds: string[];
+  perForm: Array<{ formId: string; fetched: number; created: number; attached_existing: number; duplicate: number; failed: number; pending_retry: number }>;
   scanned: number;
   created: number;
   attached_existing: number;
@@ -327,13 +357,24 @@ export async function reconcileMetaLeadsLastHours(hours = 24): Promise<{
 }> {
   const pageId = process.env.META_PAGE_ID;
   if (!pageId) throw new Error("META_PAGE_ID not set");
+  const formIds = configuredLeadFormIds();
+  if (!formIds.length) throw new Error("META_LEAD_FORM_IDS not set");
   const h = Math.min(Math.max(Number(hours) || 24, 1), 168);
   const sinceUnix = Math.floor(Date.now() / 1000) - h * 3600;
   const { ingestCapturedGraphLead } = await import("./ingestMetaLead");
-  const forms = await listPageLeadForms(pageId);
   const summary = {
     hours: h,
-    forms: forms.length,
+    forms: formIds.length,
+    formIds,
+    perForm: [] as Array<{
+      formId: string;
+      fetched: number;
+      created: number;
+      attached_existing: number;
+      duplicate: number;
+      failed: number;
+      pending_retry: number;
+    }>,
     scanned: 0,
     created: 0,
     attached_existing: 0,
@@ -341,17 +382,26 @@ export async function reconcileMetaLeadsLastHours(hours = 24): Promise<{
     failed: 0,
     pending_retry: 0,
   };
-  for (const form of forms) {
-    const leads = await listFormLeads(form.id, { maxPages: 3, sinceUnix });
+  for (const formId of formIds) {
+    const leads = await listFormLeads(formId, { maxPages: 5, sinceUnix });
+    const per = {
+      formId,
+      fetched: leads.length,
+      created: 0,
+      attached_existing: 0,
+      duplicate: 0,
+      failed: 0,
+      pending_retry: 0,
+    };
     for (const g of leads) {
       summary.scanned += 1;
-      const r = await ingestCapturedGraphLead(pageId, { ...g, form_id: form.id }, {
+      const r = await ingestCapturedGraphLead(pageId, { ...g, form_id: formId }, {
         source: "admin_reconcile",
       });
-      if (r.outcome in summary) {
-        (summary as Record<string, number>)[r.outcome] += 1;
-      }
+      if (r.outcome in per) (per as Record<string, number>)[r.outcome] += 1;
+      if (r.outcome in summary) (summary as Record<string, number>)[r.outcome] += 1;
     }
+    summary.perForm.push(per);
   }
   return summary;
 }

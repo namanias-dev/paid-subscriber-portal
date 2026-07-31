@@ -13,13 +13,15 @@ import { getSupabaseAdmin } from "@/lib/supabase";
 import { isMetaLeadsEnabled } from "@/lib/legacy-migration/flags";
 import {
   missingMetaConfig,
+  missingMetaLeadFormIds,
   missingMetaPageToken,
   reconcileMetaLeadsLastHours,
 } from "@/lib/meta/leadAds";
 import { retryPendingMetaIngestions } from "@/lib/meta/ingestMetaLead";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+/** Reconcile may Graph-fetch dozens of leads; keep headroom. */
+export const maxDuration = 300;
 
 function tokenHealth(): {
   configured: boolean;
@@ -27,14 +29,16 @@ function tokenHealth(): {
   enabled: boolean;
   pageIdSet: boolean;
   pageTokenSet: boolean;
+  formIdsSet: boolean;
 } {
   const missing = missingMetaConfig().filter((m) => m !== "META_LEADS_ENABLED=true");
   return {
     configured: missing.length === 0,
-    missing: [...missingMetaConfig(), ...missingMetaPageToken()],
+    missing: [...missingMetaConfig(), ...missingMetaLeadFormIds(), ...missingMetaPageToken()],
     enabled: isMetaLeadsEnabled(),
     pageIdSet: !!process.env.META_PAGE_ID,
     pageTokenSet: missingMetaPageToken().length === 0,
+    formIdsSet: missingMetaLeadFormIds().length === 0,
   };
 }
 

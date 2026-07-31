@@ -28,6 +28,7 @@ interface MetaIngestReport {
     enabled: boolean;
     pageIdSet: boolean;
     pageTokenSet?: boolean;
+    formIdsSet?: boolean;
   };
   lastReceived: string | null;
   silenceHours: number | null;
@@ -115,8 +116,10 @@ export default function MetaLeadIngestPage() {
           {" · "}
           Page ID: <strong>{data.health.pageIdSet ? "set" : "missing"}</strong>
           {" · "}
+          Form IDs: <strong>{data.health.formIdsSet ? "set" : "missing"}</strong>
+          {" · "}
           Page token:{" "}
-          <strong>{data.health.pageTokenSet ? "set" : "missing"}</strong>
+          <strong>{data.health.pageTokenSet ? "set" : "optional"}</strong>
         </p>
         {data.health.missing.length > 0 && (
           <p className="mt-1 text-xs text-muted">Missing: {data.health.missing.join(", ")}</p>
@@ -135,7 +138,7 @@ export default function MetaLeadIngestPage() {
           </button>
           <button
             type="button"
-            disabled={!!busy || !data.health.pageIdSet || !data.health.pageTokenSet}
+            disabled={!!busy || !data.health.pageIdSet || !data.health.formIdsSet}
             onClick={() => run("reconcile")}
             className="rounded-md border border-border px-3 py-1.5 text-xs font-medium disabled:opacity-50"
           >
