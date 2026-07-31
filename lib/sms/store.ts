@@ -876,6 +876,60 @@ export async function getRule(trigger: string): Promise<SmsAutoRule | null> {
   return (await listRules()).find((r) => r.trigger === trigger) || null;
 }
 
+/** IST calendar-day start as UTC ISO — same convention as Overview / caps. */
+function istMidnightISO(): string {
+  const ymd = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit",
+  }).format(new Date());
+  return new Date(`${ymd}T00:00:00+05:30`).toISOString();
+}
+
+export type AutomationActivity = { last_run_at: string | null; sends_today: number };
+
+/**
+ * Per-automation activity from sms_logs (source of truth). The rules.last_run_at
+ * column was never written by send paths, so the Automations UI reads logs:
+ * last_run_at = latest log for that trigger_event; sends_today = IST-day count.
+ */
+export async function getAutomationActivityStats(triggers: string[]): Promise<Record<string, AutomationActivity>> {
+  const out: Record<string, AutomationActivity> = {};
+  for (const t of triggers) out[t] = { last_run_at: null, sends_today: 0 };
+  if (!triggers.length) return out;
+
+  const since = istMidnightISO();
+  const db = getSupabaseAdmin();
+
+  if (!db) {
+    for (const l of demo().logs) {
+      const t = l.trigger_event;
+      if (!t || !out[t]) continue;
+      if (!out[t].last_run_at || l.created_at > out[t].last_run_at!) out[t].last_run_at = l.created_at;
+      if (l.created_at >= since) out[t].sends_today++;
+    }
+    return out;
+  }
+
+  try {
+    await Promise.all(triggers.map(async (t) => {
+      const [countRes, lastRes] = await Promise.all([
+        db.from("sms_logs").select("id", { count: "exact", head: true })
+          .eq("trigger_event", t).gte("created_at", since),
+        db.from("sms_logs").select("created_at")
+          .eq("trigger_event", t).order("created_at", { ascending: false }).limit(1).maybeSingle(),
+      ]);
+      out[t].sends_today = countRes.count ?? 0;
+      if (lastRes.data?.created_at) out[t].last_run_at = String(lastRes.data.created_at);
+    }));
+  } catch { /* ignore — UI falls back to empty stats */ }
+  return out;
+}
+
+/** Best-effort stamp on sms_auto_rules (display still prefers logs). */
+export function touchRuleLastRun(trigger: string): void {
+  if (!trigger) return;
+  void upsertRule(trigger, { last_run_at: nowISO() } as Partial<SmsAutoRule>).catch(() => {});
+}
+
 export async function upsertRule(trigger: string, patch: Partial<SmsAutoRule>): Promise<SmsAutoRule | null> {
   const db = getSupabaseAdmin();
   if (!db) {

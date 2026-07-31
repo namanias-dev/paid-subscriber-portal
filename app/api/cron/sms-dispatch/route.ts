@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getPayments, getWebinars, getAllCourseEnrollments } from "@/lib/dataProvider";
 import { resolveAudience, type AudienceSpec } from "@/lib/sms/audiences";
-import { getRule, getSettings } from "@/lib/sms/store";
+import { getRule, getSettings, touchRuleLastRun } from "@/lib/sms/store";
 import { sendSms, istMinutesOfDay, pollDeliveryStatuses } from "@/lib/sms/service";
 import { normalizeIndianMobile } from "@/lib/phone";
 import type { SmsAutoRule } from "@/lib/sms/types";
@@ -68,6 +68,7 @@ async function sendToAudience(rule: SmsAutoRule, spec: AudienceSpec, webinarId: 
     });
     if (res.ok) sent++;
   }
+  if (sent > 0) touchRuleLastRun(rule.trigger);
   return sent;
 }
 
@@ -112,6 +113,7 @@ async function run(req: Request) {
         });
         if (res.ok) n++;
       }
+      if (n > 0) touchRuleLastRun("payment_pending");
       result.payment_pending = n;
     }
     const abandRule = await getRule("payment_abandoned");
@@ -130,6 +132,7 @@ async function run(req: Request) {
         });
         if (res.ok) n++;
       }
+      if (n > 0) touchRuleLastRun("payment_abandoned");
       result.payment_abandoned = n;
     }
 

@@ -7,7 +7,7 @@
  * Every auto-rule defaults OFF; this no-ops unless a Super Admin enabled it.
  */
 import { normalizeIndianMobile } from "../phone";
-import { getRule, getBuyerById, resolveBuyerByPhone, firstNamesMatch } from "./store";
+import { getRule, getBuyerById, resolveBuyerByPhone, firstNamesMatch, touchRuleLastRun } from "./store";
 import { sendSms, type RelatedEntity } from "./service";
 
 export interface AutoCtx {
@@ -53,7 +53,7 @@ async function dispatch(ctx: AutoCtx): Promise<void> {
   }
 
   const entityId = ctx.entityId || ctx.entity?.payment_id || ctx.entity?.registration_id || ctx.entity?.webinar_id || ctx.entity?.user_id || digits;
-  await sendSms({
+  const res = await sendSms({
     mobile: digits,
     templateId: rule.template_id,
     variables: vars,
@@ -63,6 +63,7 @@ async function dispatch(ctx: AutoCtx): Promise<void> {
     audienceType: rule.audience_type,
     dedupeKey: `${ctx.trigger}:${rule.template_id}:${digits}:${entityId}`,
   });
+  if (res.ok) touchRuleLastRun(ctx.trigger);
 }
 
 /** Public fire-and-forget entry — never throws into the caller. */

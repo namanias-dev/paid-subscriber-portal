@@ -28,7 +28,7 @@ interface TemplateRow {
 interface RuleRow {
   trigger: string; template_id: string | null; template_name: string | null; template_ready: boolean;
   enabled: boolean; delay_minutes: number | null; schedule_time: string | null; offset_minutes: number | null;
-  audience_type: string | null; last_run_at: string | null;
+  audience_type: string | null; last_run_at: string | null; sends_today?: number;
 }
 interface LogRow {
   id: string; created_at: string; normalized_mobile: string; student_name: string | null; template_name: string | null;
@@ -901,9 +901,9 @@ function AutomationsTab({ canEdit }: { canEdit: boolean }) {
   if (loading) return <LoadingBlock />;
   return (
     <div className="card overflow-x-auto p-0">
-      <table className="w-full min-w-[860px] text-left text-sm">
+      <table className="w-full min-w-[960px] text-left text-sm">
         <thead><tr className="border-b border-line text-xs uppercase tracking-wide text-muted">
-          <th className="px-4 py-3">Trigger</th><th className="px-4 py-3">Template</th><th className="px-4 py-3">Schedule</th><th className="px-4 py-3">Audience</th><th className="px-4 py-3">Last run</th><th className="px-4 py-3 text-right">Enabled</th>
+          <th className="px-4 py-3">Trigger</th><th className="px-4 py-3">Template</th><th className="px-4 py-3">Schedule</th><th className="px-4 py-3">Audience</th><th className="px-4 py-3">Last run</th><th className="px-4 py-3 text-right" title="Sends logged today (IST)">Today</th><th className="px-4 py-3 text-right">Enabled</th>
         </tr></thead>
         <tbody>
           {rules.map((r) => (
@@ -934,6 +934,7 @@ function AutomationsTab({ canEdit }: { canEdit: boolean }) {
                 ) : (r.audience_type || "—")}
               </td>
               <td className="px-4 py-3 text-xs text-muted">{r.last_run_at ? formatISTDateTime(r.last_run_at) : "—"}</td>
+              <td className="px-4 py-3 text-right tabular-nums font-medium text-ink">{r.sends_today ?? 0}</td>
               <td className="px-4 py-3 text-right">
                 {/* ITEM 3: unambiguous toggle */}
                 <ToggleSwitch on={r.enabled} disabled={!canEdit || !r.template_ready} onChange={() => patch(r.trigger, { enabled: !r.enabled })} />
