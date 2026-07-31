@@ -3,6 +3,7 @@ import { getPayments, getWebinars, getAllCourseEnrollments } from "@/lib/dataPro
 import { resolveAudience, type AudienceSpec } from "@/lib/sms/audiences";
 import { getRule, getSettings, touchRuleLastRun } from "@/lib/sms/store";
 import { sendSms, istMinutesOfDay, pollDeliveryStatuses } from "@/lib/sms/service";
+import { varsForPaymentAutoSms } from "@/lib/sms/paymentNudge";
 import { normalizeIndianMobile } from "@/lib/phone";
 import type { SmsAutoRule } from "@/lib/sms/types";
 import { deriveCollections, isSupersededEnrollment } from "@/lib/installments";
@@ -17,13 +18,8 @@ export const maxDuration = 60;
  * per-payment dedupe_key, and sendSms inserts-then-sends under a UNIQUE index so
  * re-runs / overlapping invocations cannot double-send.
  *
- * Vercel cron runs it once daily ("30 4 * * *" UTC = 10:00 IST) to stay within
- * Hobby limits. For time-sensitive sends (1hr-before, T19 end+offset), point a
- * free external scheduler (e.g. cron-job.org) at this route HOURLY:
- *   GET  /api/cron/sms-dispatch?secret=<CRON_SECRET>
- *   or   Authorization: Bearer <CRON_SECRET>
- * Every job no-ops unless its rule is enabled, and all sends are idempotent, so
- * extra pings are safe.
+ * Vercel cron runs hourly ("5 * * * *") so delayed payment nudges (pending /
+ * abandoned) land inside the IST send window the same day. Extra pings are safe.
  */
 function istDateKey(d = new Date()): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).format(d);
@@ -106,7 +102,7 @@ async function run(req: Request) {
         if (!d) continue;
         const res = await sendSms({
           mobile: d, templateId: pendingRule.template_id,
-          variables: { name: p.student_name, item_short: p.item || p.item_slug || "your purchase", payment_status: p.status },
+          variables: await varsForPaymentAutoSms(p),
           relatedEntity: { payment_id: p.id, student_name: p.student_name },
           sentBy: { type: "SYSTEM" }, triggerEvent: "payment_pending", audienceType: "payment_pending",
           enforceWindow: true, dedupeKey: `payment_pending:${pendingRule.template_id}:${d}:${p.id}`,
@@ -118,14 +114,20 @@ async function run(req: Request) {
     }
     const abandRule = await getRule("payment_abandoned");
     if (abandRule?.enabled && abandRule.template_id) {
+      // "+Nm delay" from the rule: nudge only once the attempt is old enough
+      // (abandon sweep already flips status ~30m after initiate; this matches the
+      // Automations UI and caps how long we keep retrying).
+      const delayMs = (abandRule.delay_minutes ?? 30) * 60000;
       let n = 0;
       for (const p of payments) {
         if (p.status !== "ABANDONED" || p.is_superseded) continue;
+        const age = Date.now() - new Date(p.created_at).getTime();
+        if (age < delayMs || age > 36 * 3600 * 1000) continue;
         const d = normalizeIndianMobile(p.phone).digits10;
         if (!d) continue;
         const res = await sendSms({
           mobile: d, templateId: abandRule.template_id,
-          variables: { name: p.student_name, item_short: p.item || p.item_slug || "your purchase" },
+          variables: await varsForPaymentAutoSms(p),
           relatedEntity: { payment_id: p.id, student_name: p.student_name },
           sentBy: { type: "SYSTEM" }, triggerEvent: "payment_abandoned", audienceType: "abandoned",
           enforceWindow: true, dedupeKey: `payment_abandoned:${abandRule.template_id}:${d}:${p.id}`,
