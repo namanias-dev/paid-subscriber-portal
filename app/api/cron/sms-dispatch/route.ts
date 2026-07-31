@@ -119,12 +119,15 @@ async function run(req: Request) {
       // Automations UI and caps how long we keep retrying).
       const delayMs = (abandRule.delay_minutes ?? 30) * 60000;
       let n = 0;
+      // One abandoned nudge per phone per cron pass — repeat checkouts (same
+      // student, many ABANDONED rows) must not spam 4 identical texts.
+      const nudgedPhone = new Set<string>();
       for (const p of payments) {
         if (p.status !== "ABANDONED" || p.is_superseded) continue;
         const age = Date.now() - new Date(p.created_at).getTime();
         if (age < delayMs || age > 36 * 3600 * 1000) continue;
         const d = normalizeIndianMobile(p.phone).digits10;
-        if (!d) continue;
+        if (!d || nudgedPhone.has(d)) continue;
         const res = await sendSms({
           mobile: d, templateId: abandRule.template_id,
           variables: await varsForPaymentAutoSms(p),
@@ -132,7 +135,8 @@ async function run(req: Request) {
           sentBy: { type: "SYSTEM" }, triggerEvent: "payment_abandoned", audienceType: "abandoned",
           enforceWindow: true, dedupeKey: `payment_abandoned:${abandRule.template_id}:${d}:${p.id}`,
         });
-        if (res.ok) n++;
+        if (res.ok) { n++; nudgedPhone.add(d); }
+        else if (res.skipped === "duplicate" || res.skipped === "recent_duplicate") nudgedPhone.add(d);
       }
       if (n > 0) touchRuleLastRun("payment_abandoned");
       result.payment_abandoned = n;
