@@ -28,6 +28,8 @@ export default function PublicFooter({ brand }: { brand?: BrandConfig }) {
         { href: "/demo", label: "Book Free Demo" },
         { href: "/careers", label: "Careers" },
         { href: "/contact", label: "Contact" },
+        { href: "/privacy", label: "Privacy Policy" },
+        { href: "/terms", label: "Terms of Service" },
         { href: "/login", label: "Student Login" },
       ],
     },
