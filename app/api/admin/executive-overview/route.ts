@@ -1,19 +1,18 @@
 import { NextResponse } from "next/server";
 import { requireAdmin, requireAnyPermission } from "@/lib/adminGuard";
-import { getExecutiveOverview, type ExecPreset } from "@/lib/analytics/executiveOverview";
+import {
+  getExecutivePulse,
+  getExecutiveBody,
+  getExecutiveOverview,
+  type ExecPreset,
+  type ExecPart,
+} from "@/lib/analytics/executiveOverview";
 import { ttlCached } from "@/lib/ttlCache";
 
 export const dynamic = "force-dynamic";
 
-const PRESETS: ReadonlySet<ExecPreset> = new Set([
-  "today",
-  "yesterday",
-  "7d",
-  "30d",
-  "this_month",
-  "custom",
-  "all_time",
-]);
+const PRESETS: ReadonlySet<ExecPreset> = new Set(["today", "7d", "30d", "this_month", "all_time"]);
+const PARTS: ReadonlySet<ExecPart> = new Set(["pulse", "body", "full"]);
 const CACHE_MS = 20_000;
 
 export async function GET(req: Request) {
@@ -24,24 +23,21 @@ export async function GET(req: Request) {
     const url = new URL(req.url);
     const presetRaw = (url.searchParams.get("preset") || "30d") as ExecPreset;
     const preset = PRESETS.has(presetRaw) ? presetRaw : "30d";
+    const partRaw = (url.searchParams.get("part") || "full") as ExecPart;
+    const part = PARTS.has(partRaw) ? partRaw : "full";
     const excludeAdmin = url.searchParams.get("excludeAdmin") === "1";
     const canRevenue = await requireAnyPermission([
       "view_revenue",
       "view_analytics_revenue",
       "manage_payments",
     ]);
-    const from = url.searchParams.get("from") || "";
-    const to = url.searchParams.get("to") || "";
-    const cacheKey = `admin:exec-overview:${preset}:${excludeAdmin ? 1 : 0}:${canRevenue ? 1 : 0}:${from}:${to}`;
-    const cached = await ttlCached(cacheKey, CACHE_MS, () =>
-      getExecutiveOverview({
-        preset,
-        from: from || null,
-        to: to || null,
-        excludeAdmin,
-        canRevenue,
-      }),
-    );
+    const cacheKey = `admin:exec-overview:v2:${part}:${preset}:${excludeAdmin ? 1 : 0}:${canRevenue ? 1 : 0}`;
+    const cached = await ttlCached(cacheKey, CACHE_MS, async () => {
+      const opts = { preset, excludeAdmin, canRevenue };
+      if (part === "pulse") return { part, ...(await getExecutivePulse(opts)) };
+      if (part === "body") return { part, ...(await getExecutiveBody(opts)) };
+      return { part: "full" as const, ...(await getExecutiveOverview(opts)) };
+    });
     return NextResponse.json({ ok: true, overview: cached.value, cache: cached.cache });
   } catch (err) {
     console.error("[executive-overview]", err);
