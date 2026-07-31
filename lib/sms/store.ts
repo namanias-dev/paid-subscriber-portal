@@ -18,7 +18,8 @@ export const DEFAULT_RULES: RuleSeed[] = [
   { trigger: TRIGGERS.proof_uploaded, template_id: "proof_received" },
   { trigger: TRIGGERS.admin_approval, template_id: "access_approved" },
   { trigger: TRIGGERS.payment_failed, template_id: "payment_failed" },
-  { trigger: TRIGGERS.payment_abandoned, template_id: "abandoned_nudge", delay_minutes: 30 },
+  // No delay — ABANDONED is already set by the abandon sweep; cron sends on next pass.
+  { trigger: TRIGGERS.payment_abandoned, template_id: "abandoned_nudge" },
   { trigger: TRIGGERS.registration_created, template_id: "webinar_registered" },
   { trigger: TRIGGERS.webinar_day_before, template_id: "reminder_day_before", schedule_time: "18:00", audience_type: "webinar_registered" },
   { trigger: TRIGGERS.webinar_sameday_registered, template_id: "sameday_10am_registered", schedule_time: "10:00", audience_type: "webinar_registered" },
@@ -163,6 +164,9 @@ export async function ensureSeeded(): Promise<void> {
       offset_minutes: r.offset_minutes ?? null, audience_type: r.audience_type ?? null,
     }));
     if (missingR.length) await db.from("sms_auto_rules").insert(missingR);
+    // Heal: payment_abandoned used to seed with delay_minutes=30; clear so UI
+    // shows "on event" and cron does not wait another 30m after ABANDONED.
+    await db.from("sms_auto_rules").update({ delay_minutes: null }).eq("trigger", TRIGGERS.payment_abandoned);
   } catch { /* ignore */ }
 }
 
@@ -728,11 +732,27 @@ export async function updateLog(id: string, patch: Partial<SmsLog>): Promise<voi
 
 export interface LogFilters {
   from?: string; to?: string; status?: string; templateId?: string; mobile?: string;
+  /** Combined name or mobile search (preferred over `mobile` alone). */
+  q?: string;
   trigger?: string; sentByType?: string; audienceType?: string; limit?: number;
 }
+
+function matchesNameOrMobile(row: { normalized_mobile: string; student_name?: string | null }, query: string): boolean {
+  const raw = query.trim();
+  if (!raw) return true;
+  const digits = raw.replace(/\D/g, "");
+  const name = (row.student_name || "").toLowerCase();
+  const needle = raw.toLowerCase();
+  if (digits.length >= 3 && row.normalized_mobile.includes(digits.slice(-10))) return true;
+  if (name.includes(needle)) return true;
+  // Digits-only typing still matches name if someone typed a substring of a stored phone-like name — rare.
+  return false;
+}
+
 export async function listLogs(f: LogFilters = {}): Promise<SmsLog[]> {
   const db = getSupabaseAdmin();
   const limit = Math.min(5000, Math.max(1, f.limit || 500));
+  const search = (f.q || f.mobile || "").trim();
   if (!db) {
     let rows = [...demo().logs];
     if (f.status) rows = rows.filter((r) => r.status === f.status);
@@ -740,7 +760,7 @@ export async function listLogs(f: LogFilters = {}): Promise<SmsLog[]> {
     if (f.trigger) rows = rows.filter((r) => r.trigger_event === f.trigger);
     if (f.sentByType) rows = rows.filter((r) => r.sent_by_type === f.sentByType);
     if (f.audienceType) rows = rows.filter((r) => r.audience_type === f.audienceType);
-    if (f.mobile) rows = rows.filter((r) => r.normalized_mobile.includes(f.mobile!.replace(/\D/g, "").slice(-10)));
+    if (search) rows = rows.filter((r) => matchesNameOrMobile(r, search));
     return rows.slice(0, limit);
   }
   try {
@@ -752,7 +772,18 @@ export async function listLogs(f: LogFilters = {}): Promise<SmsLog[]> {
     if (f.trigger) q = q.eq("trigger_event", f.trigger);
     if (f.sentByType) q = q.eq("sent_by_type", f.sentByType);
     if (f.audienceType) q = q.eq("audience_type", f.audienceType);
-    if (f.mobile) q = q.ilike("normalized_mobile", `%${f.mobile.replace(/\D/g, "").slice(-10)}%`);
+    if (search) {
+      const digits = search.replace(/\D/g, "").slice(-10);
+      // Sanitize for PostgREST or()/ilike — strip pattern/filter metachars.
+      const safe = search.replace(/[%_,.()]/g, " ").trim().slice(0, 80);
+      if (digits.length >= 3 && safe) {
+        q = q.or(`normalized_mobile.ilike.%${digits}%,student_name.ilike.%${safe}%`);
+      } else if (digits.length >= 3) {
+        q = q.ilike("normalized_mobile", `%${digits}%`);
+      } else if (safe) {
+        q = q.ilike("student_name", `%${safe}%`);
+      }
+    }
     const { data } = await q;
     return (data || []) as SmsLog[];
   } catch { return []; }

@@ -13,6 +13,8 @@ function filtersFromUrl(url: URL): LogFilters {
     to: url.searchParams.get("to") || undefined,
     status: url.searchParams.get("status") || undefined,
     templateId: url.searchParams.get("template") || undefined,
+    // `q` = name or mobile; keep `mobile` for older links/CSV bookmarks.
+    q: url.searchParams.get("q") || undefined,
     mobile: url.searchParams.get("mobile") || undefined,
     trigger: url.searchParams.get("trigger") || undefined,
     sentByType: url.searchParams.get("sentBy") || undefined,

@@ -114,10 +114,10 @@ async function run(req: Request) {
     }
     const abandRule = await getRule("payment_abandoned");
     if (abandRule?.enabled && abandRule.template_id) {
-      // "+Nm delay" from the rule: nudge only once the attempt is old enough
-      // (abandon sweep already flips status ~30m after initiate; this matches the
-      // Automations UI and caps how long we keep retrying).
-      const delayMs = (abandRule.delay_minutes ?? 30) * 60000;
+      // No extra delay by default (abandon sweep already marked ABANDONED).
+      // Optional delay_minutes on the rule still honored if set explicitly.
+      // Cap at 36h so stale abandoned attempts don't get infinite retries.
+      const delayMs = (abandRule.delay_minutes ?? 0) * 60000;
       let n = 0;
       // One abandoned nudge per phone per cron pass — repeat checkouts (same
       // student, many ABANDONED rows) must not spam 4 identical texts.

@@ -1442,16 +1442,16 @@ function LogsTab() {
   const [logs, setLogs] = useState<LogRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState("");
-  const [mobile, setMobile] = useState("");
+  const [q, setQ] = useState("");
   const [open, setOpen] = useState<LogRow | null>(null);
 
   const load = useCallback(() => {
     setLoading(true);
-    const q = new URLSearchParams();
-    if (status) q.set("status", status);
-    if (mobile) q.set("mobile", mobile);
-    fetch(`/api/admin/sms/logs?${q.toString()}`).then((r) => r.json()).then((d) => setLogs(d.ok ? d.logs : [])).finally(() => setLoading(false));
-  }, [status, mobile]);
+    const params = new URLSearchParams();
+    if (status) params.set("status", status);
+    if (q.trim()) params.set("q", q.trim());
+    fetch(`/api/admin/sms/logs?${params.toString()}`).then((r) => r.json()).then((d) => setLogs(d.ok ? d.logs : [])).finally(() => setLoading(false));
+  }, [status, q]);
   useEffect(() => { load(); }, [load]);
 
   async function retry(id: string) {
@@ -1461,25 +1461,32 @@ function LogsTab() {
     toast(r.ok ? "Resent (re-rendered)." : (detail || "Retry failed."), r.ok ? "success" : "error"); load();
   }
 
+  const csvQs = new URLSearchParams({ format: "csv" });
+  if (status) csvQs.set("status", status);
+  if (q.trim()) csvQs.set("q", q.trim());
+
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-end gap-2">
         <select className="input w-40" value={status} onChange={(e) => setStatus(e.target.value)}><option value="">All statuses</option>{["QUEUED", "SENT", "DELIVERED", "FAILED", "UNKNOWN"].map((s) => <option key={s}>{s}</option>)}</select>
-        <input className="input w-40" placeholder="mobile…" value={mobile} onChange={(e) => setMobile(e.target.value)} />
+        <input className="input w-56" placeholder="name or mobile…" value={q} onChange={(e) => setQ(e.target.value)} />
         <button onClick={load} className="btn btn-secondary text-sm"><RefreshCw size={14} /> Apply</button>
-        <a href={`/api/admin/sms/logs?format=csv${status ? `&status=${status}` : ""}${mobile ? `&mobile=${mobile}` : ""}`} className="btn btn-secondary text-sm"><Download size={14} /> CSV</a>
+        <a href={`/api/admin/sms/logs?${csvQs.toString()}`} className="btn btn-secondary text-sm"><Download size={14} /> CSV</a>
       </div>
       {loading ? <LoadingBlock /> : (
         <div className="card overflow-x-auto p-0">
           <table className="w-full min-w-[820px] text-left text-sm">
             <thead><tr className="border-b border-line text-xs uppercase tracking-wide text-muted">
-              <th className="px-4 py-3">When</th><th className="px-4 py-3">Mobile</th><th className="px-4 py-3">Template</th><th className="px-4 py-3">Status</th><th className="px-4 py-3">By</th><th className="px-4 py-3 text-right">Actions</th>
+              <th className="px-4 py-3">When</th><th className="px-4 py-3">Recipient</th><th className="px-4 py-3">Template</th><th className="px-4 py-3">Status</th><th className="px-4 py-3">By</th><th className="px-4 py-3 text-right">Actions</th>
             </tr></thead>
             <tbody>
               {logs.length === 0 ? <tr><td colSpan={6} className="p-8 text-center text-sm text-muted">No logs.</td></tr> : logs.map((l) => (
                 <tr key={l.id} className="border-b border-line/60 last:border-0 hover:bg-surface2/50">
                   <td className="px-4 py-2.5 text-xs text-muted">{formatISTDateTime(l.created_at)}</td>
-                  <td className="px-4 py-2.5 font-mono text-xs">{l.normalized_mobile}</td>
+                  <td className="px-4 py-2.5">
+                    <div className="text-sm text-ink">{l.student_name || "—"}</div>
+                    <div className="font-mono text-xs text-muted">{l.normalized_mobile}</div>
+                  </td>
                   <td className="px-4 py-2.5">{l.template_name}</td>
                   <td className="px-4 py-2.5">
                     <span className={`pill text-[10px] font-semibold ${LOG_STATUS_PILL[l.status] || "pill-gray"}`}>{l.status}</span>
@@ -1499,7 +1506,7 @@ function LogsTab() {
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 p-4" onClick={() => setOpen(null)}>
           <div className="card w-full max-w-lg p-5" onClick={(e) => e.stopPropagation()}>
             <h3 className="text-lg font-bold">{open.template_name}</h3>
-            <p className="mt-1 text-xs text-muted">{open.normalized_mobile} · {formatISTDateTime(open.created_at)} · {open.status}</p>
+            <p className="mt-1 text-xs text-muted">{open.student_name ? `${open.student_name} · ` : ""}{open.normalized_mobile} · {formatISTDateTime(open.created_at)} · {open.status}</p>
             <div className="mt-3 rounded-xl bg-surface p-3 text-sm whitespace-pre-wrap">{open.message_body}</div>
             {open.error_message && <p className="mt-2 text-xs text-danger">Error: {open.error_message}</p>}
             <details className="mt-3 text-xs"><summary className="cursor-pointer text-muted">Gateway response</summary><pre className="mt-2 overflow-x-auto rounded bg-surface p-2">{JSON.stringify(open.gateway_response, null, 2)}</pre></details>
