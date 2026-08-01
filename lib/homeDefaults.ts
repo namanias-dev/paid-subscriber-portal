@@ -160,6 +160,7 @@ export function mergeSiteSettings(row: Partial<SiteSettings> | null | undefined)
     nav: { overrides: { ...(isObj(r.nav) && isObj((r.nav as NavConfig).overrides) ? (r.nav as NavConfig).overrides : {}) } },
     about: { ...DEFAULT_ABOUT, ...(isObj(r.about) ? r.about : {}) },
     leaderboard: normalizeLeaderboardSettings(r.leaderboard),
+    allow_admin_csv_export: !!r.allow_admin_csv_export,
     updated_at: r.updated_at,
   };
 }

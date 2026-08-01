@@ -19,7 +19,7 @@ import { MARKETING_CHANNELS, GOOGLE_ADS_CHANNEL } from "@/lib/attribution";
 import { DEFAULT_LEAD_STATUS, LEAD_STATUSES, LEAD_STATUS_META, leadStatusLabel, leadStatusPill, normalizeLeadStatus } from "@/lib/leadStatus";
 import { formatStaffVerdictLabel, formatSystemVerifiedLabel } from "@/lib/leadBehaviourStatus";
 import type { Lead, LeadStatus, LeadSourceTouch } from "@/lib/types";
-import LegacyLeadPill from "@/components/admin/LegacyLeadPill";
+import CopyPhonesModal from "@/components/admin/CopyPhonesModal";
 import { lookupLegacyMatch, type LegacyLeadMatch } from "@/lib/marketing/legacyLeadMatch";
 
 const DAY_MS = 86400000;
@@ -78,6 +78,15 @@ export default function LeadsPage() {
   const [showChart, setShowChart] = usePersistentState<boolean>("nsa.leads.chart", true);
   const [addOpen, setAddOpen] = useState(false);
   const [active, setActive] = useState<Lead | null>(null);
+  const [copyOpen, setCopyOpen] = useState(false);
+  const [canExportCsv, setCanExportCsv] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/admin/leads/export-permission")
+      .then((r) => r.json())
+      .then((d) => { if (d.ok) setCanExportCsv(!!d.canExport); })
+      .catch(() => null);
+  }, []);
 
   const { fromMs, toMs } = useMemo(() => resolveTimeframe(tf), [tf]);
 
@@ -189,7 +198,14 @@ export default function LeadsPage() {
     }
   }
 
-  function exportCsv() {
+  async function exportCsv() {
+    // Gate client-side; server also enforces via the log endpoint.
+    const perm = await fetch("/api/admin/leads/export-permission").then((r) => r.json()).catch(() => null);
+    if (!perm?.canExport) {
+      toast("CSV export is not permitted for your role.", "error");
+      setCanExportCsv(false);
+      return;
+    }
     const rows = [
       ["Name", "Phone", "Email", "City", "State", "Source", "Status", "Course Interest", "Counsellor", "Follow-up", "Created"],
       ...filtered.map((l) => [l.name, l.phone, l.email ?? "", l.city ?? "", l.state ?? "", l.source, leadStatusLabel(l.status), l.course_interest ?? "", l.counsellor ?? "", l.follow_up_date ?? "", l.created_at ?? ""]),
@@ -201,6 +217,14 @@ export default function LeadsPage() {
     a.download = "leads.csv";
     a.click();
     URL.revokeObjectURL(url);
+    void fetch("/api/admin/leads/export-permission", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        rowCount: filtered.length,
+        filters: { source, channel, campaign, q, timeframe: tf },
+      }),
+    }).catch(() => null);
     toast("Exported leads.csv", "success");
   }
 
@@ -213,7 +237,8 @@ export default function LeadsPage() {
         subtitle={`${filtered.length} sales-pipeline leads`}
         action={
           <div className="flex flex-wrap gap-2">
-            <button onClick={exportCsv} className="btn btn-secondary text-sm">⬇ Export CSV</button>
+            <button onClick={() => setCopyOpen(true)} className="btn btn-secondary text-sm">Copy phone numbers</button>
+            {canExportCsv && <button onClick={() => void exportCsv()} className="btn btn-secondary text-sm">⬇ Export CSV</button>}
             <button onClick={() => setAddOpen(true)} className="btn btn-primary text-sm">+ Add Lead</button>
           </div>
         }
@@ -345,6 +370,7 @@ export default function LeadsPage() {
       )}
 
       <AddLeadModal open={addOpen} onClose={() => setAddOpen(false)} onAdded={reload} />
+      <CopyPhonesModal open={copyOpen} onClose={() => setCopyOpen(false)} />
       {active && (
         <LeadDetail
           lead={active}

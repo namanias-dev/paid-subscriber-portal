@@ -88,5 +88,6 @@ export const ADMIN_NAV: AdminNavItem[] = [
 
   // ── TEAM & SYSTEM ──────────────────────────────────────────────────────
   { href: "/admin/staff", label: "Staff & Roles", icon: "staff", group: "Team & System", perm: "manage_staff" },
+  { href: "/admin/activity", label: "Activity Log", icon: "activity", group: "Team & System", perm: "manage_roles" },
   { href: "/admin/settings", label: "Settings", icon: "settings", group: "Team & System", perm: "manage_settings" },
 ];

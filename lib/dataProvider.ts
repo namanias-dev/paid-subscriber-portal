@@ -6404,7 +6404,7 @@ export const getSiteSettings = cache(async function getSiteSettings(): Promise<S
  * so editing one screen (e.g. Settings/brand) never wipes another (e.g. Home).
  */
 export async function updateSiteSettings(patch: Partial<SiteSettings>): Promise<SiteSettings> {
-  const keys = ["logo_url", "logo_alt", "hero", "popup", "content", "brand", "toppers", "nav", "about", "leaderboard"] as const;
+  const keys = ["logo_url", "logo_alt", "hero", "popup", "content", "brand", "toppers", "nav", "about", "leaderboard", "allow_admin_csv_export"] as const;
   const provided: Record<string, unknown> = {};
   for (const k of keys) {
     if (k in patch && typeof patch[k] !== "undefined") provided[k] = patch[k];

@@ -226,6 +226,22 @@ export async function staffUploadProof(input: {
     metadata: { item: payment.item, item_type: payment.item_type },
   });
 
+  void import("./adminActivity").then(({ logAdminActivity }) =>
+    logAdminActivity({
+      actor: input.actor,
+      action: "payment_proof_uploaded",
+      entityType: "payment",
+      entityId: payment.id,
+      metadata: {
+        payment_id: payment.id,
+        enrollment_id: payment.enrollment_id ?? null,
+        student_name: payment.student_name,
+        amount: payment.amount,
+        file_ref: incoming.map((f) => f.key || f.name).filter(Boolean),
+      },
+    }),
+  ).catch(() => null);
+
   return { ok: true, proof };
 }
 
@@ -286,6 +302,20 @@ export async function approvePaymentAction(input: {
     reason: input.note ?? null,
     metadata: { alreadyPaid: !!r.alreadyPaid, item: payment.item, item_type: payment.item_type },
   });
+  void import("./adminActivity").then(({ logAdminActivity }) =>
+    logAdminActivity({
+      actor: input.actor,
+      action: "payment_proof_approved",
+      entityType: "payment",
+      entityId: payment.id,
+      metadata: {
+        payment_id: payment.id,
+        student_name: payment.student_name,
+        amount: payment.amount,
+        reason: input.note ?? null,
+      },
+    }),
+  ).catch(() => null);
   return r;
 }
 
