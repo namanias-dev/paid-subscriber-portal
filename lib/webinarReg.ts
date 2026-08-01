@@ -1,5 +1,5 @@
-import { istYMD } from "./dates";
-import { isPaidStatus as isPaid, itemKey } from "./paymentsAgg";
+import { istYMD, istTodayYMD } from "./dates";
+import { isPaidStatus as isPaid, itemKey, distinctRegistrations } from "./paymentsAgg";
 import type { Payment } from "./types";
 
 /** Timeframe presets shared by every registrations view. */
@@ -8,6 +8,46 @@ export type Frame = "7d" | "30d" | "month" | "year";
 /** IST YMD for `daysAgo` days before today. */
 export function ymdDaysAgo(daysAgo: number): string {
   return istYMD(new Date(Date.now() - daysAgo * 86400000)) || "";
+}
+
+/**
+ * Canonical "confirmed paid webinar registration" filter for one IST calendar day.
+ *
+ * Matches Payments "Webinar Registrations Today":
+ *  • status is PAID or captured (isPaidStatus)
+ *  • item_type === "webinar"
+ *  • created_at falls on `ymd` in Asia/Kolkata
+ *  • NOT filtered by amount (course fee varies; ₹50 is not hard-coded)
+ *  • Soft-deleted rows excluded when deleted_at is set
+ *
+ * Count with {@link distinctRegistrations} so retry duplicates don't inflate seats.
+ */
+export function filterPaidWebinarOnYmd(payments: readonly Payment[], ymd: string): Payment[] {
+  if (!ymd) return [];
+  return payments.filter(
+    (p) =>
+      !p.deleted_at &&
+      isPaid(p.status) &&
+      p.item_type === "webinar" &&
+      istYMD(p.created_at) === ymd,
+  );
+}
+
+/** Distinct paid webinar seats for one IST day — Overview ↔ Payments must agree. */
+export function paidWebinarRegsOnYmd(payments: readonly Payment[], ymd: string): number {
+  return distinctRegistrations(filterPaidWebinarOnYmd(payments, ymd));
+}
+
+/** Today + yesterday paid webinar registration counts (IST) for KPI deltas. */
+export function paidWebinarRegsTodayDelta(payments: readonly Payment[], todayYmd = istTodayYMD()): {
+  today: number;
+  yesterday: number;
+  delta: number;
+} {
+  const yesterday = istYMD(new Date(Date.now() - 86400000)) || "";
+  const today = paidWebinarRegsOnYmd(payments, todayYmd);
+  const yest = paidWebinarRegsOnYmd(payments, yesterday);
+  return { today, yesterday: yest, delta: today - yest };
 }
 
 /** Whether an IST YMD falls inside the given timeframe. */

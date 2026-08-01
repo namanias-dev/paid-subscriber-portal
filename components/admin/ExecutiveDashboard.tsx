@@ -12,7 +12,7 @@ import Link from "next/link";
 import dynamic from "next/dynamic";
 import { PageHeader } from "@/components/admin/ui";
 import Modal from "@/components/ui/Modal";
-import { formatINR, formatISTDateTime } from "@/lib/dates";
+import { formatINR, formatISTDateTime, istTodayYMD } from "@/lib/dates";
 
 const ChartFallback = () => <div className="skeleton h-40 w-full animate-shimmer rounded-xl" />;
 const SparkArea = dynamic(() => import("@/components/admin/ExecutiveCharts").then((m) => m.SparkArea), { ssr: false, loading: ChartFallback });
@@ -25,6 +25,8 @@ const CssSpark = dynamic(() => import("@/components/admin/ExecutiveCharts").then
 });
 
 type Preset = "today" | "7d" | "30d" | "this_month" | "all_time";
+type TrafficWindow = "7d" | "14d" | "30d";
+type ExplorerFrame = "7d" | "14d" | "30d" | "90d" | "this_month" | "all" | "custom";
 
 interface MetricDelta {
   value: number | null;
@@ -105,8 +107,8 @@ interface BodyData {
     upcomingDue: { count: number; amount: number };
   };
   engagement: {
-    quizAttemptsToday: MetricDelta; quizTrend: SparkPoint[];
-    topQuizzes: { id: string; title: string; attempts: number }[];
+    quizAttemptsToday: MetricDelta; quizUniqueToday: MetricDelta; quizTrend: SparkPoint[];
+    topQuizzes: { id: string; title: string; attempts: number; uniqueStudents: number }[];
     caTop: { slug: string; title: string; views: number }[];
     resourceDownloads: { id: string; title: string; downloads: number }[];
     resourceDownloadEvents: MetricDelta;
@@ -115,6 +117,7 @@ interface BodyData {
     sent: number; delivered: number | null; failed: number; pending: number;
     deliveryRate: number | null; failureRate: number | null; deliveryKnown: boolean; trend: SparkPoint[];
   };
+  unavailable?: string[];
 }
 
 const PRESETS: { id: Preset; label: string }[] = [
@@ -125,25 +128,102 @@ const PRESETS: { id: Preset; label: string }[] = [
   { id: "all_time", label: "All time" },
 ];
 
+const TRAFFIC_WINDOWS: { id: TrafficWindow; label: string }[] = [
+  { id: "7d", label: "7D" },
+  { id: "14d", label: "14D" },
+  { id: "30d", label: "30D" },
+];
+
+const EXPLORER_FRAMES: { id: ExplorerFrame; label: string }[] = [
+  { id: "7d", label: "7 days" },
+  { id: "14d", label: "14 days" },
+  { id: "30d", label: "30 days" },
+  { id: "90d", label: "90 days" },
+  { id: "this_month", label: "This month" },
+  { id: "all", label: "All available" },
+];
+
 const nf = (n: number) => n.toLocaleString("en-IN");
 const CARD =
   "card flex w-full items-center gap-4 p-4 text-left transition-[transform,box-shadow] duration-200 ease-out hover:-translate-y-0.5 hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-primary/30 motion-reduce:transform-none motion-reduce:transition-none";
+const GOLD = "#9A7B0A";
 
 function fmtVal(m: MetricDelta, money = false): string {
   if (m.value === null) return "—";
   return money ? formatINR(m.value) : nf(m.value);
 }
 
-function Delta({ m }: { m: MetricDelta }) {
-  if (m.value === null || m.deltaAbs === null || m.prev === null) return null;
-  const up = m.deltaAbs > 0;
-  const flat = m.deltaAbs === 0;
-  const color = flat ? "text-muted" : up ? "text-emerald-600" : "text-red-600";
+function safeDeltaPct(value: number, prev: number): number | null {
+  if (prev === 0) return null;
+  const pct = ((value - prev) / prev) * 100;
+  if (!Number.isFinite(pct)) return null;
+  return Math.round(pct * 10) / 10;
+}
+
+function sumSeriesMonth(series: SparkPoint[] | undefined, yyyymm: string): number {
+  if (!series?.length) return 0;
+  return series.reduce((acc, p) => (p.day.startsWith(yyyymm) ? acc + p.value : acc), 0);
+}
+
+function buildExplorerPoints(
+  history: HistorySeries | undefined,
+  frame: ExplorerFrame,
+  customFrom: string,
+  customTo: string,
+): { day: string; visitors: number; logins: number; webinarPaid: number }[] {
+  if (!history?.visitors?.length) return [];
+  const visitors = history.visitors;
+  const loginByDay = new Map(history.loginUsers.map((p) => [p.day, p.value]));
+  const webinarByDay = new Map(history.webinarPaid.map((p) => [p.day, p.value]));
+
+  let days = visitors.map((v) => v.day);
+  if (frame === "custom" && customFrom && customTo) {
+    days = days.filter((d) => d >= customFrom && d <= customTo);
+  } else if (frame === "this_month") {
+    const ym = istTodayYMD().slice(0, 7);
+    days = days.filter((d) => d.startsWith(ym));
+  } else if (frame === "all" || frame === "90d") {
+    // API history is ~60d — 90d = all available
+  } else if (frame === "7d" || frame === "14d" || frame === "30d") {
+    const n = frame === "7d" ? 7 : frame === "14d" ? 14 : 30;
+    days = days.slice(-n);
+  }
+
+  return days.map((day) => ({
+    day,
+    visitors: visitors.find((v) => v.day === day)?.value ?? 0,
+    logins: loginByDay.get(day) ?? 0,
+    webinarPaid: webinarByDay.get(day) ?? 0,
+  }));
+}
+
+/** Delta — never Infinity/NaN. Shows "New" when prev===0 and value>0. */
+function Delta({ m, invert }: { m: MetricDelta; invert?: boolean }) {
+  if (m.value === null || m.prev === null) return null;
+  if (m.prev === 0 && m.value === 0) return null;
+  const priorLabel = m.scope === "today" ? "vs yesterday" : "vs prior";
+  if (m.prev === 0 && m.value > 0) {
+    return (
+      <span className="text-[11px] font-semibold text-emerald-600">
+        New
+        <span className="ml-1 font-normal text-muted">{priorLabel}</span>
+      </span>
+    );
+  }
+  const abs = m.deltaAbs ?? m.value - m.prev;
+  if (!Number.isFinite(abs)) return null;
+  const flat = abs === 0;
+  const up = abs > 0;
+  const good = invert ? !up : up;
+  const color = flat ? "text-muted" : good ? "text-emerald-600" : "text-red-600";
+  const pct = m.deltaPct !== null && Number.isFinite(m.deltaPct)
+    ? m.deltaPct
+    : safeDeltaPct(m.value, m.prev);
   return (
     <span className={`text-[11px] font-semibold tabular-nums ${color}`}>
-      {flat ? "→" : up ? "↑" : "↓"} {Math.abs(m.deltaAbs).toLocaleString("en-IN")}
-      {m.deltaPct !== null ? ` (${m.deltaPct > 0 ? "+" : ""}${m.deltaPct}%)` : ""}
-      <span className="ml-1 font-normal text-muted">vs prior</span>
+      {flat ? "→" : up ? "↑" : "↓"} {Math.abs(abs).toLocaleString("en-IN")}
+      {pct !== null ? ` (${pct > 0 ? "+" : ""}${pct}%)` : ""}
+      <span className="ml-1 font-normal text-muted">{priorLabel}</span>
     </span>
   );
 }
@@ -167,6 +247,7 @@ function LazyMount({ children, rootMargin = "280px", minHeight = 120 }: { childr
 }
 
 function PremiumKpi({
+  icon,
   label,
   metric,
   spark,
@@ -174,9 +255,11 @@ function PremiumKpi({
   money,
   gold,
   scopeHint,
+  secondary,
   onClick,
   href,
 }: {
+  icon: string;
   label: string;
   metric: MetricDelta;
   spark?: SparkPoint[];
@@ -184,11 +267,15 @@ function PremiumKpi({
   money?: boolean;
   gold?: boolean;
   scopeHint?: string;
+  secondary?: string;
   onClick?: () => void;
   href?: string;
 }) {
   const inner = (
     <>
+      <div className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-primary/10 text-xl" aria-hidden>
+        {icon}
+      </div>
       <div className="min-w-0 flex-1">
         <p className="truncate text-[11px] font-semibold uppercase tracking-wide text-muted">{label}</p>
         <p className={`mt-1 font-heading text-2xl font-extrabold leading-none tabular-nums sm:text-3xl ${gold ? "text-[#9A7B0A]" : "text-ink"}`}>
@@ -198,13 +285,13 @@ function PremiumKpi({
           <Delta m={metric} />
           {scopeHint && <span className="text-[10px] text-muted">{scopeHint}</span>}
         </div>
+        {secondary && <p className="mt-1 text-[11px] tabular-nums text-muted">{secondary}</p>}
       </div>
       {spark && spark.length > 0 && (
-        <div className="shrink-0">
+        <div className="hidden shrink-0 sm:block">
           <CssSpark points={spark} color={sparkColor} />
         </div>
       )}
-      <span className="shrink-0 text-xs font-semibold text-primary">View →</span>
     </>
   );
   if (href) {
@@ -243,6 +330,35 @@ function SectionShell({
   );
 }
 
+function MetricToggle({
+  label,
+  checked,
+  onChange,
+  accent,
+}: {
+  label: string;
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  accent?: string;
+}) {
+  return (
+    <label
+      className={`inline-flex cursor-pointer items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
+        checked ? "border-primary/40 bg-primary/5 text-ink" : "border-line bg-surface2 text-ink2"
+      }`}
+    >
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+        className="h-3.5 w-3.5 accent-[var(--primary)]"
+        style={accent ? { accentColor: accent } : undefined}
+      />
+      {label}
+    </label>
+  );
+}
+
 export default function ExecutiveDashboard() {
   const [preset, setPreset] = useState<Preset>("30d");
   const [excludeAdmin, setExcludeAdmin] = useState(false);
@@ -251,10 +367,16 @@ export default function ExecutiveDashboard() {
   const [pulseLoading, setPulseLoading] = useState(true);
   const [bodyLoading, setBodyLoading] = useState(false);
   const [error, setError] = useState(false);
-  const [explorerOpen, setExplorerOpen] = useState(false);
-  const [explorerFrame, setExplorerFrame] = useState<"7d" | "14d" | "30d" | "60d">("14d");
+
+  const [trafficWindow, setTrafficWindow] = useState<TrafficWindow>("14d");
+  const [showVisitors, setShowVisitors] = useState(true);
   const [showLogins, setShowLogins] = useState(false);
   const [showWebinar, setShowWebinar] = useState(false);
+
+  const [explorerOpen, setExplorerOpen] = useState(false);
+  const [explorerFrame, setExplorerFrame] = useState<ExplorerFrame>("14d");
+  const [customFrom, setCustomFrom] = useState("");
+  const [customTo, setCustomTo] = useState("");
   const [funnelCourseId, setFunnelCourseId] = useState("");
   const [webinarDetail, setWebinarDetail] = useState<WebinarRow | null>(null);
   const [courseDetail, setCourseDetail] = useState<CourseRow | null>(null);
@@ -296,26 +418,55 @@ export default function ExecutiveDashboard() {
 
   const history = pulse?.history;
   const last14 = (s?: SparkPoint[]) => (s || []).slice(-14);
+  const monthPrefix = istTodayYMD().slice(0, 7);
+  const webinarMtd = useMemo(() => sumSeriesMonth(history?.webinarRevenue, monthPrefix), [history, monthPrefix]);
+  const courseMtd = useMemo(() => sumSeriesMonth(history?.courseRevenue, monthPrefix), [history, monthPrefix]);
 
-  const explorerPoints = useMemo(() => {
+  const inlineChartPoints = useMemo(() => {
     if (!history) return [];
-    const n = explorerFrame === "7d" ? 7 : explorerFrame === "14d" ? 14 : explorerFrame === "30d" ? 30 : 60;
-    const visitors = history.visitors.slice(-n);
-    const logins = history.logins.slice(-n);
-    const webinar = history.webinarPaid.slice(-n);
-    return visitors.map((v, i) => ({
-      day: v.day,
-      visitors: v.value,
-      logins: logins[i]?.value ?? 0,
-      webinarPaid: webinar[i]?.value ?? 0,
-    }));
-  }, [history, explorerFrame]);
+    const n = trafficWindow === "7d" ? 7 : trafficWindow === "14d" ? 14 : 30;
+    return buildExplorerPoints(history, "all", "", "").slice(-n);
+  }, [history, trafficWindow]);
+
+  const explorerPoints = useMemo(
+    () => buildExplorerPoints(history, explorerFrame, customFrom, customTo),
+    [history, explorerFrame, customFrom, customTo],
+  );
+
+  const explorerSummary = useMemo(() => {
+    if (!explorerPoints.length) return null;
+    const total = explorerPoints.reduce((a, p) => a + p.visitors, 0);
+    const days = explorerPoints.length;
+    const avg = days ? total / days : 0;
+    // Prior equal-length window from full history
+    if (!history?.visitors?.length) {
+      return { total, avg, priorTotal: null as number | null, priorDeltaPct: null as number | null };
+    }
+    const endIdx = history.visitors.findIndex((v) => v.day === explorerPoints[0]?.day);
+    let priorTotal: number | null = null;
+    let priorDeltaPct: number | null = null;
+    if (endIdx > 0) {
+      const prior = history.visitors.slice(Math.max(0, endIdx - days), endIdx);
+      if (prior.length === days) {
+        priorTotal = prior.reduce((a, p) => a + p.value, 0);
+        priorDeltaPct = safeDeltaPct(total, priorTotal);
+      }
+    }
+    return { total, avg, priorTotal, priorDeltaPct };
+  }, [explorerPoints, history]);
 
   const funnelStages = useMemo(() => {
     if (!body) return [];
     if (!funnelCourseId) return body.admissionFunnel.stages;
     return body.admissionFunnel.byCourse.find((c) => c.courseId === funnelCourseId)?.stages || body.admissionFunnel.stages;
   }, [body, funnelCourseId]);
+
+  const openExplorer = (opts?: { logins?: boolean; webinar?: boolean }) => {
+    if (opts?.logins) setShowLogins(true);
+    if (opts?.webinar) setShowWebinar(true);
+    setExplorerFrame(trafficWindow);
+    setExplorerOpen(true);
+  };
 
   return (
     <div className="space-y-5">
@@ -325,10 +476,19 @@ export default function ExecutiveDashboard() {
         action={
           <div className="flex flex-wrap items-center gap-2">
             <label className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-line bg-surface px-3 py-2 text-sm">
-              <input type="checkbox" checked={excludeAdmin} onChange={(e) => setExcludeAdmin(e.target.checked)} className="h-4 w-4 accent-[var(--primary)]" />
+              <input
+                type="checkbox"
+                checked={excludeAdmin}
+                onChange={(e) => setExcludeAdmin(e.target.checked)}
+                className="h-4 w-4 accent-[var(--primary)]"
+              />
               Exclude admin
             </label>
-            <button type="button" onClick={loadPulse} className="rounded-xl border border-line bg-surface px-3 py-2 text-sm font-semibold hover:border-primary/40">
+            <button
+              type="button"
+              onClick={loadPulse}
+              className="rounded-xl border border-line bg-surface px-3 py-2 text-sm font-semibold hover:border-primary/40"
+            >
               Refresh
             </button>
           </div>
@@ -361,7 +521,7 @@ export default function ExecutiveDashboard() {
         </div>
       )}
 
-      {(pulseLoading && !pulse) && (
+      {pulseLoading && !pulse && (
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           {Array.from({ length: 8 }).map((_, i) => (
             <div key={i} className="skeleton h-[104px] animate-shimmer rounded-[20px]" />
@@ -370,86 +530,138 @@ export default function ExecutiveDashboard() {
       )}
 
       {pulse && (
-        <div className="pay-stagger space-y-5">
+        <div className="space-y-5">
           {/* Executive pulse */}
           <div>
             <div className="mb-3 flex items-end justify-between gap-2">
               <h2 className="font-heading text-xs font-bold uppercase tracking-[0.14em] text-muted">Executive pulse</h2>
-              <p className="text-[11px] text-muted">Sparklines · last 14 days</p>
+              <p className="text-[11px] text-muted">Sparklines · last 14 days · Today · IST</p>
             </div>
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <div className="pay-stagger grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
               <PremiumKpi
-                label="Website visitors today"
+                icon="👁"
+                label="Website visitors"
                 metric={pulse.pulse.visitorsToday}
                 spark={last14(history?.visitors)}
                 sparkColor="#0057FF"
                 scopeHint="Today · IST"
-                onClick={() => setExplorerOpen(true)}
+                onClick={() => openExplorer()}
               />
               <PremiumKpi
-                label="Logged-in users today"
+                icon="👤"
+                label="Logged-in users"
                 metric={pulse.pulse.loginUsersToday}
                 spark={last14(history?.loginUsers)}
                 sparkColor="#0B1F4D"
-                scopeHint="Today · unique"
-                onClick={() => {
-                  setShowLogins(true);
-                  setExplorerOpen(true);
-                }}
+                scopeHint="Today · IST"
+                onClick={() => openExplorer({ logins: true })}
               />
               <PremiumKpi
-                label="Login codes generated"
+                icon="🔑"
+                label="Login codes"
                 metric={pulse.pulse.loginCodesToday}
                 sparkColor="#64748B"
-                scopeHint="Today · new buyers"
+                scopeHint="Today · IST"
                 href="/admin/students"
               />
               <PremiumKpi
-                label="Leads collected today"
+                icon="📥"
+                label="Leads collected"
                 metric={pulse.pulse.leadsToday}
                 spark={last14(history?.leads)}
                 sparkColor="#7C3AED"
-                scopeHint="Today · all sources"
+                scopeHint="Today · IST"
                 href="/admin/leads"
               />
               <PremiumKpi
-                label="Paid webinar registrations"
+                icon="✅"
+                label="Paid webinar regs"
                 metric={pulse.pulse.webinarRegsToday}
                 spark={last14(history?.webinarPaid)}
                 sparkColor="#C9A227"
-                scopeHint="Today · PAID only"
+                scopeHint="Today · IST"
                 href="/admin/payments"
               />
               <PremiumKpi
+                icon="🎓"
                 label="Course seat bookings"
                 metric={pulse.pulse.seatBookingsToday}
                 spark={last14(history?.seatBookings)}
                 sparkColor="#0891B2"
-                scopeHint="Today · confirmed seat"
+                scopeHint="Today · IST"
                 href="/admin/course-payments"
               />
               <PremiumKpi
+                icon="💰"
                 label="Webinar revenue"
                 metric={pulse.pulse.webinarRevenue}
                 spark={last14(history?.webinarRevenue)}
                 sparkColor="#C9A227"
                 money
                 gold
-                scopeHint="Selected period"
+                scopeHint="Today · IST"
+                secondary={pulse.canRevenue ? `MTD ${formatINR(webinarMtd)}` : undefined}
                 href="/admin/payments"
               />
               <PremiumKpi
+                icon="📘"
                 label="Course revenue"
                 metric={pulse.pulse.courseRevenue}
                 spark={last14(history?.courseRevenue)}
                 sparkColor="#C9A227"
                 money
                 gold
-                scopeHint="Selected period"
+                scopeHint="Today · IST"
+                secondary={pulse.canRevenue ? `MTD ${formatINR(courseMtd)}` : undefined}
                 href="/admin/course-payments"
               />
             </div>
           </div>
+
+          {/* INLINE Traffic & conversion — directly below pulse */}
+          <section className="card overflow-hidden">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line px-5 py-3.5">
+              <h2 className="font-heading text-base font-bold tracking-tight">Traffic &amp; conversion</h2>
+              <button
+                type="button"
+                onClick={() => openExplorer()}
+                className="text-xs font-semibold text-primary hover:underline"
+              >
+                Expand →
+              </button>
+            </div>
+            <div className="space-y-4 p-5">
+              <div className="flex flex-wrap items-center gap-2">
+                {TRAFFIC_WINDOWS.map((w) => (
+                  <button
+                    key={w.id}
+                    type="button"
+                    onClick={() => setTrafficWindow(w.id)}
+                    className={`rounded-full px-3 py-1.5 text-xs font-semibold transition ${
+                      trafficWindow === w.id ? "bg-primary text-white shadow-sm" : "bg-surface2 text-ink2 hover:bg-line/50"
+                    }`}
+                  >
+                    {w.label}
+                  </button>
+                ))}
+                <div className="ml-auto flex flex-wrap items-center gap-2">
+                  <MetricToggle label="Website Visitors" checked={showVisitors} onChange={setShowVisitors} />
+                  <MetricToggle label="Unique Portal Logins" checked={showLogins} onChange={setShowLogins} accent="#0B1F4D" />
+                  <MetricToggle label="Paid Webinar Regs" checked={showWebinar} onChange={setShowWebinar} accent={GOLD} />
+                </div>
+              </div>
+              <ExplorerLines
+                points={inlineChartPoints}
+                showVisitors={showVisitors}
+                showLogins={showLogins}
+                showWebinar={showWebinar}
+                height={200}
+              />
+              <p className="text-[11px] text-muted">
+                Visitors = unique visitor_id · Logins = unique portal users · Webinar regs = paid distinct seats.
+              </p>
+            </div>
+          </section>
 
           {/* Trigger body load near fold */}
           <LazyMount rootMargin="400px" minHeight={40}>
@@ -459,7 +671,7 @@ export default function ExecutiveDashboard() {
           {body && (
             <>
               <LazyMount>
-                <SectionShell title="Website & portal activity" href="/admin/analytics" hrefLabel="Analytics →">
+                <SectionShell title="Website & portal" href="/admin/analytics" hrefLabel="Analytics →">
                   <div className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
                     <MiniStat label="Visitors" m={body.activity.visitors} />
                     <MiniStat label="Page views" m={body.activity.pageViews} />
@@ -517,7 +729,7 @@ export default function ExecutiveDashboard() {
               </LazyMount>
 
               <LazyMount>
-                <SectionShell title="Leads & acquisition" href="/admin/leads" hrefLabel="Leads CRM →">
+                <SectionShell title="Leads" href="/admin/leads" hrefLabel="Leads CRM →">
                   <div className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                     <MiniStat label="Leads (period)" m={body.leads.totalPeriod} />
                     <MiniStat label="Leads today" m={body.leads.today} />
@@ -544,7 +756,7 @@ export default function ExecutiveDashboard() {
               </LazyMount>
 
               <LazyMount>
-                <SectionShell title="Webinar performance" href="/admin/webinars" hrefLabel="Webinars →">
+                <SectionShell title="Webinars" href="/admin/webinars" hrefLabel="Webinars →">
                   <p className="mb-3 text-[11px] text-muted">
                     Registrations = distinct paid webinar seats (PAID/captured) — same as Payments.
                   </p>
@@ -593,7 +805,7 @@ export default function ExecutiveDashboard() {
               </LazyMount>
 
               <LazyMount>
-                <SectionShell title="Course admissions & seat bookings" href="/admin/course-payments" hrefLabel="Course payments →">
+                <SectionShell title="Courses" href="/admin/course-payments" hrefLabel="Course payments →">
                   <div className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                     <MiniStat label="Seat bookings today" m={body.courses.seatBookingsToday} />
                     <MiniStat label="Seat bookings (all time)" m={body.courses.seatBookingsAllTime} />
@@ -631,7 +843,7 @@ export default function ExecutiveDashboard() {
               </LazyMount>
 
               <LazyMount>
-                <SectionShell title="Admission payment funnel" href="/admin/course-payments" hrefLabel="Course payments →">
+                <SectionShell title="Admission funnel" href="/admin/course-payments" hrefLabel="Course payments →">
                   <div className="mb-3 flex flex-wrap items-center gap-2">
                     <select value={funnelCourseId} onChange={(e) => setFunnelCourseId(e.target.value)} className="rounded-lg border border-line bg-surface px-3 py-1.5 text-sm">
                       <option value="">All courses</option>
@@ -645,7 +857,7 @@ export default function ExecutiveDashboard() {
               </LazyMount>
 
               <LazyMount>
-                <SectionShell title="Installment & collection health" href="/admin/access-risk" hrefLabel="Access at risk →">
+                <SectionShell title="Collections" href="/admin/access-risk" hrefLabel="Access at risk →">
                   <div className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                     <MiniStat label="Overdue enrollments" m={body.collections.overdueCount} />
                     <MiniStat label="Overdue amount" m={body.collections.overdueAmount} money />
@@ -677,13 +889,22 @@ export default function ExecutiveDashboard() {
 
               <LazyMount>
                 <SectionShell title="Content & learning" href="/admin/quizzes" hrefLabel="Quizzes →">
-                  <div className="mb-4 grid gap-3 sm:grid-cols-2">
-                    <MiniStat label="Quizzes taken today" m={body.engagement.quizAttemptsToday} />
+                  <div className="mb-4 grid gap-3 sm:grid-cols-3">
+                    <MiniStat label="Quiz attempts today" m={body.engagement.quizAttemptsToday} />
+                    <MiniStat label="Unique students today" m={body.engagement.quizUniqueToday} />
                     <MiniStat label="Resource download events" m={body.engagement.resourceDownloadEvents} />
                   </div>
                   <MiniBars points={body.engagement.quizTrend} color="#0891B2" />
                   <div className="mt-4 grid gap-4 lg:grid-cols-3">
-                    <RankList title="Top quizzes" rows={body.engagement.topQuizzes.map((q) => ({ key: q.id, label: q.title, value: nf(q.attempts), href: `/admin/quizzes/${q.id}/edit` }))} />
+                    <RankList
+                      title="Top quizzes"
+                      rows={body.engagement.topQuizzes.map((q) => ({
+                        key: q.id,
+                        label: q.title,
+                        value: `${nf(q.attempts)} · ${nf(q.uniqueStudents)} unique`,
+                        href: `/admin/quizzes/${q.id}/edit`,
+                      }))}
+                    />
                     <RankList title="Top current affairs" rows={body.engagement.caTop.map((a) => ({ key: a.slug, label: a.title, value: nf(a.views), href: "/admin/current-affairs" }))} />
                     <RankList title="Top downloads" rows={body.engagement.resourceDownloads.map((r) => ({ key: r.id, label: r.title, value: nf(r.downloads), href: "/admin/current-affairs/pdfs" }))} />
                   </div>
@@ -691,7 +912,7 @@ export default function ExecutiveDashboard() {
               </LazyMount>
 
               <LazyMount>
-                <SectionShell title="SMS delivery" href="/admin/communications/sms" hrefLabel="Mission Control →">
+                <SectionShell title="SMS" href="/admin/communications/sms" hrefLabel="Mission Control →">
                   <div className="mb-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
                     <MiniNum label="Sent" value={nf(body.sms.sent)} />
                     <MiniNum label="Delivered" value={body.sms.delivered === null ? "—" : nf(body.sms.delivered)} tone="green" />
@@ -705,37 +926,110 @@ export default function ExecutiveDashboard() {
               </LazyMount>
             </>
           )}
+
+          {pulse.unavailable.length > 0 && (
+            <details className="card overflow-hidden">
+              <summary className="cursor-pointer px-5 py-3.5 text-sm font-semibold text-muted hover:text-ink">
+                Unavailable metrics ({pulse.unavailable.length})
+              </summary>
+              <ul className="space-y-1 border-t border-line px-5 py-3 text-sm text-ink2">
+                {pulse.unavailable.map((note) => (
+                  <li key={note} className="list-inside list-disc">{note}</li>
+                ))}
+              </ul>
+            </details>
+          )}
         </div>
       )}
 
-      {/* Visitor explorer */}
-      <Modal open={explorerOpen} onClose={() => setExplorerOpen(false)} title="Website activity explorer" maxWidth="max-w-3xl">
+      {/* Full explorer modal */}
+      <Modal open={explorerOpen} onClose={() => setExplorerOpen(false)} title="Traffic & conversion explorer" maxWidth="max-w-3xl">
         <div className="space-y-4">
           <div className="flex flex-wrap items-center gap-2">
-            {(["7d", "14d", "30d", "60d"] as const).map((f) => (
+            {EXPLORER_FRAMES.map((f) => (
               <button
-                key={f}
+                key={f.id}
                 type="button"
-                onClick={() => setExplorerFrame(f)}
+                onClick={() => setExplorerFrame(f.id)}
                 className={`rounded-full px-3 py-1.5 text-sm font-medium transition ${
-                  explorerFrame === f ? "bg-primary text-white" : "bg-surface2 text-ink2 hover:bg-surface"
+                  explorerFrame === f.id ? "bg-primary text-white" : "bg-surface2 text-ink2 hover:bg-surface"
                 }`}
               >
-                {f === "7d" ? "7 days" : f === "14d" ? "14 days" : f === "30d" ? "30 days" : "60 days"}
+                {f.label}
               </button>
             ))}
-            <label className="ml-auto inline-flex items-center gap-2 rounded-full bg-surface2 px-3 py-1.5 text-xs font-semibold">
-              <input type="checkbox" checked={showLogins} onChange={(e) => setShowLogins(e.target.checked)} className="accent-[var(--primary)]" />
-              Logins / day
-            </label>
-            <label className="inline-flex items-center gap-2 rounded-full bg-surface2 px-3 py-1.5 text-xs font-semibold">
-              <input type="checkbox" checked={showWebinar} onChange={(e) => setShowWebinar(e.target.checked)} className="accent-[var(--gold)]" />
-              Paid webinar regs
-            </label>
+            <button
+              type="button"
+              onClick={() => setExplorerFrame("custom")}
+              className={`rounded-full px-3 py-1.5 text-sm font-medium transition ${
+                explorerFrame === "custom" ? "bg-primary text-white" : "bg-surface2 text-ink2 hover:bg-surface"
+              }`}
+            >
+              Custom
+            </button>
           </div>
-          <ExplorerLines points={explorerPoints} showLogins={showLogins} showWebinar={showWebinar} />
+
+          {explorerFrame === "custom" && (
+            <div className="flex flex-wrap items-end gap-3 rounded-xl border border-line bg-surface2/50 p-3">
+              <label className="text-xs font-semibold text-muted">
+                From
+                <input
+                  type="date"
+                  value={customFrom}
+                  onChange={(e) => setCustomFrom(e.target.value)}
+                  className="mt-1 block rounded-lg border border-line bg-surface px-2.5 py-1.5 text-sm text-ink"
+                />
+              </label>
+              <label className="text-xs font-semibold text-muted">
+                To
+                <input
+                  type="date"
+                  value={customTo}
+                  onChange={(e) => setCustomTo(e.target.value)}
+                  className="mt-1 block rounded-lg border border-line bg-surface px-2.5 py-1.5 text-sm text-ink"
+                />
+              </label>
+            </div>
+          )}
+
+          <div className="flex flex-wrap items-center gap-2">
+            <MetricToggle label="Website Visitors" checked={showVisitors} onChange={setShowVisitors} />
+            <MetricToggle label="Unique Portal Logins" checked={showLogins} onChange={setShowLogins} accent="#0B1F4D" />
+            <MetricToggle label="Paid Webinar Regs" checked={showWebinar} onChange={setShowWebinar} accent={GOLD} />
+          </div>
+
+          <ExplorerLines
+            points={explorerPoints}
+            showVisitors={showVisitors}
+            showLogins={showLogins}
+            showWebinar={showWebinar}
+            height={280}
+          />
+
+          {explorerSummary && (
+            <div className="grid gap-3 sm:grid-cols-3">
+              <MiniNum label="Total visitors" value={nf(explorerSummary.total)} />
+              <MiniNum label="Daily average" value={nf(Math.round(explorerSummary.avg))} />
+              <div className="rounded-2xl border border-line bg-surface p-4">
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-muted">Vs prior window</p>
+                {explorerSummary.priorTotal === null ? (
+                  <p className="mt-2 text-sm text-muted">—</p>
+                ) : (
+                  <>
+                    <p className="mt-2 font-heading text-xl font-extrabold tabular-nums">{nf(explorerSummary.priorTotal)}</p>
+                    {explorerSummary.priorDeltaPct !== null && (
+                      <p className={`text-xs font-semibold ${explorerSummary.priorDeltaPct >= 0 ? "text-emerald-600" : "text-red-600"}`}>
+                        {explorerSummary.priorDeltaPct > 0 ? "+" : ""}{explorerSummary.priorDeltaPct}% vs prior {explorerPoints.length}d
+                      </p>
+                    )}
+                  </>
+                )}
+              </div>
+            </div>
+          )}
+
           <p className="text-xs text-muted">
-            Visitors = unique visitor_id · Logins = login events · Webinar regs = paid distinct seats (Payments methodology).
+            History window is ~60 days. “90 days” shows all available points. Visitors = unique visitor_id · Logins = unique portal users · Webinar regs = paid distinct seats.
           </p>
           <Link href="/admin/analytics" className="inline-block text-sm font-semibold text-primary hover:underline">
             Open full analytics →
