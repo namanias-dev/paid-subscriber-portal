@@ -97,55 +97,43 @@ export default function ActivityLogClient() {
       </div>
 
       {loading ? <LoadingBlock /> : (
-        <TableShell>
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-line text-left text-xs uppercase tracking-wide text-muted">
-                <th className="px-3 py-2">Time (IST)</th>
-                <th className="px-3 py-2">Actor</th>
-                <th className="px-3 py-2">Action</th>
-                <th className="px-3 py-2">Entity</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r) => {
-                const href = entityHref(r.entity_type, r.entity_id);
-                const open = expanded === r.id;
-                return (
-                  <Fragment key={r.id}>
-                    <tr
-                      className="cursor-pointer border-b border-line/70 hover:bg-surface2/60"
-                      onClick={() => setExpanded(open ? null : r.id)}
-                    >
-                      <td className="px-3 py-2 whitespace-nowrap tabular-nums text-ink2">{formatISTDateTime(r.created_at)}</td>
-                      <td className="px-3 py-2">
-                        <div className="font-medium text-ink">{r.actor_name || r.actor_user_id || "—"}</div>
-                        <div className="text-xs text-muted">{r.actor_role || "—"}</div>
-                      </td>
-                      <td className="px-3 py-2 font-medium text-ink">{r.action_label}</td>
-                      <td className="px-3 py-2 text-ink2">
-                        {href ? (
-                          <Link href={href} className="text-primary underline-offset-2 hover:underline" onClick={(e) => e.stopPropagation()}>
-                            {entitySummary(r)}
-                          </Link>
-                        ) : entitySummary(r)}
-                      </td>
-                    </tr>
-                    {open && (
-                      <tr className="border-b border-line bg-surface2/40">
-                        <td colSpan={4} className="px-3 py-3">
-                          <pre className="overflow-x-auto rounded-lg bg-ink/5 p-3 text-xs text-ink2">{JSON.stringify(r.metadata, null, 2)}</pre>
-                        </td>
-                      </tr>
-                    )}
-                  </Fragment>
-                );
-              })}
-              {rows.length === 0 && (
-                <tr><td colSpan={4} className="px-3 py-8 text-center text-muted">No activity yet.</td></tr>
-              )}
-            </tbody>
-          </table>
+        <TableShell headers={["Time (IST)", "Actor", "Action", "Entity"]}>
+          {rows.map((r) => {
+            const href = entityHref(r.entity_type, r.entity_id);
+            const open = expanded === r.id;
+            return (
+              <Fragment key={r.id}>
+                <tr
+                  className="cursor-pointer border-b border-line/70 hover:bg-surface2/60"
+                  onClick={() => setExpanded(open ? null : r.id)}
+                >
+                  <td className="px-4 py-2 whitespace-nowrap tabular-nums text-ink2">{formatISTDateTime(r.created_at)}</td>
+                  <td className="px-4 py-2">
+                    <div className="font-medium text-ink">{r.actor_name || r.actor_user_id || "—"}</div>
+                    <div className="text-xs text-muted">{r.actor_role || "—"}</div>
+                  </td>
+                  <td className="px-4 py-2 font-medium text-ink">{r.action_label}</td>
+                  <td className="px-4 py-2 text-ink2">
+                    {href ? (
+                      <Link href={href} className="text-primary underline-offset-2 hover:underline" onClick={(e) => e.stopPropagation()}>
+                        {entitySummary(r)}
+                      </Link>
+                    ) : entitySummary(r)}
+                  </td>
+                </tr>
+                {open && (
+                  <tr className="border-b border-line bg-surface2/40">
+                    <td colSpan={4} className="px-4 py-3">
+                      <pre className="overflow-x-auto rounded-lg bg-ink/5 p-3 text-xs text-ink2">{JSON.stringify(r.metadata, null, 2)}</pre>
+                    </td>
+                  </tr>
+                )}
+              </Fragment>
+            );
+          })}
+          {rows.length === 0 && (
+            <tr><td colSpan={4} className="px-4 py-8 text-center text-muted">No activity yet.</td></tr>
+          )}
         </TableShell>
       )}
 
