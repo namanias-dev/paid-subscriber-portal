@@ -121,6 +121,7 @@ interface BodyData {
 }
 
 const nf = (n: number) => n.toLocaleString("en-IN");
+const GOLD = "#C9A227";
 
 /** Body sections use a fixed 30d window — no page-level time filter. */
 const BODY_PRESET: Preset = "30d";
