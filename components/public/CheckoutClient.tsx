@@ -20,11 +20,7 @@ import {
 import { formatINR, formatISTDate } from "@/lib/dates";
 import {
   resolveEmiConfig,
-  effectiveSeatAmount,
-  buildSchedule,
-  buildFullSchedule,
-  buildFullWithSeatSchedule,
-  buildInstallmentOnlySchedule,
+  planCourseEnrollment,
   payInFullTotal,
   effectiveCourseForBatch,
   batchModeLabel,
@@ -95,34 +91,76 @@ export default function CheckoutClient({ course }: { course: Course }) {
   const [error, setError] = useState<string | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
 
-  const seat = useMemo(
-    () => effectiveSeatAmount(cfg, base, cfg.allowCustomSeat ? seatInput : null),
-    [cfg, base, seatInput]
-  );
+  const [couponOpen, setCouponOpen] = useState(false);
+  const [couponInput, setCouponInput] = useState("");
+  const [couponLoading, setCouponLoading] = useState(false);
+  const [couponError, setCouponError] = useState<string | null>(null);
+  const [applied, setApplied] = useState<{ code: string; discount: number } | null>(null);
 
   const bookingISO = useMemo(() => new Date().toISOString(), []);
   const seatActive = bookSeat && seatConfigured;
 
-  const schedule: InstallmentItem[] = useMemo(() => {
-    if (plan === "full") {
-      return seatActive
-        ? buildFullWithSeatSchedule({ payInFull, seatAmount: seat, bookingISO, firstIntervalDays: cfg.firstIntervalDays })
-        : buildFullSchedule(payInFull);
-    }
-    return seatActive
-      ? buildSchedule({ total: standardTotal, seatAmount: seat, count, bookingISO, firstIntervalDays: cfg.firstIntervalDays, intervalMonths: cfg.intervalMonths })
-      : buildInstallmentOnlySchedule({ total: standardTotal, count, bookingISO, intervalMonths: cfg.intervalMonths });
-  }, [plan, seatActive, payInFull, standardTotal, seat, count, cfg, bookingISO]);
+  // Preview only — server re-validates and decides the real amounts at initiation.
+  const plannedPreview = useMemo(() => {
+    return planCourseEnrollment({
+      course: ec,
+      plan,
+      bookSeat: seatActive,
+      seatAmount: seatActive && cfg.allowCustomSeat ? seatInput : null,
+      installmentCount: plan === "emi" ? count : null,
+      bookingISO,
+      discountRupees: applied?.discount ?? 0,
+    });
+  }, [ec, plan, seatActive, cfg.allowCustomSeat, seatInput, count, bookingISO, applied]);
 
+  const schedule: InstallmentItem[] = plannedPreview.ok ? plannedPreview.plan.schedule : [];
   const todayItem = schedule[0];
   const laterItems = schedule.slice(1);
   const todayAmount = todayItem?.amount ?? 0;
-  const grandTotal = schedule.reduce((a, s) => a + s.amount, 0);
-  const remaining = grandTotal - todayAmount;
+  const grandTotal = plannedPreview.ok ? plannedPreview.plan.totalFee : schedule.reduce((a, s) => a + s.amount, 0);
+  const remaining = Math.max(0, grandTotal - todayAmount);
+  const couponDiscount = plannedPreview.ok ? plannedPreview.plan.discountAmount : (applied?.discount ?? 0);
+  const originalTotal = plannedPreview.ok ? plannedPreview.plan.originalTotalFee : base;
 
   const seatTooLow = cfg.allowCustomSeat && seatInput < seatFloor;
   const seatTooHigh = seatInput >= base;
   const seatInvalid = seatActive && (seatTooLow || seatTooHigh);
+
+  async function applyCoupon() {
+    const code = couponInput.trim();
+    if (!code) {
+      setCouponError("Enter a coupon code.");
+      return;
+    }
+    setCouponLoading(true);
+    setCouponError(null);
+    try {
+      const res = await fetch("/api/v1/coupons/validate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ itemType: "course", slug: course.slug, code }),
+      });
+      const data = await res.json();
+      if (!data.ok) {
+        setApplied(null);
+        setCouponError(data.error || "Invalid coupon.");
+        return;
+      }
+      setApplied({ code: data.code, discount: data.discount });
+      setCouponError(null);
+    } catch {
+      setApplied(null);
+      setCouponError("Could not validate coupon. Try again.");
+    } finally {
+      setCouponLoading(false);
+    }
+  }
+
+  function removeCoupon() {
+    setApplied(null);
+    setCouponInput("");
+    setCouponError(null);
+  }
 
   async function proceed() {
     if (loading) return; // re-entry guard: a submit is already in flight
@@ -161,6 +199,8 @@ export default function CheckoutClient({ course }: { course: Course }) {
           // Phase 3: only sent for multi-batch courses. Server validates it belongs
           // to the course and recomputes price server-side (client price ignored).
           batchId: multiBatch ? batchId : undefined,
+          // Code only — server re-validates and computes the discount.
+          couponCode: applied?.code || undefined,
         }),
       });
       const json = await res.json();
@@ -355,6 +395,59 @@ export default function CheckoutClient({ course }: { course: Course }) {
             )}
           </div>
 
+          {/* Coupon */}
+          <div className="ca-card space-y-3 p-5">
+            <button
+              type="button"
+              onClick={() => setCouponOpen((v) => !v)}
+              aria-expanded={couponOpen}
+              className="ca-focus flex w-full items-center justify-between text-left"
+            >
+              <span className="inline-flex items-center gap-2 font-heading text-base font-bold text-[var(--ca-navy-900)]">
+                <Tag size={16} /> Have a coupon code?
+              </span>
+              <ChevronDown size={16} className={`text-[var(--ca-slate-400)] transition ${couponOpen || applied ? "rotate-180" : ""}`} />
+            </button>
+
+            {applied ? (
+              <div className="flex items-center justify-between gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-sm">
+                <div>
+                  <p className="font-semibold text-emerald-800">{applied.code}</p>
+                  <p className="text-xs text-emerald-700">− {formatINR(couponDiscount)} off course fee</p>
+                </div>
+                <button type="button" onClick={removeCoupon} className="ca-focus text-xs font-semibold text-[var(--ca-navy-700)] underline-offset-2 hover:underline">
+                  Remove
+                </button>
+              </div>
+            ) : couponOpen ? (
+              <div>
+                <div className="flex gap-2">
+                  <input
+                    className="w-full rounded-xl border border-[var(--ca-slate-300)] px-3 py-2.5 uppercase focus:border-[var(--ca-gold)] focus:outline-none"
+                    placeholder="Enter code"
+                    value={couponInput}
+                    onChange={(e) => setCouponInput(e.target.value.toUpperCase())}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        void applyCoupon();
+                      }
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => void applyCoupon()}
+                    disabled={couponLoading}
+                    className="ca-btn ca-btn-outline ca-focus shrink-0 whitespace-nowrap disabled:opacity-60"
+                  >
+                    {couponLoading ? "…" : "Apply"}
+                  </button>
+                </div>
+                {couponError && <p className="mt-1.5 text-xs text-red-600">{couponError}</p>}
+              </div>
+            ) : null}
+          </div>
+
           {/* Your details */}
           <div className="ca-card space-y-3 p-5">
             <h3 className="font-heading text-base font-bold text-[var(--ca-navy-900)]">Your details</h3>
@@ -377,6 +470,9 @@ export default function CheckoutClient({ course }: { course: Course }) {
               laterCount={laterItems.length}
               grandTotal={grandTotal}
               fullSavings={fullSavings}
+              couponCode={applied?.code ?? null}
+              couponDiscount={couponDiscount}
+              originalTotal={originalTotal}
               error={error}
               loading={loading}
               payLabel={payLabel}
@@ -390,7 +486,7 @@ export default function CheckoutClient({ course }: { course: Course }) {
       <div className="fixed inset-x-0 bottom-0 z-40 border-t border-[var(--ca-slate-200)] bg-white/95 backdrop-blur lg:hidden">
         {detailsOpen && (
           <div className="max-h-[50vh] overflow-y-auto border-b border-[var(--ca-slate-200)] p-4">
-            <SummaryRows plan={plan} seatActive={seatActive} base={base} todayAmount={todayAmount} remaining={remaining} laterCount={laterItems.length} grandTotal={grandTotal} fullSavings={fullSavings} />
+            <SummaryRows plan={plan} seatActive={seatActive} base={base} todayAmount={todayAmount} remaining={remaining} laterCount={laterItems.length} grandTotal={grandTotal} fullSavings={fullSavings} couponCode={applied?.code ?? null} couponDiscount={couponDiscount} originalTotal={originalTotal} />
           </div>
         )}
         <div className="flex items-center gap-3 px-4 py-2.5">
@@ -474,14 +570,19 @@ interface SummaryProps {
   laterCount: number;
   grandTotal: number;
   fullSavings: number;
+  couponCode?: string | null;
+  couponDiscount?: number;
+  originalTotal?: number;
 }
 
 function SummaryRows(p: SummaryProps) {
   const baseLabel = p.plan === "full" ? "Pay-in-full price" : "Course fee";
+  const showCoupon = !!p.couponCode && (p.couponDiscount || 0) > 0;
   return (
     <div className="space-y-2.5 text-sm">
-      <Row label={baseLabel} value={formatINR(p.base)} />
-      {p.plan === "full" && p.fullSavings > 0 && <Row label="You save" value={`− ${formatINR(p.fullSavings)}`} success />}
+      <Row label={baseLabel} value={formatINR(showCoupon ? (p.originalTotal ?? p.base) : p.base)} />
+      {p.plan === "full" && p.fullSavings > 0 && !showCoupon && <Row label="You save" value={`− ${formatINR(p.fullSavings)}`} success />}
+      {showCoupon && <Row label={`Coupon ${p.couponCode}`} value={`− ${formatINR(p.couponDiscount || 0)}`} success />}
       {p.seatActive && (
         <>
           <Row label="Seat today" value={formatINR(p.todayAmount)} strong />

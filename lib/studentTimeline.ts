@@ -441,7 +441,7 @@ export function enrollmentEvents(e: EnrollmentRow): TimelineEvent[] {
       id: `discount:${e.id}`,
       type: "discount_applied",
       at: e.discount_applied_at,
-      title: `Discount applied — ${rupees(e.discount_amount)} off ${e.course_title ?? "course"}`,
+      title: `Discount applied — ${rupees(e.discount_amount)} off ${e.course_title ?? "course"}${e.discount_reason ? ` (${e.discount_reason})` : ""}`,
       detail: null,
       actor: { id: e.discount_applied_by, name: e.discount_applied_by },
       reason: e.discount_reason ?? null,

@@ -110,7 +110,8 @@ export default function CoursePaymentsPanel({
           {(enrollment.discount_amount ?? 0) > 0 && (
             <p className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">
               🎉 {formatINR(enrollment.discount_amount!)} discount applied
-              {enrollment.original_total_fee ? <span className="font-normal text-[var(--ca-slate-700)]">· was {formatINR(enrollment.original_total_fee)}</span> : null}
+              {enrollment.discount_reason ? <span className="font-normal text-[var(--ca-slate-700)]"> · {enrollment.discount_reason}</span> : null}
+              {enrollment.original_total_fee ? <span className="font-normal text-[var(--ca-slate-700)]"> · was {formatINR(enrollment.original_total_fee)}</span> : null}
             </p>
           )}
         </div>
