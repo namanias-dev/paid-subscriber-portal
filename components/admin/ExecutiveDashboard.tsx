@@ -120,13 +120,10 @@ interface BodyData {
   unavailable?: string[];
 }
 
-const PRESETS: { id: Preset; label: string }[] = [
-  { id: "today", label: "Today" },
-  { id: "7d", label: "7 days" },
-  { id: "30d", label: "30 days" },
-  { id: "this_month", label: "This month" },
-  { id: "all_time", label: "All time" },
-];
+const nf = (n: number) => n.toLocaleString("en-IN");
+
+/** Body sections use a fixed 30d window — no page-level time filter. */
+const BODY_PRESET: Preset = "30d";
 
 const TRAFFIC_WINDOWS: { id: TrafficWindow; label: string }[] = [
   { id: "7d", label: "7D" },
@@ -143,10 +140,9 @@ const EXPLORER_FRAMES: { id: ExplorerFrame; label: string }[] = [
   { id: "all", label: "All available" },
 ];
 
-const nf = (n: number) => n.toLocaleString("en-IN");
+/** Payments-style entry card — restored from Overview v2 (68f0df51). */
 const CARD =
-  "card flex w-full items-center gap-4 p-4 text-left transition-[transform,box-shadow] duration-200 ease-out hover:-translate-y-0.5 hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-primary/30 motion-reduce:transform-none motion-reduce:transition-none";
-const GOLD = "#9A7B0A";
+  "card flex h-full min-h-[104px] w-full items-center gap-4 p-4 text-left transition-[transform,box-shadow] duration-200 ease-out hover:-translate-y-0.5 hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-primary/30 motion-reduce:transform-none motion-reduce:transition-none";
 
 function fmtVal(m: MetricDelta, money = false): string {
   if (m.value === null) return "—";
@@ -246,8 +242,8 @@ function LazyMount({ children, rootMargin = "280px", minHeight = 120 }: { childr
   return <div ref={ref} style={!show ? { minHeight } : undefined}>{show ? children : <div className="skeleton h-28 w-full animate-shimmer rounded-2xl" />}</div>;
 }
 
+/** KPI card visual from Overview v2 (68f0df51) — current metric values. */
 function PremiumKpi({
-  icon,
   label,
   metric,
   spark,
@@ -259,7 +255,6 @@ function PremiumKpi({
   onClick,
   href,
 }: {
-  icon: string;
   label: string;
   metric: MetricDelta;
   spark?: SparkPoint[];
@@ -273,9 +268,6 @@ function PremiumKpi({
 }) {
   const inner = (
     <>
-      <div className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-primary/10 text-xl" aria-hidden>
-        {icon}
-      </div>
       <div className="min-w-0 flex-1">
         <p className="truncate text-[11px] font-semibold uppercase tracking-wide text-muted">{label}</p>
         <p className={`mt-1 font-heading text-2xl font-extrabold leading-none tabular-nums sm:text-3xl ${gold ? "text-[#9A7B0A]" : "text-ink"}`}>
@@ -288,10 +280,11 @@ function PremiumKpi({
         {secondary && <p className="mt-1 text-[11px] tabular-nums text-muted">{secondary}</p>}
       </div>
       {spark && spark.length > 0 && (
-        <div className="hidden shrink-0 sm:block">
+        <div className="shrink-0">
           <CssSpark points={spark} color={sparkColor} />
         </div>
       )}
+      <span className="shrink-0 text-xs font-semibold text-primary">View →</span>
     </>
   );
   if (href) {
@@ -360,7 +353,6 @@ function MetricToggle({
 }
 
 export default function ExecutiveDashboard() {
-  const [preset, setPreset] = useState<Preset>("30d");
   const [excludeAdmin, setExcludeAdmin] = useState(false);
   const [pulse, setPulse] = useState<PulseData | null>(null);
   const [body, setBody] = useState<BodyData | null>(null);
@@ -383,10 +375,10 @@ export default function ExecutiveDashboard() {
   const bodyRequested = useRef(false);
 
   const qs = useMemo(() => {
-    const p = new URLSearchParams({ preset });
+    const p = new URLSearchParams({ preset: BODY_PRESET });
     if (excludeAdmin) p.set("excludeAdmin", "1");
     return p.toString();
-  }, [preset, excludeAdmin]);
+  }, [excludeAdmin]);
 
   const loadPulse = useCallback(() => {
     setPulseLoading(true);
@@ -495,21 +487,9 @@ export default function ExecutiveDashboard() {
         }
       />
 
-      <div className="card flex flex-wrap items-center gap-2 p-3">
-        {PRESETS.map((p) => (
-          <button
-            key={p.id}
-            type="button"
-            onClick={() => setPreset(p.id)}
-            className={`rounded-full px-3.5 py-1.5 text-xs font-semibold transition ${
-              preset === p.id ? "bg-primary text-white shadow-sm" : "bg-surface2 text-ink2 hover:bg-line/50"
-            }`}
-          >
-            {p.label}
-          </button>
-        ))}
+      <div className="flex flex-wrap items-center justify-end gap-2">
         {pulse && (
-          <p className="ml-auto text-[11px] text-muted">
+          <p className="mr-auto text-[11px] text-muted">
             Updated {formatISTDateTime(pulse.generatedAt)}
           </p>
         )}
@@ -539,7 +519,6 @@ export default function ExecutiveDashboard() {
             </div>
             <div className="pay-stagger grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
               <PremiumKpi
-                icon="👁"
                 label="Website visitors"
                 metric={pulse.pulse.visitorsToday}
                 spark={last14(history?.visitors)}
@@ -548,7 +527,6 @@ export default function ExecutiveDashboard() {
                 onClick={() => openExplorer()}
               />
               <PremiumKpi
-                icon="👤"
                 label="Logged-in users"
                 metric={pulse.pulse.loginUsersToday}
                 spark={last14(history?.loginUsers)}
@@ -557,7 +535,6 @@ export default function ExecutiveDashboard() {
                 onClick={() => openExplorer({ logins: true })}
               />
               <PremiumKpi
-                icon="🔑"
                 label="Login codes"
                 metric={pulse.pulse.loginCodesToday}
                 sparkColor="#64748B"
@@ -565,7 +542,6 @@ export default function ExecutiveDashboard() {
                 href="/admin/students"
               />
               <PremiumKpi
-                icon="📥"
                 label="Leads collected"
                 metric={pulse.pulse.leadsToday}
                 spark={last14(history?.leads)}
@@ -574,7 +550,6 @@ export default function ExecutiveDashboard() {
                 href="/admin/leads"
               />
               <PremiumKpi
-                icon="✅"
                 label="Paid webinar regs"
                 metric={pulse.pulse.webinarRegsToday}
                 spark={last14(history?.webinarPaid)}
@@ -583,7 +558,6 @@ export default function ExecutiveDashboard() {
                 href="/admin/payments"
               />
               <PremiumKpi
-                icon="🎓"
                 label="Course seat bookings"
                 metric={pulse.pulse.seatBookingsToday}
                 spark={last14(history?.seatBookings)}
@@ -592,7 +566,6 @@ export default function ExecutiveDashboard() {
                 href="/admin/course-payments"
               />
               <PremiumKpi
-                icon="💰"
                 label="Webinar revenue"
                 metric={pulse.pulse.webinarRevenue}
                 spark={last14(history?.webinarRevenue)}
@@ -604,7 +577,6 @@ export default function ExecutiveDashboard() {
                 href="/admin/payments"
               />
               <PremiumKpi
-                icon="📘"
                 label="Course revenue"
                 metric={pulse.pulse.courseRevenue}
                 spark={last14(history?.courseRevenue)}
