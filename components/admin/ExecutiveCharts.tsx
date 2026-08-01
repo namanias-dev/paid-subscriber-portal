@@ -180,11 +180,13 @@ export function FunnelBars({
 /** Multi-series explorer for visitors + optional overlays. */
 export function ExplorerLines({
   points,
+  showVisitors = true,
   showLogins,
   showWebinar,
   height = 280,
 }: {
   points: { day: string; visitors: number; logins: number; webinarPaid: number }[];
+  showVisitors?: boolean;
   showLogins: boolean;
   showWebinar: boolean;
   height?: number;
@@ -203,9 +205,11 @@ export function ExplorerLines({
           <YAxis tick={{ fontSize: 11 }} tickLine={false} axisLine={false} width={40} allowDecimals={false} />
           <Tooltip contentStyle={tipStyle} />
           <Legend wrapperStyle={{ fontSize: 12 }} />
-          <Line type="monotone" dataKey="visitors" name="Website visitors" stroke="#0057FF" strokeWidth={2.5} dot={false} activeDot={{ r: 4 }} />
+          {showVisitors && (
+            <Line type="monotone" dataKey="visitors" name="Website visitors" stroke="#0057FF" strokeWidth={2.5} dot={false} activeDot={{ r: 4 }} />
+          )}
           {showLogins && (
-            <Line type="monotone" dataKey="logins" name="Logins" stroke="#0B1F4D" strokeWidth={2} dot={false} activeDot={{ r: 4 }} />
+            <Line type="monotone" dataKey="logins" name="Unique portal logins" stroke="#0B1F4D" strokeWidth={2} dot={false} activeDot={{ r: 4 }} />
           )}
           {showWebinar && (
             <Line type="monotone" dataKey="webinarPaid" name="Paid webinar regs" stroke="#C9A227" strokeWidth={2} dot={false} activeDot={{ r: 4 }} />

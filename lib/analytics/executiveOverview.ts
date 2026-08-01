@@ -34,7 +34,8 @@ import { classifyAccessAtRisk } from "../accessAtRisk";
 import { normPhone } from "../phone";
 import { listLogs } from "../sms/store";
 import { istYMD, istTodayYMD } from "../dates";
-import { buildWebinarByDay } from "../webinarReg";
+import { buildWebinarByDay, paidWebinarRegsOnYmd } from "../webinarReg";
+import { ttlCached } from "../ttlCache";
 import {
   resolveRange,
   fetchEvents,
@@ -47,6 +48,12 @@ import {
   type OverviewPre,
 } from "./queries";
 import type { Payment, CourseEnrollment, Webinar, Lead, CourseAccessOverride } from "../types";
+
+/** Shared short-lived payments snapshot so pulse + body don't double-scan. */
+async function cachedPayments(): Promise<Payment[]> {
+  const { value } = await ttlCached("exec-overview:payments:v1", 20_000, () => getPayments());
+  return value;
+}
 
 export type ExecPreset = Exclude<RangePreset, "custom" | "yesterday"> | "all_time";
 export type ExecPart = "pulse" | "body" | "full";
@@ -189,8 +196,9 @@ export interface ExecutiveBody {
   };
   engagement: {
     quizAttemptsToday: MetricDelta;
+    quizUniqueToday: MetricDelta;
     quizTrend: SparkPoint[];
-    topQuizzes: { id: string; title: string; attempts: number }[];
+    topQuizzes: { id: string; title: string; attempts: number; uniqueStudents: number }[];
     caTop: { slug: string; title: string; views: number }[];
     resourceDownloads: { id: string; title: string; downloads: number }[];
     resourceDownloadEvents: MetricDelta;
@@ -306,13 +314,6 @@ function daySeries(days: number, fill: (ymd: string) => number): SparkPoint[] {
   return out;
 }
 
-function paidWebinarRegsOnYmd(payments: Payment[], ymd: string): number {
-  const rows = payments.filter(
-    (p) => !p.deleted_at && isPaidStatus(p.status) && p.item_type === "webinar" && istYMD(p.created_at) === ymd,
-  );
-  return distinctRegistrations(rows);
-}
-
 function seatBookingsOnYmd(payments: Payment[], ymd: string): number {
   const rows = payments.filter(
     (p) =>
@@ -397,7 +398,7 @@ export async function getExecutivePulse(opts: {
   const histTo = new Date().toISOString();
 
   const [payments, buyers, leads, histEvents, staffPhones] = await Promise.all([
-    getPayments(),
+    cachedPayments(),
     getBuyers(),
     getLeads({ includeLegacy: false }),
     fetchEvents(histFrom, histTo),
@@ -486,7 +487,12 @@ export async function getExecutivePulse(opts: {
     "New vs returning logged-in users requires lifetime first-login stamps — omitted rather than estimated.",
   );
 
-  const scopePeriod: MetricDelta["scope"] = opts.preset === "all_time" ? "all_time" : "period";
+  const scopePeriodUnused = opts.preset; // preset retained for history context / API
+  void scopePeriodUnused;
+  void fromMs;
+  void toMs;
+  void prevFromMs;
+  void prevToMs;
 
   return {
     generatedAt: new Date().toISOString(),
@@ -502,8 +508,8 @@ export async function getExecutivePulse(opts: {
       leadsToday: metric(leadsIn(todayFromMs, todayToMs).length, leadsIn(yFromMs, yToMs).length, "today"),
       webinarRegsToday: metric(webRegsTodayN, webRegsYdayN, "today"),
       seatBookingsToday: metric(seatBookings(todayFromMs, todayToMs), seatBookings(yFromMs, yToMs), "today"),
-      webinarRevenue: metric(webinarRev(fromMs, toMs), webinarRev(prevFromMs, prevToMs), scopePeriod),
-      courseRevenue: metric(courseRev(fromMs, toMs), courseRev(prevFromMs, prevToMs), scopePeriod),
+      webinarRevenue: metric(webinarRev(todayFromMs, todayToMs), webinarRev(yFromMs, yToMs), "today"),
+      courseRevenue: metric(courseRev(todayFromMs, todayToMs), courseRev(yFromMs, yToMs), "today"),
     },
     history,
     unavailable,
@@ -550,7 +556,7 @@ export async function getExecutiveBody(opts: {
     staffPhones,
     smsLogs,
   ] = await Promise.all([
-    getPayments(),
+    cachedPayments(),
     getWebinars(),
     getAllWebinarRegistrations(),
     getAllCourseEnrollments(),
@@ -784,15 +790,37 @@ export async function getExecutiveBody(opts: {
     }
   }
 
-  const quizToday = attempts.filter((a) => inRange(a.started_at, todayFromMs, todayToMs)).length;
-  const quizYday = attempts.filter((a) => inRange(a.started_at, yFromMs, yToMs)).length;
-  const quizById = new Map<string, number>();
+  const quizTodayRows = attempts.filter((a) => inRange(a.started_at, todayFromMs, todayToMs));
+  const quizYdayRows = attempts.filter((a) => inRange(a.started_at, yFromMs, yToMs));
+  const quizToday = quizTodayRows.length;
+  const quizYday = quizYdayRows.length;
+  const quizUnique = (rows: typeof attempts) => {
+    const s = new Set<string>();
+    for (const a of rows) {
+      const k = a.user_id || a.guest_mobile || a.guest_session_id || a.id;
+      if (k) s.add(String(k));
+    }
+    return s.size;
+  };
+  const quizUniqueTodayN = quizUnique(quizTodayRows);
+  const quizUniqueYdayN = quizUnique(quizYdayRows);
+
+  const quizById = new Map<string, { attempts: number; users: Set<string> }>();
   for (const a of attempts.filter((x) => inRange(x.started_at, fromMs, toMs))) {
-    quizById.set(a.quiz_id, (quizById.get(a.quiz_id) || 0) + 1);
+    const cur = quizById.get(a.quiz_id) || { attempts: 0, users: new Set<string>() };
+    cur.attempts++;
+    const k = a.user_id || a.guest_mobile || a.guest_session_id || a.id;
+    if (k) cur.users.add(String(k));
+    quizById.set(a.quiz_id, cur);
   }
   const quizTitle = new Map(quizzes.map((q) => [q.id, q.title]));
   const topQuizzes = [...quizById.entries()]
-    .map(([id, n]) => ({ id, title: quizTitle.get(id) || id, attempts: n }))
+    .map(([id, v]) => ({
+      id,
+      title: quizTitle.get(id) || id,
+      attempts: v.attempts,
+      uniqueStudents: v.users.size,
+    }))
     .sort((a, b) => b.attempts - a.attempts)
     .slice(0, 8);
 
@@ -902,6 +930,7 @@ export async function getExecutiveBody(opts: {
     },
     engagement: {
       quizAttemptsToday: metric(quizToday, quizYday, "today"),
+      quizUniqueToday: metric(quizUniqueTodayN, quizUniqueYdayN, "today"),
       quizTrend: timeseries.points.map((p) => ({ day: p.day, value: p.quizAttempts })),
       topQuizzes,
       caTop,

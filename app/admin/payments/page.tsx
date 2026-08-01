@@ -20,6 +20,7 @@ import { useToast } from "@/components/ui/Toast";
 import { usePersistentState } from "@/lib/usePersistentState";
 import { formatINR, formatISTDateTime, istYMD, istTodayYMD } from "@/lib/dates";
 import { dedupedPaidTotal, distinctRegistrations } from "@/lib/paymentsAgg";
+import { paidWebinarRegsOnYmd } from "@/lib/webinarReg";
 import {
   buildPaymentGroups,
   GROUP_STATUS_META,
@@ -413,22 +414,19 @@ export default function PaymentsAdmin() {
   const abandonedAllCount = useMemo(() => payments.filter((p) => p.status === "ABANDONED" && !p.is_superseded).length, [payments]);
 
   // ---- Today's metrics (always TODAY in IST, independent of filters) ----
+  // Webinar count uses shared paidWebinarRegsOnYmd — identical to Overview.
   const today = useMemo(() => {
     const yYMD = istYMD(new Date(Date.now() - 86400000)) || "";
     const paidOn = (ymd: string, pred: (p: Payment) => boolean) =>
       payments.filter((p) => isPaid(p.status) && pred(p) && istYMD(p.created_at) === ymd);
-    const webToday = paidOn(todayYMD, (p) => p.item_type === "webinar");
-    const webYest = paidOn(yYMD, (p) => p.item_type === "webinar");
+    const webCount = paidWebinarRegsOnYmd(payments, todayYMD);
+    const webYest = paidWebinarRegsOnYmd(payments, yYMD);
     const crsToday = paidOn(todayYMD, (p) => p.item_type === "course");
     const crsYest = paidOn(yYMD, (p) => p.item_type === "course");
-    // Seats/registrations are counted DISTINCT-by-(phone, item) so a retry that
-    // leaves two paid rows for the same person+item is one seat; revenue collapses
-    // exact retry-duplicates but keeps legitimate installments/seat+full.
-    const webCount = distinctRegistrations(webToday);
     const crsCount = distinctRegistrations(crsToday);
     return {
       webCount,
-      webDelta: webCount - distinctRegistrations(webYest),
+      webDelta: webCount - webYest,
       crsCount,
       crsAmount: dedupedPaidTotal(crsToday),
       crsDelta: crsCount - distinctRegistrations(crsYest),
