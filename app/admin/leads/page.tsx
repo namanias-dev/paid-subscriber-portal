@@ -20,6 +20,7 @@ import { DEFAULT_LEAD_STATUS, LEAD_STATUSES, LEAD_STATUS_META, leadStatusLabel, 
 import { formatStaffVerdictLabel, formatSystemVerifiedLabel } from "@/lib/leadBehaviourStatus";
 import type { Lead, LeadStatus, LeadSourceTouch } from "@/lib/types";
 import CopyPhonesModal from "@/components/admin/CopyPhonesModal";
+import LegacyLeadPill from "@/components/admin/LegacyLeadPill";
 import { lookupLegacyMatch, type LegacyLeadMatch } from "@/lib/marketing/legacyLeadMatch";
 
 const DAY_MS = 86400000;
