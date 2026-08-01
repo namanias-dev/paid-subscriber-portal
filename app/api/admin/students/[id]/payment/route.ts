@@ -29,6 +29,28 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       params.id,
       `admin:cash ${formatINR(res.receipt.amount)} ${res.receipt.method || "Cash"} · ${res.receipt.payment_label} (by ${actor})`
     );
+    void import("@/lib/adminActivity").then(async ({ logAdminActivity }) => {
+      const { getActionActor } = await import("@/lib/adminGuard");
+      const actionActor = await getActionActor();
+      const isInstallment = body.kind === "installment";
+      await logAdminActivity({
+        actor: actionActor,
+        action: isInstallment ? "installment_recorded_manually" : "payment_recorded_manually",
+        entityType: "enrollment",
+        entityId: String(body.enrollmentId || ""),
+        metadata: {
+          student_name: student.name,
+          phone: student.phone,
+          amount: res.receipt.amount,
+          payment_type: body.kind,
+          course: res.receipt.course_title ?? res.enrollment.course_title ?? null,
+          installment_number: isInstallment ? (body.installmentNo ?? null) : null,
+          due_date: isInstallment
+            ? (res.enrollment.schedule || []).find((s) => s.kind === "installment" && s.no === Number(body.installmentNo))?.due ?? null
+            : null,
+        },
+      });
+    }).catch(() => null);
     return NextResponse.json({ ok: true, receiptNo: res.receipt.receipt_no, enrollment: res.enrollment });
   } catch {
     return NextResponse.json({ ok: false, error: "Failed to record payment." }, { status: 500 });

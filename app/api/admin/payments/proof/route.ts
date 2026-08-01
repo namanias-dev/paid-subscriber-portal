@@ -93,6 +93,20 @@ export async function POST(req: Request) {
               ? await getPaymentByReference(body.referenceNo).catch(() => null)
               : null;
           void logPaymentAction({ action: "reject", payment: pay, actor, reason: body.reason ?? null });
+          void import("@/lib/adminActivity").then(({ logAdminActivity }) =>
+            logAdminActivity({
+              actor,
+              action: "payment_proof_rejected",
+              entityType: "payment",
+              entityId: pay?.id ?? body.proofId,
+              metadata: {
+                payment_id: pay?.id ?? null,
+                student_name: pay?.student_name ?? null,
+                amount: pay?.amount ?? null,
+                reason: body.reason ?? null,
+              },
+            }),
+          ).catch(() => null);
         }
         return NextResponse.json(r, { status: r.ok ? 200 : 400 });
       }

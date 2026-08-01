@@ -62,6 +62,7 @@ import {
   // misc
   Sparkles,
   Workflow,
+  History,
 } from "lucide-react";
 
 /**
@@ -124,6 +125,7 @@ export const APP_ICONS = {
   at_risk: ShieldAlert,
   staff: UserCog,
   settings: Settings,
+  activity: History,
 
   // Content types (contentMeta)
   current_affairs: Newspaper,

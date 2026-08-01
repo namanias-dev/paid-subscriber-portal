@@ -12,6 +12,9 @@ export default function SettingsAdmin() {
   const { toast } = useToast();
   const [brand, setBrand] = useState<BrandConfig | null>(null);
   const [saving, setSaving] = useState(false);
+  const [isSuper, setIsSuper] = useState(false);
+  const [allowAdminCsv, setAllowAdminCsv] = useState(false);
+  const [csvSaving, setCsvSaving] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -23,9 +26,38 @@ export default function SettingsAdmin() {
         setBrand(DEFAULT_BRAND);
       }
     })();
+    fetch("/api/admin/leads/export-permission")
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.ok) {
+          setIsSuper(!!d.isSuperAdmin);
+          setAllowAdminCsv(!!d.allowAdminCsvExport);
+        }
+      })
+      .catch(() => null);
   }, []);
 
   const set = (patch: Partial<BrandConfig>) => setBrand((b) => ({ ...(b || {}), ...patch }));
+
+  async function toggleCsvExport(next: boolean) {
+    setCsvSaving(true);
+    try {
+      const res = await fetch("/api/admin/leads/export-permission", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ allowAdminCsvExport: next }),
+      });
+      const data = await res.json().catch(() => ({ ok: false }));
+      if (data.ok) {
+        setAllowAdminCsv(!!data.allowAdminCsvExport);
+        toast(next ? "Admin CSV export enabled" : "Admin CSV export disabled", "success");
+      } else toast(data.error || "Could not update", "error");
+    } catch {
+      toast("Could not update", "error");
+    } finally {
+      setCsvSaving(false);
+    }
+  }
 
   async function save() {
     setSaving(true);
@@ -106,6 +138,24 @@ export default function SettingsAdmin() {
           <Field label="YouTube"><input className="input" value={brand.youtube || ""} onChange={(e) => set({ youtube: e.target.value })} placeholder="https://youtube.com/..." /></Field>
           <Field label="Telegram"><input className="input" value={brand.telegram || ""} onChange={(e) => set({ telegram: e.target.value })} placeholder="https://t.me/..." /></Field>
         </Section>
+
+        {isSuper && (
+          <Section title="Permissions" desc="Super Admin controls for Lead CRM data export. Staff never get CSV export.">
+            <label className="flex items-start gap-3 rounded-xl border border-line p-3 sm:col-span-2">
+              <input
+                type="checkbox"
+                className="mt-1"
+                checked={allowAdminCsv}
+                disabled={csvSaving}
+                onChange={(e) => void toggleCsvExport(e.target.checked)}
+              />
+              <span>
+                <span className="font-medium text-ink">Allow CSV export for Admin role</span>
+                <span className="mt-0.5 block text-xs text-muted">Default OFF. When ON, accounts with the Admin role see Export CSV on Lead CRM. Super Admin always can. Staff never can.</span>
+              </span>
+            </label>
+          </Section>
+        )}
 
         <Section title="Integration status" desc="Configure these via environment variables in Vercel.">
           <div className="space-y-2 sm:col-span-2">

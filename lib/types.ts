@@ -1851,6 +1851,11 @@ export interface SiteSettings {
   about: AboutContent;
   /** Admin-managed leaderboard config (global exclude list + tuned Reliability C). */
   leaderboard: LeaderboardSettings;
+  /**
+   * When true, the Admin role (not Staff) may export Leads CSV.
+   * Super Admin always can. Default OFF.
+   */
+  allow_admin_csv_export?: boolean;
   updated_at?: string;
 }
 

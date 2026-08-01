@@ -254,6 +254,21 @@ export async function POST(req: Request) {
     }
 
     await logAccess(student.id, `admin:create student (by ${actor})`);
+    void import("@/lib/adminActivity").then(async ({ logAdminActivity }) => {
+      const { getActionActor } = await import("@/lib/adminGuard");
+      const actionActor = await getActionActor();
+      await logAdminActivity({
+        actor: actionActor,
+        action: "manual_student_registration",
+        entityType: "student",
+        entityId: student.id,
+        metadata: {
+          student_name: student.name,
+          phone: student.phone,
+          course_batch: courses.map((c) => c.courseSlug).join(", ") || null,
+        },
+      });
+    }).catch(() => null);
 
     // ---- Enroll into courses (same model as online) ----
     const warnings: string[] = [];
