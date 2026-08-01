@@ -35,6 +35,8 @@ export type PermissionKey =
   // switch, bulk send) which stay Super Admin only. Holding this NEVER enables
   // sending — it only unlocks day-to-day content management.
   | "manage_sms"
+  | "telegram_inbox"
+  | "manage_telegram"
   | "manage_careers"
   | "manage_ai_agent"
   // Journey Automation (Communications). NEW + restrictive by default — holding
@@ -82,6 +84,8 @@ export const PERMISSIONS: PermissionMeta[] = [
   { key: "view_analytics_nonrevenue", label: "View non-revenue analytics", group: "Operations" },
   { key: "send_sms", label: "Send SMS (Approved templates) & view SMS logs", group: "Operations" },
   { key: "manage_sms", label: "Manage SMS Mission Control (templates, variables & content)", group: "Operations" },
+  { key: "telegram_inbox", label: "Telegram inbox & replies", group: "Operations" },
+  { key: "manage_telegram", label: "Manage Telegram Mission Control (broadcast, automations, templates)", group: "Operations" },
   { key: "manage_careers", label: "Manage careers & job applications", group: "Operations" },
   { key: "manage_ai_agent", label: "Manage AI Counselor Agent (leads, conversations & settings)", group: "Operations" },
 
@@ -168,6 +172,7 @@ export const DEFAULT_ROLES: RoleSeed[] = [
       manage_students_leads: true,
       view_analytics_nonrevenue: true,
       send_sms: true,
+      telegram_inbox: true,
       manage_careers: true,
     },
     can: ["Full content (Courses, Webinars, Quizzes, Current Affairs, PDFs)", "SEO, publishing & settings", "Students, leads & non-revenue analytics"],
@@ -199,8 +204,14 @@ export const DEFAULT_ROLES: RoleSeed[] = [
     id: "support_ops",
     name: "Support / Operations",
     description: "View and respond to students & leads, manage enrollments. No publishing, revenue or staff.",
-    permissions: { manage_students_leads: true, view_analytics_nonrevenue: true, send_sms: true, manage_careers: true },
-    can: ["View students & leads", "Respond & manage enrollments", "View non-revenue analytics"],
+    permissions: {
+      manage_students_leads: true,
+      view_analytics_nonrevenue: true,
+      send_sms: true,
+      telegram_inbox: true,
+      manage_careers: true,
+    },
+    can: ["View students & leads", "Respond & manage enrollments", "View non-revenue analytics", "Telegram inbox"],
     cannot: ["Publish content", "Access revenue", "Manage staff"],
     is_system: true,
     badge: "blue",
