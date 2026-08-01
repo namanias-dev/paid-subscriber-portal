@@ -259,6 +259,13 @@ export interface PlanCourseInput {
    * course-level fields (never throws), so behaviour can only stay the same.
    */
   batchId?: string | null;
+  /**
+   * Optional server-validated coupon discount in rupees. Reduces the plan total
+   * before schedules are built. Seat-booking amount (when requested) stays the
+   * configured seat; the discount applies to the remaining balance. Clamped so
+   * payable never goes below zero.
+   */
+  discountRupees?: number | null;
 }
 
 /**
@@ -299,6 +306,10 @@ export interface PlannedEnrollment {
   firstAmount: number;
   firstKind: "seat" | "full" | "installment";
   firstInstallmentNo: number;
+  /** List/original total before any coupon discount (equals totalFee when no discount). */
+  originalTotalFee: number;
+  /** Rupee discount actually applied (0 when none). */
+  discountAmount: number;
 }
 
 /**
@@ -336,72 +347,110 @@ export function planCourseEnrollment(
   let firstKind: "seat" | "full" | "installment";
   let firstInstallmentNo = 0;
   let planType: "full" | "emi";
-  let totalFee: number;
+  let originalTotalFee: number;
   let installmentCount = 0;
+  let seatForPlan: number | null = null;
 
   if (input.plan === "emi") {
     if (!cfg.enabled) return { ok: false, error: "EMI is not available for this course." };
     const count = Math.round(Number(input.installmentCount) || 0);
     if (!cfg.installmentCounts.includes(count)) return { ok: false, error: "Invalid installment plan." };
-    totalFee = standardTotal;
+    originalTotalFee = standardTotal;
     planType = "emi";
     installmentCount = count;
 
     if (input.bookSeat && seatConfigured) {
-      const seat = resolveSeat(standardTotal);
+      const seat = resolveSeat(originalTotalFee);
       if (typeof seat === "string") return { ok: false, error: seat };
-      schedule = buildSchedule({
-        total: standardTotal,
-        seatAmount: seat,
-        count,
-        bookingISO,
-        firstIntervalDays: cfg.firstIntervalDays,
-        intervalMonths: cfg.intervalMonths,
-        batchStartISO: course.batch_start,
-      });
+      seatForPlan = seat;
       if (!course.batch_start) {
-        // Callers may log; we keep building so checkout never crashes.
         console.info("[buildSchedule] batch_start missing — fell back to booking + firstIntervalDays", {
           courseId: course.id, bookingISO,
         });
       }
-      firstAmount = seat;
       firstKind = "seat";
       firstInstallmentNo = 0;
     } else {
-      schedule = buildInstallmentOnlySchedule({ total: standardTotal, count, bookingISO, intervalMonths: cfg.intervalMonths });
-      firstAmount = schedule[0].amount;
       firstKind = "installment";
       firstInstallmentNo = 1;
     }
   } else {
     if (!cfg.allowFull && cfg.enabled) return { ok: false, error: "Full payment is not available for this course." };
-    totalFee = payInFull;
+    originalTotalFee = payInFull;
     planType = "full";
 
     if (input.bookSeat && seatConfigured) {
-      const seat = resolveSeat(payInFull);
+      const seat = resolveSeat(originalTotalFee);
       if (typeof seat === "string") return { ok: false, error: seat };
-      schedule = buildFullWithSeatSchedule({
-        payInFull, seatAmount: seat, bookingISO,
-        firstIntervalDays: cfg.firstIntervalDays,
-        batchStartISO: course.batch_start,
-      });
-      firstAmount = seat;
+      seatForPlan = seat;
       firstKind = "seat";
       firstInstallmentNo = 0;
       installmentCount = 1;
     } else {
-      schedule = buildFullSchedule(payInFull);
-      firstAmount = payInFull;
       firstKind = "full";
       firstInstallmentNo = 0;
     }
   }
 
+  // Coupon discount: reduce total, keep seat amount as configured, rebuild schedule.
+  const requestedDiscount = Math.max(0, Math.round(Number(input.discountRupees) || 0));
+  const discountAmount = Math.min(requestedDiscount, originalTotalFee);
+  const totalFee = Math.max(0, originalTotalFee - discountAmount);
+
+  if (seatForPlan != null) {
+    if (totalFee < seatForPlan) {
+      return {
+        ok: false,
+        error: "This coupon discount exceeds the payable balance after seat booking. Remove the coupon or choose a different plan.",
+      };
+    }
+    if (planType === "emi") {
+      schedule = buildSchedule({
+        total: totalFee,
+        seatAmount: seatForPlan,
+        count: installmentCount,
+        bookingISO,
+        firstIntervalDays: cfg.firstIntervalDays,
+        intervalMonths: cfg.intervalMonths,
+        batchStartISO: course.batch_start,
+      });
+    } else {
+      schedule = buildFullWithSeatSchedule({
+        payInFull: totalFee,
+        seatAmount: seatForPlan,
+        bookingISO,
+        firstIntervalDays: cfg.firstIntervalDays,
+        batchStartISO: course.batch_start,
+      });
+    }
+    firstAmount = seatForPlan;
+  } else if (planType === "emi") {
+    schedule = buildInstallmentOnlySchedule({
+      total: totalFee,
+      count: installmentCount,
+      bookingISO,
+      intervalMonths: cfg.intervalMonths,
+    });
+    firstAmount = schedule[0].amount;
+  } else {
+    schedule = buildFullSchedule(totalFee);
+    firstAmount = totalFee;
+  }
+
   return {
     ok: true,
-    plan: { schedule, totalFee, planType, installmentCount, batchLabel, firstAmount, firstKind, firstInstallmentNo },
+    plan: {
+      schedule,
+      totalFee,
+      planType,
+      installmentCount,
+      batchLabel,
+      firstAmount,
+      firstKind,
+      firstInstallmentNo,
+      originalTotalFee,
+      discountAmount,
+    },
   };
 }
 

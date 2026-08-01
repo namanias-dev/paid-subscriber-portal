@@ -9,6 +9,8 @@ import {
   findResumableCourseEnrollment,
   isCourseFullyPaidForPhone,
   findRecentOpenCoursePayment,
+  getCourseEnrollmentsByPhone,
+  incrementCouponUsage,
 } from "@/lib/dataProvider";
 import {
   isEazypayConfigured,
@@ -19,6 +21,7 @@ import {
 } from "@/lib/eazypay";
 import { planCourseEnrollment, deriveEnrollment } from "@/lib/installments";
 import { scheduleAsCheckoutIntent } from "@/lib/enrollmentScope";
+import { validateCoupon, couponDiscountReason, parseCouponCodeFromReason } from "@/lib/coupons";
 import type { CourseEnrollment } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -32,6 +35,18 @@ async function uniqueReference(code: string): Promise<string> {
   return makeReferenceNo(code);
 }
 
+/** Soft one-use: reject if this phone already paid on this course with the same coupon. */
+async function phoneAlreadyUsedCoupon(phone: string, courseId: string, code: string): Promise<boolean> {
+  const list = await getCourseEnrollmentsByPhone(phone);
+  const want = code.trim().toLowerCase();
+  return list.some((e) => {
+    if (e.course_id !== courseId || e.status === "cancelled") return false;
+    if ((e.amount_paid || 0) <= 0) return false;
+    const applied = parseCouponCodeFromReason(e.discount_reason);
+    return !!applied && applied.toLowerCase() === want;
+  });
+}
+
 export async function POST(req: Request) {
   try {
     const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
@@ -41,6 +56,7 @@ export async function POST(req: Request) {
     const slug = String(body.courseSlug || body.slug || "");
     const plan = String(body.plan || body.mode || "full") as "full" | "emi";
     const bookSeat = body.bookSeat === true || body.bookSeat === "true";
+    const couponCode = String(body.couponCode || body.coupon || "").trim();
     // Phase 3: optional chosen batch. Pricing is recomputed server-side from the
     // batch (planCourseEnrollment) — a client price is never accepted. An unknown
     // id falls back to the course-level default inside planCourseEnrollment.
@@ -59,17 +75,67 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: "This course is not open for enrollment." }, { status: 400 });
     }
 
-    const planned = planCourseEnrollment({
+    const planInput = {
       course,
       plan,
       bookSeat,
       seatAmount: body.seatAmount != null ? Number(body.seatAmount) : null,
       installmentCount: body.installmentCount != null ? Number(body.installmentCount) : null,
       batchId,
-    });
+    };
+
+    // Plan once without discount to get the authoritative base total, then
+    // re-validate the coupon against that total (never trust client discount).
+    const basePlanned = planCourseEnrollment(planInput);
+    if (!basePlanned.ok) return NextResponse.json({ ok: false, error: basePlanned.error }, { status: 400 });
+
+    let discountRupees = 0;
+    let appliedCouponCode: string | null = null;
+    if (couponCode) {
+      const couponResult = validateCoupon(course.coupons, couponCode, basePlanned.plan.totalFee);
+      if (!couponResult.ok) {
+        return NextResponse.json({ ok: false, error: couponResult.error }, { status: 400 });
+      }
+      if (await phoneAlreadyUsedCoupon(mobile, course.id, couponResult.coupon.code)) {
+        return NextResponse.json({ ok: false, error: "This coupon has already been used." }, { status: 400 });
+      }
+      discountRupees = couponResult.discount;
+      appliedCouponCode = couponResult.coupon.code;
+    }
+
+    const planned =
+      discountRupees > 0
+        ? planCourseEnrollment({ ...planInput, discountRupees })
+        : basePlanned;
     if (!planned.ok) return NextResponse.json({ ok: false, error: planned.error }, { status: 400 });
-    const { schedule, totalFee, planType, installmentCount, batchLabel } = planned.plan;
+
+    const {
+      schedule,
+      totalFee,
+      planType,
+      installmentCount,
+      batchLabel,
+      originalTotalFee,
+      discountAmount,
+    } = planned.plan;
     let { firstAmount, firstKind, firstInstallmentNo } = planned.plan;
+
+    const discountPatch: Partial<CourseEnrollment> =
+      discountAmount > 0 && appliedCouponCode
+        ? {
+            discount_amount: discountAmount,
+            original_total_fee: originalTotalFee,
+            discount_reason: couponDiscountReason(appliedCouponCode),
+            discount_applied_by: "coupon",
+            discount_applied_at: new Date().toISOString(),
+          }
+        : {
+            discount_amount: 0,
+            original_total_fee: null,
+            discount_reason: null,
+            discount_applied_by: null,
+            discount_applied_at: null,
+          };
 
     // Batch-aware dedup key. Only multi-batch courses scope the dedup by batch, so
     // every single-batch course keeps the exact pre-batch dedup behaviour (null key).
@@ -79,7 +145,6 @@ export async function POST(req: Request) {
     const subMerchantId = eazypaySubMerchantId("course", course.slug);
 
     // ---- GUARD 1: overpayment / already fully paid ----
-    // Never create a fresh charge for a course this phone has already settled.
     if (await isCourseFullyPaidForPhone(mobile, course.id)) {
       return NextResponse.json(
         { ok: false, alreadyPaid: true, error: "You're already fully enrolled in this course. Log in to your portal to access it." },
@@ -88,10 +153,10 @@ export async function POST(req: Request) {
     }
 
     // ---- GUARD 2: idempotency dedupe (double-click / refresh / back-button) ----
-    // If an open payment attempt for this phone+course was just created, re-hand-back
-    // the SAME payment instead of minting a duplicate enrollment + payment row.
+    // Only reuse when the open attempt's amount matches this initiation (coupon
+    // must not re-apply or hand back a mismatched gateway charge).
     const recent = await findRecentOpenCoursePayment(mobile, course.slug, 120000, dedupBatchId);
-    if (recent && recent.reference_no) {
+    if (recent && recent.reference_no && Math.round(recent.amount) === Math.round(firstAmount)) {
       if (isEazypayConfigured()) {
         const url = buildPaymentUrl({ referenceNo: recent.reference_no, subMerchantId, amount: recent.amount, name, email: gatewayEmail, mobile });
         if (url) return NextResponse.json({ ok: true, referenceNo: recent.reference_no, paymentUrl: url, reused: true });
@@ -103,9 +168,10 @@ export async function POST(req: Request) {
     // ---- GUARD 3: reuse an in-progress enrollment instead of creating a 2nd ----
     const existing = await findResumableCourseEnrollment(mobile, course.id);
     let enrollment: CourseEnrollment;
+    let shouldIncrementCoupon = false;
     if (existing && (existing.amount_paid || 0) > 0) {
       // Has real money — RESUME: pay the next outstanding line of the existing plan
-      // (never re-plan or duplicate). Amount/kind come from its ledger, not the form.
+      // (never re-plan or re-apply a coupon; discount already baked into total/schedule).
       const next = deriveEnrollment(existing).nextPayable;
       if (!next) {
         return NextResponse.json(
@@ -118,11 +184,9 @@ export async function POST(req: Request) {
       firstKind = next.kind;
       firstInstallmentNo = next.no;
     } else if (existing) {
-      // No money yet — safe to RE-PLAN the same enrollment to the latest selection
-      // and abandon its stale open attempts, so a re-click reuses one row.
-      // Intent schedules keep amounts but NEVER dated dues (phantoms must not
-      // grace/block or inflate collections).
       await cancelStalePendingPayments(existing.id).catch(() => null);
+      const prevCode = parseCouponCodeFromReason(existing.discount_reason);
+      shouldIncrementCoupon = !!appliedCouponCode && prevCode?.toLowerCase() !== appliedCouponCode.toLowerCase();
       const intentSchedule = scheduleAsCheckoutIntent(schedule);
       enrollment =
         (await updateCourseEnrollment(existing.id, {
@@ -135,8 +199,10 @@ export async function POST(req: Request) {
           installment_count: installmentCount,
           status: "checkout_intent",
           schedule: intentSchedule,
+          ...discountPatch,
         })) || existing;
     } else {
+      shouldIncrementCoupon = !!appliedCouponCode;
       enrollment = await addCourseEnrollment({
         phone: mobile,
         student_name: name,
@@ -151,6 +217,7 @@ export async function POST(req: Request) {
         installment_count: installmentCount,
         status: "checkout_intent",
         schedule: scheduleAsCheckoutIntent(schedule),
+        ...discountPatch,
       });
     }
 
@@ -185,6 +252,11 @@ export async function POST(req: Request) {
       installment_no: firstInstallmentNo,
       batch_id: dedupBatchId,
     });
+
+    // Consume usage once per new coupon application (not on resume / amount-matched reuse).
+    if (shouldIncrementCoupon && appliedCouponCode) {
+      await incrementCouponUsage("course", course.id, appliedCouponCode);
+    }
 
     // Best-effort lead capture (don't block checkout on failure). Forward the
     // visitor's cookies so /api/public/lead can read the nsa_attr attribution

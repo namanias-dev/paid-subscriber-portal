@@ -14,6 +14,17 @@ export interface CouponFailure {
 }
 export type CouponResult = CouponSuccess | CouponFailure;
 
+/** Persist coupon identity on enrollment.discount_reason. */
+export function couponDiscountReason(code: string): string {
+  return `Coupon: ${(code || "").trim().toUpperCase()}`;
+}
+
+/** Extract coupon code from enrollment.discount_reason, if stored via couponDiscountReason. */
+export function parseCouponCodeFromReason(reason: string | null | undefined): string | null {
+  const m = /^Coupon:\s*(.+)$/i.exec((reason || "").trim());
+  return m ? m[1].trim() : null;
+}
+
 /**
  * Validate a coupon code against an item's coupon list + base amount.
  * Pure + server-safe: checks active flag, expiry, and usage limit.
@@ -29,16 +40,16 @@ export function validateCoupon(
   const coupon = (coupons || []).find(
     (c) => (c.code || "").trim().toLowerCase() === code.toLowerCase()
   );
-  if (!coupon) return { ok: false, error: "Invalid coupon code." };
+  if (!coupon) return { ok: false, error: "This coupon is not applicable to this course." };
   if (coupon.active === false) return { ok: false, error: "This coupon is no longer active." };
   if (coupon.expires_at && new Date(coupon.expires_at).getTime() < Date.now()) {
     return { ok: false, error: "This coupon has expired." };
   }
   if (coupon.max_uses != null && (coupon.used || 0) >= coupon.max_uses) {
-    return { ok: false, error: "This coupon has reached its usage limit." };
+    return { ok: false, error: "This coupon has already been used." };
   }
 
   const raw = coupon.type === "percent" ? Math.round((baseAmount * coupon.value) / 100) : coupon.value;
-  const discount = Math.max(0, Math.min(Math.round(raw), baseAmount));
-  return { ok: true, coupon, discount, finalAmount: Math.max(0, baseAmount - discount) };
+  const discount = Math.max(0, Math.min(Math.round(raw), Math.max(0, Math.round(baseAmount))));
+  return { ok: true, coupon, discount, finalAmount: Math.max(0, Math.round(baseAmount) - discount) };
 }
