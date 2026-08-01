@@ -14,7 +14,9 @@ export type AdminActivityAction =
   | "installment_recorded_manually"
   | "leads_csv_exported"
   | "phone_audience_copied"
-  | "export_permission_toggled";
+  | "export_permission_toggled"
+  | "telegram_broadcast_sent"
+  | "telegram_automation_updated";
 
 export const ADMIN_ACTIVITY_LABELS: Record<AdminActivityAction, string> = {
   payment_proof_uploaded: "Payment proof uploaded",
@@ -26,6 +28,8 @@ export const ADMIN_ACTIVITY_LABELS: Record<AdminActivityAction, string> = {
   leads_csv_exported: "Leads CSV exported",
   phone_audience_copied: "Phone audience copied",
   export_permission_toggled: "CSV export permission toggled",
+  telegram_broadcast_sent: "Telegram broadcast sent",
+  telegram_automation_updated: "Telegram automation updated",
 };
 
 export interface AdminActivityRow {

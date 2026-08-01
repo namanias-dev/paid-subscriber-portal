@@ -7,6 +7,7 @@
  * Every auto-rule defaults OFF; this no-ops unless a Super Admin enabled it.
  */
 import { normalizeIndianMobile } from "../phone";
+import { fireAutoTelegram } from "../telegram/dispatch";
 import { getRule, getBuyerById, resolveBuyerByPhone, firstNamesMatch, touchRuleLastRun } from "./store";
 import { sendSms, type RelatedEntity } from "./service";
 
@@ -69,4 +70,17 @@ async function dispatch(ctx: AutoCtx): Promise<void> {
 /** Public fire-and-forget entry — never throws into the caller. */
 export function fireAutoSms(ctx: AutoCtx): void {
   void dispatch(ctx).catch(() => {});
+  // Parallel Telegram automations (separate rules/tables). SMS path unchanged.
+  const vars = { ...(ctx.vars || {}) } as Record<string, string | number | null | undefined>;
+  if (vars.course == null && vars.item_short != null) vars.course = vars.item_short;
+  if (vars.course == null && vars.item_name != null) vars.course = vars.item_name;
+  fireAutoTelegram({
+    trigger: ctx.trigger,
+    phone: ctx.phone,
+    name: ctx.name,
+    vars,
+    entityId: ctx.entityId,
+    leadId: ctx.entity?.lead_id ?? null,
+    studentId: ctx.entity?.user_id ?? null,
+  });
 }

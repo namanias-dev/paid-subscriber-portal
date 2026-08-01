@@ -493,6 +493,8 @@ function LeadDetail({
   const [status, setLocalStatus] = useState<LeadStatus>(normalizeLeadStatus(lead.status) ?? DEFAULT_LEAD_STATUS);
   const [showJourney, setShowJourney] = useState(false);
   const [savingStatus, setSavingStatus] = useState(false);
+  const [tgInvite, setTgInvite] = useState<{ link: string } | null>(null);
+  const [tgBusy, setTgBusy] = useState(false);
 
   useEffect(() => {
     setLocalStatus(normalizeLeadStatus(lead.status) ?? DEFAULT_LEAD_STATUS);
@@ -516,6 +518,26 @@ function LeadDetail({
     });
     setNote("");
     toast("Note added", "success");
+  }
+
+  async function telegramInvite() {
+    setTgBusy(true);
+    const d = await fetch(`/api/admin/telegram/invite?leadId=${encodeURIComponent(lead.id)}`)
+      .then((r) => r.json())
+      .catch(() => null);
+    setTgBusy(false);
+    const link = d?.link || d?.inviteLink || d?.url;
+    if (!d?.ok && !link) {
+      toast(d?.error || "Could not create Telegram invite", "error");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(String(link));
+      toast("Telegram invite link copied", "success");
+    } catch {
+      toast("Invite ready — copy from the dialog", "success");
+    }
+    setTgInvite({ link: String(link) });
   }
 
   const systemLabel =
@@ -579,11 +601,29 @@ function LeadDetail({
           )}
         </div>
 
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <a href={waLink(lead.phone, `Hi ${lead.name}, this is Naman IAS Academy team. `)} target="_blank" rel="noopener noreferrer" className="btn btn-secondary flex-1 text-sm">💬 WhatsApp</a>
           <a href={`tel:${lead.phone}`} className="btn btn-secondary flex-1 text-sm">📞 Call</a>
           <SendSmsButton phone={lead.phone} name={lead.name} className="btn btn-secondary flex-1 justify-center text-sm" label="📱 SMS" />
+          <button type="button" onClick={() => void telegramInvite()} disabled={tgBusy} className="btn btn-secondary flex-1 text-sm">
+            {tgBusy ? "…" : "Telegram invite"}
+          </button>
         </div>
+
+        {tgInvite && (
+          <div className="rounded-xl border border-line bg-surface p-3 space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted">Telegram invite</p>
+              <button type="button" className="text-xs text-muted hover:text-ink" onClick={() => setTgInvite(null)}>Close</button>
+            </div>
+            <input className="input text-xs" readOnly value={tgInvite.link} onFocus={(e) => e.currentTarget.select()} />
+            <img
+              alt="Telegram invite QR"
+              className="mx-auto h-36 w-36 rounded-lg border border-line bg-white p-1"
+              src={`/api/admin/telegram/qr?data=${encodeURIComponent(tgInvite.link)}`}
+            />
+          </div>
+        )}
 
         <div>
           <label className="label">Add activity / note</label>

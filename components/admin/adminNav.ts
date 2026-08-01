@@ -45,6 +45,7 @@ export const ADMIN_NAV: AdminNavItem[] = [
   // nav group label moves here so it sits alongside Journey Automation. Journey
   // Automation is gated by its OWN restrictive permission (NOT send_sms).
   { href: "/admin/communications/sms", label: "SMS Mission Control", icon: "sms", group: "Communications", perm: "send_sms" },
+  { href: "/admin/communications/telegram", label: "Telegram", icon: "telegram", group: "Communications", perm: "telegram_inbox" },
   { href: "/admin/communications/journey-automation", label: "Journey Automation", icon: "journey_automation", group: "Communications", perm: "journey_view" },
   { href: "/admin/courses", label: "Courses", icon: "courses", group: "Academics", perm: "content_courses" },
   { href: "/admin/library", label: "Brochure Library", icon: "brochures", group: "Academics", perm: "content_pdfs_media" },

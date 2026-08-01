@@ -63,6 +63,7 @@ import {
   Sparkles,
   Workflow,
   History,
+  Send,
 } from "lucide-react";
 
 /**
@@ -156,7 +157,7 @@ export const APP_ICONS = {
   offline: MapPin,
   online: Video,
   hybrid: Shuffle,
-  telegram: Radio,
+  telegram: Send,
   guide: ScrollText,
   sparkle: Sparkles,
   download: Download,
