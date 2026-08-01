@@ -201,6 +201,7 @@ function dateFieldNote(courseSlug: string, webinarSlug: string): string {
 /** Which date the preset timeframe filter scopes on, for the given segment. */
 function presetDateNote(audType: string): string {
   if (audType.startsWith("payment_")) return "payment date";
+  if (audType === "webinar_registered_not_converted") return "paid webinar registration date";
   if (audType.startsWith("webinar_")) return "webinar registration date";
   if (audType === "leads") return "lead created date";
   return "signup date";
@@ -249,7 +250,7 @@ function SendTab({ meta }: { meta: Meta | null }) {
   useEffect(() => { loadSaved(); }, [loadSaved]);
 
   const sendable = templates.filter((t) => (t.status === "active" || t.status === "approved") && t.gateway_template_id);
-  const needsWebinar = audType.startsWith("webinar_");
+  const needsWebinar = audType === "webinar_registered" || audType === "webinar_not_registered" || audType === "webinar_attendees" || audType === "webinar_no_show";
   const isFiltered = audType === "filtered";
   const panel: "filtered" | "preset" | "person" = audType === "filtered" ? "filtered" : audType === "person" ? "person" : "preset";
   const filtersDirty = !!(fCourse || fWebinar || fStatus || fTimeframe !== "all");
@@ -463,7 +464,7 @@ function SendTab({ meta }: { meta: Meta | null }) {
             <Field label="Preset segment">
               <select className="input" value={audType} onChange={(e) => { setAudType(e.target.value); setLastPreset(e.target.value); setPreview(null); setRecipients(null); }}>
                 <optgroup label="Payments"><option value="payment_paid">Paid</option><option value="payment_not_paid">NOT paid (no successful payment)</option><option value="payment_pending">Pending</option><option value="payment_failed">Failed</option><option value="payment_abandoned">Abandoned</option><option value="payment_all">All payments</option></optgroup>
-                <optgroup label="Webinar"><option value="webinar_registered">Registered</option><option value="webinar_not_registered">NOT registered</option><option value="webinar_attendees">Attended</option><option value="webinar_no_show">No-show</option></optgroup>
+                <optgroup label="Webinar"><option value="webinar_registered">Registered</option><option value="webinar_not_registered">NOT registered</option><option value="webinar_attendees">Attended</option><option value="webinar_no_show">No-show</option><option value="webinar_registered_not_converted">Webinar registered — not converted</option></optgroup>
                 <optgroup label="People"><option value="leads">Leads</option><option value="users_with_mobile">All users with mobile</option>{!isPromo && <option value="all">Everyone (guarded)</option>}</optgroup>
               </select>
               {isPromo && <p className="mt-1 text-xs text-amber-700">Promotional template — warm audiences only (leads / users / webinar). The All audience is disabled (no promo route).</p>}
