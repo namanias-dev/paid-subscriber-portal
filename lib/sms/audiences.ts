@@ -20,6 +20,7 @@ import {
   getAllCourses, getAllCourseEnrollments, pageThrough,
 } from "../dataProvider";
 import { isPaidStatus } from "../paymentsAgg";
+import { isActiveEnrollment } from "../installments";
 import { firstNamesMatch, optedOutSet } from "./store";
 import { resolveSmsItemShort } from "./smsTitle";
 import type { RelatedEntity } from "./service";
@@ -37,6 +38,7 @@ export type AudienceType =
   | "person"
   | "payment_pending" | "payment_failed" | "payment_paid" | "payment_abandoned" | "payment_not_paid" | "payment_all"
   | "webinar_registered" | "webinar_not_registered" | "webinar_attendees" | "webinar_no_show"
+  | "webinar_registered_not_converted"
   | "leads" | "users_with_mobile" | "all"
   | "filtered";
 
@@ -93,6 +95,7 @@ export const AUDIENCE_OPTIONS: { type: AudienceType; label: string; needsWebinar
   { type: "webinar_not_registered", label: "Webinar — NOT registered (with mobile)", needsWebinar: true, promotionalForCold: true },
   { type: "webinar_attendees", label: "Webinar — Attended", needsWebinar: true },
   { type: "webinar_no_show", label: "Webinar — No-show", needsWebinar: true },
+  { type: "webinar_registered_not_converted", label: "Webinar registered — not converted" },
   { type: "leads", label: "Leads (by source / stage)" },
   { type: "users_with_mobile", label: "All users with a mobile" },
   { type: "all", label: "Everyone (guarded)" },
@@ -277,6 +280,43 @@ async function resolveAudienceInner(spec: AudienceSpec): Promise<Recipient[]> {
       .filter(([, a]) => match(a.cls) && inPreset(new Date(a.row.created_at).getTime()))
       .map(([d, a]) => attach(d, a.row.student_name, paymentVars(a.row),
         { payment_id: a.row.id, course_id: a.row.item_type === "course" ? a.row.item_slug : null, webinar_id: a.row.item_type === "webinar" ? a.row.item_slug : null })));
+  }
+
+  // ----- webinar registered, never converted to a course -----
+  // Paid webinar seat (same isPaidStatus + item_type=webinar as Payments/Overview),
+  // minus anyone with a successful seat/installment course payment or an active
+  // course enrollment. Deduped by normalized phone; suppression applied later.
+  if (spec.type === "webinar_registered_not_converted") {
+    const payments = await getPayments();
+    const webinarByPhone = new Map<string, { name: string | null; row: Payment; dateMs: number }>();
+    for (const p of payments) {
+      if (p.deleted_at || !isPaidStatus(p.status) || p.item_type !== "webinar") continue;
+      const d = norm(p.phone);
+      if (!d) continue;
+      const ms = new Date(p.created_at).getTime();
+      const prev = webinarByPhone.get(d);
+      if (!prev || ms > prev.dateMs) webinarByPhone.set(d, { name: p.student_name, row: p, dateMs: ms });
+    }
+
+    const converted = new Set<string>();
+    for (const p of payments) {
+      if (p.deleted_at || !isPaidStatus(p.status) || p.item_type !== "course") continue;
+      if (p.payment_kind !== "seat" && p.payment_kind !== "installment") continue;
+      const d = norm(p.phone);
+      if (d) converted.add(d);
+    }
+    for (const e of await getAllCourseEnrollments()) {
+      if (!isActiveEnrollment(e)) continue;
+      const d = norm(e.phone);
+      if (d) converted.add(d);
+    }
+
+    return dedupeRecipients([...webinarByPhone.entries()]
+      .filter(([d, a]) => !converted.has(d) && inPreset(a.dateMs))
+      .map(([d, a]) => attach(d, a.name, paymentVars(a.row), {
+        payment_id: a.row.id,
+        webinar_id: a.row.item_slug || null,
+      })));
   }
 
   // ----- webinar segments -----
