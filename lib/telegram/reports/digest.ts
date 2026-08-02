@@ -22,7 +22,8 @@ import {
 import { countsTowardCapacity } from "../../enrollmentScope";
 import { distinctRegistrations, isPaidStatus } from "../../paymentsAgg";
 import { getSupabaseAdmin } from "../../supabase";
-import type { Course, CourseBatch, CourseEnrollment, LearningMode } from "../../types";
+import type { Course, CourseBatch, CourseEnrollment, LearningMode, Payment } from "../../types";
+import { normalizeIndianMobile } from "../../phone";
 import { buildKeyboard, sendMessage } from "../botApi";
 import { tgLog } from "../log";
 import { escapeHtml, formatIstShort, inr, istNowParts } from "./format";
@@ -431,6 +432,58 @@ async function loginAllTimeDailyAvg(): Promise<number | null> {
   }
 }
 
+function displayPhone(raw: string | null | undefined): string {
+  const n = normalizeIndianMobile(raw);
+  if (n.ok && n.display) return n.display;
+  return String(raw || "").trim() || "—";
+}
+
+function paymentKindLabel(p: Payment): string {
+  if (p.item_type === "webinar") return "Webinar";
+  const kind = String(p.payment_kind || "");
+  if (kind === "seat") return "Course seat";
+  if (kind === "installment") {
+    return p.installment_no != null ? `Course inst #${p.installment_no}` : "Course installment";
+  }
+  if (kind === "full" || kind === "one_time") return "Course full pay";
+  return p.item_type === "course" ? "Course" : "Payment";
+}
+
+function shortItemName(p: Payment, max = 42): string {
+  let s = String(p.item || p.item_slug || "Item").trim();
+  // Drop long "— Installment…" suffix for readability; kind line covers it.
+  s = s.replace(/\s*[—–-]\s*Installment\s+\d+\s+of\s+\d+\s*$/i, "").trim();
+  if (s.length <= max) return s;
+  return `${s.slice(0, max - 1).trimEnd()}…`;
+}
+
+/** True if this phone later has a PAID row for the same item (slug/type). */
+function laterPaidSameItem(failed: Payment, all: Payment[]): boolean {
+  const phone = (failed.phone || "").replace(/\D/g, "").slice(-10);
+  if (!phone) return false;
+  const failedAt = new Date(failed.created_at).getTime();
+  const slug = (failed.item_slug || "").toLowerCase();
+  return all.some((p) => {
+    if (p.deleted_at || !isPaidStatus(p.status)) return false;
+    if ((p.phone || "").replace(/\D/g, "").slice(-10) !== phone) return false;
+    if (p.item_type !== failed.item_type) return false;
+    const pSlug = (p.item_slug || "").toLowerCase();
+    if (slug && pSlug && slug !== pSlug) return false;
+    if (!slug && (p.item || "") !== (failed.item || "")) return false;
+    const t = new Date(p.created_at).getTime();
+    return Number.isFinite(t) && t > failedAt;
+  });
+}
+
+function failureReasonShort(p: Payment): string | null {
+  const raw =
+    (p.verify_status && String(p.verify_status).trim()) ||
+    (p.response_code && String(p.response_code).trim()) ||
+    null;
+  if (!raw || /^(success|ok|00|0)$/i.test(raw)) return null;
+  return raw;
+}
+
 function pushSection(lines: string[], header: string, body: string[]): void {
   if (!body.length) return;
   if (lines.length && lines[lines.length - 1] !== "") lines.push("");
@@ -458,7 +511,8 @@ export async function buildDigest(opts?: {
   let courses: Awaited<ReturnType<typeof getAllCourses>> = [];
   let enrollments: Awaited<ReturnType<typeof getAllCourseEnrollments>> = [];
   let webinar: Awaited<ReturnType<typeof pickUpcomingWebinar>> = null;
-  let failedToday: number | null = null;
+  let failedRows: Payment[] = [];
+  let allPayments: Payment[] = [];
   let loginAvg: number | null = null;
 
   try {
@@ -477,13 +531,16 @@ export async function buildDigest(opts?: {
     if (settled[3].status === "fulfilled") enrollments = settled[3].value;
     if (settled[4].status === "fulfilled") webinar = settled[4].value;
     if (settled[5].status === "fulfilled") {
+      allPayments = settled[5].value;
       const today = istTodayYMD();
-      failedToday = settled[5].value.filter(
-        (p) =>
-          !p.deleted_at &&
-          String(p.status || "").toUpperCase() === "FAILED" &&
-          istYMD(p.created_at) === today,
-      ).length;
+      failedRows = allPayments
+        .filter(
+          (p) =>
+            !p.deleted_at &&
+            String(p.status || "").toUpperCase() === "FAILED" &&
+            istYMD(p.created_at) === today,
+        )
+        .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
     }
     if (settled[6].status === "fulfilled") loginAvg = settled[6].value;
     // Fallback: mean of pulse login history when all-time query is slow/unavailable.
@@ -496,6 +553,7 @@ export async function buildDigest(opts?: {
     /* sections omit missing data */
   }
 
+  const failedToday = failedRows.length;
   void opts?.previous;
   const courseBlocks = courseBreakdown(courses, enrollments);
   const collections = collectionsStats(enrollments);
@@ -627,11 +685,30 @@ export async function buildDigest(opts?: {
     pushSection(lines, `⚠️ <b>COLLECTIONS</b>`, body);
   }
 
-  // ── ALERTS (failed payments) ──
-  if (failedToday != null && failedToday > 0) {
-    if (lines.length && lines[lines.length - 1] !== "") lines.push("");
-    lines.push(
-      `🚨 <b>${failedToday}</b> payment${failedToday === 1 ? "" : "s"} failed today`,
+  // ── FAILED PAYMENTS (named detail) ──
+  if (failedRows.length > 0) {
+    const body: string[] = [];
+    for (const p of failedRows.slice(0, 8)) {
+      const name = escapeHtml(p.student_name || "Student");
+      const phone = escapeHtml(displayPhone(p.phone));
+      const kind = escapeHtml(paymentKindLabel(p));
+      const item = escapeHtml(shortItemName(p));
+      const when = escapeHtml(formatIstShort(p.created_at));
+      const reason = failureReasonShort(p);
+      const recovered = laterPaidSameItem(p, allPayments);
+      body.push(`· <b>${name}</b> · ${phone}`);
+      body.push(`  ${kind} · ${item} · <b>${inr(p.amount)}</b>`);
+      body.push(
+        `  ${when}${reason ? ` · ${escapeHtml(reason)}` : ""}${recovered ? " · <b>later PAID ✓</b>" : " · still failed"}`,
+      );
+    }
+    if (failedRows.length > 8) {
+      body.push(`· …and <b>${failedRows.length - 8}</b> more`);
+    }
+    pushSection(
+      lines,
+      `🚨 <b>${failedRows.length}</b> payment${failedRows.length === 1 ? "" : "s"} failed today`,
+      body,
     );
   }
 
