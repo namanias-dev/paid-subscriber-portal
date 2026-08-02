@@ -2839,7 +2839,7 @@ export async function incrementCouponUsage(
  * still require Supabase, because the bank callback can hit a different
  * serverless instance than the one that created the record.
  */
-function demoPayments(): Payment[] {
+export function demoPayments(): Payment[] {
   const g = globalThis as unknown as { __namanDemoPayments?: Payment[] };
   if (!g.__namanDemoPayments) g.__namanDemoPayments = [...mock.payments];
   return g.__namanDemoPayments;
@@ -2885,7 +2885,16 @@ const PAID_STATUSES = ["PAID", "captured"];
 /** Non-paid statuses eligible for (re)verification against ICICI. INITIATED
  *  (checkout opened) is included so a real payment whose callback was lost can
  *  still be recovered to PAID by a later verify. */
-const NONPAID_STATUSES = ["INITIATED", "PENDING", "pending", "VERIFYING", "ABANDONED", "FAILED"];
+const NONPAID_STATUSES = [
+  "INITIATED",
+  "UNCONFIRMED",
+  "PENDING",
+  "pending",
+  "VERIFYING",
+  "ABANDONED",
+  "FAILED",
+  "EXPIRED",
+];
 
 /**
  * Window (minutes) a fresh PENDING waits before we move it to VERIFYING.
@@ -2925,7 +2934,7 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 function statusForOutcome(outcome: VerifyOutcome): Payment["status"] | null {
   if (outcome === "paid") return "PAID";
   if (outcome === "failed") return "FAILED";
-  if (outcome === "abandoned") return "ABANDONED";
+  if (outcome === "abandoned" || outcome === "expired") return "EXPIRED";
   return null; // unknown
 }
 
@@ -2984,6 +2993,8 @@ export interface ReverifyOptions {
   withDetails?: boolean;
   /** Who triggered this run (admin button). Attributed in payment_action_log. */
   actor?: ReverifyActor | null;
+  /** Skip student SMS/Telegram (90d backfill). Ops summary handled by caller. */
+  silentStudentNotify?: boolean;
 }
 
 /**
@@ -2994,23 +3005,26 @@ async function decidePaymentOutcome(
   row: Payment,
   storedOnly: boolean,
 ): Promise<{ outcome: VerifyOutcome; source: "callback" | "verify" | "none"; rawStatus: string | null; gatewayRef: string | null; settlement: SettlementStatus | null }> {
-  const stored = verifyFromStoredCallback(row);
-  // A verified E000 callback means the money settled to us -> "settled".
-  if (stored === "paid") return { outcome: "paid", source: "callback", rawStatus: row.response_code ?? null, gatewayRef: row.gateway_ref ?? null, settlement: "settled" };
-
-  if (!storedOnly && row.reference_no) {
-    // Pass everything we know so ICICI can match by ref and, when available,
-    // by its own transaction id / amount / mode / date (doc pp. 42–46).
-    const live = await eazypayVerify(row.reference_no, {
-      ezpaytranid: row.gateway_ref,
-      amount: row.amount,
-      paymentmode: row.payment_mode,
-      trandate: row.transaction_date,
-    });
-    if (live.reachable) return { outcome: live.outcome, source: "verify", rawStatus: live.rawStatus, gatewayRef: live.gatewayRef, settlement: live.settlement };
+  // Callback is advisory only — never terminal from stored callback alone.
+  void storedOnly;
+  if (!row.reference_no) {
+    return { outcome: "unknown", source: "none", rawStatus: null, gatewayRef: null, settlement: null };
   }
-  // No live answer — fall back to stored evidence (callback failure IS ICICI).
-  if (stored === "failed") return { outcome: "failed", source: "callback", rawStatus: row.response_code ?? null, gatewayRef: null, settlement: null };
+  const live = await eazypayVerify(row.reference_no, {
+    ezpaytranid: row.gateway_ref,
+    amount: row.amount,
+    paymentmode: row.payment_mode,
+    trandate: row.transaction_date,
+  });
+  if (live.reachable) {
+    return {
+      outcome: live.outcome,
+      source: "verify",
+      rawStatus: live.rawStatus,
+      gatewayRef: live.gatewayRef,
+      settlement: live.settlement,
+    };
+  }
   return { outcome: "unknown", source: "none", rawStatus: null, gatewayRef: null, settlement: null };
 }
 
@@ -3107,95 +3121,76 @@ export async function reverifyPayments(opts: ReverifyOptions = {}): Promise<Reve
 
   for (const row of rows) {
     result.scanned += 1;
-    const { outcome, source, rawStatus, gatewayRef, settlement } = await decidePaymentOutcome(row, storedOnly);
-    if (source === "verify") await sleep(rateLimitMs);
-
-    let target = statusForOutcome(outcome);
-    // ICICI answered with an unrecognized status (Initiated/Challan/etc.): a real
-    // answer but NOT terminal — never change the row; flag it for manual review.
-    const needsReview = source === "verify" && outcome === "unknown" && !!rawStatus;
-    // Unknown: never terminal. Promote a past-window PENDING to VERIFYING so the
-    // UI/admin reflect "we're actively checking" — but a timer never FAILs it.
-    if (target === null) {
-      result.unreachable += 1;
-      if (needsReview) result.needsReview += 1;
-      const ageMs = Date.now() - new Date(row.created_at).getTime();
-      const pastWindow = ageMs >= pendingWindowMinutes() * 60_000;
-      const isPending = row.status === "PENDING" || row.status === "pending";
-      target = isPending && pastWindow ? "VERIFYING" : null;
-    } else {
-      result.reachable += 1;
-    }
-
-    // Tally the intended transition for the report.
-    const willChange = !!target && target !== row.status;
-    if (willChange) {
-      if (target === "PAID") {
-        result.toPaid += 1;
-        if (settlement === "in_progress") result.toPaidSettling += 1;
-      } else if (target === "FAILED") result.toFailed += 1;
-      else if (target === "ABANDONED") result.toAbandoned += 1;
-      else if (target === "VERIFYING") result.toVerifying += 1;
-    }
-    result.details?.push({ reference_no: row.reference_no ?? null, from: row.status, to: target ?? row.status, source, rawStatus, settlement });
-
-    if (dryRun) continue;
-
-    // Persist. Only a real LIVE ICICI call bumps the verify counters / timestamp
-    // (so blind-mode stored-evidence sweeps never consume the backoff budget or
-    // write a misleading "last verified" time). Status changes always persist.
-    const patch: Partial<Payment> = {};
-    if (source === "verify") {
-      patch.verify_attempts = (row.verify_attempts ?? 0) + 1;
-      patch.last_verify_at = new Date().toISOString();
-      if (rawStatus) patch.verify_status = rawStatus;
-    }
-    if (gatewayRef && !row.gateway_ref) patch.gateway_ref = gatewayRef;
-    if (willChange && target) patch.status = target;
-    // Record settlement state alongside a PAID transition (settled vs settling).
-    if (willChange && target === "PAID" && settlement) patch.settlement_status = settlement;
-    if (Object.keys(patch).length === 0) {
-      // No DB change, but if ICICI gave a real answer we still audit the attempt.
-      if (source === "verify") {
-        await logVerifyAudit({ row, actor: opts.actor, oldStatus: row.status, newStatus: row.status, source, rawStatus, settlement, reachable: true, needsReview });
-      }
+    if (!row.reference_no) {
+      result.unchanged += 1;
       continue;
     }
-
-    const { data: upd } = await db
-      .from("payments")
-      .update(patch as Record<string, unknown>)
-      .eq("id", row.id)
-      .not("status", "in", `(${PAID_STATUSES.join(",")})`) // never touch a paid row
-      .select("id,phone,student_name,reference_no,item_type,status")
-      .maybeSingle();
-
-    // Paid-side effects (idempotent): create the buyer + finalize course payment.
-    if (willChange && target === "PAID" && upd) {
-      const r = upd as Pick<Payment, "phone" | "student_name" | "reference_no" | "item_type">;
-      await ensureBuyer(r.phone, r.student_name).catch(() => null);
-      if (r.item_type === "course" && r.reference_no) await finalizeCoursePaymentByReference(r.reference_no).catch(() => null);
+    if (dryRun || storedOnly) {
+      // dryRun / storedOnly: do not write terminals via the legacy stored-callback path.
+      result.unchanged += 1;
+      continue;
     }
-
-    // Immutable audit trail: every verify attempt + every status change (who,
-    // when, raw ICICI response, old -> new, settlement). Best-effort.
-    if (source === "verify" || willChange) {
-      await logVerifyAudit({
-        row,
-        actor: opts.actor,
-        oldStatus: row.status,
-        newStatus: (willChange && target) ? target : row.status,
-        source,
-        rawStatus,
-        settlement,
-        reachable: source !== "none",
-        needsReview,
-      });
+    // Sole terminal writer — shared with QStash worker + callback follow-up.
+    const { applyVerifyForReference } = await import("./paymentOutcome");
+    const applied = await applyVerifyForReference(row.reference_no, {
+      silentStudentNotify: opts.silentStudentNotify === true,
+      actor: opts.actor,
+    });
+    if (applied.outcome === "rate_limited") {
+      result.unreachable += 1;
+      const { enqueueVerifyRetry } = await import("./paymentOutcome");
+      void enqueueVerifyRetry(row.reference_no, applied.retryAfterMs || 120_000);
+      continue;
     }
+    if (applied.outcome === "skipped_paid") {
+      result.unchanged += 1;
+      continue;
+    }
+    if (applied.newlyPaid) {
+      result.toPaid += 1;
+      result.reachable += 1;
+      if ((applied.rawStatus || "").toUpperCase() === "RIP" || (applied.rawStatus || "").toUpperCase() === "SIP") {
+        result.toPaidSettling += 1;
+      }
+    } else if (applied.changed && applied.to === "FAILED") {
+      result.toFailed += 1;
+      result.reachable += 1;
+    } else if (applied.changed && (applied.to === "EXPIRED" || applied.to === "ABANDONED")) {
+      result.toAbandoned += 1;
+      result.reachable += 1;
+    } else if (applied.outcome === "unreachable" || applied.outcome === "unknown") {
+      result.unreachable += 1;
+      // Legacy: promote past-window PENDING → VERIFYING label (non-terminal).
+      const ageMs = Date.now() - new Date(row.created_at).getTime();
+      const pastWindow = ageMs >= pendingWindowMinutes() * 60_000;
+      if ((row.status === "PENDING" || row.status === "pending") && pastWindow && db) {
+        await db
+          .from("payments")
+          .update({ status: "VERIFYING" })
+          .eq("id", row.id)
+          .not("status", "in", `(${PAID_STATUSES.join(",")})`);
+        result.toVerifying += 1;
+      }
+    } else {
+      result.unchanged += 1;
+      if (applied.outcome === "paid" || applied.outcome === "failed" || applied.outcome === "expired") {
+        result.reachable += 1;
+      }
+    }
+    result.details?.push({
+      reference_no: row.reference_no ?? null,
+      from: applied.from,
+      to: applied.to,
+      source: "verify",
+      rawStatus: applied.rawStatus,
+    });
+    await sleep(rateLimitMs);
   }
 
-  // `unchanged` may have been double-counted above; recompute cleanly.
-  result.unchanged = result.scanned - result.toPaid - result.toFailed - result.toAbandoned - result.toVerifying;
+  result.unchanged = Math.max(
+    0,
+    result.scanned - result.toPaid - result.toFailed - result.toAbandoned - result.toVerifying,
+  );
   return result;
 }
 
@@ -3295,7 +3290,14 @@ export async function createPayment(input: CreatePaymentInput): Promise<Payment>
       void recordPaymentPaid(saved, "checkout").catch(() => {});
       // Paid webinar created as PAID (offline/cash) → behaviour ladder.
       if (saved.item_type === "webinar") scheduleBehaviourStatusApply(saved.phone);
-    } else if (saved.status === "INITIATED" || saved.status === "PENDING") void recordPaymentInitiated(saved).catch(() => {});
+    } else if (saved.status === "INITIATED" || saved.status === "PENDING" || saved.status === "UNCONFIRMED") {
+      void recordPaymentInitiated(saved).catch(() => {});
+      if (saved.reference_no) {
+        void import("./paymentOutcome")
+          .then((m) => m.enqueueVerifyLadder(saved.reference_no!))
+          .catch(() => {});
+      }
+    }
     return saved;
   } catch {
     // Best-effort: fall back to in-memory so the flow still works pre-migration.
@@ -3397,9 +3399,9 @@ export type WebinarPayClass = "PAID" | "PENDING" | "FAILED";
 export function webinarPayClass(status: string | null | undefined): WebinarPayClass {
   const s = (status || "").toUpperCase();
   if (s === "PAID" || s === "CAPTURED") return "PAID";
-  // ABANDONED (never completed) is, for the student, a retry-able non-payment.
-  if (s === "FAILED" || s === "REFUNDED" || s === "ABANDONED") return "FAILED";
-  // PENDING + VERIFYING -> still confirming.
+  // EXPIRED/ABANDONED/FAILED — retryable non-payment for the student.
+  if (s === "FAILED" || s === "REFUNDED" || s === "ABANDONED" || s === "EXPIRED") return "FAILED";
+  // INITIATED is filtered by callers; UNCONFIRMED/PENDING/VERIFYING → pending.
   return "PENDING";
 }
 const PAY_RANK: Record<WebinarPayClass, number> = { PAID: 3, PENDING: 2, FAILED: 1 };
@@ -5064,9 +5066,8 @@ export interface AbandonSweepResult {
 }
 
 /**
- * Expire evidence-less open attempts (INITIATED / PENDING / legacy "pending") for
- * courses + webinars to ABANDONED. Idempotent and safe to re-run — used by the
- * lazy on-read sweep and by the one-time cleanup of pre-fix spurious PENDING rows.
+ * Evidence-less open attempts: do NOT timer-write a terminal status (Verify-only
+ * rule). Instead enqueue / ensure the Verify ladder so NotInitiated → EXPIRED.
  */
 export async function abandonEvidencelessOpenPayments(
   opts: { olderThanMinutes?: number; dryRun?: boolean; phones?: string[] } = {},
@@ -5082,7 +5083,7 @@ export async function abandonEvidencelessOpenPayments(
   let q = db
     .from("payments")
     .select("*")
-    .in("status", ["INITIATED", "PENDING", "pending"])
+    .in("status", ["INITIATED", "UNCONFIRMED", "PENDING", "pending"])
     .in("item_type", ["course", "webinar"])
     .is("deleted_at", null)
     .lt("created_at", cutoff);
@@ -5091,60 +5092,30 @@ export async function abandonEvidencelessOpenPayments(
   const rows = (data as Payment[] | null) ?? [];
   if (!rows.length) return res;
 
-  // Evidence guard: any gateway/verify signal means we must NOT timer-abandon it.
   const hasEvidence = (p: Payment): boolean =>
     !!(p.gateway_ref || p.response_code || p.verify_status || p.verified_signature || (p.verify_attempts ?? 0) > 0);
 
-  const candidates = rows.filter((p) => {
+  const { enqueueVerifySoon, applyVerifyForReference } = await import("./paymentOutcome");
+  for (const p of rows) {
     res.scanned += 1;
-    if (hasEvidence(p)) { res.keptEvidence += 1; return false; }
-    return true;
-  });
-  if (!candidates.length) return res;
-
-  // Proof guard: an uploaded proof means the student claims a real payment — keep
-  // it in the verification flow, never silently abandon.
-  const ids = candidates.map((p) => p.id);
-  const proofIds = new Set<string>();
-  for (let i = 0; i < ids.length; i += 200) {
-    const chunk = ids.slice(i, i + 200);
-    const { data: proofs } = await db.from("payment_proofs").select("payment_id").in("payment_id", chunk);
-    for (const r of (proofs as { payment_id: string }[] | null) ?? []) proofIds.add(r.payment_id);
-  }
-
-  // Paid-sibling guard: never abandon an attempt whose obligation is already paid.
-  const phones = [...new Set(candidates.map((p) => (p.phone || "").trim()).filter(Boolean))];
-  const paidKeys = new Set<string>();
-  const groupKey = (p: Payment): string => {
-    const purpose = p.payment_kind === "seat" ? "seat" : p.payment_kind === "installment" ? `inst:${p.installment_no ?? 0}` : "full";
-    return [(p.phone || "").trim(), p.item_type, (p.item_slug || p.item || "").trim().toLowerCase(), purpose].join("|");
-  };
-  for (let i = 0; i < phones.length; i += 50) {
-    const chunk = phones.slice(i, i + 50);
-    const { data: sib } = await db.from("payments").select("*").in("phone", chunk).is("deleted_at", null);
-    for (const p of (sib as Payment[] | null) ?? []) if (isPaidStatus(p.status)) paidKeys.add(groupKey(p));
-  }
-
-  const toAbandon = candidates.filter((p) => {
-    if (proofIds.has(p.id)) { res.keptProof += 1; return false; }
-    if (paidKeys.has(groupKey(p))) { res.keptPaidSibling += 1; return false; }
-    return true;
-  });
-  if (!toAbandon.length) return res;
-
-  res.referenceNos = toAbandon.map((p) => p.reference_no).filter(Boolean) as string[];
-  if (opts.dryRun) { res.abandoned = toAbandon.length; return res; }
-
-  const abandonIds = toAbandon.map((p) => p.id);
-  for (let i = 0; i < abandonIds.length; i += 200) {
-    const chunk = abandonIds.slice(i, i + 200);
-    const { data: upd } = await db
-      .from("payments")
-      .update({ status: "ABANDONED" })
-      .in("id", chunk)
-      .not("status", "in", `(${PAID_STATUSES.join(",")})`)
-      .select("id");
-    res.abandoned += ((upd as { id: string }[] | null) ?? []).length;
+    if (hasEvidence(p)) {
+      res.keptEvidence += 1;
+      // Has evidence — Verify decides (may recover RIP→PAID or fail).
+      if (!opts.dryRun && p.reference_no) {
+        void applyVerifyForReference(p.reference_no, { silentStudentNotify: false }).catch(() => {});
+      }
+      continue;
+    }
+    if (!p.reference_no) continue;
+    res.referenceNos.push(p.reference_no);
+    if (!opts.dryRun) {
+      void enqueueVerifySoon(p.reference_no).catch(() => {});
+      // Also run Verify now so NotInitiated can become EXPIRED without waiting.
+      const applied = await applyVerifyForReference(p.reference_no, { silentStudentNotify: true });
+      if (applied.changed && (applied.to === "EXPIRED" || applied.to === "ABANDONED")) res.abandoned += 1;
+    } else {
+      res.abandoned += 1;
+    }
   }
   return res;
 }

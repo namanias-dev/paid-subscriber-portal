@@ -1398,26 +1398,26 @@ export interface WebinarRegistration {
 
 // ----------------------------- Finance -----------------------------
 /**
- * Payment lifecycle.
- *   PENDING   — initiated, within the active window. No access.
- *   VERIFYING — window passed; we are re-checking with ICICI. No access yet.
- *   ABANDONED — ICICI shows no successful payment (clicked Pay, never completed). Hot lead.
- *   FAILED    — ICICI explicitly returned failure/cancellation. No access.
- *   PAID      — ICICI success (callback OR Verify URL). Access granted.
+ * Payment lifecycle (Verify-only terminals):
+ *   INITIATED    — checkout opened
+ *   UNCONFIRMED  — callback received (advisory) or money-in-flight; awaiting Verify
+ *   PENDING/VERIFYING — legacy open labels (treated as UNCONFIRMED)
+ *   PAID         — Verify success (immutable)
+ *   FAILED       — Verify explicit failure
+ *   EXPIRED      — Verify NotInitiated / never completed (true abandon)
+ *   ABANDONED    — legacy synonym of EXPIRED
  * `captured`/`pending`/`refunded` are legacy/Razorpay statuses, kept for back-compat.
  */
 export type PaymentStatus =
   | "captured"
   | "pending"
   | "refunded"
-  /** Checkout opened / "Pay" clicked — a mere intent, NOT money in flight. Created
-   *  on button click; promoted to PAID/FAILED by the gateway callback, or expired
-   *  to ABANDONED when no confirmation ever arrives. Never counts as paid or as
-   *  "needs verification". */
   | "INITIATED"
+  | "UNCONFIRMED"
   | "PENDING"
   | "VERIFYING"
   | "ABANDONED"
+  | "EXPIRED"
   | "PAID"
   | "FAILED";
 
@@ -1459,6 +1459,14 @@ export interface Payment {
    * Null for non-paid rows or when unknown.
    */
   settlement_status?: "settled" | "in_progress" | null;
+  /** Raw ICICI return-URL callback (advisory). */
+  callback_payload?: Record<string, unknown> | null;
+  /** Raw ICICI Verify URL response. */
+  verify_payload?: Record<string, unknown> | null;
+  /** When student confirmation SMS/TG was sent (once). */
+  payment_confirmed_notified_at?: string | null;
+  /** QStash message ids for the verify ladder. */
+  verify_schedule_ids?: string[] | null;
   // --- Phase 2: Book-Your-Seat + EMI ledger links (nullable; one-time payments leave these null) ---
   enrollment_id?: string | null;
   payment_kind?: "one_time" | "seat" | "installment" | "full" | null;

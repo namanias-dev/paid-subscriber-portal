@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getPaymentByReference, updatePaymentByReference, ensureBuyer, finalizeCoursePaymentByReference } from "@/lib/dataProvider";
+import { getPaymentByReference, ensureBuyer, finalizeCoursePaymentByReference } from "@/lib/dataProvider";
 import { isEazypayConfigured, verifyStatusSignature, itemTypeFromReference } from "@/lib/eazypay";
 
 export const dynamic = "force-dynamic";
@@ -52,22 +52,21 @@ export async function GET(req: Request, { params }: { params: { referenceNo: str
     const signedAmount = url.searchParams.get("amt");
     const sig = url.searchParams.get("sig");
 
-    // 1) Authoritative, stateless result handed over by the verified callback.
-    //    The HMAC proves the callback (which checked ICICI's signature) produced
-    //    it, so it's trustworthy even with no database.
+    // 1) Signed hint from callback redirect — ADVISORY only.
+    //    Never write PAID/FAILED from this. Kick Verify and return current DB state.
     if (signedStatus && verifyStatusSignature(referenceNo, signedStatus, signedAmount ?? "0", sig)) {
-      // Best-effort: also reflect it into any stored record.
-      await updatePaymentByReference(referenceNo, {
-        status: signedStatus as "PAID" | "FAILED",
-      }).catch(() => null);
+      const { applyVerifyForReference } = await import("@/lib/paymentOutcome");
+      void applyVerifyForReference(referenceNo).catch(() => {});
 
       const record = await getPaymentByReference(referenceNo).catch(() => null);
-      const loginCode = signedStatus === "PAID" ? await buyerLogin(record?.phone, record?.student_name) : null;
-      const extras = signedStatus === "PAID" ? await emiExtras(referenceNo) : {};
+      const status = record?.status || "UNCONFIRMED";
+      const paid = status === "PAID" || status === "captured";
+      const loginCode = paid ? await buyerLogin(record?.phone, record?.student_name) : null;
+      const extras = paid ? await emiExtras(referenceNo) : {};
       return NextResponse.json({
         ok: true,
         referenceNo,
-        status: signedStatus,
+        status,
         item: record?.item || ITEM_LABEL[itemTypeFromReference(referenceNo)],
         itemType: record?.item_type || itemTypeFromReference(referenceNo),
         itemSlug: record?.item_slug ?? null,
@@ -76,6 +75,7 @@ export async function GET(req: Request, { params }: { params: { referenceNo: str
         loginCode,
         verifiedSignature: true,
         demo: false,
+        awaiting: !paid,
         ...extras,
       });
     }
@@ -99,12 +99,20 @@ export async function GET(req: Request, { params }: { params: { referenceNo: str
         });
       }
       if (payment.status !== "PAID" && payment.status !== "captured") {
-        payment =
-          (await updatePaymentByReference(referenceNo, {
-            status: "PAID",
-            verified_signature: false,
-            gateway_ref: `DEMO-${referenceNo}`,
-          })) ?? payment;
+        // Demo only: simulate Verify success (no real ICICI).
+        const { applyVerifyForReference } = await import("@/lib/paymentOutcome");
+        await applyVerifyForReference(referenceNo, {
+          precomputed: {
+            reachable: true,
+            outcome: "paid",
+            settlement: "settled",
+            rawStatus: "Success",
+            gatewayRef: `DEMO-${referenceNo}`,
+            amount: payment.amount,
+            httpStatus: 200,
+          },
+        });
+        payment = (await getPaymentByReference(referenceNo)) ?? payment;
       }
       return NextResponse.json({
         ok: true,

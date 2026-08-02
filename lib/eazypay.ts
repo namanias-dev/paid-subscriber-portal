@@ -309,7 +309,7 @@ export function verifyFromStoredCallback(row: {
  */
 export const EAZYPAY_VERIFY_URL = "https://eazypay.icicibank.com/EazyPGVerify";
 
-export type VerifyOutcome = "paid" | "failed" | "abandoned" | "unknown";
+export type VerifyOutcome = "paid" | "failed" | "abandoned" | "expired" | "unknown";
 /** Whether the money has settled to our account yet. */
 export type SettlementStatus = "settled" | "in_progress";
 
@@ -348,6 +348,9 @@ export function mapVerifyStatus(rawStatus: string | null | undefined): VerifyOut
   if (!s) return "unknown";
   // Money received from the bank: settled (Success) or settling (RIP/SIP).
   if (s === "SUCCESS" || s === "PAID" || s === "RIP" || s === "SIP") return "paid";
+  // Never completed at gateway — true abandon / never opened payment instrument.
+  const compact = s.replace(/[\s_-]+/g, "");
+  if (compact === "NOTINITIATED" || compact === "NOTINITATED") return "expired";
   // ICICI explicitly reported a non-success terminal outcome.
   if (
     s === "FAILED" ||
