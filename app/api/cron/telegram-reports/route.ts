@@ -86,6 +86,22 @@ async function run(req: Request) {
           { status: 400 },
         );
       }
+      // Refuse binding the public student channel unless explicitly forced.
+      const title = (guarded.title || "").toLowerCase();
+      const forcePublic = url.searchParams.get("allow_public") === "1";
+      if (!forcePublic && (!/ops/.test(title) || guarded.id === "-1001062189351")) {
+        return NextResponse.json(
+          {
+            ok: false,
+            error:
+              "refusing_non_ops_channel — title must include Ops (use allow_public=1 only for intentional exceptions)",
+            title: guarded.title,
+            channelMasked: maskChannelId(guarded.id),
+            ts: Date.now(),
+          },
+          { status: 400 },
+        );
+      }
       await updateReportSettings({ channel_id: guarded.id });
       const kick = await kickoffReportsAfterChannelCapture(guarded.id);
       return NextResponse.json({

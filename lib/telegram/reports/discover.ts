@@ -155,19 +155,29 @@ export async function maybeCaptureReportsChannel(chat: {
   id: number | string;
   type?: string;
   title?: string | null;
+  username?: string | null;
 }): Promise<{ captured: boolean; id: string | null }> {
   const type = String(chat.type || "");
   if (type !== "channel" && type !== "supergroup") return { captured: false, id: null };
   const id = normalizeChannelId(String(chat.id));
   if (!id) return { captured: false, id: null };
-  const settings = await getReportSettings();
-  // Always prefer an Ops-titled channel; otherwise fill if empty / broken env.
   const title = chat.title || "";
-  const isOps = /ops/i.test(title) || /naman\s*ias/i.test(title);
+  const username = String(chat.username || "").toLowerCase();
+  // Never bind the public student channel (@naman21) as Ops.
+  if (username === "naman21" || id === "-1001062189351") {
+    tgLog("reports_channel_skip_public", { id: maskChannelId(id), title }, "warn");
+    return { captured: false, id: null };
+  }
+  const isOps = /ops/i.test(title);
+  // Prefer Ops-titled channels; allow first fill only for explicitly Ops-named chats.
+  if (!isOps) {
+    tgLog("reports_channel_skip_non_ops", { id: maskChannelId(id), title }, "info");
+    return { captured: false, id: null };
+  }
+  const settings = await getReportSettings();
   if (settings.channel_id && settings.channel_id === id) {
     return { captured: false, id };
   }
-  if (settings.channel_id && !isOps) return { captured: false, id: null };
   await updateReportSettings({ channel_id: id });
   tgLog("reports_channel_captured", { id: maskChannelId(id), title }, "info");
   return { captured: true, id };
