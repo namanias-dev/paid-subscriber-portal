@@ -479,6 +479,8 @@ export async function buildDigest(opts?: {
   let allPayments: Payment[] = [];
   let loginAvg: number | null = null;
   let loginAvg30: number | null = null;
+  let loginsToday: number | null = null;
+  let loginsYday: number | null = null;
 
   try {
     const settled = await Promise.allSettled([
@@ -510,6 +512,8 @@ export async function buildDigest(opts?: {
     if (settled[6].status === "fulfilled") {
       loginAvg = settled[6].value.allTimeAvg;
       loginAvg30 = settled[6].value.rolling30Avg;
+      loginsToday = settled[6].value.today;
+      loginsYday = settled[6].value.yesterday;
     }
   } catch {
     /* sections omit missing data */
@@ -520,8 +524,6 @@ export async function buildDigest(opts?: {
   const courseBlocks = courseBreakdown(courses, enrollments);
   const collections = collectionsStats(enrollments);
 
-  const loginsToday = pulseToday ? mVal(pulseToday.pulse.loginUsersToday) : null;
-  const loginsYday = pulseToday ? mPrev(pulseToday.pulse.loginUsersToday) : null;
   const revenueToday = pulseToday
     ? (mVal(pulseToday.pulse.courseRevenue) || 0) + (mVal(pulseToday.pulse.webinarRevenue) || 0)
     : null;

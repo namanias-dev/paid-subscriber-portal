@@ -36,6 +36,10 @@ export interface LoginAvgStats {
 export interface LoginAvgResult {
   allTimeAvg: number | null;
   rolling30Avg: number | null;
+  /** Unique login users today (IST) — same definition as averages. */
+  today: number;
+  /** Unique login users yesterday (IST). */
+  yesterday: number;
   activeDays: number;
   uniqueSum: number;
   firstActiveYmd: string | null;
@@ -73,22 +77,31 @@ async function uniqueLoginsOnYmd(ymd: string): Promise<number> {
   startPad.setUTCDate(startPad.getUTCDate() - 1);
   const endPad = new Date(`${ymd}T23:59:59.999+05:30`);
   endPad.setUTCDate(endPad.getUTCDate() + 1);
-  const { data, error } = await db
-    .from("analytics_events")
-    .select("buyer_id,phone,occurred_at")
-    .eq("event_name", "login")
-    .gte("occurred_at", startPad.toISOString())
-    .lte("occurred_at", endPad.toISOString())
-    .limit(20000);
-  if (error) {
-    tgLog("login_avg_day_query_failed", { ymd, error: error.message }, "warn");
-    return 0;
-  }
   const set = new Set<string>();
-  for (const row of data || []) {
-    if (istYMD((row as { occurred_at?: string }).occurred_at) !== ymd) continue;
-    const k = loginUserKey(row as { buyer_id?: string | null; phone?: string | null });
-    if (k) set.add(k);
+  let offset = 0;
+  const page = 1000;
+  for (;;) {
+    const { data, error } = await db
+      .from("analytics_events")
+      .select("buyer_id,phone,occurred_at")
+      .eq("event_name", "login")
+      .gte("occurred_at", startPad.toISOString())
+      .lte("occurred_at", endPad.toISOString())
+      .order("occurred_at", { ascending: true })
+      .range(offset, offset + page - 1);
+    if (error) {
+      tgLog("login_avg_day_query_failed", { ymd, error: error.message }, "warn");
+      break;
+    }
+    const rows = data || [];
+    if (!rows.length) break;
+    for (const row of rows) {
+      if (istYMD((row as { occurred_at?: string }).occurred_at) !== ymd) continue;
+      const k = loginUserKey(row as { buyer_id?: string | null; phone?: string | null });
+      if (k) set.add(k);
+    }
+    if (rows.length < page) break;
+    offset += page;
   }
   return set.size;
 }
@@ -243,24 +256,34 @@ async function rolling30Avg(): Promise<number | null> {
   const startPad = new Date(`${fromYmd}T00:00:00+05:30`);
   startPad.setUTCDate(startPad.getUTCDate() - 1);
   const endPad = new Date(`${today}T00:00:00+05:30`);
-  const { data, error } = await db
-    .from("analytics_events")
-    .select("buyer_id,phone,occurred_at")
-    .eq("event_name", "login")
-    .gte("occurred_at", startPad.toISOString())
-    .lt("occurred_at", endPad.toISOString())
-    .limit(50000);
-  if (error) {
-    tgLog("login_avg_30d_failed", { error: error.message }, "warn");
-    return null;
-  }
   const byDay = new Map<string, Set<string>>();
   for (let i = 1; i <= 30; i++) byDay.set(ymdDaysAgoFrom(today, i), new Set());
-  for (const row of data || []) {
-    const ymd = istYMD((row as { occurred_at?: string }).occurred_at);
-    if (!ymd || !byDay.has(ymd)) continue;
-    const k = loginUserKey(row as { buyer_id?: string | null; phone?: string | null });
-    if (k) byDay.get(ymd)!.add(k);
+
+  let offset = 0;
+  const page = 1000;
+  for (;;) {
+    const { data, error } = await db
+      .from("analytics_events")
+      .select("buyer_id,phone,occurred_at")
+      .eq("event_name", "login")
+      .gte("occurred_at", startPad.toISOString())
+      .lt("occurred_at", endPad.toISOString())
+      .order("occurred_at", { ascending: true })
+      .range(offset, offset + page - 1);
+    if (error) {
+      tgLog("login_avg_30d_failed", { error: error.message }, "warn");
+      return null;
+    }
+    const rows = data || [];
+    if (!rows.length) break;
+    for (const row of rows) {
+      const ymd = istYMD((row as { occurred_at?: string }).occurred_at);
+      if (!ymd || !byDay.has(ymd)) continue;
+      const k = loginUserKey(row as { buyer_id?: string | null; phone?: string | null });
+      if (k) byDay.get(ymd)!.add(k);
+    }
+    if (rows.length < page) break;
+    offset += page;
   }
   let sum = 0;
   for (const set of byDay.values()) sum += set.size;
@@ -307,9 +330,33 @@ export async function resolveLoginAverages(): Promise<LoginAvgResult> {
   const finalAll =
     stored.active_days > 0 ? Math.round(stored.unique_sum / stored.active_days) : null;
 
+  const todayYmd = istTodayYMD();
+  const yesterdayYmd = ymdDaysAgoFrom(todayYmd, 1);
+  const [todayN, yesterdayN] = await Promise.all([
+    uniqueLoginsOnYmd(todayYmd),
+    uniqueLoginsOnYmd(yesterdayYmd),
+  ]);
+
+  // Re-check sanity after possible re-backfill.
+  const rollingFinal = rolling30;
+  if (
+    finalAll != null &&
+    rollingFinal != null &&
+    rollingFinal > 0 &&
+    finalAll * 10 < rollingFinal
+  ) {
+    tgLog(
+      "login_avg_sanity_fail_after_backfill",
+      { allTimeAvg: finalAll, rolling30: rollingFinal, active_days: stored.active_days },
+      "error",
+    );
+  }
+
   return {
     allTimeAvg: finalAll,
-    rolling30Avg: rolling30,
+    rolling30Avg: rollingFinal,
+    today: todayN,
+    yesterday: yesterdayN,
     activeDays: stored.active_days,
     uniqueSum: stored.unique_sum,
     firstActiveYmd: stored.first_active_ymd,
