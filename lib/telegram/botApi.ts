@@ -33,6 +33,8 @@ export interface SendMessageOpts {
   text: string;
   parse_mode?: "HTML" | "Markdown" | "MarkdownV2";
   disable_web_page_preview?: boolean;
+  /** Silent post — digests use true; alerts and 6 AM summary use false. */
+  disable_notification?: boolean;
   reply_markup?: {
     inline_keyboard?: InlineKeyboardButton[][];
   };

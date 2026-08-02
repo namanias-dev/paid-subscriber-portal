@@ -35,6 +35,10 @@
     {
       "path": "/api/cron/telegram-dispatch",
       "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/cron/telegram-reports",
+      "schedule": "5 * * * *"
     }
   ]
 }
