@@ -17,7 +17,8 @@ export type AdminActivityAction =
   | "export_permission_toggled"
   | "telegram_broadcast_sent"
   | "telegram_direct_send"
-  | "telegram_automation_updated";
+  | "telegram_automation_updated"
+  | "course_batch_zoom_updated";
 
 export const ADMIN_ACTIVITY_LABELS: Record<AdminActivityAction, string> = {
   payment_proof_uploaded: "Payment proof uploaded",
@@ -32,6 +33,7 @@ export const ADMIN_ACTIVITY_LABELS: Record<AdminActivityAction, string> = {
   telegram_broadcast_sent: "Telegram broadcast sent",
   telegram_direct_send: "Telegram direct send",
   telegram_automation_updated: "Telegram automation updated",
+  course_batch_zoom_updated: "Course batch Zoom link updated",
 };
 
 export interface AdminActivityRow {

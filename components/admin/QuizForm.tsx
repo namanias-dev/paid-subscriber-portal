@@ -67,10 +67,16 @@ export default function QuizForm({ quiz }: { quiz?: Quiz }) {
   const [showTimer, setShowTimer] = useState(quiz?.timing_settings?.show_timer ?? true);
   const [resumeAllowed, setResumeAllowed] = useState(quiz?.timing_settings?.resume_allowed ?? true);
 
-  // Access
-  const [isPublic, setIsPublic] = useState(quiz?.is_public ?? true);
-  const [requiresLogin, setRequiresLogin] = useState(quiz?.requires_login ?? false);
-  const [requiresPayment, setRequiresPayment] = useState(quiz?.requires_payment ?? false);
+  // Access — single source of truth for gating (is_public is SEO/crawl derived from Public mode)
+  const initialAccessMode: "public" | "login" | "paid" = quiz?.requires_payment
+    ? "paid"
+    : quiz?.requires_login
+      ? "login"
+      : "public";
+  const [accessMode, setAccessMode] = useState<"public" | "login" | "paid">(initialAccessMode);
+  const isPublic = accessMode === "public";
+  const requiresLogin = accessMode === "login" || accessMode === "paid";
+  const requiresPayment = accessMode === "paid";
   const [maxAttempts, setMaxAttempts] = useState(quiz?.max_attempts?.toString() || "");
   const [retryAllowed, setRetryAllowed] = useState(quiz?.attempt_settings?.retry_allowed ?? true);
   const [scoreCount, setScoreCount] = useState<"best" | "latest">(quiz?.attempt_settings?.score_count || "best");
@@ -79,6 +85,14 @@ export default function QuizForm({ quiz }: { quiz?: Quiz }) {
   const [oneAtATime, setOneAtATime] = useState(quiz?.attempt_settings?.one_at_a_time ?? false);
   const [allowedCourseIds, setAllowedCourseIds] = useState<string[]>(quiz?.access_rules?.allowed_course_ids || []);
   const [expiresAt, setExpiresAt] = useState(quiz?.access_rules?.expires_at || "");
+
+  function setAccess(mode: "public" | "login" | "paid") {
+    setAccessMode(mode);
+    if (mode === "public" || mode === "login") {
+      // Clear sticky course locks when leaving Paid so the change actually takes effect.
+      setAllowedCourseIds([]);
+    }
+  }
 
   // Result
   const r = quiz?.result_settings || {};
@@ -184,12 +198,13 @@ export default function QuizForm({ quiz }: { quiz?: Quiz }) {
         capture_lead_before_result: captureLead,
       },
       access_rules: {
-        allowed_course_ids: allowedCourseIds,
+        allowed_course_ids: requiresPayment ? allowedCourseIds : [],
         expires_at: expiresAt || null,
       },
       seo: {
         seo_title: seoTitle, seo_description: seoDesc, seo_keywords: seoKeywords,
-        og_image: ogImage || undefined, indexable, include_in_sitemap: includeSitemap,
+        og_image: ogImage || undefined, indexable: isPublic ? indexable : false,
+        include_in_sitemap: isPublic ? includeSitemap : false,
         structured_data_enabled: structuredData, public_summary: publicSummary,
       },
     };
@@ -221,17 +236,27 @@ export default function QuizForm({ quiz }: { quiz?: Quiz }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(buildPayload()),
       });
-      const data = await res.json();
-      if (!data.ok) {
-        toast(data.error || "Failed to save quiz", "error");
+      let data: { ok?: boolean; error?: string; quiz?: { id: string } } = {};
+      try {
+        data = await res.json();
+      } catch {
+        toast(res.ok ? "Saved, but response was unreadable" : `Save failed (${res.status})`, "error");
         return;
       }
-      const quizId = data.quiz.id;
-      await saveQuestions(quizId);
+      if (!res.ok || !data.ok) {
+        toast(data.error || `Failed to save quiz (${res.status})`, "error");
+        return;
+      }
+      const quizId = data.quiz!.id;
+      const questionsOk = await saveQuestions(quizId);
+      if (!questionsOk) {
+        toast("Quiz settings saved, but questions failed to save — check the error above.", "error");
+        return;
+      }
       toast(editing ? "Quiz updated" : "Quiz created", "success");
       router.push(BACK);
-    } catch {
-      toast("Failed to save quiz", "error");
+    } catch (e) {
+      toast(e instanceof Error ? e.message : "Failed to save quiz", "error");
     } finally {
       setSaving(false);
     }
@@ -370,10 +395,26 @@ export default function QuizForm({ quiz }: { quiz?: Quiz }) {
 
   const accessTab = (
     <>
-      <Section title="Access">
-        <Field label="Visibility"><Toggle label="Public (crawlable, no login)" checked={isPublic} onChange={setIsPublic} /></Field>
-        <Field label="Login"><Toggle label="Requires login" checked={requiresLogin} onChange={setRequiresLogin} /></Field>
-        <Field label="Paid test" hint="When on, only learners enrolled in a course that grants this test (below) can take it. Free quizzes stay open."><Toggle label="Paid — unlock via course enrolment" checked={requiresPayment} onChange={setRequiresPayment} /></Field>
+      <Section title="Access" desc="One mode controls who can take this quiz. Paid → Public clears course locks so the change takes effect immediately.">
+        <Field label="Access mode" full>
+          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+            {(
+              [
+                { id: "public" as const, label: "Public", hint: "Anyone can take it (no login)" },
+                { id: "login" as const, label: "Login required", hint: "Free, but must be signed in" },
+                { id: "paid" as const, label: "Paid", hint: "Unlock via course enrolment" },
+              ] as const
+            ).map((opt) => (
+              <label key={opt.id} className={`flex cursor-pointer items-start gap-2 rounded-xl border px-3 py-2 text-sm ${accessMode === opt.id ? "border-primary bg-primary/5" : "border-line"}`}>
+                <input type="radio" name="quiz-access-mode" checked={accessMode === opt.id} onChange={() => setAccess(opt.id)} className="mt-0.5" />
+                <span>
+                  <span className="font-semibold text-ink">{opt.label}</span>
+                  <span className="mt-0.5 block text-xs text-muted">{opt.hint}</span>
+                </span>
+              </label>
+            ))}
+          </div>
+        </Field>
         <Field label="Max attempts (blank = unlimited)"><input type="number" className="input" value={maxAttempts} onChange={(e) => setMaxAttempts(e.target.value)} /></Field>
         <Field label="Retry"><Toggle label="Retry allowed" checked={retryAllowed} onChange={setRetryAllowed} /></Field>
         <Field label="Counted score">
@@ -387,16 +428,18 @@ export default function QuizForm({ quiz }: { quiz?: Quiz }) {
         <Field label="One at a time"><Toggle label="Show one question at a time" checked={oneAtATime} onChange={setOneAtATime} /></Field>
         <Field label="Expires at (optional)"><input type="datetime-local" className="input" value={expiresAt || ""} onChange={(e) => setExpiresAt(e.target.value)} /></Field>
       </Section>
-      <Section title="Unlocked by courses" desc="Select which courses grant access to this test. For a Paid test, enrolling in any of these unlocks it (no lead form). You can also set this from each course's Access & Entitlements tab — both directions work.">
-        <div className="sm:col-span-2 space-y-1">
-          {courses.length === 0 ? <p className="text-sm text-muted">No courses available.</p> : courses.map((c) => (
-            <label key={c.id} className="flex items-center gap-2 text-sm">
-              <input type="checkbox" checked={allowedCourseIds.includes(c.id)} onChange={() => setAllowedCourseIds((prev) => prev.includes(c.id) ? prev.filter((x) => x !== c.id) : [...prev, c.id])} />
-              {c.title}
-            </label>
-          ))}
-        </div>
-      </Section>
+      {requiresPayment && (
+        <Section title="Unlocked by courses" desc="Select which courses grant access to this paid test. You can also set this from each course's Access & Entitlements tab.">
+          <div className="sm:col-span-2 space-y-1">
+            {courses.length === 0 ? <p className="text-sm text-muted">No courses available.</p> : courses.map((c) => (
+              <label key={c.id} className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={allowedCourseIds.includes(c.id)} onChange={() => setAllowedCourseIds((prev) => prev.includes(c.id) ? prev.filter((x) => x !== c.id) : [...prev, c.id])} />
+                {c.title}
+              </label>
+            ))}
+          </div>
+        </Section>
+      )}
     </>
   );
 

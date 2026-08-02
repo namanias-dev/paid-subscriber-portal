@@ -1,5 +1,6 @@
 import { normalizeIndianMobile } from "./phone";
 import { sanitizeHtml } from "./sanitizeHtml";
+import { isValidZoomUrl } from "./courseZoom";
 import type {
   SeatConfig,
   WhatsAppConfig,
@@ -130,9 +131,13 @@ export function normalizeLandingInput(body: Record<string, unknown>): LandingNor
           visible: sec.visible !== false,
         } satisfies PageSection))
       : [];
+    const courseZoom = (a.zoom_link || "").toString().trim() || null;
+    if (courseZoom && !isValidZoomUrl(courseZoom)) {
+      return { ok: false, error: "Course Zoom link must be a valid zoom.us / zoom.com URL." };
+    }
     out.after_registration = {
       welcome_html: a.welcome_html ? sanitizeHtml(a.welcome_html as string) || null : null,
-      zoom_link: (a.zoom_link || "").toString().trim() || null,
+      zoom_link: courseZoom,
       zoom_note: (a.zoom_note || "").toString().trim() || null,
       class_timing: (a.class_timing || "").toString().trim() || null,
       next_class_at: (a.next_class_at || "").toString().trim() || null,
@@ -140,6 +145,31 @@ export function normalizeLandingInput(body: Record<string, unknown>): LandingNor
       doc_ids: Array.isArray(a.doc_ids) ? (a.doc_ids as unknown[]).filter((x): x is string => typeof x === "string") : [],
       blocks,
     };
+  }
+
+  // --- Per-batch Zoom (join URL validated; host URL kept but never student-facing) ---
+  if (Array.isArray(out.batches)) {
+    const normalized: Record<string, unknown>[] = [];
+    for (let i = 0; i < (out.batches as unknown[]).length; i++) {
+      const raw = (out.batches as unknown[])[i];
+      if (!raw || typeof raw !== "object") continue;
+      const b = { ...(raw as Record<string, unknown>) };
+      const zl = (b.zoom_link || "").toString().trim() || null;
+      if (zl && !isValidZoomUrl(zl)) {
+        return { ok: false, error: `Batch ${i + 1}: Zoom link must be a valid zoom.us / zoom.com URL.` };
+      }
+      const host = (b.zoom_host_url || "").toString().trim() || null;
+      if (host && !isValidZoomUrl(host)) {
+        return { ok: false, error: `Batch ${i + 1}: Host/start URL must be a valid Zoom URL.` };
+      }
+      b.zoom_link = zl;
+      b.zoom_meeting_id = (b.zoom_meeting_id || "").toString().trim() || null;
+      b.zoom_passcode = (b.zoom_passcode || "").toString().trim() || null;
+      b.zoom_host_url = host;
+      b.zoom_note = (b.zoom_note || "").toString().trim() || null;
+      normalized.push(b);
+    }
+    out.batches = normalized;
   }
 
   // --- Reviews (clamp rating; keep text plain) ---

@@ -163,9 +163,9 @@ export function quizUnlockCourseIds(quiz: Pick<Quiz, "id" | "access_rules">, cou
   return [...new Set([...fromQuiz, ...fromCourses])];
 }
 
-/** A quiz is "paid"/restricted when it requires payment OR any course gates it. */
-export function quizIsPaid(quiz: Pick<Quiz, "id" | "requires_payment" | "access_rules">, courses: Course[]): boolean {
-  return !!quiz.requires_payment || quizUnlockCourseIds(quiz, courses).length > 0;
+/** A quiz is "paid" when requires_payment is set. Course unlock lists only apply while paid. */
+export function quizIsPaid(quiz: Pick<Quiz, "id" | "requires_payment" | "access_rules">, _courses?: Course[]): boolean {
+  return !!quiz.requires_payment;
 }
 
 export type QuizGateReason = "ok" | "login" | "expired" | "payment";
@@ -181,16 +181,17 @@ export interface QuizGate {
 }
 
 /**
- * THE quiz entitlement decision. `requiresLogin` honours the per-quiz flag for
- * free quizzes. For paid quizzes, only entitled learners pass.
+ * THE quiz entitlement decision. `requires_payment` is the single source of
+ * truth for paid vs free. Course unlock IDs only gate while the quiz is paid.
+ * Residual allowed_course_ids after unpaid must not keep a quiz locked.
  */
 export function gateQuiz(
   quiz: Pick<Quiz, "id" | "requires_login" | "requires_payment" | "access_rules">,
   learner: Learner | null,
   courses: Course[],
 ): QuizGate {
-  const unlockCourseIds = quizUnlockCourseIds(quiz, courses);
-  const paid = !!quiz.requires_payment || unlockCourseIds.length > 0;
+  const unlockCourseIds = quiz.requires_payment ? quizUnlockCourseIds(quiz, courses) : [];
+  const paid = !!quiz.requires_payment;
 
   if (!paid) {
     // Free quiz. Logged-out is allowed (lead form handled elsewhere) unless the

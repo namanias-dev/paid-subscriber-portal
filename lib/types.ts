@@ -607,6 +607,16 @@ export interface CourseBatch {
   capacity: number | null;
   /** Seats remaining (mirrors Course.seats_left). */
   seats_left: number | null;
+  /** Per-batch Zoom join URL (preferred over course after_registration.zoom_link). */
+  zoom_link?: string | null;
+  /** Zoom meeting ID shown to students with the join link. */
+  zoom_meeting_id?: string | null;
+  /** Zoom passcode shown to students. */
+  zoom_passcode?: string | null;
+  /** Host/start URL — admin-only; never exposed to students. */
+  zoom_host_url?: string | null;
+  /** Optional join note / instructions for this batch. */
+  zoom_note?: string | null;
 }
 
 /**

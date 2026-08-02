@@ -193,6 +193,8 @@ export async function POST(req: Request) {
           student_name: name,
           email: email || null,
           batch_label: batchLabel,
+          // Persist catalog batch for Class Hub Zoom resolution (amounts unchanged).
+          ...(batchId ? { batch_id: batchId, batch_id_source: "checkout" } : {}),
           plan_type: planType,
           total_fee: totalFee,
           amount_paid: 0,
@@ -211,6 +213,7 @@ export async function POST(req: Request) {
         course_slug: course.slug,
         course_title: course.title,
         batch_label: batchLabel,
+        ...(batchId ? { batch_id: batchId, batch_id_source: "checkout" } : {}),
         plan_type: planType,
         total_fee: totalFee,
         amount_paid: 0,

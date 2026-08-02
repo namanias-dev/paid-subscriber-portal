@@ -313,9 +313,9 @@ export default function CourseForm({ course }: { course?: Course }) {
                     <RichTextEditor value={ar.welcome_html} onChange={(html) => setAR("welcome_html", html)} placeholder="Thanks for enrolling — welcome, future officer!" />
                   </Field>
                 </Section>
-                <Section title="Live class (Zoom)" desc="Same pattern as webinars. Times are IST.">
-                  <Field label="Zoom / live-class link"><input className="input" value={ar.zoom_link || ""} onChange={(e) => setAR("zoom_link", e.target.value)} placeholder="https://zoom.us/j/…" /></Field>
-                  <Field label="Join note (passcode / instructions)"><input className="input" value={ar.zoom_note || ""} onChange={(e) => setAR("zoom_note", e.target.value)} placeholder="e.g. Passcode: 1234" /></Field>
+                <Section title="Live class fallback (course-level)" desc="Used only when a batch has no Zoom link of its own. Prefer setting Zoom on each batch under the Batches tab. Times are IST.">
+                  <Field label="Fallback Zoom link"><input className="input" value={ar.zoom_link || ""} onChange={(e) => setAR("zoom_link", e.target.value)} placeholder="https://zoom.us/j/…" /></Field>
+                  <Field label="Fallback join note"><input className="input" value={ar.zoom_note || ""} onChange={(e) => setAR("zoom_note", e.target.value)} placeholder="e.g. Passcode: 1234" /></Field>
                   <Field label="Class timing (text, IST)"><input className="input" value={ar.class_timing || ""} onChange={(e) => setAR("class_timing", e.target.value)} placeholder="Mon–Sat, 7–9 AM" /></Field>
                   <Field label="Next class (IST)" hint="Optional — drives the countdown in the Class Hub.">
                     <input type="datetime-local" className="input" value={isoToISTInput(ar.next_class_at)} onChange={(e) => setAR("next_class_at", e.target.value ? istInputToISO(e.target.value) : null)} />
@@ -836,6 +836,43 @@ function BatchesEditor({
             <div className="mt-3 rounded-xl border border-line p-3">
               <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Book Your Seat + EMI (this batch)</p>
               <EmiConfigEditor total={b.price ?? 0} value={b.emi_config || {}} onChange={(v) => update(i, { emi_config: v })} />
+            </div>
+
+            <div className="mt-3 rounded-xl border border-line p-3">
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Zoom / live class (this batch)</p>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field label="Zoom join link" hint="Students in this batch see this link." full>
+                  <input
+                    className="input"
+                    value={b.zoom_link || ""}
+                    onChange={(e) => update(i, { zoom_link: e.target.value || null })}
+                    placeholder="https://zoom.us/j/…"
+                  />
+                </Field>
+                <Field label="Meeting ID">
+                  <input className="input font-mono" value={b.zoom_meeting_id || ""} onChange={(e) => update(i, { zoom_meeting_id: e.target.value || null })} placeholder="123 456 7890" />
+                </Field>
+                <Field label="Passcode">
+                  <input className="input font-mono" value={b.zoom_passcode || ""} onChange={(e) => update(i, { zoom_passcode: e.target.value || null })} placeholder="abc123" />
+                </Field>
+                <Field label="Host / start URL" hint="Admin-only — never shown to students.">
+                  <input className="input" value={b.zoom_host_url || ""} onChange={(e) => update(i, { zoom_host_url: e.target.value || null })} placeholder="https://zoom.us/s/…" />
+                </Field>
+                <Field label="Join note" full>
+                  <input className="input" value={b.zoom_note || ""} onChange={(e) => update(i, { zoom_note: e.target.value || null })} placeholder="Optional instructions" />
+                </Field>
+              </div>
+              {(() => {
+                const link = (b.zoom_link || "").trim().toLowerCase();
+                if (!link) return null;
+                const dupes = batches.filter((x, j) => j !== i && (x.zoom_link || "").trim().toLowerCase() === link);
+                if (!dupes.length) return null;
+                return (
+                  <p className="mt-2 text-xs font-semibold text-amber-700">
+                    Warning: the same Zoom link is also set on {dupes.map((d) => d.label || "another batch").join(", ")}. Usually a mistake — save still allowed.
+                  </p>
+                );
+              })()}
             </div>
           </div>
         );
