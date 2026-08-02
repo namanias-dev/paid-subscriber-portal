@@ -1,6 +1,6 @@
 /**
  * Build + send Telegram CEO digests.
- * Metrics reuse getExecutivePulse / shared helpers Overview uses — no alternate definitions.
+ * Metrics reuse getExecutivePulse where possible — no alternate revenue definitions.
  */
 import { SITE_URL } from "../../config";
 import { getExecutivePulse, type MetricDelta } from "../../analytics/executiveOverview";
@@ -16,23 +16,14 @@ import {
   batchModes,
   batchTimings,
   deriveCollections,
-  deriveEnrollment,
   isActiveEnrollment,
 } from "../../installments";
 import { countsTowardCapacity } from "../../enrollmentScope";
 import { distinctRegistrations, isPaidStatus } from "../../paymentsAgg";
+import { getSupabaseAdmin } from "../../supabase";
 import { buildKeyboard, sendMessage } from "../botApi";
 import { tgLog } from "../log";
-import {
-  dash,
-  deltaAbsLabel,
-  deltaArrow,
-  escapeHtml,
-  formatIstShort,
-  inr,
-  istNowParts,
-  pct,
-} from "./format";
+import { escapeHtml, formatIstShort, inr, istNowParts } from "./format";
 import {
   digestHoursForFrequency,
   getReportSettings,
@@ -42,7 +33,7 @@ import {
   resolveReportsChannelId,
   type ReportSettings,
 } from "./settings";
-import { getPreviousSnapshot, getSnapshotBySlot, num, saveSnapshot, type SnapshotMetrics } from "./snapshots";
+import { getPreviousSnapshot, getSnapshotBySlot, saveSnapshot, type SnapshotMetrics } from "./snapshots";
 import { assertReportsChannel } from "./channelGuard";
 
 function mVal(m: MetricDelta | null | undefined): number | null {
@@ -53,23 +44,103 @@ function mPrev(m: MetricDelta | null | undefined): number | null {
   if (!m || m.prev == null || !Number.isFinite(m.prev)) return null;
   return m.prev;
 }
-function mPct(m: MetricDelta | null | undefined): number | null {
-  if (!m || m.deltaPct == null || !Number.isFinite(m.deltaPct)) return null;
-  return m.deltaPct;
+
+/** Truncate display names for Telegram (~40 chars). */
+function truncName(s: string, max = 40): string {
+  const t = String(s || "").trim();
+  if (t.length <= max) return t;
+  return `${t.slice(0, max - 1).trimEnd()}…`;
+}
+
+/**
+ * Meaningful period delta only when there is a real non-zero base.
+ * Suppresses zero-vs-zero and 0→N “100%” noise.
+ */
+function meaningfulDeltaPct(curr: number | null, prev: number | null): number | null {
+  if (curr == null || prev == null) return null;
+  if (!Number.isFinite(curr) || !Number.isFinite(prev)) return null;
+  if (prev === 0) return null;
+  return ((curr - prev) / prev) * 100;
+}
+
+function deltaLabel(curr: number | null, prev: number | null): string | null {
+  const pct = meaningfulDeltaPct(curr, prev);
+  if (pct == null) return null;
+  const abs = Math.abs(Math.round(pct));
+  if (abs === 0) return null;
+  return pct > 0 ? `▲ ${abs}%` : `▼ ${abs}%`;
+}
+
+type ModeBucket = "online" | "offline";
+type TimingBucket = "morning" | "evening";
+
+/**
+ * Classify ONE mode per enrollment. Never fall back to course.modes
+ * (those list catalog options and would double-count).
+ */
+function classifyMode(
+  batch: { mode?: unknown } | null,
+  batchLabel: string,
+): ModeBucket | null {
+  const modes = batch ? batchModes(batch as { mode?: import("../../types").LearningMode | import("../../types").LearningMode[] | null }) : [];
+  const fromBatch = new Set<ModeBucket>();
+  for (const m of modes) {
+    const s = String(m);
+    if (/offline/i.test(s)) fromBatch.add("offline");
+    else if (/online|recorded|hybrid/i.test(s)) fromBatch.add("online");
+  }
+  if (fromBatch.size === 1) return [...fromBatch][0]!;
+  if (fromBatch.size > 1) return null;
+
+  const label = batchLabel.toLowerCase();
+  const hasOff = /\boffline\b/.test(label);
+  const hasOn = /\bonline\b|\brecorded\b|\bhybrid\b/.test(label);
+  if (hasOff && !hasOn) return "offline";
+  if (hasOn && !hasOff) return "online";
+  return null;
+}
+
+/**
+ * Classify ONE timing per enrollment. Never fall back to course.batch_timings
+ * (catalog lists both Morning and Evening → Morning 24 · Evening 14 on Total 24).
+ */
+function classifyTiming(
+  batch: { timing?: unknown } | null,
+  batchLabel: string,
+): TimingBucket | null {
+  const timings = batch ? batchTimings(batch as { timing?: string | string[] | null }) : [];
+  const fromBatch = new Set<TimingBucket>();
+  for (const t of timings) {
+    const s = String(t);
+    if (/morning/i.test(s)) fromBatch.add("morning");
+    if (/evening/i.test(s)) fromBatch.add("evening");
+  }
+  if (fromBatch.size === 1) return [...fromBatch][0]!;
+  if (fromBatch.size > 1) return null; // e.g. ["Morning","Evening"] — ambiguous
+
+  const label = batchLabel.toLowerCase();
+  const hasM = /\bmorning\b/.test(label);
+  const hasE = /\bevening\b/.test(label);
+  if (hasM && !hasE) return "morning";
+  if (hasE && !hasM) return "evening";
+  return null;
 }
 
 interface CourseBlock {
   title: string;
   total: number;
   capacity: number | null;
+  seatsLeft: number | null;
   online: number;
   offline: number;
   morning: number;
   evening: number;
-  fullPaid: number;
-  partial: number;
-  unpaid: number;
-  todayNew: number;
+  modeOk: boolean;
+  timingOk: boolean;
+  /** True when morning+evening are both 0 (suppress timing line). */
+  timingEmpty: boolean;
+  /** True when online+offline are both 0 (suppress mode line). */
+  modeEmpty: boolean;
 }
 
 function courseBreakdown(
@@ -77,24 +148,23 @@ function courseBreakdown(
   enrollments: Awaited<ReturnType<typeof getAllCourseEnrollments>>,
 ): CourseBlock[] {
   const enabled = courses.filter((c) => c.status === "published" && c.active !== false);
-  const now = Date.now();
-  const today = istTodayYMD();
   const out: CourseBlock[] = [];
 
   for (const course of enabled) {
-    const enrs = enrollments.filter(
-      (e) => e.course_id === course.id && isActiveEnrollment(e) && countsTowardCapacity(e),
-    );
+    // One row per enrollment id — never expand by installment/payment.
+    const seen = new Set<string>();
+    const enrs = enrollments.filter((e) => {
+      if (e.course_id !== course.id || !isActiveEnrollment(e) || !countsTowardCapacity(e)) return false;
+      if (seen.has(e.id)) return false;
+      seen.add(e.id);
+      return true;
+    });
     if (!enrs.length && (course.capacity == null || course.capacity <= 0)) continue;
 
     let online = 0,
       offline = 0,
       morning = 0,
-      evening = 0,
-      fullPaid = 0,
-      partial = 0,
-      unpaid = 0,
-      todayNew = 0;
+      evening = 0;
     const batchById = new Map((course.batches || []).map((b) => [b.id, b]));
 
     let capacity: number | null = null;
@@ -113,41 +183,55 @@ function courseBreakdown(
     }
 
     for (const e of enrs) {
-      const batch = e.batch_id ? batchById.get(e.batch_id) : null;
-      const modes = batch ? batchModes(batch) : course.modes || [];
-      const timings = batch ? batchTimings(batch) : course.batch_timings || [];
-      const label = (e.batch_label || "").toLowerCase();
-
-      const isOnline = modes.some((m) => /online|recorded|hybrid/i.test(m)) || /online/.test(label);
-      const isOffline = modes.some((m) => /offline/i.test(m)) || /offline/.test(label);
-      if (isOffline && !isOnline) offline++;
-      else if (isOnline && !isOffline) online++;
-      else if (isOffline) offline++;
-      else if (isOnline) online++;
-
-      if (timings.some((t) => /morning/i.test(t)) || /morning/.test(label)) morning++;
-      if (timings.some((t) => /evening/i.test(t)) || /evening/.test(label)) evening++;
-
-      const der = deriveEnrollment(e, now);
-      if (der.isFullyPaid) fullPaid++;
-      else if ((e.amount_paid || 0) > 0 || der.paid > 0) partial++;
-      else unpaid++;
-
-      if (istYMD(e.created_at) === today) todayNew++;
+      const batch = e.batch_id ? batchById.get(e.batch_id) || null : null;
+      const label = e.batch_label || "";
+      const mode = classifyMode(batch, label);
+      if (mode === "online") online++;
+      else if (mode === "offline") offline++;
+      const timing = classifyTiming(batch, label);
+      if (timing === "morning") morning++;
+      else if (timing === "evening") evening++;
     }
+
+    const total = enrs.length;
+    const modeSum = online + offline;
+    const timingSum = morning + evening;
+    const modeEmpty = modeSum === 0;
+    const timingEmpty = timingSum === 0;
+    const modeOk = !modeEmpty && modeSum === total;
+    const timingOk = !timingEmpty && timingSum === total;
+
+    if (!modeOk && !modeEmpty) {
+      tgLog(
+        "digest_admissions_mode_invariant",
+        { course: course.title, total, online, offline },
+        "error",
+      );
+    }
+    if (!timingOk && !timingEmpty) {
+      tgLog(
+        "digest_admissions_timing_invariant",
+        { course: course.title, total, morning, evening },
+        "error",
+      );
+    }
+
+    const seatsLeft =
+      capacity != null && capacity > 0 ? Math.max(0, capacity - total) : null;
 
     out.push({
       title: course.title,
-      total: enrs.length,
+      total,
       capacity,
+      seatsLeft,
       online,
       offline,
       morning,
       evening,
-      fullPaid,
-      partial,
-      unpaid,
-      todayNew,
+      modeOk,
+      timingOk,
+      timingEmpty,
+      modeEmpty,
     });
   }
   return out.sort((a, b) => b.total - a.total);
@@ -158,22 +242,14 @@ function collectionsStats(enrollments: Awaited<ReturnType<typeof getAllCourseEnr
   const weekMs = 7 * 86400_000;
   let overdueCount = 0;
   let overdueAmount = 0;
-  let overdue7d = 0;
-  let overdue30d = 0;
   let due7dAmount = 0;
-  let billed = 0;
-  let collected = 0;
 
   for (const e of enrollments) {
     if (!isActiveEnrollment(e) || e.status === "cancelled" || e.status === "transferred_out") continue;
     const col = deriveCollections(e, now);
-    billed += Number(e.total_fee) || 0;
-    collected += col.paid || 0;
     if (col.overdueAmount > 0) {
       overdueCount++;
       overdueAmount += col.overdueAmount;
-      if (col.daysOverdue >= 7) overdue7d++;
-      if (col.daysOverdue >= 30) overdue30d++;
     }
     if (col.nextDueDate && col.nextDueAmount > 0) {
       const due = new Date(col.nextDueDate).getTime();
@@ -182,15 +258,14 @@ function collectionsStats(enrollments: Awaited<ReturnType<typeof getAllCourseEnr
       }
     }
   }
-  const collectedPct = billed > 0 ? Math.round((collected / billed) * 100) : null;
-  return { overdueCount, overdueAmount, overdue7d, overdue30d, due7dAmount, collectedPct };
+  return { overdueCount, overdueAmount, due7dAmount };
 }
 
 async function pickUpcomingWebinar(): Promise<{
   title: string;
   dateLabel: string;
   registered: number;
-  confirmed: number;
+  confirmed: number | null;
   attendedLastPct: number | null;
   webinarId: string;
 } | null> {
@@ -207,14 +282,17 @@ async function pickUpcomingWebinar(): Promise<{
     if (!upcoming) return null;
 
     const registered = regs.filter((r) => r.webinar_id === upcoming.id).length;
-    const paid = payments.filter(
-      (p) =>
-        !p.deleted_at &&
-        isPaidStatus(p.status) &&
-        p.item_type === "webinar" &&
-        (p.item_slug || "").toLowerCase() === (upcoming.slug || "").toLowerCase(),
-    );
-    const confirmed = upcoming.price && upcoming.price > 0 ? distinctRegistrations(paid) : registered;
+    let confirmed: number | null = null;
+    if (upcoming.price && upcoming.price > 0) {
+      const paid = payments.filter(
+        (p) =>
+          !p.deleted_at &&
+          isPaidStatus(p.status) &&
+          p.item_type === "webinar" &&
+          (p.item_slug || "").toLowerCase() === (upcoming.slug || "").toLowerCase(),
+      );
+      confirmed = distinctRegistrations(paid);
+    }
 
     let attendedLastPct: number | null = null;
     const past = [...webinars]
@@ -222,7 +300,7 @@ async function pickUpcomingWebinar(): Promise<{
       .sort((a, b) => new Date(b.datetime).getTime() - new Date(a.datetime).getTime())[0];
     if (past) {
       const pastRegs = regs.filter((r) => r.webinar_id === past.id);
-      const attended = pastRegs.filter((r) => (r as { attended?: boolean }).attended === true).length;
+      const attended = pastRegs.filter((r) => r.attended === true).length;
       if (pastRegs.length > 0 && attended > 0) {
         attendedLastPct = Math.round((attended / pastRegs.length) * 100);
       }
@@ -241,6 +319,41 @@ async function pickUpcomingWebinar(): Promise<{
   }
 }
 
+/** total login events ÷ days since first login (all-time daily average). */
+async function loginAllTimeDailyAvg(): Promise<number | null> {
+  const db = getSupabaseAdmin();
+  if (!db) return null;
+  try {
+    const { count, error: cErr } = await db
+      .from("analytics_events")
+      .select("id", { count: "exact", head: true })
+      .eq("event_name", "login");
+    if (cErr || count == null || count <= 0) return null;
+
+    const { data: firstRow, error: fErr } = await db
+      .from("analytics_events")
+      .select("occurred_at")
+      .eq("event_name", "login")
+      .order("occurred_at", { ascending: true })
+      .limit(1)
+      .maybeSingle();
+    if (fErr || !firstRow?.occurred_at) return null;
+    const first = new Date(firstRow.occurred_at).getTime();
+    if (!Number.isFinite(first)) return null;
+    const days = Math.max(1, Math.ceil((Date.now() - first) / 86400_000));
+    return Math.round(count / days);
+  } catch {
+    return null;
+  }
+}
+
+function pushSection(lines: string[], header: string, body: string[]): void {
+  if (!body.length) return;
+  if (lines.length > 1) lines.push("");
+  lines.push(header);
+  for (const row of body.slice(0, 4)) lines.push(row);
+}
+
 export interface DigestBuildResult {
   html: string;
   metrics: SnapshotMetrics;
@@ -253,7 +366,8 @@ export async function buildDigest(opts?: {
   previous?: SnapshotMetrics | null;
 }): Promise<DigestBuildResult> {
   const parts = istNowParts();
-  const isMorningSummary = opts?.forceMorningExtras === true || parts.hour === 6;
+  // Yesterday close / 7-day trend only at real 6 AM IST — not on manual force sends.
+  const isMorningSummary = parts.hour === 6;
 
   let pulseToday: Awaited<ReturnType<typeof getExecutivePulse>> | null = null;
   let pulseMtd: Awaited<ReturnType<typeof getExecutivePulse>> | null = null;
@@ -261,6 +375,7 @@ export async function buildDigest(opts?: {
   let enrollments: Awaited<ReturnType<typeof getAllCourseEnrollments>> = [];
   let webinar: Awaited<ReturnType<typeof pickUpcomingWebinar>> = null;
   let failedToday: number | null = null;
+  let loginAvg: number | null = null;
 
   try {
     const settled = await Promise.allSettled([
@@ -270,6 +385,7 @@ export async function buildDigest(opts?: {
       getAllCourseEnrollments(),
       pickUpcomingWebinar(),
       getPayments(),
+      loginAllTimeDailyAvg(),
     ]);
     if (settled[0].status === "fulfilled") pulseToday = settled[0].value;
     if (settled[1].status === "fulfilled") pulseMtd = settled[1].value;
@@ -279,197 +395,176 @@ export async function buildDigest(opts?: {
     if (settled[5].status === "fulfilled") {
       const today = istTodayYMD();
       failedToday = settled[5].value.filter(
-        (p) => !p.deleted_at && String(p.status || "").toUpperCase() === "FAILED" && istYMD(p.created_at) === today,
+        (p) =>
+          !p.deleted_at &&
+          String(p.status || "").toUpperCase() === "FAILED" &&
+          istYMD(p.created_at) === today,
       ).length;
     }
+    if (settled[6].status === "fulfilled") loginAvg = settled[6].value;
   } catch {
-    /* sections fall back to — */
+    /* sections omit missing data */
   }
 
-  const prev = opts?.previous || null;
+  void opts?.previous;
   const courseBlocks = courseBreakdown(courses, enrollments);
   const collections = collectionsStats(enrollments);
 
   const loginsToday = pulseToday ? mVal(pulseToday.pulse.loginUsersToday) : null;
-  const leadsToday = pulseToday ? mVal(pulseToday.pulse.leadsToday) : null;
-  const admissionsToday = pulseToday ? mVal(pulseToday.pulse.seatBookingsToday) : null;
+  const loginsYday = pulseToday ? mPrev(pulseToday.pulse.loginUsersToday) : null;
   const revenueToday = pulseToday
     ? (mVal(pulseToday.pulse.courseRevenue) || 0) + (mVal(pulseToday.pulse.webinarRevenue) || 0)
     : null;
   const revenueMtd = pulseMtd
     ? (mVal(pulseMtd.pulse.courseRevenue) || 0) + (mVal(pulseMtd.pulse.webinarRevenue) || 0)
     : null;
-
-  const convPct =
-    leadsToday != null && leadsToday > 0 && admissionsToday != null
-      ? Math.round((admissionsToday / leadsToday) * 1000) / 10
-      : null;
-  const avgTicket =
-    admissionsToday != null && admissionsToday > 0 && revenueToday != null
-      ? Math.round(revenueToday / admissionsToday)
-      : null;
-
-  const webinarDelta = deltaAbsLabel(
-    webinar?.registered ?? null,
-    num(prev, "webinar_registered"),
-    " in 3h",
-  );
+  const revenueYday = pulseToday
+    ? (mPrev(pulseToday.pulse.courseRevenue) || 0) + (mPrev(pulseToday.pulse.webinarRevenue) || 0)
+    : null;
 
   const metrics: SnapshotMetrics = {
     logins_today: loginsToday,
-    leads_today: leadsToday,
-    admissions_today: admissionsToday,
+    logins_yday: loginsYday,
+    logins_avg: loginAvg,
     revenue_today: revenueToday,
     revenue_mtd: revenueMtd,
-    collected_pct: collections.collectedPct,
+    revenue_yday: revenueYday,
     overdue_count: collections.overdueCount,
     overdue_amount: collections.overdueAmount,
-    overdue_7d: collections.overdue7d,
-    overdue_30d: collections.overdue30d,
     due_7d_amount: collections.due7dAmount,
     webinar_registered: webinar?.registered ?? null,
-    webinar_confirmed: webinar?.confirmed ?? null,
     webinar_id: webinar?.webinarId ?? null,
     failed_today: failedToday,
-    conv_pct: convPct,
-    avg_ticket: avgTicket,
   };
   for (const c of courseBlocks) {
     metrics[`course:${c.title}:total`] = c.total;
   }
 
   const lines: string[] = [];
-  lines.push(`📊 <b>NAMAN IAS · ${escapeHtml(parts.label)}</b>`);
-  lines.push("");
+  // Header uses uppercase AM/PM to match target style
+  const headerLabel = parts.label.replace(/\b(am|pm)\b/i, (m) => m.toUpperCase());
+  lines.push(`📊 <b>NAMAN IAS · ${escapeHtml(headerLabel)}</b>`);
 
-  // REVENUE
-  lines.push(`💰 <b>REVENUE</b>`);
-  lines.push(`Today ${inr(revenueToday)} · MTD ${inr(revenueMtd)}`);
-  lines.push(
-    `${deltaArrow(pulseToday ? mPct(pulseToday.pulse.courseRevenue) : null)} vs yesterday · Collected ${collections.collectedPct != null ? `${collections.collectedPct}%` : "—"} of billed`,
-  );
-  lines.push("");
-
-  // ADMISSIONS per course
-  if (courseBlocks.length) {
-    for (const c of courseBlocks.slice(0, 6)) {
-      const seats =
-        c.capacity != null && c.capacity > 0 ? `${c.total}/${c.capacity}` : `${dash(c.total)}/—`;
-      const todayBit = c.todayNew > 0 ? ` (+${c.todayNew} today)` : "";
-      lines.push(`🎓 <b>ADMISSIONS — ${escapeHtml(c.title)}</b>`);
-      lines.push(`Total ${dash(c.total)}${escapeHtml(todayBit)} · Seats ${escapeHtml(seats)}`);
-      lines.push(`Online ${dash(c.online)} · Offline ${dash(c.offline)}`);
-      lines.push(`Morning ${dash(c.morning)} · Evening ${dash(c.evening)}`);
-      lines.push(`Full paid ${dash(c.fullPaid)} · Partial ${dash(c.partial)} · Unpaid ${dash(c.unpaid)}`);
-      const prevTotal = num(prev, `course:${c.title}:total`);
-      lines.push(`${deltaArrow(prevTotal != null && prevTotal > 0 ? ((c.total - prevTotal) / prevTotal) * 100 : null)} vs last digest`);
-      lines.push("");
-    }
-  } else {
-    lines.push(`🎓 <b>ADMISSIONS</b>`);
-    lines.push(`—`);
-    lines.push("");
-  }
-
-  // COLLECTIONS
-  lines.push(`⚠️ <b>COLLECTIONS</b>`);
-  lines.push(
-    `Overdue ${inr(collections.overdueAmount)} across ${dash(collections.overdueCount)} students`,
-  );
-  lines.push(`7d+ overdue: ${dash(collections.overdue7d)} · 30d+: ${dash(collections.overdue30d)}`);
-  lines.push(`Due next 7 days: ${inr(collections.due7dAmount)}`);
-  lines.push("");
-
-  // WEBINAR
-  if (webinar) {
-    const shortDate = webinar.dateLabel.replace(/\s+\d{1,2}:\d{2}.*/, "").trim() || webinar.dateLabel;
-    lines.push(`📣 <b>WEBINAR — ${escapeHtml(webinar.title)} (${escapeHtml(shortDate)})</b>`);
-    lines.push(
-      `Registered ${dash(webinar.registered)}${escapeHtml(webinarDelta)} · Confirmed ${dash(webinar.confirmed)}`,
+  // ── WEBINAR ──
+  if (webinar && webinar.registered > 0) {
+    const body: string[] = [];
+    const dateBit = webinar.dateLabel || "";
+    body.push(
+      `${escapeHtml(truncName(webinar.title))} — ${escapeHtml(dateBit)}`,
     );
-    lines.push(`Last webinar attendance ${pct(webinar.attendedLastPct)}`);
-    lines.push("");
-  } else {
-    lines.push(`📣 <b>WEBINAR</b>`);
-    lines.push(`—`);
-    lines.push("");
+    body.push(`Registered ${webinar.registered}`);
+    if (webinar.confirmed != null && webinar.confirmed > 0) {
+      body.push(`Confirmed ${webinar.confirmed}`);
+    }
+    if (webinar.attendedLastPct != null) {
+      body.push(`Last attendance ${webinar.attendedLastPct}%`);
+    }
+    pushSection(lines, `📣 <b>WEBINAR</b>`, body);
   }
 
-  // FUNNEL
-  lines.push(`👥 <b>FUNNEL</b>`);
-  lines.push(
-    `New leads ${dash(leadsToday)}${escapeHtml(
-      pulseToday && mPct(pulseToday.pulse.leadsToday) != null
-        ? ` (${deltaArrow(mPct(pulseToday.pulse.leadsToday)).replace(/^· /, "")})`
-        : "",
-    )} · Logins ${dash(loginsToday)}`,
-  );
-  lines.push(
-    `Lead→admission ${convPct != null ? `${convPct}%` : "—"} · Avg ticket ${inr(avgTicket)}`,
-  );
-  lines.push("");
-
-  // Failed payments
-  if (failedToday != null && failedToday > 0) {
-    lines.push(`🚨 ${failedToday} payment${failedToday === 1 ? "" : "s"} failed today`);
-  } else {
-    lines.push(`🚨 ${dash(failedToday)} payments failed today`);
+  // ── ADMISSIONS ──
+  {
+    const body: string[] = [];
+    for (const c of courseBlocks.filter((x) => x.total > 0).slice(0, 2)) {
+      body.push(escapeHtml(truncName(c.title)));
+      const seats =
+        c.seatsLeft != null
+          ? `${c.total} admissions · ${c.seatsLeft} seats left`
+          : `${c.total} admissions`;
+      body.push(escapeHtml(seats));
+      if (!c.modeEmpty) {
+        if (c.modeOk) {
+          body.push(`Offline ${c.offline} · Online ${c.online}`);
+        } else {
+          body.push(`Offline/Online — ⚠`);
+        }
+      }
+      // Timing only when invariant passes (and not empty).
+      if (c.timingOk) {
+        body.push(`Morning ${c.morning} · Evening ${c.evening}`);
+      } else if (!c.timingEmpty) {
+        body.push(`Morning/Evening — ⚠`);
+      }
+    }
+    if (body.length) {
+      if (lines.length > 1) lines.push("");
+      lines.push(`🎓 <b>ADMISSIONS</b>`);
+      for (const row of body) lines.push(row);
+    }
   }
 
-  if (isMorningSummary) {
-    lines.push("");
-    lines.push(`🗓 <b>YESTERDAY CLOSE</b>`);
-    if (pulseToday) {
-      lines.push(
-        `Leads ${dash(mPrev(pulseToday.pulse.leadsToday))} · Admissions ${dash(mPrev(pulseToday.pulse.seatBookingsToday))} · Revenue ${inr((mPrev(pulseToday.pulse.courseRevenue) || 0) + (mPrev(pulseToday.pulse.webinarRevenue) || 0) || null)}`,
+  // ── LOGINS ──
+  if (loginsToday != null || loginsYday != null || loginAvg != null) {
+    const body: string[] = [];
+    if (loginsToday != null || loginsYday != null) {
+      const t = loginsToday != null ? `Today ${loginsToday}` : null;
+      const y = loginsYday != null ? `Yesterday ${loginsYday}` : null;
+      body.push([t, y].filter(Boolean).join(" · "));
+    }
+    if (loginAvg != null) {
+      body.push(`All-time daily average ${loginAvg}`);
+    }
+    pushSection(lines, `👥 <b>LOGINS</b>`, body);
+  }
+
+  // ── REVENUE ──
+  if (revenueToday != null || revenueMtd != null || (revenueYday != null && revenueYday > 0)) {
+    const body: string[] = [];
+    body.push(`Today ${inr(revenueToday)} · MTD ${inr(revenueMtd)}`);
+    if (revenueYday != null && revenueYday > 0) {
+      body.push(`Yesterday ${inr(revenueYday)}`);
+    }
+    const d = deltaLabel(revenueToday, revenueYday);
+    if (d) body.push(d);
+    pushSection(lines, `💰 <b>REVENUE</b>`, body);
+  }
+
+  // ── COLLECTIONS ──
+  if (collections.overdueCount > 0 || collections.due7dAmount > 0) {
+    const body: string[] = [];
+    if (collections.overdueCount > 0) {
+      body.push(
+        `${inr(collections.overdueAmount)} overdue · ${collections.overdueCount} students`,
       );
-    } else {
-      lines.push(`Leads — · Admissions — · Revenue —`);
     }
-    lines.push("");
-    lines.push(`📉 <b>7-DAY TREND</b>`);
-    if (pulseToday) {
-      const leadSum = pulseToday.history.leads.slice(-7).reduce((s, p) => s + (p.value || 0), 0);
-      const seatSum = pulseToday.history.seatBookings.slice(-7).reduce((s, p) => s + (p.value || 0), 0);
-      const revSum =
-        pulseToday.history.courseRevenue.slice(-7).reduce((s, p) => s + (p.value || 0), 0) +
-        pulseToday.history.webinarRevenue.slice(-7).reduce((s, p) => s + (p.value || 0), 0);
-      lines.push(`Leads ${dash(leadSum)} · Admissions ${dash(seatSum)} · Revenue ${inr(revSum || null)}`);
-    } else {
-      lines.push(`Leads — · Admissions — · Revenue —`);
+    if (collections.due7dAmount > 0) {
+      body.push(`Due this week ${inr(collections.due7dAmount)}`);
     }
+    pushSection(lines, `⚠️ <b>COLLECTIONS</b>`, body);
+  }
 
-    try {
-      const webinars = await getWebinars();
-      const today = istTodayYMD();
-      const soon = webinars.filter((w) => {
-        const ymd = istYMD(w.datetime || "");
-        return ymd && ymd >= today;
-      });
-      // Payment deadlines: enrollments with next due today
-      const dueToday: string[] = [];
-      const now = Date.now();
-      for (const e of enrollments) {
-        if (!isActiveEnrollment(e)) continue;
-        const col = deriveCollections(e, now);
-        if (col.nextDueDate && istYMD(col.nextDueDate) === today && col.nextDueAmount > 0) {
-          dueToday.push(
-            `${escapeHtml(e.student_name || "Student")} · ${inr(col.nextDueAmount)}`,
-          );
-        }
-      }
-      if (soon.length || dueToday.length) {
-        lines.push("");
-        lines.push(`📅 <b>UPCOMING</b>`);
-        for (const w of soon.slice(0, 5)) {
-          lines.push(`· ${escapeHtml(w.title)} — ${escapeHtml(w.datetime ? formatIstShort(w.datetime) : "—")}`);
-        }
-        for (const row of dueToday.slice(0, 5)) {
-          lines.push(`· Due today — ${row}`);
-        }
-      }
-    } catch {
-      /* ignore */
+  // ── ALERTS (failed payments) ──
+  if (failedToday != null && failedToday > 0) {
+    if (lines.length > 1) lines.push("");
+    lines.push(`🚨 ${failedToday} payment${failedToday === 1 ? "" : "s"} failed today`);
+  }
+
+  // ── 6 AM only ──
+  if (isMorningSummary && pulseToday) {
+    const yBody: string[] = [];
+    const yLeads = mPrev(pulseToday.pulse.leadsToday);
+    const yAdm = mPrev(pulseToday.pulse.seatBookingsToday);
+    const yRev =
+      (mPrev(pulseToday.pulse.courseRevenue) || 0) + (mPrev(pulseToday.pulse.webinarRevenue) || 0);
+    if (yLeads != null || yAdm != null || yRev) {
+      yBody.push(
+        `Leads ${yLeads ?? "—"} · Admissions ${yAdm ?? "—"} · Revenue ${inr(yRev || null)}`.replace(
+          / · —/g,
+          "",
+        ),
+      );
+    }
+    if (yBody.length) pushSection(lines, `🗓 <b>YESTERDAY CLOSE</b>`, yBody);
+
+    const leadSum = pulseToday.history.leads.slice(-7).reduce((s, p) => s + (p.value || 0), 0);
+    const seatSum = pulseToday.history.seatBookings.slice(-7).reduce((s, p) => s + (p.value || 0), 0);
+    const revSum =
+      pulseToday.history.courseRevenue.slice(-7).reduce((s, p) => s + (p.value || 0), 0) +
+      pulseToday.history.webinarRevenue.slice(-7).reduce((s, p) => s + (p.value || 0), 0);
+    if (leadSum || seatSum || revSum) {
+      pushSection(lines, `📉 <b>7-DAY TREND</b>`, [
+        `Leads ${leadSum} · Admissions ${seatSum} · Revenue ${inr(revSum || null)}`,
+      ]);
     }
   }
 
@@ -557,7 +652,7 @@ export async function sendDigestNow(opts?: {
   try {
     built = await buildDigest({
       previous: prev?.metrics || null,
-      forceMorningExtras: opts?.morningExtras === true || parts.hour === 6,
+      forceMorningExtras: opts?.morningExtras === true,
     });
   } catch (e) {
     const msg = (e as Error).message || "build_failed";
