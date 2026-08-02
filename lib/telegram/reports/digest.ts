@@ -265,7 +265,7 @@ export async function buildDigest(opts?: {
   try {
     const settled = await Promise.allSettled([
       getExecutivePulse({ preset: "today", canRevenue: true }),
-      getExecutivePulse({ preset: "mtd", canRevenue: true }),
+      getExecutivePulse({ preset: "this_month", canRevenue: true }),
       getAllCourses(),
       getAllCourseEnrollments(),
       pickUpcomingWebinar(),
