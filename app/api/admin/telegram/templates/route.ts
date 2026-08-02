@@ -13,9 +13,12 @@ function asButtons(raw: unknown): TelegramButton[] {
       if (!b || typeof b !== "object") return null;
       const o = b as Record<string, unknown>;
       const label = String(o.label || "").trim();
-      const url = String(o.url || "").trim();
-      if (!label || !url) return null;
-      return { label, url };
+      if (!label) return null;
+      const url = o.url != null ? String(o.url).trim() : "";
+      const callback_data = o.callback_data != null ? String(o.callback_data).trim() : "";
+      if (callback_data) return { label, callback_data };
+      if (url) return { label, url };
+      return null;
     })
     .filter(Boolean) as TelegramButton[];
 }
@@ -55,6 +58,10 @@ export async function POST(req: Request) {
     image_url: body.image_url ? String(body.image_url) : null,
     buttons: asButtons(body.buttons),
     variables: extractVars(tplBody),
+    fallbacks:
+      body.fallbacks && typeof body.fallbacks === "object" && !Array.isArray(body.fallbacks)
+        ? body.fallbacks
+        : {},
     is_active: body.is_active !== false,
     created_by: adminId,
     updated_by: adminId,
@@ -88,6 +95,12 @@ export async function PATCH(req: Request) {
   if (body.image_url !== undefined) patch.image_url = body.image_url ? String(body.image_url) : null;
   if (body.buttons !== undefined) patch.buttons = asButtons(body.buttons);
   if (body.is_active !== undefined) patch.is_active = !!body.is_active;
+  if (body.fallbacks !== undefined) {
+    patch.fallbacks =
+      body.fallbacks && typeof body.fallbacks === "object" && !Array.isArray(body.fallbacks)
+        ? body.fallbacks
+        : {};
+  }
 
   const { data, error } = await db.from("telegram_templates").update(patch).eq("id", id).select("*").single();
   if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });

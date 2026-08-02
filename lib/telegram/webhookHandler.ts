@@ -2,7 +2,8 @@
  * Telegram update processor. Must be awaited by the webhook route before HTTP 200.
  */
 import { getSupabaseAdmin } from "../supabase";
-import { answerCallbackQuery } from "./botApi";
+import { answerCallbackQuery, sendMessage } from "./botApi";
+import { recordButtonAnswer, recordPollAnswer } from "./answers";
 import { fireTriggerForSubscriber } from "./dispatch";
 import { tgLog } from "./log";
 import {
@@ -34,6 +35,11 @@ export interface TelegramUpdate {
       chat?: { id: number };
       text?: string;
     };
+  };
+  poll_answer?: {
+    poll_id: string;
+    user?: { id: number; username?: string; first_name?: string };
+    option_ids?: number[];
   };
 }
 
@@ -173,17 +179,76 @@ async function handleText(update: NonNullable<TelegramUpdate["message"]>): Promi
   tgLog("text_ok", { chat_id: String(chatId), len: text.length });
 }
 
+async function handlePollAnswer(pa: NonNullable<TelegramUpdate["poll_answer"]>): Promise<void> {
+  const userId = pa.user?.id;
+  if (userId == null || !pa.poll_id) return;
+  const chatId = String(userId); // private chats: chat_id === user_id
+  await touchInteraction(chatId);
+  await storeInbound({
+    chatId,
+    body: `poll_answer:${pa.poll_id}:${(pa.option_ids || []).join(",")}`,
+    metadata: { kind: "poll_answer", poll_id: pa.poll_id, option_ids: pa.option_ids || [] },
+  });
+  try {
+    await recordPollAnswer({
+      chatId,
+      pollId: String(pa.poll_id),
+      optionIds: pa.option_ids || [],
+      raw: { user: pa.user || null, option_ids: pa.option_ids || [] },
+    });
+  } catch (e) {
+    tgLog("poll_answer_record_failed", { error: (e as Error).message }, "warn");
+  }
+  tgLog("poll_answer_ok", { chat_id: chatId, poll_id: pa.poll_id });
+}
+
 async function handleCallback(cq: NonNullable<TelegramUpdate["callback_query"]>): Promise<void> {
   const chatId = cq.message?.chat?.id ?? cq.from?.id;
   if (chatId == null) return;
   await touchInteraction(chatId);
+  const data = cq.data || "";
   await storeInbound({
     chatId: String(chatId),
-    body: cq.data || null,
+    body: data || null,
     telegramMessageId: cq.message?.message_id != null ? String(cq.message.message_id) : null,
-    callbackData: cq.data || null,
+    callbackData: data || null,
     metadata: { kind: "callback" },
   });
+
+  // Question buttons: q:{broadcastId}:{optionKey}
+  if (data.startsWith("q:")) {
+    const parts = data.split(":");
+    const broadcastId = parts[1] || "";
+    const optionKey = parts.slice(2).join(":") || "";
+    if (broadcastId && optionKey) {
+      try {
+        await recordButtonAnswer({
+          chatId: String(chatId),
+          broadcastId,
+          optionKey,
+          raw: { callback_data: data },
+        });
+      } catch (e) {
+        tgLog("button_answer_failed", { error: (e as Error).message }, "warn");
+      }
+      try {
+        await answerCallbackQuery(cq.id, "Recorded");
+      } catch (e) {
+        tgLog("callback_answer_failed", { error: (e as Error).message }, "warn");
+      }
+      try {
+        await sendMessage({
+          chat_id: chatId,
+          text: "Thanks — recorded.",
+          disable_web_page_preview: true,
+        });
+      } catch {
+        /* ignore */
+      }
+      return;
+    }
+  }
+
   try {
     await answerCallbackQuery(cq.id);
   } catch (e) {
@@ -199,7 +264,11 @@ export async function processUpdate(update: TelegramUpdate): Promise<void> {
   let error: string | null = null;
 
   try {
-    if (update.callback_query) {
+    if (update.poll_answer) {
+      kind = "poll_answer";
+      chatId = update.poll_answer.user?.id != null ? String(update.poll_answer.user.id) : null;
+      await handlePollAnswer(update.poll_answer);
+    } else if (update.callback_query) {
       kind = "callback_query";
       chatId = String(update.callback_query.message?.chat?.id ?? update.callback_query.from?.id ?? "");
       await handleCallback(update.callback_query);

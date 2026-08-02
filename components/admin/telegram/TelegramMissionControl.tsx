@@ -4,12 +4,18 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import {
   Activity, Send, Workflow, FileText, Inbox, BarChart3, Settings as SettingsIcon,
-  RefreshCw, AlertTriangle, CheckCircle2, Plus, Trash2, Clock, MessageCircle, ExternalLink, Save, Eye,
+  RefreshCw, AlertTriangle, CheckCircle2, Plus, Trash2, Clock, MessageCircle, ExternalLink, Save, Eye, Search, ChevronDown, ChevronUp, User,
 } from "lucide-react";
 import { LoadingBlock } from "@/components/admin/ui";
 import { useToast } from "@/components/ui/Toast";
 import TimeframeFilter from "@/components/admin/TimeframeFilter";
 import { formatISTDateTime, istTodayYMD, resolveTimeframe, type TimeframeValue } from "@/lib/dates";
+import TelegramComposer, {
+  emptyComposerValue,
+  trimComposerButtons,
+  type ComposerValue,
+  type PreviewRecipient,
+} from "@/components/admin/telegram/TelegramComposer";
 
 // ---- meta / permissions (booleans only — token never reaches the client) ----
 interface Meta {
@@ -407,26 +413,84 @@ function RecentList({ title, empty, items }: {
 }
 
 // ============================ BROADCAST ============================
+type AnswerAudience = { id: string; label: string; questionKey?: string; optionKey?: string; count?: number };
+
 function BroadcastTab() {
   const { toast } = useToast();
-  const [step, setStep] = useState<"compose" | "preview" | "send">("compose");
   const [name, setName] = useState("");
   const [audienceId, setAudienceId] = useState<string>(AUDIENCES[0].id);
+  const [answerAudiences, setAnswerAudiences] = useState<AnswerAudience[]>([]);
   const [tf, setTf] = useState<TimeframeValue>({ mode: "30d" });
-  const [body, setBody] = useState("");
-  const [imageUrl, setImageUrl] = useState("");
-  const [buttons, setButtons] = useState<InlineBtn[]>(emptyButtons());
+  const [composer, setComposer] = useState<ComposerValue>(() => emptyComposerValue());
   const [scheduledAt, setScheduledAt] = useState("");
-  const [audienceMeta, setAudienceMeta] = useState<{ audienceSize?: number; reachableCount?: number; skippedNoTelegram?: number } | null>(null);
+  const [audienceMeta, setAudienceMeta] = useState<{
+    audienceSize?: number;
+    reachableCount?: number;
+    skippedNoTelegram?: number;
+  } | null>(null);
+  const [previewRecipients, setPreviewRecipients] = useState<PreviewRecipient[]>([]);
+  const [missingVars, setMissingVars] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
+  const [broadcasts, setBroadcasts] = useState<any[]>([]);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [detail, setDetail] = useState<Record<string, any>>({});
+
+  // Direct send
+  const [searchQ, setSearchQ] = useState("");
+  const [searchHits, setSearchHits] = useState<{ chatId: string; label: string; phone?: string }[]>([]);
+  const [searchBusy, setSearchBusy] = useState(false);
+  const [directPick, setDirectPick] = useState<{ chatId: string; label: string } | null>(null);
+  const [directComposer, setDirectComposer] = useState<ComposerValue>(() => emptyComposerValue());
 
   function setThisYear() {
     const y = istTodayYMD().slice(0, 4);
     setTf({ mode: "range", from: `${y}-01-01`, to: istTodayYMD() });
   }
 
+  const loadBroadcasts = useCallback(() => {
+    fetch("/api/admin/telegram/broadcast")
+      .then((r) => r.json())
+      .then((d) => setBroadcasts(Array.isArray(d?.broadcasts) ? d.broadcasts : []))
+      .catch(() => setBroadcasts([]));
+  }, []);
+
+  useEffect(() => {
+    loadBroadcasts();
+    fetch("/api/admin/telegram/analytics")
+      .then((r) => r.json())
+      .then((d) => {
+        const raw = d?.answers || d?.answerAudiences || d?.analytics?.answers || [];
+        if (!Array.isArray(raw)) return;
+        setAnswerAudiences(
+          raw.map((a: any) => ({
+            id: a.id || `answer:${a.questionKey || a.question_key}:${a.optionKey || a.option_key}`,
+            label:
+              a.label ||
+              `Answered ${a.questionKey || a.question_key} → ${a.optionLabel || a.option_label || a.optionKey || a.option_key}`,
+            questionKey: a.questionKey || a.question_key,
+            optionKey: a.optionKey || a.option_key,
+            count: a.count,
+          })),
+        );
+      })
+      .catch(() => {});
+  }, [loadBroadcasts]);
+
   async function loadAudience() {
+    const needsBody = composer.kind !== "poll";
+    if (needsBody && !composer.body.trim()) {
+      toast("Message body required", "error");
+      return;
+    }
+    if (composer.kind === "poll") {
+      const opts = (composer.poll?.options || []).filter((o) => o.trim());
+      if (!composer.poll?.question?.trim() || opts.length < 2) {
+        toast("Poll needs a question and at least 2 options", "error");
+        return;
+      }
+    }
     setBusy(true);
+    setMissingVars([]);
     const { fromMs, toMs } = resolveTimeframe(tf);
     const qs = new URLSearchParams({
       audienceId,
@@ -434,6 +498,32 @@ function BroadcastTab() {
       toMs: String(Number.isFinite(toMs) ? toMs : Date.now() + 86400000),
     });
     const d = await fetch(`/api/admin/telegram/audience?${qs}`).then((r) => r.json()).catch(() => null);
+
+    const sample = Array.isArray(d?.reachable)
+      ? d.reachable.slice(0, 12).map((r: any) => ({
+          chatId: String(r.chat_id || r.chatId || ""),
+          label: r.name || r.first_name || r.phone || String(r.chat_id || r.chatId || "recipient"),
+        })).filter((r: PreviewRecipient) => r.chatId)
+      : [];
+    setPreviewRecipients(sample);
+
+    // Missing-var warning from preview API (same path as send)
+    const preview = await fetch("/api/admin/telegram/broadcast/preview", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        body: composer.body,
+        fallbacks: composer.fallbacks,
+        imageUrl: composer.imageUrl.trim() || null,
+        chatId: sample[0]?.chatId,
+        kind: composer.kind,
+        audienceId,
+      }),
+    }).then((r) => r.json()).catch(() => null);
+    if (Array.isArray(preview?.missingVars) || Array.isArray(preview?.missing)) {
+      setMissingVars(preview.missingVars || preview.missing || []);
+    }
+
     setBusy(false);
     if (d?.ok || d?.audienceSize !== undefined) {
       setAudienceMeta({
@@ -441,83 +531,220 @@ function BroadcastTab() {
         reachableCount: d.reachableCount,
         skippedNoTelegram: d.skippedNoTelegram,
       });
-      setStep("preview");
     } else {
       toast(d?.error || "Could not load audience", "error");
     }
   }
 
-  async function send(schedule: boolean) {
-    if (!body.trim()) { toast("Message body required", "error"); return; }
-    setBusy(true);
+  function buildBroadcastPayload(schedule: boolean) {
     const { fromMs, toMs } = resolveTimeframe(tf);
     const payload: Record<string, unknown> = {
       audienceId,
       fromMs: Number.isFinite(fromMs) ? fromMs : 0,
       toMs: Number.isFinite(toMs) ? toMs : Date.now() + 86400000,
-      body: body.trim(),
-      imageUrl: imageUrl.trim() || undefined,
-      buttons: trimButtons(buttons),
+      body: composer.body.trim(),
+      imageUrl: composer.imageUrl.trim() || undefined,
+      image: composer.imageUrl.trim() || undefined,
+      buttons: trimComposerButtons(composer.buttons, composer.kind),
       name: name.trim() || undefined,
+      fallbacks: composer.fallbacks,
+      templateId: composer.templateId,
+      kind: composer.kind,
+      poll:
+        composer.kind === "poll" && composer.poll
+          ? {
+              question: composer.poll.question,
+              options: composer.poll.options,
+              is_anonymous: composer.poll.is_anonymous,
+              allows_multiple: composer.poll.allows_multiple,
+              allows_multiple_answers: composer.poll.allows_multiple,
+            }
+          : null,
+      questionKey: composer.kind === "question" ? composer.questionKey : undefined,
+      leadField: composer.kind === "question" ? composer.leadField || undefined : undefined,
     };
     if (schedule && scheduledAt) payload.scheduledAt = new Date(scheduledAt).toISOString();
+    return payload;
+  }
+
+  async function send(schedule: boolean) {
+    if (composer.kind !== "poll" && !composer.body.trim()) {
+      toast("Message body required", "error");
+      return;
+    }
+    setBusy(true);
     const d = await fetch("/api/admin/telegram/broadcast", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(buildBroadcastPayload(schedule)),
     }).then((r) => r.json()).catch(() => null);
     setBusy(false);
     if (d?.ok) {
       toast(schedule ? "Broadcast scheduled." : "Broadcast queued.", "success");
-      setStep("compose");
       setAudienceMeta(null);
+      loadBroadcasts();
     } else {
       toast(d?.error || "Send failed", "error");
     }
   }
 
+  async function searchRecipients() {
+    const q = searchQ.trim();
+    if (!q) return;
+    setSearchBusy(true);
+    const d = await fetch(`/api/admin/telegram/recipients/search?q=${encodeURIComponent(q)}`)
+      .then((r) => r.json())
+      .catch(() => null);
+    setSearchBusy(false);
+    if (!d?.ok) {
+      toast(d?.error || "Recipient search unavailable", "error");
+      setSearchHits([]);
+      return;
+    }
+    const hits = Array.isArray(d.recipients || d.results || d.hits)
+      ? (d.recipients || d.results || d.hits)
+      : [];
+    setSearchHits(
+      hits.map((h: any) => ({
+        chatId: String(h.chat_id || h.chatId || ""),
+        label: h.name || h.first_name || h.username || h.phone || String(h.chat_id || h.chatId),
+        phone: h.phone,
+      })).filter((h: { chatId: string }) => h.chatId),
+    );
+  }
+
+  async function sendDirect() {
+    if (!directPick) { toast("Pick a recipient", "error"); return; }
+    if (directComposer.kind !== "poll" && !directComposer.body.trim()) {
+      toast("Message body required", "error");
+      return;
+    }
+    setBusy(true);
+    const d = await fetch("/api/admin/telegram/broadcast/direct", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        chatId: directPick.chatId,
+        body: directComposer.body.trim(),
+        imageUrl: directComposer.imageUrl.trim() || undefined,
+        buttons: trimComposerButtons(directComposer.buttons, directComposer.kind),
+        fallbacks: directComposer.fallbacks,
+        kind: directComposer.kind,
+        poll:
+          directComposer.kind === "poll" && directComposer.poll
+            ? {
+                ...directComposer.poll,
+                allows_multiple_answers: directComposer.poll.allows_multiple,
+              }
+            : null,
+        questionKey: directComposer.questionKey,
+        leadField: directComposer.leadField,
+        templateId: directComposer.templateId,
+      }),
+    }).then((r) => r.json()).catch(() => null);
+    setBusy(false);
+    toast(d?.ok ? "Sent to individual." : (d?.error || "Direct send failed"), d?.ok ? "success" : "error");
+    if (d?.ok) loadBroadcasts();
+  }
+
+  async function toggleDetail(id: string) {
+    if (expandedId === id) {
+      setExpandedId(null);
+      return;
+    }
+    setExpandedId(id);
+    if (detail[id]) return;
+    const d = await fetch(`/api/admin/telegram/broadcast?id=${encodeURIComponent(id)}`)
+      .then((r) => r.json())
+      .catch(() => null);
+    if (d?.ok && (d.broadcast || d.detail)) {
+      setDetail((prev) => ({ ...prev, [id]: d.broadcast || d.detail }));
+    } else {
+      const row = broadcasts.find((b) => b.id === id);
+      setDetail((prev) => ({ ...prev, [id]: row || { error: d?.error || "Detail unavailable" } }));
+    }
+  }
+
+  const audienceDef =
+    AUDIENCES.find((a) => a.id === audienceId)?.definition ||
+    answerAudiences.find((a) => a.id === audienceId)?.label ||
+    "";
+
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap gap-2 text-xs">
-        {(["compose", "preview", "send"] as const).map((s, i) => (
-          <span key={s} className={`pill ${step === s ? "pill-blue" : "pill-gray"}`}>{i + 1}. {s}</span>
-        ))}
-      </div>
-
       <div className="card space-y-3 p-4">
-        <p className="text-sm font-semibold">Compose</p>
+        <p className="text-sm font-semibold">Broadcast</p>
         <Field label="Campaign name (optional)">
           <input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Seat booking nudge — Mar" />
         </Field>
         <Field label="Audience">
-          <select className="input" value={audienceId} onChange={(e) => { setAudienceId(e.target.value); setAudienceMeta(null); setStep("compose"); }}>
-            {AUDIENCES.map((a) => <option key={a.id} value={a.id}>{a.label}</option>)}
+          <select
+            className="input"
+            value={audienceId}
+            onChange={(e) => {
+              setAudienceId(e.target.value);
+              setAudienceMeta(null);
+            }}
+          >
+            <optgroup label="Phone audiences">
+              {AUDIENCES.map((a) => (
+                <option key={a.id} value={a.id}>{a.label}</option>
+              ))}
+            </optgroup>
+            {answerAudiences.length > 0 && (
+              <optgroup label="Answer audiences">
+                {answerAudiences.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.label}{a.count != null ? ` (${a.count})` : ""}
+                  </option>
+                ))}
+              </optgroup>
+            )}
           </select>
-          <p className="mt-1 text-xs text-muted">{AUDIENCES.find((a) => a.id === audienceId)?.definition}</p>
+          {audienceDef && <p className="mt-1 text-xs text-muted">{audienceDef}</p>}
         </Field>
         <div>
           <p className="mb-1.5 text-xs font-medium text-muted">Timeframe</p>
           <div className="flex flex-wrap items-center gap-1.5">
-            <TimeframeFilter value={tf} onChange={(v) => { setTf(v); setAudienceMeta(null); setStep("compose"); }} modes={TF_MODES} size="sm" />
-            <button type="button" onClick={setThisYear}
-              className={`rounded-full px-2.5 py-1 text-xs font-medium transition ${tf.mode === "range" && tf.from?.endsWith("-01-01") && tf.from?.startsWith(istTodayYMD().slice(0, 4)) ? "bg-primary text-white" : "bg-surface2 text-ink2 hover:bg-surface"}`}>
+            <TimeframeFilter
+              value={tf}
+              onChange={(v) => {
+                setTf(v);
+                setAudienceMeta(null);
+              }}
+              modes={TF_MODES}
+              size="sm"
+            />
+            <button
+              type="button"
+              onClick={setThisYear}
+              className={`rounded-full px-2.5 py-1 text-xs font-medium transition ${
+                tf.mode === "range" && tf.from?.endsWith("-01-01") && tf.from?.startsWith(istTodayYMD().slice(0, 4))
+                  ? "bg-primary text-white"
+                  : "bg-surface2 text-ink2 hover:bg-surface"
+              }`}
+            >
               This year
             </button>
           </div>
         </div>
-        <Field label="Message body ({{vars}} ok)">
-          <textarea className="input min-h-[120px]" value={body} onChange={(e) => setBody(e.target.value)} placeholder="Hi {{first_name}}, …" />
-        </Field>
-        <Field label="Image URL (optional)">
-          <input className="input" value={imageUrl} onChange={(e) => setImageUrl(e.target.value)} placeholder="https://…" />
-        </Field>
-        <ButtonsEditor buttons={buttons} onChange={setButtons} />
-        <button onClick={loadAudience} disabled={busy || !body.trim()} className="btn btn-primary">
-          <Eye size={14} /> {busy ? "…" : "Preview audience"}
-        </button>
+
+        <TelegramComposer
+          value={composer}
+          onChange={setComposer}
+          mode="broadcast"
+          recipients={previewRecipients}
+          onRequestRecipients={() => void loadAudience()}
+        />
+
+        <div className="flex flex-wrap gap-2 border-t border-line pt-3">
+          <button type="button" onClick={() => void loadAudience()} disabled={busy} className="btn btn-primary">
+            <Eye size={14} /> {busy ? "…" : "Preview audience"}
+          </button>
+        </div>
       </div>
 
-      {step !== "compose" && audienceMeta && (
+      {audienceMeta && (
         <div className="card space-y-3 p-4">
           <p className="text-sm font-semibold">Audience size vs reachable</p>
           <div className="grid gap-3 sm:grid-cols-3">
@@ -525,16 +752,142 @@ function BroadcastTab() {
             <Kpi label="Reachable (Telegram)" value={audienceMeta.reachableCount ?? "—"} />
             <Kpi label="Skipped (no TG)" value={audienceMeta.skippedNoTelegram ?? "—"} />
           </div>
-          <div className="rounded-xl border border-line bg-surface2 p-3 text-sm whitespace-pre-wrap">{body}</div>
-          <Field label="Schedule (optional, IST local)">
+          {missingVars.length > 0 && (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+              <AlertTriangle size={12} className="mr-1 inline" />
+              Some recipients are missing: <strong>{missingVars.join(", ")}</strong>. Fallbacks will be used.
+            </div>
+          )}
+          <Field label="Schedule (optional, local time)">
             <input type="datetime-local" className="input" value={scheduledAt} onChange={(e) => setScheduledAt(e.target.value)} />
           </Field>
           <div className="flex flex-wrap gap-2">
-            <button onClick={() => send(false)} disabled={busy} className="btn btn-primary"><Send size={14} /> {busy ? "…" : "Send now"}</button>
-            <button onClick={() => send(true)} disabled={busy || !scheduledAt} className="btn btn-secondary"><Clock size={14} /> Schedule</button>
+            <button type="button" onClick={() => void send(false)} disabled={busy} className="btn btn-primary">
+              <Send size={14} /> {busy ? "…" : "Send now"}
+            </button>
+            <button type="button" onClick={() => void send(true)} disabled={busy || !scheduledAt} className="btn btn-secondary">
+              <Clock size={14} /> Schedule
+            </button>
           </div>
         </div>
       )}
+
+      <div className="card space-y-3 p-4">
+        <p className="text-sm font-semibold">Send to individual</p>
+        <p className="text-xs text-muted">Search reachable subscribers / linked leads, then send a one-off message.</p>
+        <div className="flex flex-wrap gap-2">
+          <input
+            className="input min-w-[12rem] flex-1"
+            value={searchQ}
+            onChange={(e) => setSearchQ(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") void searchRecipients(); }}
+            placeholder="Name, phone, username, chat id…"
+          />
+          <button type="button" className="btn btn-secondary text-xs" disabled={searchBusy} onClick={() => void searchRecipients()}>
+            <Search size={13} /> {searchBusy ? "…" : "Search"}
+          </button>
+        </div>
+        {searchHits.length > 0 && (
+          <ul className="divide-y divide-line rounded-xl border border-line">
+            {searchHits.map((h) => (
+              <li key={h.chatId}>
+                <button
+                  type="button"
+                  className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-surface2 ${
+                    directPick?.chatId === h.chatId ? "bg-primary/5" : ""
+                  }`}
+                  onClick={() => setDirectPick({ chatId: h.chatId, label: h.label })}
+                >
+                  <User size={14} className="text-muted" />
+                  <span className="font-medium">{h.label}</span>
+                  <span className="ml-auto font-mono text-[11px] text-muted">{h.chatId}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+        {directPick && (
+          <>
+            <p className="text-xs text-muted">
+              To: <strong className="text-ink">{directPick.label}</strong>{" "}
+              <span className="font-mono">({directPick.chatId})</span>
+            </p>
+            <TelegramComposer
+              value={directComposer}
+              onChange={setDirectComposer}
+              mode="direct"
+              recipients={[{ chatId: directPick.chatId, label: directPick.label }]}
+            />
+            <button type="button" className="btn btn-primary text-xs" disabled={busy} onClick={() => void sendDirect()}>
+              <Send size={13} /> Send to individual
+            </button>
+          </>
+        )}
+      </div>
+
+      <div className="card overflow-hidden">
+        <div className="flex items-center gap-2 border-b border-line px-4 py-3">
+          <p className="text-sm font-semibold">Recent broadcasts</p>
+          <button type="button" className="btn btn-secondary ml-auto text-xs" onClick={loadBroadcasts}>
+            <RefreshCw size={12} /> Refresh
+          </button>
+        </div>
+        {broadcasts.length === 0 ? (
+          <p className="p-4 text-sm text-muted">
+            No broadcasts yet. Compose a message above, preview the audience, then Send now.
+          </p>
+        ) : (
+          <ul className="divide-y divide-line">
+            {broadcasts.map((b) => {
+              const open = expandedId === b.id;
+              const d = detail[b.id] || b;
+              return (
+                <li key={b.id} className="text-sm">
+                  <button
+                    type="button"
+                    className="flex w-full flex-wrap items-center gap-2 px-4 py-3 text-left hover:bg-surface2/50"
+                    onClick={() => void toggleDetail(b.id)}
+                  >
+                    <span className={`pill text-[10px] ${b.status === "done" ? "pill-green" : b.status === "failed" ? "pill-red" : "pill-gray"}`}>
+                      {b.status || "—"}
+                    </span>
+                    <span className="font-medium text-ink">{b.name || b.id?.slice(0, 8)}</span>
+                    <span className="text-xs text-muted">{b.audience_id}</span>
+                    <span className="ml-auto text-[11px] tabular-nums text-muted">
+                      {b.created_at ? formatISTDateTime(b.created_at) : ""}
+                    </span>
+                    {open ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                  </button>
+                  {open && (
+                    <div className="space-y-2 border-t border-line/60 bg-surface2/40 px-4 py-3 text-xs">
+                      <div className="flex flex-wrap gap-3">
+                        <span>Sent: <strong className="tabular-nums">{d.sent_count ?? b.sent_count ?? 0}</strong></span>
+                        <span>Failed: <strong className="tabular-nums">{d.failed_count ?? b.failed_count ?? 0}</strong></span>
+                        <span>Blocked: <strong className="tabular-nums">{d.blocked_count ?? b.blocked_count ?? 0}</strong></span>
+                        <span>Skipped: <strong className="tabular-nums">{d.skipped_count ?? b.skipped_count ?? 0}</strong></span>
+                        <span>Reachable: <strong className="tabular-nums">{d.reachable_count ?? b.reachable_count ?? "—"}</strong></span>
+                      </div>
+                      {(d.kind || b.kind) && <p>Kind: {d.kind || b.kind}</p>}
+                      {(d.poll_results || d.pollResults) && (
+                        <div>
+                          <p className="font-semibold">Poll results</p>
+                          <pre className="mt-1 overflow-x-auto rounded-lg bg-ink/5 p-2 text-[11px]">
+                            {JSON.stringify(d.poll_results || d.pollResults, null, 2)}
+                          </pre>
+                        </div>
+                      )}
+                      {(d.message_body || b.message_body) && (
+                        <p className="line-clamp-4 whitespace-pre-wrap text-ink2">{d.message_body || b.message_body}</p>
+                      )}
+                      {d.error && <p className="text-danger">{d.error}</p>}
+                    </div>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
     </div>
   );
 }
@@ -1029,39 +1382,226 @@ function InboxTab() {
 // ============================ ANALYTICS ============================
 function AnalyticsTab() {
   const [data, setData] = useState<any>(null);
+  const [broadcasts, setBroadcasts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  useEffect(() => {
-    fetch("/api/admin/telegram/analytics")
-      .then((r) => r.json())
-      .then((d) => setData(d?.ok ? d : d))
-      .catch(() => setData(null))
+  const [err, setErr] = useState<string | null>(null);
+
+  const load = useCallback(() => {
+    setLoading(true);
+    setErr(null);
+    Promise.all([
+      fetch("/api/admin/telegram/analytics").then((r) => r.json()).catch(() => null),
+      fetch("/api/admin/telegram/broadcast").then((r) => r.json()).catch(() => null),
+    ])
+      .then(([a, b]) => {
+        if (!a || a.ok === false) {
+          setData(null);
+          setErr(a?.error || "Could not load analytics");
+        } else {
+          setData(a);
+        }
+        setBroadcasts(Array.isArray(b?.broadcasts) ? b.broadcasts : []);
+      })
       .finally(() => setLoading(false));
   }, []);
-  if (loading) return <LoadingBlock />;
-  if (!data) return <p className="text-sm text-muted">No analytics yet.</p>;
 
-  const stats = data.analytics || data.stats || data;
-  const keys = Object.keys(stats).filter((k) => typeof stats[k] === "number" || typeof stats[k] === "string");
+  useEffect(() => { load(); }, [load]);
+
+  if (loading) return <LoadingBlock />;
+  if (!data) {
+    return (
+      <div className="card space-y-2 p-6 text-sm">
+        <p className="font-medium text-ink">No analytics yet</p>
+        <p className="text-muted">
+          {err || "Once the bot is online and you send a broadcast or receive a /start, KPIs appear here."}
+        </p>
+        <p className="text-xs text-muted">Next: open Settings → confirm webhook → share a deep link from Leads → send a test broadcast.</p>
+        <button type="button" className="btn btn-secondary text-xs" onClick={load}><RefreshCw size={13} /> Retry</button>
+      </div>
+    );
+  }
+
+  const overview = data.overview || data.outbound || data.stats || {};
+  const outbound = data.outbound || {
+    sentToday: overview.sentToday,
+    sentLast7d: overview.sentLast7d,
+    failedLast7d: overview.failedLast7d,
+    blockedLast7d: overview.blockedLast7d,
+    queued: overview.queued ?? overview.queue?.queued,
+  };
+  const inbound = data.inbound || {
+    unread: overview.unreadInbound ?? overview.unread,
+    lastInboundAt: overview.lastInboundAt,
+    recent: overview.recent?.inbound || [],
+  };
+  const growth =
+    data.subscribersGrowth ||
+    data.subscriberGrowth ||
+    overview.recent?.joins ||
+    [];
+  const reachability: any[] = Array.isArray(data.reachability) ? data.reachability : [];
+  const recentBroadcasts: any[] =
+    Array.isArray(data.recentBroadcasts) && data.recentBroadcasts.length
+      ? data.recentBroadcasts
+      : broadcasts;
 
   return (
-    <div className="space-y-4">
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        {keys.length === 0 ? (
-          <p className="text-sm text-muted col-span-full">No numeric metrics returned.</p>
-        ) : (
-          keys.slice(0, 12).map((k) => <Kpi key={k} label={k.replace(/_/g, " ")} value={stats[k]} />)
-        )}
+    <div className="space-y-5">
+      <div className="flex items-center gap-2">
+        <button type="button" className="btn btn-secondary ml-auto text-xs" onClick={load}>
+          <RefreshCw size={13} /> Refresh
+        </button>
       </div>
-      {Array.isArray(stats.byDay) && (
-        <div className="card p-4">
-          <p className="mb-2 text-sm font-semibold">By day</p>
-          <ul className="space-y-1 text-sm">
-            {stats.byDay.map((d: any, i: number) => (
-              <li key={i} className="flex justify-between"><span className="text-ink2">{d.day || d.date}</span><span className="tabular-nums font-semibold">{d.count ?? d.sent ?? "—"}</span></li>
-            ))}
-          </ul>
+
+      <section className="space-y-2">
+        <h2 className="font-heading text-sm font-bold uppercase tracking-wide text-muted">Outbound</h2>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <Kpi label="Sent today" value={outbound.sentToday ?? 0} />
+          <Kpi label="Sent last 7 days" value={outbound.sentLast7d ?? 0} />
+          <Kpi label="Failed (7d)" value={outbound.failedLast7d ?? 0} tone={(outbound.failedLast7d || 0) > 0 ? "red" : undefined} />
+          <Kpi label="Blocked (7d)" value={outbound.blockedLast7d ?? 0} tone={(outbound.blockedLast7d || 0) > 0 ? "red" : undefined} />
+          <Kpi label="Queued" value={outbound.queued ?? 0} />
         </div>
-      )}
+        {(outbound.sentToday == null && outbound.sentLast7d == null) && (
+          <p className="text-xs text-muted">No outbound traffic yet — queue a broadcast from the Broadcast tab.</p>
+        )}
+      </section>
+
+      <section className="space-y-2">
+        <h2 className="font-heading text-sm font-bold uppercase tracking-wide text-muted">Inbound</h2>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <Kpi label="Unread inbox" value={inbound.unread ?? 0} tone={(inbound.unread || 0) > 0 ? "red" : undefined} />
+          <div className="card p-4 sm:col-span-2">
+            <p className="text-xs uppercase tracking-wide text-muted">Recent inbound</p>
+            {!Array.isArray(inbound.recent) || inbound.recent.length === 0 ? (
+              <p className="mt-2 text-sm text-muted">
+                No inbound messages yet. After subscribers tap /start, replies show here and in Inbox.
+              </p>
+            ) : (
+              <ul className="mt-2 max-h-48 space-y-1 overflow-y-auto text-sm">
+                {inbound.recent.slice(0, 8).map((m: any, i: number) => (
+                  <li key={i} className="flex justify-between gap-2 border-b border-line/50 py-1.5 last:border-0">
+                    <span className="truncate text-ink">{m.body || "(empty)"}</span>
+                    <span className="shrink-0 text-[11px] tabular-nums text-muted">
+                      {m.at ? formatISTDateTime(m.at) : ""}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+      </section>
+
+      <section className="space-y-2">
+        <h2 className="font-heading text-sm font-bold uppercase tracking-wide text-muted">Subscribers growth</h2>
+        <div className="card overflow-hidden">
+          {!Array.isArray(growth) || growth.length === 0 ? (
+            <p className="p-4 text-sm text-muted">
+              No joins recorded. Next: copy a Telegram invite deep link from a lead profile and ask them to open the bot.
+            </p>
+          ) : (
+            <ul className="divide-y divide-line">
+              {growth.slice(0, 20).map((j: any, i: number) => (
+                <li key={j.chat_id + (j.at || i)} className="flex flex-wrap items-center gap-2 px-4 py-2.5 text-sm">
+                  <span className="font-medium text-ink">{j.name || j.first_name || j.chat_id}</span>
+                  <span className="text-xs text-muted">
+                    {j.linked_lead_id ? `Lead ${j.linked_lead_id}` : "Unlinked"}
+                  </span>
+                  <span className="ml-auto text-[11px] tabular-nums text-muted">
+                    {j.at ? formatISTDateTime(j.at) : j.subscribed_at ? formatISTDateTime(j.subscribed_at) : ""}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </section>
+
+      <section className="space-y-2">
+        <h2 className="font-heading text-sm font-bold uppercase tracking-wide text-muted">Reachability by audience</h2>
+        {reachability.length === 0 ? (
+          <p className="card p-4 text-sm text-muted">
+            Reachability not available yet. Ensure phone audiences resolve and subscribers are linked by phone.
+          </p>
+        ) : (
+          <div className="card overflow-x-auto">
+            <table className="w-full min-w-[32rem] text-left text-sm">
+              <thead>
+                <tr className="border-b border-line text-xs uppercase tracking-wide text-muted">
+                  <th className="px-4 py-2 font-medium">Audience</th>
+                  <th className="px-4 py-2 font-medium tabular-nums">Size</th>
+                  <th className="px-4 py-2 font-medium tabular-nums">Reachable</th>
+                  <th className="px-4 py-2 font-medium tabular-nums">No TG</th>
+                  <th className="px-4 py-2 font-medium tabular-nums">%</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-line/70">
+                {reachability.map((r) => {
+                  const size = Number(r.audienceSize ?? 0);
+                  const reachable = Number(r.reachable ?? r.reachableCount ?? 0);
+                  const pct = size > 0 ? Math.round((reachable / size) * 1000) / 10 : 0;
+                  return (
+                    <tr key={r.id}>
+                      <td className="px-4 py-2 font-medium text-ink">{r.label || r.id}</td>
+                      <td className="px-4 py-2 tabular-nums">{size}</td>
+                      <td className="px-4 py-2 tabular-nums">{reachable}</td>
+                      <td className="px-4 py-2 tabular-nums">{r.skippedNoTelegram ?? "—"}</td>
+                      <td className="px-4 py-2 tabular-nums text-muted">{pct}%</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
+      <section className="space-y-2">
+        <h2 className="font-heading text-sm font-bold uppercase tracking-wide text-muted">Recent broadcasts</h2>
+        <div className="card overflow-hidden">
+          {recentBroadcasts.length === 0 ? (
+            <p className="p-4 text-sm text-muted">
+              No broadcasts yet. Open Broadcast → compose → preview audience → Send now.
+            </p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[36rem] text-left text-sm">
+                <thead>
+                  <tr className="border-b border-line text-xs uppercase tracking-wide text-muted">
+                    <th className="px-4 py-2 font-medium">Name</th>
+                    <th className="px-4 py-2 font-medium">Status</th>
+                    <th className="px-4 py-2 font-medium">Audience</th>
+                    <th className="px-4 py-2 font-medium tabular-nums">Sent</th>
+                    <th className="px-4 py-2 font-medium tabular-nums">Failed</th>
+                    <th className="px-4 py-2 font-medium tabular-nums">Blocked</th>
+                    <th className="px-4 py-2 font-medium">When</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-line/70">
+                  {recentBroadcasts.slice(0, 25).map((b: any) => (
+                    <tr key={b.id}>
+                      <td className="px-4 py-2 font-medium text-ink">{b.name || b.id?.slice(0, 8)}</td>
+                      <td className="px-4 py-2">
+                        <span className={`pill text-[10px] ${b.status === "done" ? "pill-green" : "pill-gray"}`}>
+                          {b.status || "—"}
+                        </span>
+                      </td>
+                      <td className="px-4 py-2 text-xs text-muted">{b.audience_id}</td>
+                      <td className="px-4 py-2 tabular-nums">{b.sent_count ?? 0}</td>
+                      <td className="px-4 py-2 tabular-nums">{b.failed_count ?? 0}</td>
+                      <td className="px-4 py-2 tabular-nums">{b.blocked_count ?? 0}</td>
+                      <td className="px-4 py-2 text-[11px] tabular-nums text-muted">
+                        {b.created_at ? formatISTDateTime(b.created_at) : "—"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </section>
     </div>
   );
 }

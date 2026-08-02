@@ -1,11 +1,20 @@
 /**
  * Persistent Telegram send queue with token-bucket rate limiting.
  * Global 25/sec, per-chat 1/sec. 429 → pause_until (never drop). 403 → inactive.
+ * Per-recipient HTML personalisation runs on drain (never store pre-rendered once).
  */
 import { getSupabaseAdmin } from "../supabase";
-import { inlineKeyboardFromButtons, sendMessage, sendPhoto } from "./botApi";
+import { buildKeyboard, sendMessage, sendPhoto, sendPoll } from "./botApi";
+import { prepareOutboundHtml } from "./compose";
+import { resolveRecipientVars } from "./recipientVars";
 import { markInactive } from "./subscribers";
-import type { EnqueueSendInput, FollowUpStep, TelegramButton, TelegramSendQueueRow } from "./types";
+import type {
+  EnqueueSendInput,
+  FollowUpStep,
+  TelegramButton,
+  TelegramPollPayload,
+  TelegramSendQueueRow,
+} from "./types";
 
 const GLOBAL_PER_SEC = 25;
 const PER_CHAT_MS = 1000;
@@ -22,8 +31,34 @@ function nowIso() {
 function asButtons(raw: unknown): TelegramButton[] {
   if (!Array.isArray(raw)) return [];
   return raw
-    .filter((b): b is TelegramButton => !!b && typeof b === "object" && !!(b as TelegramButton).label && !!(b as TelegramButton).url)
-    .map((b) => ({ label: String(b.label), url: String(b.url) }));
+    .map((b) => {
+      if (!b || typeof b !== "object") return null;
+      const o = b as Record<string, unknown>;
+      const label = String(o.label || "").trim();
+      if (!label) return null;
+      const url = o.url != null ? String(o.url).trim() : "";
+      const callback_data = o.callback_data != null ? String(o.callback_data).trim() : "";
+      if (callback_data) return { label, callback_data };
+      if (url) return { label, url };
+      return null;
+    })
+    .filter(Boolean) as TelegramButton[];
+}
+
+function asPoll(raw: unknown): TelegramPollPayload | null {
+  if (!raw || typeof raw !== "object") return null;
+  const o = raw as Record<string, unknown>;
+  const question = String(o.question || "").trim();
+  const options = Array.isArray(o.options)
+    ? o.options.map((x) => String(x || "").trim()).filter(Boolean).slice(0, 10)
+    : [];
+  if (!question || options.length < 2) return null;
+  return {
+    question,
+    options,
+    is_anonymous: o.is_anonymous !== false,
+    allows_multiple_answers: !!o.allows_multiple_answers,
+  };
 }
 
 function mapRow(row: Record<string, unknown>): TelegramSendQueueRow {
@@ -48,7 +83,16 @@ function mapRow(row: Record<string, unknown>): TelegramSendQueueRow {
     metadata: (row.metadata as Record<string, unknown>) || {},
     created_at: String(row.created_at),
     sent_at: row.sent_at != null ? String(row.sent_at) : null,
+    parse_mode: row.parse_mode != null ? String(row.parse_mode) : "HTML",
+    kind: row.kind != null ? String(row.kind) : "message",
+    poll: asPoll(row.poll),
+    rendered_body: row.rendered_body != null ? String(row.rendered_body) : null,
   };
+}
+
+function needsPersonalisation(body: string, metadata: Record<string, unknown>): boolean {
+  if (metadata.template || metadata.fallbacks) return true;
+  return /\{\{/.test(body || "");
 }
 
 export async function enqueueSend(input: EnqueueSendInput): Promise<string | null> {
@@ -69,6 +113,9 @@ export async function enqueueSend(input: EnqueueSendInput): Promise<string | nul
     metadata: input.metadata || {},
     attempt: 0,
     max_attempts: 3,
+    parse_mode: input.parse_mode || "HTML",
+    kind: input.kind || "message",
+    poll: input.poll || null,
   };
   const { data, error } = await supabase.from("telegram_send_queue").insert(row).select("id").single();
   if (error || !data) return null;
@@ -83,12 +130,20 @@ export async function enqueueBroadcast(opts: {
   image_url?: string | null;
   buttons?: TelegramButton[];
   scheduled_at?: string | null;
+  fallbacks?: Record<string, string>;
+  kind?: string;
+  poll?: TelegramPollPayload | null;
+  parse_mode?: string;
+  question_key?: string | null;
+  lead_field?: string | null;
 }): Promise<{ enqueued: number; skipped: number }> {
   const supabase = db();
   if (!supabase) return { enqueued: 0, skipped: 0 };
   const scheduledAt = opts.scheduled_at || nowIso();
   let enqueued = 0;
   let skipped = 0;
+  const kind = opts.kind || "message";
+  const fallbacks = opts.fallbacks || {};
 
   const CHUNK = 100;
   for (let i = 0; i < opts.reachable.length; i += CHUNK) {
@@ -102,9 +157,19 @@ export async function enqueueBroadcast(opts: {
       buttons: opts.buttons || [],
       broadcast_id: opts.broadcastId,
       scheduled_at: scheduledAt,
-      metadata: { name: r.name || null, phone: r.phone || null },
+      metadata: {
+        name: r.name || null,
+        phone: r.phone || null,
+        fallbacks,
+        template: true,
+        question_key: opts.question_key || null,
+        lead_field: opts.lead_field || null,
+      },
       attempt: 0,
       max_attempts: 3,
+      parse_mode: opts.parse_mode || "HTML",
+      kind,
+      poll: kind === "poll" ? opts.poll || null : null,
     }));
     const { error } = await supabase.from("telegram_send_queue").insert(rows);
     if (!error) enqueued += rows.length;
@@ -121,9 +186,12 @@ export async function enqueueBroadcast(opts: {
       buttons: opts.buttons || [],
       broadcast_id: opts.broadcastId,
       scheduled_at: scheduledAt,
-      metadata: { phone },
+      metadata: { phone, fallbacks },
       attempt: 0,
       max_attempts: 0,
+      parse_mode: opts.parse_mode || "HTML",
+      kind,
+      poll: kind === "poll" ? opts.poll || null : null,
     }));
     const { error } = await supabase.from("telegram_send_queue").insert(rows);
     if (!error) skipped += rows.length;
@@ -169,7 +237,6 @@ async function shouldSkipFollowUp(row: TelegramSendQueueRow): Promise<boolean> {
   const supabase = db();
   if (!supabase) return false;
 
-  // Automation-level stop_on_reply: any inbound after parent send.
   if (meta.stop_if_replied || row.follow_up_index != null) {
     const { data: auto } = row.automation_id
       ? await supabase
@@ -243,6 +310,38 @@ function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+async function prepareRowBody(row: TelegramSendQueueRow): Promise<{ html: string; overLimit: boolean }> {
+  const meta = row.metadata || {};
+  const fallbacks =
+    meta.fallbacks && typeof meta.fallbacks === "object"
+      ? (meta.fallbacks as Record<string, string>)
+      : {};
+
+  if (!needsPersonalisation(row.body, meta)) {
+    // Still sanitize/escape path if body was already prepared; strip leftover tokens.
+    const prepared = prepareOutboundHtml(row.body, {}, fallbacks, { hasImage: !!row.image_url });
+    return { html: prepared.html, overLimit: prepared.overLimit };
+  }
+
+  const vars = await resolveRecipientVars({
+    chatId: row.chat_id,
+    subscriberId: row.subscriber_id,
+    nameHint: meta.name != null ? String(meta.name) : null,
+    phoneHint: meta.phone != null ? String(meta.phone) : null,
+  });
+  // Merge any precomputed vars from metadata without overwriting real recipient data with empty.
+  if (meta.vars && typeof meta.vars === "object") {
+    for (const [k, v] of Object.entries(meta.vars as Record<string, unknown>)) {
+      if (v != null && String(v).trim() && String(v).toLowerCase() !== "undefined") {
+        vars[k] = String(v);
+      }
+    }
+  }
+
+  const prepared = prepareOutboundHtml(row.body, vars, fallbacks, { hasImage: !!row.image_url });
+  return { html: prepared.html, overLimit: prepared.overLimit };
+}
+
 export async function drainTelegramQueue(opts: { limit?: number } = {}): Promise<{
   processed: number;
   sent: number;
@@ -258,7 +357,6 @@ export async function drainTelegramQueue(opts: { limit?: number } = {}): Promise
   const limit = Math.min(MAX_DRAIN, Math.max(1, opts.limit || 100));
   const now = nowIso();
 
-  // Resume paused rows whose pause_until has elapsed.
   try {
     await supabase
       .from("telegram_send_queue")
@@ -306,12 +404,10 @@ export async function drainTelegramQueue(opts: { limit?: number } = {}): Promise
       /* continue to send */
     }
 
-    // Per-chat 1/sec
     const last = lastSentByChat.get(row.chat_id) || 0;
     const waitChat = PER_CHAT_MS - (Date.now() - last);
     if (waitChat > 0) await sleep(waitChat);
 
-    // Global 25/sec token bucket (sliding 1s window)
     const elapsed = Date.now() - globalWindowStart;
     if (elapsed >= 1000) {
       globalWindowStart = Date.now();
@@ -323,19 +419,82 @@ export async function drainTelegramQueue(opts: { limit?: number } = {}): Promise
       globalCount = 0;
     }
 
-    const markup = inlineKeyboardFromButtons(row.buttons);
+    // --- Poll path ---
+    if (row.kind === "poll" && row.poll) {
+      const result = await sendPoll({
+        chat_id: row.chat_id,
+        question: row.poll.question,
+        options: row.poll.options,
+        is_anonymous: row.poll.is_anonymous !== false,
+        allows_multiple_answers: !!row.poll.allows_multiple_answers,
+      });
+      globalCount++;
+      lastSentByChat.set(row.chat_id, Date.now());
+
+      if (result.ok) {
+        const msgId = result.result?.message_id != null ? String(result.result.message_id) : null;
+        const pollId = result.result?.poll?.id != null ? String(result.result.poll.id) : null;
+        await supabase
+          .from("telegram_send_queue")
+          .update({
+            status: "sent",
+            telegram_message_id: msgId,
+            sent_at: nowIso(),
+            last_error: null,
+            rendered_body: row.poll.question,
+            metadata: { ...row.metadata, poll_id: pollId },
+          })
+          .eq("id", row.id);
+        await logOutboundMessage({
+          chatId: row.chat_id,
+          subscriberId: row.subscriber_id,
+          body: row.poll.question,
+          telegramMessageId: msgId,
+        });
+        stats.sent++;
+        await bumpBroadcastCounters(row.broadcast_id, "sent_count");
+        continue;
+      }
+
+      // Fall through to shared error handling below via result variable
+      await handleSendFailure(supabase, row, result, stats, now);
+      if (result.isRateLimited || result.error_code === 429) break;
+      continue;
+    }
+
+    // --- Message / question path with personalisation ---
+    const prepared = await prepareRowBody(row);
+    // Safety: never enqueue/send raw tokens (prepareOutboundHtml should already strip them).
+    if (prepared.overLimit || /\{\{/.test(prepared.html)) {
+      await supabase
+        .from("telegram_send_queue")
+        .update({
+          status: "failed",
+          last_error: prepared.overLimit ? "over_char_limit" : "unresolved_tokens",
+          sent_at: nowIso(),
+          rendered_body: prepared.html,
+        })
+        .eq("id", row.id);
+      stats.failed++;
+      await bumpBroadcastCounters(row.broadcast_id, "failed_count");
+      continue;
+    }
+
+    const markup = buildKeyboard(row.buttons);
     let result;
     if (row.image_url) {
       result = await sendPhoto({
         chat_id: row.chat_id,
         photo: row.image_url,
-        caption: row.body || undefined,
+        caption: prepared.html || undefined,
+        parse_mode: "HTML",
         reply_markup: markup,
       });
     } else {
       result = await sendMessage({
         chat_id: row.chat_id,
-        text: row.body || "(empty)",
+        text: prepared.html || "(empty)",
+        parse_mode: "HTML",
         reply_markup: markup,
         disable_web_page_preview: true,
       });
@@ -353,12 +512,13 @@ export async function drainTelegramQueue(opts: { limit?: number } = {}): Promise
           telegram_message_id: msgId,
           sent_at: nowIso(),
           last_error: null,
+          rendered_body: prepared.html,
         })
         .eq("id", row.id);
       await logOutboundMessage({
         chatId: row.chat_id,
         subscriberId: row.subscriber_id,
-        body: row.body,
+        body: prepared.html,
         telegramMessageId: msgId,
       });
       stats.sent++;
@@ -366,74 +526,89 @@ export async function drainTelegramQueue(opts: { limit?: number } = {}): Promise
       continue;
     }
 
-    if (result.isBlocked || result.error_code === 403) {
-      await markInactive(row.chat_id, "blocked_bot");
-      await supabase
-        .from("telegram_send_queue")
-        .update({
-          status: "blocked",
-          last_error: result.description || "blocked",
-          sent_at: nowIso(),
-        })
-        .eq("id", row.id);
-      stats.blocked++;
-      await bumpBroadcastCounters(row.broadcast_id, "blocked_count");
-      continue;
-    }
-
-    if (result.isRateLimited || result.error_code === 429) {
-      const retryAfter = Math.max(1, result.retryAfterSec || 1);
-      const pauseUntil = new Date(Date.now() + retryAfter * 1000).toISOString();
-      await supabase
-        .from("telegram_send_queue")
-        .update({
-          status: "paused",
-          pause_until: pauseUntil,
-          last_error: result.description || "rate_limited",
-        })
-        .eq("id", row.id);
-      // Also pause remaining due rows briefly so we don't hammer.
-      try {
-        await supabase
-          .from("telegram_send_queue")
-          .update({ status: "paused", pause_until: pauseUntil })
-          .eq("status", "queued")
-          .lte("scheduled_at", now);
-      } catch {
-        /* ignore */
-      }
-      stats.paused++;
-      break;
-    }
-
-    // Transient: retry with backoff up to max_attempts
-    const attempt = row.attempt + 1;
-    if (attempt < row.max_attempts) {
-      const backoffSec = Math.min(300, Math.pow(2, attempt) * 2);
-      const nextAt = new Date(Date.now() + backoffSec * 1000).toISOString();
-      await supabase
-        .from("telegram_send_queue")
-        .update({
-          status: "queued",
-          attempt,
-          scheduled_at: nextAt,
-          last_error: result.description || "transient_error",
-        })
-        .eq("id", row.id);
-    } else {
-      await supabase
-        .from("telegram_send_queue")
-        .update({
-          status: "failed",
-          attempt,
-          last_error: result.description || "failed",
-          sent_at: nowIso(),
-        })
-        .eq("id", row.id);
-      stats.failed++;
-      await bumpBroadcastCounters(row.broadcast_id, "failed_count");
-    }
+    await handleSendFailure(supabase, row, result, stats, now);
+    if (result.isRateLimited || result.error_code === 429) break;
   }
 
   return stats;
+}
+
+async function handleSendFailure(
+  supabase: NonNullable<ReturnType<typeof db>>,
+  row: TelegramSendQueueRow,
+  result: {
+    isBlocked?: boolean;
+    isRateLimited?: boolean;
+    error_code?: number;
+    description?: string;
+    retryAfterSec?: number;
+  },
+  stats: { failed: number; blocked: number; paused: number },
+  now: string,
+): Promise<void> {
+  if (result.isBlocked || result.error_code === 403) {
+    await markInactive(row.chat_id, "blocked_bot");
+    await supabase
+      .from("telegram_send_queue")
+      .update({
+        status: "blocked",
+        last_error: result.description || "blocked",
+        sent_at: nowIso(),
+      })
+      .eq("id", row.id);
+    stats.blocked++;
+    await bumpBroadcastCounters(row.broadcast_id, "blocked_count");
+    return;
+  }
+
+  if (result.isRateLimited || result.error_code === 429) {
+    const retryAfter = Math.max(1, result.retryAfterSec || 1);
+    const pauseUntil = new Date(Date.now() + retryAfter * 1000).toISOString();
+    await supabase
+      .from("telegram_send_queue")
+      .update({
+        status: "paused",
+        pause_until: pauseUntil,
+        last_error: result.description || "rate_limited",
+      })
+      .eq("id", row.id);
+    try {
+      await supabase
+        .from("telegram_send_queue")
+        .update({ status: "paused", pause_until: pauseUntil })
+        .eq("status", "queued")
+        .lte("scheduled_at", now);
+    } catch {
+      /* ignore */
+    }
+    stats.paused++;
+    return;
+  }
+
+  const attempt = row.attempt + 1;
+  if (attempt < row.max_attempts) {
+    const backoffSec = Math.min(300, Math.pow(2, attempt) * 2);
+    const nextAt = new Date(Date.now() + backoffSec * 1000).toISOString();
+    await supabase
+      .from("telegram_send_queue")
+      .update({
+        status: "queued",
+        attempt,
+        scheduled_at: nextAt,
+        last_error: result.description || "transient_error",
+      })
+      .eq("id", row.id);
+  } else {
+    await supabase
+      .from("telegram_send_queue")
+      .update({
+        status: "failed",
+        attempt,
+        last_error: result.description || "failed",
+        sent_at: nowIso(),
+      })
+      .eq("id", row.id);
+    stats.failed++;
+    await bumpBroadcastCounters(row.broadcast_id, "failed_count");
+  }
 }

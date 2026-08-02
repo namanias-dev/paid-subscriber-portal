@@ -256,3 +256,296 @@ export async function getAnalytics(): Promise<{
 
   return { overview, byAutomation, byBroadcast, reachability };
 }
+
+function dayKey(iso: string): string {
+  return String(iso || "").slice(0, 10);
+}
+
+function daysAgoIso(days: number): string {
+  return new Date(Date.now() - days * 24 * 3600 * 1000).toISOString();
+}
+
+export interface FullAnalytics {
+  outbound: {
+    today: number;
+    d7: number;
+    d30: number;
+    bySource: { broadcast: number; automation: number };
+    failed: number;
+    blocked: number;
+    skipped: number;
+  };
+  inbound: {
+    perDay: { day: string; count: number }[];
+    uniqueRepliers7d: number;
+    avgFirstResponseMinutes: number | null;
+    unanswered: number;
+  };
+  subscribers: {
+    total: number;
+    active: number;
+    blocked: number;
+    growth: { day: string; joins: number }[];
+    bySource: { source: string; count: number }[];
+  };
+  reachability: {
+    totalLeads: number;
+    withChat: number;
+    percent: number;
+    byAudience: {
+      id: string;
+      label: string;
+      audienceSize: number;
+      reachable: number;
+      percent: number;
+    }[];
+  };
+  broadcasts: {
+    id: string;
+    name: string | null;
+    sent: number;
+    failed: number;
+    blocked: number;
+    skipped: number;
+    created_at: string;
+  }[];
+}
+
+/** Structured analytics for the composer / analytics UI. Uses DB aggregates only. */
+export async function getFullAnalytics(): Promise<FullAnalytics> {
+  const supabase = db();
+  const empty: FullAnalytics = {
+    outbound: {
+      today: 0,
+      d7: 0,
+      d30: 0,
+      bySource: { broadcast: 0, automation: 0 },
+      failed: 0,
+      blocked: 0,
+      skipped: 0,
+    },
+    inbound: { perDay: [], uniqueRepliers7d: 0, avgFirstResponseMinutes: null, unanswered: 0 },
+    subscribers: { total: 0, active: 0, blocked: 0, growth: [], bySource: [] },
+    reachability: { totalLeads: 0, withChat: 0, percent: 0, byAudience: [] },
+    broadcasts: [],
+  };
+  if (!supabase) return empty;
+
+  const today = startOfUtcDayIso();
+  const since7d = daysAgoIso(7);
+  const since30d = daysAgoIso(30);
+
+  const [
+    sentToday,
+    sent7,
+    sent30,
+    failed30,
+    blocked30,
+    skipped30,
+    broadcastSent,
+    automationSent,
+    totalSubs,
+    activeSubs,
+    blockedSubs,
+    totalLeads,
+    withChat,
+  ] = await Promise.all([
+    countWhere("telegram_send_queue", { status: "sent" }, { col: "sent_at", val: today }),
+    countWhere("telegram_send_queue", { status: "sent" }, { col: "sent_at", val: since7d }),
+    countWhere("telegram_send_queue", { status: "sent" }, { col: "sent_at", val: since30d }),
+    countWhere("telegram_send_queue", { status: "failed" }, { col: "created_at", val: since30d }),
+    countWhere("telegram_send_queue", { status: "blocked" }, { col: "created_at", val: since30d }),
+    countWhere("telegram_send_queue", { status: "skipped" }, { col: "created_at", val: since30d }),
+    countSentBySource("broadcast_id", since30d),
+    countSentBySource("automation_id", since30d),
+    countWhere("telegram_subscribers"),
+    countWhere("telegram_subscribers", { is_active: true }),
+    countWhere("telegram_subscribers", { is_active: false }),
+    countWhere("leads"),
+    countLeadsWithTelegram(),
+  ]);
+
+  const [inboundRows, joinRows, sourceRows, broadcastRows, unanswered] = await Promise.all([
+    supabase
+      .from("telegram_messages")
+      .select("created_at, chat_id")
+      .eq("direction", "inbound")
+      .gte("created_at", since30d)
+      .limit(20000),
+    supabase
+      .from("telegram_subscribers")
+      .select("subscribed_at")
+      .gte("subscribed_at", since30d)
+      .limit(20000),
+    supabase.from("telegram_subscribers").select("source").limit(20000),
+    supabase
+      .from("telegram_broadcasts")
+      .select("id, name, sent_count, failed_count, blocked_count, skipped_count, created_at")
+      .order("created_at", { ascending: false })
+      .limit(50),
+    countWhere("telegram_messages", { direction: "inbound", is_read: false }),
+  ]);
+
+  // Inbound per day (last 30d)
+  const inboundByDay = new Map<string, number>();
+  const repliers7d = new Set<string>();
+  for (const r of inboundRows.data || []) {
+    const day = dayKey(String((r as { created_at: string }).created_at));
+    inboundByDay.set(day, (inboundByDay.get(day) || 0) + 1);
+    const at = String((r as { created_at: string }).created_at);
+    if (at >= since7d) {
+      repliers7d.add(String((r as { chat_id: string }).chat_id));
+    }
+  }
+  const perDay = [...inboundByDay.entries()]
+    .map(([day, count]) => ({ day, count }))
+    .sort((a, b) => a.day.localeCompare(b.day));
+
+  // Avg first response: sample recent inbound chats and find first outbound after.
+  const avgFirstResponseMinutes = await avgFirstResponseMinutesCalc(since7d);
+
+  // Subscriber growth
+  const growthMap = new Map<string, number>();
+  for (const r of joinRows.data || []) {
+    const day = dayKey(String((r as { subscribed_at: string }).subscribed_at));
+    growthMap.set(day, (growthMap.get(day) || 0) + 1);
+  }
+  const growth = [...growthMap.entries()]
+    .map(([day, joins]) => ({ day, joins }))
+    .sort((a, b) => a.day.localeCompare(b.day));
+
+  const sourceMap = new Map<string, number>();
+  for (const r of sourceRows.data || []) {
+    const src = String((r as { source?: string | null }).source || "unknown");
+    sourceMap.set(src, (sourceMap.get(src) || 0) + 1);
+  }
+  const bySource = [...sourceMap.entries()]
+    .map(([source, count]) => ({ source, count }))
+    .sort((a, b) => b.count - a.count);
+
+  const toMs = Date.now();
+  const fromMs = toMs - 30 * 24 * 3600 * 1000;
+  const byAudience = await Promise.all(
+    PHONE_AUDIENCES.map(async (a) => {
+      try {
+        const r = await resolveTelegramAudience(a.id, fromMs, toMs);
+        const percent =
+          r.audienceSize > 0 ? Math.round((r.reachable.length / r.audienceSize) * 1000) / 10 : 0;
+        return {
+          id: a.id,
+          label: a.label,
+          audienceSize: r.audienceSize,
+          reachable: r.reachable.length,
+          percent,
+        };
+      } catch {
+        return { id: a.id, label: a.label, audienceSize: 0, reachable: 0, percent: 0 };
+      }
+    }),
+  );
+
+  const percent = totalLeads > 0 ? Math.round((withChat / totalLeads) * 1000) / 10 : 0;
+
+  return {
+    outbound: {
+      today: sentToday,
+      d7: sent7,
+      d30: sent30,
+      bySource: { broadcast: broadcastSent, automation: automationSent },
+      failed: failed30,
+      blocked: blocked30,
+      skipped: skipped30,
+    },
+    inbound: {
+      perDay,
+      uniqueRepliers7d: repliers7d.size,
+      avgFirstResponseMinutes,
+      unanswered,
+    },
+    subscribers: {
+      total: totalSubs,
+      active: activeSubs,
+      blocked: blockedSubs,
+      growth,
+      bySource,
+    },
+    reachability: {
+      totalLeads,
+      withChat,
+      percent,
+      byAudience,
+    },
+    broadcasts: (broadcastRows.data || []).map((b) => ({
+      id: String((b as { id: string }).id),
+      name: (b as { name?: string | null }).name ?? null,
+      sent: Number((b as { sent_count?: number }).sent_count || 0),
+      failed: Number((b as { failed_count?: number }).failed_count || 0),
+      blocked: Number((b as { blocked_count?: number }).blocked_count || 0),
+      skipped: Number((b as { skipped_count?: number }).skipped_count || 0),
+      created_at: String((b as { created_at: string }).created_at),
+    })),
+  };
+}
+
+async function countSentBySource(
+  col: "broadcast_id" | "automation_id",
+  since: string,
+): Promise<number> {
+  const supabase = db();
+  if (!supabase) return 0;
+  const { count } = await supabase
+    .from("telegram_send_queue")
+    .select("id", { count: "exact", head: true })
+    .eq("status", "sent")
+    .not(col, "is", null)
+    .gte("sent_at", since);
+  return count ?? 0;
+}
+
+async function avgFirstResponseMinutesCalc(since: string): Promise<number | null> {
+  const supabase = db();
+  if (!supabase) return null;
+  const [{ data: inbound }, { data: outbound }] = await Promise.all([
+    supabase
+      .from("telegram_messages")
+      .select("chat_id, created_at")
+      .eq("direction", "inbound")
+      .gte("created_at", since)
+      .order("created_at", { ascending: true })
+      .limit(5000),
+    supabase
+      .from("telegram_messages")
+      .select("chat_id, created_at")
+      .eq("direction", "outbound")
+      .gte("created_at", since)
+      .order("created_at", { ascending: true })
+      .limit(5000),
+  ]);
+  if (!inbound?.length) return null;
+
+  const firstIn = new Map<string, number>();
+  for (const r of inbound) {
+    const chat = String((r as { chat_id: string }).chat_id);
+    const t = new Date(String((r as { created_at: string }).created_at)).getTime();
+    if (!firstIn.has(chat)) firstIn.set(chat, t);
+  }
+
+  const firstOutAfter = new Map<string, number>();
+  for (const r of outbound || []) {
+    const chat = String((r as { chat_id: string }).chat_id);
+    const t = new Date(String((r as { created_at: string }).created_at)).getTime();
+    const inAt = firstIn.get(chat);
+    if (inAt == null || t <= inAt) continue;
+    if (!firstOutAfter.has(chat)) firstOutAfter.set(chat, t);
+  }
+
+  const diffs: number[] = [];
+  for (const [chat, outAt] of firstOutAfter) {
+    const inAt = firstIn.get(chat)!;
+    const mins = (outAt - inAt) / 60000;
+    if (mins >= 0 && mins < 7 * 24 * 60) diffs.push(mins);
+  }
+  if (!diffs.length) return null;
+  return Math.round((diffs.reduce((a, b) => a + b, 0) / diffs.length) * 10) / 10;
+}
+

@@ -2,7 +2,17 @@ import { TRIGGERS as SMS_TRIGGERS } from "../sms/templates";
 
 export interface TelegramButton {
   label: string;
-  url: string;
+  url?: string;
+  callback_data?: string;
+}
+
+export type TelegramBroadcastKind = "message" | "poll" | "question";
+
+export interface TelegramPollPayload {
+  question: string;
+  options: string[];
+  is_anonymous?: boolean;
+  allows_multiple_answers?: boolean;
 }
 
 export interface FollowUpStep {
@@ -75,6 +85,7 @@ export interface TelegramTemplate {
   image_url: string | null;
   buttons: TelegramButton[];
   variables: string[];
+  fallbacks: Record<string, string>;
   is_active: boolean;
   created_by: string | null;
   updated_by: string | null;
@@ -123,6 +134,13 @@ export interface TelegramBroadcast {
   created_by: string | null;
   created_at: string;
   completed_at: string | null;
+  parse_mode: "HTML" | string;
+  fallbacks: Record<string, string>;
+  template_id: string | null;
+  kind: TelegramBroadcastKind;
+  poll: TelegramPollPayload | null;
+  question_key: string | null;
+  lead_field: string | null;
 }
 
 export interface TelegramSendQueueRow {
@@ -146,6 +164,10 @@ export interface TelegramSendQueueRow {
   metadata: Record<string, unknown>;
   created_at: string;
   sent_at: string | null;
+  parse_mode: "HTML" | string;
+  kind: TelegramBroadcastKind | string;
+  poll: TelegramPollPayload | null;
+  rendered_body: string | null;
 }
 
 export interface TelegramMessage {
@@ -195,6 +217,9 @@ export interface EnqueueSendInput {
   status?: TelegramQueueStatus;
   skip_reason?: string | null;
   metadata?: Record<string, unknown>;
+  parse_mode?: "HTML" | string;
+  kind?: TelegramBroadcastKind | string;
+  poll?: TelegramPollPayload | null;
 }
 
 export type TelegramTemplateVars = {
