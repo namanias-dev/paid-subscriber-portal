@@ -5,32 +5,88 @@ import type { Payment } from "./types";
 /** Timeframe presets shared by every registrations view. */
 export type Frame = "7d" | "30d" | "month" | "year";
 
+/**
+ * Canonical paid webinar registration definition (digest ≡ alerts ≡ Overview ≡ detail).
+ *
+ * Counts ONLY when payment status is PAID/captured (real money in).
+ * Explicitly excludes: INITIATED, PENDING, VERIFYING, FAILED, ABANDONED, REFUNDED,
+ * refunded, cancelled, expired, soft-deleted, and non-webinar rows.
+ * Distinct seats: one per (phone, webinar slug/item).
+ */
+export function isCountablePaidWebinarPayment(
+  p: Pick<Payment, "status" | "item_type" | "deleted_at">,
+): boolean {
+  if (p.deleted_at) return false;
+  if (p.item_type !== "webinar") return false;
+  const st = String(p.status || "").toUpperCase();
+  if (st === "REFUNDED" || st === "CANCELLED" || st === "EXPIRED" || st === "ABANDONED") return false;
+  return isPaid(p.status);
+}
+
+/** Incomplete checkout — never counted as a registration. */
+export function isPendingWebinarCheckout(
+  p: Pick<Payment, "status" | "item_type" | "deleted_at">,
+): boolean {
+  if (p.deleted_at) return false;
+  if (p.item_type !== "webinar") return false;
+  const st = String(p.status || "").toUpperCase();
+  return (
+    st === "INITIATED" ||
+    st === "PENDING" ||
+    st === "VERIFYING" ||
+    st === "PROCESSING" ||
+    st === "ABANDONED" ||
+    st === "FAILED" ||
+    st === "CANCELLED" ||
+    st === "EXPIRED"
+  );
+}
+
+export function filterPaidWebinarForSlug(payments: readonly Payment[], slugOrKey: string): Payment[] {
+  const key = (slugOrKey || "").trim().toLowerCase();
+  if (!key) return [];
+  return payments.filter((p) => isCountablePaidWebinarPayment(p) && itemKey(p) === key);
+}
+
+/** Distinct paid seats for one webinar — THE shared count. */
+export function paidWebinarRegistrationCount(payments: readonly Payment[], slugOrKey: string): number {
+  return distinctRegistrations(filterPaidWebinarForSlug(payments, slugOrKey));
+}
+
+/**
+ * Distinct phones with an open checkout and no paid seat for the same webinar.
+ * Shown separately so it can never be mistaken for a registration.
+ */
+export function pendingWebinarCheckoutCount(payments: readonly Payment[], slugOrKey: string): number {
+  const key = (slugOrKey || "").trim().toLowerCase();
+  if (!key) return 0;
+  const paidPhones = new Set(
+    filterPaidWebinarForSlug(payments, key)
+      .map((p) => (p.phone || "").trim())
+      .filter(Boolean),
+  );
+  const pending = new Set<string>();
+  for (const p of payments) {
+    if (!isPendingWebinarCheckout(p) || itemKey(p) !== key) continue;
+    const phone = (p.phone || "").trim();
+    if (!phone || paidPhones.has(phone)) continue;
+    pending.add(phone);
+  }
+  return pending.size;
+}
+
 /** IST YMD for `daysAgo` days before today. */
 export function ymdDaysAgo(daysAgo: number): string {
   return istYMD(new Date(Date.now() - daysAgo * 86400000)) || "";
 }
 
 /**
- * Canonical "confirmed paid webinar registration" filter for one IST calendar day.
- *
- * Matches Payments "Webinar Registrations Today":
- *  • status is PAID or captured (isPaidStatus)
- *  • item_type === "webinar"
- *  • created_at falls on `ymd` in Asia/Kolkata
- *  • NOT filtered by amount (course fee varies; ₹50 is not hard-coded)
- *  • Soft-deleted rows excluded when deleted_at is set
- *
- * Count with {@link distinctRegistrations} so retry duplicates don't inflate seats.
+ * Canonical paid webinar filter for one IST calendar day.
+ * Soft-deleted / refunded excluded via {@link isCountablePaidWebinarPayment}.
  */
 export function filterPaidWebinarOnYmd(payments: readonly Payment[], ymd: string): Payment[] {
   if (!ymd) return [];
-  return payments.filter(
-    (p) =>
-      !p.deleted_at &&
-      isPaid(p.status) &&
-      p.item_type === "webinar" &&
-      istYMD(p.created_at) === ymd,
-  );
+  return payments.filter((p) => isCountablePaidWebinarPayment(p) && istYMD(p.created_at) === ymd);
 }
 
 /** Distinct paid webinar seats for one IST day — Overview ↔ Payments must agree. */
@@ -39,7 +95,10 @@ export function paidWebinarRegsOnYmd(payments: readonly Payment[], ymd: string):
 }
 
 /** Today + yesterday paid webinar registration counts (IST) for KPI deltas. */
-export function paidWebinarRegsTodayDelta(payments: readonly Payment[], todayYmd = istTodayYMD()): {
+export function paidWebinarRegsTodayDelta(
+  payments: readonly Payment[],
+  todayYmd = istTodayYMD(),
+): {
   today: number;
   yesterday: number;
   delta: number;
@@ -66,20 +125,21 @@ export function last7Pred(): (ymd: string) => boolean {
 
 /**
  * Paid webinar registrations bucketed by IST day, counted DISTINCT by
- * (phone, webinar) per day — the SAME methodology as the live registrations
- * cards. `selected` scopes to one webinar (itemKey); "" = all webinars.
- * Pure/read-only.
+ * (phone, webinar) per day. `selected` scopes to one webinar (itemKey); "" = all.
  */
 export function buildWebinarByDay(payments: Payment[], selected: string): Map<string, number> {
   const perDay = new Map<string, Set<string>>();
   for (const p of payments) {
-    if (!isPaid(p.status) || p.item_type !== "webinar") continue;
+    if (!isCountablePaidWebinarPayment(p)) continue;
     const key = itemKey(p);
     if (selected && key !== selected) continue;
     const ymd = istYMD(p.created_at);
     if (!ymd) continue;
     let s = perDay.get(ymd);
-    if (!s) { s = new Set(); perDay.set(ymd, s); }
+    if (!s) {
+      s = new Set();
+      perDay.set(ymd, s);
+    }
     s.add(`${(p.phone || "").trim()}|${key}`);
   }
   const map = new Map<string, number>();
@@ -99,23 +159,22 @@ export interface WebinarSplitRow {
   count: number;
 }
 
-/**
- * Per-webinar registration split for the rows matching `inSel` (an IST-YMD
- * predicate). Distinct by (phone, webinar, day) — identical granularity to
- * {@link buildWebinarByDay} and the source breakdown, so the per-webinar rows
- * sum EXACTLY to the all-webinars total for the same window. Sorted most-first.
- * Read-only.
- */
-export function webinarSplit(payments: Payment[], inSel: (ymd: string) => boolean): { rows: WebinarSplitRow[]; total: number } {
+export function webinarSplit(
+  payments: Payment[],
+  inSel: (ymd: string) => boolean,
+): { rows: WebinarSplitRow[]; total: number } {
   const perWebinar = new Map<string, { label: string; set: Set<string> }>();
   for (const p of payments) {
-    if (!isPaid(p.status) || p.item_type !== "webinar") continue;
+    if (!isCountablePaidWebinarPayment(p)) continue;
     const key = itemKey(p);
     if (!key) continue;
     const ymd = istYMD(p.created_at);
     if (!ymd || !inSel(ymd)) continue;
     let e = perWebinar.get(key);
-    if (!e) { e = { label: p.item || key, set: new Set() }; perWebinar.set(key, e); }
+    if (!e) {
+      e = { label: p.item || key, set: new Set() };
+      perWebinar.set(key, e);
+    }
     if (p.item && (e.label === key || !e.label)) e.label = p.item;
     e.set.add(`${(p.phone || "").trim()}|${ymd}`);
   }
@@ -127,11 +186,10 @@ export function webinarSplit(payments: Payment[], inSel: (ymd: string) => boolea
   return { rows, total };
 }
 
-/** Distinct paid webinars that have registrations → selector options, most first. */
 export function listPaidWebinars(payments: Payment[]): PaidWebinarOption[] {
   const totals = new Map<string, PaidWebinarOption>();
   for (const p of payments) {
-    if (!isPaid(p.status) || p.item_type !== "webinar") continue;
+    if (!isCountablePaidWebinarPayment(p)) continue;
     const key = itemKey(p);
     if (!key) continue;
     const cur = totals.get(key) || { key, label: p.item || key, count: 0 };
@@ -148,36 +206,26 @@ export interface WebinarMeta {
   datetime?: string | null;
 }
 
-/**
- * Lifetime distinct paid registrations for one webinar (phone×day), same
- * granularity as {@link webinarSplit} / the opened trend view.
- */
-export function webinarLifetimeDistinct(payments: Payment[], webinarKey: string): {
+/** Lifetime distinct paid registrations for one webinar (phone×item). */
+export function webinarLifetimeDistinct(
+  payments: Payment[],
+  webinarKey: string,
+): {
   key: string;
   label: string;
   count: number;
 } | null {
   const key = webinarKey.trim().toLowerCase();
   if (!key) return null;
-  const set = new Set<string>();
+  const rows = filterPaidWebinarForSlug(payments, key);
+  if (!rows.length) return null;
   let label = key;
-  for (const p of payments) {
-    if (!isPaid(p.status) || p.item_type !== "webinar") continue;
-    if (itemKey(p) !== key) continue;
-    const ymd = istYMD(p.created_at);
-    if (!ymd) continue;
+  for (const p of rows) {
     if (p.item && (label === key || !label)) label = p.item;
-    set.add(`${(p.phone || "").trim()}|${ymd}`);
   }
-  if (set.size === 0) return null;
-  return { key, label, count: set.size };
+  return { key, label, count: distinctRegistrations(rows) };
 }
 
-/**
- * Pick the chronologically latest webinar that has paid registrations.
- * Prefers `webinars[].datetime` when provided; otherwise falls back to the
- * webinar with the most recent paid registration timestamp.
- */
 export function latestPaidWebinar(
   payments: Payment[],
   webinars?: WebinarMeta[] | null,
@@ -186,7 +234,7 @@ export function latestPaidWebinar(
   const latestPayAt = new Map<string, number>();
   const labels = new Map<string, string>();
   for (const p of payments) {
-    if (!isPaid(p.status) || p.item_type !== "webinar") continue;
+    if (!isCountablePaidWebinarPayment(p)) continue;
     const key = itemKey(p);
     if (!key) continue;
     paidKeys.add(key);

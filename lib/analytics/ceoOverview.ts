@@ -18,6 +18,7 @@
  */
 import { getPayments, getWebinars, getAllWebinarRegistrations, getAllCourseEnrollments } from "../dataProvider";
 import { isPaidStatus, dedupePaidRows, dedupedPaidTotal, distinctRegistrations, itemKey } from "../paymentsAgg";
+import { paidWebinarRegistrationCount } from "../webinarReg";
 import { deriveEnrollment, isActiveEnrollment } from "../installments";
 import { normPhone } from "../phone";
 import {
@@ -289,21 +290,16 @@ export async function getCeoOverview(opts: {
     upcomingWebinars: [] as CeoOverviewResult["today"]["upcomingWebinars"],
   };
 
-  // Upcoming webinars (next few by datetime) with honest paid-distinct counts.
+  // Upcoming webinars (next few by datetime) — paid-only registration count.
   const nowMs = Date.now();
-  const idToWeb = new Map(webinars.map((w) => [w.id, w] as const));
-  const regBySlug = new Map<string, number>();
-  for (const r of regs) { const w = idToWeb.get(r.webinar_id); if (w) regBySlug.set(w.slug, (regBySlug.get(w.slug) || 0) + 1); }
-  const paidWebBySlug = new Map<string, number>();
-  for (const p of dedupePaidRows(payments.filter((p) => p.item_type === "webinar" && isPaidStatus(p.status)))) {
-    const s = (p.item_slug || "").toLowerCase();
-    paidWebBySlug.set(s, (paidWebBySlug.get(s) || 0) + 1);
-  }
   today.upcomingWebinars = webinars
     .filter((w) => w.datetime && new Date(w.datetime).getTime() >= nowMs && w.status !== "completed")
     .sort((a, b) => new Date(a.datetime).getTime() - new Date(b.datetime).getTime())
     .slice(0, 5)
-    .map((w) => ({ slug: w.slug, title: w.title, datetime: w.datetime, registrations: regBySlug.get(w.slug) || 0, paid: paidWebBySlug.get(w.slug.toLowerCase()) || 0 }));
+    .map((w) => {
+      const paid = paidWebinarRegistrationCount(payments, w.slug);
+      return { slug: w.slug, title: w.title, datetime: w.datetime, registrations: paid, paid };
+    });
 
   const result: CeoOverviewResult = {
     range: { from, to },

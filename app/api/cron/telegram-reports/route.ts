@@ -101,44 +101,42 @@ async function run(req: Request) {
     }
 
     if (action === "webinar_reg_alert") {
-      const { alertWebinarRegistration } = await import("@/lib/telegram/reports/alerts");
-      const { getAllWebinarRegistrations, getWebinars } = await import("@/lib/dataProvider");
-      const regId = url.searchParams.get("registration_id") || "";
+      const { firePaidWebinarRegistrationAlert, alertWebinarRegistration } = await import(
+        "@/lib/telegram/reports/alerts"
+      );
+      const { getPayments, getWebinars } = await import("@/lib/dataProvider");
+      const { paidWebinarRegistrationCount } = await import("@/lib/webinarReg");
+      const { isPaidStatus } = await import("@/lib/paymentsAgg");
+      const paymentId = url.searchParams.get("payment_id") || "";
       const nameQ = (url.searchParams.get("name") || "").trim().toLowerCase();
-      const regs = await getAllWebinarRegistrations();
-      let reg =
-        (regId && regs.find((r) => r.id === regId)) ||
-        (nameQ
-          ? [...regs]
-              .filter((r) => (r.name || "").toLowerCase() === nameQ)
-              .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0]
-          : null) ||
+      const pays = await getPayments();
+      let pay =
+        (paymentId && pays.find((p) => p.id === paymentId)) ||
+        [...pays]
+          .filter(
+            (p) =>
+              !p.deleted_at &&
+              isPaidStatus(p.status) &&
+              p.item_type === "webinar" &&
+              (!nameQ || (p.student_name || "").toLowerCase() === nameQ),
+          )
+          .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0] ||
         null;
-      if (!reg) {
-        return NextResponse.json({ ok: false, error: "registration_not_found", ts: Date.now() }, { status: 404 });
+      if (!pay) {
+        return NextResponse.json({ ok: false, error: "paid_webinar_payment_not_found", ts: Date.now() }, { status: 404 });
       }
+      await firePaidWebinarRegistrationAlert(pay);
       const webs = await getWebinars();
-      const w = webs.find((x) => x.id === reg!.webinar_id);
-      const count = regs.filter((r) => r.webinar_id === reg!.webinar_id).length;
-      const sent = await alertWebinarRegistration({
-        webinarId: reg.webinar_id,
-        name: reg.name || "Student",
-        phone: reg.phone,
-        webinarTitle: w?.title || null,
-        webinarSlug: w?.slug || null,
-        webinarAt: w?.datetime || null,
-        price: w?.price ?? null,
-        regCount: count,
-        registeredAt: reg.created_at,
-      });
+      const w = webs.find((x) => x.slug === pay!.item_slug);
+      const count = paidWebinarRegistrationCount(pays, pay.item_slug || "");
       return NextResponse.json({
-        ok: sent,
+        ok: true,
         registration: {
-          id: reg.id,
-          name: reg.name,
-          webinar: w?.title || null,
+          payment_id: pay.id,
+          name: pay.student_name,
+          webinar: w?.title || pay.item,
           count,
-          created_at: reg.created_at,
+          created_at: pay.created_at,
         },
         ts: Date.now(),
       });

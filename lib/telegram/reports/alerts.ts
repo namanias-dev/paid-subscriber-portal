@@ -11,6 +11,7 @@ import {
   getPayments,
 } from "../../dataProvider";
 import { isPaidStatus } from "../../paymentsAgg";
+import { paidWebinarRegistrationCount, filterPaidWebinarForSlug, isCountablePaidWebinarPayment } from "../../webinarReg";
 import { deriveCollections, deriveEnrollment, isActiveEnrollment } from "../../installments";
 import { istTodayYMD, istYMD } from "../../dates";
 import type { Payment } from "../../types";
@@ -217,65 +218,71 @@ function truncItem(s: string, max = 40): string {
 }
 
 export interface WebinarRegAlertInput {
-  webinarId: string;
+  webinarId?: string | null;
+  webinarSlug?: string | null;
   name: string;
   phone?: string | null;
   webinarTitle?: string | null;
-  webinarSlug?: string | null;
   webinarAt?: string | null;
-  price?: number | null;
-  /** When set, skip recount (manual / already known). */
-  regCount?: number | null;
-  registeredAt?: string | null;
+  amount?: number | null;
+  paidAt?: string | null;
+  /** Paid-only total; when omitted, recomputed from payments. */
+  paidCount?: number | null;
 }
 
-/** Instant alert on every webinar registration (seat-booked style). */
+/** Instant alert on successful webinar PAYMENT only (never on reg-row create). */
 export async function alertWebinarRegistration(input: WebinarRegAlertInput): Promise<boolean> {
+  const phoneDisp = displayPhone(input.phone);
+  if (!phoneDisp || phoneDisp === "—") {
+    tgLog("webinar_reg_alert_missing_phone", { name: input.name, slug: input.webinarSlug }, "warn");
+    return false;
+  }
+
   const webs = await getWebinars().catch(() => []);
-  const w = webs.find((x) => x.id === input.webinarId);
+  const w =
+    (input.webinarId && webs.find((x) => x.id === input.webinarId)) ||
+    (input.webinarSlug && webs.find((x) => x.slug === input.webinarSlug)) ||
+    null;
+  const slug = input.webinarSlug || w?.slug || null;
   const title = escapeHtml(input.webinarTitle || w?.title || "Webinar");
   const name = escapeHtml(input.name || "Student");
-  const phoneDisp = escapeHtml(displayPhone(input.phone));
-  const when = formatIstShort(input.registeredAt || new Date().toISOString());
+  const when = formatIstShort(input.paidAt || new Date().toISOString());
   const starts = input.webinarAt || w?.datetime
     ? formatIstShort(input.webinarAt || w!.datetime!)
     : "—";
-  const priceNum = input.price != null ? Number(input.price) : Number(w?.price ?? 0);
-  const priceLine =
-    priceNum > 0 ? `Paid webinar · ${inr(priceNum)}` : "Free webinar";
+  const amount = input.amount != null ? Number(input.amount) : Number(w?.price ?? 0);
 
-  let regCount = input.regCount != null ? Number(input.regCount) : 0;
-  if (!Number.isFinite(regCount) || regCount <= 0) {
+  let paidCount = input.paidCount != null ? Number(input.paidCount) : 0;
+  if (!Number.isFinite(paidCount) || paidCount <= 0) {
     try {
-      const regs = await getAllWebinarRegistrations();
-      regCount = regs.filter((r) => r.webinar_id === input.webinarId).length;
+      const pays = await getPayments();
+      paidCount = slug ? paidWebinarRegistrationCount(pays, slug) : 1;
     } catch {
-      regCount = 1;
+      paidCount = 1;
     }
   }
 
   const html = [
-    `📝 <b>WEBINAR REGISTRATION</b>`,
-    `${name} · ${phoneDisp}`,
+    `✅ <b>PAID · WEBINAR REGISTRATION</b>`,
+    `${name} · ${escapeHtml(phoneDisp)}`,
     `${title}`,
     `Starts ${starts}`,
-    priceLine,
-    when,
-    `Total registrations: ${regCount}`,
+    `${inr(amount)} paid · ${when}`,
+    ``,
+    `Total paid registrations: ${paidCount}`,
   ].join("\n");
 
   const base = SITE_URL.replace(/\/$/, "") || "https://www.namanias.com";
-  const slug = input.webinarSlug || w?.slug;
   const buttons = [
-    { label: "Webinar", url: slug ? `${base}/admin/webinars` : `${base}/admin` },
+    { label: "Webinar", url: `${base}/admin/webinars` },
     { label: "Dashboard", url: `${base}/admin` },
   ];
   return postAlert("webinar_registration", html, buttons);
 }
 
-/** Every 25 registrations; call out paid/hot names when available. */
-export async function alertWebinarMilestone(regCount: number, webinarTitle: string, webinarId?: string): Promise<void> {
-  if (regCount <= 0 || regCount % 25 !== 0) return;
+/** Every 25 PAID registrations. */
+export async function alertWebinarMilestone(paidCount: number, webinarTitle: string, webinarId?: string): Promise<void> {
+  if (paidCount <= 0 || paidCount % 25 !== 0) return;
   let hotLines: string[] = [];
   try {
     if (webinarId) {
@@ -287,16 +294,7 @@ export async function alertWebinarMilestone(regCount: number, webinarTitle: stri
       const w = webs.find((x) => x.id === webinarId);
       const slug = (w?.slug || "").toLowerCase();
       const paidPhones = new Set(
-        pays
-          .filter(
-            (p) =>
-              !p.deleted_at &&
-              isPaidStatus(p.status) &&
-              p.item_type === "webinar" &&
-              (p.item_slug || "").toLowerCase() === slug,
-          )
-          .map((p) => (p.phone || "").toLowerCase())
-          .filter(Boolean),
+        filterPaidWebinarForSlug(pays, slug).map((p) => (p.phone || "").toLowerCase()).filter(Boolean),
       );
       const mine = regs
         .filter((r) => r.webinar_id === webinarId)
@@ -304,8 +302,7 @@ export async function alertWebinarMilestone(regCount: number, webinarTitle: stri
         .slice(0, 8);
       for (const r of mine) {
         const key = (r.phone || "").toLowerCase();
-        const paid = key && paidPhones.has(key);
-        if (paid) {
+        if (key && paidPhones.has(key)) {
           hotLines.push(`· ${escapeHtml(r.name || "Student")} · paid`);
         }
       }
@@ -315,9 +312,9 @@ export async function alertWebinarMilestone(regCount: number, webinarTitle: stri
   }
 
   const html = [
-    `🎯 <b>WEBINAR +${regCount} REGS</b>`,
+    `🎯 <b>WEBINAR +${paidCount} PAID</b>`,
     `${escapeHtml(webinarTitle)}`,
-    `${regCount} registrations`,
+    `${paidCount} paid registrations`,
     ...(hotLines.length ? ["Notable:", ...hotLines.slice(0, 5)] : []),
     formatIstShort(new Date()),
   ].join("\n");
@@ -507,11 +504,15 @@ export async function alertNoLoginsIfStale(): Promise<boolean> {
   return ok;
 }
 
-/** 24h before webinar: final registration count. */
+/** 24h before webinar: final PAID registration count. */
 export async function alertWebinarReminders24h(): Promise<number> {
   const settings = await getReportSettings();
   if (!isAlertEnabled(settings, "webinar_reminder_24h")) return 0;
-  const [webinars, regs] = await Promise.all([getWebinars(), getAllWebinarRegistrations()]);
+  const [webinars, payments, regs] = await Promise.all([
+    getWebinars(),
+    getPayments(),
+    getAllWebinarRegistrations(),
+  ]);
   const now = Date.now();
   let sent = 0;
   const db = getSupabaseAdmin();
@@ -526,11 +527,15 @@ export async function alertWebinarReminders24h(): Promise<number> {
       const { data } = await db.from("telegram_report_snapshots").select("id").eq("slot_key", dedupeKey).maybeSingle();
       if (data) continue;
     }
-    const count = regs.filter((r) => r.webinar_id === w.id).length;
+    const price = Number(w.price) || 0;
+    const count =
+      price > 0
+        ? paidWebinarRegistrationCount(payments, w.slug)
+        : regs.filter((r) => r.webinar_id === w.id).length;
     const html = [
       `📣 <b>WEBINAR IN 24h</b>`,
       `${escapeHtml(w.title)}`,
-      `Registrations: ${count}`,
+      price > 0 ? `Paid registrations: ${count}` : `Registrations: ${count}`,
       formatIstShort(w.datetime),
     ].join("\n");
     const ok = await postAlert("webinar_reminder_24h", html);
@@ -547,14 +552,45 @@ export async function alertWebinarReminders24h(): Promise<number> {
 
 /** Fire-and-forget wrappers used from analytics/server + cron. */
 export function fireReportPaymentPaid(p: Payment): void {
-  void alertPaymentPaid(p).catch(() => {});
+  void (async () => {
+    await alertPaymentPaid(p);
+    if (p.item_type === "webinar") {
+      await firePaidWebinarRegistrationAlert(p);
+    }
+  })().catch(() => {});
 }
 
 export function fireReportGatewayFailure(p: Payment): void {
   void alertGatewayFailure(p).catch(() => {});
 }
 
-export function fireReportWebinarReg(input: {
+/** Paid webinar alert — only from verified PAID payments. */
+export async function firePaidWebinarRegistrationAlert(p: Payment): Promise<void> {
+  if (!isCountablePaidWebinarPayment(p)) return;
+  const slug = (p.item_slug || "").trim();
+  const webs = await getWebinars();
+  const w = slug ? webs.find((x) => x.slug === slug) : null;
+  const pays = await getPayments();
+  const paidCount = slug ? paidWebinarRegistrationCount(pays, slug) : 1;
+  await alertWebinarRegistration({
+    webinarId: w?.id || null,
+    webinarSlug: slug || w?.slug || null,
+    name: p.student_name || "Student",
+    phone: p.phone,
+    webinarTitle: w?.title || p.item || slug,
+    webinarAt: w?.datetime || null,
+    amount: p.amount,
+    paidAt: p.created_at,
+    paidCount,
+  });
+  await alertWebinarMilestone(paidCount, w?.title || p.item || slug || "Webinar", w?.id);
+}
+
+/**
+ * @deprecated Registration-row path — no longer fires channel alerts.
+ * Kept as no-op so old call sites / scripts do not crash.
+ */
+export function fireReportWebinarReg(_input: {
   webinarId: string;
   webinarSlug?: string | null;
   name?: string | null;
@@ -562,42 +598,5 @@ export function fireReportWebinarReg(input: {
   price?: number | null;
   isFree?: boolean | null;
 }): void {
-  void (async () => {
-    const regs = await getAllWebinarRegistrations();
-    const mine = regs.filter((r) => r.webinar_id === input.webinarId);
-    const count = mine.length;
-    const webs = await getWebinars();
-    const w = webs.find((x) => x.id === input.webinarId);
-    const title = w?.title || input.webinarSlug || "Webinar";
-
-    // Prefer the newest reg for this phone if name missing (manual recovery).
-    let name = (input.name || "").trim();
-    let phone = input.phone || null;
-    if (!name && phone) {
-      const hit = mine.find((r) => (r.phone || "") === phone) || mine[0];
-      name = hit?.name || "Student";
-      phone = hit?.phone || phone;
-    }
-    if (!name) {
-      const newest = [...mine].sort(
-        (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
-      )[0];
-      name = newest?.name || "Student";
-      phone = phone || newest?.phone || null;
-    }
-
-    await alertWebinarRegistration({
-      webinarId: input.webinarId,
-      name,
-      phone,
-      webinarTitle: title,
-      webinarSlug: input.webinarSlug || w?.slug || null,
-      webinarAt: w?.datetime || null,
-      price: input.price != null ? input.price : w?.price ?? null,
-      regCount: count,
-    });
-
-    // Keep every-25 milestone as an extra celebration ping.
-    await alertWebinarMilestone(count, title, input.webinarId);
-  })().catch(() => {});
+  /* intentional no-op: webinar channel alerts fire only on PAID payment */
 }

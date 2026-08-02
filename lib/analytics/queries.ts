@@ -1108,14 +1108,18 @@ export async function getWebinarFunnel(opts: { from: string; to: string; exclude
   for (const e of events) if (e.event_name === "zoom_link_clicked") { const slug = String((e.props as { webinar_slug?: string } | null)?.webinar_slug || "").toLowerCase(); const id = e.phone ? normPhone(e.phone) : e.visitor_id; if (slug && id) (zoomBySlug.get(slug) || zoomBySlug.set(slug, new Set()).get(slug)!).add(id); }
 
   const slugs = new Set<string>([...regBySlug.keys(), ...paidBySlug.keys(), ...zoomBySlug.keys()]);
-  const webinarRows = [...slugs].map((slug) => ({
-    slug,
-    title: slugToTitle.get(slug) || slug,
-    registrations: regBySlug.get(slug) || 0,
-    paid: paidBySlug.get(slug)?.paid || 0,
-    attended: zoomBySlug.get(slug)?.size || 0,
-    revenue: paidBySlug.get(slug)?.revenue || 0,
-  })).sort((a, b) => b.revenue - a.revenue || b.registrations - a.registrations);
+  const webinarRows = [...slugs].map((slug) => {
+    const paid = paidBySlug.get(slug)?.paid || 0;
+    return {
+      slug,
+      title: slugToTitle.get(slug) || slug,
+      // Paid-only: same definition as digest / Overview (raw reg rows are NOT registrations).
+      registrations: paid,
+      paid,
+      attended: zoomBySlug.get(slug)?.size || 0,
+      revenue: paidBySlug.get(slug)?.revenue || 0,
+    };
+  }).sort((a, b) => b.revenue - a.revenue || b.registrations - a.registrations);
 
   return { range: { from: fromISO, to: toISO }, steps, webinars: webinarRows };
 }

@@ -20,13 +20,17 @@ import {
   isActiveEnrollment,
 } from "../../installments";
 import { countsTowardCapacity } from "../../enrollmentScope";
-import { distinctRegistrations, isPaidStatus } from "../../paymentsAgg";
-import { getSupabaseAdmin } from "../../supabase";
+import { isPaidStatus } from "../../paymentsAgg";
+import {
+  paidWebinarRegistrationCount,
+  pendingWebinarCheckoutCount,
+} from "../../webinarReg";
 import type { Course, CourseBatch, CourseEnrollment, LearningMode, Payment } from "../../types";
 import { normalizeIndianMobile } from "../../phone";
 import { buildKeyboard, sendMessage } from "../botApi";
 import { tgLog } from "../log";
 import { escapeHtml, formatIstShort, inr, istNowParts } from "./format";
+import { resolveLoginAverages } from "./loginAvg";
 import {
   digestHoursForFrequency,
   getReportSettings,
@@ -341,9 +345,10 @@ async function pickUpcomingWebinar(): Promise<{
   title: string;
   dateLabel: string;
   registered: number;
-  confirmed: number | null;
+  pendingCheckout: number;
   attendedLastPct: number | null;
   webinarId: string;
+  slug: string;
 } | null> {
   try {
     const [webinars, regs, payments] = await Promise.all([
@@ -357,18 +362,14 @@ async function pickUpcomingWebinar(): Promise<{
       .sort((a, b) => new Date(a.datetime).getTime() - new Date(b.datetime).getTime())[0];
     if (!upcoming) return null;
 
-    const registered = regs.filter((r) => r.webinar_id === upcoming.id).length;
-    let confirmed: number | null = null;
-    if (upcoming.price && upcoming.price > 0) {
-      const paid = payments.filter(
-        (p) =>
-          !p.deleted_at &&
-          isPaidStatus(p.status) &&
-          p.item_type === "webinar" &&
-          (p.item_slug || "").toLowerCase() === (upcoming.slug || "").toLowerCase(),
-      );
-      confirmed = distinctRegistrations(paid);
-    }
+    const price = Number(upcoming.price) || 0;
+    // Paid webinars: paid-only seat count. Free webinars: registration rows (= confirmed).
+    const registered =
+      price > 0
+        ? paidWebinarRegistrationCount(payments, upcoming.slug)
+        : regs.filter((r) => r.webinar_id === upcoming.id).length;
+    const pendingCheckout =
+      price > 0 ? pendingWebinarCheckoutCount(payments, upcoming.slug) : 0;
 
     let attendedLastPct: number | null = null;
     const past = [...webinars]
@@ -386,48 +387,12 @@ async function pickUpcomingWebinar(): Promise<{
       title: upcoming.title,
       dateLabel: formatIstShort(upcoming.datetime),
       registered,
-      confirmed,
+      pendingCheckout,
       attendedLastPct,
       webinarId: upcoming.id,
+      slug: upcoming.slug,
     };
   } catch {
-    return null;
-  }
-}
-
-/** total login events ÷ days since first login (all-time daily average). */
-async function loginAllTimeDailyAvg(): Promise<number | null> {
-  const db = getSupabaseAdmin();
-  if (!db) return null;
-  try {
-    const { count, error: cErr } = await db
-      .from("analytics_events")
-      .select("id", { count: "exact", head: true })
-      .eq("event_name", "login");
-    if (cErr) {
-      tgLog("digest_login_avg_count_failed", { error: cErr.message }, "warn");
-      return null;
-    }
-    if (count == null || count <= 0) return null;
-
-    const { data: rows, error: fErr } = await db
-      .from("analytics_events")
-      .select("occurred_at")
-      .eq("event_name", "login")
-      .order("occurred_at", { ascending: true })
-      .limit(1);
-    if (fErr) {
-      tgLog("digest_login_avg_first_failed", { error: fErr.message }, "warn");
-      return null;
-    }
-    const firstIso = Array.isArray(rows) && rows[0] ? (rows[0] as { occurred_at?: string }).occurred_at : null;
-    if (!firstIso) return null;
-    const first = new Date(firstIso).getTime();
-    if (!Number.isFinite(first)) return null;
-    const days = Math.max(1, Math.ceil((Date.now() - first) / 86400_000));
-    return Math.round(count / days);
-  } catch (e) {
-    tgLog("digest_login_avg_error", { error: (e as Error).message }, "warn");
     return null;
   }
 }
@@ -513,6 +478,7 @@ export async function buildDigest(opts?: {
   let failedRows: Payment[] = [];
   let allPayments: Payment[] = [];
   let loginAvg: number | null = null;
+  let loginAvg30: number | null = null;
 
   try {
     const settled = await Promise.allSettled([
@@ -522,7 +488,7 @@ export async function buildDigest(opts?: {
       getAllCourseEnrollments(),
       pickUpcomingWebinar(),
       getPayments(),
-      loginAllTimeDailyAvg(),
+      resolveLoginAverages(),
     ]);
     if (settled[0].status === "fulfilled") pulseToday = settled[0].value;
     if (settled[1].status === "fulfilled") pulseMtd = settled[1].value;
@@ -541,12 +507,9 @@ export async function buildDigest(opts?: {
         )
         .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
     }
-    if (settled[6].status === "fulfilled") loginAvg = settled[6].value;
-    // Fallback: mean of pulse login history when all-time query is slow/unavailable.
-    if (loginAvg == null && pulseToday?.history?.logins?.length) {
-      const pts = pulseToday.history.logins.map((p) => p.value || 0);
-      const sum = pts.reduce((a, b) => a + b, 0);
-      if (pts.length > 0 && sum > 0) loginAvg = Math.round(sum / pts.length);
+    if (settled[6].status === "fulfilled") {
+      loginAvg = settled[6].value.allTimeAvg;
+      loginAvg30 = settled[6].value.rolling30Avg;
     }
   } catch {
     /* sections omit missing data */
@@ -573,6 +536,7 @@ export async function buildDigest(opts?: {
     logins_today: loginsToday,
     logins_yday: loginsYday,
     logins_avg: loginAvg,
+    logins_avg_30d: loginAvg30,
     revenue_today: revenueToday,
     revenue_mtd: revenueMtd,
     revenue_yday: revenueYday,
@@ -593,14 +557,14 @@ export async function buildDigest(opts?: {
   lines.push("");
 
   // ── WEBINAR ──
-  if (webinar && webinar.registered > 0) {
+  if (webinar && (webinar.registered > 0 || webinar.pendingCheckout > 0)) {
     const body: string[] = [
       `<b>${escapeHtml(webinar.title)}</b>`,
       webinar.dateLabel ? `<i>${escapeHtml(webinar.dateLabel)}</i>` : "",
-      `Registered <b>${webinar.registered}</b>`,
+      `Registered <b>${webinar.registered}</b> (paid)`,
     ].filter(Boolean);
-    if (webinar.confirmed != null && webinar.confirmed > 0) {
-      body.push(`Confirmed <b>${webinar.confirmed}</b>`);
+    if (webinar.pendingCheckout > 0) {
+      body.push(`Pending checkout <b>${webinar.pendingCheckout}</b>`);
     }
     if (webinar.attendedLastPct != null) {
       body.push(`Last attendance <b>${webinar.attendedLastPct}%</b>`);
@@ -648,12 +612,16 @@ export async function buildDigest(opts?: {
     const hasToday = loginsToday != null;
     const hasYday = loginsYday != null;
     const hasAvg = loginAvg != null && loginAvg > 0;
-    if ((hasToday && (loginsToday ?? 0) > 0) || (hasYday && (loginsYday ?? 0) > 0) || hasAvg) {
-      const bits: string[] = [];
-      if (loginsToday != null) bits.push(`Today <b>${loginsToday}</b>`);
-      if (loginsYday != null) bits.push(`Yesterday <b>${loginsYday}</b>`);
-      if (hasAvg) bits.push(`All-time avg/day <b>${loginAvg}</b>`);
-      pushSection(lines, `👥 <b>LOGINS</b>`, [bits.join(" · ")]);
+    const has30 = loginAvg30 != null && loginAvg30 > 0;
+    if ((hasToday && (loginsToday ?? 0) > 0) || (hasYday && (loginsYday ?? 0) > 0) || hasAvg || has30) {
+      const row1: string[] = [];
+      if (loginsToday != null) row1.push(`Today <b>${loginsToday}</b>`);
+      if (loginsYday != null) row1.push(`Yesterday <b>${loginsYday}</b>`);
+      const row2: string[] = [];
+      if (has30) row2.push(`30-day avg <b>${loginAvg30}</b>`);
+      if (hasAvg) row2.push(`All-time avg <b>${loginAvg}</b>`);
+      const body = [row1.join(" · "), row2.join(" · ")].filter(Boolean);
+      pushSection(lines, `👥 <b>LOGINS</b>`, body);
     }
   }
 
