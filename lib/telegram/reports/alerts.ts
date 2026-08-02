@@ -26,6 +26,25 @@ import {
 } from "./settings";
 import { getSupabaseAdmin } from "../../supabase";
 import { assertReportsChannel } from "./channelGuard";
+import { normalizeIndianMobile } from "../../phone";
+
+function displayPhone(raw: string | null | undefined): string {
+  const n = normalizeIndianMobile(raw);
+  if (n.ok && n.display) return n.display;
+  const s = String(raw || "").trim();
+  return s || "—";
+}
+
+function failureReason(p: Payment): string | null {
+  const raw =
+    (p.verify_status && String(p.verify_status).trim()) ||
+    (p.response_code && String(p.response_code).trim()) ||
+    null;
+  if (!raw) return null;
+  // Skip opaque success-like codes
+  if (/^(success|ok|00|0)$/i.test(raw)) return null;
+  return raw;
+}
 
 async function postAlert(
   key: ReportAlertKey,
@@ -102,7 +121,7 @@ export async function alertPaymentPaid(p: Payment): Promise<void> {
   const der = enr ? deriveEnrollment(enr, now) : null;
   const col = enr ? deriveCollections(enr, now) : null;
   const mode = enr?.batch_label || "—";
-  const phone = escapeHtml(p.phone || enr?.phone || "—");
+  const phone = displayPhone(p.phone || enr?.phone);
   const balance = col ? inr(Math.max(0, (col.remaining ?? der?.remaining) || 0)) : "—";
   const paidSoFar = col ? inr(col.paid) : amount;
   const fee = enr ? inr(Number(enr.total_fee) || null) : "—";
@@ -121,9 +140,10 @@ export async function alertPaymentPaid(p: Payment): Promise<void> {
   }
 
   if (p.payment_kind === "seat") {
+    const phoneDisp = displayPhone(p.phone || enr?.phone);
     const html = [
       `🎉 <b>SEAT BOOKED</b>`,
-      `${name} · ${phone}`,
+      `${name} · ${escapeHtml(phoneDisp)}`,
       `${course}`,
       `Mode/batch: ${escapeHtml(String(mode))}`,
       `Paid ${amount} · Fee ${fee} · Balance ${balance}`,
@@ -178,15 +198,23 @@ export async function alertPaymentPaid(p: Payment): Promise<void> {
 
 export async function alertGatewayFailure(p: Payment): Promise<void> {
   const name = escapeHtml(p.student_name || "Student");
-  const item = escapeHtml(p.item || p.item_slug || "Item");
+  const phoneDisp = escapeHtml(displayPhone(p.phone));
+  const item = escapeHtml(truncItem(p.item || p.item_slug || "Item"));
+  const reason = failureReason(p);
   const html = [
     `🚨 <b>PAYMENT FAILED</b>`,
-    `${name} · ${item}`,
-    `${inr(p.amount)} · ${escapeHtml(String(p.status || "FAILED"))}`,
+    `${name} · ${phoneDisp}`,
+    `${item} · ${inr(p.amount)}`,
     formatIstShort(p.created_at || new Date().toISOString()),
-    `Check gateway / bank callback immediately`,
+    reason ? `Reason: ${escapeHtml(reason)}` : `Status: ${escapeHtml(String(p.status || "FAILED"))}`,
   ].join("\n");
   await postAlert("gateway_failure", html);
+}
+
+function truncItem(s: string, max = 40): string {
+  const t = String(s || "").trim();
+  if (t.length <= max) return t;
+  return `${t.slice(0, max - 1).trimEnd()}…`;
 }
 
 /** Every 25 registrations; call out paid/hot names when available. */
