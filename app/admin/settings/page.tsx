@@ -22,7 +22,7 @@ const ALERT_LABELS: { key: string; label: string }[] = [
 type ReportSettingsState = {
   channel_id: string;
   digest_enabled: boolean;
-  digest_frequency: "3h" | "6h" | "daily";
+  digest_frequency: "2h" | "3h" | "6h" | "daily";
   quiet_hours_start: string;
   quiet_hours_end: string;
   alerts: Record<string, boolean>;
@@ -53,7 +53,7 @@ export default function SettingsAdmin() {
         setReports({
           channel_id: s.channel_id || "",
           digest_enabled: s.digest_enabled !== false,
-          digest_frequency: s.digest_frequency || "3h",
+          digest_frequency: s.digest_frequency || "2h",
           quiet_hours_start: s.quiet_hours_start != null ? String(s.quiet_hours_start) : "",
           quiet_hours_end: s.quiet_hours_end != null ? String(s.quiet_hours_end) : "",
           alerts: s.alerts || {},
@@ -244,7 +244,7 @@ export default function SettingsAdmin() {
           <Field label="Telegram"><input className="input" value={brand.telegram || ""} onChange={(e) => set({ telegram: e.target.value })} placeholder="https://t.me/..." /></Field>
         </Section>
 
-        <Section title="Reports" desc="Telegram channel digests (every 3h IST, silent) and real-time event alerts. Uses Overview metrics — same numbers as the dashboard.">
+        <Section title="Reports" desc="Telegram channel digests (every 2h IST, silent) and real-time event alerts. Uses Overview metrics — same numbers as the dashboard.">
           {!reports ? (
             <p className="text-sm text-muted sm:col-span-2">Loading reports settings…</p>
           ) : (
@@ -264,11 +264,12 @@ export default function SettingsAdmin() {
                   onChange={(e) =>
                     setReports({
                       ...reports,
-                      digest_frequency: e.target.value as "3h" | "6h" | "daily",
+                      digest_frequency: e.target.value as "2h" | "3h" | "6h" | "daily",
                     })
                   }
                 >
-                  <option value="3h">Every 3 hours (6am–12am IST)</option>
+                  <option value="2h">Every 2 hours</option>
+                  <option value="3h">Every 3 hours (skip 3am)</option>
                   <option value="6h">Every 6 hours</option>
                   <option value="daily">Daily only (6 AM)</option>
                 </select>

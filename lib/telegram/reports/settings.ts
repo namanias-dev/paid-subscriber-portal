@@ -3,7 +3,7 @@
  */
 import { getSupabaseAdmin } from "../../supabase";
 
-export type DigestFrequency = "3h" | "6h" | "daily";
+export type DigestFrequency = "2h" | "3h" | "6h" | "daily";
 
 export type ReportAlertKey =
   | "seat_booked"
@@ -55,12 +55,13 @@ function asAlerts(raw: unknown): Record<ReportAlertKey, boolean> {
 }
 
 function mapRow(row: Record<string, unknown>): ReportSettings {
-  const freq = String(row.digest_frequency || "3h");
+  const freq = String(row.digest_frequency || "2h");
   return {
     id: String(row.id || "default"),
     channel_id: row.channel_id != null ? String(row.channel_id) : null,
     digest_enabled: row.digest_enabled !== false,
-    digest_frequency: freq === "6h" || freq === "daily" ? freq : "3h",
+    digest_frequency:
+      freq === "2h" || freq === "3h" || freq === "6h" || freq === "daily" ? freq : "2h",
     quiet_hours_start:
       row.quiet_hours_start != null && Number.isFinite(Number(row.quiet_hours_start))
         ? Number(row.quiet_hours_start)
@@ -81,7 +82,7 @@ const FALLBACK: ReportSettings = {
   id: "default",
   channel_id: null,
   digest_enabled: true,
-  digest_frequency: "3h",
+  digest_frequency: "2h",
   quiet_hours_start: null,
   quiet_hours_end: null,
   alerts: { ...DEFAULT_ALERTS },
@@ -216,6 +217,7 @@ export function inQuietHours(settings: ReportSettings, istHour: number): boolean
 export function digestHoursForFrequency(freq: DigestFrequency): number[] {
   if (freq === "daily") return [6];
   if (freq === "6h") return [0, 6, 12, 18];
-  // 3h: 6am–12am IST, skip 3am
-  return [0, 6, 9, 12, 15, 18, 21];
+  if (freq === "3h") return [0, 6, 9, 12, 15, 18, 21]; // skip 3am
+  // 2h: every even hour IST
+  return [0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22];
 }
