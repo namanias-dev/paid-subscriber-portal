@@ -1,13 +1,33 @@
 /**
  * One-shot: post a webinar-registration Telegram alert for a known registration.
- * Usage: npx tsx --require ./scripts/react-cache-shim.cjs scripts/send-webinar-reg-alert.ts [registrationId]
+ * Usage: npx tsx scripts/send-webinar-reg-alert.ts [registrationId]
  */
-import { alertWebinarRegistration } from "../lib/telegram/reports/alerts";
-import { getAllWebinarRegistrations, getWebinars } from "../lib/dataProvider";
+import { readFileSync, existsSync } from "fs";
+import { resolve } from "path";
 
-const AJAY_REG_ID = "74c5f849-9195-4fa0-964c-dc6e71a508ce";
+function loadEnvFile(path: string) {
+  if (!existsSync(path)) return;
+  for (const line of readFileSync(path, "utf8").split(/\n/)) {
+    if (!line || line.trimStart().startsWith("#")) continue;
+    const eq = line.indexOf("=");
+    if (eq < 1) continue;
+    const key = line.slice(0, eq).trim();
+    let val = line.slice(eq + 1);
+    if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+      val = val.slice(1, -1);
+    }
+    if (!(key in process.env)) process.env[key] = val;
+  }
+}
+
+loadEnvFile(resolve(process.cwd(), ".env.local"));
+loadEnvFile(resolve(process.cwd(), ".env"));
 
 async function main() {
+  const { alertWebinarRegistration } = await import("../lib/telegram/reports/alerts");
+  const { getAllWebinarRegistrations, getWebinars } = await import("../lib/dataProvider");
+
+  const AJAY_REG_ID = "74c5f849-9195-4fa0-964c-dc6e71a508ce";
   const id = process.argv[2] || AJAY_REG_ID;
   const [regs, webs] = await Promise.all([getAllWebinarRegistrations(), getWebinars()]);
   const reg = regs.find((r) => r.id === id);
