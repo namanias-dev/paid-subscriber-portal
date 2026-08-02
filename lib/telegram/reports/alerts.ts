@@ -1,16 +1,22 @@
 /**
  * Real-time Telegram business report alerts.
- * Fire-and-forget from payment/registration/cron hooks.
+ * Digests are silent; alerts always notify.
  */
 import { SITE_URL } from "../../config";
-import { getLeads, getWebinars, getAllWebinarRegistrations, getAllCourseEnrollments } from "../../dataProvider";
+import {
+  getLeads,
+  getWebinars,
+  getAllWebinarRegistrations,
+  getAllCourseEnrollments,
+  getPayments,
+} from "../../dataProvider";
 import { isPaidStatus } from "../../paymentsAgg";
-import { deriveCollections, isActiveEnrollment } from "../../installments";
+import { deriveCollections, deriveEnrollment, isActiveEnrollment } from "../../installments";
 import { istTodayYMD, istYMD } from "../../dates";
 import type { Payment } from "../../types";
 import { buildKeyboard, sendMessage } from "../botApi";
 import { tgLog } from "../log";
-import { escapeHtml, formatIstShort, inr } from "./format";
+import { escapeHtml, formatIstShort, inr, istNowParts } from "./format";
 import {
   getReportSettings,
   isAlertEnabled,
@@ -19,18 +25,29 @@ import {
   type ReportAlertKey,
 } from "./settings";
 import { getSupabaseAdmin } from "../../supabase";
+import { assertReportsChannel } from "./channelGuard";
 
-async function postAlert(key: ReportAlertKey, html: string): Promise<void> {
+async function postAlert(
+  key: ReportAlertKey,
+  html: string,
+  buttons?: { label: string; url: string }[],
+): Promise<boolean> {
   try {
     const settings = await getReportSettings();
-    if (!isAlertEnabled(settings, key)) return;
+    if (!isAlertEnabled(settings, key)) return false;
     const resolved = resolveReportsChannelId(settings);
-    const { assertReportsChannel } = await import("./channelGuard");
     const guarded = await assertReportsChannel(resolved);
-    if (!guarded.ok || !guarded.id) return;
+    if (!guarded.ok || !guarded.id) return false;
     const channel = guarded.id;
 
     const base = SITE_URL.replace(/\/$/, "") || "https://www.namanias.com";
+    const markup = buildKeyboard(
+      (buttons || [
+        { label: "Dashboard", url: `${base}/admin` },
+        { label: "Admissions", url: `${base}/admin/course-payments` },
+      ]).map((b) => ({ label: b.label, url: b.url })),
+    );
+
     let lastErr = "";
     for (let i = 0; i < 3; i++) {
       const res = await sendMessage({
@@ -39,66 +56,100 @@ async function postAlert(key: ReportAlertKey, html: string): Promise<void> {
         parse_mode: "HTML",
         disable_web_page_preview: true,
         disable_notification: false,
-        reply_markup: buildKeyboard([
-          { label: "Open Dashboard", url: `${base}/admin` },
-          { label: "View Admissions", url: `${base}/admin/course-payments` },
-        ]),
+        reply_markup: markup,
       });
       if (res.ok) {
         await markAlertSent();
-        return;
+        return true;
       }
       lastErr = res.description || "send_failed";
       await new Promise((r) => setTimeout(r, 400 * (i + 1)));
     }
     tgLog("report_alert_failed", { key, error: lastErr }, "error");
+    return false;
   } catch (e) {
     tgLog("report_alert_error", { key, error: (e as Error).message }, "error");
+    return false;
   }
 }
 
-function modeTimingLabel(p: Payment): string {
-  const kind = String(p.payment_kind || "");
-  // Prefer batch_label crumbs on related enrollment when available — kept short.
-  return kind === "seat" ? "Seat" : kind === "full" ? "Full" : kind === "installment" ? `Inst ${p.installment_no || ""}`.trim() : "Payment";
+async function findEnrollmentForPayment(p: Payment) {
+  try {
+    const enrs = await getAllCourseEnrollments();
+    return (
+      enrs.find(
+        (e) =>
+          isActiveEnrollment(e) &&
+          (e.id === p.enrollment_id ||
+            ((e.course_slug === p.item_slug || e.course_title === p.item) &&
+              (e.phone === p.phone || (!!p.email && e.email === p.email)))),
+      ) || null
+    );
+  } catch {
+    return null;
+  }
 }
 
-/** Seat booked / full payment alerts from verified PAID chokepoint. */
+/** Seat booked / payment received / full payment from verified PAID chokepoint. */
 export async function alertPaymentPaid(p: Payment): Promise<void> {
   if (p.item_type !== "course") return;
   const name = escapeHtml(p.student_name || "Student");
   const course = escapeHtml(p.item || p.item_slug || "Course");
   const when = formatIstShort(p.created_at || new Date().toISOString());
   const amount = inr(p.amount);
+  const enr = await findEnrollmentForPayment(p);
+  const now = Date.now();
+  const der = enr ? deriveEnrollment(enr, now) : null;
+  const col = enr ? deriveCollections(enr, now) : null;
+  const mode = enr?.batch_label || "—";
+  const phone = escapeHtml(p.phone || enr?.phone || "—");
+  const balance = col ? inr(Math.max(0, (col.remaining ?? der?.remaining) || 0)) : "—";
+  const paidSoFar = col ? inr(col.paid) : amount;
+  const fee = enr ? inr(Number(enr.total_fee) || null) : "—";
+
+  let courseTotal = "—";
+  try {
+    const enrs = await getAllCourseEnrollments();
+    const same = enrs.filter(
+      (e) =>
+        isActiveEnrollment(e) &&
+        (e.course_slug === p.item_slug || e.course_title === p.item || e.course_id === p.item_slug),
+    );
+    courseTotal = String(same.length);
+  } catch {
+    /* ignore */
+  }
 
   if (p.payment_kind === "seat") {
-    let total = "—";
-    try {
-      const enrs = await getAllCourseEnrollments();
-      const n = enrs.filter(
-        (e) =>
-          isActiveEnrollment(e) &&
-          (e.course_slug === p.item_slug || e.course_title === p.item || e.course_id === p.item_slug),
-      ).length;
-      total = String(n);
-    } catch {
-      /* ignore */
-    }
     const html = [
-      `🎉 <b>NEW ADMISSION</b>`,
-      `${name} · ${course}`,
-      `${escapeHtml(modeTimingLabel(p))} · ${amount} paid`,
+      `🎉 <b>SEAT BOOKED</b>`,
+      `${name} · ${phone}`,
+      `${course}`,
+      `Mode/batch: ${escapeHtml(String(mode))}`,
+      `Paid ${amount} · Fee ${fee} · Balance ${balance}`,
       when,
-      `Course total: ${total} admissions`,
+      `Course admissions: ${courseTotal}`,
     ].join("\n");
     await postAlert("seat_booked", html);
     return;
   }
 
-  if (p.payment_kind === "full" || p.payment_kind === "one_time" || p.payment_kind == null) {
+  if (p.payment_kind === "installment") {
+    const inst = p.installment_no != null ? `Inst #${p.installment_no}` : "Installment";
+    const html = [
+      `💳 <b>PAYMENT RECEIVED</b>`,
+      `${name} · ${course}`,
+      `${escapeHtml(inst)} · ${amount}`,
+      `Paid to date ${paidSoFar} · Balance ${balance}`,
+      when,
+    ].join("\n");
+    await postAlert("full_payment", html);
+    if (!der?.isFullyPaid) return;
+  }
+
+  if (p.payment_kind === "full" || p.payment_kind === "one_time" || p.payment_kind == null || der?.isFullyPaid) {
     let todayTotal = 0;
     try {
-      const { getPayments } = await import("../../dataProvider");
       const pays = await getPayments();
       const today = istTodayYMD();
       todayTotal = pays
@@ -116,7 +167,8 @@ export async function alertPaymentPaid(p: Payment): Promise<void> {
     const html = [
       `✅ <b>FULL PAYMENT</b>`,
       `${name} · ${course}`,
-      `${amount}`,
+      `${amount} · Fee ${fee}`,
+      `Balance ${balance}`,
       when,
       `Collections today: ${inr(todayTotal)}`,
     ].join("\n");
@@ -128,27 +180,69 @@ export async function alertGatewayFailure(p: Payment): Promise<void> {
   const name = escapeHtml(p.student_name || "Student");
   const item = escapeHtml(p.item || p.item_slug || "Item");
   const html = [
-    `🚨 <b>PAYMENT GATEWAY FAILURE</b>`,
+    `🚨 <b>PAYMENT FAILED</b>`,
     `${name} · ${item}`,
     `${inr(p.amount)} · ${escapeHtml(String(p.status || "FAILED"))}`,
     formatIstShort(p.created_at || new Date().toISOString()),
-    `Revenue at risk — check gateway / bank callback`,
+    `Check gateway / bank callback immediately`,
   ].join("\n");
   await postAlert("gateway_failure", html);
 }
 
-export async function alertWebinarMilestone(regCount: number, webinarTitle: string): Promise<void> {
-  if (regCount <= 0 || regCount % 50 !== 0) return;
+/** Every 25 registrations; call out paid/hot names when available. */
+export async function alertWebinarMilestone(regCount: number, webinarTitle: string, webinarId?: string): Promise<void> {
+  if (regCount <= 0 || regCount % 25 !== 0) return;
+  let hotLines: string[] = [];
+  try {
+    if (webinarId) {
+      const [regs, pays, webs] = await Promise.all([
+        getAllWebinarRegistrations(),
+        getPayments(),
+        getWebinars(),
+      ]);
+      const w = webs.find((x) => x.id === webinarId);
+      const slug = (w?.slug || "").toLowerCase();
+      const paidPhones = new Set(
+        pays
+          .filter(
+            (p) =>
+              !p.deleted_at &&
+              isPaidStatus(p.status) &&
+              p.item_type === "webinar" &&
+              (p.item_slug || "").toLowerCase() === slug,
+          )
+          .map((p) => (p.phone || "").toLowerCase())
+          .filter(Boolean),
+      );
+      const mine = regs
+        .filter((r) => r.webinar_id === webinarId)
+        .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+        .slice(0, 8);
+      for (const r of mine) {
+        const key = (r.phone || "").toLowerCase();
+        const paid = key && paidPhones.has(key);
+        if (paid) {
+          hotLines.push(`· ${escapeHtml(r.name || "Student")} · paid`);
+        }
+      }
+    }
+  } catch {
+    hotLines = [];
+  }
+
   const html = [
-    `🎯 <b>WEBINAR MILESTONE</b>`,
+    `🎯 <b>WEBINAR +${regCount} REGS</b>`,
     `${escapeHtml(webinarTitle)}`,
     `${regCount} registrations`,
+    ...(hotLines.length ? ["Notable:", ...hotLines.slice(0, 5)] : []),
     formatIstShort(new Date()),
   ].join("\n");
   await postAlert("webinar_milestone", html);
 }
 
-/** Scan overdue installments (from collections helper — same as Overview). */
+/**
+ * Overdue: daily summary around 10 AM IST, plus immediate alerts at 7d and 30d thresholds.
+ */
 export async function alertOverdueInstallments(): Promise<{ sent: number }> {
   const settings = await getReportSettings();
   if (!isAlertEnabled(settings, "installment_overdue")) return { sent: 0 };
@@ -158,42 +252,93 @@ export async function alertOverdueInstallments(): Promise<{ sent: number }> {
   const db = getSupabaseAdmin();
   const enrs = await getAllCourseEnrollments();
   const now = Date.now();
+  const parts = istNowParts();
   let sent = 0;
 
+  const overdueRows: { name: string; course: string; amount: number; days: number; id: string }[] = [];
   for (const e of enrs) {
     if (!isActiveEnrollment(e)) continue;
     const col = deriveCollections(e, now);
     if (col.daysOverdue < 1 || col.overdueAmount <= 0) continue;
-    const dedupeKey = `overdue_alert:${e.id}:${col.daysOverdue}`;
-    if (db) {
-      try {
-        const { data } = await db
-          .from("telegram_report_snapshots")
-          .select("id")
-          .eq("slot_key", dedupeKey)
-          .maybeSingle();
-        if (data) continue;
-      } catch {
-        /* continue */
+    overdueRows.push({
+      id: e.id,
+      name: e.student_name || "Student",
+      course: e.course_title || "Course",
+      amount: col.overdueAmount,
+      days: col.daysOverdue,
+    });
+
+    // Immediate threshold alerts at exactly 7 / 30 days
+    if (col.daysOverdue === 7 || col.daysOverdue === 30) {
+      const dedupeKey = `overdue_threshold:${e.id}:${col.daysOverdue}`;
+      let already = false;
+      if (db) {
+        try {
+          const { data } = await db
+            .from("telegram_report_snapshots")
+            .select("id")
+            .eq("slot_key", dedupeKey)
+            .maybeSingle();
+          already = !!data;
+        } catch {
+          already = false;
+        }
+      }
+      if (!already) {
+        const html = [
+          `⏰ <b>${col.daysOverdue}d OVERDUE</b>`,
+          `${escapeHtml(e.student_name || "Student")} · ${escapeHtml(e.course_title || "Course")}`,
+          `${inr(col.overdueAmount)} · ${col.daysOverdue} days`,
+          formatIstShort(new Date()),
+        ].join("\n");
+        const ok = await postAlert("installment_overdue", html);
+        if (ok && db) {
+          await db.from("telegram_report_snapshots").upsert(
+            { slot_key: dedupeKey, kind: "alert_dedupe", metrics: { days: col.daysOverdue } },
+            { onConflict: "slot_key" },
+          );
+        }
+        if (ok) sent++;
       }
     }
-
-    const html = [
-      `⏰ <b>INSTALLMENT OVERDUE</b>`,
-      `${escapeHtml(e.student_name || "Student")} · ${escapeHtml(e.course_title)}`,
-      `${inr(col.overdueAmount)} · ${col.daysOverdue}d overdue`,
-      formatIstShort(new Date()),
-    ].join("\n");
-    await postAlert("installment_overdue", html);
-    if (db) {
-      await db.from("telegram_report_snapshots").upsert(
-        { slot_key: dedupeKey, kind: "alert_dedupe", metrics: { days: col.daysOverdue } },
-        { onConflict: "slot_key" },
-      );
-    }
-    sent++;
-    if (sent >= 5) break; // rate-limit burst
   }
+
+  // Daily 10 AM IST summary (window :00–:20 via cron)
+  if (parts.hour === 10 && parts.minute <= 20 && overdueRows.length > 0) {
+    const dedupeKey = `overdue_daily:${parts.ymd}`;
+    let already = false;
+    if (db) {
+      const { data } = await db.from("telegram_report_snapshots").select("id").eq("slot_key", dedupeKey).maybeSingle();
+      already = !!data;
+    }
+    if (!already) {
+      const totalAmt = overdueRows.reduce((s, r) => s + r.amount, 0);
+      const top = [...overdueRows].sort((a, b) => b.days - a.days).slice(0, 8);
+      const html = [
+        `⚠️ <b>OVERDUE DAILY</b>`,
+        `${overdueRows.length} students · ${inr(totalAmt)}`,
+        ...top.map(
+          (r) =>
+            `· ${escapeHtml(r.name)} · ${escapeHtml(r.course)} · ${inr(r.amount)} · ${r.days}d`,
+        ),
+        formatIstShort(new Date()),
+      ].join("\n");
+      const ok = await postAlert("installment_overdue", html, [
+        {
+          label: "Collections",
+          url: `${(SITE_URL.replace(/\/$/, "") || "https://www.namanias.com")}/admin/at-risk`,
+        },
+      ]);
+      if (ok && db) {
+        await db.from("telegram_report_snapshots").upsert(
+          { slot_key: dedupeKey, kind: "alert_dedupe", metrics: { count: overdueRows.length } },
+          { onConflict: "slot_key" },
+        );
+      }
+      if (ok) sent++;
+    }
+  }
+
   return { sent };
 }
 
@@ -201,9 +346,8 @@ export async function alertOverdueInstallments(): Promise<{ sent: number }> {
 export async function alertNoLeadsIfStale(): Promise<boolean> {
   const settings = await getReportSettings();
   if (!isAlertEnabled(settings, "no_leads_6h")) return false;
-  const hourFmt = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Kolkata", hour: "2-digit", hour12: false });
-  const hour = Number(hourFmt.format(new Date()));
-  if (hour < 10 || hour >= 20) return false;
+  const parts = istNowParts();
+  if (parts.hour < 10 || parts.hour >= 20) return false;
 
   const leads = await getLeads({ includeLegacy: false });
   const newest = leads
@@ -214,7 +358,7 @@ export async function alertNoLeadsIfStale(): Promise<boolean> {
   const ageH = (Date.now() - newest) / 3600_000;
   if (ageH < 6) return false;
 
-  const dedupeKey = `no_leads:${istTodayYMD()}:${Math.floor(hour / 6)}`;
+  const dedupeKey = `no_leads:${parts.ymd}:${Math.floor(parts.hour / 6)}`;
   const db = getSupabaseAdmin();
   if (db) {
     const { data } = await db.from("telegram_report_snapshots").select("id").eq("slot_key", dedupeKey).maybeSingle();
@@ -227,14 +371,57 @@ export async function alertNoLeadsIfStale(): Promise<boolean> {
     `Possible form / tracking breakage — check Meta + site forms`,
     formatIstShort(new Date()),
   ].join("\n");
-  await postAlert("no_leads_6h", html);
-  if (db) {
+  const ok = await postAlert("no_leads_6h", html);
+  if (ok && db) {
     await db.from("telegram_report_snapshots").upsert(
       { slot_key: dedupeKey, kind: "alert_dedupe", metrics: { age_h: ageH } },
       { onConflict: "slot_key" },
     );
   }
-  return true;
+  return ok;
+}
+
+/** No portal logins for 3h during business hours. */
+export async function alertNoLoginsIfStale(): Promise<boolean> {
+  const settings = await getReportSettings();
+  if (!isAlertEnabled(settings, "no_logins_3h")) return false;
+  const parts = istNowParts();
+  if (parts.hour < 10 || parts.hour >= 20) return false;
+
+  let newest: number | null = null;
+  try {
+    const { getExecutivePulse } = await import("../../analytics/executiveOverview");
+    const pulse = await getExecutivePulse({ preset: "today", canRevenue: false });
+    // Use history last point or today's value as proxy — if today logins is 0 and hour late enough.
+    const logins = pulse.pulse.loginUsersToday?.value;
+    if (logins != null && logins > 0) return false;
+    // No logins recorded today after 3h into business day → alert once per 3h bucket
+    if (parts.hour < 13) return false;
+  } catch {
+    return false;
+  }
+
+  const dedupeKey = `no_logins:${parts.ymd}:${Math.floor(parts.hour / 3)}`;
+  const db = getSupabaseAdmin();
+  if (db) {
+    const { data } = await db.from("telegram_report_snapshots").select("id").eq("slot_key", dedupeKey).maybeSingle();
+    if (data) return false;
+  }
+
+  const html = [
+    `🕳 <b>NO LOGINS (3h+)</b>`,
+    `Zero portal logins so far today`,
+    `Check auth / student portal health`,
+    formatIstShort(new Date()),
+  ].join("\n");
+  const ok = await postAlert("no_logins_3h", html);
+  if (ok && db) {
+    await db.from("telegram_report_snapshots").upsert(
+      { slot_key: dedupeKey, kind: "alert_dedupe", metrics: { newest } },
+      { onConflict: "slot_key" },
+    );
+  }
+  return ok;
 }
 
 /** 24h before webinar: final registration count. */
@@ -263,14 +450,14 @@ export async function alertWebinarReminders24h(): Promise<number> {
       `Registrations: ${count}`,
       formatIstShort(w.datetime),
     ].join("\n");
-    await postAlert("webinar_reminder_24h", html);
-    if (db) {
+    const ok = await postAlert("webinar_reminder_24h", html);
+    if (ok && db) {
       await db.from("telegram_report_snapshots").upsert(
         { slot_key: dedupeKey, kind: "alert_dedupe", metrics: { count } },
         { onConflict: "slot_key" },
       );
     }
-    sent++;
+    if (ok) sent++;
   }
   return sent;
 }
@@ -293,6 +480,6 @@ export function fireReportWebinarReg(webinarId: string, webinarTitle?: string | 
       const webs = await getWebinars();
       title = webs.find((w) => w.id === webinarId)?.title || title;
     }
-    await alertWebinarMilestone(count, title);
+    await alertWebinarMilestone(count, title, webinarId);
   })().catch(() => {});
 }

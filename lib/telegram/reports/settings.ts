@@ -12,6 +12,7 @@ export type ReportAlertKey =
   | "webinar_milestone"
   | "webinar_reminder_24h"
   | "no_leads_6h"
+  | "no_logins_3h"
   | "gateway_failure";
 
 export const DEFAULT_ALERTS: Record<ReportAlertKey, boolean> = {
@@ -21,6 +22,7 @@ export const DEFAULT_ALERTS: Record<ReportAlertKey, boolean> = {
   webinar_milestone: true,
   webinar_reminder_24h: true,
   no_leads_6h: true,
+  no_logins_3h: true,
   gateway_failure: true,
 };
 

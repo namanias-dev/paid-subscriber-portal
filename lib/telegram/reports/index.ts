@@ -16,7 +16,8 @@ export {
   fireReportWebinarReg,
   alertOverdueInstallments,
   alertNoLeadsIfStale,
+  alertNoLoginsIfStale,
   alertWebinarReminders24h,
   alertPaymentPaid,
 } from "./alerts";
-export { verifyReportsChannel } from "./verify";
+export { verifyReportsChannel, validateReportsChannelId } from "./verify";
