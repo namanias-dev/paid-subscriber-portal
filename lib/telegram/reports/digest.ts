@@ -412,6 +412,12 @@ export async function buildDigest(opts?: {
       ).length;
     }
     if (settled[6].status === "fulfilled") loginAvg = settled[6].value;
+    // Fallback: mean of pulse login history when all-time query is slow/unavailable.
+    if (loginAvg == null && pulseToday?.history?.logins?.length) {
+      const pts = pulseToday.history.logins.map((p) => p.value || 0);
+      const sum = pts.reduce((a, b) => a + b, 0);
+      if (pts.length > 0 && sum > 0) loginAvg = Math.round(sum / pts.length);
+    }
   } catch {
     /* sections omit missing data */
   }
