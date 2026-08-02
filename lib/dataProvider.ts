@@ -2729,7 +2729,16 @@ export async function registerWebinar(webinarId: string, name: string, phone: st
   // Analytics (best-effort, idempotent): a webinar registration milestone. The
   // attribution snapshot (from the nsa_attr cookie, passed by the route) rides the
   // event so the lead attributes to its campaign — the Meta report reads it.
-  void recordRegistrationCreated({ webinar_id: webinarId, webinar_slug: webinarSlug, phone, visitor_id: visitorId ?? null, price: webinarPrice, is_free: isFreeWebinar, attribution: attr ?? null }).catch(() => {});
+  void recordRegistrationCreated({
+    webinar_id: webinarId,
+    webinar_slug: webinarSlug,
+    name,
+    phone,
+    visitor_id: visitorId ?? null,
+    price: webinarPrice,
+    is_free: isFreeWebinar,
+    attribution: attr ?? null,
+  }).catch(() => {});
   // Auto-SMS (disabled by default): "Webinar Registered". FREE webinars confirm at
   // registration (registration == confirmation). PAID webinars must NOT confirm here —
   // payment is unresolved at registration time; the confirmation fires only after a
