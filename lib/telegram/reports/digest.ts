@@ -328,28 +328,38 @@ async function loginAllTimeDailyAvg(): Promise<number | null> {
       .from("analytics_events")
       .select("id", { count: "exact", head: true })
       .eq("event_name", "login");
-    if (cErr || count == null || count <= 0) return null;
+    if (cErr) {
+      tgLog("digest_login_avg_count_failed", { error: cErr.message }, "warn");
+      return null;
+    }
+    if (count == null || count <= 0) return null;
 
-    const { data: firstRow, error: fErr } = await db
+    const { data: rows, error: fErr } = await db
       .from("analytics_events")
       .select("occurred_at")
       .eq("event_name", "login")
       .order("occurred_at", { ascending: true })
-      .limit(1)
-      .maybeSingle();
-    if (fErr || !firstRow?.occurred_at) return null;
-    const first = new Date(firstRow.occurred_at).getTime();
+      .limit(1);
+    if (fErr) {
+      tgLog("digest_login_avg_first_failed", { error: fErr.message }, "warn");
+      return null;
+    }
+    const firstIso = Array.isArray(rows) && rows[0] ? (rows[0] as { occurred_at?: string }).occurred_at : null;
+    if (!firstIso) return null;
+    const first = new Date(firstIso).getTime();
     if (!Number.isFinite(first)) return null;
     const days = Math.max(1, Math.ceil((Date.now() - first) / 86400_000));
     return Math.round(count / days);
-  } catch {
+  } catch (e) {
+    tgLog("digest_login_avg_error", { error: (e as Error).message }, "warn");
     return null;
   }
 }
 
 function pushSection(lines: string[], header: string, body: string[]): void {
   if (!body.length) return;
-  if (lines.length > 1) lines.push("");
+  // Blank line between sections (header already ends with one blank after title).
+  if (lines.length && lines[lines.length - 1] !== "") lines.push("");
   lines.push(header);
   for (const row of body.slice(0, 4)) lines.push(row);
 }
@@ -441,9 +451,9 @@ export async function buildDigest(opts?: {
   }
 
   const lines: string[] = [];
-  // Header uses uppercase AM/PM to match target style
   const headerLabel = parts.label.replace(/\b(am|pm)\b/i, (m) => m.toUpperCase());
   lines.push(`📊 <b>NAMAN IAS · ${escapeHtml(headerLabel)}</b>`);
+  lines.push("");
 
   // ── WEBINAR ──
   if (webinar && webinar.registered > 0) {
@@ -494,17 +504,20 @@ export async function buildDigest(opts?: {
   }
 
   // ── LOGINS ──
-  if (loginsToday != null || loginsYday != null || loginAvg != null) {
-    const body: string[] = [];
-    if (loginsToday != null || loginsYday != null) {
-      const t = loginsToday != null ? `Today ${loginsToday}` : null;
-      const y = loginsYday != null ? `Yesterday ${loginsYday}` : null;
-      body.push([t, y].filter(Boolean).join(" · "));
+  {
+    const hasToday = loginsToday != null && loginsToday > 0;
+    const hasYday = loginsYday != null && loginsYday > 0;
+    const hasAvg = loginAvg != null && loginAvg > 0;
+    if (hasToday || hasYday || hasAvg) {
+      const body: string[] = [];
+      if (hasToday || hasYday) {
+        const t = loginsToday != null ? `Today ${loginsToday}` : null;
+        const y = loginsYday != null ? `Yesterday ${loginsYday}` : null;
+        body.push([t, y].filter(Boolean).join(" · "));
+      }
+      if (hasAvg) body.push(`All-time daily average ${loginAvg}`);
+      pushSection(lines, `👥 <b>LOGINS</b>`, body);
     }
-    if (loginAvg != null) {
-      body.push(`All-time daily average ${loginAvg}`);
-    }
-    pushSection(lines, `👥 <b>LOGINS</b>`, body);
   }
 
   // ── REVENUE ──
