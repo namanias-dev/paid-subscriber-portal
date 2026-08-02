@@ -161,23 +161,23 @@ export async function markAlertSent(): Promise<void> {
     .eq("id", "default");
 }
 
-/** Normalize Telegram channel/supergroup IDs to the -100… form Bot API expects. */
+/** Normalize Telegram channel/supergroup IDs to the form Bot API expects. */
 export function normalizeChannelId(raw: string | null | undefined): string | null {
   if (raw == null) return null;
   let s = String(raw).trim();
   if (!s) return null;
-  // Strip accidental wrapping quotes from env paste
   if ((s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'"))) {
     s = s.slice(1, -1).trim();
   }
   if (!s) return null;
   if (s.startsWith("-100")) return s;
-  // Bare positive channel id digits (common copy from getUpdates / web)
-  if (/^\d{9,}$/.test(s)) return `-100${s}`;
-  // Negative without -100 prefix (e.g. -1234567890)
-  if (/^-\d{9,}$/.test(s) && !s.startsWith("-100")) {
-    const digits = s.slice(1);
-    if (!digits.startsWith("100")) return `-100${digits}`;
+  // Already a negative chat id — keep as-is (do not double-prefix).
+  if (/^-\d+$/.test(s)) return s;
+  // Bare digits: only auto-prefix -100 for long ids (channel internals are typically ≥10+ after -100).
+  // Short ids (≤10) are often mistaken private user chat_ids — leave raw so getChat can diagnose.
+  if (/^\d+$/.test(s)) {
+    if (s.length >= 11) return `-100${s}`;
+    return s;
   }
   return s;
 }

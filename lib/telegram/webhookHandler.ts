@@ -17,14 +17,27 @@ import {
 } from "./subscribers";
 import { DEFAULT_FIRST_INBOUND_ACK, DEFAULT_UNKNOWN_COMMAND } from "./defaults";
 import { sendPlainAutoReply, sendWelcome } from "./welcome";
+import { maybeCaptureReportsChannel } from "./reports/discover";
 
 export interface TelegramUpdate {
   update_id?: number;
   message?: {
     message_id?: number;
     text?: string;
-    chat?: { id: number; type?: string };
+    chat?: { id: number; type?: string; title?: string };
     from?: { id: number; username?: string; first_name?: string; is_bot?: boolean };
+  };
+  channel_post?: {
+    message_id?: number;
+    text?: string;
+    chat?: { id: number; type?: string; title?: string };
+  };
+  my_chat_member?: {
+    chat?: { id: number; type?: string; title?: string };
+    new_chat_member?: { status?: string };
+  };
+  chat_member?: {
+    chat?: { id: number; type?: string; title?: string };
   };
   callback_query?: {
     id: string;
@@ -272,6 +285,18 @@ export async function processUpdate(update: TelegramUpdate): Promise<void> {
       kind = "callback_query";
       chatId = String(update.callback_query.message?.chat?.id ?? update.callback_query.from?.id ?? "");
       await handleCallback(update.callback_query);
+    } else if (update.channel_post?.chat) {
+      kind = "channel_post";
+      chatId = String(update.channel_post.chat.id);
+      await maybeCaptureReportsChannel(update.channel_post.chat);
+    } else if (update.my_chat_member?.chat) {
+      kind = "my_chat_member";
+      chatId = String(update.my_chat_member.chat.id);
+      await maybeCaptureReportsChannel(update.my_chat_member.chat);
+    } else if (update.chat_member?.chat) {
+      kind = "chat_member";
+      chatId = String(update.chat_member.chat.id);
+      await maybeCaptureReportsChannel(update.chat_member.chat);
     } else {
       const msg = update.message;
       if (!msg?.chat?.id) {
