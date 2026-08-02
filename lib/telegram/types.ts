@@ -63,6 +63,7 @@ export interface TelegramSubscriber {
   unsubscribed_at: string | null;
   last_interaction_at: string;
   phone: string | null;
+  first_inbound_ack_sent_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -166,6 +167,10 @@ export interface TelegramSettings {
   bot_username: string | null;
   welcome_body: string | null;
   welcome_buttons: TelegramButton[];
+  welcome_image_url: string | null;
+  unknown_command_reply: string | null;
+  first_inbound_ack_enabled: boolean;
+  first_inbound_ack_body: string | null;
   updated_at: string;
   updated_by: string | null;
 }

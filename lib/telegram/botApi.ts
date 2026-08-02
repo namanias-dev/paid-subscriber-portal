@@ -2,6 +2,7 @@
  * Thin Telegram Bot API client via plain fetch. No wrapper library.
  */
 import { apiBase, botConfigured } from "./config";
+import { tgLog } from "./log";
 
 export interface TelegramApiParameters {
   retry_after?: number;
@@ -103,7 +104,22 @@ export async function callMethod<T = unknown>(
 }
 
 export async function sendMessage(opts: SendMessageOpts): Promise<TelegramApiResult<{ message_id: number }>> {
-  return callMethod("sendMessage", opts as unknown as Record<string, unknown>);
+  const res = await callMethod<{ message_id: number }>(
+    "sendMessage",
+    opts as unknown as Record<string, unknown>,
+  );
+  tgLog(
+    "sendMessage",
+    {
+      chat_id: String(opts.chat_id),
+      ok: res.ok,
+      error_code: res.error_code ?? null,
+      description: res.description ?? null,
+      message_id: res.result?.message_id ?? null,
+    },
+    res.ok ? "info" : "error",
+  );
+  return res;
 }
 
 export async function sendPhoto(opts: SendPhotoOpts): Promise<TelegramApiResult<{ message_id: number }>> {
@@ -153,6 +169,10 @@ type WebhookInfoRaw = {
 
 const WEBHOOK_INFO_TTL_MS = 60_000;
 let webhookInfoCache: { at: number; value: WebhookInfoStatus } | null = null;
+
+export function invalidateWebhookInfoCache(): void {
+  webhookInfoCache = null;
+}
 
 /**
  * Server-only status for Mission Control. Cached 60s. Never returns the token.
