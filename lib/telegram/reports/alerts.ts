@@ -121,7 +121,6 @@ export async function alertPaymentPaid(p: Payment): Promise<void> {
   const der = enr ? deriveEnrollment(enr, now) : null;
   const col = enr ? deriveCollections(enr, now) : null;
   const mode = enr?.batch_label || "—";
-  const phone = displayPhone(p.phone || enr?.phone);
   const balance = col ? inr(Math.max(0, (col.remaining ?? der?.remaining) || 0)) : "—";
   const paidSoFar = col ? inr(col.paid) : amount;
   const fee = enr ? inr(Number(enr.total_fee) || null) : "—";
