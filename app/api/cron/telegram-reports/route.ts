@@ -5,7 +5,9 @@ import {
   alertOverdueInstallments,
   alertWebinarReminders24h,
   maybeRunScheduledDigest,
+  sendDigestNow,
 } from "@/lib/telegram/reports";
+import { verifyReportsChannel } from "@/lib/telegram/reports/verify";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
@@ -18,25 +20,56 @@ async function run(req: Request) {
     return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   }
   try {
-    // Manual force via ?force=1 or action=send_now — skips slot-hour gate.
     const url = new URL(req.url);
-    const force = url.searchParams.get("force") === "1" || url.searchParams.get("action") === "send_now";
-    const digest = force
-      ? await (await import("@/lib/telegram/reports")).sendDigestNow({ force: true, skipIdempotency: true })
-      : await maybeRunScheduledDigest();
-    const alerts = force
-      ? { overdue: { sent: 0 }, noLeads: false, webinar24h: 0 }
-      : {
-          overdue: await alertOverdueInstallments().catch(() => ({ sent: 0 })),
-          noLeads: await alertNoLeadsIfStale().catch(() => false),
-          webinar24h: await alertWebinarReminders24h().catch(() => 0),
-        };
-    return NextResponse.json({
-      ok: true,
-      digest,
-      alerts,
-      ts: Date.now(),
-    });
+    const action = url.searchParams.get("action") || "";
+    const force =
+      url.searchParams.get("force") === "1" ||
+      action === "send_now" ||
+      action === "send_digest";
+
+    // Fast path: verify env + getChat + optional one-line test
+    if (action === "verify") {
+      const verify = await verifyReportsChannel({
+        sendTest: url.searchParams.get("test") !== "0",
+      });
+      return NextResponse.json({ ok: verify.ok, verify, ts: Date.now() });
+    }
+
+    if (force || action === "send_morning") {
+      // Verify channel first so failures are explicit
+      const verify = await verifyReportsChannel({ sendTest: true });
+      if (!verify.ok) {
+        return NextResponse.json(
+          {
+            ok: false,
+            error: "channel_verify_failed",
+            verify,
+            ts: Date.now(),
+          },
+          { status: 502 },
+        );
+      }
+      const digest = await sendDigestNow({
+        force: true,
+        skipIdempotency: true,
+        morningExtras: action === "send_morning" || url.searchParams.get("morning") === "1",
+      });
+      return NextResponse.json({
+        ok: digest.ok,
+        verify,
+        digest,
+        alerts: { overdue: { sent: 0 }, noLeads: false, webinar24h: 0 },
+        ts: Date.now(),
+      });
+    }
+
+    const digest = await maybeRunScheduledDigest();
+    const alerts = {
+      overdue: await alertOverdueInstallments().catch(() => ({ sent: 0 })),
+      noLeads: await alertNoLeadsIfStale().catch(() => false),
+      webinar24h: await alertWebinarReminders24h().catch(() => 0),
+    };
+    return NextResponse.json({ ok: true, digest, alerts, ts: Date.now() });
   } catch (e) {
     return NextResponse.json({ ok: false, error: (e as Error).message }, { status: 500 });
   }
