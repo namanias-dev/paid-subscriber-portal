@@ -41,10 +41,8 @@ export function checkQuizAccess(quiz: Quiz, session: SessionPayload | null, enro
   if (quiz.requires_payment) {
     if (!session) return { ok: false, reason: "login" };
     if (!hasAllowedCourse && !hasPaidPlan) return { ok: false, reason: "payment", message: "Enroll or upgrade to access this test." };
-  } else if (allowedCourses.length) {
-    if (!session) return { ok: false, reason: "login" };
-    if (!hasAllowedCourse) return { ok: false, reason: "payment", message: "This test is restricted to enrolled students." };
   }
+  // Residual allowed_course_ids without requires_payment must not keep a free quiz locked.
 
   return { ok: true };
 }

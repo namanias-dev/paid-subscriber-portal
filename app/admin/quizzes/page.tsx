@@ -60,10 +60,10 @@ export default function QuizzesAdmin() {
               <td className="px-4 py-3"><span className="font-medium">{item.title}</span><span className="block text-xs text-muted">/{item.slug}</span></td>
               <td className="px-4 py-3">{item.type}</td>
               <td className="px-4 py-3">{item.subject || "—"}</td>
-              <td className="px-4 py-3">{item.is_public ? <span className="pill pill-green">Public</span> : item.requires_payment ? <span className="pill pill-amber">Paid</span> : <span className="pill pill-blue">Login</span>}</td>
+              <td className="px-4 py-3">{item.requires_payment ? <span className="pill pill-amber">Paid</span> : item.requires_login ? <span className="pill pill-blue">Login</span> : <span className="pill pill-green">Public</span>}</td>
               <td className="px-4 py-3"><span className={`pill ${item.status === "published" ? "pill-green" : item.status === "disabled" || item.status === "archived" ? "pill-gray" : "pill-amber"}`}>{item.status}</span></td>
               <td className="whitespace-nowrap px-4 py-3">
-                {item.is_public && item.status === "published" && <Link href={`/quizzes/${item.slug}`} target="_blank" className="text-primary">View</Link>}
+                {!item.requires_payment && !item.requires_login && item.status === "published" && <Link href={`/quizzes/${item.slug}`} target="_blank" className="text-primary">View</Link>}
                 <Link href={`/admin/quizzes/${item.id}/edit`} className="ml-3 text-primary">Edit</Link>
                 <button onClick={() => del(item.id)} className="ml-3 text-danger">Delete</button>
               </td>

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { revalidatePath } from "next/cache";
 import { getQuizById, updateQuiz, deleteQuiz, getAttemptsByQuiz } from "@/lib/dataProvider";
 import { requirePermission } from "@/lib/adminGuard";
 import { normalizeQuizInput } from "@/lib/quizNormalize";
@@ -24,6 +25,9 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
     const input = normalizeQuizInput(body);
     const quiz = await updateQuiz(params.id, input);
     if (!quiz) return NextResponse.json({ ok: false, error: "Not found" }, { status: 404 });
+    revalidatePath(`/quizzes/${quiz.slug}`);
+    revalidatePath("/quizzes");
+    revalidatePath("/admin/quizzes");
     return NextResponse.json({ ok: true, quiz });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Failed to update quiz.";

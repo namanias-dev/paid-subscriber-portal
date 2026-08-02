@@ -6584,7 +6584,11 @@ export async function getFoundationCourseIds(): Promise<string[]> {
  * `base` is the effective access_rules to merge into (existing ∪ patch).
  */
 export async function applyFoundationQuizAccess(isPaid: boolean, base: QuizAccessRules | undefined): Promise<QuizAccessRules | undefined> {
-  if (!isPaid) return base;
+  if (!isPaid) {
+    // Paid → free: drop sticky course locks so public/login access takes effect.
+    if (!base) return base;
+    return { ...base, allowed_course_ids: [] };
+  }
   const foundationIds = await getFoundationCourseIds();
   if (!foundationIds.length) return base;
   const ar: QuizAccessRules = { ...(base || {}) };
@@ -6592,6 +6596,18 @@ export async function applyFoundationQuizAccess(isPaid: boolean, base: QuizAcces
   const merged = [...new Set([...existing, ...foundationIds])];
   ar.allowed_course_ids = merged;
   return ar;
+}
+
+/** Remove a quiz id from every course's entitlements.quiz_ids (bidirectional cleanup). */
+async function clearQuizFromCourseEntitlements(quizId: string): Promise<void> {
+  const courses = await getAllCourses();
+  for (const c of courses) {
+    const ids = c.entitlements?.quiz_ids || [];
+    if (!ids.includes(quizId)) continue;
+    await updateCourse(c.id, {
+      entitlements: { ...(c.entitlements || {}), quiz_ids: ids.filter((id) => id !== quizId) },
+    });
+  }
 }
 
 export async function addQuiz(input: Partial<Quiz>): Promise<Quiz> {
@@ -6642,15 +6658,19 @@ export async function addQuiz(input: Partial<Quiz>): Promise<Quiz> {
 }
 export async function updateQuiz(id: string, patch: Partial<Quiz>): Promise<Quiz | null> {
   const next = { ...patch, updated_at: new Date().toISOString() };
-  // Future-proof: when a quiz is (or becomes) PAID, ensure Safalta/Saarthi course
-  // IDs stay present in allowed_course_ids. Merge against the existing quiz so a
-  // PATCH that doesn't touch access_rules/requires_payment still stays covered.
+  // When a quiz is (or becomes) PAID, ensure Safalta/Saarthi course IDs stay in
+  // allowed_course_ids. When it becomes unpaid, clear sticky course locks and
+  // remove the quiz from course.entitlements.quiz_ids so paid→public sticks.
   const existing = await getQuizById(id);
   if (existing) {
+    const wasPaid = existing.requires_payment === true;
     const isPaid = (next.requires_payment ?? existing.requires_payment) === true;
     const base = (next.access_rules ?? existing.access_rules) as QuizAccessRules | undefined;
     const mergedAr = await applyFoundationQuizAccess(isPaid, base);
     if (mergedAr) next.access_rules = mergedAr;
+    if (wasPaid && !isPaid) {
+      await clearQuizFromCourseEntitlements(id).catch(() => null);
+    }
   }
   if (demoMode()) {
     const idx = mock.quizzes.findIndex((q) => q.id === id);
