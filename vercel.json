@@ -43,7 +43,7 @@
     },
     {
       "path": "/api/cron/telegram-reports",
-      "schedule": "5 * * * *"
+      "schedule": "35 * * * *"
     }
   ]
 }
