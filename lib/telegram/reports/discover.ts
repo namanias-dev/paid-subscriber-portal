@@ -3,15 +3,12 @@
  * Handles the common mistake of pasting a private user chat_id instead of a channel id.
  */
 import { callMethod, getChat, getMe, sendMessage } from "../botApi";
-import { SITE_URL } from "../../config";
-import { webhookSecret } from "../config";
 import { tgLog } from "../log";
 import { reregisterWebhook } from "../status";
 import {
   getReportSettings,
   maskChannelId,
   normalizeChannelId,
-  resolveReportsChannelId,
   updateReportSettings,
 } from "./settings";
 import { verifyReportsChannel, type ChannelVerifyResult } from "./verify";
@@ -153,21 +150,69 @@ export async function diagnoseAndDiscoverChannel(): Promise<{
   };
 }
 
-/** Persist a channel id when webhook sees channel_post / my_chat_member. */
+/** Persist a channel id when webhook sees channel_post / my_chat_member / forward. */
 export async function maybeCaptureReportsChannel(chat: {
   id: number | string;
   type?: string;
   title?: string | null;
-}): Promise<void> {
+}): Promise<{ captured: boolean; id: string | null }> {
   const type = String(chat.type || "");
-  if (type !== "channel" && type !== "supergroup") return;
+  if (type !== "channel" && type !== "supergroup") return { captured: false, id: null };
   const id = normalizeChannelId(String(chat.id));
-  if (!id) return;
+  if (!id) return { captured: false, id: null };
   const settings = await getReportSettings();
   // Always prefer an Ops-titled channel; otherwise fill if empty / broken env.
   const title = chat.title || "";
   const isOps = /ops/i.test(title) || /naman\s*ias/i.test(title);
-  if (settings.channel_id && !isOps) return;
+  if (settings.channel_id && settings.channel_id === id) {
+    return { captured: false, id };
+  }
+  if (settings.channel_id && !isOps) return { captured: false, id: null };
   await updateReportSettings({ channel_id: id });
-  tgLog("reports_channel_captured", { id: id.replace(/.(?=.{4})/g, "•"), title }, "info");
+  tgLog("reports_channel_captured", { id: maskChannelId(id), title }, "info");
+  return { captured: true, id };
+}
+
+/** Accept a pasted channel id from a private DM (e.g. "-100…"). */
+export async function maybeCaptureReportsChannelIdFromText(
+  text: string,
+): Promise<{ captured: boolean; id: string | null }> {
+  const m = text.match(/(?:^|\s)(-100\d{8,}|-\d{10,})(?:\s|$)/);
+  if (!m) return { captured: false, id: null };
+  const id = normalizeChannelId(m[1]);
+  if (!id) return { captured: false, id: null };
+  const chat = await getChat(id);
+  if (!chat.ok || !chat.result) return { captured: false, id: null };
+  return maybeCaptureReportsChannel({
+    id: chat.result.id,
+    type: chat.result.type,
+    title: chat.result.title,
+  });
+}
+
+/** After capture: one-line test + morning digest (fire-and-forget safe to await in webhook). */
+export async function kickoffReportsAfterChannelCapture(channelId: string): Promise<{
+  testMessageId: number | null;
+  digestMessageId: number | null;
+  digestOk: boolean;
+}> {
+  const me = await getMe();
+  const bot = me.ok && me.result ? me.result.username || "bot" : "bot";
+  const test = await sendMessage({
+    chat_id: channelId,
+    text: `✅ Reports channel linked · @${bot} · ${new Date().toISOString()}`,
+    disable_notification: true,
+    disable_web_page_preview: true,
+  });
+  const { sendDigestNow } = await import("./digest");
+  const digest = await sendDigestNow({
+    force: true,
+    skipIdempotency: true,
+    morningExtras: true,
+  });
+  return {
+    testMessageId: test.result?.message_id ?? null,
+    digestMessageId: digest.messageId ?? null,
+    digestOk: !!digest.ok,
+  };
 }
