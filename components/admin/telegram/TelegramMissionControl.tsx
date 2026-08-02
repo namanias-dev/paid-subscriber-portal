@@ -4,19 +4,23 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import {
   Activity, Send, Workflow, FileText, Inbox, BarChart3, Settings as SettingsIcon,
-  RefreshCw, AlertTriangle, Plus, Trash2, Clock, MessageCircle, ExternalLink, Save, Eye,
+  RefreshCw, AlertTriangle, CheckCircle2, Plus, Trash2, Clock, MessageCircle, ExternalLink, Save, Eye,
 } from "lucide-react";
 import { LoadingBlock } from "@/components/admin/ui";
 import { useToast } from "@/components/ui/Toast";
 import TimeframeFilter from "@/components/admin/TimeframeFilter";
 import { formatISTDateTime, istTodayYMD, resolveTimeframe, type TimeframeValue } from "@/lib/dates";
 
-// ---- meta / permissions ----
+// ---- meta / permissions (booleans only — token never reaches the client) ----
 interface Meta {
   canInbox: boolean;
   canManage: boolean;
   isSuperAdmin: boolean;
   configured: boolean;
+  webhookRegistered: boolean;
+  webhookUrl: string | null;
+  lastWebhookError: string | null;
+  lastWebhookErrorAt: string | null;
   botUsername: string | null;
 }
 
@@ -99,12 +103,18 @@ export default function TelegramMissionControl() {
     fetch("/api/admin/telegram/meta")
       .then((r) => r.json())
       .then((d) => {
-        if (!d || d.ok === false && d.canInbox === undefined) return;
+        if (!d || (d.ok === false && d.canInbox === undefined)) return;
+        // Server evaluates TELEGRAM_BOT_TOKEN via botConfigured(); accept either key name.
+        const configured = d.configured === true || d.botConfigured === true;
         setMeta({
           canInbox: !!d.canInbox,
           canManage: !!d.canManage,
           isSuperAdmin: !!d.isSuperAdmin,
-          configured: d.configured === true,
+          configured,
+          webhookRegistered: d.webhookRegistered === true,
+          webhookUrl: typeof d.webhookUrl === "string" ? d.webhookUrl : null,
+          lastWebhookError: typeof d.lastWebhookError === "string" ? d.lastWebhookError : null,
+          lastWebhookErrorAt: typeof d.lastWebhookErrorAt === "string" ? d.lastWebhookErrorAt : null,
           botUsername: d.botUsername ?? null,
         });
       })
@@ -119,6 +129,12 @@ export default function TelegramMissionControl() {
     return true;
   });
 
+  const statusTone = !meta
+    ? null
+    : !meta.configured || !meta.webhookRegistered || meta.lastWebhookError
+      ? "amber"
+      : "green";
+
   return (
     <div className="space-y-5 pb-16">
       <div>
@@ -126,15 +142,50 @@ export default function TelegramMissionControl() {
         <p className="text-sm text-muted">Broadcast, automate and reply via Telegram — subscribers, leads and students.</p>
       </div>
 
-      {meta && !meta.configured && (
-        <div className="flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-          <AlertTriangle size={16} />
-          <span><code className="font-mono text-xs">TELEGRAM_BOT_TOKEN</code> is missing — Telegram sending is not configured.</span>
+      {meta && statusTone && (
+        <div
+          className={`rounded-xl border p-3 text-sm ${
+            statusTone === "green"
+              ? "border-emerald-200 bg-emerald-50 text-emerald-950"
+              : "border-amber-200 bg-amber-50 text-amber-900"
+          }`}
+        >
+          <div className="flex items-start gap-2">
+            {statusTone === "green"
+              ? <CheckCircle2 size={16} className="mt-0.5 shrink-0 text-emerald-700" />
+              : <AlertTriangle size={16} className="mt-0.5 shrink-0" />}
+            <div className="min-w-0 space-y-1.5">
+              <div className="flex flex-wrap gap-2">
+                <span className={`pill text-[10px] ${meta.configured ? "pill-green" : "pill-amber"}`}>
+                  Token {meta.configured ? "configured" : "missing"}
+                </span>
+                <span className={`pill text-[10px] ${meta.webhookRegistered ? "pill-green" : "pill-amber"}`}>
+                  Webhook {meta.webhookRegistered ? "registered" : "not registered"}
+                </span>
+                {meta.botUsername && (
+                  <span className="pill pill-gray text-[10px]">@{meta.botUsername.replace(/^@/, "")}</span>
+                )}
+              </div>
+              {!meta.configured && (
+                <p>
+                  <code className="font-mono text-xs">TELEGRAM_BOT_TOKEN</code> is missing on the server — Telegram sending is not configured.
+                </p>
+              )}
+              {meta.configured && !meta.webhookRegistered && (
+                <p>Bot token is present, but no webhook URL is registered. Run <code className="font-mono text-xs">setWebhook</code> against this deployment.</p>
+              )}
+              {meta.webhookUrl && (
+                <p className="truncate text-xs text-muted" title={meta.webhookUrl}>URL: {meta.webhookUrl}</p>
+              )}
+              {meta.lastWebhookError && (
+                <p className="text-xs">
+                  Last webhook error{meta.lastWebhookErrorAt ? ` (${formatISTDateTime(meta.lastWebhookErrorAt)})` : ""}:{" "}
+                  <span className="font-medium">{meta.lastWebhookError}</span>
+                </p>
+              )}
+            </div>
+          </div>
         </div>
-      )}
-
-      {meta?.botUsername && (
-        <p className="text-xs text-muted">Bot: <span className="font-medium text-ink">@{meta.botUsername.replace(/^@/, "")}</span></p>
       )}
 
       <div className="flex flex-wrap gap-1.5 border-b border-line">
