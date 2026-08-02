@@ -497,7 +497,7 @@ export async function buildDigest(opts?: {
       }
     }
     if (body.length) {
-      if (lines.length > 1) lines.push("");
+      if (lines.length && lines[lines.length - 1] !== "") lines.push("");
       lines.push(`🎓 <b>ADMISSIONS</b>`);
       for (const row of body) lines.push(row);
     }
@@ -548,7 +548,7 @@ export async function buildDigest(opts?: {
 
   // ── ALERTS (failed payments) ──
   if (failedToday != null && failedToday > 0) {
-    if (lines.length > 1) lines.push("");
+    if (lines.length && lines[lines.length - 1] !== "") lines.push("");
     lines.push(`🚨 ${failedToday} payment${failedToday === 1 ? "" : "s"} failed today`);
   }
 
