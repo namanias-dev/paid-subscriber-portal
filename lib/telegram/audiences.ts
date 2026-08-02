@@ -5,6 +5,7 @@ import {
 } from "../adminPhoneAudiences";
 import { normalizeIndianMobile } from "../phone";
 import { getSupabaseAdmin } from "../supabase";
+import { resolveAnswerAudience } from "./answers";
 import type { TelegramReachable } from "./types";
 
 export { PHONE_AUDIENCES };
@@ -25,18 +26,37 @@ function digits10(phone: string | null | undefined): string | null {
  * Resolve a phone audience, then join to active telegram_subscribers by
  * normalized phone OR linked lead/student (via phone match on lead/student rows
  * already reflected on subscriber.phone / linked ids).
+ *
+ * Also supports `answer:{questionKey}:{optionKey}` for retargeting poll/button answers.
  */
 export async function resolveTelegramAudience(
   audienceId: PhoneAudienceId | string,
   fromMs: number,
   toMs: number,
 ): Promise<TelegramAudienceResult> {
-  const id = audienceId as PhoneAudienceId;
+  const id = String(audienceId || "");
+
+  if (id.startsWith("answer:")) {
+    const parts = id.split(":");
+    // answer:{questionKey}:{optionKey} — questionKey may contain colons rarely; take last as option.
+    if (parts.length < 3) {
+      return { audienceSize: 0, reachable: [], skippedNoTelegram: 0 };
+    }
+    const optionKey = parts[parts.length - 1]!;
+    const questionKey = parts.slice(1, -1).join(":");
+    const reachable = await resolveAnswerAudience(questionKey, optionKey);
+    return {
+      audienceSize: reachable.length,
+      reachable,
+      skippedNoTelegram: 0,
+    };
+  }
+
   if (!PHONE_AUDIENCES.some((a) => a.id === id)) {
     return { audienceSize: 0, reachable: [], skippedNoTelegram: 0 };
   }
 
-  const people = await resolvePhoneAudience(id, fromMs, toMs);
+  const people = await resolvePhoneAudience(id as PhoneAudienceId, fromMs, toMs);
   const audienceSize = people.length;
   if (!audienceSize) {
     return { audienceSize: 0, reachable: [], skippedNoTelegram: 0 };

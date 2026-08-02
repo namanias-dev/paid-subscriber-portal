@@ -193,7 +193,7 @@ export async function reregisterWebhook(): Promise<{
   const res = await callMethod("setWebhook", {
     url,
     secret_token: secret,
-    allowed_updates: ["message", "callback_query"],
+    allowed_updates: ["message", "callback_query", "poll_answer"],
     drop_pending_updates: false,
   });
   invalidateTelegramStatusCache();

@@ -126,6 +126,39 @@ export async function sendPhoto(opts: SendPhotoOpts): Promise<TelegramApiResult<
   return callMethod("sendPhoto", opts as unknown as Record<string, unknown>);
 }
 
+export interface SendPollOpts {
+  chat_id: string | number;
+  question: string;
+  options: string[];
+  is_anonymous?: boolean;
+  allows_multiple_answers?: boolean;
+}
+
+export async function sendPoll(
+  opts: SendPollOpts,
+): Promise<TelegramApiResult<{ message_id: number; poll?: { id: string } }>> {
+  const res = await callMethod<{ message_id: number; poll?: { id: string } }>("sendPoll", {
+    chat_id: opts.chat_id,
+    question: opts.question,
+    options: opts.options,
+    is_anonymous: opts.is_anonymous !== false,
+    allows_multiple_answers: !!opts.allows_multiple_answers,
+  });
+  tgLog(
+    "sendPoll",
+    {
+      chat_id: String(opts.chat_id),
+      ok: res.ok,
+      error_code: res.error_code ?? null,
+      description: res.description ?? null,
+      message_id: res.result?.message_id ?? null,
+      poll_id: res.result?.poll?.id ?? null,
+    },
+    res.ok ? "info" : "error",
+  );
+  return res;
+}
+
 export async function answerCallbackQuery(
   callbackQueryId: string,
   text?: string,
@@ -136,16 +169,36 @@ export async function answerCallbackQuery(
   });
 }
 
-/** Build Telegram inline_keyboard from {label,url} buttons (max 3). */
-export function inlineKeyboardFromButtons(
-  buttons: { label: string; url: string }[] | null | undefined,
+export type KeyboardButtonInput =
+  | { label: string; url?: string; callback_data?: string }
+  | { label: string; url: string }
+  | { label: string; callback_data: string };
+
+/** Build Telegram inline_keyboard from url and/or callback_data buttons (max 3). */
+export function buildKeyboard(
+  buttons: KeyboardButtonInput[] | null | undefined,
 ): { inline_keyboard: InlineKeyboardButton[][] } | undefined {
   const rows = (buttons || [])
-    .filter((b) => b?.label && b?.url)
-    .slice(0, 3)
-    .map((b) => [{ text: b.label, url: b.url }]);
+    .map((b) => {
+      const label = String(b?.label || "").trim();
+      if (!label) return null;
+      const url = "url" in b && b.url ? String(b.url).trim() : "";
+      const callback = "callback_data" in b && b.callback_data ? String(b.callback_data).trim() : "";
+      if (callback) return [{ text: label, callback_data: callback.slice(0, 64) }];
+      if (url) return [{ text: label, url }];
+      return null;
+    })
+    .filter(Boolean)
+    .slice(0, 3) as InlineKeyboardButton[][];
   if (!rows.length) return undefined;
   return { inline_keyboard: rows };
+}
+
+/** @deprecated Prefer buildKeyboard — kept for url-only callers. */
+export function inlineKeyboardFromButtons(
+  buttons: KeyboardButtonInput[] | null | undefined,
+): { inline_keyboard: InlineKeyboardButton[][] } | undefined {
+  return buildKeyboard(buttons);
 }
 
 export interface WebhookInfoStatus {

@@ -1,40 +1,31 @@
-import type { TelegramTemplateVars } from "./types";
+/** @deprecated Prefer lib/telegram/compose — kept for existing imports. */
+export {
+  extractVars,
+  prepareOutboundHtml as renderTelegramBodyHtml,
+  DEFAULT_FALLBACKS,
+  TELEGRAM_VARS,
+} from "./compose";
+export { prepareOutboundHtml } from "./compose";
 
-const PLACEHOLDER_RE = /\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g;
+import { prepareOutboundHtml } from "./compose";
 
-export const SAMPLE_VARS: Required<
-  Pick<TelegramTemplateVars, "name" | "course" | "amount" | "coupon" | "webinar_date">
-> = {
+export const SAMPLE_VARS = {
   name: "Priya",
+  first_name: "Priya",
   course: "UPSC Foundation",
   amount: "4999",
   coupon: "NAMAN10",
   webinar_date: "15 Aug 2026",
+  course_link_1: "https://www.namanias.com/courses",
+  course_link_2: "https://www.namanias.com/courses",
+  webinar_link: "https://www.namanias.com/webinars",
 };
 
-export function extractVars(template: string): string[] {
-  const seen = new Set<string>();
-  const out: string[] = [];
-  const re = new RegExp(PLACEHOLDER_RE.source, "g");
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(template || ""))) {
-    const key = m[1]!;
-    if (!seen.has(key)) {
-      seen.add(key);
-      out.push(key);
-    }
-  }
-  return out;
-}
-
+/** Plain-ish render for welcome/legacy callers (strips tags after HTML prepare). */
 export function renderTelegramBody(
   template: string,
-  vars: TelegramTemplateVars | Record<string, string | number | null | undefined> = {},
+  vars: Record<string, string | number | null | undefined> = {},
+  fallbacks: Record<string, string> = {},
 ): string {
-  const re = new RegExp(PLACEHOLDER_RE.source, "g");
-  return (template || "").replace(re, (_full, key: string) => {
-    const v = vars[key];
-    if (v === undefined || v === null) return "";
-    return String(v);
-  });
+  return prepareOutboundHtml(template, vars, fallbacks).html.replace(/<[^>]+>/g, "");
 }
