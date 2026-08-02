@@ -17,7 +17,6 @@ import {
 } from "./subscribers";
 import { DEFAULT_FIRST_INBOUND_ACK, DEFAULT_UNKNOWN_COMMAND } from "./defaults";
 import { sendPlainAutoReply, sendWelcome } from "./welcome";
-import { maybeCaptureReportsChannel, maybeCaptureReportsChannelIdFromText, kickoffReportsAfterChannelCapture } from "./reports/discover";
 
 export interface TelegramUpdate {
   update_id?: number;
@@ -279,57 +278,6 @@ async function handleCallback(cq: NonNullable<TelegramUpdate["callback_query"]>)
   }
 }
 
-async function tryCaptureFromMessage(
-  msg: NonNullable<TelegramUpdate["message"]>,
-): Promise<void> {
-  const forwardChat =
-    msg.forward_from_chat ||
-    (msg.forward_origin?.type === "channel" ? msg.forward_origin.chat : undefined);
-  if (forwardChat?.id != null) {
-    const r = await maybeCaptureReportsChannel(forwardChat);
-    if (r.captured && r.id) {
-      const kick = await kickoffReportsAfterChannelCapture(r.id);
-      tgLog("reports_capture_from_forward", {
-        id: r.id.replace(/.(?=.{4})/g, "•"),
-        testMessageId: kick.testMessageId,
-        digestMessageId: kick.digestMessageId,
-        digestOk: kick.digestOk,
-      });
-      try {
-        await sendMessage({
-          chat_id: msg.chat!.id,
-          text: `✅ Ops channel linked. Digest ${kick.digestOk ? "sent" : "queued"} (msg ${kick.digestMessageId ?? "—"}).`,
-          disable_web_page_preview: true,
-        });
-      } catch {
-        /* ignore */
-      }
-      return;
-    }
-  }
-  const text = (msg.text || "").trim();
-  if (!text) return;
-  const r = await maybeCaptureReportsChannelIdFromText(text);
-  if (r.captured && r.id) {
-    const kick = await kickoffReportsAfterChannelCapture(r.id);
-    tgLog("reports_capture_from_text", {
-      id: r.id.replace(/.(?=.{4})/g, "•"),
-      testMessageId: kick.testMessageId,
-      digestMessageId: kick.digestMessageId,
-      digestOk: kick.digestOk,
-    });
-    try {
-      await sendMessage({
-        chat_id: msg.chat!.id,
-        text: `✅ Ops channel linked from pasted id. Digest ${kick.digestOk ? "sent" : "failed"} (msg ${kick.digestMessageId ?? "—"}).`,
-        disable_web_page_preview: true,
-      });
-    } catch {
-      /* ignore */
-    }
-  }
-}
-
 /** Process one Telegram update. Awaited by the webhook route before responding. */
 export async function processUpdate(update: TelegramUpdate): Promise<void> {
   let kind = "unknown";
@@ -349,23 +297,15 @@ export async function processUpdate(update: TelegramUpdate): Promise<void> {
     } else if (update.channel_post?.chat) {
       kind = "channel_post";
       chatId = String(update.channel_post.chat.id);
-      const r = await maybeCaptureReportsChannel(update.channel_post.chat);
-      if (r.captured && r.id) await kickoffReportsAfterChannelCapture(r.id);
     } else if (update.edited_channel_post?.chat) {
       kind = "edited_channel_post";
       chatId = String(update.edited_channel_post.chat.id);
-      const r = await maybeCaptureReportsChannel(update.edited_channel_post.chat);
-      if (r.captured && r.id) await kickoffReportsAfterChannelCapture(r.id);
     } else if (update.my_chat_member?.chat) {
       kind = "my_chat_member";
       chatId = String(update.my_chat_member.chat.id);
-      const r = await maybeCaptureReportsChannel(update.my_chat_member.chat);
-      if (r.captured && r.id) await kickoffReportsAfterChannelCapture(r.id);
     } else if (update.chat_member?.chat) {
       kind = "chat_member";
       chatId = String(update.chat_member.chat.id);
-      const r = await maybeCaptureReportsChannel(update.chat_member.chat);
-      if (r.captured && r.id) await kickoffReportsAfterChannelCapture(r.id);
     } else {
       const msg = update.message;
       if (!msg?.chat?.id) {
@@ -374,7 +314,6 @@ export async function processUpdate(update: TelegramUpdate): Promise<void> {
         tgLog("update_ignored", { update_id: update.update_id ?? null, keys }, "warn");
       } else {
         chatId = String(msg.chat.id);
-        await tryCaptureFromMessage(msg);
         const text = (msg.text || "").trim();
         if (text.startsWith("/start")) {
           kind = "start";

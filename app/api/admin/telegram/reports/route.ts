@@ -7,6 +7,7 @@ import {
   type DigestFrequency,
   type ReportAlertKey,
 } from "@/lib/telegram/reports";
+import { validateReportsChannelId, verifyReportsChannel } from "@/lib/telegram/reports/verify";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -31,7 +32,23 @@ export async function PATCH(req: NextRequest) {
   const patch: Parameters<typeof updateReportSettings>[0] = {};
   if ("channel_id" in body) {
     const v = body.channel_id;
-    patch.channel_id = v == null || v === "" ? null : String(v).trim();
+    if (v == null || v === "") {
+      patch.channel_id = null;
+    } else {
+      const raw = String(v).trim();
+      const validated = await validateReportsChannelId(raw);
+      if (!validated.ok || !validated.id) {
+        return NextResponse.json(
+          {
+            ok: false,
+            error: validated.error || "getChat_failed",
+            getChat: validated,
+          },
+          { status: 400 },
+        );
+      }
+      patch.channel_id = validated.id;
+    }
   }
   if (typeof body.digest_enabled === "boolean") patch.digest_enabled = body.digest_enabled;
   if (body.digest_frequency === "3h" || body.digest_frequency === "6h" || body.digest_frequency === "daily") {
@@ -62,9 +79,21 @@ export async function POST(req: NextRequest) {
   }
   const body = (await req.json().catch(() => ({}))) as { action?: string };
   const action = body.action || "send_digest_now";
+
+  if (action === "test_post") {
+    const verify = await verifyReportsChannel({ sendTest: true });
+    return NextResponse.json({
+      ok: verify.ok,
+      action,
+      verify,
+      reason: verify.ok ? undefined : verify.testError || verify.getChatError || "test_failed",
+    });
+  }
+
   if (action === "send_digest_now" || action === "send_test_report") {
     const result = await sendDigestNow({ force: true, skipIdempotency: true });
     return NextResponse.json({ ...result, action });
   }
+
   return NextResponse.json({ ok: false, error: "unknown_action" }, { status: 400 });
 }

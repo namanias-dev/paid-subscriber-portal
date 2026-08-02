@@ -9,13 +9,14 @@ import { isDemoMode, RAZORPAY_ENABLED, EMAIL_ENABLED } from "@/lib/config";
 import type { BrandConfig } from "@/lib/types";
 
 const ALERT_LABELS: { key: string; label: string }[] = [
-  { key: "seat_booked", label: "Seat booked / new admission" },
-  { key: "full_payment", label: "Full payment received" },
-  { key: "installment_overdue", label: "Installment overdue" },
-  { key: "webinar_milestone", label: "Webinar registration milestone (every 50)" },
+  { key: "seat_booked", label: "Seat booked (full detail)" },
+  { key: "full_payment", label: "Payment received / full payment" },
+  { key: "installment_overdue", label: "Overdue (daily 10 AM + 7d/30d)" },
+  { key: "webinar_milestone", label: "Webinar regs (every 25)" },
   { key: "webinar_reminder_24h", label: "Webinar 24h reminder" },
   { key: "no_leads_6h", label: "No leads for 6h (business hours)" },
-  { key: "gateway_failure", label: "Payment gateway failure" },
+  { key: "no_logins_3h", label: "No logins for 3h (business hours)" },
+  { key: "gateway_failure", label: "Payment failed (immediate)" },
 ];
 
 type ReportSettingsState = {
@@ -154,7 +155,7 @@ export default function SettingsAdmin() {
     }
   }
 
-  async function sendDigest(action: "send_digest_now" | "send_test_report") {
+  async function sendDigest(action: "send_digest_now" | "send_test_report" | "test_post") {
     setReportsBusy(true);
     try {
       const res = await fetch("/api/admin/telegram/reports", {
@@ -164,7 +165,14 @@ export default function SettingsAdmin() {
       });
       const data = await res.json().catch(() => ({ ok: false }));
       if (data.ok) {
-        toast(action === "send_test_report" ? "Test report sent" : "Digest sent", "success");
+        toast(
+          action === "test_post"
+            ? "Test post sent"
+            : action === "send_test_report"
+              ? "Test report sent"
+              : "Digest sent",
+          "success",
+        );
         loadReports();
       } else toast(data.reason || data.error || "Send failed", "error");
     } catch {
@@ -319,11 +327,11 @@ export default function SettingsAdmin() {
                 <button type="button" className="btn btn-secondary" disabled={reportsSaving} onClick={() => void saveReports()}>
                   {reportsSaving ? "Saving…" : "Save reports"}
                 </button>
-                <button type="button" className="btn btn-primary" disabled={reportsBusy} onClick={() => void sendDigest("send_test_report")}>
-                  {reportsBusy ? "Sending…" : "Send test report"}
+                <button type="button" className="btn btn-secondary" disabled={reportsBusy} onClick={() => void sendDigest("test_post")}>
+                  {reportsBusy ? "Sending…" : "Test post"}
                 </button>
-                <button type="button" className="btn btn-secondary" disabled={reportsBusy} onClick={() => void sendDigest("send_digest_now")}>
-                  Send digest now
+                <button type="button" className="btn btn-primary" disabled={reportsBusy} onClick={() => void sendDigest("send_digest_now")}>
+                  {reportsBusy ? "Sending…" : "Send digest now"}
                 </button>
               </div>
               <div className="sm:col-span-2 text-xs text-muted space-y-1">
