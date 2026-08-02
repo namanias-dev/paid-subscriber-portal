@@ -108,16 +108,28 @@ export async function upsertFromStart(input: UpsertFromStartInput): Promise<Upse
   let source: string | null = null;
 
   if (payload.startsWith("lead_")) {
-    linkedLeadId = payload.slice("lead_".length) || null;
-    if (linkedLeadId) {
-      const linked = await linkLead(linkedLeadId, chatId);
-      if (linked) phone = linked.phone;
+    const candidate = payload.slice("lead_".length) || null;
+    if (candidate) {
+      const linked = await linkLead(candidate, chatId);
+      if (linked) {
+        linkedLeadId = candidate;
+        phone = linked.phone;
+      } else {
+        tgLog("lead_link_miss", { lead_id: candidate, chat_id: chatId }, "warn");
+        source = payload.slice(0, 120);
+      }
     }
   } else if (payload.startsWith("student_")) {
-    linkedStudentId = payload.slice("student_".length) || null;
-    if (linkedStudentId) {
-      const linked = await linkStudent(linkedStudentId, chatId);
-      if (linked) phone = linked.phone;
+    const candidate = payload.slice("student_".length) || null;
+    if (candidate) {
+      const linked = await linkStudent(candidate, chatId);
+      if (linked) {
+        linkedStudentId = candidate;
+        phone = linked.phone;
+      } else {
+        tgLog("student_link_miss", { student_id: candidate, chat_id: chatId }, "warn");
+        source = payload.slice(0, 120);
+      }
     }
   } else if (payload) {
     source = payload.slice(0, 120);
