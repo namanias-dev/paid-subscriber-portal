@@ -8,7 +8,7 @@ import {
 } from "@/lib/telegram/reports";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+export const maxDuration = 120;
 
 async function run(req: Request) {
   const authorized =
@@ -24,15 +24,17 @@ async function run(req: Request) {
     const digest = force
       ? await (await import("@/lib/telegram/reports")).sendDigestNow({ force: true, skipIdempotency: true })
       : await maybeRunScheduledDigest();
-    const [overdue, noLeads, webinar24h] = await Promise.all([
-      alertOverdueInstallments().catch(() => ({ sent: 0 })),
-      alertNoLeadsIfStale().catch(() => false),
-      alertWebinarReminders24h().catch(() => 0),
-    ]);
+    const alerts = force
+      ? { overdue: { sent: 0 }, noLeads: false, webinar24h: 0 }
+      : {
+          overdue: await alertOverdueInstallments().catch(() => ({ sent: 0 })),
+          noLeads: await alertNoLeadsIfStale().catch(() => false),
+          webinar24h: await alertWebinarReminders24h().catch(() => 0),
+        };
     return NextResponse.json({
       ok: true,
       digest,
-      alerts: { overdue, noLeads, webinar24h },
+      alerts,
       ts: Date.now(),
     });
   } catch (e) {
