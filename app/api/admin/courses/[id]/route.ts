@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
 import { updateCourse, deleteCourse, getAllCourses } from "@/lib/dataProvider";
-import { requirePermission } from "@/lib/adminGuard";
+import { requirePermission, getActionActor } from "@/lib/adminGuard";
 import { assertBatchesHaveStartDates, normalizeLandingInput } from "@/lib/landing";
+import { logAdminActivity } from "@/lib/adminActivity";
+import { zoomAuditSnapshot, zoomFieldsChanged } from "@/lib/courseZoom";
 
 export const dynamic = "force-dynamic";
 
@@ -15,8 +17,28 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
     const previousIds = new Set((existing?.batches || []).map((b) => b.id));
     const batchCheck = assertBatchesHaveStartDates((norm.value as { batches?: unknown })?.batches, { previousIds });
     if (!batchCheck.ok) return NextResponse.json({ ok: false, error: batchCheck.error }, { status: 400 });
+
+    const beforeZoom = existing
+      ? zoomAuditSnapshot(existing.batches, existing.after_registration)
+      : null;
+
     const course = await updateCourse(params.id, norm.value!);
     if (!course) return NextResponse.json({ ok: false, error: "Not found." }, { status: 404 });
+
+    if (beforeZoom) {
+      const afterZoom = zoomAuditSnapshot(course.batches, course.after_registration);
+      if (zoomFieldsChanged(beforeZoom, afterZoom)) {
+        const actor = await getActionActor().catch(() => null);
+        void logAdminActivity({
+          actor,
+          action: "course_batch_zoom_updated",
+          entityType: "course",
+          entityId: course.id,
+          metadata: { before: beforeZoom, after: afterZoom, title: course.title },
+        });
+      }
+    }
+
     return NextResponse.json({ ok: true, course });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Failed to update.";

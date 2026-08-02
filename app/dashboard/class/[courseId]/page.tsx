@@ -1,10 +1,11 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { ArrowLeft, Lock, ShieldCheck } from "lucide-react";
-import { getEnrollments, getAllCourses, getLibraryDocsByIds, getOrientationVideosForTarget } from "@/lib/dataProvider";
+import { getEnrollments, getAllCourses, getLibraryDocsByIds, getOrientationVideosForTarget, getCourseEnrollmentsByPhone } from "@/lib/dataProvider";
 import { hasCourseAccess } from "@/lib/courseAccess";
 import { resolveLearner } from "@/lib/entitlements";
 import { getClassHubSectionsForCourse, getClassHubPerformance } from "@/lib/classHubServer";
+import { resolveEnrollmentBatchId, resolveLiveClass } from "@/lib/courseZoom";
 import ClassHubContent from "@/components/dashboard/ClassHubContent";
 import ClassHubBatch from "@/components/dashboard/ClassHubBatch";
 
@@ -21,14 +22,12 @@ export default async function ClassHubPage({ params }: { params: { courseId: str
   }
 
   const isStaff = learner.kind === "staff";
-  // Access gate: staff via comp grant; students via their active enrolment; other
-  // learners via their validity-filtered course set. Student path is unchanged.
   let access: boolean;
   if (isStaff) {
     access = learner.courseIds.includes(course.id);
   } else if (learner.kind === "student" && learner.studentId) {
     const enrollments = await getEnrollments(learner.studentId);
-    access = hasCourseAccess(course.id, { enrollments });
+    access = hasCourseAccess(course.id, { enrollments }) || learner.courseIds.includes(course.id);
   } else {
     access = learner.courseIds.includes(course.id);
   }
@@ -41,6 +40,11 @@ export default async function ClassHubPage({ params }: { params: { courseId: str
       />
     );
   }
+
+  const courseEnrollments = isStaff ? [] : await getCourseEnrollmentsByPhone(learner.phone);
+  const enrollment = courseEnrollments.find((e) => e.course_id === course.id && e.status !== "cancelled") || null;
+  const batchId = resolveEnrollmentBatchId(course, enrollment);
+  const live = resolveLiveClass(course, batchId);
 
   const ar = course.after_registration || {};
   const [docs, orientationVideos, sections, performance] = await Promise.all([
@@ -62,7 +66,6 @@ export default async function ClassHubPage({ params }: { params: { courseId: str
         </div>
       )}
 
-      {/* Hero */}
       <section className="ca-dark ca-grain relative overflow-hidden rounded-2xl p-6 sm:p-8">
         <div className="ca-orb" style={{ width: 220, height: 220, top: -110, right: -50, background: "rgba(212,175,55,0.18)" }} />
         <div className="relative">
@@ -72,7 +75,7 @@ export default async function ClassHubPage({ params }: { params: { courseId: str
         </div>
       </section>
 
-      <ClassHubContent course={course} docs={docs} orientationVideos={orientationVideos} />
+      <ClassHubContent course={course} docs={docs} orientationVideos={orientationVideos} live={live} />
 
       <ClassHubBatch courseId={course.id} sections={sections} performance={performance} />
     </div>

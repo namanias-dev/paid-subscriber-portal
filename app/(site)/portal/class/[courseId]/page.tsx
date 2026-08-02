@@ -3,11 +3,12 @@ import { redirect } from "next/navigation";
 import type { Metadata } from "next";
 import { ArrowLeft, Lock } from "lucide-react";
 import { getBuyerSession } from "@/lib/session";
-import { getAllCourses, getLibraryDocsByIds, paidCourseIdsForPhone, getOrientationVideosForTarget } from "@/lib/dataProvider";
+import { getAllCourses, getLibraryDocsByIds, paidCourseIdsForPhone, getOrientationVideosForTarget, getCourseEnrollmentsByPhone } from "@/lib/dataProvider";
 import { hasCourseAccess } from "@/lib/courseAccess";
 import { resolveLearner } from "@/lib/entitlements";
 import { getClassHubSectionsForCourse, getClassHubPerformance } from "@/lib/classHubServer";
 import { buildPerformanceData } from "@/lib/performance";
+import { resolveEnrollmentBatchId, resolveLiveClass } from "@/lib/courseZoom";
 import ClassHubContent from "@/components/dashboard/ClassHubContent";
 import ClassHubBatch from "@/components/dashboard/ClassHubBatch";
 
@@ -24,9 +25,10 @@ export default async function PortalClassHubPage({
   const session = await getBuyerSession();
   if (!session) redirect(`/portal/login?next=${encodeURIComponent(`/portal/class/${params.courseId}`)}`);
 
-  const [courses, paidCourseIds] = await Promise.all([
+  const [courses, paidCourseIds, courseEnrollments] = await Promise.all([
     getAllCourses(),
     paidCourseIdsForPhone(session.phone),
+    getCourseEnrollmentsByPhone(session.phone),
   ]);
   const course = courses.find((c) => c.id === params.courseId);
 
@@ -34,7 +36,6 @@ export default async function PortalClassHubPage({
     return <Locked title="Course not found" subtitle="This course is no longer available." />;
   }
 
-  // Phase 2 gating: access is granted the moment the seat OR full fee is paid.
   const access = hasCourseAccess(course.id, { paidCourseIds });
   if (!access) {
     return (
@@ -46,6 +47,10 @@ export default async function PortalClassHubPage({
     );
   }
 
+  const enrollment = courseEnrollments.find((e) => e.course_id === course.id && e.status !== "cancelled") || null;
+  const batchId = resolveEnrollmentBatchId(course, enrollment);
+  const live = resolveLiveClass(course, batchId);
+
   const ar = course.after_registration || {};
   const [docs, orientationVideos, learner] = await Promise.all([
     getLibraryDocsByIds([...(ar.doc_ids || []), ...(course.brochure_ids || [])]),
@@ -53,8 +58,6 @@ export default async function PortalClassHubPage({
     resolveLearner(),
   ]);
 
-  // Reuse the entitlement engine for limited-access expiry: if the learner's
-  // valid course set no longer includes this course, the batch content is gated.
   const accessExpired = !!learner && !learner.courseIds.includes(course.id);
   const [sections, performance] = accessExpired
     ? [[], buildPerformanceData({ attempts: [], quizById: new Map(), available: [], attemptStatus: {}, views: [], courseId: course.id })]
@@ -78,7 +81,7 @@ export default async function PortalClassHubPage({
         </div>
       </section>
 
-      <ClassHubContent course={course} docs={docs} orientationVideos={orientationVideos} />
+      <ClassHubContent course={course} docs={docs} orientationVideos={orientationVideos} live={live} />
 
       {accessExpired ? (
         <div className="rounded-2xl border border-amber-200 bg-amber-50 p-6 text-center">
