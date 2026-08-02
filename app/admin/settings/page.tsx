@@ -1,12 +1,34 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { PageHeader } from "@/components/admin/ui";
 import { Section, Field, FormActions } from "@/components/admin/FormKit";
 import { useToast } from "@/components/ui/Toast";
 import { DEFAULT_BRAND } from "@/lib/homeDefaults";
 import { isDemoMode, RAZORPAY_ENABLED, EMAIL_ENABLED } from "@/lib/config";
 import type { BrandConfig } from "@/lib/types";
+
+const ALERT_LABELS: { key: string; label: string }[] = [
+  { key: "seat_booked", label: "Seat booked / new admission" },
+  { key: "full_payment", label: "Full payment received" },
+  { key: "installment_overdue", label: "Installment overdue" },
+  { key: "webinar_milestone", label: "Webinar registration milestone (every 50)" },
+  { key: "webinar_reminder_24h", label: "Webinar 24h reminder" },
+  { key: "no_leads_6h", label: "No leads for 6h (business hours)" },
+  { key: "gateway_failure", label: "Payment gateway failure" },
+];
+
+type ReportSettingsState = {
+  channel_id: string;
+  digest_enabled: boolean;
+  digest_frequency: "3h" | "6h" | "daily";
+  quiet_hours_start: string;
+  quiet_hours_end: string;
+  alerts: Record<string, boolean>;
+  last_digest_at: string | null;
+  last_digest_error: string | null;
+  last_alert_at: string | null;
+};
 
 export default function SettingsAdmin() {
   const { toast } = useToast();
@@ -15,6 +37,32 @@ export default function SettingsAdmin() {
   const [isSuper, setIsSuper] = useState(false);
   const [allowAdminCsv, setAllowAdminCsv] = useState(false);
   const [csvSaving, setCsvSaving] = useState(false);
+  const [reports, setReports] = useState<ReportSettingsState | null>(null);
+  const [reportsSaving, setReportsSaving] = useState(false);
+  const [reportsBusy, setReportsBusy] = useState(false);
+  const [envChannel, setEnvChannel] = useState(false);
+
+  const loadReports = useCallback(() => {
+    fetch("/api/admin/telegram/reports")
+      .then((r) => r.json())
+      .then((d) => {
+        if (!d?.ok) return;
+        const s = d.settings || {};
+        setEnvChannel(!!d.envChannelConfigured);
+        setReports({
+          channel_id: s.channel_id || "",
+          digest_enabled: s.digest_enabled !== false,
+          digest_frequency: s.digest_frequency || "3h",
+          quiet_hours_start: s.quiet_hours_start != null ? String(s.quiet_hours_start) : "",
+          quiet_hours_end: s.quiet_hours_end != null ? String(s.quiet_hours_end) : "",
+          alerts: s.alerts || {},
+          last_digest_at: s.last_digest_at || null,
+          last_digest_error: s.last_digest_error || null,
+          last_alert_at: s.last_alert_at || null,
+        });
+      })
+      .catch(() => null);
+  }, []);
 
   useEffect(() => {
     (async () => {
@@ -35,7 +83,8 @@ export default function SettingsAdmin() {
         }
       })
       .catch(() => null);
-  }, []);
+    loadReports();
+  }, [loadReports]);
 
   const set = (patch: Partial<BrandConfig>) => setBrand((b) => ({ ...(b || {}), ...patch }));
 
@@ -74,6 +123,54 @@ export default function SettingsAdmin() {
       toast("Failed to save", "error");
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function saveReports() {
+    if (!reports) return;
+    setReportsSaving(true);
+    try {
+      const res = await fetch("/api/admin/telegram/reports", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          channel_id: reports.channel_id.trim() || null,
+          digest_enabled: reports.digest_enabled,
+          digest_frequency: reports.digest_frequency,
+          quiet_hours_start: reports.quiet_hours_start === "" ? null : Number(reports.quiet_hours_start),
+          quiet_hours_end: reports.quiet_hours_end === "" ? null : Number(reports.quiet_hours_end),
+          alerts: reports.alerts,
+        }),
+      });
+      const data = await res.json().catch(() => ({ ok: false }));
+      if (data.ok) {
+        toast("Reports settings saved", "success");
+        loadReports();
+      } else toast(data.error || "Failed to save reports", "error");
+    } catch {
+      toast("Failed to save reports", "error");
+    } finally {
+      setReportsSaving(false);
+    }
+  }
+
+  async function sendDigest(action: "send_digest_now" | "send_test_report") {
+    setReportsBusy(true);
+    try {
+      const res = await fetch("/api/admin/telegram/reports", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action }),
+      });
+      const data = await res.json().catch(() => ({ ok: false }));
+      if (data.ok) {
+        toast(action === "send_test_report" ? "Test report sent" : "Digest sent", "success");
+        loadReports();
+      } else toast(data.reason || data.error || "Send failed", "error");
+    } catch {
+      toast("Send failed", "error");
+    } finally {
+      setReportsBusy(false);
     }
   }
 
@@ -137,6 +234,107 @@ export default function SettingsAdmin() {
           <Field label="Instagram"><input className="input" value={brand.instagram || ""} onChange={(e) => set({ instagram: e.target.value })} placeholder="https://instagram.com/..." /></Field>
           <Field label="YouTube"><input className="input" value={brand.youtube || ""} onChange={(e) => set({ youtube: e.target.value })} placeholder="https://youtube.com/..." /></Field>
           <Field label="Telegram"><input className="input" value={brand.telegram || ""} onChange={(e) => set({ telegram: e.target.value })} placeholder="https://t.me/..." /></Field>
+        </Section>
+
+        <Section title="Reports" desc="Telegram channel digests (every 3h IST, silent) and real-time event alerts. Uses Overview metrics — same numbers as the dashboard.">
+          {!reports ? (
+            <p className="text-sm text-muted sm:col-span-2">Loading reports settings…</p>
+          ) : (
+            <>
+              <Field label="Channel ID" full hint={envChannel ? "Env TELEGRAM_REPORTS_CHANNEL_ID is set; field overrides when filled." : "Or set TELEGRAM_REPORTS_CHANNEL_ID in Vercel."}>
+                <input
+                  className="input font-mono"
+                  value={reports.channel_id}
+                  onChange={(e) => setReports({ ...reports, channel_id: e.target.value })}
+                  placeholder="-100…"
+                />
+              </Field>
+              <Field label="Digest frequency">
+                <select
+                  className="input"
+                  value={reports.digest_frequency}
+                  onChange={(e) =>
+                    setReports({
+                      ...reports,
+                      digest_frequency: e.target.value as "3h" | "6h" | "daily",
+                    })
+                  }
+                >
+                  <option value="3h">Every 3 hours (6am–12am IST)</option>
+                  <option value="6h">Every 6 hours</option>
+                  <option value="daily">Daily only (6 AM)</option>
+                </select>
+              </Field>
+              <Field label="Digests enabled">
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={reports.digest_enabled}
+                    onChange={(e) => setReports({ ...reports, digest_enabled: e.target.checked })}
+                  />
+                  Post scheduled digests
+                </label>
+              </Field>
+              <Field label="Quiet hours start (IST)">
+                <input
+                  className="input"
+                  type="number"
+                  min={0}
+                  max={23}
+                  value={reports.quiet_hours_start}
+                  onChange={(e) => setReports({ ...reports, quiet_hours_start: e.target.value })}
+                  placeholder="e.g. 23"
+                />
+              </Field>
+              <Field label="Quiet hours end (IST)">
+                <input
+                  className="input"
+                  type="number"
+                  min={0}
+                  max={23}
+                  value={reports.quiet_hours_end}
+                  onChange={(e) => setReports({ ...reports, quiet_hours_end: e.target.value })}
+                  placeholder="e.g. 6"
+                />
+              </Field>
+              <div className="sm:col-span-2 space-y-2">
+                <p className="text-sm font-medium text-ink">Event alerts</p>
+                {ALERT_LABELS.map((a) => (
+                  <label key={a.key} className="flex items-center gap-2 text-sm text-ink2">
+                    <input
+                      type="checkbox"
+                      checked={reports.alerts[a.key] !== false}
+                      onChange={(e) =>
+                        setReports({
+                          ...reports,
+                          alerts: { ...reports.alerts, [a.key]: e.target.checked },
+                        })
+                      }
+                    />
+                    {a.label}
+                  </label>
+                ))}
+              </div>
+              <div className="sm:col-span-2 flex flex-wrap gap-2">
+                <button type="button" className="btn btn-secondary" disabled={reportsSaving} onClick={() => void saveReports()}>
+                  {reportsSaving ? "Saving…" : "Save reports"}
+                </button>
+                <button type="button" className="btn btn-primary" disabled={reportsBusy} onClick={() => void sendDigest("send_test_report")}>
+                  {reportsBusy ? "Sending…" : "Send test report"}
+                </button>
+                <button type="button" className="btn btn-secondary" disabled={reportsBusy} onClick={() => void sendDigest("send_digest_now")}>
+                  Send digest now
+                </button>
+              </div>
+              <div className="sm:col-span-2 text-xs text-muted space-y-1">
+                <p>Last digest: {reports.last_digest_at ? new Date(reports.last_digest_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }) : "—"}</p>
+                <p>Last alert: {reports.last_alert_at ? new Date(reports.last_alert_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }) : "—"}</p>
+                <p className={reports.last_digest_error ? "text-red-600" : ""}>
+                  Last error: {reports.last_digest_error || "—"}
+                </p>
+              </div>
+            </>
+          )}
         </Section>
 
         {isSuper && (

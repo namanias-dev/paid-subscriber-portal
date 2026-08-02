@@ -169,6 +169,9 @@ export async function recordPaymentStatusChanged(p: Payment, toStatus: string, s
   // Auto-SMS (disabled by default): payment failed.
   if (toStatus === "FAILED") {
     fireAutoSms({ trigger: TRIGGERS.payment_failed, phone: p.phone, name: p.student_name, vars: { item_short: p.item }, entity: smsEntityForPayment(p), entityId: ref });
+    void import("../telegram/reports/alerts")
+      .then((m) => m.fireReportGatewayFailure(p))
+      .catch(() => {});
   }
 }
 
@@ -218,6 +221,10 @@ export async function recordPaymentPaid(p: Payment, source = "system"): Promise<
       dedupeKey: `payment_received:${ref}`,
       source: "payment",
     });
+    // Telegram business reports — seat / full-payment alerts (non-blocking).
+    void import("../telegram/reports/alerts")
+      .then((m) => m.fireReportPaymentPaid(p))
+      .catch(() => {});
     if (p.item_type === "course") {
       fireAutoSms({ trigger: TRIGGERS.course_enrolled, phone: p.phone, name: p.student_name, vars: { item_short: p.item }, entity: smsEntityForPayment(p), entityId: ref });
     } else if (p.item_type === "webinar") {
@@ -301,6 +308,9 @@ export async function recordRegistrationCreated(reg: { id?: string; webinar_id: 
     dedupeKey: reg.id ? `webinar_registered:reg:${reg.id}` : `webinar_registered:${reg.webinar_id}:${phone}`,
     source: "webinar",
   });
+  void import("../telegram/reports/alerts")
+    .then((m) => m.fireReportWebinarReg(reg.webinar_id, reg.webinar_slug ?? null))
+    .catch(() => {});
   // Meta Lead (server) — the free-registration conversion. Paid webinars fire
   // Purchase from the PAID chokepoint instead; this Lead marks the free capture.
   // The id is DETERMINISTIC from webinar_id + phone so the browser pixel computes
