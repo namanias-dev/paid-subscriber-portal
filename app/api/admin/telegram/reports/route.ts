@@ -51,7 +51,12 @@ export async function PATCH(req: NextRequest) {
     }
   }
   if (typeof body.digest_enabled === "boolean") patch.digest_enabled = body.digest_enabled;
-  if (body.digest_frequency === "3h" || body.digest_frequency === "6h" || body.digest_frequency === "daily") {
+  if (
+    body.digest_frequency === "2h" ||
+    body.digest_frequency === "3h" ||
+    body.digest_frequency === "6h" ||
+    body.digest_frequency === "daily"
+  ) {
     patch.digest_frequency = body.digest_frequency as DigestFrequency;
   }
   if ("quiet_hours_start" in body) {
