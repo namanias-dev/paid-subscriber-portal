@@ -100,6 +100,50 @@ async function run(req: Request) {
       });
     }
 
+    if (action === "webinar_reg_alert") {
+      const { alertWebinarRegistration } = await import("@/lib/telegram/reports/alerts");
+      const { getAllWebinarRegistrations, getWebinars } = await import("@/lib/dataProvider");
+      const regId = url.searchParams.get("registration_id") || "";
+      const nameQ = (url.searchParams.get("name") || "").trim().toLowerCase();
+      const regs = await getAllWebinarRegistrations();
+      let reg =
+        (regId && regs.find((r) => r.id === regId)) ||
+        (nameQ
+          ? [...regs]
+              .filter((r) => (r.name || "").toLowerCase() === nameQ)
+              .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0]
+          : null) ||
+        null;
+      if (!reg) {
+        return NextResponse.json({ ok: false, error: "registration_not_found", ts: Date.now() }, { status: 404 });
+      }
+      const webs = await getWebinars();
+      const w = webs.find((x) => x.id === reg!.webinar_id);
+      const count = regs.filter((r) => r.webinar_id === reg!.webinar_id).length;
+      const sent = await alertWebinarRegistration({
+        webinarId: reg.webinar_id,
+        name: reg.name || "Student",
+        phone: reg.phone,
+        webinarTitle: w?.title || null,
+        webinarSlug: w?.slug || null,
+        webinarAt: w?.datetime || null,
+        price: w?.price ?? null,
+        regCount: count,
+        registeredAt: reg.created_at,
+      });
+      return NextResponse.json({
+        ok: sent,
+        registration: {
+          id: reg.id,
+          name: reg.name,
+          webinar: w?.title || null,
+          count,
+          created_at: reg.created_at,
+        },
+        ts: Date.now(),
+      });
+    }
+
     if (force || action === "send_morning") {
       const settings = await getReportSettings();
       const guarded = await assertReportsChannel(
