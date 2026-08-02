@@ -3,6 +3,11 @@
   "regions": [
     "bom1"
   ],
+  "functions": {
+    "app/api/cron/telegram-reports/route.ts": {
+      "maxDuration": 120
+    }
+  },
   "crons": [
     {
       "path": "/api/cron/ping",

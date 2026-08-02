@@ -161,6 +161,25 @@ export async function sendPoll(
   return res;
 }
 
+export async function getChat(
+  chatId: string | number,
+): Promise<
+  TelegramApiResult<{
+    id: number;
+    type: string;
+    title?: string;
+    username?: string;
+  }>
+> {
+  return callMethod("getChat", { chat_id: chatId });
+}
+
+export async function getMe(): Promise<
+  TelegramApiResult<{ id: number; username?: string; first_name?: string }>
+> {
+  return callMethod("getMe");
+}
+
 export async function answerCallbackQuery(
   callbackQueryId: string,
   text?: string,

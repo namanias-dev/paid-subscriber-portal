@@ -3,6 +3,8 @@ export {
   getReportSettings,
   updateReportSettings,
   resolveReportsChannelId,
+  normalizeChannelId,
+  maskChannelId,
   DEFAULT_ALERTS,
   type ReportSettings,
   type ReportAlertKey,
@@ -15,4 +17,6 @@ export {
   alertOverdueInstallments,
   alertNoLeadsIfStale,
   alertWebinarReminders24h,
+  alertPaymentPaid,
 } from "./alerts";
+export { verifyReportsChannel } from "./verify";

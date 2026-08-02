@@ -33,6 +33,7 @@ import {
   getReportSettings,
   inQuietHours,
   markDigestResult,
+  maskChannelId,
   resolveReportsChannelId,
   type ReportSettings,
 } from "./settings";
@@ -212,29 +213,42 @@ export async function buildDigest(opts?: {
   const parts = istNowParts();
   const isMorningSummary = opts?.forceMorningExtras === true || parts.hour === 6;
 
-  const [pulse, courses, enrollments, webinar] = await Promise.all([
-    getExecutivePulse({ preset: "today", canRevenue: true }),
-    getAllCourses(),
-    getAllCourseEnrollments(),
-    pickUpcomingWebinar(),
-  ]);
+  let pulse: Awaited<ReturnType<typeof getExecutivePulse>> | null = null;
+  let courses: Awaited<ReturnType<typeof getAllCourses>> = [];
+  let enrollments: Awaited<ReturnType<typeof getAllCourseEnrollments>> = [];
+  let webinar: Awaited<ReturnType<typeof pickUpcomingWebinar>> = null;
+
+  try {
+    const settled = await Promise.allSettled([
+      getExecutivePulse({ preset: "today", canRevenue: true }),
+      getAllCourses(),
+      getAllCourseEnrollments(),
+      pickUpcomingWebinar(),
+    ]);
+    if (settled[0].status === "fulfilled") pulse = settled[0].value;
+    if (settled[1].status === "fulfilled") courses = settled[1].value;
+    if (settled[2].status === "fulfilled") enrollments = settled[2].value;
+    if (settled[3].status === "fulfilled") webinar = settled[3].value;
+  } catch {
+    /* sections fall back to — */
+  }
 
   const prev = opts?.previous || null;
   const courseBlocks = courseBreakdown(courses, enrollments);
   const unpaid7d = seatsUnpaid7d(enrollments);
   const collections = collectionsFromEnrollments(enrollments);
 
-  const loginsToday = mVal(pulse.pulse.loginUsersToday);
-  const loginsYday = mPrev(pulse.pulse.loginUsersToday);
-  // Same series Overview uses for login history — 7-day average of login users.
-  const last7 = pulse.history.loginUsers.slice(-7);
+  const loginsToday = pulse ? mVal(pulse.pulse.loginUsersToday) : null;
+  const loginsYday = pulse ? mPrev(pulse.pulse.loginUsersToday) : null;
+  const last7 = pulse?.history.loginUsers.slice(-7) || [];
   const loginAvg =
     last7.length > 0 ? Math.round((last7.reduce((s, p) => s + (p.value || 0), 0) / last7.length) * 10) / 10 : null;
 
-  const leadsToday = mVal(pulse.pulse.leadsToday);
-  const admissionsToday = mVal(pulse.pulse.seatBookingsToday);
-  const revenueToday =
-    (mVal(pulse.pulse.courseRevenue) || 0) + (mVal(pulse.pulse.webinarRevenue) || 0);
+  const leadsToday = pulse ? mVal(pulse.pulse.leadsToday) : null;
+  const admissionsToday = pulse ? mVal(pulse.pulse.seatBookingsToday) : null;
+  const revenueToday = pulse
+    ? (mVal(pulse.pulse.courseRevenue) || 0) + (mVal(pulse.pulse.webinarRevenue) || 0)
+    : null;
 
   const metrics: SnapshotMetrics = {
     logins_today: loginsToday,
@@ -266,7 +280,7 @@ export async function buildDigest(opts?: {
   lines.push("");
   lines.push(`👥 <b>LOGINS</b>`);
   lines.push(`Today ${dash(loginsToday)} · Yesterday ${dash(loginsYday)} · Avg ${dash(loginAvg)}`);
-  lines.push(`${deltaArrow(mPct(pulse.pulse.loginUsersToday))} vs yesterday`);
+  lines.push(`${deltaArrow(pulse ? mPct(pulse.pulse.loginUsersToday) : null)} vs yesterday`);
   lines.push("");
 
   if (webinar) {
@@ -303,9 +317,9 @@ export async function buildDigest(opts?: {
 
   lines.push(`📈 <b>TODAY</b>`);
   lines.push(
-    `New leads ${dash(leadsToday)} · Admissions ${dash(admissionsToday)} · Revenue ${inr(revenueToday || null)}`,
+    `New leads ${dash(leadsToday)} · Admissions ${dash(admissionsToday)} · Revenue ${inr(revenueToday)}`,
   );
-  lines.push(`${deltaArrow(mPct(pulse.pulse.leadsToday))} leads vs yesterday`);
+  lines.push(`${deltaArrow(pulse ? mPct(pulse.pulse.leadsToday) : null)} leads vs yesterday`);
   lines.push("");
   lines.push(`⚠️ ${dash(collections.overdueCount)} installments overdue · ${dash(unpaid7d)} seats unpaid 7d+`);
   if (collections.overdueAmount > 0) lines.push(`${inr(collections.overdueAmount)} overdue`);
@@ -313,17 +327,25 @@ export async function buildDigest(opts?: {
   if (isMorningSummary) {
     lines.push("");
     lines.push(`🗓 <b>YESTERDAY CLOSE</b>`);
-    lines.push(
-      `Leads ${dash(mPrev(pulse.pulse.leadsToday))} · Admissions ${dash(mPrev(pulse.pulse.seatBookingsToday))} · Revenue ${inr((mPrev(pulse.pulse.courseRevenue) || 0) + (mPrev(pulse.pulse.webinarRevenue) || 0) || null)}`,
-    );
+    if (pulse) {
+      lines.push(
+        `Leads ${dash(mPrev(pulse.pulse.leadsToday))} · Admissions ${dash(mPrev(pulse.pulse.seatBookingsToday))} · Revenue ${inr((mPrev(pulse.pulse.courseRevenue) || 0) + (mPrev(pulse.pulse.webinarRevenue) || 0) || null)}`,
+      );
+    } else {
+      lines.push(`Leads — · Admissions — · Revenue —`);
+    }
     lines.push("");
     lines.push(`📉 <b>7-DAY TREND</b>`);
-    const leadSum = pulse.history.leads.slice(-7).reduce((s, p) => s + (p.value || 0), 0);
-    const seatSum = pulse.history.seatBookings.slice(-7).reduce((s, p) => s + (p.value || 0), 0);
-    const revSum =
-      pulse.history.courseRevenue.slice(-7).reduce((s, p) => s + (p.value || 0), 0) +
-      pulse.history.webinarRevenue.slice(-7).reduce((s, p) => s + (p.value || 0), 0);
-    lines.push(`Leads ${dash(leadSum)} · Admissions ${dash(seatSum)} · Revenue ${inr(revSum || null)}`);
+    if (pulse) {
+      const leadSum = pulse.history.leads.slice(-7).reduce((s, p) => s + (p.value || 0), 0);
+      const seatSum = pulse.history.seatBookings.slice(-7).reduce((s, p) => s + (p.value || 0), 0);
+      const revSum =
+        pulse.history.courseRevenue.slice(-7).reduce((s, p) => s + (p.value || 0), 0) +
+        pulse.history.webinarRevenue.slice(-7).reduce((s, p) => s + (p.value || 0), 0);
+      lines.push(`Leads ${dash(leadSum)} · Admissions ${dash(seatSum)} · Revenue ${inr(revSum || null)}`);
+    } else {
+      lines.push(`Leads — · Admissions — · Revenue —`);
+    }
 
     try {
       const webinars = await getWebinars();
@@ -375,7 +397,15 @@ export async function sendDigestNow(opts?: {
   force?: boolean;
   slotKey?: string;
   skipIdempotency?: boolean;
-}): Promise<{ ok: boolean; skipped?: boolean; reason?: string; html?: string }> {
+  morningExtras?: boolean;
+}): Promise<{
+  ok: boolean;
+  skipped?: boolean;
+  reason?: string;
+  html?: string;
+  messageId?: number;
+  channelMasked?: string | null;
+}> {
   const settings = await getReportSettings();
   if (!settings.digest_enabled && !opts?.force) {
     return { ok: false, skipped: true, reason: "digest_disabled" };
@@ -394,26 +424,31 @@ export async function sendDigestNow(opts?: {
   const channel = resolveReportsChannelId(settings);
   if (!channel) {
     await markDigestResult(false, "channel_not_configured");
-    return { ok: false, reason: "channel_not_configured" };
+    return { ok: false, reason: "channel_not_configured", channelMasked: null };
   }
 
   if (!opts?.force && inQuietHours(settings, parts.hour)) {
-    return { ok: false, skipped: true, reason: "quiet_hours" };
+    return { ok: false, skipped: true, reason: "quiet_hours", channelMasked: maskChannelId(channel) };
   }
 
   const prev = await getPreviousSnapshot();
   let built: DigestBuildResult;
   try {
-    built = await buildDigest({ previous: prev?.metrics || null });
+    built = await buildDigest({
+      previous: prev?.metrics || null,
+      forceMorningExtras: opts?.morningExtras === true || parts.hour === 6,
+    });
   } catch (e) {
     const msg = (e as Error).message || "build_failed";
     await markDigestResult(false, msg);
-    return { ok: false, reason: msg };
+    return { ok: false, reason: msg, channelMasked: maskChannelId(channel) };
   }
 
   const base = SITE_URL.replace(/\/$/, "") || "https://www.namanias.com";
+  // 6 AM–style digest (or forced morning) always notifies; other digests silent.
+  const silent = built.isMorningSummary ? false : built.silent;
   const sent = await sendWithRetry(channel, built.html, {
-    silent: built.silent,
+    silent,
     buttons: [
       { label: "Open Dashboard", url: `${base}/admin` },
       { label: "View Admissions", url: `${base}/admin/course-payments` },
@@ -422,7 +457,12 @@ export async function sendDigestNow(opts?: {
 
   if (!sent.ok) {
     await markDigestResult(false, sent.error || "send_failed");
-    return { ok: false, reason: sent.error || "send_failed", html: built.html };
+    return {
+      ok: false,
+      reason: sent.error || "send_failed",
+      html: built.html,
+      channelMasked: maskChannelId(channel),
+    };
   }
 
   await saveSnapshot({
@@ -432,7 +472,12 @@ export async function sendDigestNow(opts?: {
     messageHtml: built.html,
   });
   await markDigestResult(true);
-  return { ok: true, html: built.html };
+  return {
+    ok: true,
+    html: built.html,
+    messageId: sent.messageId,
+    channelMasked: maskChannelId(channel),
+  };
 }
 
 export async function maybeRunScheduledDigest(): Promise<{
