@@ -439,22 +439,21 @@ function displayPhone(raw: string | null | undefined): string {
 }
 
 function paymentKindLabel(p: Payment): string {
-  if (p.item_type === "webinar") return "Webinar";
+  if (p.item_type === "webinar") return "Webinar registration";
   const kind = String(p.payment_kind || "");
-  if (kind === "seat") return "Course seat";
+  if (kind === "seat") return "Course seat booking";
   if (kind === "installment") {
-    return p.installment_no != null ? `Course inst #${p.installment_no}` : "Course installment";
+    return p.installment_no != null
+      ? `Course installment #${p.installment_no}`
+      : "Course installment";
   }
-  if (kind === "full" || kind === "one_time") return "Course full pay";
-  return p.item_type === "course" ? "Course" : "Payment";
+  if (kind === "full" || kind === "one_time") return "Course full payment";
+  return p.item_type === "course" ? "Course payment" : "Payment";
 }
 
-function shortItemName(p: Payment, max = 42): string {
-  let s = String(p.item || p.item_slug || "Item").trim();
-  // Drop long "— Installment…" suffix for readability; kind line covers it.
-  s = s.replace(/\s*[—–-]\s*Installment\s+\d+\s+of\s+\d+\s*$/i, "").trim();
-  if (s.length <= max) return s;
-  return `${s.slice(0, max - 1).trimEnd()}…`;
+/** Full item title — never truncate in the failed-payments block. */
+function fullItemName(p: Payment): string {
+  return String(p.item || p.item_slug || "Item").trim();
 }
 
 /** True if this phone later has a PAID row for the same item (slug/type). */
@@ -685,31 +684,38 @@ export async function buildDigest(opts?: {
     pushSection(lines, `⚠️ <b>COLLECTIONS</b>`, body);
   }
 
-  // ── FAILED PAYMENTS (named detail) ──
+  // ── FAILED PAYMENTS (named detail — spacious, no truncation) ──
   if (failedRows.length > 0) {
-    const body: string[] = [];
-    for (const p of failedRows.slice(0, 8)) {
+    if (lines.length && lines[lines.length - 1] !== "") lines.push("");
+    lines.push(
+      `🚨 <b>${failedRows.length} payment${failedRows.length === 1 ? "" : "s"} failed today</b>`,
+    );
+
+    failedRows.slice(0, 8).forEach((p, idx) => {
       const name = escapeHtml(p.student_name || "Student");
       const phone = escapeHtml(displayPhone(p.phone));
       const kind = escapeHtml(paymentKindLabel(p));
-      const item = escapeHtml(shortItemName(p));
+      const item = escapeHtml(fullItemName(p));
       const when = escapeHtml(formatIstShort(p.created_at));
       const reason = failureReasonShort(p);
       const recovered = laterPaidSameItem(p, allPayments);
-      body.push(`· <b>${name}</b> · ${phone}`);
-      body.push(`  ${kind} · ${item} · <b>${inr(p.amount)}</b>`);
-      body.push(
-        `  ${when}${reason ? ` · ${escapeHtml(reason)}` : ""}${recovered ? " · <b>later PAID ✓</b>" : " · still failed"}`,
-      );
-    }
+      const status = recovered ? "✅ Later paid successfully" : "❌ Still failed — no later payment";
+
+      lines.push("");
+      lines.push(`<b>${idx + 1}. ${name}</b>`);
+      lines.push(`Phone: ${phone}`);
+      lines.push(`Type: ${kind}`);
+      lines.push(`Item: <b>${item}</b>`);
+      lines.push(`Amount: <b>${inr(p.amount)}</b>`);
+      lines.push(`When: ${when}`);
+      if (reason) lines.push(`Reason: ${escapeHtml(reason)}`);
+      lines.push(`Status: <b>${status}</b>`);
+    });
+
     if (failedRows.length > 8) {
-      body.push(`· …and <b>${failedRows.length - 8}</b> more`);
+      lines.push("");
+      lines.push(`…and <b>${failedRows.length - 8}</b> more failed today`);
     }
-    pushSection(
-      lines,
-      `🚨 <b>${failedRows.length}</b> payment${failedRows.length === 1 ? "" : "s"} failed today`,
-      body,
-    );
   }
 
   // ── 6 AM only ──
