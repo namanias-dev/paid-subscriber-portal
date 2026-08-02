@@ -24,8 +24,11 @@ async function postAlert(key: ReportAlertKey, html: string): Promise<void> {
   try {
     const settings = await getReportSettings();
     if (!isAlertEnabled(settings, key)) return;
-    const channel = resolveReportsChannelId(settings);
-    if (!channel) return;
+    const resolved = resolveReportsChannelId(settings);
+    const { assertReportsChannel } = await import("./channelGuard");
+    const guarded = await assertReportsChannel(resolved);
+    if (!guarded.ok || !guarded.id) return;
+    const channel = guarded.id;
 
     const base = SITE_URL.replace(/\/$/, "") || "https://www.namanias.com";
     let lastErr = "";

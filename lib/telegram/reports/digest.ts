@@ -421,11 +421,19 @@ export async function sendDigestNow(opts?: {
     }
   }
 
-  const channel = resolveReportsChannelId(settings);
-  if (!channel) {
-    await markDigestResult(false, "channel_not_configured");
-    return { ok: false, reason: "channel_not_configured", channelMasked: null };
+  const resolved = resolveReportsChannelId(settings);
+  const { assertReportsChannel } = await import("./channelGuard");
+  const guarded = await assertReportsChannel(resolved);
+  if (!guarded.ok || !guarded.id) {
+    const reason = guarded.error || "channel_not_configured";
+    await markDigestResult(false, reason);
+    return {
+      ok: false,
+      reason,
+      channelMasked: maskChannelId(resolved),
+    };
   }
+  const channel = guarded.id;
 
   if (!opts?.force && inQuietHours(settings, parts.hour)) {
     return { ok: false, skipped: true, reason: "quiet_hours", channelMasked: maskChannelId(channel) };

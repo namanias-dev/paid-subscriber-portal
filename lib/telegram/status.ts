@@ -198,6 +198,7 @@ export async function reregisterWebhook(): Promise<{
       "callback_query",
       "poll_answer",
       "channel_post",
+      "edited_channel_post",
       "my_chat_member",
       "chat_member",
     ],
