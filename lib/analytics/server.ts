@@ -278,7 +278,17 @@ export async function recordStaffReview(p: Payment, decision: "approved" | "reje
   }
 }
 
-export async function recordRegistrationCreated(reg: { id?: string; webinar_id: string; webinar_slug?: string | null; phone: string; visitor_id?: string | null; price?: number; is_free?: boolean; attribution?: AttributionState | null }): Promise<void> {
+export async function recordRegistrationCreated(reg: {
+  id?: string;
+  webinar_id: string;
+  webinar_slug?: string | null;
+  name?: string | null;
+  phone: string;
+  visitor_id?: string | null;
+  price?: number;
+  is_free?: boolean;
+  attribution?: AttributionState | null;
+}): Promise<void> {
   const phone = normPhone(reg.phone);
   await writeEvent({
     event_name: "registration_created",
@@ -295,7 +305,15 @@ export async function recordRegistrationCreated(reg: { id?: string; webinar_id: 
     // {first_touch,last_touch} shape the client beacon writes — the Meta report
     // reads attribution.first_touch.campaign. Null when no cookie (honest untracked).
     attribution: reg.attribution ?? null,
-    props: { registration_id: reg.id ?? null, webinar_id: reg.webinar_id, webinar_slug: reg.webinar_slug ?? null, phone, price: reg.price ?? 0, is_free: !!reg.is_free },
+    props: {
+      registration_id: reg.id ?? null,
+      webinar_id: reg.webinar_id,
+      webinar_slug: reg.webinar_slug ?? null,
+      phone,
+      name: reg.name ?? null,
+      price: reg.price ?? 0,
+      is_free: !!reg.is_free,
+    },
   });
   // Journey Automation: capture `webinar_registered` (write-only, idempotent per
   // registration, non-blocking). Consumes nothing; proves capture + shape only.
@@ -304,12 +322,27 @@ export async function recordRegistrationCreated(reg: { id?: string; webinar_id: 
     phone,
     studentId: await resolveBuyerId(phone),
     webinarId: reg.webinar_id,
-    payload: { registration_id: reg.id ?? null, webinar_slug: reg.webinar_slug ?? null, price: reg.price ?? 0, is_free: !!reg.is_free },
+    payload: {
+      registration_id: reg.id ?? null,
+      webinar_slug: reg.webinar_slug ?? null,
+      name: reg.name ?? null,
+      price: reg.price ?? 0,
+      is_free: !!reg.is_free,
+    },
     dedupeKey: reg.id ? `webinar_registered:reg:${reg.id}` : `webinar_registered:${reg.webinar_id}:${phone}`,
     source: "webinar",
   });
   void import("../telegram/reports/alerts")
-    .then((m) => m.fireReportWebinarReg(reg.webinar_id, reg.webinar_slug ?? null))
+    .then((m) =>
+      m.fireReportWebinarReg({
+        webinarId: reg.webinar_id,
+        webinarSlug: reg.webinar_slug ?? null,
+        name: reg.name ?? null,
+        phone: reg.phone,
+        price: reg.price ?? null,
+        isFree: reg.is_free ?? null,
+      }),
+    )
     .catch(() => {});
   // Meta Lead (server) — the free-registration conversion. Paid webinars fire
   // Purchase from the PAID chokepoint instead; this Lead marks the free capture.

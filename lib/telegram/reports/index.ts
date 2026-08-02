@@ -19,5 +19,6 @@ export {
   alertNoLoginsIfStale,
   alertWebinarReminders24h,
   alertPaymentPaid,
+  alertWebinarRegistration,
 } from "./alerts";
 export { verifyReportsChannel, validateReportsChannelId } from "./verify";

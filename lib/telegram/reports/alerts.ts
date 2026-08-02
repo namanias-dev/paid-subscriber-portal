@@ -216,6 +216,63 @@ function truncItem(s: string, max = 40): string {
   return `${t.slice(0, max - 1).trimEnd()}…`;
 }
 
+export interface WebinarRegAlertInput {
+  webinarId: string;
+  name: string;
+  phone?: string | null;
+  webinarTitle?: string | null;
+  webinarSlug?: string | null;
+  webinarAt?: string | null;
+  price?: number | null;
+  /** When set, skip recount (manual / already known). */
+  regCount?: number | null;
+  registeredAt?: string | null;
+}
+
+/** Instant alert on every webinar registration (seat-booked style). */
+export async function alertWebinarRegistration(input: WebinarRegAlertInput): Promise<boolean> {
+  const webs = await getWebinars().catch(() => []);
+  const w = webs.find((x) => x.id === input.webinarId);
+  const title = escapeHtml(input.webinarTitle || w?.title || "Webinar");
+  const name = escapeHtml(input.name || "Student");
+  const phoneDisp = escapeHtml(displayPhone(input.phone));
+  const when = formatIstShort(input.registeredAt || new Date().toISOString());
+  const starts = input.webinarAt || w?.datetime
+    ? formatIstShort(input.webinarAt || w!.datetime!)
+    : "—";
+  const priceNum = input.price != null ? Number(input.price) : Number(w?.price ?? 0);
+  const priceLine =
+    priceNum > 0 ? `Paid webinar · ${inr(priceNum)}` : "Free webinar";
+
+  let regCount = input.regCount != null ? Number(input.regCount) : 0;
+  if (!Number.isFinite(regCount) || regCount <= 0) {
+    try {
+      const regs = await getAllWebinarRegistrations();
+      regCount = regs.filter((r) => r.webinar_id === input.webinarId).length;
+    } catch {
+      regCount = 1;
+    }
+  }
+
+  const html = [
+    `📝 <b>WEBINAR REGISTRATION</b>`,
+    `${name} · ${phoneDisp}`,
+    `${title}`,
+    `Starts ${starts}`,
+    priceLine,
+    when,
+    `Total registrations: ${regCount}`,
+  ].join("\n");
+
+  const base = SITE_URL.replace(/\/$/, "") || "https://www.namanias.com";
+  const slug = input.webinarSlug || w?.slug;
+  const buttons = [
+    { label: "Webinar", url: slug ? `${base}/admin/webinars` : `${base}/admin` },
+    { label: "Dashboard", url: `${base}/admin` },
+  ];
+  return postAlert("webinar_registration", html, buttons);
+}
+
 /** Every 25 registrations; call out paid/hot names when available. */
 export async function alertWebinarMilestone(regCount: number, webinarTitle: string, webinarId?: string): Promise<void> {
   if (regCount <= 0 || regCount % 25 !== 0) return;
@@ -497,15 +554,50 @@ export function fireReportGatewayFailure(p: Payment): void {
   void alertGatewayFailure(p).catch(() => {});
 }
 
-export function fireReportWebinarReg(webinarId: string, webinarTitle?: string | null): void {
+export function fireReportWebinarReg(input: {
+  webinarId: string;
+  webinarSlug?: string | null;
+  name?: string | null;
+  phone?: string | null;
+  price?: number | null;
+  isFree?: boolean | null;
+}): void {
   void (async () => {
     const regs = await getAllWebinarRegistrations();
-    const count = regs.filter((r) => r.webinar_id === webinarId).length;
-    let title = webinarTitle || "Webinar";
-    if (!webinarTitle) {
-      const webs = await getWebinars();
-      title = webs.find((w) => w.id === webinarId)?.title || title;
+    const mine = regs.filter((r) => r.webinar_id === input.webinarId);
+    const count = mine.length;
+    const webs = await getWebinars();
+    const w = webs.find((x) => x.id === input.webinarId);
+    const title = w?.title || input.webinarSlug || "Webinar";
+
+    // Prefer the newest reg for this phone if name missing (manual recovery).
+    let name = (input.name || "").trim();
+    let phone = input.phone || null;
+    if (!name && phone) {
+      const hit = mine.find((r) => (r.phone || "") === phone) || mine[0];
+      name = hit?.name || "Student";
+      phone = hit?.phone || phone;
     }
-    await alertWebinarMilestone(count, title, webinarId);
+    if (!name) {
+      const newest = [...mine].sort(
+        (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+      )[0];
+      name = newest?.name || "Student";
+      phone = phone || newest?.phone || null;
+    }
+
+    await alertWebinarRegistration({
+      webinarId: input.webinarId,
+      name,
+      phone,
+      webinarTitle: title,
+      webinarSlug: input.webinarSlug || w?.slug || null,
+      webinarAt: w?.datetime || null,
+      price: input.price != null ? input.price : w?.price ?? null,
+      regCount: count,
+    });
+
+    // Keep every-25 milestone as an extra celebration ping.
+    await alertWebinarMilestone(count, title, input.webinarId);
   })().catch(() => {});
 }

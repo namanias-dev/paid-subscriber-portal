@@ -9,6 +9,7 @@ export type ReportAlertKey =
   | "seat_booked"
   | "full_payment"
   | "installment_overdue"
+  | "webinar_registration"
   | "webinar_milestone"
   | "webinar_reminder_24h"
   | "no_leads_6h"
@@ -19,6 +20,7 @@ export const DEFAULT_ALERTS: Record<ReportAlertKey, boolean> = {
   seat_booked: true,
   full_payment: true,
   installment_overdue: true,
+  webinar_registration: true,
   webinar_milestone: true,
   webinar_reminder_24h: true,
   no_leads_6h: true,

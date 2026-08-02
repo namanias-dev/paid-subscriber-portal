@@ -82,7 +82,13 @@ export async function POST(req: NextRequest) {
   if (!(await requirePermission("manage_telegram"))) {
     return NextResponse.json({ ok: false, error: "Forbidden" }, { status: 403 });
   }
-  const body = (await req.json().catch(() => ({}))) as { action?: string };
+  const body = (await req.json().catch(() => ({}))) as {
+    action?: string;
+    registration_id?: string;
+    webinar_id?: string;
+    name?: string;
+    phone?: string;
+  };
   const action = body.action || "send_digest_now";
 
   if (action === "test_post") {
@@ -98,6 +104,49 @@ export async function POST(req: NextRequest) {
   if (action === "send_digest_now" || action === "send_test_report") {
     const result = await sendDigestNow({ force: true, skipIdempotency: true });
     return NextResponse.json({ ...result, action });
+  }
+
+  if (action === "send_webinar_registration") {
+    const { alertWebinarRegistration } = await import("@/lib/telegram/reports/alerts");
+    const { getAllWebinarRegistrations, getWebinars } = await import("@/lib/dataProvider");
+    const regs = await getAllWebinarRegistrations();
+    let reg =
+      (body.registration_id && regs.find((r) => r.id === body.registration_id)) ||
+      (body.webinar_id && body.phone
+        ? regs.find((r) => r.webinar_id === body.webinar_id && r.phone === body.phone)
+        : null) ||
+      null;
+    if (!reg && body.name) {
+      const hits = regs
+        .filter((r) => (r.name || "").toLowerCase() === body.name!.toLowerCase())
+        .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+      reg = hits[0] || null;
+    }
+    if (!reg) {
+      return NextResponse.json({ ok: false, error: "registration_not_found", action }, { status: 404 });
+    }
+    const webs = await getWebinars();
+    const w = webs.find((x) => x.id === reg!.webinar_id);
+    const count = regs.filter((r) => r.webinar_id === reg!.webinar_id).length;
+    const sent = await alertWebinarRegistration({
+      webinarId: reg.webinar_id,
+      name: reg.name || body.name || "Student",
+      phone: reg.phone,
+      webinarTitle: w?.title || null,
+      webinarSlug: w?.slug || null,
+      webinarAt: w?.datetime || null,
+      price: w?.price ?? null,
+      regCount: count,
+      registeredAt: reg.created_at,
+    });
+    return NextResponse.json({
+      ok: sent,
+      action,
+      registration_id: reg.id,
+      webinar_id: reg.webinar_id,
+      name: reg.name,
+      reg_count: count,
+    });
   }
 
   return NextResponse.json({ ok: false, error: "unknown_action" }, { status: 400 });
