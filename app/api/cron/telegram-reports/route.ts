@@ -8,6 +8,10 @@ import {
   sendDigestNow,
 } from "@/lib/telegram/reports";
 import { verifyReportsChannel } from "@/lib/telegram/reports/verify";
+import { diagnoseAndDiscoverChannel } from "@/lib/telegram/reports/discover";
+import { alertPaymentPaid } from "@/lib/telegram/reports/alerts";
+import { getPayments } from "@/lib/dataProvider";
+import { isPaidStatus } from "@/lib/paymentsAgg";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
@@ -27,7 +31,11 @@ async function run(req: Request) {
       action === "send_now" ||
       action === "send_digest";
 
-    // Fast path: verify env + getChat + optional one-line test
+    if (action === "discover") {
+      const discovery = await diagnoseAndDiscoverChannel();
+      return NextResponse.json({ ok: discovery.ok, discovery, ts: Date.now() });
+    }
+
     if (action === "verify") {
       const verify = await verifyReportsChannel({
         sendTest: url.searchParams.get("test") !== "0",
@@ -35,15 +43,41 @@ async function run(req: Request) {
       return NextResponse.json({ ok: verify.ok, verify, ts: Date.now() });
     }
 
+    if (action === "seat_alert_test") {
+      const pays = await getPayments();
+      const seat = [...pays]
+        .filter(
+          (p) =>
+            !p.deleted_at &&
+            isPaidStatus(p.status) &&
+            p.item_type === "course" &&
+            p.payment_kind === "seat",
+        )
+        .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0];
+      if (!seat) {
+        return NextResponse.json({ ok: false, error: "no_seat_payment_found", ts: Date.now() });
+      }
+      await alertPaymentPaid(seat);
+      return NextResponse.json({
+        ok: true,
+        seat: {
+          name: seat.student_name,
+          item: seat.item,
+          amount: seat.amount,
+          created_at: seat.created_at,
+        },
+        ts: Date.now(),
+      });
+    }
+
     if (force || action === "send_morning") {
-      // Verify channel first so failures are explicit
-      const verify = await verifyReportsChannel({ sendTest: true });
-      if (!verify.ok) {
+      const discovery = await diagnoseAndDiscoverChannel();
+      if (!discovery.ok && !discovery.chosen) {
         return NextResponse.json(
           {
             ok: false,
             error: "channel_verify_failed",
-            verify,
+            discovery,
             ts: Date.now(),
           },
           { status: 502 },
@@ -56,7 +90,7 @@ async function run(req: Request) {
       });
       return NextResponse.json({
         ok: digest.ok,
-        verify,
+        discovery,
         digest,
         alerts: { overdue: { sent: 0 }, noLeads: false, webinar24h: 0 },
         ts: Date.now(),
