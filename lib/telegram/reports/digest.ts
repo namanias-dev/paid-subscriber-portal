@@ -589,7 +589,7 @@ export async function sendDigestNow(opts?: {
   await saveSnapshot({
     slotKey: opts?.skipIdempotency ? `${slotKey}:manual:${Date.now()}` : slotKey,
     kind: built.isMorningSummary ? "daily_summary" : "digest",
-    metrics: built.metrics,
+    metrics: { ...built.metrics, message_id: sent.messageId ?? null },
     messageHtml: built.html,
   });
   await markDigestResult(true);
