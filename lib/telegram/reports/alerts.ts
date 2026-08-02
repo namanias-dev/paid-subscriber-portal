@@ -381,43 +381,42 @@ export async function alertNoLeadsIfStale(): Promise<boolean> {
   return ok;
 }
 
-/** No portal logins for 3h during business hours. */
+/** No portal logins for 3h during business hours (analytics_events.login). */
 export async function alertNoLoginsIfStale(): Promise<boolean> {
   const settings = await getReportSettings();
   if (!isAlertEnabled(settings, "no_logins_3h")) return false;
   const parts = istNowParts();
   if (parts.hour < 10 || parts.hour >= 20) return false;
 
-  let newest: number | null = null;
-  try {
-    const { getExecutivePulse } = await import("../../analytics/executiveOverview");
-    const pulse = await getExecutivePulse({ preset: "today", canRevenue: false });
-    // Use history last point or today's value as proxy — if today logins is 0 and hour late enough.
-    const logins = pulse.pulse.loginUsersToday?.value;
-    if (logins != null && logins > 0) return false;
-    // No logins recorded today after 3h into business day → alert once per 3h bucket
-    if (parts.hour < 13) return false;
-  } catch {
+  const db = getSupabaseAdmin();
+  if (!db) return false;
+
+  const sinceIso = new Date(Date.now() - 3 * 3600_000).toISOString();
+  const { count, error } = await db
+    .from("analytics_events")
+    .select("id", { count: "exact", head: true })
+    .eq("event_name", "login")
+    .gte("occurred_at", sinceIso);
+  if (error) {
+    tgLog("no_logins_query_failed", { error: error.message }, "warn");
     return false;
   }
+  if ((count || 0) > 0) return false;
 
   const dedupeKey = `no_logins:${parts.ymd}:${Math.floor(parts.hour / 3)}`;
-  const db = getSupabaseAdmin();
-  if (db) {
-    const { data } = await db.from("telegram_report_snapshots").select("id").eq("slot_key", dedupeKey).maybeSingle();
-    if (data) return false;
-  }
+  const { data } = await db.from("telegram_report_snapshots").select("id").eq("slot_key", dedupeKey).maybeSingle();
+  if (data) return false;
 
   const html = [
     `🕳 <b>NO LOGINS (3h+)</b>`,
-    `Zero portal logins so far today`,
+    `Zero portal login events in the last 3 hours`,
     `Check auth / student portal health`,
     formatIstShort(new Date()),
   ].join("\n");
   const ok = await postAlert("no_logins_3h", html);
-  if (ok && db) {
+  if (ok) {
     await db.from("telegram_report_snapshots").upsert(
-      { slot_key: dedupeKey, kind: "alert_dedupe", metrics: { newest } },
+      { slot_key: dedupeKey, kind: "alert_dedupe", metrics: { since: sinceIso } },
       { onConflict: "slot_key" },
     );
   }
