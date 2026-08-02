@@ -63,8 +63,8 @@ export default function CheckoutClient({ course }: { course: Course }) {
   const fullAvailable = !cfg.enabled || cfg.allowFull;
   const seatConfigured = cfg.enabled && (cfg.seatAmount != null || cfg.allowCustomSeat);
 
-  const [plan, setPlan] = useState<Plan>(fullAvailable ? "full" : "emi");
-  const [bookSeat, setBookSeat] = useState(false);
+  const [plan, setPlan] = useState<Plan>(emiAvailable ? "emi" : fullAvailable ? "full" : "emi");
+  const [bookSeat, setBookSeat] = useState(true);
   const [count, setCount] = useState<number>(
     cfg.installmentCounts[Math.min(1, cfg.installmentCounts.length - 1)] || cfg.installmentCounts[0] || 6
   );
@@ -77,8 +77,8 @@ export default function CheckoutClient({ course }: { course: Course }) {
   // that batch's defaults (its EMI config may differ). No-op for single-batch.
   useEffect(() => {
     if (!multiBatch) return;
-    setPlan(fullAvailable ? "full" : "emi");
-    setBookSeat(false);
+    setPlan(emiAvailable ? "emi" : fullAvailable ? "full" : "emi");
+    setBookSeat(true);
     setCount(cfg.installmentCounts[Math.min(1, cfg.installmentCounts.length - 1)] || cfg.installmentCounts[0] || 6);
     setSeatInput(cfg.seatAmount ?? seatFloor);
     // eslint-disable-next-line react-hooks/exhaustive-deps
