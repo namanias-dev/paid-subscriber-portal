@@ -131,3 +131,69 @@ export function inlineKeyboardFromButtons(
   if (!rows.length) return undefined;
   return { inline_keyboard: rows };
 }
+
+export interface WebhookInfoStatus {
+  /** True when TELEGRAM_BOT_TOKEN is present (same check as the send path). */
+  configured: boolean;
+  /** True when getWebhookInfo reports a non-empty url. */
+  webhookRegistered: boolean;
+  webhookUrl: string | null;
+  pendingUpdateCount: number | null;
+  /** Last error message from Telegram, if any — never includes the token. */
+  lastErrorMessage: string | null;
+  lastErrorDate: string | null;
+}
+
+type WebhookInfoRaw = {
+  url?: string;
+  pending_update_count?: number;
+  last_error_message?: string;
+  last_error_date?: number;
+};
+
+const WEBHOOK_INFO_TTL_MS = 60_000;
+let webhookInfoCache: { at: number; value: WebhookInfoStatus } | null = null;
+
+/**
+ * Server-only status for Mission Control. Cached 60s. Never returns the token.
+ * Uses the same botConfigured()/callMethod path as outbound sends.
+ */
+export async function getWebhookInfoStatus(opts?: { force?: boolean }): Promise<WebhookInfoStatus> {
+  const now = Date.now();
+  if (!opts?.force && webhookInfoCache && now - webhookInfoCache.at < WEBHOOK_INFO_TTL_MS) {
+    return webhookInfoCache.value;
+  }
+
+  if (!botConfigured()) {
+    const value: WebhookInfoStatus = {
+      configured: false,
+      webhookRegistered: false,
+      webhookUrl: null,
+      pendingUpdateCount: null,
+      lastErrorMessage: null,
+      lastErrorDate: null,
+    };
+    webhookInfoCache = { at: now, value };
+    return value;
+  }
+
+  const res = await callMethod<WebhookInfoRaw>("getWebhookInfo", {});
+  const info = res.ok && res.result ? res.result : null;
+  const url = (info?.url || "").trim() || null;
+  const lastMsg = (info?.last_error_message || "").trim() || null;
+  const lastDateUnix = info?.last_error_date;
+  const value: WebhookInfoStatus = {
+    configured: true,
+    webhookRegistered: !!url,
+    webhookUrl: url,
+    pendingUpdateCount:
+      typeof info?.pending_update_count === "number" ? info.pending_update_count : null,
+    lastErrorMessage: lastMsg || (!res.ok ? (res.description || "getWebhookInfo_failed") : null),
+    lastErrorDate:
+      typeof lastDateUnix === "number" && lastDateUnix > 0
+        ? new Date(lastDateUnix * 1000).toISOString()
+        : null,
+  };
+  webhookInfoCache = { at: now, value };
+  return value;
+}
