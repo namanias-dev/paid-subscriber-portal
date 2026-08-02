@@ -17,11 +17,21 @@ interface Meta {
   canManage: boolean;
   isSuperAdmin: boolean;
   configured: boolean;
+  online: boolean;
+  healthy: boolean;
+  healthReason: string | null;
   webhookRegistered: boolean;
   webhookUrl: string | null;
+  pendingUpdateCount: number | null;
   lastWebhookError: string | null;
   lastWebhookErrorAt: string | null;
+  webhookHitsLastHour: number;
+  lastInboundAt: string | null;
+  lastOutboundAt: string | null;
   botUsername: string | null;
+  botFirstName: string | null;
+  botId: number | null;
+  hasAvatar: boolean;
 }
 
 // ---- local audience options (mirror PHONE_AUDIENCES — do NOT import server module) ----
@@ -95,31 +105,56 @@ function padButtons(btns?: InlineBtn[] | null): InlineBtn[] {
   return base;
 }
 
+function parseMeta(d: any): Meta | null {
+  if (!d || (d.ok === false && d.canInbox === undefined)) return null;
+  const configured = d.configured === true || d.botConfigured === true;
+  const pending = typeof d.pendingUpdateCount === "number" ? d.pendingUpdateCount : null;
+  const lastWebhookError = typeof d.lastWebhookError === "string" ? d.lastWebhookError : null;
+  const online = d.online === true || d.bot?.online === true;
+  const healthy =
+    d.healthy === true ||
+    (configured && online && d.webhookRegistered === true && !lastWebhookError && !(pending && pending > 0));
+  return {
+    canInbox: !!d.canInbox,
+    canManage: !!d.canManage,
+    isSuperAdmin: !!d.isSuperAdmin,
+    configured,
+    online,
+    healthy,
+    healthReason: typeof d.healthReason === "string" ? d.healthReason : null,
+    webhookRegistered: d.webhookRegistered === true,
+    webhookUrl: typeof d.webhookUrl === "string" ? d.webhookUrl : null,
+    pendingUpdateCount: pending,
+    lastWebhookError,
+    lastWebhookErrorAt: typeof d.lastWebhookErrorAt === "string" ? d.lastWebhookErrorAt : null,
+    webhookHitsLastHour: Number(d.webhookHitsLastHour) || 0,
+    lastInboundAt: typeof d.lastInboundAt === "string" ? d.lastInboundAt : null,
+    lastOutboundAt: typeof d.lastOutboundAt === "string" ? d.lastOutboundAt : null,
+    botUsername: d.botUsername || d.bot?.username || null,
+    botFirstName: d.bot?.firstName || null,
+    botId: typeof d.bot?.id === "number" ? d.bot.id : null,
+    hasAvatar: d.bot?.hasAvatar === true,
+  };
+}
+
 export default function TelegramMissionControl() {
   const [tab, setTab] = useState<TabId>("overview");
   const [meta, setMeta] = useState<Meta | null>(null);
+  const [metaBusy, setMetaBusy] = useState(false);
 
-  useEffect(() => {
-    fetch("/api/admin/telegram/meta")
+  const loadMeta = useCallback((refresh = false) => {
+    setMetaBusy(true);
+    fetch(`/api/admin/telegram/meta${refresh ? "?refresh=1" : ""}`)
       .then((r) => r.json())
       .then((d) => {
-        if (!d || (d.ok === false && d.canInbox === undefined)) return;
-        // Server evaluates TELEGRAM_BOT_TOKEN via botConfigured(); accept either key name.
-        const configured = d.configured === true || d.botConfigured === true;
-        setMeta({
-          canInbox: !!d.canInbox,
-          canManage: !!d.canManage,
-          isSuperAdmin: !!d.isSuperAdmin,
-          configured,
-          webhookRegistered: d.webhookRegistered === true,
-          webhookUrl: typeof d.webhookUrl === "string" ? d.webhookUrl : null,
-          lastWebhookError: typeof d.lastWebhookError === "string" ? d.lastWebhookError : null,
-          lastWebhookErrorAt: typeof d.lastWebhookErrorAt === "string" ? d.lastWebhookErrorAt : null,
-          botUsername: d.botUsername ?? null,
-        });
+        const m = parseMeta(d);
+        if (m) setMeta(m);
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setMetaBusy(false));
   }, []);
+
+  useEffect(() => { loadMeta(false); }, [loadMeta]);
 
   const canManage = !!meta?.canManage;
   const canInbox = !!meta?.canInbox;
@@ -131,15 +166,20 @@ export default function TelegramMissionControl() {
 
   const statusTone = !meta
     ? null
-    : !meta.configured || !meta.webhookRegistered || meta.lastWebhookError
-      ? "amber"
-      : "green";
+    : meta.healthy
+      ? "green"
+      : "amber";
 
   return (
     <div className="space-y-5 pb-16">
-      <div>
-        <h1 className="font-heading text-2xl font-extrabold">Telegram Mission Control</h1>
-        <p className="text-sm text-muted">Broadcast, automate and reply via Telegram — subscribers, leads and students.</p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="font-heading text-2xl font-extrabold">Telegram Mission Control</h1>
+          <p className="text-sm text-muted">Broadcast, automate and reply via Telegram — subscribers, leads and students.</p>
+        </div>
+        <button type="button" className="btn btn-secondary text-xs" disabled={metaBusy} onClick={() => loadMeta(true)}>
+          <RefreshCw size={13} className={metaBusy ? "animate-spin" : ""} /> Refresh status
+        </button>
       </div>
 
       {meta && statusTone && (
@@ -147,32 +187,41 @@ export default function TelegramMissionControl() {
           className={`rounded-xl border p-3 text-sm ${
             statusTone === "green"
               ? "border-emerald-200 bg-emerald-50 text-emerald-950"
-              : "border-amber-200 bg-amber-50 text-amber-900"
+              : meta.lastWebhookError || (meta.pendingUpdateCount || 0) > 0
+                ? "border-red-200 bg-red-50 text-red-950"
+                : "border-amber-200 bg-amber-50 text-amber-900"
           }`}
         >
           <div className="flex items-start gap-2">
             {statusTone === "green"
               ? <CheckCircle2 size={16} className="mt-0.5 shrink-0 text-emerald-700" />
               : <AlertTriangle size={16} className="mt-0.5 shrink-0" />}
-            <div className="min-w-0 space-y-1.5">
-              <div className="flex flex-wrap gap-2">
+            <div className="min-w-0 flex-1 space-y-1.5">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className={`inline-flex items-center gap-1.5 pill text-[10px] ${meta.online ? "pill-green" : "pill-red"}`}>
+                  <span className={`h-1.5 w-1.5 rounded-full ${meta.online ? "bg-emerald-600" : "bg-red-600"}`} />
+                  {meta.online ? "Online" : "Offline"}
+                </span>
                 <span className={`pill text-[10px] ${meta.configured ? "pill-green" : "pill-amber"}`}>
                   Token {meta.configured ? "configured" : "missing"}
                 </span>
                 <span className={`pill text-[10px] ${meta.webhookRegistered ? "pill-green" : "pill-amber"}`}>
                   Webhook {meta.webhookRegistered ? "registered" : "not registered"}
                 </span>
+                {(meta.pendingUpdateCount || 0) > 0 && (
+                  <span className="pill pill-red text-[10px]">{meta.pendingUpdateCount} pending</span>
+                )}
                 {meta.botUsername && (
                   <span className="pill pill-gray text-[10px]">@{meta.botUsername.replace(/^@/, "")}</span>
                 )}
               </div>
+              {meta.healthReason && !meta.healthy && (
+                <p className="text-xs font-medium">{meta.healthReason}</p>
+              )}
               {!meta.configured && (
                 <p>
-                  <code className="font-mono text-xs">TELEGRAM_BOT_TOKEN</code> is missing on the server — Telegram sending is not configured.
+                  <code className="font-mono text-xs">TELEGRAM_BOT_TOKEN</code> is missing on the server.
                 </p>
-              )}
-              {meta.configured && !meta.webhookRegistered && (
-                <p>Bot token is present, but no webhook URL is registered. Run <code className="font-mono text-xs">setWebhook</code> against this deployment.</p>
               )}
               {meta.webhookUrl && (
                 <p className="truncate text-xs text-muted" title={meta.webhookUrl}>URL: {meta.webhookUrl}</p>
@@ -183,6 +232,11 @@ export default function TelegramMissionControl() {
                   <span className="font-medium">{meta.lastWebhookError}</span>
                 </p>
               )}
+              <p className="text-xs text-muted">
+                Webhook hits (1h): <span className="font-medium text-ink tabular-nums">{meta.webhookHitsLastHour}</span>
+                {" · "}Last inbound: {meta.lastInboundAt ? formatISTDateTime(meta.lastInboundAt) : "—"}
+                {" · "}Last outbound: {meta.lastOutboundAt ? formatISTDateTime(meta.lastOutboundAt) : "—"}
+              </p>
             </div>
           </div>
         </div>
@@ -200,46 +254,154 @@ export default function TelegramMissionControl() {
         })}
       </div>
 
-      {tab === "overview" && <OverviewTab />}
+      {tab === "overview" && <OverviewTab onOpenInbox={() => setTab("inbox")} />}
       {tab === "broadcast" && canManage && <BroadcastTab />}
       {tab === "automations" && <AutomationsTab canEdit={canManage} />}
       {tab === "templates" && <TemplatesTab canEdit={canManage} />}
       {tab === "inbox" && (canInbox || canManage) && <InboxTab />}
       {tab === "analytics" && <AnalyticsTab />}
-      {tab === "settings" && <SettingsTab canEdit={canManage} botUsername={meta?.botUsername ?? null} />}
+      {tab === "settings" && <SettingsTab canEdit={canManage} onStatusChange={() => loadMeta(true)} />}
     </div>
   );
 }
 
 // ============================ OVERVIEW ============================
-function OverviewTab() {
+function OverviewTab({ onOpenInbox }: { onOpenInbox: () => void }) {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const load = useCallback(() => {
     setLoading(true);
     fetch("/api/admin/telegram/overview")
       .then((r) => r.json())
-      .then((d) => setData(d?.ok ? d.overview : d?.overview ?? null))
+      .then((d) => setData(d?.ok ? d.overview : null))
       .catch(() => setData(null))
       .finally(() => setLoading(false));
   }, []);
   useEffect(() => { load(); }, [load]);
 
   if (loading) return <LoadingBlock />;
-  if (!data) return <p className="text-sm text-muted">No data.</p>;
+  if (!data) {
+    return (
+      <div className="card space-y-2 p-6 text-sm">
+        <p className="font-medium text-ink">Could not load overview</p>
+        <p className="text-muted">Check that you are signed in with Telegram permissions, then refresh.</p>
+        <button type="button" className="btn btn-secondary text-xs" onClick={load}><RefreshCw size={13} /> Retry</button>
+      </div>
+    );
+  }
+
+  const bot = data.bot || {};
+  const username = bot.username ? `@${String(bot.username).replace(/^@/, "")}` : null;
+  const reach = data.reachability || { totalLeads: 0, leadsWithTelegram: 0, percent: 0 };
+  const recent = data.recent || { joins: [], sends: [], inbound: [] };
 
   return (
     <div className="space-y-5">
       <div className="flex items-center gap-2">
         <button onClick={load} className="btn btn-secondary ml-auto text-xs"><RefreshCw size={13} /> Refresh</button>
       </div>
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-        <Kpi label="Active subscribers" value={data.activeSubscribers ?? "—"} />
-        <Kpi label="Total subscribers" value={data.totalSubscribers ?? "—"} />
-        <Kpi label="Queued" value={data.queued ?? "—"} />
-        <Kpi label="Sent today" value={data.sentToday ?? "—"} />
-        <Kpi label="Unread inbox" value={data.unread ?? "—"} tone={data.unread > 0 ? "red" : undefined} />
+
+      <div className="card flex flex-wrap items-center gap-4 p-4">
+        <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-full bg-surface2">
+          {bot.hasAvatar ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src="/api/admin/telegram/bot-avatar" alt="" className="h-full w-full object-cover" />
+          ) : (
+            <div className="flex h-full w-full items-center justify-center text-lg font-bold text-muted">TG</div>
+          )}
+          <span className={`absolute bottom-0.5 right-0.5 h-3 w-3 rounded-full border-2 border-white ${data.online ? "bg-emerald-500" : "bg-red-500"}`} />
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="font-heading text-lg font-bold text-ink">{bot.firstName || "Telegram bot"}</p>
+          <p className="text-sm text-muted">{username || "Username unavailable — open Settings → Re-register webhook after token is set"}</p>
+          {bot.id != null && <p className="text-xs text-muted">Bot ID {bot.id}</p>}
+        </div>
+        {username && (
+          <a href={`https://t.me/${username.replace(/^@/, "")}`} target="_blank" rel="noreferrer" className="btn btn-secondary text-xs">
+            <ExternalLink size={13} /> Open bot
+          </a>
+        )}
       </div>
+
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <Kpi label="Active subscribers" value={data.subscribersActive ?? 0} />
+        <Kpi label="Inactive / blocked" value={data.subscribersInactive ?? 0} />
+        <Kpi label="Joined last 7 days" value={data.joinedLast7d ?? 0} />
+        <Kpi label="Total subscribers" value={data.subscribersTotal ?? 0} />
+        <Kpi label="Sent today" value={data.sentToday ?? 0} />
+        <Kpi label="Sent last 7 days" value={data.sentLast7d ?? 0} />
+        <Kpi label="Failed (7d)" value={data.failedLast7d ?? 0} tone={(data.failedLast7d || 0) > 0 ? "red" : undefined} />
+        <Kpi label="Blocked (7d)" value={data.blockedLast7d ?? 0} tone={(data.blockedLast7d || 0) > 0 ? "red" : undefined} />
+      </div>
+
+      <div className="grid gap-3 lg:grid-cols-2">
+        <button type="button" onClick={onOpenInbox} className="card p-4 text-left transition hover:bg-surface2/60">
+          <p className="text-xs uppercase tracking-wide text-muted">Inbox awaiting reply</p>
+          <p className={`mt-1 font-heading text-2xl font-extrabold tabular-nums ${(data.unreadInbound || 0) > 0 ? "text-danger" : ""}`}>
+            {data.unreadInbound ?? 0}
+          </p>
+          <p className="mt-1 text-xs text-muted">
+            {(data.unreadInbound || 0) > 0 ? "Open Inbox to reply" : "No unread messages — share a deep link from Leads to grow subscribers"}
+          </p>
+        </button>
+        <div className="card p-4">
+          <p className="text-xs uppercase tracking-wide text-muted">Lead reachability</p>
+          <p className="mt-1 font-heading text-2xl font-extrabold tabular-nums">
+            {reach.leadsWithTelegram}/{reach.totalLeads} <span className="text-base font-semibold text-muted">({reach.percent}%)</span>
+          </p>
+          <p className="mt-1 text-xs text-muted">
+            {reach.totalLeads === 0
+              ? "No leads yet."
+              : "Leads with an active Telegram chat_id. Use “Telegram invite” on a lead to grow this."}
+          </p>
+        </div>
+      </div>
+
+      <div className="grid gap-3 lg:grid-cols-3">
+        <RecentList title="Recent joins" empty="No subscribers yet — ask a lead to tap /start on the bot." items={(recent.joins || []).map((j: any) => ({
+          key: j.chat_id + j.at,
+          primary: j.name || j.chat_id,
+          secondary: j.linked_lead_id ? `Lead ${j.linked_lead_id}` : "Unlinked",
+          at: j.at,
+        }))} />
+        <RecentList title="Recent sends" empty="No outbound sends yet — try Settings → Send test, or enable an automation." items={(recent.sends || []).map((s: any) => ({
+          key: s.chat_id + s.at + s.status,
+          primary: s.status,
+          secondary: s.body || s.chat_id,
+          at: s.at,
+        }))} />
+        <RecentList title="Recent inbound" empty="No inbound messages yet — after /start works, plain texts appear here and in Inbox." items={(recent.inbound || []).map((m: any) => ({
+          key: m.chat_id + m.at,
+          primary: m.body || "(empty)",
+          secondary: m.chat_id,
+          at: m.at,
+        }))} />
+      </div>
+    </div>
+  );
+}
+
+function RecentList({ title, empty, items }: {
+  title: string;
+  empty: string;
+  items: { key: string; primary: string; secondary: string; at: string }[];
+}) {
+  return (
+    <div className="card p-0">
+      <p className="border-b border-line px-4 py-3 text-sm font-semibold">{title}</p>
+      {items.length === 0 ? (
+        <p className="p-4 text-xs text-muted">{empty}</p>
+      ) : (
+        <ul className="divide-y divide-line/70">
+          {items.map((it) => (
+            <li key={it.key} className="px-4 py-2.5 text-sm">
+              <div className="font-medium text-ink truncate">{it.primary}</div>
+              <div className="text-xs text-muted truncate">{it.secondary}</div>
+              <div className="text-[11px] text-muted tabular-nums">{formatISTDateTime(it.at)}</div>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
@@ -905,55 +1067,284 @@ function AnalyticsTab() {
 }
 
 // ============================ SETTINGS ============================
-function SettingsTab({ canEdit, botUsername }: { canEdit: boolean; botUsername: string | null }) {
+function SettingsTab({ canEdit, onStatusChange }: { canEdit: boolean; onStatusChange?: () => void }) {
   const { toast } = useToast();
-  const [welcome, setWelcome] = useState("");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [bot, setBot] = useState<any>(null);
+  const [webhook, setWebhook] = useState<any>(null);
+  const [welcome, setWelcome] = useState("");
+  const [welcomeImage, setWelcomeImage] = useState("");
+  const [buttons, setButtons] = useState<InlineBtn[]>(emptyButtons());
+  const [unknownCmd, setUnknownCmd] = useState("");
+  const [ackOn, setAckOn] = useState(true);
+  const [ackBody, setAckBody] = useState("");
+  const [testChatId, setTestChatId] = useState("");
+  const [reregisterResult, setReregisterResult] = useState<string | null>(null);
 
-  useEffect(() => {
+  const load = useCallback(() => {
+    setLoading(true);
     fetch("/api/admin/telegram/settings")
       .then((r) => r.json())
       .then((d) => {
-        setWelcome(d?.settings?.welcomeMessage || d?.welcomeMessage || d?.welcome_message || "");
+        if (!d?.ok) return;
+        const s = d.settings || {};
+        setBot(d.bot || null);
+        setWebhook(d.webhook || null);
+        setWelcome(s.welcome_body || "");
+        setWelcomeImage(s.welcome_image_url || "");
+        setButtons(padButtons(s.welcome_buttons));
+        setUnknownCmd(s.unknown_command_reply || "");
+        setAckOn(s.first_inbound_ack_enabled !== false);
+        setAckBody(s.first_inbound_ack_body || "");
       })
       .catch(() => {})
       .finally(() => setLoading(false));
   }, []);
 
+  useEffect(() => { load(); }, [load]);
+
   async function save() {
     if (!canEdit) return;
+    const trimmed = trimButtons(buttons);
+    for (const b of trimmed) {
+      try {
+        const u = new URL(b.url);
+        if (u.protocol !== "http:" && u.protocol !== "https:") throw new Error("bad");
+      } catch {
+        toast(`Invalid button URL: ${b.url}`, "error");
+        return;
+      }
+    }
     setBusy(true);
     const d = await fetch("/api/admin/telegram/settings", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ welcomeMessage: welcome }),
+      body: JSON.stringify({
+        welcome_body: welcome,
+        welcome_image_url: welcomeImage.trim() || null,
+        welcome_buttons: trimmed,
+        unknown_command_reply: unknownCmd,
+        first_inbound_ack_enabled: ackOn,
+        first_inbound_ack_body: ackBody,
+      }),
     }).then((r) => r.json()).catch(() => null);
     setBusy(false);
-    toast(d?.ok ? "Settings saved." : (d?.error || "Save failed"), d?.ok ? "success" : "error");
+    toast(d?.ok ? "Settings saved — live immediately." : (d?.error || "Save failed"), d?.ok ? "success" : "error");
+    if (d?.ok) load();
+  }
+
+  async function reregister() {
+    if (!canEdit) return;
+    setBusy(true);
+    setReregisterResult(null);
+    const d = await fetch("/api/admin/telegram/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "reregister_webhook" }),
+    }).then((r) => r.json()).catch(() => null);
+    setBusy(false);
+    setReregisterResult(JSON.stringify(d, null, 2));
+    toast(d?.ok ? "Webhook re-registered." : (d?.error || d?.description || "setWebhook failed"), d?.ok ? "success" : "error");
+    onStatusChange?.();
+    load();
+  }
+
+  async function sendTest() {
+    if (!canEdit) return;
+    if (!testChatId.trim()) { toast("Enter a chat_id", "error"); return; }
+    setBusy(true);
+    const d = await fetch("/api/admin/telegram/test-send", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        chat_id: testChatId.trim(),
+        body: welcome,
+        buttons: trimButtons(buttons),
+        image_url: welcomeImage.trim() || undefined,
+        vars: { first_name: "Priya", name: "Priya" },
+      }),
+    }).then((r) => r.json()).catch(() => null);
+    setBusy(false);
+    toast(
+      d?.ok ? `Test sent (message_id ${d.telegram_message_id ?? "ok"}).` : (d?.error || "Test send failed"),
+      d?.ok ? "success" : "error",
+    );
   }
 
   if (loading) return <LoadingBlock />;
 
+  const username = bot?.username ? `@${String(bot.username).replace(/^@/, "")}` : null;
+  const previewButtons = trimButtons(buttons);
+  const previewText = welcome
+    .replace(/\{\{\s*first_name\s*\}\}/gi, "Priya")
+    .replace(/\{\{\s*name\s*\}\}/gi, "Priya");
+
   return (
-    <div className="grid gap-4 lg:grid-cols-2">
+    <div className="space-y-4">
       <div className="card space-y-3 p-4">
-        <p className="text-sm font-semibold">Bot</p>
-        <div className="flex items-center justify-between text-sm">
-          <span className="text-ink2">Username</span>
-          <span className="font-medium text-ink">{botUsername ? `@${botUsername.replace(/^@/, "")}` : "—"}</span>
+        <p className="text-sm font-semibold">Bot connection</p>
+        <div className="flex flex-wrap items-center gap-4">
+          <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-full bg-surface2">
+            {bot?.hasAvatar ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src="/api/admin/telegram/bot-avatar" alt="" className="h-full w-full object-cover" />
+            ) : (
+              <div className="flex h-full w-full items-center justify-center text-lg font-bold text-muted">TG</div>
+            )}
+            <span className={`absolute bottom-0.5 right-0.5 h-3 w-3 rounded-full border-2 border-white ${bot?.online ? "bg-emerald-500" : "bg-red-500"}`} />
+          </div>
+          <div className="min-w-0 flex-1 space-y-1 text-sm">
+            <Row label="Display name" value={bot?.firstName || "Unavailable — getMe failed"} />
+            <Row label="Username" value={username || "Unavailable"} />
+            <Row label="Bot ID" value={bot?.id != null ? String(bot.id) : "Unavailable"} />
+            <Row label="Status" value={bot?.online ? "Online" : (bot?.error || "Offline")} />
+            <Row label="Webhook URL" value={webhook?.webhookUrl || "Not registered"} />
+            <Row label="Last webhook error" value={webhook?.lastErrorMessage || "None"} />
+          </div>
         </div>
-      </div>
-      <div className="card space-y-3 p-4">
-        <p className="text-sm font-semibold">Welcome message</p>
-        <textarea className="input min-h-[120px]" value={welcome} disabled={!canEdit} onChange={(e) => setWelcome(e.target.value)}
-          placeholder="Sent when a subscriber joins…" />
-        {canEdit ? (
-          <button onClick={save} disabled={busy} className="btn btn-primary">{busy ? "…" : "Save settings"}</button>
-        ) : (
-          <p className="text-xs text-muted">You need manage permission to edit settings.</p>
+        {canEdit && (
+          <div className="flex flex-wrap gap-2">
+            <button type="button" className="btn btn-secondary text-sm" disabled={busy} onClick={reregister}>
+              Re-register webhook
+            </button>
+          </div>
+        )}
+        {reregisterResult && (
+          <pre className="overflow-x-auto rounded-lg bg-ink/5 p-3 text-xs text-ink2">{reregisterResult}</pre>
         )}
       </div>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <div className="card space-y-3 p-4">
+          <p className="text-sm font-semibold">Welcome message</p>
+          <p className="text-xs text-muted">Sent on every /start. Supports {"{{name}}"} and {"{{first_name}}"}.</p>
+          <textarea
+            className="input min-h-[140px]"
+            value={welcome}
+            disabled={!canEdit}
+            onChange={(e) => setWelcome(e.target.value)}
+            placeholder="Welcome…"
+          />
+          <Field label="Optional image URL (shown above welcome text)">
+            <input className="input" value={welcomeImage} disabled={!canEdit} onChange={(e) => setWelcomeImage(e.target.value)} placeholder="https://…" />
+          </Field>
+          <WelcomeButtonsEditor buttons={buttons} onChange={setButtons} disabled={!canEdit} />
+          {canEdit ? (
+            <button type="button" onClick={save} disabled={busy} className="btn btn-primary text-sm">
+              <Save size={14} /> {busy ? "…" : "Save welcome settings"}
+            </button>
+          ) : (
+            <p className="text-xs text-muted">You need manage permission to edit settings.</p>
+          )}
+        </div>
+
+        <div className="space-y-4">
+          <div className="card space-y-3 p-4">
+            <p className="text-sm font-semibold">Live preview</p>
+            <div className="rounded-2xl bg-[#e7f0f8] p-4">
+              <div className="max-w-[85%] rounded-2xl rounded-tl-sm bg-white px-3 py-2 text-sm shadow-sm">
+                {welcomeImage.trim() && (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={welcomeImage.trim()} alt="" className="mb-2 max-h-32 w-full rounded-lg object-cover" />
+                )}
+                <p className="whitespace-pre-wrap text-ink">{previewText || "Welcome message…"}</p>
+                {previewButtons.length > 0 && (
+                  <div className="mt-2 space-y-1.5">
+                    {previewButtons.map((b, i) => (
+                      <div key={i} className="rounded-lg border border-sky-200 bg-sky-50 px-2 py-1.5 text-center text-xs font-medium text-sky-800">
+                        {b.label}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+            {canEdit && (
+              <div className="flex flex-wrap items-end gap-2">
+                <Field label="Test chat_id">
+                  <input className="input" value={testChatId} onChange={(e) => setTestChatId(e.target.value)} placeholder="e.g. 123456789" />
+                </Field>
+                <button type="button" className="btn btn-secondary text-sm" disabled={busy} onClick={sendTest}>
+                  Send test to my chat_id
+                </button>
+              </div>
+            )}
+          </div>
+
+          <div className="card space-y-3 p-4">
+            <p className="text-sm font-semibold">Auto-replies</p>
+            <Field label="Unrecognised command reply">
+              <textarea className="input min-h-[80px]" value={unknownCmd} disabled={!canEdit} onChange={(e) => setUnknownCmd(e.target.value)} />
+            </Field>
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={ackOn} disabled={!canEdit} onChange={(e) => setAckOn(e.target.checked)} />
+              First-inbound acknowledgement (once per conversation)
+            </label>
+            <Field label="Acknowledgement text">
+              <textarea className="input min-h-[80px]" value={ackBody} disabled={!canEdit || !ackOn} onChange={(e) => setAckBody(e.target.value)} />
+            </Field>
+            {canEdit && (
+              <button type="button" onClick={save} disabled={busy} className="btn btn-primary text-sm">Save auto-replies</button>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function WelcomeButtonsEditor({
+  buttons, onChange, disabled,
+}: { buttons: InlineBtn[]; onChange: (b: InlineBtn[]) => void; disabled?: boolean }) {
+  const filled = buttons.filter((b) => b.label.trim() || b.url.trim());
+  function update(i: number, patch: Partial<InlineBtn>) {
+    const next = padButtons(buttons);
+    next[i] = { ...next[i]!, ...patch };
+    onChange(next);
+  }
+  function move(i: number, dir: -1 | 1) {
+    const next = padButtons(buttons);
+    const j = i + dir;
+    if (j < 0 || j >= 3) return;
+    const tmp = next[i]!;
+    next[i] = next[j]!;
+    next[j] = tmp;
+    onChange(next);
+  }
+  function remove(i: number) {
+    const next = padButtons(buttons);
+    next[i] = { label: "", url: "" };
+    onChange(next);
+  }
+  return (
+    <div className="space-y-2">
+      <p className="text-xs font-medium text-muted">Inline buttons (up to 3) — shown after /start</p>
+      {buttons.map((b, i) => (
+        <div key={i} className="flex flex-wrap items-center gap-2">
+          <input className="input min-w-[8rem] flex-1" placeholder={`Button ${i + 1} label`} value={b.label} disabled={disabled}
+            onChange={(e) => update(i, { label: e.target.value })} />
+          <input className="input min-w-[12rem] flex-[2]" placeholder="https://…" value={b.url} disabled={disabled}
+            onChange={(e) => update(i, { url: e.target.value })} />
+          {!disabled && (
+            <div className="flex gap-1">
+              <button type="button" className="btn btn-secondary px-2 text-xs" onClick={() => move(i, -1)} disabled={i === 0}>↑</button>
+              <button type="button" className="btn btn-secondary px-2 text-xs" onClick={() => move(i, 1)} disabled={i === 2}>↓</button>
+              <button type="button" className="btn btn-secondary px-2 text-xs" onClick={() => remove(i)} disabled={!b.label && !b.url}><Trash2 size={12} /></button>
+            </div>
+          )}
+        </div>
+      ))}
+      <p className="text-[11px] text-muted">{filled.length}/3 buttons configured</p>
+    </div>
+  );
+}
+
+function Row({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex flex-wrap justify-between gap-2">
+      <span className="text-ink2">{label}</span>
+      <span className="max-w-full break-all text-right font-medium text-ink">{value}</span>
     </div>
   );
 }

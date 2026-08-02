@@ -1,5 +1,12 @@
 import { getSupabaseAdmin } from "../supabase";
 import { normalizeIndianMobile } from "../phone";
+import { tgLog } from "./log";
+import {
+  DEFAULT_FIRST_INBOUND_ACK,
+  DEFAULT_UNKNOWN_COMMAND,
+  DEFAULT_WELCOME,
+  defaultWelcomeButtons,
+} from "./defaults";
 import type { TelegramButton, TelegramSettings, TelegramSubscriber } from "./types";
 
 function db() {
@@ -39,6 +46,8 @@ function mapSubscriber(row: Record<string, unknown>): TelegramSubscriber {
     unsubscribed_at: row.unsubscribed_at != null ? String(row.unsubscribed_at) : null,
     last_interaction_at: String(row.last_interaction_at || row.updated_at || nowIso()),
     phone: row.phone != null ? String(row.phone) : null,
+    first_inbound_ack_sent_at:
+      row.first_inbound_ack_sent_at != null ? String(row.first_inbound_ack_sent_at) : null,
     created_at: String(row.created_at),
     updated_at: String(row.updated_at),
   };
@@ -143,7 +152,10 @@ export async function upsertFromStart(input: UpsertFromStartInput): Promise<Upse
       .eq("chat_id", chatId)
       .select("*")
       .single();
-    if (error || !data) return null;
+    if (error || !data) {
+      tgLog("subscriber_update_failed", { chat_id: chatId, error: error?.message || "no_data" }, "error");
+      return null;
+    }
     return {
       isNew: false,
       reactivated: wasInactive,
@@ -167,7 +179,10 @@ export async function upsertFromStart(input: UpsertFromStartInput): Promise<Upse
     updated_at: ts,
   };
   const { data, error } = await supabase.from("telegram_subscribers").insert(row).select("*").single();
-  if (error || !data) return null;
+  if (error || !data) {
+    tgLog("subscriber_insert_failed", { chat_id: chatId, error: error?.message || "no_data" }, "error");
+    return null;
+  }
   return {
     isNew: true,
     reactivated: false,
@@ -368,28 +383,46 @@ export async function findActiveByStudentId(studentId: string): Promise<Telegram
   return data ? mapSubscriber(data as Record<string, unknown>) : null;
 }
 
-const DEFAULT_SETTINGS: TelegramSettings = {
-  id: "default",
-  bot_username: null,
-  welcome_body: null,
-  welcome_buttons: [],
-  updated_at: nowIso(),
-  updated_by: null,
-};
-
-export async function getSettings(): Promise<TelegramSettings> {
-  const supabase = db();
-  if (!supabase) return { ...DEFAULT_SETTINGS };
-  const { data } = await supabase.from("telegram_settings").select("*").eq("id", "default").maybeSingle();
-  if (!data) return { ...DEFAULT_SETTINGS };
+function mapSettings(data: Record<string, unknown> | null | undefined): TelegramSettings {
+  const buttons = asButtons(data?.welcome_buttons);
   return {
     id: "default",
-    bot_username: data.bot_username != null ? String(data.bot_username).replace(/^@/, "") : null,
-    welcome_body: data.welcome_body != null ? String(data.welcome_body) : null,
-    welcome_buttons: asButtons(data.welcome_buttons),
-    updated_at: String(data.updated_at || nowIso()),
-    updated_by: data.updated_by != null ? String(data.updated_by) : null,
+    bot_username: data?.bot_username != null ? String(data.bot_username).replace(/^@/, "") : null,
+    welcome_body: data?.welcome_body != null ? String(data.welcome_body) : DEFAULT_WELCOME,
+    welcome_buttons: buttons.length ? buttons : defaultWelcomeButtons(),
+    welcome_image_url: data?.welcome_image_url != null ? String(data.welcome_image_url) : null,
+    unknown_command_reply:
+      data?.unknown_command_reply != null ? String(data.unknown_command_reply) : DEFAULT_UNKNOWN_COMMAND,
+    first_inbound_ack_enabled: data?.first_inbound_ack_enabled !== false,
+    first_inbound_ack_body:
+      data?.first_inbound_ack_body != null ? String(data.first_inbound_ack_body) : DEFAULT_FIRST_INBOUND_ACK,
+    updated_at: String(data?.updated_at || nowIso()),
+    updated_by: data?.updated_by != null ? String(data.updated_by) : null,
   };
+}
+
+/** Ensure a settings row exists with sensible defaults (no redeploy needed). */
+export async function ensureDefaultSettings(): Promise<TelegramSettings> {
+  const supabase = db();
+  if (!supabase) return mapSettings(null);
+  const { data: existing } = await supabase.from("telegram_settings").select("*").eq("id", "default").maybeSingle();
+  if (existing) return mapSettings(existing as Record<string, unknown>);
+  const seed = {
+    id: "default",
+    welcome_body: DEFAULT_WELCOME,
+    welcome_buttons: defaultWelcomeButtons(),
+    first_inbound_ack_enabled: true,
+    first_inbound_ack_body: DEFAULT_FIRST_INBOUND_ACK,
+    unknown_command_reply: DEFAULT_UNKNOWN_COMMAND,
+    updated_at: nowIso(),
+  };
+  const { data, error } = await supabase.from("telegram_settings").insert(seed).select("*").single();
+  if (error) tgLog("settings_seed_failed", { error: error.message }, "error");
+  return mapSettings((data || seed) as Record<string, unknown>);
+}
+
+export async function getSettings(): Promise<TelegramSettings> {
+  return ensureDefaultSettings();
 }
 
 export async function updateSettings(
@@ -397,11 +430,16 @@ export async function updateSettings(
     bot_username: string | null;
     welcome_body: string | null;
     welcome_buttons: TelegramButton[];
+    welcome_image_url: string | null;
+    unknown_command_reply: string | null;
+    first_inbound_ack_enabled: boolean;
+    first_inbound_ack_body: string | null;
   }>,
   updatedBy?: string | null,
 ): Promise<TelegramSettings> {
   const supabase = db();
   if (!supabase) return getSettings();
+  await ensureDefaultSettings();
   const ts = nowIso();
   const row: Record<string, unknown> = {
     id: "default",
@@ -413,20 +451,57 @@ export async function updateSettings(
   }
   if (patch.welcome_body !== undefined) row.welcome_body = patch.welcome_body;
   if (patch.welcome_buttons !== undefined) row.welcome_buttons = patch.welcome_buttons;
+  if (patch.welcome_image_url !== undefined) row.welcome_image_url = patch.welcome_image_url;
+  if (patch.unknown_command_reply !== undefined) row.unknown_command_reply = patch.unknown_command_reply;
+  if (patch.first_inbound_ack_enabled !== undefined) {
+    row.first_inbound_ack_enabled = !!patch.first_inbound_ack_enabled;
+  }
+  if (patch.first_inbound_ack_body !== undefined) row.first_inbound_ack_body = patch.first_inbound_ack_body;
   const { data, error } = await supabase
     .from("telegram_settings")
     .upsert(row, { onConflict: "id" })
     .select("*")
     .single();
-  if (error || !data) return getSettings();
-  return {
-    id: "default",
-    bot_username: data.bot_username != null ? String(data.bot_username).replace(/^@/, "") : null,
-    welcome_body: data.welcome_body != null ? String(data.welcome_body) : null,
-    welcome_buttons: asButtons(data.welcome_buttons),
-    updated_at: String(data.updated_at || ts),
-    updated_by: data.updated_by != null ? String(data.updated_by) : null,
-  };
+  if (error) {
+    tgLog("settings_update_failed", { error: error.message }, "error");
+    return getSettings();
+  }
+  return mapSettings(data as Record<string, unknown>);
+}
+
+export async function markFirstInboundAckSent(chatId: string | number): Promise<void> {
+  const supabase = db();
+  if (!supabase) return;
+  try {
+    await supabase
+      .from("telegram_subscribers")
+      .update({ first_inbound_ack_sent_at: nowIso(), updated_at: nowIso() })
+      .eq("chat_id", String(chatId));
+  } catch (e) {
+    tgLog("ack_mark_failed", { error: (e as Error).message }, "warn");
+  }
+}
+
+export async function recordWebhookEvent(opts: {
+  updateId?: number | null;
+  kind: string;
+  chatId?: string | null;
+  ok: boolean;
+  error?: string | null;
+}): Promise<void> {
+  const supabase = db();
+  if (!supabase) return;
+  try {
+    await supabase.from("telegram_webhook_events").insert({
+      update_id: opts.updateId ?? null,
+      kind: opts.kind,
+      chat_id: opts.chatId || null,
+      ok: opts.ok,
+      error: opts.error || null,
+    });
+  } catch (e) {
+    tgLog("webhook_event_insert_failed", { error: (e as Error).message }, "warn");
+  }
 }
 
 export async function touchInteraction(chatId: string | number): Promise<void> {

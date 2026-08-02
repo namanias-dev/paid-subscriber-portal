@@ -9,5 +9,5 @@ export async function GET() {
     return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   }
   const overview = await getOverview();
-  return NextResponse.json({ ok: true, ...overview });
+  return NextResponse.json({ ok: true, overview });
 }
