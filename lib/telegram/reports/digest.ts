@@ -16,11 +16,13 @@ import {
   batchModes,
   batchTimings,
   deriveCollections,
+  deriveEnrollment,
   isActiveEnrollment,
 } from "../../installments";
 import { countsTowardCapacity } from "../../enrollmentScope";
 import { distinctRegistrations, isPaidStatus } from "../../paymentsAgg";
 import { getSupabaseAdmin } from "../../supabase";
+import type { Course, CourseBatch, CourseEnrollment, LearningMode } from "../../types";
 import { buildKeyboard, sendMessage } from "../botApi";
 import { tgLog } from "../log";
 import { escapeHtml, formatIstShort, inr, istNowParts } from "./format";
@@ -45,13 +47,6 @@ function mPrev(m: MetricDelta | null | undefined): number | null {
   return m.prev;
 }
 
-/** Truncate display names for Telegram (~40 chars). */
-function truncName(s: string, max = 40): string {
-  const t = String(s || "").trim();
-  if (t.length <= max) return t;
-  return `${t.slice(0, max - 1).trimEnd()}…`;
-}
-
 /**
  * Meaningful period delta only when there is a real non-zero base.
  * Suppresses zero-vs-zero and 0→N “100%” noise.
@@ -74,72 +69,146 @@ function deltaLabel(curr: number | null, prev: number | null): string | null {
 type ModeBucket = "online" | "offline";
 type TimingBucket = "morning" | "evening";
 
-/**
- * Classify ONE mode per enrollment. Never fall back to course.modes
- * (those list catalog options and would double-count).
- */
-function classifyMode(
-  batch: { mode?: unknown } | null,
-  batchLabel: string,
-): ModeBucket | null {
-  const modes = batch ? batchModes(batch as { mode?: import("../../types").LearningMode | import("../../types").LearningMode[] | null }) : [];
-  const fromBatch = new Set<ModeBucket>();
+function modeFromModes(modes: LearningMode[] | string[]): ModeBucket | null {
+  const set = new Set<ModeBucket>();
   for (const m of modes) {
     const s = String(m);
-    if (/offline/i.test(s)) fromBatch.add("offline");
-    else if (/online|recorded|hybrid/i.test(s)) fromBatch.add("online");
+    if (/offline/i.test(s)) set.add("offline");
+    else if (/online|recorded|hybrid/i.test(s)) set.add("online");
   }
-  if (fromBatch.size === 1) return [...fromBatch][0]!;
-  if (fromBatch.size > 1) return null;
+  if (set.size === 1) return [...set][0]!;
+  return null;
+}
 
-  const label = batchLabel.toLowerCase();
-  const hasOff = /\boffline\b/.test(label);
-  const hasOn = /\bonline\b|\brecorded\b|\bhybrid\b/.test(label);
+function timingFromList(timings: string[]): TimingBucket | null {
+  const set = new Set<TimingBucket>();
+  for (const t of timings) {
+    if (/morning/i.test(t)) set.add("morning");
+    if (/evening/i.test(t)) set.add("evening");
+  }
+  if (set.size === 1) return [...set][0]!;
+  return null;
+}
+
+function timingFromLabel(label: string): TimingBucket | null {
+  const hasM = /\bmorning\b/i.test(label);
+  const hasE = /\bevening\b/i.test(label);
+  if (hasM && !hasE) return "morning";
+  if (hasE && !hasM) return "evening";
+  return null;
+}
+
+function modeFromLabel(label: string): ModeBucket | null {
+  const hasOff = /\boffline\b/i.test(label);
+  const hasOn = /\bonline\b|\brecorded\b|\bhybrid\b/i.test(label);
   if (hasOff && !hasOn) return "offline";
   if (hasOn && !hasOff) return "online";
   return null;
 }
 
-/**
- * Classify ONE timing per enrollment. Never fall back to course.batch_timings
- * (catalog lists both Morning and Evening → Morning 24 · Evening 14 on Total 24).
- */
-function classifyTiming(
-  batch: { timing?: unknown } | null,
-  batchLabel: string,
-): TimingBucket | null {
-  const timings = batch ? batchTimings(batch as { timing?: string | string[] | null }) : [];
-  const fromBatch = new Set<TimingBucket>();
-  for (const t of timings) {
-    const s = String(t);
-    if (/morning/i.test(s)) fromBatch.add("morning");
-    if (/evening/i.test(s)) fromBatch.add("evening");
-  }
-  if (fromBatch.size === 1) return [...fromBatch][0]!;
-  if (fromBatch.size > 1) return null; // e.g. ["Morning","Evening"] — ambiguous
+/** Price anchors on a batch used to match enrollments with missing batch_id. */
+function batchPriceAnchors(b: CourseBatch): number[] {
+  return [b.price, b.pay_in_full_price, b.original_price]
+    .map((n) => Number(n))
+    .filter((n) => Number.isFinite(n) && n > 0);
+}
 
-  const label = batchLabel.toLowerCase();
-  const hasM = /\bmorning\b/.test(label);
-  const hasE = /\bevening\b/.test(label);
-  if (hasM && !hasE) return "morning";
-  if (hasE && !hasM) return "evening";
+/**
+ * Resolve the catalog batch for an enrollment.
+ * Prefer batch_id; else match timing (from label) + closest fee to batch price.
+ */
+function resolveEnrollmentBatch(
+  course: Course,
+  e: CourseEnrollment,
+): CourseBatch | null {
+  const batches = course.batches || [];
+  if (!batches.length) return null;
+  if (e.batch_id) {
+    const hit = batches.find((b) => b.id === e.batch_id);
+    if (hit) return hit;
+  }
+
+  const timing = timingFromLabel(e.batch_label || "");
+  const fee = Number(e.total_fee) || 0;
+  let best: { batch: CourseBatch; dist: number } | null = null;
+
+  for (const b of batches) {
+    const bTiming = timingFromList(batchTimings(b));
+    if (timing && bTiming && timing !== bTiming) continue;
+    if (timing && !bTiming && !timingFromLabel(b.label || "")) continue;
+
+    const anchors = batchPriceAnchors(b);
+    if (!anchors.length || fee <= 0) continue;
+    const dist = Math.min(...anchors.map((p) => Math.abs(p - fee)));
+    if (!best || dist < best.dist) best = { batch: b, dist };
+  }
+
+  // Accept only a clear fee match (within ₹15k of a listed price).
+  if (best && best.dist <= 15_000) return best.batch;
   return null;
+}
+
+/**
+ * ONE mode per enrollment — never double-count.
+ * Order: linked/matched batch → label → fee-vs-batch-prices → single course.modes.
+ */
+function classifyMode(
+  course: Course,
+  batch: CourseBatch | null,
+  e: CourseEnrollment,
+): ModeBucket | null {
+  if (batch) {
+    const fromBatch = modeFromModes(batchModes(batch));
+    if (fromBatch) return fromBatch;
+  }
+  const fromLabel = modeFromLabel(e.batch_label || "");
+  if (fromLabel) return fromLabel;
+
+  // Fee proximity to Online vs Offline batch prices on this course.
+  const fee = Number(e.total_fee) || 0;
+  if (fee > 0 && course.batches?.length) {
+    let bestOn = Infinity;
+    let bestOff = Infinity;
+    for (const b of course.batches) {
+      const m = modeFromModes(batchModes(b));
+      if (!m) continue;
+      for (const p of batchPriceAnchors(b)) {
+        const d = Math.abs(p - fee);
+        if (m === "online") bestOn = Math.min(bestOn, d);
+        if (m === "offline") bestOff = Math.min(bestOff, d);
+      }
+    }
+    if (bestOn < bestOff && bestOn <= 15_000) return "online";
+    if (bestOff < bestOn && bestOff <= 15_000) return "offline";
+  }
+
+  // Course catalog has a single exclusive mode → safe default for unlabeled rows.
+  return modeFromModes(course.modes || []);
+}
+
+/** ONE timing per enrollment — never fall back to course.batch_timings catalog. */
+function classifyTiming(batch: CourseBatch | null, batchLabel: string): TimingBucket | null {
+  if (batch) {
+    const fromBatch = timingFromList(batchTimings(batch));
+    if (fromBatch) return fromBatch;
+  }
+  return timingFromLabel(batchLabel);
 }
 
 interface CourseBlock {
   title: string;
   total: number;
   capacity: number | null;
-  seatsLeft: number | null;
   online: number;
   offline: number;
   morning: number;
   evening: number;
+  fullPaid: number;
+  partial: number;
+  unpaid: number;
   modeOk: boolean;
   timingOk: boolean;
-  /** True when morning+evening are both 0 (suppress timing line). */
   timingEmpty: boolean;
-  /** True when online+offline are both 0 (suppress mode line). */
   modeEmpty: boolean;
 }
 
@@ -149,9 +218,9 @@ function courseBreakdown(
 ): CourseBlock[] {
   const enabled = courses.filter((c) => c.status === "published" && c.active !== false);
   const out: CourseBlock[] = [];
+  const now = Date.now();
 
   for (const course of enabled) {
-    // One row per enrollment id — never expand by installment/payment.
     const seen = new Set<string>();
     const enrs = enrollments.filter((e) => {
       if (e.course_id !== course.id || !isActiveEnrollment(e) || !countsTowardCapacity(e)) return false;
@@ -164,8 +233,10 @@ function courseBreakdown(
     let online = 0,
       offline = 0,
       morning = 0,
-      evening = 0;
-    const batchById = new Map((course.batches || []).map((b) => [b.id, b]));
+      evening = 0,
+      fullPaid = 0,
+      partial = 0,
+      unpaid = 0;
 
     let capacity: number | null = null;
     if (course.batches?.length) {
@@ -183,14 +254,19 @@ function courseBreakdown(
     }
 
     for (const e of enrs) {
-      const batch = e.batch_id ? batchById.get(e.batch_id) || null : null;
-      const label = e.batch_label || "";
-      const mode = classifyMode(batch, label);
+      const batch = resolveEnrollmentBatch(course, e);
+      const mode = classifyMode(course, batch, e);
       if (mode === "online") online++;
       else if (mode === "offline") offline++;
-      const timing = classifyTiming(batch, label);
+
+      const timing = classifyTiming(batch, e.batch_label || "");
       if (timing === "morning") morning++;
       else if (timing === "evening") evening++;
+
+      const der = deriveEnrollment(e, now);
+      if (der.isFullyPaid) fullPaid++;
+      else if ((e.amount_paid || 0) > 0 || der.paid > 0) partial++;
+      else unpaid++;
     }
 
     const total = enrs.length;
@@ -216,18 +292,17 @@ function courseBreakdown(
       );
     }
 
-    const seatsLeft =
-      capacity != null && capacity > 0 ? Math.max(0, capacity - total) : null;
-
     out.push({
       title: course.title,
       total,
       capacity,
-      seatsLeft,
       online,
       offline,
       morning,
       evening,
+      fullPaid,
+      partial,
+      unpaid,
       modeOk,
       timingOk,
       timingEmpty,
@@ -358,10 +433,9 @@ async function loginAllTimeDailyAvg(): Promise<number | null> {
 
 function pushSection(lines: string[], header: string, body: string[]): void {
   if (!body.length) return;
-  // Blank line between sections (header already ends with one blank after title).
   if (lines.length && lines[lines.length - 1] !== "") lines.push("");
   lines.push(header);
-  for (const row of body.slice(0, 4)) lines.push(row);
+  for (const row of body) lines.push(row);
 }
 
 export interface DigestBuildResult {
@@ -458,83 +532,84 @@ export async function buildDigest(opts?: {
 
   const lines: string[] = [];
   const headerLabel = parts.label.replace(/\b(am|pm)\b/i, (m) => m.toUpperCase());
-  lines.push(`📊 <b>NAMAN IAS · ${escapeHtml(headerLabel)}</b>`);
+  lines.push(`📊 <b><u>NAMAN IAS</u> · ${escapeHtml(headerLabel)}</b>`);
   lines.push("");
 
   // ── WEBINAR ──
   if (webinar && webinar.registered > 0) {
-    const body: string[] = [];
-    const dateBit = webinar.dateLabel || "";
-    body.push(
-      `${escapeHtml(truncName(webinar.title))} — ${escapeHtml(dateBit)}`,
-    );
-    body.push(`Registered ${webinar.registered}`);
+    const body: string[] = [
+      `<b>${escapeHtml(webinar.title)}</b>`,
+      webinar.dateLabel ? `<i>${escapeHtml(webinar.dateLabel)}</i>` : "",
+      `Registered <b>${webinar.registered}</b>`,
+    ].filter(Boolean);
     if (webinar.confirmed != null && webinar.confirmed > 0) {
-      body.push(`Confirmed ${webinar.confirmed}`);
+      body.push(`Confirmed <b>${webinar.confirmed}</b>`);
     }
     if (webinar.attendedLastPct != null) {
-      body.push(`Last attendance ${webinar.attendedLastPct}%`);
+      body.push(`Last attendance <b>${webinar.attendedLastPct}%</b>`);
     }
     pushSection(lines, `📣 <b>WEBINAR</b>`, body);
   }
 
-  // ── ADMISSIONS ──
-  {
+  // ── ADMISSIONS (per course) ──
+  for (const c of courseBlocks.filter((x) => x.total > 0).slice(0, 3)) {
     const body: string[] = [];
-    for (const c of courseBlocks.filter((x) => x.total > 0).slice(0, 2)) {
-      body.push(escapeHtml(truncName(c.title)));
-      const seats =
-        c.seatsLeft != null
-          ? `${c.total} admissions · ${c.seatsLeft} seats left`
-          : `${c.total} admissions`;
-      body.push(escapeHtml(seats));
-      if (!c.modeEmpty) {
-        if (c.modeOk) {
-          body.push(`Offline ${c.offline} · Online ${c.online}`);
-        } else {
-          body.push(`Offline/Online — ⚠`);
-        }
-      }
-      // Timing only when invariant passes (and not empty).
-      if (c.timingOk) {
-        body.push(`Morning ${c.morning} · Evening ${c.evening}`);
-      } else if (!c.timingEmpty) {
-        body.push(`Morning/Evening — ⚠`);
-      }
+    const seats =
+      c.capacity != null && c.capacity > 0
+        ? `Total <b>${c.total}</b> · Seats <b>${c.total}/${c.capacity}</b>`
+        : `Total <b>${c.total}</b>`;
+    body.push(seats);
+
+    if (c.modeOk) {
+      body.push(`Online <b>${c.online}</b> · Offline <b>${c.offline}</b>`);
+    } else if (!c.modeEmpty) {
+      tgLog("digest_admissions_mode_render_fail", { course: c.title, online: c.online, offline: c.offline, total: c.total }, "error");
+      // Still show counted numbers when partial — never a fake ⚠ placeholder that hides real splits.
+      body.push(`Online <b>${c.online}</b> · Offline <b>${c.offline}</b> · Unmapped <b>${c.total - c.online - c.offline}</b>`);
     }
-    if (body.length) {
-      if (lines.length && lines[lines.length - 1] !== "") lines.push("");
-      lines.push(`🎓 <b>ADMISSIONS</b>`);
-      for (const row of body) lines.push(row);
+
+    if (c.timingOk) {
+      body.push(`Morning <b>${c.morning}</b> · Evening <b>${c.evening}</b>`);
+    } else if (!c.timingEmpty) {
+      body.push(
+        `Morning <b>${c.morning}</b> · Evening <b>${c.evening}</b> · Unmapped <b>${c.total - c.morning - c.evening}</b>`,
+      );
     }
+
+    const payBits = [
+      `Full paid <b>${c.fullPaid}</b>`,
+      `Partial <b>${c.partial}</b>`,
+      c.unpaid > 0 ? `Unpaid <b>${c.unpaid}</b>` : null,
+    ].filter(Boolean);
+    body.push(payBits.join(" · "));
+
+    pushSection(lines, `🎓 <b>ADMISSIONS — ${escapeHtml(c.title)}</b>`, body);
   }
 
   // ── LOGINS ──
   {
-    const hasToday = loginsToday != null && loginsToday > 0;
-    const hasYday = loginsYday != null && loginsYday > 0;
+    const hasToday = loginsToday != null;
+    const hasYday = loginsYday != null;
     const hasAvg = loginAvg != null && loginAvg > 0;
-    if (hasToday || hasYday || hasAvg) {
-      const body: string[] = [];
-      if (hasToday || hasYday) {
-        const t = loginsToday != null ? `Today ${loginsToday}` : null;
-        const y = loginsYday != null ? `Yesterday ${loginsYday}` : null;
-        body.push([t, y].filter(Boolean).join(" · "));
-      }
-      if (hasAvg) body.push(`All-time daily average ${loginAvg}`);
-      pushSection(lines, `👥 <b>LOGINS</b>`, body);
+    if ((hasToday && (loginsToday ?? 0) > 0) || (hasYday && (loginsYday ?? 0) > 0) || hasAvg) {
+      const bits: string[] = [];
+      if (loginsToday != null) bits.push(`Today <b>${loginsToday}</b>`);
+      if (loginsYday != null) bits.push(`Yesterday <b>${loginsYday}</b>`);
+      if (hasAvg) bits.push(`All-time avg/day <b>${loginAvg}</b>`);
+      pushSection(lines, `👥 <b>LOGINS</b>`, [bits.join(" · ")]);
     }
   }
 
   // ── REVENUE ──
   if (revenueToday != null || revenueMtd != null || (revenueYday != null && revenueYday > 0)) {
-    const body: string[] = [];
-    body.push(`Today ${inr(revenueToday)} · MTD ${inr(revenueMtd)}`);
+    const body: string[] = [
+      `Today <b>${inr(revenueToday)}</b> · MTD <b>${inr(revenueMtd)}</b>`,
+    ];
     if (revenueYday != null && revenueYday > 0) {
-      body.push(`Yesterday ${inr(revenueYday)}`);
+      body.push(`Yesterday <b>${inr(revenueYday)}</b>`);
     }
     const d = deltaLabel(revenueToday, revenueYday);
-    if (d) body.push(d);
+    if (d) body.push(`<b>${d}</b>`);
     pushSection(lines, `💰 <b>REVENUE</b>`, body);
   }
 
@@ -543,11 +618,11 @@ export async function buildDigest(opts?: {
     const body: string[] = [];
     if (collections.overdueCount > 0) {
       body.push(
-        `${inr(collections.overdueAmount)} overdue · ${collections.overdueCount} students`,
+        `<b>${inr(collections.overdueAmount)}</b> overdue · <b>${collections.overdueCount}</b> students`,
       );
     }
     if (collections.due7dAmount > 0) {
-      body.push(`Due this week ${inr(collections.due7dAmount)}`);
+      body.push(`Due this week <b>${inr(collections.due7dAmount)}</b>`);
     }
     pushSection(lines, `⚠️ <b>COLLECTIONS</b>`, body);
   }
@@ -555,7 +630,9 @@ export async function buildDigest(opts?: {
   // ── ALERTS (failed payments) ──
   if (failedToday != null && failedToday > 0) {
     if (lines.length && lines[lines.length - 1] !== "") lines.push("");
-    lines.push(`🚨 ${failedToday} payment${failedToday === 1 ? "" : "s"} failed today`);
+    lines.push(
+      `🚨 <b>${failedToday}</b> payment${failedToday === 1 ? "" : "s"} failed today`,
+    );
   }
 
   // ── 6 AM only ──
