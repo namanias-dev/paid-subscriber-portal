@@ -1,9 +1,9 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
 import Countdown from "@/components/public/Countdown";
 import WebinarRegister from "@/components/public/WebinarRegister";
 import CoverImage from "@/components/public/CoverImage";
 import SeatCounter from "@/components/public/SeatCounter";
-import WhatsAppButton from "@/components/public/WhatsAppButton";
 import TrustStrip from "@/components/public/TrustStrip";
 import StickyMobileCTA from "@/components/public/StickyMobileCTA";
 import LandingSections from "@/components/public/LandingSections";
@@ -15,6 +15,7 @@ import { getPurchaseSnapshot, webinarStatus } from "@/lib/purchaseStatus";
 import { buildLandingView } from "@/lib/landingView";
 import { formatINR, formatISTRange } from "@/lib/dates";
 import { SITE_URL, ACADEMY } from "@/lib/config";
+import { whatsappLink } from "@/lib/phone";
 
 export const revalidate = 300;
 export const maxDuration = 10;
@@ -224,9 +225,14 @@ export default async function WebinarDetail({ params }: { params: { slug: string
             ) : closed ? (
               <a href={closedCtaHref} className="btn btn-primary">{closedCtaLabel} →</a>
             ) : (
-              <a href="#register" className="btn btn-primary">{completed ? "Get the recording" : "Reserve your spot →"}</a>
+              <a href="#register" className="btn btn-primary">
+                {completed
+                  ? "Get the recording"
+                  : w.price > 0
+                    ? `Pay ${formatINR(w.price)} & Reserve Seat →`
+                    : "Reserve your spot →"}
+              </a>
             )}
-            <WhatsAppButton config={view.whatsapp} />
           </div>
 
           <TrustStrip items={trust} />
@@ -255,6 +261,20 @@ export default async function WebinarDetail({ params }: { params: { slug: string
             resourcesTitle="Included resources"
             resourcesSubtitle="Bonus material you get with this session."
           />
+
+          {(() => {
+            const wa = whatsappLink(view.whatsapp?.whatsapp || view.whatsapp?.phone, view.whatsapp?.prefill_message);
+            if (!wa) return null;
+            return (
+              <p className="mt-8 text-sm text-muted">
+                Questions before you register?{" "}
+                <a href={wa} target="_blank" rel="noopener noreferrer" className="underline underline-offset-2 hover:text-ink">
+                  Message us
+                </a>
+                .
+              </p>
+            );
+          })()}
 
           {brochures.length > 0 && (
             <section className="mt-10">
@@ -308,20 +328,27 @@ export default async function WebinarDetail({ params }: { params: { slug: string
                   <SeatCounter seat={view.seat} compact />
                 </div>
                 <div className="mt-4">
-                  <WebinarRegister webinarId={w.id} webinarSlug={w.slug} price={w.price} />
+                  <Suspense fallback={<div className="h-40 animate-pulse rounded-xl bg-surface2" />}>
+                    <WebinarRegister webinarId={w.id} webinarSlug={w.slug} price={w.price} entryPoint="detail" />
+                  </Suspense>
                 </div>
               </>
             )}
-            <WhatsAppButton config={view.whatsapp} className="mt-3 w-full" />
           </div>
         </div>
       </div>
 
       <StickyMobileCTA
-        priceLabel={priceLabel}
-        ctaLabel={closed ? closedCtaLabel : completed ? "Get recording" : "Reserve spot"}
+        ctaLabel={
+          closed
+            ? `${closedCtaLabel} →`
+            : completed
+              ? "Get recording →"
+              : w.price > 0
+                ? `Pay ${formatINR(w.price)} & Reserve Seat →`
+                : "Reserve your spot →"
+        }
         ctaHref={closed ? closedCtaHref : "#register"}
-        whatsapp={view.whatsapp}
       />
     </div>
   );

@@ -2675,7 +2675,14 @@ export async function deleteWebinar(id: string): Promise<boolean> {
   }
   return dbDelete("webinars", id);
 }
-export async function registerWebinar(webinarId: string, name: string, phone: string, attr?: AttributionState | null, visitorId?: string | null): Promise<{ ok: boolean }> {
+export async function registerWebinar(
+  webinarId: string,
+  name: string,
+  phone: string,
+  attr?: AttributionState | null,
+  visitorId?: string | null,
+  entryPoint?: string | null,
+): Promise<{ ok: boolean }> {
   if (demoMode()) {
     const w = mock.webinars.find((x) => x.id === webinarId);
     if (w) w.registrations += 1;
@@ -2697,6 +2704,8 @@ export async function registerWebinar(webinarId: string, name: string, phone: st
       // just leaves the columns null (honest untracked), matching payment behavior.
       const flat = flattenForStamp(attr ?? null);
       const metaId = metaIdentityFromState(attr ?? null);
+      const entry =
+        entryPoint === "listing" || entryPoint === "detail" || entryPoint === "direct" ? entryPoint : null;
       const insertRow: Record<string, unknown> = {
         webinar_id: webinarId,
         name,
@@ -2705,6 +2714,7 @@ export async function registerWebinar(webinarId: string, name: string, phone: st
         attribution_campaign: flat.campaign,
         attribution_fbclid: metaId.fbclid,
         attribution_fbc: metaId.fbc,
+        ...(entry ? { entry_point: entry } : {}),
       };
       // FULL AD-HIERARCHY CAPTURE (feature-flagged, default ON): additionally
       // stamp the campaign_id/adset_id/ad_id/ad_name/content/term/platform

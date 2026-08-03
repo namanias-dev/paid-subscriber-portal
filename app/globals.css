@@ -95,6 +95,13 @@ a {
   from { opacity: 0; transform: translateY(16px) translateZ(-42px) rotateX(7deg) scale(0.985); }
   to   { opacity: 1; transform: translateY(0) translateZ(0) rotateX(0deg) scale(1); }
 }
+@keyframes webinarCtaSheen {
+  0% { transform: translateX(-140%); }
+  100% { transform: translateX(320%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-\[webinarCtaSheen_3s_ease-in-out_infinite\] { animation: none !important; display: none !important; }
+}
 .pay-stagger > * {
   transform-origin: 50% 100%;
   backface-visibility: hidden;

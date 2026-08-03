@@ -22,6 +22,7 @@ import type { Lead, LeadStatus, LeadSourceTouch } from "@/lib/types";
 import CopyPhonesModal from "@/components/admin/CopyPhonesModal";
 import LegacyLeadPill from "@/components/admin/LegacyLeadPill";
 import { lookupLegacyMatch, type LegacyLeadMatch } from "@/lib/marketing/legacyLeadMatch";
+import { displayPublicEmail } from "@/lib/displayEmail";
 
 const DAY_MS = 86400000;
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -209,7 +210,7 @@ export default function LeadsPage() {
     }
     const rows = [
       ["Name", "Phone", "Email", "City", "State", "Source", "Status", "Course Interest", "Counsellor", "Follow-up", "Created"],
-      ...filtered.map((l) => [l.name, l.phone, l.email ?? "", l.city ?? "", l.state ?? "", l.source, leadStatusLabel(l.status), l.course_interest ?? "", l.counsellor ?? "", l.follow_up_date ?? "", l.created_at ?? ""]),
+      ...filtered.map((l) => [l.name, l.phone, displayPublicEmail(l.email) === "—" ? "" : displayPublicEmail(l.email), l.city ?? "", l.state ?? "", l.source, leadStatusLabel(l.status), l.course_interest ?? "", l.counsellor ?? "", l.follow_up_date ?? "", l.created_at ?? ""]),
     ];
     const csv = rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
     const url = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
@@ -561,9 +562,9 @@ function LeadDetail({
       <div className="space-y-4">
         <div className="grid grid-cols-2 gap-2 text-sm">
           <Info label="Phone" value={lead.phone} />
-          <Info label="Email" value={lead.email || "—"} />
+          <Info label="Email" value={displayPublicEmail(lead.email)} />
           <Info label="City" value={lead.city || "—"} />
-          <Info label="Source (latest)" value={lead.source} />
+          <Info label="Source (latest)" value={lead.source === "Webinar" ? "Webinar (listing or detail form)" : (lead.source || "—")} />
           <div className="col-span-2">
             <LegacyLeadPill match={legacyMatch} />
           </div>

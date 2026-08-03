@@ -12,7 +12,7 @@ const ALERT_LABELS: { key: string; label: string }[] = [
   { key: "seat_booked", label: "Seat booked (full detail)" },
   { key: "full_payment", label: "Payment received / full payment" },
   { key: "installment_overdue", label: "Overdue (daily 10 AM + 7d/30d)" },
-  { key: "webinar_registration", label: "Webinar registration (on PAID only)" },
+  { key: "webinar_registration", label: "Webinar registration — listing or detail (on PAID only)" },
   { key: "webinar_milestone", label: "Webinar paid milestone (every 25)" },
   { key: "webinar_reminder_24h", label: "Webinar 24h reminder" },
   { key: "no_leads_6h", label: "No leads for 6h (business hours)" },

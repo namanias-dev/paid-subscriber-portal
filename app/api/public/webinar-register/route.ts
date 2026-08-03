@@ -32,7 +32,10 @@ export async function POST(req: Request) {
     // Visitor id bridges this conversion to the same visitor's anonymous,
     // campaign-rich landing page views so the lead attributes to its ad campaign.
     const visitorId = jar.get(VISITOR_COOKIE)?.value || null;
-    await registerWebinar(webinarId, name, phone, attr, visitorId);
+    const entryRaw = String(body.entry_point || "").trim().toLowerCase();
+    const entryPoint =
+      entryRaw === "listing" || entryRaw === "detail" || entryRaw === "direct" ? entryRaw : null;
+    await registerWebinar(webinarId, name, phone, attr, visitorId, entryPoint);
     return NextResponse.json({ ok: true });
   } catch {
     return NextResponse.json({ ok: false, error: "Could not register." }, { status: 500 });
