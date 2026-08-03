@@ -45,5 +45,24 @@ const nextConfig = {
     contentDispositionType: "attachment",
     contentSecurityPolicy: "default-src 'self'; script-src 'none'; sandbox;",
   },
+  async redirects() {
+    // Expired / inactive webinar slugs still linked from Instagram/ManyChat ads.
+    // Destination is the webinars index — never shadows a live upcoming slug.
+    const expiredWebinars = [
+      "upsc-full-masterclass-by-naman-sir-july-25",
+      "upsc-full-masterclass-by-naman-sir-july-18",
+      "upsc-full-masterclass-by-naman-sir-04072026",
+      "upsc-full-masterclass-by-naman-sir-01-august-2026",
+      "upsc-cse-masterclass",
+      "how-to-choose-optional",
+    ];
+    return [
+      ...expiredWebinars.map((slug) => ({
+        source: `/webinars/${slug}`,
+        destination: "/webinars",
+        permanent: false,
+      })),
+    ];
+  },
 };
 module.exports = nextConfig;

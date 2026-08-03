@@ -1,9 +1,10 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Search, ArrowRight } from "lucide-react";
 import { resourceCategoryName } from "@/lib/resourceConstants";
+import { ga4Event } from "@/lib/analytics/ga4";
 
 interface Item { slug: string; title: string; summary: string; category: string | null; tags: string[] }
 
@@ -16,6 +17,17 @@ export default function ResourceSearch({ items }: { items: Item[] }) {
       .filter((r) => `${r.title} ${r.summary} ${(r.tags || []).join(" ")} ${resourceCategoryName(r.category)}`.toLowerCase().includes(term))
       .slice(0, 8);
   }, [items, term]);
+
+  useEffect(() => {
+    if (!term) return;
+    const t = setTimeout(() => {
+      ga4Event("view_search_results", {
+        search_term: term.slice(0, 40),
+        result_count: results.length,
+      });
+    }, 400);
+    return () => clearTimeout(t);
+  }, [term, results.length]);
 
   return (
     <div className="relative mx-auto max-w-2xl">

@@ -5,6 +5,7 @@ import { usePathname, useSearchParams } from "next/navigation";
 import {
   ga4Init,
   ga4PageView,
+  ga4SetUserProperties,
   hasMarketingConsent,
   isGa4Configured,
   isPublicAnalyticsPath,
@@ -44,6 +45,8 @@ export default function GoogleAnalytics() {
     if (!isPublicAnalyticsPath(pathname)) return; // private page => no load, no page_view
     if (!hasMarketingConsent()) return; // no consent => nothing loads/fires
     ga4Init(); // idempotent gtag bootstrap (only runs once)
+    // Public visitors default to anonymous until a portal session stamps a role.
+    ga4SetUserProperties({ role: "anonymous" });
     const key = `${pathname}?${search?.toString() || ""}`;
     if (lastSent.current === key) return; // dedupe: initial load never double-counts
     lastSent.current = key;

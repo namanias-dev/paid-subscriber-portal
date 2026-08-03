@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Sparkles, CheckCircle2, Send } from "lucide-react";
+import { useGa4FormTracking } from "@/lib/analytics/ga4Form";
 
 /** Lead-capture form for monthly PDF / daily updates. Phone required. */
 export default function CaLeadForm({
@@ -20,6 +21,8 @@ export default function CaLeadForm({
   const [city, setCity] = useState("");
   const [status, setStatus] = useState<"idle" | "loading" | "done" | "error">("idle");
   const [msg, setMsg] = useState("");
+  const formId = `ca_lead:${source}`;
+  const { onFocusCapture, trackSubmit } = useGa4FormTracking(formId, "Current affairs lead");
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -36,6 +39,7 @@ export default function CaLeadForm({
     });
     const d = await res.json().catch(() => ({ ok: false }));
     if (d.ok) {
+      trackSubmit({ source });
       setStatus("done");
       setMsg("You're in! Check your WhatsApp shortly.");
     } else {
@@ -63,7 +67,7 @@ export default function CaLeadForm({
           <h3 className="mt-3 font-heading text-2xl font-extrabold tracking-tight text-white sm:text-3xl">{title}</h3>
           <p className="mt-2 max-w-md text-[var(--ca-slate-300)]">{description}</p>
         </div>
-        <form onSubmit={submit} className="ca-glass space-y-3 p-5">
+        <form onSubmit={submit} onFocusCapture={onFocusCapture} className="ca-glass space-y-3 p-5">
           <div className="grid gap-3 sm:grid-cols-2">
             <input className="input ca-focus" placeholder="Your name" value={name} onChange={(e) => setName(e.target.value)} />
             <input className="input ca-focus" inputMode="numeric" placeholder="Mobile number*" value={phone} onChange={(e) => setPhone(e.target.value)} required />

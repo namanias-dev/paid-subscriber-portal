@@ -235,6 +235,10 @@ export async function recordPaymentPaid(p: Payment, source = "system"): Promise<
       // at registration (registration == confirmation). Once per payment (dedupe).
       fireAutoSms({ trigger: TRIGGERS.registration_created, phone: p.phone, name: p.student_name, vars: { item_short: p.item }, entity: smsEntityForPayment(p), entityId: ref });
     }
+    // GA4 Measurement Protocol payment_success (fire-and-forget; never blocks PAID/SMS).
+    void import("./ga4mp")
+      .then((m) => m.sendGa4PaymentSuccess(p))
+      .catch(() => {});
   }
 }
 

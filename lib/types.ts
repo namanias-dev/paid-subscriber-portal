@@ -1467,6 +1467,10 @@ export interface Payment {
   payment_confirmed_notified_at?: string | null;
   /** QStash message ids for the verify ladder. */
   verify_schedule_ids?: string[] | null;
+  /** GA4 client_id captured at checkout (nullable; never required). */
+  ga_client_id?: string | null;
+  /** When GA4 MP payment_success was sent (once per paid order). */
+  ga_purchase_sent_at?: string | null;
   // --- Phase 2: Book-Your-Seat + EMI ledger links (nullable; one-time payments leave these null) ---
   enrollment_id?: string | null;
   payment_kind?: "one_time" | "seat" | "installment" | "full" | null;

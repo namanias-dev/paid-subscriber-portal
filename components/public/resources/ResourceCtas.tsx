@@ -25,7 +25,7 @@ function track(kind: string, href: string) {
     }).catch(() => {});
   } catch { /* ignore */ }
   // GA4 (independent, consent-gated, no PII) fires alongside the in-house beacon.
-  ga4Event("resource_cta_click", { cta_kind: kind, cta_href: href });
+  ga4Event("resource_cta_click", { cta_kind: kind, cta_href: href }, { beacon: true });
 }
 
 export default function ResourceCtas({ blocks }: { blocks: ResourceCta[] }) {

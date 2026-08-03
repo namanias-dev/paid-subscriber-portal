@@ -7,6 +7,8 @@
  * gateways must redirect back to our return URL, which then lands on the status
  * page in the same tab — a new tab would strand the user on a blank status tab.
  */
+import { readGaClientId } from "@/lib/analytics/ga4";
+
 export interface StartPaymentInput {
   itemType: "course" | "plan" | "webinar";
   name: string;
@@ -29,10 +31,16 @@ export interface StartPaymentResult {
 
 export async function startPayment(input: StartPaymentInput): Promise<StartPaymentResult> {
   try {
+    let gaClientId: string | null = null;
+    try {
+      gaClientId = readGaClientId();
+    } catch {
+      gaClientId = null;
+    }
     const res = await fetch("/api/v1/bank/create-payment", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(input),
+      body: JSON.stringify({ ...input, gaClientId: gaClientId || undefined }),
     });
     const json = (await res.json()) as StartPaymentResult;
     if (!json.ok || !json.paymentUrl) {

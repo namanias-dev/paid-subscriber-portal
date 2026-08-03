@@ -25,6 +25,7 @@ import {
   eazypaySubMerchantId,
   PAYMENT_GATEWAY,
 } from "@/lib/eazypay";
+import { parseGaClientId } from "@/lib/analytics/gaClientId";
 
 export const dynamic = "force-dynamic";
 
@@ -98,6 +99,12 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: "Enter a valid email address, or leave it blank." }, { status: 400 });
     }
     const gatewayEmail = email || `${mobile}@guest.namanias.com`;
+    let gaClientId: string | null = null;
+    try {
+      gaClientId = parseGaClientId(body.gaClientId);
+    } catch {
+      gaClientId = null;
+    }
 
     const resolved = await resolveItem(itemType, body);
     if (!resolved) {
@@ -168,6 +175,7 @@ export async function POST(req: Request) {
         mode: null,
         attribution_source: attrFlat.source,
         attribution_campaign: attrFlat.campaign,
+        ga_client_id: gaClientId,
         ...adStamp,
       });
       void stampBuyerAttribution(mobile, attr).catch(() => {});
@@ -216,6 +224,7 @@ export async function POST(req: Request) {
       mode: null,
       attribution_source: attrFlat.source,
       attribution_campaign: attrFlat.campaign,
+      ga_client_id: gaClientId,
       ...adStamp,
     });
     void stampBuyerAttribution(mobile, attr).catch(() => {});

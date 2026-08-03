@@ -7,6 +7,7 @@ import { formatINR } from "@/lib/dates";
 import { trackClient } from "@/lib/analytics/client";
 import { metaPixelLead } from "@/lib/analytics/metaPixel";
 import { ga4Event } from "@/lib/analytics/ga4";
+import { useGa4FormTracking } from "@/lib/analytics/ga4Form";
 import PaymentCautionModal from "@/components/public/PaymentCautionModal";
 
 export default function WebinarRegister({
@@ -31,6 +32,8 @@ export default function WebinarRegister({
   const [couponMsg, setCouponMsg] = useState<string | null>(null);
   // Pre-redirect caution gate for PAID webinars (free registrations skip it).
   const [caution, setCaution] = useState(false);
+  const formId = `webinar_register:${webinarSlug || webinarId}`;
+  const { onFocusCapture, trackSubmit } = useGa4FormTracking(formId, "Webinar registration");
 
   const isPaid = price > 0;
   const payable = applied ? applied.finalAmount : price;
@@ -89,6 +92,8 @@ export default function WebinarRegister({
       value: payable,
       currency: "INR",
     });
+    // Explicit form_submit (beacon) — Enhanced Measurement cannot see JS+redirect submits.
+    trackSubmit({ is_paid: isPaid, value: payable, currency: "INR" });
     // PAID webinars redirect to the gateway — surface the caution first. Free
     // registrations have no hand-off, so proceed straight away.
     if (isPaid) {
@@ -128,7 +133,24 @@ export default function WebinarRegister({
       if (isPaid && webinarSlug) {
         trackClient("click_register_pay", { webinar_id: webinarId, webinar_slug: webinarSlug, item_type: "webinar", price: payable, source_section: "webinar_register" });
         // GA4 payment_start — numeric value + currency only, no PII.
-        ga4Event("payment_start", { item_type: "webinar", webinar_slug: webinarSlug, value: payable, currency: "INR" });
+        let isRetry = false;
+        try {
+          const key = `ga4_pay_start:webinar:${webinarSlug}`;
+          isRetry = sessionStorage.getItem(key) === "1";
+          sessionStorage.setItem(key, "1");
+        } catch { /* ignore */ }
+        ga4Event(
+          "payment_start",
+          {
+            item_type: "webinar",
+            product_type: "webinar",
+            webinar_slug: webinarSlug,
+            value: payable,
+            currency: "INR",
+            is_retry: isRetry,
+          },
+          { beacon: true },
+        );
         const result = await startPayment({
           itemType: "webinar",
           webinarSlug,
@@ -180,7 +202,7 @@ export default function WebinarRegister({
       onConfirm={proceed}
       onCancel={() => setCaution(false)}
     />
-    <form onSubmit={submit} className="space-y-3">
+    <form onSubmit={submit} onFocusCapture={onFocusCapture} className="space-y-3">
       <input className="input" placeholder="Your name" value={name} onChange={(e) => setName(e.target.value)} />
       <input
         className="input"

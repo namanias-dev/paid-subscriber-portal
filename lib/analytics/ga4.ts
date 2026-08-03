@@ -192,13 +192,73 @@ export function ga4Init(): void {
  * floating WhatsApp button on /portal, or the shared quiz engine on /dashboard,
  * can NEVER load gtag or fire on a private page. Payload is always
  * PII-sanitised. Never throws.
+ *
+ * Pass `beacon: true` to set transport_type=beacon so the hit survives a
+ * same-tab redirect to the payment gateway (form_submit / payment_start).
  */
-export function ga4Event(name: string, params: Record<string, unknown> = {}): void {
+export function ga4Event(
+  name: string,
+  params: Record<string, unknown> = {},
+  opts?: { beacon?: boolean },
+): void {
   try {
     if (typeof location !== "undefined" && !isPublicAnalyticsPath(location.pathname)) return;
     const gtag = ensureGtag();
     if (!gtag) return;
-    gtag("event", name, sanitizeParams(params));
+    const payload: Record<string, unknown> = { ...sanitizeParams(params) };
+    if (opts?.beacon) payload.transport_type = "beacon";
+    gtag("event", name, payload);
+  } catch {
+    /* never throw */
+  }
+}
+
+/** form_start — first interaction. Safe; does not use beacon. */
+export function ga4FormStart(formId: string, formName: string): void {
+  ga4Event("form_start", { form_id: formId, form_name: formName });
+}
+
+/**
+ * form_submit via beacon so a subsequent gateway redirect cannot abort the hit.
+ * Always call BEFORE window.location / navigation. Never throws; never blocks.
+ */
+export function ga4FormSubmit(formId: string, formName: string, extra: Record<string, unknown> = {}): void {
+  ga4Event("form_submit", { form_id: formId, form_name: formName, ...extra }, { beacon: true });
+}
+
+/**
+ * Read GA4 client_id from the `_ga` cookie. Never throws; returns null on failure.
+ * Format: GA1.1.XXXXXXXXXX.YYYYYYYYYY → client_id = XXXXXXXXXX.YYYYYYYYYY
+ */
+export function readGaClientId(): string | null {
+  try {
+    if (typeof document === "undefined") return null;
+    const raw = document.cookie.match(/(?:^|; )_ga=([^;]*)/)?.[1];
+    if (!raw) return null;
+    const decoded = decodeURIComponent(raw);
+    const parts = decoded.split(".");
+    if (parts.length >= 4) return `${parts[2]}.${parts[3]}`;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Set GA4 user_properties (role segmentation). Allowed on private paths so
+ * portal/login can stamp role without sending page_view. Never throws.
+ */
+export function ga4SetUserProperties(props: Record<string, string | null | undefined>): void {
+  try {
+    const gtag = ensureGtag();
+    if (!gtag) return;
+    const clean: Record<string, string> = {};
+    for (const [k, v] of Object.entries(props || {})) {
+      if (!v || PII_KEY.test(k)) continue;
+      clean[k] = String(v).slice(0, 36);
+    }
+    if (!Object.keys(clean).length) return;
+    gtag("set", "user_properties", clean);
   } catch {
     /* never throw */
   }

@@ -4,7 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { trackClient } from "@/lib/analytics/client";
-import { ga4Event } from "@/lib/analytics/ga4";
+import { ga4Event, readGaClientId } from "@/lib/analytics/ga4";
+import { useGa4FormTracking } from "@/lib/analytics/ga4Form";
 import {
   ArrowLeft,
   ShieldCheck,
@@ -96,6 +97,8 @@ export default function CheckoutClient({ course }: { course: Course }) {
   const [couponLoading, setCouponLoading] = useState(false);
   const [couponError, setCouponError] = useState<string | null>(null);
   const [applied, setApplied] = useState<{ code: string; discount: number } | null>(null);
+  const formId = `course_checkout:${course.slug}`;
+  const { onFocusCapture, trackSubmit } = useGa4FormTracking(formId, "Course checkout");
 
   const bookingISO = useMemo(() => new Date().toISOString(), []);
   const seatActive = bookSeat && seatConfigured;
@@ -181,9 +184,34 @@ export default function CheckoutClient({ course }: { course: Course }) {
     setLoading(true);
     trackClient("click_enroll", { course_id: course.id, course_slug: course.slug, item_type: "course", price: ec.price });
     // GA4 enroll/buy click + payment_start — numeric value + currency only, no PII.
-    ga4Event("course_enroll_click", { course_id: course.id, course_slug: course.slug, value: ec.price, currency: "INR" });
-    ga4Event("payment_start", { item_type: "course", course_slug: course.slug, value: todayAmount, currency: "INR" });
+    const productType = seatActive ? "seat_booking" : plan === "emi" ? "installment" : "full_payment";
+    let isRetry = false;
     try {
+      const key = `ga4_pay_start:course:${course.slug}:${productType}`;
+      isRetry = sessionStorage.getItem(key) === "1";
+      sessionStorage.setItem(key, "1");
+    } catch { /* ignore */ }
+    trackSubmit({ product_type: productType, value: todayAmount, currency: "INR" });
+    ga4Event("course_enroll_click", { course_id: course.id, course_slug: course.slug, value: ec.price, currency: "INR" });
+    ga4Event(
+      "payment_start",
+      {
+        item_type: "course",
+        product_type: productType,
+        course_slug: course.slug,
+        value: todayAmount,
+        currency: "INR",
+        is_retry: isRetry,
+      },
+      { beacon: true },
+    );
+    try {
+      let gaClientId: string | null = null;
+      try {
+        gaClientId = readGaClientId();
+      } catch {
+        gaClientId = null;
+      }
       const res = await fetch("/api/v1/enroll/create-payment", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -201,6 +229,7 @@ export default function CheckoutClient({ course }: { course: Course }) {
           batchId: multiBatch ? batchId : undefined,
           // Code only — server re-validates and computes the discount.
           couponCode: applied?.code || undefined,
+          gaClientId: gaClientId || undefined,
         }),
       });
       const json = await res.json();
@@ -451,7 +480,13 @@ export default function CheckoutClient({ course }: { course: Course }) {
           {/* Your details */}
           <div className="ca-card space-y-3 p-5">
             <h3 className="font-heading text-base font-bold text-[var(--ca-navy-900)]">Your details</h3>
-            <input className="w-full rounded-xl border border-[var(--ca-slate-300)] px-3 py-2.5 focus:border-[var(--ca-gold)] focus:outline-none" placeholder="Full name" value={name} onChange={(e) => setName(e.target.value)} />
+            <input
+              className="w-full rounded-xl border border-[var(--ca-slate-300)] px-3 py-2.5 focus:border-[var(--ca-gold)] focus:outline-none"
+              placeholder="Full name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              onFocus={onFocusCapture}
+            />
             <input className="w-full rounded-xl border border-[var(--ca-slate-300)] px-3 py-2.5 focus:border-[var(--ca-gold)] focus:outline-none" placeholder="10-digit mobile *" inputMode="numeric" value={phone} onChange={(e) => setPhone(e.target.value.replace(/\D/g, "").slice(0, 10))} />
             <input className="w-full rounded-xl border border-[var(--ca-slate-300)] px-3 py-2.5 focus:border-[var(--ca-gold)] focus:outline-none" type="email" placeholder="Email (optional — for receipts)" value={email} onChange={(e) => setEmail(e.target.value)} />
             <p className="text-xs text-[var(--ca-slate-700)]">You&apos;ll receive a login code after payment to access your Class Hub and payment history.</p>

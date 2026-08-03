@@ -4,6 +4,7 @@ import { useState } from "react";
 import { CheckCircle2 } from "lucide-react";
 import { useToast } from "@/components/ui/Toast";
 import { COURSE_CATEGORIES } from "@/lib/config";
+import { useGa4FormTracking } from "@/lib/analytics/ga4Form";
 
 export default function LeadForm({
   source = "Website",
@@ -24,6 +25,8 @@ export default function LeadForm({
   const [loading, setLoading] = useState(false);
   const [done, setDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const formId = `lead:${source}:${campaign || "default"}`;
+  const { onFocusCapture, trackSubmit } = useGa4FormTracking(formId, campaign || "Lead form");
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -41,6 +44,7 @@ export default function LeadForm({
       });
       const data = await res.json();
       if (data.ok) {
+        trackSubmit({ source, campaign: campaign || null });
         setDone(true);
         toast("Thanks! Our team will call you soon. 🎯", "success");
       } else {
@@ -66,7 +70,7 @@ export default function LeadForm({
   }
 
   return (
-    <form onSubmit={submit} className={compact ? "grid gap-3 sm:grid-cols-2" : "space-y-3"}>
+    <form onSubmit={submit} onFocusCapture={onFocusCapture} className={compact ? "grid gap-3 sm:grid-cols-2" : "space-y-3"}>
       <div>
         <input className="input" placeholder="Your name" value={name} onChange={(e) => setName(e.target.value)} />
       </div>

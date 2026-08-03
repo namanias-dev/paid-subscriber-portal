@@ -12,6 +12,7 @@ import PortalLogoutButton from "@/components/portal/PortalLogoutButton";
 import PaymentRecovery from "@/components/portal/PaymentRecovery";
 import LeadPromoBanner, { type PromoItem } from "@/components/portal/LeadPromoBanner";
 import EnrolledCard from "@/components/portal/EnrolledCard";
+import Ga4RoleStamp, { type Ga4Role } from "@/components/analytics/Ga4RoleStamp";
 
 const courseCover = (c: { cover_image_url?: string | null; image?: string | null; mobile_image_url?: string | null } | undefined) =>
   c?.cover_image_url || c?.image || c?.mobile_image_url || null;
@@ -128,6 +129,12 @@ export default async function PortalDashboardPage() {
   // A "free user" (lead / marketing audience) has no paid purchases, no paid
   // enrolments and no staff comp — show them rotating Enroll nudges for paid items.
   const isFreeUser = purchases.length === 0 && enrolledCourses.length === 0 && !hasStaffAccess;
+  const gaRole: Ga4Role =
+    buyer?.is_staff || hasStaffAccess || learner?.kind === "staff"
+      ? "staff"
+      : purchases.length > 0 || enrolledCourses.length > 0
+        ? "paid_student"
+        : "registered_free";
   const nowMs = Date.now();
   const promoItems: PromoItem[] = isFreeUser
     ? [
@@ -150,6 +157,7 @@ export default async function PortalDashboardPage() {
 
   return (
     <div className="container-wide section">
+      <Ga4RoleStamp role={gaRole} />
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <p className="pill pill-blue mb-3">My Portal</p>

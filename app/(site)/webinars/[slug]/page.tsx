@@ -8,6 +8,7 @@ import TrustStrip from "@/components/public/TrustStrip";
 import StickyMobileCTA from "@/components/public/StickyMobileCTA";
 import LandingSections from "@/components/public/LandingSections";
 import BrochureCards from "@/components/public/BrochureCards";
+import WebinarNotFound from "@/components/public/WebinarNotFound";
 import { getWebinarBySlug, getWebinarById, getLibraryDocsByIds, getWebinarRegisteredCount } from "@/lib/dataProvider";
 import { canRegisterForWebinar, EXPIRED_COPY, webinarRegCountDisplay, WEBINAR_REGCOUNT_ENCOURAGE } from "@/lib/webinarLifecycle";
 import { getPurchaseSnapshot, webinarStatus } from "@/lib/purchaseStatus";
@@ -77,22 +78,10 @@ export default async function WebinarDetail({ params }: { params: { slug: string
   }
   // List hides inactive; detail still serves completed/disabled rows so old links & recordings work.
   if (!w) {
-    return (
-      <div className="container-wide py-16 text-center">
-        <h1 className="font-heading text-2xl font-bold">Webinar not found</h1>
-        <p className="mt-2 text-sm text-[var(--ca-slate-700)]">This session may have been removed or the link is outdated.</p>
-        <a href="/webinars" className="btn btn-primary mt-6 inline-flex">All webinars</a>
-      </div>
-    );
+    return <WebinarNotFound reason="webinar_missing" />;
   }
   if (w.active === false && w.status !== "completed") {
-    return (
-      <div className="container-wide py-16 text-center">
-        <h1 className="font-heading text-2xl font-bold">Webinar not found</h1>
-        <p className="mt-2 text-sm text-[var(--ca-slate-700)]">This session may have been removed or the link is outdated.</p>
-        <a href="/webinars" className="btn btn-primary mt-6 inline-flex">All webinars</a>
-      </div>
-    );
+    return <WebinarNotFound reason="webinar_inactive" />;
   }
 
   const view = buildLandingView(w);

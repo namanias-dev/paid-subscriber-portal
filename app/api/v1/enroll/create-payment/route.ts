@@ -23,6 +23,7 @@ import { planCourseEnrollment, deriveEnrollment } from "@/lib/installments";
 import { scheduleAsCheckoutIntent } from "@/lib/enrollmentScope";
 import { validateCoupon, couponDiscountReason, parseCouponCodeFromReason } from "@/lib/coupons";
 import type { CourseEnrollment } from "@/lib/types";
+import { parseGaClientId } from "@/lib/analytics/gaClientId";
 
 export const dynamic = "force-dynamic";
 
@@ -68,6 +69,12 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: "Enter a valid email address, or leave it blank." }, { status: 400 });
     }
     const gatewayEmail = email || `${mobile}@guest.namanias.com`;
+    let gaClientId: string | null = null;
+    try {
+      gaClientId = parseGaClientId(body.gaClientId);
+    } catch {
+      gaClientId = null;
+    }
 
     const course = await getCourseBySlug(slug);
     if (!course) return NextResponse.json({ ok: false, error: "Course not found." }, { status: 404 });
@@ -254,6 +261,7 @@ export async function POST(req: Request) {
       payment_kind: firstKind,
       installment_no: firstInstallmentNo,
       batch_id: dedupBatchId,
+      ga_client_id: gaClientId,
     });
 
     // Consume usage once per new coupon application (not on resume / amount-matched reuse).
