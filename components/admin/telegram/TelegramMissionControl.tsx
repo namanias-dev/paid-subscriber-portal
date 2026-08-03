@@ -1658,13 +1658,16 @@ function ManualDigestCard({
   }, []);
 
   async function generatePreview() {
-    if (!canEdit) return;
+    if (!canEdit || busy) return;
     setBusy("preview");
+    const ac = new AbortController();
+    const timer = window.setTimeout(() => ac.abort(), 90_000);
     try {
       const res = await fetch("/api/admin/telegram/reports", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "preview_digest" }),
+        signal: ac.signal,
       });
       const data = await res.json().catch(() => ({ ok: false }));
       if (!data.ok || !data.html) {
@@ -1677,49 +1680,47 @@ function ManualDigestCard({
         channelMasked: data.channelMasked || null,
       });
       if (data.lastDigestAt) setLastDigestAt(data.lastDigestAt);
-      toast("Digest generated — review below, then send", "success");
-    } catch {
-      toast("Could not generate digest", "error");
+      toast("Digest ready — review below", "success");
+    } catch (e) {
+      const aborted = e instanceof DOMException && e.name === "AbortError";
+      toast(aborted ? "Generate timed out — try again" : "Could not generate digest", "error");
     } finally {
+      window.clearTimeout(timer);
       setBusy(null);
     }
   }
 
   async function sendToTelegram() {
-    if (!canEdit) return;
-    if (!previewHtml) {
-      toast("Generate a digest preview first", "error");
-      return;
-    }
+    if (!canEdit || busy === "send") return;
     setBusy("send");
     try {
+      // Quick ack — generate+send continues on the server via waitUntil
+      // even if you leave this tab.
       const res = await fetch("/api/admin/telegram/reports", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "send_digest_now", html: previewHtml }),
+        body: JSON.stringify({ action: "queue_digest_send" }),
+        keepalive: true,
       });
       const data = await res.json().catch(() => ({ ok: false }));
       if (!data.ok) {
-        toast(data.reason || data.error || "Send failed", "error");
+        toast(data.reason || data.error || "Could not queue digest send", "error");
         return;
       }
       toast(
-        data.messageId
-          ? `Digest sent to Telegram (message ${data.messageId})`
-          : "Digest sent to Telegram",
+        data.message ||
+          "Digest is generating in the background and will post to Telegram. You can leave this page.",
         "success",
       );
       setLastDigestAt(new Date().toISOString());
     } catch {
-      toast("Send failed", "error");
+      toast("Could not queue digest send", "error");
     } finally {
       setBusy(null);
     }
   }
 
-  const previewDisplay = previewHtml
-    ? previewHtml.replace(/\n/g, "<br/>")
-    : null;
+  const previewDisplay = previewHtml ? previewHtml.replace(/\n/g, "<br/>") : null;
 
   return (
     <div className="card space-y-3 border-primary/20 p-4">
@@ -1727,8 +1728,9 @@ function ManualDigestCard({
         <div>
           <p className="text-sm font-semibold">CEO digest</p>
           <p className="text-xs text-muted">
-            Generate the live digests report, preview it here, then send to the reports channel.
-            {compact ? " Full controls also live under Settings." : ""}
+            Preview builds a live report here. Send generates in the background and posts to Telegram
+            even if you leave this page.
+            {compact ? " Full controls also under Settings." : ""}
           </p>
         </div>
         {compact && onOpenSettings && (
@@ -1742,16 +1744,12 @@ function ManualDigestCard({
         <span>Schedule: {digestEnabled ? `on · every ${frequency}` : "off"}</span>
         <span>
           Last sent:{" "}
-          {lastDigestAt
-            ? formatISTDateTime(lastDigestAt)
-            : "—"}
+          {lastDigestAt ? formatISTDateTime(lastDigestAt) : "—"}
         </span>
         {(previewMeta?.channelTitle || previewMeta?.channelMasked || channelLabel) && (
           <span>
             Channel:{" "}
-            {previewMeta?.channelTitle ||
-              previewMeta?.channelMasked ||
-              channelLabel}
+            {previewMeta?.channelTitle || previewMeta?.channelMasked || channelLabel}
           </span>
         )}
       </div>
@@ -1761,7 +1759,7 @@ function ManualDigestCard({
           <button
             type="button"
             className="btn btn-secondary text-sm"
-            disabled={!!busy}
+            disabled={busy === "preview"}
             onClick={() => void generatePreview()}
           >
             <Eye size={14} />
@@ -1770,11 +1768,11 @@ function ManualDigestCard({
           <button
             type="button"
             className="btn btn-primary text-sm"
-            disabled={!!busy || !previewHtml}
+            disabled={busy === "send"}
             onClick={() => void sendToTelegram()}
           >
             <Send size={14} />
-            {busy === "send" ? "Sending…" : "Send to Telegram"}
+            {busy === "send" ? "Queuing…" : "Send to Telegram"}
           </button>
         </div>
       ) : (
@@ -1787,7 +1785,6 @@ function ManualDigestCard({
           <div className="rounded-2xl bg-[#e7f0f8] p-4">
             <div
               className="max-w-xl rounded-2xl rounded-tl-sm bg-white px-3 py-2 text-sm leading-relaxed text-ink shadow-sm [&_b]:font-bold [&_i]:italic [&_u]:underline"
-              // Trusted HTML from our own buildDigest (escaped content + fixed tags).
               dangerouslySetInnerHTML={{ __html: previewDisplay || "" }}
             />
           </div>

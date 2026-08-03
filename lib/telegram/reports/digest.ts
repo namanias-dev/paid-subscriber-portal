@@ -7,7 +7,6 @@ import { getExecutivePulse, type MetricDelta } from "../../analytics/executiveOv
 import {
   getAllCourseEnrollments,
   getAllCourses,
-  getAllWebinarRegistrations,
   getPayments,
   getWebinars,
 } from "../../dataProvider";
@@ -341,7 +340,7 @@ function collectionsStats(enrollments: Awaited<ReturnType<typeof getAllCourseEnr
   return { overdueCount, overdueAmount, due7dAmount };
 }
 
-async function pickUpcomingWebinar(): Promise<{
+async function pickUpcomingWebinar(payments: Payment[]): Promise<{
   title: string;
   dateLabel: string;
   registered: number;
@@ -351,11 +350,9 @@ async function pickUpcomingWebinar(): Promise<{
   slug: string;
 } | null> {
   try {
-    const [webinars, regs, payments] = await Promise.all([
-      getWebinars(),
-      getAllWebinarRegistrations(),
-      getPayments(),
-    ]);
+    // Payments already loaded by buildDigest — avoid a second full payments scan.
+    // Skip registration-table scan (attendance %) so preview/send stay snappy.
+    const webinars = await getWebinars();
     const now = Date.now();
     const upcoming = [...webinars]
       .filter((w) => w.datetime && new Date(w.datetime).getTime() >= now - 6 * 3600_000)
@@ -363,38 +360,57 @@ async function pickUpcomingWebinar(): Promise<{
     if (!upcoming) return null;
 
     const price = Number(upcoming.price) || 0;
-    // Paid webinars: paid-only seat count. Free webinars: registration rows (= confirmed).
-    const registered =
-      price > 0
-        ? paidWebinarRegistrationCount(payments, upcoming.slug)
-        : regs.filter((r) => r.webinar_id === upcoming.id).length;
+    let registered = 0;
+    if (price > 0) {
+      registered = paidWebinarRegistrationCount(payments, upcoming.slug);
+    } else {
+      const { getAllWebinarRegistrations } = await import("../../dataProvider");
+      const regs = await getAllWebinarRegistrations();
+      registered = regs.filter((r) => r.webinar_id === upcoming.id).length;
+    }
     const pendingCheckout =
       price > 0 ? pendingWebinarCheckoutCount(payments, upcoming.slug) : 0;
-
-    let attendedLastPct: number | null = null;
-    const past = [...webinars]
-      .filter((w) => w.datetime && new Date(w.datetime).getTime() < now && w.id !== upcoming.id)
-      .sort((a, b) => new Date(b.datetime).getTime() - new Date(a.datetime).getTime())[0];
-    if (past) {
-      const pastRegs = regs.filter((r) => r.webinar_id === past.id);
-      const attended = pastRegs.filter((r) => r.attended === true).length;
-      if (pastRegs.length > 0 && attended > 0) {
-        attendedLastPct = Math.round((attended / pastRegs.length) * 100);
-      }
-    }
 
     return {
       title: upcoming.title,
       dateLabel: formatIstShort(upcoming.datetime),
       registered,
       pendingCheckout,
-      attendedLastPct,
+      attendedLastPct: null,
       webinarId: upcoming.id,
       slug: upcoming.slug,
     };
   } catch {
     return null;
   }
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T> {
+  return new Promise((resolve) => {
+    let done = false;
+    const t = setTimeout(() => {
+      if (!done) {
+        done = true;
+        resolve(fallback);
+      }
+    }, ms);
+    promise.then(
+      (v) => {
+        if (!done) {
+          done = true;
+          clearTimeout(t);
+          resolve(v);
+        }
+      },
+      () => {
+        if (!done) {
+          done = true;
+          clearTimeout(t);
+          resolve(fallback);
+        }
+      },
+    );
+  });
 }
 
 function displayPhone(raw: string | null | undefined): string {
@@ -469,6 +485,7 @@ export async function buildDigest(opts?: {
   const parts = istNowParts();
   // Yesterday close / 7-day trend only at real 6 AM IST — not on manual force sends.
   const isMorningSummary = parts.hour === 6;
+  void opts?.forceMorningExtras;
 
   let pulseToday: Awaited<ReturnType<typeof getExecutivePulse>> | null = null;
   let pulseMtd: Awaited<ReturnType<typeof getExecutivePulse>> | null = null;
@@ -482,23 +499,35 @@ export async function buildDigest(opts?: {
   let loginsToday: number | null = null;
   let loginsYday: number | null = null;
 
+  const prev = opts?.previous || null;
+  const emptyLogins = {
+    allTimeAvg: prev?.logins_avg != null ? Number(prev.logins_avg) : null,
+    rolling30Avg: prev?.logins_avg_30d != null ? Number(prev.logins_avg_30d) : null,
+    today: prev?.logins_today != null ? Number(prev.logins_today) : 0,
+    yesterday: prev?.logins_yday != null ? Number(prev.logins_yday) : 0,
+    activeDays: 0,
+    uniqueSum: 0,
+    firstActiveYmd: null as string | null,
+    method: "active_days" as const,
+  };
+
   try {
+    // One payments fetch shared by failed-today + upcoming webinar (was double-scanned).
+    const paymentsPromise = getPayments();
     const settled = await Promise.allSettled([
-      getExecutivePulse({ preset: "today", canRevenue: true }),
-      getExecutivePulse({ preset: "this_month", canRevenue: true }),
+      withTimeout(getExecutivePulse({ preset: "today", canRevenue: true }), 12_000, null),
+      withTimeout(getExecutivePulse({ preset: "this_month", canRevenue: true }), 12_000, null),
       getAllCourses(),
       getAllCourseEnrollments(),
-      pickUpcomingWebinar(),
-      getPayments(),
-      resolveLoginAverages(),
+      paymentsPromise,
+      withTimeout(resolveLoginAverages(), 8_000, emptyLogins),
     ]);
     if (settled[0].status === "fulfilled") pulseToday = settled[0].value;
     if (settled[1].status === "fulfilled") pulseMtd = settled[1].value;
     if (settled[2].status === "fulfilled") courses = settled[2].value;
     if (settled[3].status === "fulfilled") enrollments = settled[3].value;
-    if (settled[4].status === "fulfilled") webinar = settled[4].value;
-    if (settled[5].status === "fulfilled") {
-      allPayments = settled[5].value;
+    if (settled[4].status === "fulfilled") {
+      allPayments = settled[4].value;
       const today = istTodayYMD();
       failedRows = allPayments
         .filter(
@@ -508,19 +537,19 @@ export async function buildDigest(opts?: {
             istYMD(p.created_at) === today,
         )
         .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+      webinar = await pickUpcomingWebinar(allPayments);
     }
-    if (settled[6].status === "fulfilled") {
-      loginAvg = settled[6].value.allTimeAvg;
-      loginAvg30 = settled[6].value.rolling30Avg;
-      loginsToday = settled[6].value.today;
-      loginsYday = settled[6].value.yesterday;
+    if (settled[5].status === "fulfilled") {
+      loginAvg = settled[5].value.allTimeAvg;
+      loginAvg30 = settled[5].value.rolling30Avg;
+      loginsToday = settled[5].value.today;
+      loginsYday = settled[5].value.yesterday;
     }
   } catch {
     /* sections omit missing data */
   }
 
   const failedToday = failedRows.length;
-  void opts?.previous;
   const courseBlocks = courseBreakdown(courses, enrollments);
   const collections = collectionsStats(enrollments);
 

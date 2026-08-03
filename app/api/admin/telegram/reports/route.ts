@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { waitUntil } from "@vercel/functions";
 import { requirePermission } from "@/lib/adminGuard";
 import {
   getReportSettings,
@@ -9,6 +10,7 @@ import {
   type ReportAlertKey,
 } from "@/lib/telegram/reports";
 import { validateReportsChannelId, verifyReportsChannel } from "@/lib/telegram/reports/verify";
+import { tgLog } from "@/lib/telegram/log";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
@@ -107,6 +109,39 @@ export async function POST(req: NextRequest) {
   if (action === "preview_digest") {
     const result = await previewDigestNow({ morningExtras: body.morning === true });
     return NextResponse.json({ ...result, action });
+  }
+
+  // Fire-and-forget: generate + send on the server after the response.
+  // Survives the admin leaving the tab (Vercel waitUntil).
+  if (action === "queue_digest_send") {
+    waitUntil(
+      (async () => {
+        try {
+          const result = await sendDigestNow({
+            force: true,
+            skipIdempotency: true,
+            morningExtras: body.morning === true,
+          });
+          tgLog(
+            "digest_queue_send_done",
+            {
+              ok: result.ok,
+              reason: result.reason,
+              messageId: result.messageId ?? null,
+            },
+            result.ok ? "info" : "warn",
+          );
+        } catch (e) {
+          tgLog("digest_queue_send_failed", { error: (e as Error).message }, "error");
+        }
+      })(),
+    );
+    return NextResponse.json({
+      ok: true,
+      queued: true,
+      action,
+      message: "Digest is generating and will post to Telegram shortly. You can leave this page.",
+    });
   }
 
   if (action === "send_digest_now" || action === "send_test_report") {
