@@ -47,8 +47,8 @@ export default async function WebinarsPage() {
     <div className="bg-[var(--ca-slate-50)]">
       <header className="ca-dark ca-grain relative overflow-hidden">
         <div className="ca-orb" style={{ width: 240, height: 240, top: -100, right: -60, background: "rgba(212,175,55,0.14)" }} />
-        <div className="container-wide relative py-4 text-center sm:py-5">
-          <h1 className="font-heading text-lg font-bold leading-snug tracking-tight text-white sm:text-xl">
+        <div className="container-wide relative py-2.5 text-center sm:py-4">
+          <h1 className="font-heading text-base font-bold leading-snug tracking-tight text-white sm:text-xl">
             Live masterclasses to level up your UPSC prep
           </h1>
         </div>
@@ -56,7 +56,7 @@ export default async function WebinarsPage() {
 
       <div className="relative z-10 bg-[var(--ca-slate-50)]">
         {featured && (
-          <div className="container-wide pt-3 sm:pt-4">
+          <div className="container-wide pt-2 sm:pt-4">
             <FeaturedWebinarHero
               webinar={featured}
               registered={featuredRegistered}
