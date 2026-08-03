@@ -51,6 +51,7 @@ const EMPTY_FORM = {
   date: "",
   class_no: "",
   course_ids: [] as string[],
+  batch_ids: [] as string[],
   is_published: true,
   drip_date: "",
   source_type: "link" as "link" | "hosted",
@@ -183,6 +184,7 @@ export default function ContentAdmin() {
       date: c.date ? c.date.slice(0, 10) : "",
       class_no: c.class_no != null ? String(c.class_no) : "",
       course_ids: itemCourseIds(c),
+      batch_ids: Array.isArray(c.batch_ids) ? [...c.batch_ids] : [],
       is_published: c.is_published,
       drip_date: c.drip_date ? c.drip_date.slice(0, 10) : "",
       source_type: c.source_type === "hosted" ? "hosted" : "link",
@@ -221,9 +223,25 @@ export default function ContentAdmin() {
   }
 
   function toggleCourse(id: string) {
+    setForm((f) => {
+      const nextIds = f.course_ids.includes(id) ? f.course_ids.filter((x) => x !== id) : [...f.course_ids, id];
+      const allowed = new Set(
+        courseList
+          .filter((c) => nextIds.includes(c.id))
+          .flatMap((c) => (c.batches || []).map((b) => b.id)),
+      );
+      return {
+        ...f,
+        course_ids: nextIds,
+        batch_ids: f.batch_ids.filter((b) => allowed.has(b)),
+      };
+    });
+  }
+
+  function toggleBatch(id: string) {
     setForm((f) => ({
       ...f,
-      course_ids: f.course_ids.includes(id) ? f.course_ids.filter((x) => x !== id) : [...f.course_ids, id],
+      batch_ids: f.batch_ids.includes(id) ? f.batch_ids.filter((x) => x !== id) : [...f.batch_ids, id],
     }));
   }
 
@@ -251,6 +269,7 @@ export default function ContentAdmin() {
       date: form.date || null,
       class_no: form.class_no === "" ? null : Number(form.class_no),
       course_ids: form.course_ids,
+      batch_ids: form.batch_ids,
       is_published: form.is_published,
       drip_date: form.drip_date || null,
       source_type: hosted ? "hosted" : "link",
@@ -505,8 +524,27 @@ export default function ContentAdmin() {
                 ))
               )}
             </div>
-            <p className="mt-1 text-xs text-muted">One item can belong to multiple batches — it appears in each batch&apos;s Class Hub. Leave empty for a global library item.</p>
+            <p className="mt-1 text-xs text-muted">One item can belong to multiple courses — it appears in each course&apos;s Class Hub. Leave empty for a global library item.</p>
           </div>
+
+          {form.course_ids.length > 0 && (
+            <div>
+              <label className="label">Restrict to batch(es) within those courses</label>
+              <div className="max-h-44 space-y-1 overflow-y-auto rounded-xl border border-line p-2">
+                {courseList
+                  .filter((c) => form.course_ids.includes(c.id))
+                  .flatMap((c) =>
+                    (c.batches || []).map((b) => (
+                      <label key={b.id} className="flex min-h-[36px] cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-sm hover:bg-surface2">
+                        <input type="checkbox" checked={form.batch_ids.includes(b.id)} onChange={() => toggleBatch(b.id)} />
+                        <span className="flex-1">{c.title} · {b.label || b.id}</span>
+                      </label>
+                    )),
+                  )}
+              </div>
+              <p className="mt-1 text-xs text-muted">Leave empty to share with every batch of the assigned course(s). When set, only students enrolled in a checked batch can see/play this item.</p>
+            </div>
+          )}
 
           {/* Reusable orientation / starter assignment (video items only) */}
           {isRecording && (

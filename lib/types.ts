@@ -70,6 +70,11 @@ export interface ContentItem {
   course_id: string | null;
   /** Course/batch ids this item is assigned to (one item → many batches, no duplication). */
   course_ids?: string[];
+  /**
+   * Optional CourseBatch.id values this item is scoped to within the assigned course(s).
+   * Empty/null = shared across all batches of those courses (fail-open for entitlement).
+   */
+  batch_ids?: string[] | null;
   /** Optional class/session number for ordering recordings & notes (e.g. 1, 2, 12). */
   class_no?: number | null;
   /** External Telegram link (alongside Drive + YouTube). Links only for source_type='link'. */

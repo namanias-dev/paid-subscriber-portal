@@ -401,6 +401,7 @@ export interface NewContentInput {
   is_published?: boolean;
   course_id?: string | null;
   course_ids?: string[];
+  batch_ids?: string[] | null;
   class_no?: number | null;
   drip_date?: string | null;
   source_type?: ContentItem["source_type"];
@@ -426,6 +427,7 @@ export async function addContent(input: NewContentInput): Promise<ContentItem> {
     is_published: input.is_published ?? false,
     course_id: input.course_id ?? (courseIds[0] ?? null),
     course_ids: courseIds,
+    batch_ids: input.batch_ids ?? null,
     class_no: input.class_no ?? null,
     drip_date: input.drip_date ?? null,
     source_type: input.source_type ?? "link",

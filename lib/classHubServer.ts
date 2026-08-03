@@ -1,5 +1,6 @@
 import { getCourseContent, getClassHubViews, getAllQuizzes, getAllCourses, getPublishedContent, getAttemptsByUser, getCourseEnrollmentsByPhone, getAccessOverridesByPhone, getLectureProgressByLearner } from "./dataProvider";
 import { quizUnlockCourseIds, canAccessLecture, type Learner, type LectureAccess } from "./entitlements";
+import { filterContentByBatchScope } from "./contentBatchScope";
 import { getAttemptStatusForLearner } from "./quizAttemptStatus";
 import { assembleClassHubSections, totalNewCount, type ClassHubSection } from "./classHub";
 import { buildPerformanceData, PERFORMANCE_SECTION, type PerformanceData } from "./performance";
@@ -13,7 +14,7 @@ function accessChip(a: LectureAccess): string | null {
     case "active": return a.expiresAt ? `Renews ${new Date(a.expiresAt).toLocaleDateString("en-IN")}` : "Access active";
     case "expiring": return a.daysLeft != null ? `Expires in ${a.daysLeft} day${a.daysLeft === 1 ? "" : "s"}` : "Expiring soon";
     case "grace": return a.daysLeft != null ? `Complete installment in ${a.daysLeft} day${a.daysLeft === 1 ? "" : "s"}` : "Installment due";
-    case "blocked": return a.reason === "overdue" ? "Locked — complete pending installment" : a.reason === "expired" ? "Access expired" : "Locked";
+    case "blocked": return a.reason === "overdue" ? "Locked — complete pending installment" : a.reason === "expired" ? "Access expired" : a.reason === "wrong_batch" ? "Not in your batch" : "Locked";
     case "login": return "Log in to watch";
     default: return null;
   }
@@ -48,10 +49,22 @@ export async function getClassHubSectionsForCourse(
   courseId: string,
   learner: Learner | null,
 ): Promise<ClassHubSection[]> {
-  const [items, views] = await Promise.all([
+  const [rawItems, views, courses, enrollments] = await Promise.all([
     getCourseContent(courseId),
     learner?.studentId ? getClassHubViews(learner.studentId) : Promise.resolve([]),
+    getAllCourses(),
+    learner ? getCourseEnrollmentsByPhone(learner.phone) : Promise.resolve([]),
   ]);
+  // Server-side batch filter (not UI-only). Fail-open when batch_ids empty or
+  // enrolment batch unresolvable — see lib/contentBatchScope.ts.
+  const items = learner
+    ? filterContentByBatchScope(rawItems, {
+        enrollments,
+        courses,
+        learnerKind: learner.kind,
+        phone: learner.phone,
+      })
+    : rawItems;
   const sections = assembleClassHubSections({ items, courseId, views });
   await enrichHostedLectures(sections, items, learner);
   return sections;

@@ -52,6 +52,9 @@ export async function POST(req: Request) {
       : body.course_id
         ? [String(body.course_id)]
         : [];
+    const batchIds = Array.isArray(body.batch_ids)
+      ? (body.batch_ids as unknown[]).map((x) => String(x || "").trim()).filter(Boolean)
+      : [];
     const classNo = body.class_no !== undefined && body.class_no !== null && body.class_no !== ""
       ? Number(body.class_no)
       : null;
@@ -71,6 +74,7 @@ export async function POST(req: Request) {
       is_published: Boolean(body.is_published),
       course_id: courseIds[0] ?? null,
       course_ids: courseIds,
+      batch_ids: batchIds.length ? batchIds : null,
       class_no: Number.isFinite(classNo) ? classNo : null,
       drip_date: body.drip_date ? String(body.drip_date) : null,
       source_type: body.source_type === "hosted" ? "hosted" : "link",

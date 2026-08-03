@@ -30,6 +30,7 @@ export async function PATCH(
       "is_published",
       "course_id",
       "course_ids",
+      "batch_ids",
       "class_no",
       "drip_date",
       "source_type",
@@ -44,6 +45,12 @@ export async function PATCH(
     // Keep the legacy single course_id in sync with the multi-assignment array.
     if (Array.isArray(patch.course_ids)) {
       patch.course_id = (patch.course_ids as string[])[0] ?? null;
+    }
+    if (Array.isArray(patch.batch_ids)) {
+      patch.batch_ids = (patch.batch_ids as unknown[])
+        .map((x) => String(x || "").trim())
+        .filter(Boolean);
+      if ((patch.batch_ids as string[]).length === 0) patch.batch_ids = null;
     }
     const updated = await updateContent(params.id, patch as Partial<ContentItem>);
     if (!updated) {

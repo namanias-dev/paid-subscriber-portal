@@ -123,7 +123,7 @@ export async function GET() {
           : e.status === "seat_booked" || d.seatPaid || e.plan_type === "emi" || d.installmentTotal > 0
             ? ` (${paymentProgressLabel(d)})`
             : " (Pay in full)";
-        labels.push(`${e.course_title}${tag}`);
+        labels.push(`${e.course_title}${e.batch_label ? ` · ${e.batch_label}` : ""}${tag}`);
       }
 
       const webKeys = new Set<string>();

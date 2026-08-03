@@ -20,6 +20,7 @@ import {
   getAccessOverridesByPhone,
   getEnrollmentPlanChangeLogs,
   findActiveLeadByPhone,
+  getPublishedContent,
 } from "@/lib/dataProvider";
 import { getAdminSession } from "@/lib/session";
 import { requirePermission } from "@/lib/adminGuard";
@@ -31,6 +32,8 @@ import {
 import { activeAccessGrant } from "@/lib/sms/accessReminderService";
 import { deriveDisplayChannel } from "@/lib/marketing/leadAttrByPhone";
 import { lookupLegacyLeadsByPhones } from "@/lib/marketing/legacyLeadMatch";
+import { resolveEnrollmentBatchId } from "@/lib/courseZoom";
+import { contentBatchIds, decideContentBatchScope, recordingCourseIds } from "@/lib/contentBatchScope";
 import type { Student, PlanId, InstallmentItem, PaymentPlan } from "@/lib/types";
 
 const DAY = 86400000;
@@ -110,6 +113,8 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
       title: string;
       slug: string | null;
       batch: string | null;
+      batchId: string | null;
+      batchAmbiguous: boolean;
       plan: string;
       status: string;
       total: number;
@@ -159,13 +164,18 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
               : "Pay in full";
       const ovr = overrides.find((o) => o.course_id === e.course_id) || null;
       const grant = activeAccessGrant(ovr, now);
+      const courseRow = courseTitleById.get(e.course_id);
+      const resolvedBatchId = courseRow ? resolveEnrollmentBatchId(courseRow, e) : (e.batch_id || null);
+      const multiBatch = (courseRow?.batches || []).length > 1;
       return {
         id: e.id,
         // A course row with a null title/fee must still render an openable card —
         // staff always need to reach the profile. Mirrors the legacy branch below.
         title: e.course_title || "Course",
         slug: e.course_slug || null,
-        batch: e.batch_label || null,
+        batch: e.batch_label || (courseRow?.batches || []).find((b) => b.id === resolvedBatchId)?.label || null,
+        batchId: resolvedBatchId,
+        batchAmbiguous: multiBatch && !resolvedBatchId,
         plan: planLabel,
         status: humanizeCourseStatus(e.status),
         total: e.total_fee ?? 0,
@@ -216,6 +226,8 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
         title: courseTitleById.get(e.course_id)?.title || "Course",
         slug: courseTitleById.get(e.course_id)?.slug || null,
         batch: null,
+        batchId: null,
+        batchAmbiguous: false,
         plan: "Enrollment",
         status: humanizeCourseStatus(e.status),
         total: e.fee_total,
@@ -419,6 +431,43 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
       logoAlt: logo_alt || brand.name || "Naman Sharma IAS Academy",
     };
 
+    // Accessible recordings with batch labels — admin can verify batch scoping
+    // without a DB query. Fail-open rules match student Class Hub.
+    const published = await getPublishedContent().catch(() => []);
+    const enrolledCourseIds = new Set(courseEnrollments.map((e) => e.course_id));
+    const batchLabelById = new Map<string, string>();
+    for (const c of allCourses) {
+      for (const b of c.batches || []) {
+        batchLabelById.set(b.id, `${c.title} · ${b.label || b.id}`);
+      }
+    }
+    const accessibleRecordings = published
+      .filter((item) => item.type === "recording" || item.type === "live_link")
+      .filter((item) => {
+        const cids = recordingCourseIds(item);
+        if (!cids.some((id) => enrolledCourseIds.has(id))) return false;
+        return decideContentBatchScope({
+          item,
+          enrollments: courseEnrollments,
+          courses: allCourses,
+          phone,
+        }).allow;
+      })
+      .map((item) => {
+        const bids = contentBatchIds(item);
+        return {
+          id: item.id,
+          title: item.title,
+          subject: item.subject,
+          courseIds: recordingCourseIds(item),
+          batchIds: bids,
+          batchLabels: bids.length
+            ? bids.map((id) => batchLabelById.get(id) || id)
+            : ["All batches (unscoped)"],
+        };
+      })
+      .sort((a, b) => a.title.localeCompare(b.title));
+
     return NextResponse.json({
       ok: true,
       profile: {
@@ -444,6 +493,7 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
           trend,
         },
         accessLogs,
+        accessibleRecordings,
       },
     });
   } catch {

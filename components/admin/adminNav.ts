@@ -78,6 +78,13 @@ export const ADMIN_NAV: AdminNavItem[] = [
     match: ["/admin/enrollments"],
   },
   {
+    href: "/admin/enrollments/ambiguous-batches",
+    label: "Missing batch enrolments",
+    icon: "seats",
+    group: "Admissions & Payments",
+    perm: "manage_students_leads",
+  },
+  {
     href: "/admin/at-risk",
     label: "At-Risk Students",
     icon: "at_risk",

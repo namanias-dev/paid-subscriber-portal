@@ -62,6 +62,8 @@ interface CourseCard {
   title: string;
   slug: string | null;
   batch: string | null;
+  batchId?: string | null;
+  batchAmbiguous?: boolean;
   plan: string;
   status: string;
   total: number;
@@ -125,6 +127,14 @@ interface Profile {
     trend: number[];
   };
   accessLogs: { action: string; timestamp: string }[];
+  accessibleRecordings?: {
+    id: string;
+    title: string;
+    subject: string | null;
+    courseIds: string[];
+    batchIds: string[];
+    batchLabels: string[];
+  }[];
 }
 
 // ---------------------------------------------------------------- helpers
@@ -494,7 +504,10 @@ export default function StudentProfilePage({ params }: { params: { id: string } 
                 </div>
                 <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted">
                   <span>{c.plan}</span>
-                  {c.batch && <span>· {c.batch}</span>}
+                  {c.batch && <span>· Batch: {c.batch}</span>}
+                  {c.batchId && <span className="font-mono text-[10px]">({c.batchId})</span>}
+                  {c.batchAmbiguous && <span className="font-semibold text-warning">· Batch missing / unresolvable</span>}
+                  {!c.batch && !c.batchAmbiguous && c.source === "course" && <span className="text-warning">· No batch</span>}
                   <span>· Enrolled {formatISTDate(c.createdAt)}</span>
                 </div>
                 <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-surface2">
@@ -550,6 +563,35 @@ export default function StudentProfilePage({ params }: { params: { id: string } 
               </div>
             ))}
           </div>
+        )}
+      </Card>
+
+      {/* ---------------- ACCESSIBLE RECORDINGS (batch check) ---------------- */}
+      <Card
+        title={`Accessible recordings (${profile.accessibleRecordings?.length ?? 0})`}
+        icon={<Video size={17} />}
+      >
+        <p className="mb-3 text-xs text-muted">
+          Recordings this student can see under current batch scoping. Each row shows the recording&apos;s batch restriction.
+        </p>
+        {!profile.accessibleRecordings?.length ? (
+          <Empty>No accessible recordings for enrolled courses.</Empty>
+        ) : (
+          <ul className="max-h-80 divide-y divide-line overflow-y-auto text-sm">
+            {profile.accessibleRecordings.map((r) => (
+              <li key={r.id} className="flex flex-col gap-0.5 py-2 sm:flex-row sm:items-start sm:justify-between">
+                <div className="min-w-0">
+                  <p className="font-medium leading-snug">{r.title}</p>
+                  <p className="text-xs text-muted">{r.subject || "No subject"}</p>
+                </div>
+                <div className="shrink-0 text-xs text-muted sm:max-w-[45%] sm:text-right">
+                  {r.batchLabels.map((l) => (
+                    <div key={l}>{l}</div>
+                  ))}
+                </div>
+              </li>
+            ))}
+          </ul>
         )}
       </Card>
 
