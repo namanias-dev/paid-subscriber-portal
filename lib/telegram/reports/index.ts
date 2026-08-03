@@ -1,8 +1,13 @@
-export { buildDigest, sendDigestNow, maybeRunScheduledDigest } from "./digest";
+export {
+  buildDigest,
+  sendDigestNow,
+  maybeRunScheduledDigest,
+} from "./digest";
 export {
   getReportSettings,
   updateReportSettings,
   resolveReportsChannelId,
+  resolveDueDigestSlot,
   normalizeChannelId,
   maskChannelId,
   DEFAULT_ALERTS,

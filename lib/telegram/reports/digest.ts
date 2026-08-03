@@ -32,11 +32,11 @@ import { tgLog } from "../log";
 import { escapeHtml, formatIstShort, inr, istNowParts } from "./format";
 import { resolveLoginAverages } from "./loginAvg";
 import {
-  digestHoursForFrequency,
   getReportSettings,
   inQuietHours,
   markDigestResult,
   maskChannelId,
+  resolveDueDigestSlot,
   resolveReportsChannelId,
   type ReportSettings,
 } from "./settings";
@@ -851,33 +851,30 @@ export async function maybeRunScheduledDigest(): Promise<{
   reason?: string;
   html?: string;
   messageId?: number;
+  slotKey?: string;
 }> {
   const settings = await getReportSettings();
   if (!settings.digest_enabled) return { ok: true, ran: false, reason: "digest_disabled" };
 
-  const parts = istNowParts();
-  if (parts.hour === 3) return { ok: true, ran: false, reason: "skip_3am" };
+  const due = resolveDueDigestSlot(settings.digest_frequency);
+  if (!due) return { ok: true, ran: false, reason: "no_slot" };
 
-  const hours = digestHoursForFrequency(settings.digest_frequency);
-  if (!hours.includes(parts.hour)) return { ok: true, ran: false, reason: "not_slot_hour" };
-  if (parts.minute > 20) return { ok: true, ran: false, reason: "outside_window" };
-  if (inQuietHours(settings, parts.hour) && parts.hour !== 6) {
-    return { ok: true, ran: false, reason: "quiet_hours" };
+  if (inQuietHours(settings, due.hour) && due.hour !== 6) {
+    return { ok: true, ran: false, reason: "quiet_hours", slotKey: due.slotKey };
   }
 
-  const result = await sendDigestNow({ slotKey: parts.slotKey });
+  const result = await sendDigestNow({ slotKey: due.slotKey });
   return {
     ok: result.ok || !!result.skipped,
     ran: result.ok && !result.skipped,
     reason: result.reason,
     html: result.html,
     messageId: result.messageId,
+    slotKey: due.slotKey,
   };
 }
 
 export async function shouldSendDigestForSettings(settings: ReportSettings): Promise<boolean> {
-  const parts = istNowParts();
   if (!settings.digest_enabled) return false;
-  if (parts.hour === 3) return false;
-  return digestHoursForFrequency(settings.digest_frequency).includes(parts.hour);
+  return resolveDueDigestSlot(settings.digest_frequency) != null;
 }

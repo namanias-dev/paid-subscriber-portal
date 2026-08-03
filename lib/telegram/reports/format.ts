@@ -81,12 +81,14 @@ export function istNowParts(d = new Date()): {
     hour: "2-digit",
     hour12: false,
   });
-  const hour = Number(hourFmt.format(d));
+  // Some engines emit "24" for midnight with hour12:false — normalize to 0–23.
+  let hour = Number(hourFmt.format(d).replace(/\D/g, "").slice(-2) || "0");
+  if (hour === 24) hour = 0;
   const minFmt = new Intl.DateTimeFormat("en-GB", {
     timeZone: "Asia/Kolkata",
     minute: "2-digit",
   });
-  const minuteN = Number(minFmt.format(d));
+  const minuteN = Number(minFmt.format(d).replace(/\D/g, "") || "0");
 
   const label = `${day} ${month}, ${hour12}:${minute} ${dayPeriod}`.replace(/\s+/g, " ").trim();
   const slotHour = String(hour).padStart(2, "0");

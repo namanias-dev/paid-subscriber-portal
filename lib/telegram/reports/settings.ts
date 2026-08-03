@@ -2,6 +2,7 @@
  * Telegram business reports — settings, channel resolution, alert toggles.
  */
 import { getSupabaseAdmin } from "../../supabase";
+import { istNowParts } from "./format";
 
 export type DigestFrequency = "2h" | "3h" | "6h" | "daily";
 
@@ -222,4 +223,44 @@ export function digestHoursForFrequency(freq: DigestFrequency): number[] {
   if (freq === "3h") return [0, 6, 9, 12, 15, 18, 21]; // skip 3am
   // 2h: every even hour IST
   return [0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22];
+}
+
+/** YYYY-MM-DD ± calendar days (date-only arithmetic). */
+function addCalendarDays(ymd: string, days: number): string {
+  const [y, m, d] = ymd.split("-").map(Number);
+  if (!y || !m || !d) return ymd;
+  const utc = Date.UTC(y, m - 1, d) + days * 86_400_000;
+  return new Date(utc).toISOString().slice(0, 10);
+}
+
+/**
+ * Most recent digest slot that has already started (IST).
+ * Catch-up: a missed 10:05 send remains due until the next frequency slot.
+ * Snapshot idempotency prevents doubles.
+ */
+export function resolveDueDigestSlot(
+  freq: DigestFrequency,
+  d = new Date(),
+): { slotKey: string; hour: number; ymd: string } | null {
+  const parts = istNowParts(d);
+  const hours = digestHoursForFrequency(freq)
+    .filter((h) => h !== 3)
+    .slice()
+    .sort((a, b) => a - b);
+  if (!hours.length) return null;
+
+  let dueHour: number | null = null;
+  for (const h of hours) {
+    if (h <= parts.hour) dueHour = h;
+  }
+  let ymd = parts.ymd;
+  if (dueHour == null) {
+    dueHour = hours[hours.length - 1]!;
+    ymd = addCalendarDays(parts.ymd, -1);
+  }
+  return {
+    hour: dueHour,
+    ymd,
+    slotKey: `${ymd}T${String(dueHour).padStart(2, "0")}:00+05:30`,
+  };
 }
