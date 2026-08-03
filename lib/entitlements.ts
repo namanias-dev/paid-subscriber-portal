@@ -12,7 +12,6 @@ import {
 import { studentBlockReason } from "./studentAccess";
 import { isActiveEnrollment, isLineOutstanding } from "./installments";
 import { resolveEnrollmentBatchStart } from "./batchStart";
-import { decideContentBatchScope } from "./contentBatchScope";
 import type { Course, Quiz, CaPdf, ContentItem, CourseEnrollment, CourseAccessOverride } from "./types";
 
 /**
@@ -247,7 +246,7 @@ const EXPIRING_SOON_DAYS = 7; // chip turns to a gentle countdown within this wi
 
 export type LectureAccessReason =
   | "public" | "ok" | "login" | "lifetime" | "active" | "grace"
-  | "expired" | "overdue" | "revoked" | "not_enrolled" | "wrong_batch";
+  | "expired" | "overdue" | "revoked" | "not_enrolled";
 export type LectureAccessStatus = "public" | "active" | "expiring" | "grace" | "blocked" | "login";
 
 export interface LectureAccess {
@@ -405,8 +404,8 @@ function accessRank(a: LectureAccess): number {
  * THE hosted-lecture access decision. Public lectures bypass everything (even
  * logged-out). Otherwise the learner must pass for AT LEAST ONE assigned course;
  * we surface the most generous outcome (and, when blocked, the most actionable).
- * When content.batch_ids is set, a matching enrolled batch is also required
- * (fail-open when enrolment batch or content batch mapping is ambiguous).
+ * Course-scoped only — batch timing/mode on the enrolment does not restrict
+ * which lectures of that course are visible (cross-batch access is intentional).
  */
 export function canAccessLecture(
   learner: Learner | null,
@@ -456,25 +455,9 @@ export function canAccessLecture(
     lectureAccessForCourse(byCourse.get(cid), enrByCourse.get(cid), ovrByCourse.get(cid), learner.courseIds.includes(cid), now),
   );
   const allowed = results.filter((r) => r.allowed);
-  if (!allowed.length) {
-    // None allowed → most actionable block (prefer one with an amount due / grace info).
-    return results.sort((a, b) => (b.amountDue ?? 0) - (a.amountDue ?? 0))[0] ?? { allowed: false, reason: "not_enrolled", status: "blocked" };
-  }
-
-  const best = allowed.sort((a, b) => accessRank(b) - accessRank(a))[0];
-
-  // Batch scope (server-side). Fail-open on ambiguity — never blank entitled content.
-  const batch = decideContentBatchScope({
-    item: recording,
-    enrollments: ctx.enrollments,
-    courses: ctx.courses,
-    learnerKind: learner.kind,
-    phone: learner.phone,
-  });
-  if (!batch.allow) {
-    return { allowed: false, reason: "wrong_batch", status: "blocked" };
-  }
-  return best;
+  if (allowed.length) return allowed.sort((a, b) => accessRank(b) - accessRank(a))[0];
+  // None allowed → most actionable block (prefer one with an amount due / grace info).
+  return results.sort((a, b) => (b.amountDue ?? 0) - (a.amountDue ?? 0))[0] ?? { allowed: false, reason: "not_enrolled", status: "blocked" };
 }
 
 /**

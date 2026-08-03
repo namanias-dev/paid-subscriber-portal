@@ -33,7 +33,7 @@ import { activeAccessGrant } from "@/lib/sms/accessReminderService";
 import { deriveDisplayChannel } from "@/lib/marketing/leadAttrByPhone";
 import { lookupLegacyLeadsByPhones } from "@/lib/marketing/legacyLeadMatch";
 import { resolveEnrollmentBatchId } from "@/lib/courseZoom";
-import { contentBatchIds, decideContentBatchScope, recordingCourseIds } from "@/lib/contentBatchScope";
+import { contentBatchIds, recordingCourseIds } from "@/lib/contentBatchScope";
 import type { Student, PlanId, InstallmentItem, PaymentPlan } from "@/lib/types";
 
 const DAY = 86400000;
@@ -431,8 +431,8 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
       logoAlt: logo_alt || brand.name || "Naman Sharma IAS Academy",
     };
 
-    // Accessible recordings with batch labels — admin can verify batch scoping
-    // without a DB query. Fail-open rules match student Class Hub.
+    // Accessible recordings for enrolled courses (course-level entitlement).
+    // batch_ids are metadata labels only — they do not gate student access.
     const published = await getPublishedContent().catch(() => []);
     const enrolledCourseIds = new Set(courseEnrollments.map((e) => e.course_id));
     const batchLabelById = new Map<string, string>();
@@ -445,13 +445,7 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
       .filter((item) => item.type === "recording" || item.type === "live_link")
       .filter((item) => {
         const cids = recordingCourseIds(item);
-        if (!cids.some((id) => enrolledCourseIds.has(id))) return false;
-        return decideContentBatchScope({
-          item,
-          enrollments: courseEnrollments,
-          courses: allCourses,
-          phone,
-        }).allow;
+        return cids.some((id) => enrolledCourseIds.has(id));
       })
       .map((item) => {
         const bids = contentBatchIds(item);
@@ -463,7 +457,7 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
           batchIds: bids,
           batchLabels: bids.length
             ? bids.map((id) => batchLabelById.get(id) || id)
-            : ["All batches (unscoped)"],
+            : ["All batches (course-shared)"],
         };
       })
       .sort((a, b) => a.title.localeCompare(b.title));

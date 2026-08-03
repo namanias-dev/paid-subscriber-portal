@@ -1,8 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { canAccessLecture } from "../../lib/entitlements";
-import { decideContentBatchScope, filterContentByBatchScope } from "../../lib/contentBatchScope";
-import type { ContentItem, Course, CourseEnrollment } from "../../lib/types";
+import type { Course, CourseEnrollment } from "../../lib/types";
 
 const morningId = "b-safalta-june-2026-old-online-morning";
 const eveningId = "b-safalta-june-2026-old-online-evening";
@@ -18,6 +17,15 @@ const course: Course = {
     { id: morningId, label: "Online · Morning", mode: "Online", timing: "Morning", price: 27000 },
     { id: eveningId, label: "Online · Evening", mode: "Online", timing: "Evening", price: 27000 },
   ],
+} as Course;
+
+const otherCourse: Course = {
+  id: "co-other",
+  slug: "other",
+  title: "Other Course",
+  price: 1000,
+  created_at: "2026-01-01T00:00:00.000Z",
+  entitlements: { recorded: true },
 } as Course;
 
 function enr(over: Partial<CourseEnrollment>): CourseEnrollment {
@@ -53,8 +61,8 @@ const learner = {
   kind: "buyer" as const,
 };
 
-describe("batch-scoped lecture access", () => {
-  test("morning student blocked from evening-scoped recording", () => {
+describe("course-scoped lecture access (cross-batch restored)", () => {
+  test("morning student can play evening-tagged recording on same course", () => {
     const access = canAccessLecture(
       learner,
       {
@@ -66,12 +74,11 @@ describe("batch-scoped lecture access", () => {
       },
       { courses: [course], enrollments: [enr({})], overrides: [] },
     );
-    assert.equal(access.allowed, false);
-    assert.equal(access.reason, "wrong_batch");
+    assert.equal(access.allowed, true);
   });
 
-  test("morning student keeps morning-scoped + unscoped recordings", () => {
-    const morning = canAccessLecture(
+  test("batch_ids metadata does not block morning-scoped recording either", () => {
+    const access = canAccessLecture(
       learner,
       {
         id: "pol-1",
@@ -82,52 +89,22 @@ describe("batch-scoped lecture access", () => {
       },
       { courses: [course], enrollments: [enr({})], overrides: [] },
     );
-    assert.equal(morning.allowed, true);
+    assert.equal(access.allowed, true);
+  });
 
-    const shared = canAccessLecture(
+  test("other-course recording still blocked (course isolation)", () => {
+    const access = canAccessLecture(
       learner,
       {
-        id: "hist-1",
-        course_id: "co-safalta-old",
-        course_ids: ["co-safalta-old"],
+        id: "other-1",
+        course_id: "co-other",
+        course_ids: ["co-other"],
         visibility: "enrolled",
         batch_ids: null,
       },
-      { courses: [course], enrollments: [enr({})], overrides: [] },
+      { courses: [course, otherCourse], enrollments: [enr({})], overrides: [] },
     );
-    assert.equal(shared.allowed, true);
-  });
-
-  test("ambiguous enrolment fail-opens (does not blank portal)", () => {
-    const d = decideContentBatchScope({
-      item: {
-        id: "geo-1",
-        course_id: "co-safalta-old",
-        course_ids: ["co-safalta-old"],
-        visibility: "enrolled",
-        batch_ids: [eveningId],
-      },
-      enrollments: [enr({ batch_id: null, batch_label: null })],
-      courses: [course],
-      phone: "999",
-    });
-    assert.equal(d.allow, true);
-    assert.equal(d.failOpen, true);
-  });
-
-  test("multi-enrolment union sees both batches", () => {
-    const items = [
-      { id: "a", type: "recording", title: "Polity", subject: "Polity", course_id: "co-safalta-old", course_ids: ["co-safalta-old"], batch_ids: [morningId], is_published: true, created_at: "", description: null, drive_link: null, youtube_link: null, date: null, duration: null, paper: null, drip_date: null },
-      { id: "b", type: "recording", title: "Geo", subject: "Geography", course_id: "co-safalta-old", course_ids: ["co-safalta-old"], batch_ids: [eveningId], is_published: true, created_at: "", description: null, drive_link: null, youtube_link: null, date: null, duration: null, paper: null, drip_date: null },
-    ] as ContentItem[];
-    const filtered = filterContentByBatchScope(items, {
-      courses: [course],
-      enrollments: [
-        enr({ id: "m", batch_id: morningId }),
-        enr({ id: "e", batch_id: eveningId, batch_label: "Online · Evening" }),
-      ],
-      phone: "8219451749",
-    });
-    assert.equal(filtered.length, 2);
+    assert.equal(access.allowed, false);
+    assert.equal(access.reason, "not_enrolled");
   });
 });
