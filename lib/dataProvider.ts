@@ -100,6 +100,7 @@ import { mergeSiteSettings } from "./homeDefaults";
 import { normalizeLeaderboardSettings, type LeaderboardSettings } from "./leaderboardConfig";
 import { DEFAULT_ROLES, resolvePermissions, type PermissionSet } from "./permissions";
 import { dedupedPaidTotal } from "./paymentsAgg";
+import { assertNotTestWriteInProduction } from "./testRecordGuard";
 
 /**
  * The switchboard every API route uses.
@@ -3278,6 +3279,14 @@ export async function createPayment(input: CreatePaymentInput): Promise<Payment>
     await ensureBuyer(row.phone, row.student_name).catch(() => null);
     return row;
   }
+  assertNotTestWriteInProduction("payment", {
+    student_name: row.student_name,
+    phone: row.phone,
+    email: row.email,
+    reference_no: row.reference_no,
+    item_slug: row.item_slug,
+    item: row.item,
+  });
   try {
     const saved = await dbInsert<Payment>("payments", row as unknown as Record<string, unknown>);
     // Issue the portal login code at payment INITIATION (idempotent, phone-keyed) so
@@ -3293,9 +3302,20 @@ export async function createPayment(input: CreatePaymentInput): Promise<Payment>
     } else if (saved.status === "INITIATED" || saved.status === "PENDING" || saved.status === "UNCONFIRMED") {
       void recordPaymentInitiated(saved).catch(() => {});
       if (saved.reference_no) {
+        // Non-blocking: QStash outage must never fail checkout.
         void import("./paymentOutcome")
           .then((m) => m.enqueueVerifyLadder(saved.reference_no!))
-          .catch(() => {});
+          .catch((e) => {
+            console.warn(
+              JSON.stringify({
+                scope: "payment",
+                stage: "qstash_enqueue_swallowed",
+                ref: saved.reference_no,
+                error: (e as Error).message,
+                ts: new Date().toISOString(),
+              }),
+            );
+          });
       }
     }
     return saved;
@@ -3867,6 +3887,14 @@ export async function getBuyerByPhone(phone: string): Promise<Buyer | null> {
 export async function ensureBuyer(phone: string, name?: string | null): Promise<Buyer | null> {
   const p = (phone || "").trim();
   if (!p) return null;
+  // Allow returning an existing buyer (e.g. seed Demo Student); only block NEW
+  // test-shaped inserts in production.
+  if (!demoMode()) {
+    const existing = await getBuyerByPhone(p);
+    if (!existing) {
+      assertNotTestWriteInProduction("buyer", { name, phone: p });
+    }
+  }
   const buyer = await ensureBuyerRow(p, name);
   if (buyer) {
     // Conversion: a former quiz LEAD with a confirmed PAID purchase is no longer a

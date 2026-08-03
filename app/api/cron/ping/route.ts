@@ -1,12 +1,16 @@
 import { NextResponse } from "next/server";
 import { isDemoMode } from "@/lib/config";
 import { getSupabaseAdmin } from "@/lib/supabase";
+import { qstashHealthStatus, isQstashConfigured } from "@/lib/paymentOutcome";
+import { isEazypayConfigured } from "@/lib/eazypay";
+import { smsEnvEnabled } from "@/lib/sms/config";
 
 export const dynamic = "force-dynamic";
 
 /**
- * Keep-alive endpoint. Hit daily (Vercel cron or cron-job.org) to stop
+ * Keep-alive + infra health. Hit daily (Vercel cron or cron-job.org) to stop
  * Supabase free tier from pausing. Protected by CRON_SECRET when set.
+ * Includes QStash status so ops can confirm the verify ladder without a live order.
  */
 export async function GET(req: Request) {
   try {
@@ -21,15 +25,32 @@ export async function GET(req: Request) {
       }
     }
 
+    const qstash = qstashHealthStatus();
+
     if (isDemoMode) {
-      return NextResponse.json({ ok: true, demo: true, ts: Date.now() });
+      return NextResponse.json({
+        ok: true,
+        demo: true,
+        qstash: qstash.qstash,
+        qstashDetail: qstash,
+        eazypay: isEazypayConfigured(),
+        smsEnv: smsEnvEnabled(),
+        ts: Date.now(),
+      });
     }
 
     const db = getSupabaseAdmin();
     if (db) {
       await db.from("students").select("id").limit(1);
     }
-    return NextResponse.json({ ok: true, ts: Date.now() });
+    return NextResponse.json({
+      ok: true,
+      qstash: isQstashConfigured(),
+      qstashDetail: qstash,
+      eazypay: isEazypayConfigured(),
+      smsEnv: smsEnvEnabled(),
+      ts: Date.now(),
+    });
   } catch {
     return NextResponse.json({ ok: false }, { status: 500 });
   }

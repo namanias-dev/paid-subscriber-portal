@@ -182,6 +182,21 @@ export async function applyVerifyForReference(
   }
 
   const newlyPaid = await guardedTerminalWrite(row, patch, target);
+  if (newlyPaid) {
+    tgLog(
+      "payment_verify_terminal",
+      {
+        ref,
+        from: row.status,
+        to: target,
+        outcome: live.outcome,
+        rawStatus: live.rawStatus,
+        amount: row.amount,
+        itemType: row.item_type,
+      },
+      "info",
+    );
+  }
 
   if (newlyPaid && target === "PAID") {
     const { ensureBuyer, finalizeCoursePaymentByReference, getPaymentByReference } = await import(
