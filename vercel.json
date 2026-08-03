@@ -23,7 +23,7 @@
     },
     {
       "path": "/api/cron/sms-dispatch",
-      "schedule": "5 * * * *"
+      "schedule": "*/10 * * * *"
     },
     {
       "path": "/api/cron/sms-dlr",
@@ -39,7 +39,7 @@
     },
     {
       "path": "/api/cron/telegram-dispatch",
-      "schedule": "* * * * *"
+      "schedule": "*/5 * * * *"
     },
     {
       "path": "/api/cron/telegram-reports",

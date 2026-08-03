@@ -3,13 +3,23 @@ import { requirePermission, requireSuperAdmin, currentAdminId } from "@/lib/admi
 import { getSettings, updateSettings } from "@/lib/sms/store";
 import { envStatus } from "@/lib/sms/config";
 import type { SmsSettings } from "@/lib/sms/types";
+import { promoWindowStatus } from "@/lib/sms/promoQuietHours";
 
 export const dynamic = "force-dynamic";
+
+function isHm(s: unknown): s is string {
+  return typeof s === "string" && /^\d{1,2}:\d{2}$/.test(s.trim());
+}
 
 export async function GET() {
   if (!(await requirePermission("send_sms"))) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   const settings = await getSettings();
-  return NextResponse.json({ ok: true, settings, env: envStatus() });
+  return NextResponse.json({
+    ok: true,
+    settings,
+    env: envStatus(),
+    promoWindow: promoWindowStatus(settings),
+  });
 }
 
 export async function PATCH(req: Request) {
@@ -21,9 +31,12 @@ export async function PATCH(req: Request) {
   if (body.perMobileDailyCap !== undefined) patch.perMobileDailyCap = Math.max(0, Number(body.perMobileDailyCap) || 0);
   if (typeof body.windowStart === "string") patch.windowStart = body.windowStart;
   if (typeof body.windowEnd === "string") patch.windowEnd = body.windowEnd;
+  if (isHm(body.promoWindowStart)) patch.promoWindowStart = body.promoWindowStart.trim();
+  if (isHm(body.promoWindowEnd)) patch.promoWindowEnd = body.promoWindowEnd.trim();
+  if (isHm(body.promoDispatchTime)) patch.promoDispatchTime = body.promoDispatchTime.trim();
   if (body.t19OffsetMinutes !== undefined) patch.t19OffsetMinutes = Math.max(0, Number(body.t19OffsetMinutes) || 0);
   if (body.t19FallbackAllRegistered !== undefined) patch.t19FallbackAllRegistered = !!body.t19FallbackAllRegistered;
   if (body.costPerSms !== undefined) patch.costPerSms = Math.max(0, Number(body.costPerSms) || 0);
   const settings = await updateSettings(patch, await currentAdminId());
-  return NextResponse.json({ ok: true, settings });
+  return NextResponse.json({ ok: true, settings, promoWindow: promoWindowStatus(settings) });
 }

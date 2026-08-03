@@ -342,6 +342,30 @@ async function prepareRowBody(row: TelegramSendQueueRow): Promise<{ html: string
   return { html: prepared.html, overLimit: prepared.overLimit };
 }
 
+/**
+ * Cheap idle check for cron early-exit: any queued-due or unpausable row.
+ * Does not claim or mutate.
+ */
+export async function hasDueTelegramQueueWork(): Promise<boolean> {
+  const supabase = db();
+  if (!supabase) return false;
+  const now = nowIso();
+  const { data: queued } = await supabase
+    .from("telegram_send_queue")
+    .select("id")
+    .eq("status", "queued")
+    .lte("scheduled_at", now)
+    .limit(1);
+  if (queued && queued.length > 0) return true;
+  const { data: paused } = await supabase
+    .from("telegram_send_queue")
+    .select("id")
+    .eq("status", "paused")
+    .lte("pause_until", now)
+    .limit(1);
+  return !!(paused && paused.length > 0);
+}
+
 export async function drainTelegramQueue(opts: { limit?: number } = {}): Promise<{
   processed: number;
   sent: number;

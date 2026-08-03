@@ -17,7 +17,7 @@ const SmsSendsOverTime = dynamic(() => import("@/components/admin/sms/SmsCharts"
 
 // ---- shared types (mirror API responses) ----
 interface TemplateRow {
-  id: string; name: string; use_case: string; message_type: string; status: string;
+  id: string; name: string; use_case: string; message_type: string; category?: string | null; status: string;
   is_active: boolean; gateway_template_id: string | null; body_template: string; variables: string[];
   trigger_event: string | null; audience_type: string | null;
   sender_id?: string; route?: string;
@@ -50,6 +50,7 @@ const TABS = [
   { id: "send", label: "Send SMS", icon: Send },
   { id: "campaigns", label: "Campaigns", icon: History },
   { id: "automations", label: "Automations", icon: Workflow },
+  { id: "queued", label: "Queued", icon: Clock },
   { id: "templates", label: "Templates", icon: FileText },
   { id: "variables", label: "Variables", icon: Braces },
   { id: "logs", label: "Logs", icon: ScrollText },
@@ -57,6 +58,17 @@ const TABS = [
   { id: "settings", label: "Settings", icon: SettingsIcon },
 ] as const;
 type TabId = (typeof TABS)[number]["id"];
+
+function templateCategory(t: { category?: string | null; message_type?: string }): "promo" | "transactional" {
+  if (t.category === "promo" || t.category === "transactional") return t.category;
+  return t.message_type === "service" ? "transactional" : "promo";
+}
+
+function CategoryBadge({ category }: { category: "promo" | "transactional" }) {
+  return category === "promo"
+    ? <span className="pill pill-amber ml-1 text-[10px]">Promo</span>
+    : <span className="pill pill-blue ml-1 text-[10px]">Transactional</span>;
+}
 
 const STATUS_TONE: Record<string, string> = {
   SENT: "text-amber-700", DELIVERED: "text-success", FAILED: "text-danger", QUEUED: "text-muted", UNKNOWN: "text-muted",
@@ -98,6 +110,7 @@ export default function MissionControl() {
       {tab === "send" && <SendTab meta={meta} />}
       {tab === "campaigns" && <CampaignsTab canResend={!!meta?.isSuperAdmin} />}
       {tab === "automations" && <AutomationsTab canEdit={!!meta?.isSuperAdmin} />}
+      {tab === "queued" && <QueuedTab canEdit={!!meta?.isSuperAdmin} />}
       {tab === "templates" && <TemplatesTab canEdit={!!meta?.canManageSms} />}
       {tab === "variables" && <VariablesTab canEdit={!!meta?.canManageSms} />}
       {tab === "logs" && <LogsTab />}
@@ -137,11 +150,12 @@ function OverviewTab() {
         <button onClick={load} className="btn btn-secondary ml-auto text-xs"><RefreshCw size={13} /> Refresh</button>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
         <Kpi label="Submitted to gateway" value={data.today.submitted} />
         <Kpi label="Delivered (confirmed)" value={data.deliveryKnown ? data.today.delivered : "—"} />
         <Kpi label="Failed" value={data.today.failed} tone="red" />
         <Kpi label="Pending" value={data.today.queued} />
+        <Kpi label="Deferred (promo)" value={data.today.deferred ?? 0} />
         <Kpi label="Credits (gateway)" value={balance ? (balance.configured ? (balance.balance ?? "—") : "not configured") : "…"} />
       </div>
       <p className="-mt-2 text-xs text-muted">Daily cap: {data.dailyCap.cap ? `${data.dailyCap.used} / ${data.dailyCap.cap}` : `${data.dailyCap.used} / ∞`}</p>
@@ -238,6 +252,9 @@ function SendTab({ meta }: { meta: Meta | null }) {
   const [busy, setBusy] = useState(false);
   const [allowOverride, setAllowOverride] = useState(false);
   const [scheduleAt, setScheduleAt] = useState("");
+  const [scheduleError, setScheduleError] = useState<string | null>(null);
+  const [nextValidSlot, setNextValidSlot] = useState<{ datetimeLocal: string; istLabel: string } | null>(null);
+  const [promoWindow, setPromoWindow] = useState<{ open: boolean; istNow: string; windowStart: string; windowEnd: string; dispatchTime: string } | null>(null);
   const [balance, setBalance] = useState<{ configured: boolean; balance: number | null } | null>(null);
   const [campaignId, setCampaignId] = useState<string | null>(null);
   const [testMobile, setTestMobile] = useState("");
@@ -245,6 +262,12 @@ function SendTab({ meta }: { meta: Meta | null }) {
 
   useEffect(() => { fetch("/api/admin/sms/templates").then((r) => r.json()).then((d) => d.ok && setTemplates(d.templates)).catch(() => {}); }, []);
   useEffect(() => { fetch("/api/admin/sms/balance").then((r) => r.json()).then((d) => (d.ok || d.configured === false) && setBalance(d)).catch(() => {}); }, []);
+  useEffect(() => {
+    const loadWin = () => fetch("/api/admin/sms/settings").then((r) => r.json()).then((d) => d.ok && setPromoWindow(d.promoWindow || null)).catch(() => {});
+    loadWin();
+    const t = setInterval(loadWin, 30_000);
+    return () => clearInterval(t);
+  }, []);
 
   const loadSaved = useCallback(() => { fetch("/api/admin/sms/saved-audiences").then((r) => r.json()).then((d) => d.ok && setSaved(d.saved)).catch(() => {}); }, []);
   useEffect(() => { loadSaved(); }, [loadSaved]);
@@ -281,7 +304,7 @@ function SendTab({ meta }: { meta: Meta | null }) {
     else toast("Delete failed", "error");
   }
   const selectedTpl = templates.find((t) => t.id === templateId);
-  const isPromo = selectedTpl?.message_type === "promotional";
+  const isPromo = selectedTpl ? templateCategory(selectedTpl) === "promo" : false;
   useEffect(() => { if (isPromo && audType === "all") { setAudType("person"); setPreview(null); } }, [isPromo, audType]);
 
   const buildAudience = useCallback((restrictTo?: string[]) => {
@@ -352,21 +375,39 @@ function SendTab({ meta }: { meta: Meta | null }) {
       : "";
     if (!confirm(`Send "${templates.find((t) => t.id === templateId)?.name}" to ${n} ${label || "recipient(s)"}${when}?${preflightLines}\n\nSample:\n${pf?.sampleBody || preview?.preview?.text || "(run preview)"}`)) return;
     setBusy(true);
+    setScheduleError(null);
+    setNextValidSlot(null);
     try {
       const res = await fetch("/api/admin/sms/send", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ audience: buildAudience(restrictTo), templateId, allowRecentOverride: allowOverride, scheduleAt: restrictTo ? undefined : (scheduleAt || undefined) }) });
-      if (!res.ok) throw new Error(`Send failed (HTTP ${res.status}). ${res.status === 504 ? "The batch took too long — try a smaller audience or retry." : "Please retry."}`);
+      if (!res.ok && res.status !== 400) throw new Error(`Send failed (HTTP ${res.status}). ${res.status === 504 ? "The batch took too long — try a smaller audience or retry." : "Please retry."}`);
       const r = await res.json();
+      if (r.code === "promo_outside_window") {
+        setScheduleError(r.error || "Outside promo window.");
+        if (r.nextValidSlot) setNextValidSlot(r.nextValidSlot);
+        toast(r.error || "Promo outside quiet-hours window.", "error");
+        return;
+      }
+      if (!r.ok && r.error && (r.code === "past" || r.code === "malformed" || r.code === "too_far")) {
+        setScheduleError(r.error);
+        toast(r.error, "error");
+        return;
+      }
       if (r.aborted) {
         const first = (r.violations || []).slice(0, 3).map((v: { mobile: string; reason: string; detail: string }) => `${v.mobile}: ${v.reason}`).join("; ");
         toast(r.error || `Batch aborted (${(r.violations || []).length} violations). ${first}`, "error");
         return;
       }
       if (r.ok) {
+        if (r.scheduled > 0 && r.scheduledForIst) {
+          toast(`Scheduled for ${r.scheduledForIst} — ${r.scheduled} message(s). Sends within 10 minutes of the scheduled time.`, "success");
+          setScheduleAt("");
+          if (!restrictTo) setPreview(null);
+          return;
+        }
         const skipTxt = Object.keys(r.skipped || {}).length ? " Skipped: " + Object.entries(r.skipped).map(([k, v]) => `${k}:${v}`).join(", ") : "";
         const modeTxt = r.mode && r.mode !== "single" ? ` [${r.mode}${r.batches ? ` ×${r.batches}` : ""}]` : "";
-        const schedTxt = r.scheduledFor ? ` Scheduled for ${r.scheduledFor}.` : "";
-        toast(`Sent ${r.sent}/${r.requested}${modeTxt}.${schedTxt}${skipTxt}`, r.sent > 0 ? "success" : "error");
-        if (r.campaignId && !r.scheduledFor) setCampaignId(r.campaignId);
+        toast(`Sent ${r.sent}/${r.requested}${modeTxt}.${skipTxt}`, r.sent > 0 ? "success" : "error");
+        if (r.campaignId) setCampaignId(r.campaignId);
         if (!restrictTo) setPreview(null);
       } else toast(r.error || "Send failed", "error");
     } catch (e) {
@@ -396,9 +437,14 @@ function SendTab({ meta }: { meta: Meta | null }) {
         <Field label="Template (Approved / Active only)">
           <select className="input" value={templateId} onChange={(e) => { setTemplateId(e.target.value); if (!isFiltered) setPreview(null); }}>
             <option value="">Select a template…</option>
-            {sendable.map((t) => <option key={t.id} value={t.id}>{t.name}{t.message_type === "promotional" ? " · promo" : ""}</option>)}
+            {sendable.map((t) => <option key={t.id} value={t.id}>{t.name}{templateCategory(t) === "promo" ? " · promo" : " · txn"}</option>)}
           </select>
           {sendable.length === 0 && <p className="mt-1 text-xs text-amber-700">No Approved/Active templates yet — set a DLT ID and activate one in the Templates tab.</p>}
+          {isPromo && (
+            <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-xs text-amber-900">
+              Promo template — delivery restricted to 10:00–21:00 IST. Triggers outside this window are queued for 10:30 IST.
+            </p>
+          )}
         </Field>
 
         <div>
@@ -499,7 +545,23 @@ function SendTab({ meta }: { meta: Meta | null }) {
         )}
 
         <Field label="Schedule (optional, IST) — leave blank to send now">
-          <input type="datetime-local" className="input" value={scheduleAt} onChange={(e) => setScheduleAt(e.target.value)} />
+          <input type="datetime-local" className="input" value={scheduleAt} onChange={(e) => { setScheduleAt(e.target.value); setScheduleError(null); setNextValidSlot(null); }} />
+          <p className="mt-1 text-[11px] text-muted">Sends within 10 minutes of the scheduled time (sms-dispatch cron). Stored in the Queued tab.</p>
+          {promoWindow && (
+            <p className={`mt-1 text-[11px] ${promoWindow.open ? "text-success" : "text-amber-800"}`}>
+              {promoWindow.open ? "Promo window OPEN" : "Promo window CLOSED"} · {promoWindow.istNow} · allowed {promoWindow.windowStart}–{promoWindow.windowEnd} IST
+            </p>
+          )}
+          {scheduleError && <p className="mt-1 text-xs text-danger">{scheduleError}</p>}
+          {nextValidSlot && (
+            <button
+              type="button"
+              className="btn btn-secondary mt-1.5 text-xs"
+              onClick={() => { setScheduleAt(nextValidSlot.datetimeLocal); setScheduleError(null); setNextValidSlot(null); toast(`Set to ${nextValidSlot.istLabel}`, "success"); }}
+            >
+              Use next valid slot ({nextValidSlot.istLabel})
+            </button>
+          )}
         </Field>
 
         <label className="flex items-center gap-2 text-xs text-muted"><input type="checkbox" checked={allowOverride} onChange={(e) => setAllowOverride(e.target.checked)} /> Override 30-min re-send guard (only if you really mean to re-send)</label>
@@ -923,10 +985,19 @@ function AutomationsTab({ canEdit }: { canEdit: boolean }) {
                 {canEdit ? (
                   <select className="input h-9 py-1 text-xs" value={r.template_id || ""} onChange={(e) => patch(r.trigger, { template_id: e.target.value })}>
                     {!r.template_id && <option value="">— select —</option>}
-                    {templates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                    {templates.map((t) => <option key={t.id} value={t.id}>{t.name}{templateCategory(t) === "promo" ? " · promo" : ""}</option>)}
                   </select>
                 ) : (r.template_name || "—")}
                 {!r.template_ready && <span className="pill pill-amber ml-1 text-[10px]">no DLT/active</span>}
+                {(() => {
+                  const tpl = templates.find((t) => t.id === r.template_id);
+                  if (!tpl || templateCategory(tpl) !== "promo") return null;
+                  return (
+                    <p className="mt-1 max-w-xs text-[11px] leading-snug text-amber-800">
+                      Promo template — delivery restricted to 10:00–21:00 IST. Triggers outside this window are queued for 10:30 IST.
+                    </p>
+                  );
+                })()}
               </td>
               <td className="px-4 py-3 text-xs text-ink2">
                 {r.schedule_time && <>at {r.schedule_time} IST</>}
@@ -964,6 +1035,126 @@ function AutomationsTab({ canEdit }: { canEdit: boolean }) {
         </tbody>
       </table>
       {!canEdit && <p className="p-3 text-xs text-muted">Only a Super Admin can toggle or edit automations.</p>}
+    </div>
+  );
+}
+
+// ============================ QUEUED (promo deferrals) ============================
+function QueuedTab({ canEdit }: { canEdit: boolean }) {
+  const { toast } = useToast();
+  const [rows, setRows] = useState<any[]>([]);
+  const [pending, setPending] = useState(0);
+  const [windowInfo, setWindowInfo] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [editId, setEditId] = useState<string | null>(null);
+  const [editAt, setEditAt] = useState("");
+  const load = useCallback(() => {
+    setLoading(true);
+    fetch("/api/admin/sms/promo-queue?status=pending,claimed")
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.ok) {
+          setRows(d.rows || []);
+          setPending(d.pending || 0);
+          setWindowInfo(d.promoWindow || null);
+        }
+      })
+      .finally(() => setLoading(false));
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  async function cancel(id: string) {
+    if (!confirm("Cancel this queued message? It will not send.")) return;
+    const r = await fetch("/api/admin/sms/promo-queue", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "cancel", id }),
+    }).then((x) => x.json());
+    toast(r.ok ? "Cancelled." : (r.error || "Cancel failed"), r.ok ? "success" : "error");
+    load();
+  }
+
+  async function saveEdit(id: string) {
+    const r = await fetch("/api/admin/sms/promo-queue", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "reschedule", id, scheduleAt: editAt }),
+    }).then((x) => x.json());
+    if (r.ok) {
+      toast(`Rescheduled for ${r.scheduledForIst}.`, "success");
+      setEditId(null);
+      load();
+    } else {
+      toast(r.error || "Reschedule failed", "error");
+      if (r.nextValidSlot) {
+        setEditAt(r.nextValidSlot.datetimeLocal);
+      }
+    }
+  }
+
+  if (loading) return <LoadingBlock />;
+  return (
+    <div className="space-y-4">
+      <div className={`rounded-xl border p-3 text-sm ${windowInfo?.open ? "border-line bg-surface" : "border-amber-200 bg-amber-50 text-amber-900"}`}>
+        <p className="font-semibold">{windowInfo?.open ? "Promo window OPEN" : "Promo window CLOSED"} · {windowInfo?.istNow || "—"}</p>
+        <p className="mt-0.5 text-xs opacity-90">Allowed {windowInfo?.windowStart || "10:00"}–{windowInfo?.windowEnd || "21:00"} IST · deferred dispatch {windowInfo?.dispatchTime || "10:30"} IST · {pending} pending · sends within 10 minutes of scheduled time</p>
+      </div>
+      <div className="card overflow-x-auto p-0">
+        <table className="w-full min-w-[960px] text-left text-sm">
+          <thead>
+            <tr className="border-b border-line text-xs uppercase tracking-wide text-muted">
+              <th className="px-4 py-3">Recipient</th>
+              <th className="px-4 py-3">Template</th>
+              <th className="px-4 py-3">Source</th>
+              <th className="px-4 py-3">Trigger</th>
+              <th className="px-4 py-3">Queued at</th>
+              <th className="px-4 py-3">Scheduled (IST)</th>
+              <th className="px-4 py-3">Status</th>
+              <th className="px-4 py-3 text-right">Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.id} className="border-b border-line/60 last:border-0">
+                <td className="px-4 py-3 font-mono text-xs">{r.normalized_mobile}</td>
+                <td className="px-4 py-3 text-xs">{r.template_id}</td>
+                <td className="px-4 py-3"><span className={`pill text-[10px] ${r.source_label === "Manual" ? "pill-blue" : r.source_label === "Recovery" ? "pill-amber" : "pill-gray"}`}>{r.source_label || "Automation"}</span></td>
+                <td className="px-4 py-3 text-xs text-muted">{r.trigger_event || "—"}</td>
+                <td className="px-4 py-3 text-xs text-muted">{formatISTDateTime(r.created_at)}</td>
+                <td className="px-4 py-3 text-xs font-medium">
+                  {editId === r.id ? (
+                    <div className="flex flex-wrap items-center gap-1">
+                      <input type="datetime-local" className="input h-8 py-0 text-xs" value={editAt} onChange={(e) => setEditAt(e.target.value)} />
+                      <button onClick={() => saveEdit(r.id)} className="btn btn-primary text-xs">Save</button>
+                      <button onClick={() => setEditId(null)} className="btn btn-secondary text-xs">Cancel</button>
+                    </div>
+                  ) : formatISTDateTime(r.scheduled_for)}
+                </td>
+                <td className="px-4 py-3"><span className="pill pill-amber text-[10px]">{r.status}</span></td>
+                <td className="px-4 py-3 text-right">
+                  {canEdit && r.status === "pending" && (
+                    <div className="flex justify-end gap-1">
+                      <button onClick={() => {
+                        const d = new Date(r.scheduled_for);
+                        const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }).formatToParts(d);
+                        const g = (t: string) => parts.find((p) => p.type === t)?.value || "00";
+                        let h = g("hour"); if (h === "24") h = "00";
+                        setEditId(r.id);
+                        setEditAt(`${g("year")}-${g("month")}-${g("day")}T${h}:${g("minute")}`);
+                      }} className="btn btn-secondary text-xs">Edit</button>
+                      <button onClick={() => cancel(r.id)} className="btn btn-secondary text-xs">Cancel</button>
+                    </div>
+                  )}
+                </td>
+              </tr>
+            ))}
+            {rows.length === 0 && (
+              <tr><td colSpan={8} className="px-4 py-8 text-center text-sm text-muted">No deferred / scheduled messages.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+      <p className="text-xs text-muted">Queued and scheduled messages are pending — not failures. They send once via sms-dispatch (claim-style, no double-send).</p>
     </div>
   );
 }
@@ -1017,7 +1208,7 @@ function TemplatesTab({ canEdit }: { canEdit: boolean }) {
           <tbody>
             {templates.map((t) => (
               <tr key={t.id} className="border-b border-line/60 last:border-0">
-                <td className="px-4 py-3 font-medium text-ink">{t.name}{t.message_type === "promotional" && <span className="pill pill-amber ml-1 text-[10px]">promo</span>}{t.custom && <span className="pill pill-blue ml-1 text-[10px]">custom</span>}</td>
+                <td className="px-4 py-3 font-medium text-ink">{t.name}<CategoryBadge category={templateCategory(t)} />{t.custom && <span className="pill pill-blue ml-1 text-[10px]">custom</span>}</td>
                 <td className="px-4 py-3 text-xs">{t.use_case}</td>
                 <td className="px-4 py-3"><span className={`pill text-[10px] ${STATUS_TONE[t.status] || "pill-gray"}`}>{t.status}</span></td>
                 <td className="px-4 py-3 font-mono text-xs">{t.gateway_template_id || <span className="text-amber-700">missing</span>}</td>
@@ -1188,13 +1379,14 @@ function TemplateEditor({ t, canEdit, onClose, onSaved }: { t: TemplateRow; canE
   const [body, setBody] = useState(t.body_template);
   const [dlt, setDlt] = useState(t.gateway_template_id || "");
   const [status, setStatus] = useState(t.status);
+  const [category, setCategory] = useState<"promo" | "transactional">(templateCategory(t));
   const [busy, setBusy] = useState(false);
   const len = useMemo(() => [...body].length, [body]);
   const rupee = body.includes("₹");
 
   async function save() {
     setBusy(true);
-    const r = await fetch("/api/admin/sms/templates", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: t.id, body_template: body, gateway_template_id: dlt, status }) }).then((x) => x.json());
+    const r = await fetch("/api/admin/sms/templates", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: t.id, body_template: body, gateway_template_id: dlt, status, category }) }).then((x) => x.json());
     setBusy(false);
     if (r.ok) onSaved(); else toast(r.error || "Save failed", "error");
   }
@@ -1202,9 +1394,15 @@ function TemplateEditor({ t, canEdit, onClose, onSaved }: { t: TemplateRow; canE
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
       <div className="card max-h-[90vh] w-full max-w-xl overflow-y-auto p-5" onClick={(e) => e.stopPropagation()}>
-        <h3 className="text-lg font-bold">{t.name}</h3>
+        <h3 className="text-lg font-bold">{t.name} <CategoryBadge category={category} /></h3>
         <p className="mt-0.5 text-xs text-muted">{t.use_case} · {t.message_type} · variables: {t.variables.join(", ") || "none"}</p>
         <div className="mt-4 space-y-3">
+          <Field label="Quiet-hours category">
+            <select className="input" value={category} onChange={(e) => setCategory(e.target.value as "promo" | "transactional")} disabled={!canEdit}>
+              <option value="promo">Promo (10:00–21:00 IST only)</option>
+              <option value="transactional">Transactional (24×7)</option>
+            </select>
+          </Field>
           <Field label="Body (use {variable} tokens; must byte-match approved DLT text)">
             <textarea className="input min-h-[110px] font-mono text-xs" value={body} onChange={(e) => setBody(e.target.value)} disabled={!canEdit} />
             <p className={`mt-1 text-xs ${len > 155 ? "text-amber-700" : "text-muted"}`}>{len} chars{len > 155 ? " (> 155 — warns)" : ""}{rupee ? " · ❌ contains ₹ (use Rs)" : ""}</p>
@@ -1579,8 +1777,22 @@ function SettingsTab({ canEdit }: { canEdit: boolean }) {
   const { toast } = useToast();
   const [data, setData] = useState<any>(null);
   const [form, setForm] = useState<any>(null);
+  const [promoWindow, setPromoWindow] = useState<any>(null);
   const [busy, setBusy] = useState(false);
-  const load = useCallback(() => { fetch("/api/admin/sms/settings").then((r) => r.json()).then((d) => { if (d.ok) { setData(d); setForm(d.settings); } }); }, []);
+  const load = useCallback(() => {
+    fetch("/api/admin/sms/settings").then((r) => r.json()).then((d) => {
+      if (d.ok) {
+        setData(d);
+        setForm({
+          ...d.settings,
+          promoWindowStart: d.settings.promoWindowStart || d.settings.windowStart || "10:00",
+          promoWindowEnd: d.settings.promoWindowEnd || d.settings.windowEnd || "21:00",
+          promoDispatchTime: d.settings.promoDispatchTime || "10:30",
+        });
+        setPromoWindow(d.promoWindow || null);
+      }
+    });
+  }, []);
   useEffect(() => { load(); }, [load]);
   if (!data || !form) return <LoadingBlock />;
   const env = data.env;
@@ -1589,7 +1801,7 @@ function SettingsTab({ canEdit }: { canEdit: boolean }) {
     setBusy(true);
     const r = await fetch("/api/admin/sms/settings", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(form) }).then((x) => x.json());
     setBusy(false);
-    if (r.ok) { toast("Saved.", "success"); setForm(r.settings); } else toast(r.error || "Save failed", "error");
+    if (r.ok) { toast("Saved.", "success"); setForm(r.settings); setPromoWindow(r.promoWindow || null); } else toast(r.error || "Save failed", "error");
   }
 
   return (
@@ -1611,14 +1823,21 @@ function SettingsTab({ canEdit }: { canEdit: boolean }) {
 
       <div className="card space-y-3 p-4">
         <p className="text-sm font-semibold">Controls</p>
+        <div className={`rounded-lg border p-2.5 text-xs ${promoWindow?.open ? "border-line bg-surface" : "border-amber-200 bg-amber-50 text-amber-900"}`}>
+          <b>{promoWindow?.open ? "Promo window OPEN" : "Promo window CLOSED"}</b> · {promoWindow?.istNow || "—"}
+          <div className="mt-0.5 opacity-90">Active: {form.promoWindowStart}–{form.promoWindowEnd} IST · dispatch {form.promoDispatchTime} IST</div>
+        </div>
         <label className="flex items-center justify-between text-sm"><span>Master kill switch (soft)</span>
           <button disabled={!canEdit} onClick={() => setForm({ ...form, enabled: !form.enabled })} className={`rounded-full px-3 py-1 text-xs font-semibold ${form.enabled ? "bg-success/15 text-success" : "bg-danger/15 text-danger"}`}>{form.enabled ? "ON" : "OFF"}</button>
         </label>
         <div className="grid grid-cols-2 gap-2">
           <Field label="Daily cap (0=∞)"><input type="number" className="input" value={form.dailyCap} onChange={(e) => setForm({ ...form, dailyCap: Number(e.target.value) })} disabled={!canEdit} /></Field>
           <Field label="Per-mobile/day (0=∞)"><input type="number" className="input" value={form.perMobileDailyCap} onChange={(e) => setForm({ ...form, perMobileDailyCap: Number(e.target.value) })} disabled={!canEdit} /></Field>
-          <Field label="Window start (IST)"><input className="input" value={form.windowStart} onChange={(e) => setForm({ ...form, windowStart: e.target.value })} disabled={!canEdit} /></Field>
-          <Field label="Window end (IST)"><input className="input" value={form.windowEnd} onChange={(e) => setForm({ ...form, windowEnd: e.target.value })} disabled={!canEdit} /></Field>
+          <Field label="Legacy window start (IST)"><input className="input" value={form.windowStart} onChange={(e) => setForm({ ...form, windowStart: e.target.value })} disabled={!canEdit} /></Field>
+          <Field label="Legacy window end (IST)"><input className="input" value={form.windowEnd} onChange={(e) => setForm({ ...form, windowEnd: e.target.value })} disabled={!canEdit} /></Field>
+          <Field label="Promo window start (IST)"><input className="input" value={form.promoWindowStart || "10:00"} onChange={(e) => setForm({ ...form, promoWindowStart: e.target.value })} disabled={!canEdit} /></Field>
+          <Field label="Promo window end (IST)"><input className="input" value={form.promoWindowEnd || "21:00"} onChange={(e) => setForm({ ...form, promoWindowEnd: e.target.value })} disabled={!canEdit} /></Field>
+          <Field label="Promo dispatch time (IST)"><input className="input" value={form.promoDispatchTime || "10:30"} onChange={(e) => setForm({ ...form, promoDispatchTime: e.target.value })} disabled={!canEdit} /></Field>
           <Field label="T19 offset (min)"><input type="number" className="input" value={form.t19OffsetMinutes} onChange={(e) => setForm({ ...form, t19OffsetMinutes: Number(e.target.value) })} disabled={!canEdit} /></Field>
           <Field label="T19 fallback all-registered"><select className="input" value={form.t19FallbackAllRegistered ? "1" : "0"} onChange={(e) => setForm({ ...form, t19FallbackAllRegistered: e.target.value === "1" })} disabled={!canEdit}><option value="1">Yes</option><option value="0">No</option></select></Field>
           <Field label="Cost per SMS (Rs / segment)"><input type="number" step="0.01" className="input" value={form.costPerSms ?? 0.13} onChange={(e) => setForm({ ...form, costPerSms: Number(e.target.value) })} disabled={!canEdit} /></Field>

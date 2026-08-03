@@ -42,6 +42,9 @@ next-env.d.ts
 # Local DB backups (contain PII — never commit)
 /backups/
 
+# Ephemeral screenshot dumps (never trigger builds)
+.tmp-screenshots/
+
 # Legacy-migration service-account credentials (Google Sheets read).
 # Do NOT commit — the operator sets GOOGLE_SHEETS_SERVICE_ACCOUNT_JSON in Vercel env,
 # or passes --service-account-path=<file> as an ephemeral local input for the dry-run.

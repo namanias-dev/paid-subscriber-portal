@@ -107,7 +107,6 @@ async function handleStart(update: NonNullable<TelegramUpdate["message"]>): Prom
     return;
   }
   const payload = parseStartPayload(update.text || "");
-  tgLog("start_begin", { chat_id: String(chatId), payload });
 
   const result = await upsertFromStart({
     chatId,
@@ -119,14 +118,6 @@ async function handleStart(update: NonNullable<TelegramUpdate["message"]>): Prom
 
   if (!result) {
     tgLog("start_upsert_failed", { chat_id: String(chatId), payload }, "error");
-  } else {
-    tgLog("start_upsert_ok", {
-      chat_id: String(chatId),
-      isNew: result.isNew,
-      reactivated: result.reactivated,
-      linked_lead_id: result.subscriber.linked_lead_id,
-      subscriber_id: result.subscriber.id,
-    });
   }
 
   await storeInbound({
@@ -146,7 +137,9 @@ async function handleStart(update: NonNullable<TelegramUpdate["message"]>): Prom
     },
     result?.subscriber.id,
   );
-  tgLog("start_welcome", { chat_id: String(chatId), ok: welcome.ok, description: welcome.description ?? null });
+  if (!welcome.ok) {
+    tgLog("start_welcome", { chat_id: String(chatId), ok: false, description: welcome.description ?? null }, "error");
+  }
 
   fireTriggerForSubscriber("subscriber_joined", chatId);
 }
@@ -162,7 +155,6 @@ async function handleStop(update: NonNullable<TelegramUpdate["message"]>): Promi
     metadata: { kind: "command", command: "stop" },
   });
   await sendPlainAutoReply(chatId, "You have unsubscribed. Send /start anytime to rejoin.", null, "stop_ack");
-  tgLog("stop_ok", { chat_id: String(chatId) });
 }
 
 async function handleText(update: NonNullable<TelegramUpdate["message"]>): Promise<void> {
@@ -198,7 +190,6 @@ async function handleText(update: NonNullable<TelegramUpdate["message"]>): Promi
   }
 
   if (sub?.is_active) fireTriggerForSubscriber("subscriber_replied", chatId);
-  tgLog("text_ok", { chat_id: String(chatId), len: text.length });
 }
 
 async function handlePollAnswer(pa: NonNullable<TelegramUpdate["poll_answer"]>): Promise<void> {
@@ -221,7 +212,6 @@ async function handlePollAnswer(pa: NonNullable<TelegramUpdate["poll_answer"]>):
   } catch (e) {
     tgLog("poll_answer_record_failed", { error: (e as Error).message }, "warn");
   }
-  tgLog("poll_answer_ok", { chat_id: chatId, poll_id: pa.poll_id });
 }
 
 async function handleCallback(cq: NonNullable<TelegramUpdate["callback_query"]>): Promise<void> {

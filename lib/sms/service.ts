@@ -13,6 +13,8 @@ import { gatewayConfigured, smsEnvEnabled, loginUrlForTemplate, bulkChunkSize, S
 import { getResolvedDefaults } from "./variables";
 import { prepareAndRenderSms } from "./renderPipeline";
 import type { SmsLog, SmsLogStatus } from "./types";
+import { isPromoTemplate, nextPromoDispatchAt } from "./promoQuietHours";
+import { enqueuePromo } from "./promoQueue";
 
 const SAME_TRIGGER_WINDOW_MIN = 30;
 /** Parallel gateway calls in the per-recipient fan-out (keeps 170+ under the 60s function limit). */
@@ -65,6 +67,11 @@ export interface SendSmsInput {
   dedupeKey?: string | null;
   /** Cron auto-sends enforce the allowed IST window; manual sends do not. */
   enforceWindow?: boolean;
+  /**
+   * Drain path only: skip promo quiet-hours gate (message already deferred).
+   * Never set from automations / manual / bulk.
+   */
+  bypassPromoQuietHours?: boolean;
   /** Manual override of the 30-min same-trigger anti-spam guard. */
   allowRecentOverride?: boolean;
   /** Deferred send: gateway "time" format "YYYY-MM-DD HH:MMam/pm" (IST). */
@@ -81,6 +88,9 @@ export interface SendSmsResult {
   error?: string;
   logId?: string;
   status?: SmsLogStatus;
+  /** Present when promo was deferred to quiet-hours queue (not a failure). */
+  queueId?: string;
+  scheduledFor?: string;
 }
 
 function istMidnightISO(): string {
@@ -214,6 +224,38 @@ export async function sendSms(input: SendSmsInput): Promise<SendSmsResult> {
   // 3b. opt-out / DND suppression — compliance, enforced on EVERY send path.
   if (await isOptedOut(normalized)) return { ok: false, skipped: "opted_out" };
 
+  // 3c. PROMO QUIET HOURS (dispatch-layer, all paths). Transactional untouched.
+  // Outside 10:00–21:00 IST (configurable) → enqueue for promoDispatchTime, never drop.
+  if (!input.bypassPromoQuietHours && isPromoTemplate(t)) {
+    const when = nextPromoDispatchAt(settings, new Date(), {
+      jitterSeed: `${t.id}:${normalized}:${input.dedupeKey || ""}`,
+    });
+    if (when) {
+        const enq = await enqueuePromo({
+        templateId: t.id,
+        mobile: input.mobile,
+        normalizedMobile: normalized,
+        variables: input.variables || {},
+        relatedEntity: input.relatedEntity || null,
+        triggerEvent: input.triggerEvent ?? null,
+        audienceType: input.audienceType ?? null,
+        dedupeKey: input.dedupeKey
+          ? `promo_defer:${input.dedupeKey}`
+          : `promo_defer:${t.id}:${normalized}:${when.toISOString().slice(0, 13)}`,
+        scheduledFor: when,
+        sentBy: input.sentBy,
+        queueSource: "quiet_hours",
+      });
+      if (!enq.ok) return { ok: false, skipped: "defer_failed", error: enq.error };
+      return {
+        ok: true,
+        skipped: "deferred_quiet_hours",
+        queueId: enq.id,
+        scheduledFor: when.toISOString(),
+      };
+    }
+  }
+
   // 4. render + validate via the SINGLE shared pipeline (preview uses the same).
   const filled0 = await resolveSendVars(input.templateId, input.variables || {});
   const rendered = prepareAndRenderSms(t.body_template, input.templateId, filled0);
@@ -325,7 +367,9 @@ export interface BatchResult {
   sent: number;
   failed: number;
   skipped: Record<string, number>;
-  mode: "single" | "bulk" | "per-recipient" | "none";
+  /** Count enqueued to sms_promo_queue (manual schedule or quiet-hours). */
+  scheduled: number;
+  mode: "single" | "bulk" | "per-recipient" | "none" | "scheduled";
   batches: number;
   balance: number | null;
   /** True when a hard DLT/GSM/skeleton violation aborted the WHOLE batch before any send. */
@@ -333,6 +377,10 @@ export interface BatchResult {
   abortReason?: string | null;
   /** Per-recipient hard violations that caused the abort (never silent). */
   violations?: { mobile: string; reason: string; detail: string; item_short?: string; item_short_len?: number }[];
+  /** ISO UTC of the operator-chosen schedule (manual path). */
+  scheduledFor?: string | null;
+  scheduledForIst?: string | null;
+  queueIds?: string[];
 }
 
 interface ScreenedRecipient {
@@ -353,6 +401,13 @@ export async function sendBatch(input: {
   audienceType?: string | null;
   allowRecentOverride?: boolean;
   enforceWindow?: boolean;
+  /** Drain path only — skip promo quiet-hours gate. */
+  bypassPromoQuietHours?: boolean;
+  /**
+   * Manual Mission Control schedule: enqueue to sms_promo_queue at this instant
+   * (UTC Date already resolved from IST). When set, never hits the gateway now.
+   */
+  scheduleFor?: Date | null;
   scheduleTime?: string | null;
   /** Stamps every log in this send so the UI can track per-recipient status + resend-to-failed. */
   campaignId?: string | null;
@@ -364,12 +419,16 @@ export async function sendBatch(input: {
     sent: 0,
     failed: 0,
     skipped: {},
+    scheduled: 0,
     mode: "none",
     batches: 0,
     balance: null,
     aborted: false,
     abortReason: null,
     violations: [],
+    scheduledFor: null,
+    scheduledForIst: null,
+    queueIds: [],
   };
   const skip = (k: string, n = 1) => { out.skipped[k] = (out.skipped[k] || 0) + n; };
 
@@ -471,6 +530,69 @@ export async function sendBatch(input: {
     return out;
   }
   if (eligible.length === 0) return out;
+
+  // Manual schedule → sms_promo_queue (same claim/drain as quiet-hours). No gateway now.
+  if (input.scheduleFor && input.scheduleFor.getTime() > Date.now() - 60_000) {
+    const { formatIstScheduleLabel } = await import("./promoQuietHours");
+    out.mode = "scheduled";
+    out.scheduledFor = input.scheduleFor.toISOString();
+    out.scheduledForIst = formatIstScheduleLabel(input.scheduleFor);
+    for (let i = 0; i < eligible.length; i++) {
+      const r = eligible[i];
+      // Small stagger so large batches spread across cron claim windows without
+      // jumping ahead of earlier-queued rows (ORDER BY scheduled_for ASC).
+      const when = new Date(input.scheduleFor.getTime() + i * 2000);
+      const enq = await enqueuePromo({
+        templateId: t.id,
+        mobile: r.mobile,
+        normalizedMobile: r.normalized,
+        variables: r.variables,
+        relatedEntity: r.relatedEntity || null,
+        triggerEvent: input.triggerEvent || "manual_schedule",
+        audienceType: input.audienceType ?? null,
+        dedupeKey: `manual_sched:${t.id}:${r.normalized}:${input.scheduleFor.toISOString()}:${input.campaignId || "nocampaign"}`,
+        scheduledFor: when,
+        sentBy: input.sentBy,
+        queueSource: "manual",
+      });
+      if (enq.ok) {
+        out.scheduled++;
+        if (enq.id) out.queueIds!.push(enq.id);
+        if (enq.duplicate) skip("schedule_duplicate");
+      } else {
+        skip("schedule_enqueue_failed");
+      }
+    }
+    return out;
+  }
+
+  // Promo quiet-hours: defer entire eligible set (do not send / do not fail).
+  if (!input.bypassPromoQuietHours && isPromoTemplate(t)) {
+    const whenBase = nextPromoDispatchAt(settings, new Date(), { jitterMinutes: 0 });
+    if (whenBase) {
+      for (const r of eligible) {
+        const when = nextPromoDispatchAt(settings, new Date(), {
+          jitterSeed: `${t.id}:${r.normalized}:${input.campaignId || input.triggerEvent || "batch"}`,
+        }) || whenBase;
+        const enq = await enqueuePromo({
+          templateId: t.id,
+          mobile: r.mobile,
+          normalizedMobile: r.normalized,
+          variables: r.variables,
+          relatedEntity: r.relatedEntity || null,
+          triggerEvent: input.triggerEvent ?? null,
+          audienceType: input.audienceType ?? null,
+          dedupeKey: `promo_defer_batch:${t.id}:${r.normalized}:${when.toISOString().slice(0, 10)}:${input.campaignId || "nocampaign"}`,
+          scheduledFor: when,
+          sentBy: input.sentBy,
+          queueSource: "quiet_hours",
+        });
+        if (enq.ok) { skip("deferred_quiet_hours"); out.scheduled++; }
+        else skip("defer_failed");
+      }
+      return out;
+    }
+  }
 
   // ---- pre-batch balance guard (refuse if known credits < recipients) ----
   if (gatewayConfigured()) {

@@ -249,6 +249,57 @@ export async function runManualAutomation(id: string): Promise<{ ok: boolean; en
   return { ok: true, enqueued };
 }
 
+/** True if a scheduled automation would fire on this pass (no enqueue). */
+function automationIsDue(
+  auto: ReturnType<typeof mapAuto>,
+  now: Date,
+  nowIsoStr: string,
+): boolean {
+  if (auto.schedule_mode === "datetime") {
+    if (!auto.schedule_at) return false;
+    if (new Date(auto.schedule_at).getTime() > now.getTime()) return false;
+    if (auto.last_run_at && new Date(auto.last_run_at).getTime() >= new Date(auto.schedule_at).getTime()) {
+      return false;
+    }
+    return true;
+  }
+  if (auto.schedule_mode === "recurring") {
+    const cron = (auto.recurring_cron || "daily").toLowerCase();
+    if (!cron.startsWith("daily")) return false;
+    const todayKey = nowIsoStr.slice(0, 10);
+    if (auto.last_run_at && auto.last_run_at.slice(0, 10) === todayKey) return false;
+    const m = cron.match(/daily(?::|\s+)(\d{1,2}):(\d{2})/);
+    if (m) {
+      const h = Number(m[1]);
+      const min = Number(m[2]);
+      if (now.getUTCHours() * 60 + now.getUTCMinutes() < h * 60 + min) return false;
+    }
+    return true;
+  }
+  if (auto.schedule_mode === "send_now" && auto.enabled && !auto.last_run_at) return true;
+  return false;
+}
+
+/**
+ * Cheap idle check: any enabled datetime/recurring/send_now automation due now.
+ * Selects lean columns only; does not enqueue.
+ */
+export async function hasDueScheduledAutomations(): Promise<boolean> {
+  const supabase = db();
+  if (!supabase) return false;
+  const now = new Date();
+  const nowIsoStr = now.toISOString();
+  const { data } = await supabase
+    .from("telegram_automations")
+    .select("id, enabled, schedule_mode, schedule_at, recurring_cron, last_run_at")
+    .eq("enabled", true)
+    .in("schedule_mode", ["datetime", "recurring", "send_now"]);
+  for (const raw of (data || []) as Record<string, unknown>[]) {
+    if (automationIsDue(mapAuto(raw), now, nowIsoStr)) return true;
+  }
+  return false;
+}
+
 /**
  * Process datetime one-shots and simple daily recurring (recurring_cron like "daily HH:MM"
  * or bare "daily"). Idempotent via last_run_at day key.
@@ -269,36 +320,10 @@ export async function processDueScheduledAutomations(): Promise<{ ran: number }>
   for (const raw of (data || []) as Record<string, unknown>[]) {
     const auto = mapAuto(raw);
     try {
-      if (auto.schedule_mode === "datetime") {
-        if (!auto.schedule_at) continue;
-        if (new Date(auto.schedule_at).getTime() > now.getTime()) continue;
-        if (auto.last_run_at && new Date(auto.last_run_at).getTime() >= new Date(auto.schedule_at).getTime()) {
-          continue;
-        }
-        await enqueueAudienceAutomation(auto);
-        await supabase.from("telegram_automations").update({ last_run_at: nowIsoStr }).eq("id", auto.id);
-        ran++;
-      } else if (auto.schedule_mode === "recurring") {
-        // Simple daily: recurring_cron = "daily" or "daily:HH:MM" (IST-ish wall clock ignored; fire once/day).
-        const cron = (auto.recurring_cron || "daily").toLowerCase();
-        if (!cron.startsWith("daily")) continue;
-        const todayKey = nowIsoStr.slice(0, 10);
-        if (auto.last_run_at && auto.last_run_at.slice(0, 10) === todayKey) continue;
-        // Optional HH:MM gate
-        const m = cron.match(/daily(?::|\s+)(\d{1,2}):(\d{2})/);
-        if (m) {
-          const h = Number(m[1]);
-          const min = Number(m[2]);
-          if (now.getUTCHours() * 60 + now.getUTCMinutes() < h * 60 + min) continue;
-        }
-        await enqueueAudienceAutomation(auto);
-        await supabase.from("telegram_automations").update({ last_run_at: nowIsoStr }).eq("id", auto.id);
-        ran++;
-      } else if (auto.schedule_mode === "send_now" && auto.enabled && !auto.last_run_at) {
-        await enqueueAudienceAutomation(auto);
-        await supabase.from("telegram_automations").update({ last_run_at: nowIsoStr }).eq("id", auto.id);
-        ran++;
-      }
+      if (!automationIsDue(auto, now, nowIsoStr)) continue;
+      await enqueueAudienceAutomation(auto);
+      await supabase.from("telegram_automations").update({ last_run_at: nowIsoStr }).eq("id", auto.id);
+      ran++;
     } catch {
       /* continue other automations */
     }

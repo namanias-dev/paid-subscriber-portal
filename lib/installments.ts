@@ -363,11 +363,6 @@ export function planCourseEnrollment(
       const seat = resolveSeat(originalTotalFee);
       if (typeof seat === "string") return { ok: false, error: seat };
       seatForPlan = seat;
-      if (!course.batch_start) {
-        console.info("[buildSchedule] batch_start missing — fell back to booking + firstIntervalDays", {
-          courseId: course.id, bookingISO,
-        });
-      }
       firstKind = "seat";
       firstInstallmentNo = 0;
     } else {

@@ -41,6 +41,9 @@ export const DEFAULT_SETTINGS = (): SmsSettings => ({
   perMobileDailyCap: envPerMobileDailyCap(),
   windowStart: "10:00",
   windowEnd: "21:00",
+  promoWindowStart: "10:00",
+  promoWindowEnd: "21:00",
+  promoDispatchTime: "10:30",
   t19OffsetMinutes: 240,
   // Attendees-only by default: if attendance is unknown for a webinar, T19 sends
   // to NOBODY rather than blasting all registered. Flip on per preference.
@@ -70,9 +73,10 @@ function nowISO() { return new Date().toISOString(); }
 
 function seedToTemplate(s: (typeof SEED_TEMPLATES)[number]): SmsTemplate {
   const approved = !!s.gateway_template_id;
+  const category = s.message_type === "promotional" ? "promo" as const : "transactional" as const;
   return {
     id: s.id, name: s.name, use_case: s.use_case, gateway_template_id: s.gateway_template_id ?? null,
-    sender_id: "NAMIAS", route: "12", message_type: s.message_type,
+    sender_id: "NAMIAS", route: "12", message_type: s.message_type, category,
     body_template: s.body, variables: uniqueVariables(s.body),
     // A seed that carries an approved DLT id is send-ready; the rest stay draft.
     status: approved ? "approved" : "draft", is_active: approved, auto_send_enabled: false,
@@ -92,11 +96,22 @@ function ruleSeedToRule(r: RuleSeed): SmsAutoRule {
 // row<->object mapping for DB
 type Row = Record<string, unknown>;
 function rowToTemplate(r: Row): SmsTemplate {
+  const message_type = (r.message_type as SmsTemplate["message_type"]) || "service";
+  const rawCat = r.category as string | null | undefined;
+  const category =
+    rawCat === "promo" || rawCat === "transactional"
+      ? rawCat
+      : message_type === "promotional"
+        ? "promo"
+        : message_type === "service"
+          ? "transactional"
+          : null;
   return {
     id: String(r.id), name: String(r.name), use_case: r.use_case as SmsTemplate["use_case"],
     gateway_template_id: (r.gateway_template_id as string) ?? null,
     sender_id: String(r.sender_id || "NAMIAS"), route: String(r.route || "12"),
-    message_type: (r.message_type as SmsTemplate["message_type"]) || "service",
+    message_type,
+    category,
     body_template: String(r.body_template), variables: (r.variables as string[]) || [],
     status: (r.status as SmsTemplateStatus) || "draft", is_active: !!r.is_active,
     auto_send_enabled: !!r.auto_send_enabled,
@@ -193,6 +208,7 @@ export async function getTemplate(id: string): Promise<SmsTemplate | null> {
 
 export interface TemplatePatch {
   name?: string; use_case?: SmsTemplate["use_case"]; message_type?: SmsTemplate["message_type"];
+  category?: SmsTemplate["category"];
   body_template?: string; gateway_template_id?: string | null; status?: SmsTemplateStatus;
   is_active?: boolean; auto_send_enabled?: boolean; trigger_event?: string | null;
   audience_type?: string | null; sender_id?: string; route?: string; updated_by?: string | null;
@@ -217,7 +233,9 @@ export async function upsertTemplate(id: string, patch: TemplatePatch, createIfM
     const exists = await getTemplate(id);
     if (!exists && !createIfMissing) return null;
     if (!exists) {
-      await db.from("sms_templates").insert({ id, name: patch.name || id, use_case: patch.use_case || "ONBOARDING", message_type: patch.message_type || "service", body_template: patch.body_template || "", variables: variables || [], status: patch.status || "draft", is_active: patch.is_active ?? false, auto_send_enabled: patch.auto_send_enabled ?? false, trigger_event: patch.trigger_event ?? null, audience_type: patch.audience_type ?? null, gateway_template_id: patch.gateway_template_id ?? null });
+      // New templates default category to promo (fail-safe quiet hours).
+      const category = patch.category ?? (patch.message_type === "service" ? "transactional" : "promo");
+      await db.from("sms_templates").insert({ id, name: patch.name || id, use_case: patch.use_case || "ONBOARDING", message_type: patch.message_type || "promotional", category, body_template: patch.body_template || "", variables: variables || [], status: patch.status || "draft", is_active: patch.is_active ?? false, auto_send_enabled: patch.auto_send_enabled ?? false, trigger_event: patch.trigger_event ?? null, audience_type: patch.audience_type ?? null, gateway_template_id: patch.gateway_template_id ?? null });
     } else {
       await db.from("sms_templates").update(clean).eq("id", id);
     }
@@ -263,6 +281,8 @@ export interface CreateTemplateInput {
   name: string;
   use_case: SmsTemplate["use_case"];
   message_type: SmsTemplate["message_type"];
+  /** Defaults to promo (fail-safe) when omitted. */
+  category?: SmsTemplate["category"];
   body_template: string;
   gateway_template_id: string;
   sender_id?: string | null;
@@ -282,10 +302,13 @@ export interface CreateTemplateInput {
 export async function createTemplate(input: CreateTemplateInput): Promise<SmsTemplate | null> {
   const variables = uniqueVariables(input.body_template);
   const active = !!input.is_active;
+  // Fail-safe: unclassified / new → promo unless explicitly transactional.
+  const category = input.category === "transactional" ? "transactional" : "promo";
   const row = {
     name: input.name.trim(),
     use_case: input.use_case,
     message_type: input.message_type,
+    category,
     body_template: input.body_template,
     variables,
     gateway_template_id: input.gateway_template_id.trim(),

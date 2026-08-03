@@ -8,6 +8,7 @@ import { normalizeIndianMobile } from "@/lib/phone";
 import type { SmsAutoRule } from "@/lib/sms/types";
 import { deriveCollections, isSupersededEnrollment } from "@/lib/installments";
 import { fireAutomationEvent } from "@/lib/journey-automation/events";
+import { drainPromoQueue, hasDuePromoQueueWork } from "@/lib/sms/promoQueue";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -77,11 +78,17 @@ async function run(req: Request) {
   }
 
   const now = new Date();
-  const istHour = Math.floor(istMinutesOfDay(now) / 60);
+  const istMins = istMinutesOfDay(now);
+  const istHour = Math.floor(istMins / 60);
   const today = istDateKey(now);
   const result: Record<string, number> = {};
 
   try {
+    // Cheap promo peek first — skip claim/enrolment when idle. Payment + webinar
+    // + DLR paths still run (they do not ride sms_promo_queue).
+    const promoDue = await hasDuePromoQueueWork();
+    result.promo_due = promoDue ? 1 : 0;
+
     const webinars = await getWebinars();
     const settings = await getSettings();
 
@@ -194,40 +201,43 @@ async function run(req: Request) {
       }
     }
 
-    // ---- Journey Automation event-capture spike (Part A): installment_overdue ----
-    // Cron-detected capture ONLY. Reads business truth via the existing
-    // deriveCollections; ingests one idempotent event per overdue installment
-    // line (dedupe once per line, ever). Consumes nothing, sends nothing, mutates
-    // nothing. Fully non-blocking — a failure here never affects the SMS cron.
-    try {
-      const enrollments = await getAllCourseEnrollments();
-      let captured = 0;
-      const nowMs = Date.now();
-      for (const e of enrollments) {
-        if (e.status === "cancelled") continue;
-        // A row superseded by a batch transfer keeps its old unpaid lines, so
-        // dunning it would chase a plan that has already been replaced.
-        if (isSupersededEnrollment(e)) continue;
-        const col = deriveCollections(e);
-        if (col.missedInstallments <= 0) continue;
-        for (const line of e.schedule || []) {
-          if (line.kind !== "installment" || line.paid) continue;
-          if (line.status === "waived" || line.status === "cancelled") continue;
-          if (!line.due || new Date(line.due).getTime() >= nowMs) continue;
-          fireAutomationEvent({
-            eventType: "installment_overdue",
-            occurredAt: line.due,
-            enrollmentId: e.id,
-            phone: e.phone,
-            payload: { installment_no: line.no, amount: line.amount, due: line.due, course_id: e.course_id, days_overdue: col.daysOverdue },
-            dedupeKey: `installment_overdue:${e.id}:${line.no}`,
-            source: "cron",
-          });
-          captured++;
+    // ---- Journey Automation event-capture: installment_overdue ----
+    // Skip the heavy all-enrolments scan on idle promo ticks. Still run once
+    // per IST hour (first */10 slot) so overdue capture does not starve.
+    const runEnrollmentScan = promoDue || istMins % 60 < 10;
+    if (runEnrollmentScan) {
+      try {
+        const enrollments = await getAllCourseEnrollments();
+        let captured = 0;
+        const nowMs = Date.now();
+        for (const e of enrollments) {
+          if (e.status === "cancelled") continue;
+          // A row superseded by a batch transfer keeps its old unpaid lines, so
+          // dunning it would chase a plan that has already been replaced.
+          if (isSupersededEnrollment(e)) continue;
+          const col = deriveCollections(e);
+          if (col.missedInstallments <= 0) continue;
+          for (const line of e.schedule || []) {
+            if (line.kind !== "installment" || line.paid) continue;
+            if (line.status === "waived" || line.status === "cancelled") continue;
+            if (!line.due || new Date(line.due).getTime() >= nowMs) continue;
+            fireAutomationEvent({
+              eventType: "installment_overdue",
+              occurredAt: line.due,
+              enrollmentId: e.id,
+              phone: e.phone,
+              payload: { installment_no: line.no, amount: line.amount, due: line.due, course_id: e.course_id, days_overdue: col.daysOverdue },
+              dedupeKey: `installment_overdue:${e.id}:${line.no}`,
+              source: "cron",
+            });
+            captured++;
+          }
         }
-      }
-      result.installment_overdue_captured = captured;
-    } catch { /* non-fatal: event capture never breaks the cron */ }
+        result.installment_overdue_captured = captured;
+      } catch { /* non-fatal: event capture never breaks the cron */ }
+    } else {
+      result.installment_overdue_skipped = 1;
+    }
 
     // ---- delivery-report PULL: promote open SENT logs via JustGoSMS http-dlr.php ----
     try {
@@ -236,6 +246,23 @@ async function run(req: Request) {
       result.dlr_delivered = dlr.delivered;
       result.dlr_failed = dlr.failed;
     } catch { /* non-fatal */ }
+
+    // ---- promo quiet-hours drain (claim → send once, paced) ----
+    // Skip RPC claim when peek shows nothing due (preserves claim semantics when due).
+    if (promoDue) {
+      try {
+        const drained = await drainPromoQueue({ limit: 20, gapMs: 350 });
+        result.promo_claimed = drained.claimed;
+        result.promo_sent = drained.sent;
+        result.promo_skipped = drained.skipped;
+        result.promo_failed = drained.failed;
+      } catch { /* non-fatal: never break the rest of the cron */ }
+    } else {
+      result.promo_claimed = 0;
+      result.promo_sent = 0;
+      result.promo_skipped = 0;
+      result.promo_failed = 0;
+    }
 
     return NextResponse.json({ ok: true, istHour, result, ts: Date.now() });
   } catch (e) {

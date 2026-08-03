@@ -31,7 +31,7 @@ export interface SmsOverview {
    * confirmed via DLR only. deliveryKnown = whether ANY DLR has ever landed, so
    * the UI can honestly say "awaiting delivery receipts" instead of showing 0.
    */
-  today: { submitted: number; delivered: number; failed: number; queued: number; total: number };
+  today: { submitted: number; delivered: number; failed: number; queued: number; deferred: number; total: number };
   deliveryKnown: boolean;
   dailyCap: { used: number; cap: number };
   byTemplate: { template: string; name: string; count: number }[];
@@ -50,6 +50,12 @@ export async function getOverview(): Promise<SmsOverview> {
   const submitted = today.filter((l) => isSent(l.status)).length;
   const failed = today.filter((l) => l.status === "FAILED").length;
   const queued = today.filter((l) => l.status === "QUEUED").length;
+  // Deferred promo (quiet-hours) — pending in sms_promo_queue, NOT failures.
+  let deferred = 0;
+  try {
+    const { countPendingPromo } = await import("./promoQueue");
+    deferred = await countPendingPromo();
+  } catch { /* ignore */ }
   // Do we have ANY delivery receipts at all (recently)? If not, we show delivered
   // as "—" rather than a misleading 0.
   const recentForDlr = await listLogs({ from: new Date(Date.now() - 7 * 86400000).toISOString(), limit: 5000 });
@@ -82,7 +88,7 @@ export async function getOverview(): Promise<SmsOverview> {
 
   return {
     killSwitch: { enabledByEnv: smsEnvEnabled(), enabledBySettings: settings.enabled, effectiveOn: smsEnvEnabled() && settings.enabled },
-    today: { submitted, delivered, failed, queued, total: today.length },
+    today: { submitted, delivered, failed, queued, deferred, total: today.length },
     deliveryKnown,
     dailyCap: { used: submitted, cap: settings.dailyCap },
     byTemplate,

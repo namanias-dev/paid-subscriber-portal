@@ -441,10 +441,9 @@ export async function runAccessAutomation(now = Date.now()): Promise<AutoRunRepo
   return { ...plan, dryRun: false, sent };
 }
 
-/** Console-friendly tables for QA / cron logs. */
+/** Console-friendly summary for QA / cron logs (no per-recipient tables). */
 export function printAutoReport(report: AutoRunReport): void {
-  console.log("\n=== Access automation run ===");
-  console.log({
+  console.log("[access-automation]", {
     dryRun: report.dryRun,
     enabled: report.settings.enabled,
     killSwitch: report.settings.killSwitch,
@@ -452,20 +451,8 @@ export function printAutoReport(report: AutoRunReport): void {
     quiet: report.inQuietHours,
     wouldSend: report.wouldSend.length,
     sent: report.sent,
+    excluded: report.excluded.length,
     halted: report.haltedReason,
     seatBookingOnly: report.seatBookingOnly,
   });
-  if (report.wouldSend.length) {
-    console.table(report.wouldSend.map((c) => ({
-      student: c.studentName,
-      phone: c.maskedPhone,
-      status: c.accessStatus,
-      template: c.templateId,
-      inst: c.installmentNo,
-      days: c.daysLeft,
-    })));
-  }
-  if (report.excluded.length) {
-    console.table(report.excluded);
-  }
 }

@@ -2,6 +2,8 @@
 
 export type SmsUseCase = "PAYMENT" | "WEBINAR" | "POST_WEBINAR" | "ONBOARDING";
 export type SmsMessageType = "service" | "promotional";
+/** Quiet-hours category. Null/missing resolves to promo (fail-safe). */
+export type SmsCategory = "promo" | "transactional";
 export type SmsTemplateStatus = "draft" | "pending" | "approved" | "active" | "inactive";
 export type SmsLogStatus = "QUEUED" | "SENT" | "FAILED" | "DELIVERED" | "UNKNOWN";
 export type SmsSentByType = "ADMIN" | "SYSTEM";
@@ -20,6 +22,8 @@ export interface SmsTemplate {
   sender_id: string;
   route: string;
   message_type: SmsMessageType;
+  /** promo | transactional. Null → treated as promo at dispatch. */
+  category?: SmsCategory | null;
   body_template: string;
   variables: string[];
   status: SmsTemplateStatus;
@@ -97,9 +101,15 @@ export interface SmsSettings {
   dailyCap: number;
   /** 0 = unlimited global per-recipient cap across ALL templates. */
   perMobileDailyCap: number;
-  /** Allowed send window in IST, "HH:MM". */
+  /** Allowed send window in IST, "HH:MM" (legacy cron enforceWindow). */
   windowStart: string;
   windowEnd: string;
+  /** Promo quiet-hours window start IST (defaults to windowStart / 10:00). */
+  promoWindowStart: string;
+  /** Promo quiet-hours window end IST (defaults to windowEnd / 21:00). */
+  promoWindowEnd: string;
+  /** When deferred promos fire IST (default 10:30). */
+  promoDispatchTime: string;
   /** Post-webinar (T19) delay after webinar end, in minutes. */
   t19OffsetMinutes: number;
   /** When attendance is unknown, fall back to ALL registered for T19. */

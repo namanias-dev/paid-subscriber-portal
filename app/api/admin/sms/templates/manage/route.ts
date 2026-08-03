@@ -77,7 +77,8 @@ export async function POST(req: Request) {
 
   const name = s(body.name).trim();
   const use_case = s(body.use_case) || "WEBINAR";
-  const message_type = s(body.message_type) || "service";
+  const message_type = s(body.message_type) || "promotional";
+  // Fail-safe: new self-serve templates default to promo quiet-hours unless set.
   const body_template = s(body.body_template);
   const gateway_template_id = s(body.gateway_template_id).trim();
   const sender_id = s(body.sender_id).trim() || null;
@@ -90,6 +91,7 @@ export async function POST(req: Request) {
 
   const created = await createTemplate({
     name, use_case: use_case as SmsUseCase, message_type: message_type as SmsMessageType,
+    category: body.category === "transactional" ? "transactional" : "promo",
     body_template, gateway_template_id, sender_id, route, audience_type,
     is_active, created_by: await currentAdminId(),
   });
@@ -153,6 +155,7 @@ export async function PATCH(req: Request) {
   if (body.name !== undefined) patch.name = s(body.name).trim();
   if (body.use_case !== undefined) patch.use_case = s(body.use_case);
   if (body.message_type !== undefined) patch.message_type = s(body.message_type);
+  if (body.category === "promo" || body.category === "transactional") patch.category = body.category;
   if (body.audience_type !== undefined) patch.audience_type = body.audience_type === null ? null : (s(body.audience_type).trim() || null);
   if (body.sender_id !== undefined) patch.sender_id = s(body.sender_id).trim() || "NAMIAS";
   if (body.route !== undefined) patch.route = s(body.route).trim() || "12";

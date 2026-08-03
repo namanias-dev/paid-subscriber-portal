@@ -110,17 +110,20 @@ export async function sendMessage(opts: SendMessageOpts): Promise<TelegramApiRes
     "sendMessage",
     opts as unknown as Record<string, unknown>,
   );
-  tgLog(
-    "sendMessage",
-    {
-      chat_id: String(opts.chat_id),
-      ok: res.ok,
-      error_code: res.error_code ?? null,
-      description: res.description ?? null,
-      message_id: res.result?.message_id ?? null,
-    },
-    res.ok ? "info" : "error",
-  );
+  // Success-path log trimmed (high volume from digests/queue). Keep failures.
+  if (!res.ok) {
+    tgLog(
+      "sendMessage",
+      {
+        chat_id: String(opts.chat_id),
+        ok: false,
+        error_code: res.error_code ?? null,
+        description: res.description ?? null,
+        message_id: null,
+      },
+      "error",
+    );
+  }
   return res;
 }
 
@@ -146,18 +149,20 @@ export async function sendPoll(
     is_anonymous: opts.is_anonymous !== false,
     allows_multiple_answers: !!opts.allows_multiple_answers,
   });
-  tgLog(
-    "sendPoll",
-    {
-      chat_id: String(opts.chat_id),
-      ok: res.ok,
-      error_code: res.error_code ?? null,
-      description: res.description ?? null,
-      message_id: res.result?.message_id ?? null,
-      poll_id: res.result?.poll?.id ?? null,
-    },
-    res.ok ? "info" : "error",
-  );
+  if (!res.ok) {
+    tgLog(
+      "sendPoll",
+      {
+        chat_id: String(opts.chat_id),
+        ok: false,
+        error_code: res.error_code ?? null,
+        description: res.description ?? null,
+        message_id: null,
+        poll_id: null,
+      },
+      "error",
+    );
+  }
   return res;
 }
 

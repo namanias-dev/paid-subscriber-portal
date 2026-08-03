@@ -42,6 +42,7 @@ export async function POST(req: Request) {
   if (typeof body.name === "string") patch.name = body.name;
   if (typeof body.use_case === "string") patch.use_case = body.use_case;
   if (typeof body.message_type === "string") patch.message_type = body.message_type;
+  if (body.category === "promo" || body.category === "transactional") patch.category = body.category;
   if (typeof body.audience_type === "string" || body.audience_type === null) patch.audience_type = body.audience_type;
 
   let bodyChanged = false;
