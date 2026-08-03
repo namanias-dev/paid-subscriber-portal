@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requirePermission } from "@/lib/adminGuard";
 import {
   getReportSettings,
+  previewDigestNow,
   sendDigestNow,
   updateReportSettings,
   type DigestFrequency,
@@ -10,7 +11,7 @@ import {
 import { validateReportsChannelId, verifyReportsChannel } from "@/lib/telegram/reports/verify";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+export const maxDuration = 120;
 
 export async function GET() {
   if (!(await requirePermission("manage_telegram"))) {
@@ -88,6 +89,8 @@ export async function POST(req: NextRequest) {
     webinar_id?: string;
     name?: string;
     phone?: string;
+    morning?: boolean;
+    html?: string;
   };
   const action = body.action || "send_digest_now";
 
@@ -101,8 +104,19 @@ export async function POST(req: NextRequest) {
     });
   }
 
+  if (action === "preview_digest") {
+    const result = await previewDigestNow({ morningExtras: body.morning === true });
+    return NextResponse.json({ ...result, action });
+  }
+
   if (action === "send_digest_now" || action === "send_test_report") {
-    const result = await sendDigestNow({ force: true, skipIdempotency: true });
+    const html = typeof body.html === "string" ? body.html : undefined;
+    const result = await sendDigestNow({
+      force: true,
+      skipIdempotency: true,
+      morningExtras: body.morning === true,
+      html,
+    });
     return NextResponse.json({ ...result, action });
   }
 

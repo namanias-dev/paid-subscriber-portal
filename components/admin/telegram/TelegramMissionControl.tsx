@@ -260,7 +260,13 @@ export default function TelegramMissionControl() {
         })}
       </div>
 
-      {tab === "overview" && <OverviewTab onOpenInbox={() => setTab("inbox")} />}
+      {tab === "overview" && (
+        <OverviewTab
+          canManage={canManage}
+          onOpenInbox={() => setTab("inbox")}
+          onOpenSettings={() => setTab("settings")}
+        />
+      )}
       {tab === "broadcast" && canManage && <BroadcastTab />}
       {tab === "automations" && <AutomationsTab canEdit={canManage} />}
       {tab === "templates" && <TemplatesTab canEdit={canManage} />}
@@ -272,7 +278,15 @@ export default function TelegramMissionControl() {
 }
 
 // ============================ OVERVIEW ============================
-function OverviewTab({ onOpenInbox }: { onOpenInbox: () => void }) {
+function OverviewTab({
+  canManage,
+  onOpenInbox,
+  onOpenSettings,
+}: {
+  canManage: boolean;
+  onOpenInbox: () => void;
+  onOpenSettings: () => void;
+}) {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const load = useCallback(() => {
@@ -303,6 +317,7 @@ function OverviewTab({ onOpenInbox }: { onOpenInbox: () => void }) {
 
   return (
     <div className="space-y-5">
+      {canManage && <ManualDigestCard canEdit={canManage} compact onOpenSettings={onOpenSettings} />}
       <div className="flex items-center gap-2">
         <button onClick={load} className="btn btn-secondary ml-auto text-xs"><RefreshCw size={13} /> Refresh</button>
       </div>
@@ -1607,6 +1622,181 @@ function AnalyticsTab() {
 }
 
 // ============================ SETTINGS ============================
+// ============================ MANUAL CEO DIGEST ============================
+function ManualDigestCard({
+  canEdit,
+  compact,
+  onOpenSettings,
+}: {
+  canEdit: boolean;
+  compact?: boolean;
+  onOpenSettings?: () => void;
+}) {
+  const { toast } = useToast();
+  const [busy, setBusy] = useState<"preview" | "send" | null>(null);
+  const [lastDigestAt, setLastDigestAt] = useState<string | null>(null);
+  const [digestEnabled, setDigestEnabled] = useState(true);
+  const [frequency, setFrequency] = useState("2h");
+  const [channelLabel, setChannelLabel] = useState<string | null>(null);
+  const [previewHtml, setPreviewHtml] = useState<string | null>(null);
+  const [previewMeta, setPreviewMeta] = useState<{
+    channelTitle?: string | null;
+    channelMasked?: string | null;
+  } | null>(null);
+
+  useEffect(() => {
+    fetch("/api/admin/telegram/reports")
+      .then((r) => r.json())
+      .then((d) => {
+        if (!d?.ok || !d.settings) return;
+        setLastDigestAt(d.settings.last_digest_at || null);
+        setDigestEnabled(d.settings.digest_enabled !== false);
+        setFrequency(d.settings.digest_frequency || "2h");
+        setChannelLabel(d.settings.channel_id ? String(d.settings.channel_id) : null);
+      })
+      .catch(() => {});
+  }, []);
+
+  async function generatePreview() {
+    if (!canEdit) return;
+    setBusy("preview");
+    try {
+      const res = await fetch("/api/admin/telegram/reports", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "preview_digest" }),
+      });
+      const data = await res.json().catch(() => ({ ok: false }));
+      if (!data.ok || !data.html) {
+        toast(data.reason || data.error || "Could not generate digest", "error");
+        return;
+      }
+      setPreviewHtml(String(data.html));
+      setPreviewMeta({
+        channelTitle: data.channelTitle || null,
+        channelMasked: data.channelMasked || null,
+      });
+      if (data.lastDigestAt) setLastDigestAt(data.lastDigestAt);
+      toast("Digest generated — review below, then send", "success");
+    } catch {
+      toast("Could not generate digest", "error");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function sendToTelegram() {
+    if (!canEdit) return;
+    if (!previewHtml) {
+      toast("Generate a digest preview first", "error");
+      return;
+    }
+    setBusy("send");
+    try {
+      const res = await fetch("/api/admin/telegram/reports", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "send_digest_now", html: previewHtml }),
+      });
+      const data = await res.json().catch(() => ({ ok: false }));
+      if (!data.ok) {
+        toast(data.reason || data.error || "Send failed", "error");
+        return;
+      }
+      toast(
+        data.messageId
+          ? `Digest sent to Telegram (message ${data.messageId})`
+          : "Digest sent to Telegram",
+        "success",
+      );
+      setLastDigestAt(new Date().toISOString());
+    } catch {
+      toast("Send failed", "error");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  const previewDisplay = previewHtml
+    ? previewHtml.replace(/\n/g, "<br/>")
+    : null;
+
+  return (
+    <div className="card space-y-3 border-primary/20 p-4">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <p className="text-sm font-semibold">CEO digest</p>
+          <p className="text-xs text-muted">
+            Generate the live digests report, preview it here, then send to the reports channel.
+            {compact ? " Full controls also live under Settings." : ""}
+          </p>
+        </div>
+        {compact && onOpenSettings && (
+          <button type="button" className="btn btn-secondary text-xs" onClick={onOpenSettings}>
+            Settings
+          </button>
+        )}
+      </div>
+
+      <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted">
+        <span>Schedule: {digestEnabled ? `on · every ${frequency}` : "off"}</span>
+        <span>
+          Last sent:{" "}
+          {lastDigestAt
+            ? formatISTDateTime(lastDigestAt)
+            : "—"}
+        </span>
+        {(previewMeta?.channelTitle || previewMeta?.channelMasked || channelLabel) && (
+          <span>
+            Channel:{" "}
+            {previewMeta?.channelTitle ||
+              previewMeta?.channelMasked ||
+              channelLabel}
+          </span>
+        )}
+      </div>
+
+      {canEdit ? (
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            className="btn btn-secondary text-sm"
+            disabled={!!busy}
+            onClick={() => void generatePreview()}
+          >
+            <Eye size={14} />
+            {busy === "preview" ? "Generating…" : previewHtml ? "Regenerate digest" : "Generate digest"}
+          </button>
+          <button
+            type="button"
+            className="btn btn-primary text-sm"
+            disabled={!!busy || !previewHtml}
+            onClick={() => void sendToTelegram()}
+          >
+            <Send size={14} />
+            {busy === "send" ? "Sending…" : "Send to Telegram"}
+          </button>
+        </div>
+      ) : (
+        <p className="text-xs text-muted">You need manage permission to generate or send digests.</p>
+      )}
+
+      {previewHtml && (
+        <div className="space-y-2">
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted">Preview</p>
+          <div className="rounded-2xl bg-[#e7f0f8] p-4">
+            <div
+              className="max-w-xl rounded-2xl rounded-tl-sm bg-white px-3 py-2 text-sm leading-relaxed text-ink shadow-sm [&_b]:font-bold [&_i]:italic [&_u]:underline"
+              // Trusted HTML from our own buildDigest (escaped content + fixed tags).
+              dangerouslySetInnerHTML={{ __html: previewDisplay || "" }}
+            />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SettingsTab({ canEdit, onStatusChange }: { canEdit: boolean; onStatusChange?: () => void }) {
   const { toast } = useToast();
   const [loading, setLoading] = useState(true);
@@ -1722,6 +1912,8 @@ function SettingsTab({ canEdit, onStatusChange }: { canEdit: boolean; onStatusCh
 
   return (
     <div className="space-y-4">
+      <ManualDigestCard canEdit={canEdit} />
+
       <div className="card space-y-3 p-4">
         <p className="text-sm font-semibold">Bot connection</p>
         <div className="flex flex-wrap items-center gap-4">

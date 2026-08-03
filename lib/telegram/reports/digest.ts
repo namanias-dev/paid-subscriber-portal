@@ -754,6 +754,8 @@ export async function sendDigestNow(opts?: {
   slotKey?: string;
   skipIdempotency?: boolean;
   morningExtras?: boolean;
+  /** When set (admin manual send), post this exact HTML instead of rebuilding. */
+  html?: string;
 }): Promise<{
   ok: boolean;
   skipped?: boolean;
@@ -796,23 +798,36 @@ export async function sendDigestNow(opts?: {
     return { ok: false, skipped: true, reason: "quiet_hours", channelMasked: maskChannelId(channel) };
   }
 
-  const prev = await getPreviousSnapshot();
   let built: DigestBuildResult;
-  try {
-    built = await buildDigest({
-      previous: prev?.metrics || null,
-      forceMorningExtras: opts?.morningExtras === true,
-    });
-  } catch (e) {
-    const msg = (e as Error).message || "build_failed";
-    await markDigestResult(false, msg);
-    return { ok: false, reason: msg, channelMasked: maskChannelId(channel) };
+  const overrideHtml = typeof opts?.html === "string" ? opts.html.trim() : "";
+  if (overrideHtml) {
+    if (overrideHtml.length > 60_000) {
+      return { ok: false, reason: "html_too_large", channelMasked: maskChannelId(channel) };
+    }
+    built = {
+      html: overrideHtml,
+      metrics: {},
+      isMorningSummary: false,
+      silent: false,
+    };
+  } else {
+    const prev = await getPreviousSnapshot();
+    try {
+      built = await buildDigest({
+        previous: prev?.metrics || null,
+        forceMorningExtras: opts?.morningExtras === true,
+      });
+    } catch (e) {
+      const msg = (e as Error).message || "build_failed";
+      await markDigestResult(false, msg);
+      return { ok: false, reason: msg, channelMasked: maskChannelId(channel) };
+    }
   }
 
   const base = SITE_URL.replace(/\/$/, "") || "https://www.namanias.com";
   const silent = built.isMorningSummary ? false : built.silent;
   const sent = await sendWithRetry(channel, built.html, {
-    silent,
+    silent: opts?.html ? false : silent,
     buttons: [
       { label: "Dashboard", url: `${base}/admin` },
       { label: "Collections", url: `${base}/admin/at-risk` },
@@ -843,6 +858,65 @@ export async function sendDigestNow(opts?: {
     messageId: sent.messageId,
     channelMasked: maskChannelId(channel),
   };
+}
+
+/**
+ * Build the live CEO digest HTML without sending — for admin preview.
+ * Does not write snapshots or touch last_digest_at.
+ */
+export async function previewDigestNow(opts?: {
+  morningExtras?: boolean;
+}): Promise<{
+  ok: boolean;
+  html?: string;
+  reason?: string;
+  channelMasked?: string | null;
+  channelTitle?: string | null;
+  channelId?: string | null;
+  isMorningSummary?: boolean;
+  digestEnabled?: boolean;
+  lastDigestAt?: string | null;
+}> {
+  const settings = await getReportSettings();
+  const resolved = resolveReportsChannelId(settings);
+  const guarded = await assertReportsChannel(resolved);
+  if (!guarded.ok || !guarded.id) {
+    return {
+      ok: false,
+      reason: guarded.error || "channel_not_configured",
+      channelMasked: maskChannelId(resolved),
+      digestEnabled: settings.digest_enabled,
+      lastDigestAt: settings.last_digest_at,
+    };
+  }
+
+  try {
+    const prev = await getPreviousSnapshot();
+    const built = await buildDigest({
+      previous: prev?.metrics || null,
+      forceMorningExtras: opts?.morningExtras === true,
+    });
+    return {
+      ok: true,
+      html: built.html,
+      channelMasked: maskChannelId(guarded.id),
+      channelTitle: guarded.title,
+      channelId: guarded.id,
+      isMorningSummary: built.isMorningSummary,
+      digestEnabled: settings.digest_enabled,
+      lastDigestAt: settings.last_digest_at,
+    };
+  } catch (e) {
+    return {
+      ok: false,
+      reason: (e as Error).message || "build_failed",
+      channelMasked: maskChannelId(guarded.id),
+      channelTitle: guarded.title,
+      channelId: guarded.id,
+      digestEnabled: settings.digest_enabled,
+      lastDigestAt: settings.last_digest_at,
+    };
+  }
 }
 
 export async function maybeRunScheduledDigest(): Promise<{

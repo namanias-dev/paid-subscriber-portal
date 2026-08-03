@@ -1,5 +1,6 @@
 export {
   buildDigest,
+  previewDigestNow,
   sendDigestNow,
   maybeRunScheduledDigest,
 } from "./digest";
