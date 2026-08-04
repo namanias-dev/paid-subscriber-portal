@@ -59,6 +59,7 @@ const METHODS = ["Cash", "Bank Transfer", "Offline UPI"];
 // ---------------------------------------------------------------- types
 interface CourseCard {
   id: string;
+  courseId?: string;
   title: string;
   slug: string | null;
   batch: string | null;
@@ -543,6 +544,66 @@ export default function StudentProfilePage({ params }: { params: { id: string } 
                   )}
                   {c.source === "course" && c.remaining > 0 && (
                     <AccessReminderButton enrollmentId={c.id} label="Access reminder" />
+                  )}
+                  {c.source === "course" && (
+                    <button
+                      disabled={busy}
+                      onClick={async () => {
+                        const reason = window.prompt("Reason for 7-day lecture access extension (required):");
+                        if (!reason?.trim()) return;
+                        setBusy(true);
+                        try {
+                          const res = await fetch("/api/admin/access-actions", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                              action: "extend",
+                              phone: s.phone,
+                              course_id: c.courseId || (c as { course_id?: string }).course_id,
+                              enrollment_id: c.id,
+                              days: 7,
+                              reason: reason.trim(),
+                            }),
+                          });
+                          const j = await res.json().catch(() => ({}));
+                          if (res.ok) toast("Lecture access extended 7 days", "success");
+                          else toast(j.error || "Extend failed", "error");
+                          await load();
+                        } finally { setBusy(false); }
+                      }}
+                      className="inline-flex items-center gap-1 text-xs font-semibold text-primary hover:underline"
+                    >
+                      Extend access 7d
+                    </button>
+                  )}
+                  {c.source === "course" && c.accessGrant?.expiresAt && (
+                    <button
+                      disabled={busy}
+                      onClick={async () => {
+                        if (!window.confirm("Revoke lecture access grant? Schedule/fees unchanged.")) return;
+                        setBusy(true);
+                        try {
+                          const res = await fetch("/api/admin/access-actions", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                              action: "revoke_extension",
+                              phone: s.phone,
+                              course_id: c.courseId || (c as { course_id?: string }).course_id,
+                              enrollment_id: c.id,
+                              reason: "Revoked from student profile",
+                            }),
+                          });
+                          const j = await res.json().catch(() => ({}));
+                          if (res.ok) toast("Access grant revoked", "success");
+                          else toast(j.error || "Revoke failed", "error");
+                          await load();
+                        } finally { setBusy(false); }
+                      }}
+                      className="inline-flex items-center gap-1 text-xs font-semibold text-danger hover:underline"
+                    >
+                      Revoke grant
+                    </button>
                   )}
                   {c.source === "course" && (
                     <button onClick={() => { setPlanCourse(c); setModal("changePlan"); }} className="inline-flex items-center gap-1 text-xs font-semibold text-primary hover:underline"><Repeat size={13} /> Change plan</button>

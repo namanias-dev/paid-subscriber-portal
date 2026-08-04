@@ -62,6 +62,18 @@ export async function runPaidTerminalSideEffects(
     await bumpBuyerSessionVersion(payment.phone).catch(() => null);
   }
 
+  // Stop access/installment reminder automation the moment money clears.
+  try {
+    const { stopRemindersOnPaid } = await import("../accessActions");
+    await stopRemindersOnPaid({
+      phone: payment.phone,
+      enrollmentId: payment.enrollment_id ?? null,
+      courseId: null,
+    });
+  } catch (e) {
+    tgLog("paid_side_effects_stop_reminders_failed", { ref, error: (e as Error).message }, "warn");
+  }
+
   if (opts.silentStudentNotify) {
     const { supersedeUnpaidSiblings } = await import("../paymentSupersede");
     const { recordPaymentStatusChanged } = await import("../analytics/server");

@@ -4,7 +4,7 @@ import { getSupabaseAdmin } from "@/lib/supabase";
 import { getStudentById } from "@/lib/dataProvider";
 import {
   transferEvent, paymentEvent, smsEvent, enrollmentEvents, accessCapEvents, accessOverrideEvent,
-  scheduleReanchorEvent, sortTimeline,
+  scheduleReanchorEvent, studentAccessActionEvent, sortTimeline,
   type TimelineEvent, type TimelineEventType,
 } from "@/lib/studentTimeline";
 
@@ -35,7 +35,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   const phone = student.phone;
 
   const started = Date.now();
-  const [transfers, enrollments, payments, sms, caps, overrideEvents, reanchors] = await Promise.all([
+  const [transfers, enrollments, payments, sms, caps, overrideEvents, reanchors, accessActions] = await Promise.all([
     db.from("enrollment_transfers").select("*").eq("student_phone", phone).order("created_at", { ascending: false }),
     db.from("course_enrollments")
       .select("id, created_at, course_title, batch_label, total_fee, plan_type, status, payment_plan_changed_at, payment_plan_changed_by, payment_plan_change_reason, discount_amount, discount_applied_at, discount_applied_by, discount_reason, original_total_fee")
@@ -49,6 +49,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
     db.from("access_reminder_caps").select("*").eq("student_id", id),
     db.from("access_override_events").select("*").eq("phone", phone).order("created_at", { ascending: false }).limit(100),
     db.from("schedule_reanchor_snapshots").select("*").eq("phone", phone).order("created_at", { ascending: false }).limit(100),
+    db.from("student_access_events").select("*").eq("phone", phone).order("created_at", { ascending: false }).limit(200),
   ]);
 
   const courseTitleById = new Map(
@@ -66,6 +67,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
       const row = r as never as Parameters<typeof scheduleReanchorEvent>[0];
       return scheduleReanchorEvent(row, courseTitleById.get(row.enrollment_id) ?? null);
     }),
+    ...(accessActions.data ?? []).map((r) => studentAccessActionEvent(r as never)),
   ];
 
   const sorted = sortTimeline(events);

@@ -29,7 +29,8 @@ export type TimelineEventType =
   | "discount_applied"
   | "access_cap"
   | "access_exclusion"
-  | "access_override";
+  | "access_override"
+  | "access_action";
 
 export interface TimelineActor {
   /** The username or id recorded against the action. */
@@ -482,6 +483,7 @@ export const TYPE_LABELS: Record<TimelineEventType, string> = {
   access_cap: "Access cap",
   access_exclusion: "Access automation",
   access_override: "Access grant",
+  access_action: "Access action",
 };
 
 export interface ScheduleReanchorRow {
@@ -557,6 +559,55 @@ export function accessOverrideEvent(row: AccessOverrideEventRow): TimelineEvent 
     reason: row.reason,
     changes: [],
     snapshot: null,
+    courseTitle: null,
+  };
+}
+
+export interface StudentAccessEventTimelineRow {
+  id: string;
+  created_at: string;
+  event_type: string;
+  actor: string;
+  channel: string | null;
+  template_id: string | null;
+  body_sent: string | null;
+  amount: number | null;
+  installment_no: number | null;
+  reason: string | null;
+  related_event_id: string | null;
+  course_id: string | null;
+}
+
+const ACCESS_ACTION_TITLES: Record<string, string> = {
+  reminder_sent: "Reminder sent",
+  reminder_failed: "Reminder failed",
+  extension_granted: "Extension granted",
+  extension_revoked: "Extension revoked",
+  extension_expired: "Extension expired",
+  call_task_created: "Call task created",
+  access_blocked: "Access blocked",
+  access_restored: "Access restored",
+};
+
+/** Unified student_access_events → timeline (actor system | staff). */
+export function studentAccessActionEvent(row: StudentAccessEventTimelineRow): TimelineEvent {
+  const title = ACCESS_ACTION_TITLES[row.event_type] || row.event_type;
+  const bits: string[] = [];
+  if (row.template_id) bits.push(row.template_id);
+  if (row.installment_no != null) bits.push(`installment ${row.installment_no}`);
+  if (row.amount != null) bits.push(rupees(row.amount));
+  if (row.channel) bits.push(row.channel);
+  const actorLabel = row.actor === "system" ? "system" : row.actor;
+  return {
+    id: `access_act:${row.id}`,
+    type: "access_action",
+    at: row.created_at,
+    title,
+    detail: [bits.join(" · "), row.body_sent, row.reason].filter(Boolean).join(" — ") || null,
+    actor: { id: row.actor === "system" ? null : row.actor, name: actorLabel },
+    reason: row.reason,
+    changes: [],
+    snapshot: row.related_event_id ? { related_event_id: row.related_event_id } : null,
     courseTitle: null,
   };
 }

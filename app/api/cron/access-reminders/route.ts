@@ -3,16 +3,16 @@ import { authorizeCron } from "@/lib/journey-automation/engine/cronAuth";
 import { printAutoReport, runAccessAutomation } from "@/lib/sms/accessAutomation";
 import { heavyCronHalted } from "@/lib/incidentHalt";
 import { dbCircuitOpen, dbCircuitStatus, withDbBudget } from "@/lib/dbCircuit";
+import { getRule, touchRuleLastRun } from "@/lib/sms/store";
+import { istMinutesOfDay } from "@/lib/sms/service";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 /**
- * Access At Risk automation tick. Defaults: dry-run ON, enabled OFF, kill
- * switch OFF — so this cron is safe to ship. It logs would-send / excluded
- * tables and sends nothing until settings are flipped.
- *
- * SEV1: hard-halted while public-site DB pressure is unresolved.
+ * Access At Risk automation tick — gated by Mission Control rule
+ * `installment_access_reminder` (enabled + schedule_time). Defaults send nothing.
+ * Same scanner as sms-dispatch; this cron is the 11:00 IST dedicated slot.
  */
 async function run(req: Request) {
   if (!authorizeCron(req, process.env.CRON_SECRET)) {
@@ -33,6 +33,18 @@ async function run(req: Request) {
       ts: Date.now(),
     });
   }
+
+  const rule = await getRule("installment_access_reminder");
+  // MC rule is the kill/arm switch. Disabled → plan-only dry report if settings.dryRun.
+  if (rule && !rule.enabled) {
+    return NextResponse.json({
+      ok: true,
+      armed: false,
+      note: "Mission Control installment_access_reminder is OFF — zero sends.",
+      ts: Date.now(),
+    });
+  }
+
   try {
     const raced = await withDbBudget(runAccessAutomation(), 25_000, "access_automation");
     if (!raced.ok) {
@@ -42,8 +54,12 @@ async function run(req: Request) {
     }
     const report = raced.value;
     printAutoReport(report);
+    if (report.sent > 0) touchRuleLastRun("installment_access_reminder");
     return NextResponse.json({
       ok: true,
+      missionControl: true,
+      scheduleTime: rule?.schedule_time || "11:00",
+      istMins: istMinutesOfDay(new Date()),
       dryRun: report.dryRun,
       enabled: report.settings.enabled,
       killSwitch: report.settings.killSwitch,

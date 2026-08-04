@@ -417,6 +417,40 @@ export async function runAccessAutomation(now = Date.now()): Promise<AutoRunRepo
       });
     }
 
+    try {
+      const { appendStudentAccessEvent } = await import("../studentAccessEvents");
+      const { recordReminderStreakSend, REMINDER_STREAK_HARD_CAP, markStreakCallTaskCreated } = await import("./installmentReminderStreak");
+      await appendStudentAccessEvent({
+        studentId: e.student_id ?? null,
+        phone: e.phone,
+        courseId: e.course_id,
+        courseEnrollmentId: c.enrollmentId,
+        eventType: "reminder_sent",
+        actor: "system",
+        channel: "sms",
+        templateId: c.preview.templateId,
+        bodySent: c.preview.body,
+        installmentNo: c.preview.installmentKey.installmentNo,
+        relatedEventId: result.logId,
+        meta: { trigger: "installment_access_reminder" },
+      });
+      const streak = await recordReminderStreakSend({
+        enrollmentId: c.enrollmentId,
+        installmentNo: c.preview.installmentKey.installmentNo,
+      });
+      if (streak.hitCap) {
+        const { createCollectionsCallTask } = await import("../accessActions");
+        await createCollectionsCallTask({
+          enrollmentId: c.enrollmentId,
+          actor: { id: null, name: "system" },
+          reason: "reminder_streak_cap_10",
+          installmentNo: c.preview.installmentKey.installmentNo,
+        });
+        await markStreakCallTaskCreated(c.enrollmentId, c.preview.installmentKey.installmentNo);
+        void REMINDER_STREAK_HARD_CAP;
+      }
+    } catch { /* non-fatal */ }
+
     await recordAutoSequence({
       courseEnrollmentId: c.preview.installmentKey.courseEnrollmentId,
       installmentNo: c.preview.installmentKey.installmentNo,

@@ -33,6 +33,15 @@ export const DEFAULT_RULES: RuleSeed[] = [
   // Instant on Lead CRM INSERT. No default template — Super Admin must pick an
   // approved DLT template before the toggle can turn on (same fail-closed gate).
   { trigger: TRIGGERS.lead_created, template_id: null },
+  // Daily-until-paid access notice. MC toggle + schedule_time gate the scanner;
+  // template_id seeds portal_access_expiring (stage 1). Stage 2/3 chosen by access state.
+  // Ship DISABLED — arm via Mission Control after pilot approval.
+  {
+    trigger: TRIGGERS.installment_access_reminder,
+    template_id: "portal_access_expiring",
+    schedule_time: "11:00",
+    audience_type: "access_risk",
+  },
 ];
 
 export const DEFAULT_SETTINGS = (): SmsSettings => ({

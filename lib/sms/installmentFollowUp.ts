@@ -427,6 +427,28 @@ export async function cancelFollowUpByStaff(id: string): Promise<boolean> {
   return (data || []).length > 0;
 }
 
+/** Cancel all pending/claimed follow-ups for an enrollment (e.g. on PAID). */
+export async function cancelPendingFollowUpsForEnrollment(
+  courseEnrollmentId: string,
+  reason: FollowUpCancelReason = "installment_paid",
+): Promise<number> {
+  const client = db();
+  if (!client) return 0;
+  const { data, error } = await client
+    .from("sms_scheduled_sends")
+    .update({
+      status: "cancelled",
+      cancel_reason: reason,
+      finished_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    })
+    .eq("course_enrollment_id", courseEnrollmentId)
+    .in("status", ["pending", "claimed"])
+    .select("id");
+  if (error) return 0;
+  return (data || []).length;
+}
+
 /** Follow-ups for a page of enrollments, newest first — powers the row pills. */
 export async function listFollowUpsForEnrollments(enrollmentIds: string[]): Promise<ScheduledSend[]> {
   const client = db();
@@ -564,6 +586,22 @@ export async function processFollowUp(job: ScheduledSend, deps: FollowUpDeps = {
 
   if (result.ok) {
     await markFollowUpSent(job.id, result.logId ?? null);
+    try {
+      const { appendStudentAccessEvent } = await import("../studentAccessEvents");
+      await appendStudentAccessEvent({
+        studentId: job.student_id,
+        phone: job.normalized_mobile,
+        courseId: job.course_id,
+        courseEnrollmentId: job.course_enrollment_id,
+        eventType: "reminder_sent",
+        actor: "system",
+        channel: "sms",
+        templateId: job.template_id,
+        installmentNo: job.installment_no,
+        relatedEventId: result.logId ?? job.parent_send_id,
+        meta: { stage: "instructions", parent_send_id: job.parent_send_id },
+      });
+    } catch { /* non-fatal */ }
     return "sent";
   }
 
@@ -579,6 +617,23 @@ export async function processFollowUp(job: ScheduledSend, deps: FollowUpDeps = {
     return "retried";
   }
   await markFollowUpFailed(job.id, detail);
+  try {
+    const { appendStudentAccessEvent } = await import("../studentAccessEvents");
+    await appendStudentAccessEvent({
+      studentId: job.student_id,
+      phone: job.normalized_mobile,
+      courseId: job.course_id,
+      courseEnrollmentId: job.course_enrollment_id,
+      eventType: "reminder_failed",
+      actor: "system",
+      channel: "sms",
+      templateId: job.template_id,
+      installmentNo: job.installment_no,
+      reason: detail,
+      relatedEventId: job.parent_send_id,
+      meta: { stage: "instructions", attempts: job.attempts },
+    });
+  } catch { /* non-fatal */ }
   return "failed";
 }
 

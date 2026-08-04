@@ -239,6 +239,30 @@ async function run(req: Request) {
       result.installment_overdue_skipped = 1;
     }
 
+    // ---- Mission Control: installment_access_reminder (daily-until-paid scanner) ----
+    // Framework extension: sms_auto_rules cannot express stateful "daily until paid,
+    // cap 10" — this trigger's enabled + schedule_time gate the existing scanner so
+    // every send/log stays visible in Mission Control. Ship disabled until armed.
+    try {
+      const accessRule = await getRule("installment_access_reminder");
+      if (accessRule?.enabled) {
+        const sched = accessRule.schedule_time || "11:00";
+        const [hh, mm] = sched.split(":").map((x) => Number(x));
+        const targetMins = (Number.isFinite(hh) ? hh : 11) * 60 + (Number.isFinite(mm) ? mm : 0);
+        // */10 cron: fire in the 10-minute window containing schedule_time.
+        if (istMins >= targetMins && istMins < targetMins + 10) {
+          const { runAccessAutomation, printAutoReport } = await import("@/lib/sms/accessAutomation");
+          const report = await runAccessAutomation();
+          printAutoReport(report);
+          result.installment_access_reminder_sent = report.sent;
+          result.installment_access_reminder_would = report.wouldSend.length;
+          if (report.sent > 0 || report.wouldSend.length > 0) {
+            touchRuleLastRun("installment_access_reminder");
+          }
+        }
+      }
+    } catch { /* non-fatal */ }
+
     // ---- delivery-report PULL: promote open SENT logs via JustGoSMS http-dlr.php ----
     try {
       const dlr = await pollDeliveryStatuses({ sinceDays: 3, limit: 500 });

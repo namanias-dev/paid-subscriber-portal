@@ -1,0 +1,119 @@
+{
+  "armed": false,
+  "scheduled_for": "2026-08-05T11:00:00+05:30",
+  "pilot": [
+    {
+      "name": "Amandeep Kaur",
+      "pctPaid": 89,
+      "amountDue": 8000,
+      "phone": "7807139593",
+      "phoneValid": true,
+      "installmentNo": 2,
+      "loginCode": "RSNV8SF",
+      "msg1": "Hi Amandeep, your portal access expires in 7 days. Pay installment 2 to continue access. Naman Sharma IAS Academy.",
+      "msg3": "To pay your installment, login: https://www.namanias.com/login. Open Course Card > View & Pay > select Installment > Pay. Confirmation will follow. Naman Sharma IAS Academy."
+    },
+    {
+      "name": "Krishna Gupta",
+      "pctPaid": 86,
+      "amountDue": 10000,
+      "phone": "9041484294",
+      "phoneValid": true,
+      "installmentNo": 2,
+      "loginCode": "NVXPMRU",
+      "msg1": "Hi Krishna, your portal access expires in 7 days. Pay installment 2 to continue access. Naman Sharma IAS Academy.",
+      "msg3": "To pay your installment, login: https://www.namanias.com/login. Open Course Card > View & Pay > select Installment > Pay. Confirmation will follow. Naman Sharma IAS Academy."
+    },
+    {
+      "name": "Neha",
+      "pctPaid": 34,
+      "amountDue": 5750,
+      "phone": "8080769590",
+      "phoneValid": true,
+      "installmentNo": 2,
+      "loginCode": "64KT3Y9",
+      "msg1": "Hi Neha, your portal access expires in 7 days. Pay installment 2 to continue access. Naman Sharma IAS Academy.",
+      "msg3": "To pay your installment, login: https://www.namanias.com/login. Open Course Card > View & Pay > select Installment > Pay. Confirmation will follow. Naman Sharma IAS Academy."
+    },
+    {
+      "name": "Preeti",
+      "pctPaid": 25,
+      "amountDue": 10000,
+      "phone": "7495502792",
+      "phoneValid": true,
+      "installmentNo": 2,
+      "loginCode": "DMP8B7E",
+      "msg1": "Hi Preeti, your portal access expires in 7 days. Pay installment 2 to continue access. Naman Sharma IAS Academy.",
+      "msg3": "To pay your installment, login: https://www.namanias.com/login. Open Course Card > View & Pay > select Installment > Pay. Confirmation will follow. Naman Sharma IAS Academy."
+    },
+    {
+      "name": "Simranjeet Singh",
+      "pctPaid": 63,
+      "amountDue": 15000,
+      "phone": "9876173887",
+      "phoneValid": true,
+      "installmentNo": 2,
+      "loginCode": "BVDRYZ7",
+      "msg1": "Hi Simranjeet, your portal access expires in 7 days. Pay installment 2 to continue access. Naman Sharma IAS Academy.",
+      "msg3": "To pay your installment, login: https://www.namanias.com/login. Open Course Card > View & Pay > select Installment > Pay. Confirmation will follow. Naman Sharma IAS Academy."
+    },
+    {
+      "name": "Harsha",
+      "pctPaid": 75,
+      "amountDue": 10000,
+      "phone": "8728058817",
+      "phoneValid": true,
+      "installmentNo": 2,
+      "loginCode": "MSJS23A",
+      "msg1": "Hi Harsha, your portal access expires in 7 days. Pay installment 2 to continue access. Naman Sharma IAS Academy.",
+      "msg3": "To pay your installment, login: https://www.namanias.com/login. Open Course Card > View & Pay > select Installment > Pay. Confirmation will follow. Naman Sharma IAS Academy."
+    },
+    {
+      "name": "Amanpreet Kaur",
+      "pctPaid": 55,
+      "amountDue": 9666,
+      "phone": "9041644157",
+      "phoneValid": true,
+      "installmentNo": 2,
+      "loginCode": "B8J9ZDT",
+      "msg1": "Hi Amanpreet, your portal access expires in 7 days. Pay installment 2 to continue access. Naman Sharma IAS Academy.",
+      "msg3": "To pay your installment, login: https://www.namanias.com/login. Open Course Card > View & Pay > select Installment > Pay. Confirmation will follow. Naman Sharma IAS Academy."
+    },
+    {
+      "name": "Shruti verma",
+      "pctPaid": 13,
+      "amountDue": 5000,
+      "phone": "9205049100",
+      "phoneValid": true,
+      "installmentNo": 2,
+      "loginCode": "AX2SJBZ",
+      "msg1": "Hi Shruti, your portal access expires in 7 days. Pay installment 2 to continue access. Naman Sharma IAS Academy.",
+      "msg3": "To pay your installment, login: https://www.namanias.com/login. Open Course Card > View & Pay > select Installment > Pay. Confirmation will follow. Naman Sharma IAS Academy."
+    },
+    {
+      "name": "Gaganpreet singh",
+      "pctPaid": 45,
+      "amountDue": 10000,
+      "phone": "9877439778",
+      "phoneValid": true,
+      "installmentNo": 2,
+      "loginCode": "F9M5PPN",
+      "msg1": "Hi Gaganpreet, your portal access expires in 7 days. Pay installment 2 to continue access. Naman Sharma IAS Academy.",
+      "msg3": "To pay your installment, login: https://www.namanias.com/login. Open Course Card > View & Pay > select Installment > Pay. Confirmation will follow. Naman Sharma IAS Academy."
+    },
+    {
+      "name": "Harshita",
+      "pctPaid": 3,
+      "amountDue": 19333,
+      "phone": "9878640990",
+      "phoneValid": true,
+      "installmentNo": 2,
+      "loginCode": null,
+      "msg1": "Hi Harshita, your portal access expires in 7 days. Pay installment 2 to continue access. Naman Sharma IAS Academy.",
+      "msg3": "To pay your installment, login: https://www.namanias.com/login. Open Course Card > View & Pay > select Installment > Pay. Confirmation will follow. Naman Sharma IAS Academy."
+    }
+  ],
+  "queued53": 53,
+  "classicGraceExcluded": 10,
+  "sent": 0
+}

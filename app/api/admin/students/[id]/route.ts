@@ -169,6 +169,7 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
       const multiBatch = (courseRow?.batches || []).length > 1;
       return {
         id: e.id,
+        courseId: e.course_id,
         // A course row with a null title/fee must still render an openable card —
         // staff always need to reach the profile. Mirrors the legacy branch below.
         title: e.course_title || "Course",

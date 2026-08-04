@@ -69,6 +69,12 @@ export const TRIGGERS = {
   webinar_moved: "webinar_moved",
   /** New Lead CRM row (genuine INSERT only — phone folds do not fire). */
   lead_created: "lead_created",
+  /**
+   * Daily installment access reminder scan (Mission Control).
+   * Not a one-shot event — sms-dispatch / access-reminders cron honors
+   * schedule_time + enabled. Stateful streak lives in installment_reminder_streaks.
+   */
+  installment_access_reminder: "installment_access_reminder",
 } as const;
 
 export interface SeedTemplate {
