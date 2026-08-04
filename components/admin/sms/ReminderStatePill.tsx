@@ -3,7 +3,7 @@
 import { formatINR, formatISTDateTime } from "@/lib/dates";
 import type { InstallmentReminderState } from "@/lib/sms/installmentAttribution";
 import type { FollowUpView } from "@/lib/sms/installmentTracking";
-import { CANCEL_REASON_LABELS } from "@/lib/sms/installmentFollowUp";
+import { CANCEL_REASON_LABELS } from "@/lib/sms/followUpLabels";
 
 /**
  * Reminder → payment state for ONE installment.

@@ -38,7 +38,7 @@ export const DEFAULT_RULES: RuleSeed[] = [
   // Ship DISABLED — arm via Mission Control after pilot approval.
   {
     trigger: TRIGGERS.installment_access_reminder,
-    template_id: "portal_access_expiring",
+    template_id: "installment_reminder",
     schedule_time: "11:00",
     audience_type: "access_risk",
   },

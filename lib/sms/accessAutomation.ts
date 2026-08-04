@@ -28,6 +28,7 @@ import {
   ACCESS_BLOCKED_TEMPLATE_ID,
   ACCESS_DAILY_VOLUME_CEILING,
   ACCESS_EXPIRING_TEMPLATE_ID,
+  ACCESS_INSTALLMENT_REMINDER_TEMPLATE_ID,
   ACCESS_GRACE_WEEKDAYS_IST,
   ACCESS_MANUAL_DEDUP_HOURS,
   ACCESS_MAX_AUTO_PER_PHONE_PER_DAY,
@@ -109,12 +110,13 @@ function daysSince(iso: string | null | undefined, now: number): number | null {
 
 async function recentManualAccessSend(digits: Set<string>, now: number): Promise<Set<string>> {
   const since = new Date(now - ACCESS_MANUAL_DEDUP_HOURS * 3600_000).toISOString();
-  const [a, b] = await Promise.all([
+  const [a, b, c] = await Promise.all([
     listLogs({ from: since, templateId: ACCESS_BLOCKED_TEMPLATE_ID, limit: 5000 }),
     listLogs({ from: since, templateId: ACCESS_EXPIRING_TEMPLATE_ID, limit: 5000 }),
+    listLogs({ from: since, templateId: ACCESS_INSTALLMENT_REMINDER_TEMPLATE_ID, limit: 5000 }),
   ]);
   const hit = new Set<string>();
-  for (const l of [...a, ...b]) {
+  for (const l of [...a, ...b, ...c]) {
     if (!digits.has(l.normalized_mobile)) continue;
     if (l.sent_by_type === "ADMIN") hit.add(l.normalized_mobile);
   }
@@ -124,12 +126,13 @@ async function recentManualAccessSend(digits: Set<string>, now: number): Promise
 async function autoSentPhonesToday(now: number): Promise<Set<string>> {
   const today = istYMD(new Date(now))!;
   const since = `${today}T00:00:00+05:30`;
-  const [a, b] = await Promise.all([
+  const [a, b, c] = await Promise.all([
     listLogs({ from: since, templateId: ACCESS_BLOCKED_TEMPLATE_ID, limit: 5000 }),
     listLogs({ from: since, templateId: ACCESS_EXPIRING_TEMPLATE_ID, limit: 5000 }),
+    listLogs({ from: since, templateId: ACCESS_INSTALLMENT_REMINDER_TEMPLATE_ID, limit: 5000 }),
   ]);
   const hit = new Set<string>();
-  for (const l of [...a, ...b]) {
+  for (const l of [...a, ...b, ...c]) {
     if (l.sent_by_type === "SYSTEM" && ["SENT", "DELIVERED", "QUEUED"].includes(l.status)) {
       hit.add(l.normalized_mobile);
     }
@@ -403,7 +406,8 @@ export async function runAccessAutomation(now = Date.now()): Promise<AutoRunRepo
     if (!result.ok || !result.logId) continue;
 
     const digits = normalizeIndianMobile(e.phone).digits10;
-    if (digits) {
+    // Drop +30m installment_instructions when primary is installment_reminder.
+    if (digits && c.preview.templateId !== ACCESS_INSTALLMENT_REMINDER_TEMPLATE_ID) {
       await scheduleFollowUp({
         parentSendId: result.logId,
         normalizedMobile: digits,

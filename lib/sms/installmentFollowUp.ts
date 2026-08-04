@@ -26,6 +26,7 @@ import { getCourseEnrollmentById } from "../dataProvider";
 import { installmentFingerprint, isInstallmentLine, lineOutstandingAmount } from "./installmentAttribution";
 import type { CourseEnrollment, InstallmentItem } from "../types";
 import type { SmsTemplate } from "./types";
+export { CANCEL_REASON_LABELS } from "./followUpLabels";
 
 /**
  * THE delay. One constant, one place. Tests override it via `delayMinutes` on
@@ -63,20 +64,6 @@ export type FollowUpCancelReason =
   | "already_instructed"
   | "template_inactive"
   | "cancelled_by_staff";
-
-export const CANCEL_REASON_LABELS: Record<FollowUpCancelReason | string, string> = {
-  installment_paid: "paid",
-  installment_partially_paid_then_cleared: "paid in full",
-  installment_voided: "installment waived or voided",
-  installment_restructured: "payment plan changed",
-  enrollment_cancelled: "enrollment cancelled",
-  enrollment_superseded: "moved to another batch",
-  enrollment_gone: "enrollment no longer exists",
-  opted_out: "opted out",
-  already_instructed: "instructions already sent",
-  template_inactive: "template deactivated",
-  cancelled_by_staff: "cancelled by staff",
-};
 
 export interface ScheduledSend {
   id: string;

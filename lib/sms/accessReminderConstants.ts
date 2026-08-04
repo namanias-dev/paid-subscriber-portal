@@ -6,10 +6,15 @@
 
 /** Portal Access Blocked — DLT 1777178527476051073 */
 export const ACCESS_BLOCKED_TEMPLATE_ID = "portal_access_blocked";
-/** Portal Access Expiring — DLT 1777178527489267737 */
+/** Portal Access Expiring — DLT 1777178527489267737 — genuine dated notice only */
 export const ACCESS_EXPIRING_TEMPLATE_ID = "portal_access_expiring";
+/**
+ * Installment Reminder — DLT 1777178513223214410.
+ * Primary for −7d / grandfather notice (amount + login code).
+ */
+export const ACCESS_INSTALLMENT_REMINDER_TEMPLATE_ID = "installment_reminder";
 
-/** Reuse the existing Installment Instructions follow-up. */
+/** Legacy +30m follow-up. Dropped for installment_reminder primary path. */
 export const ACCESS_FOLLOW_UP_TEMPLATE_ID = "installment_instructions";
 export const ACCESS_FOLLOW_UP_DELAY_MINUTES = 30;
 

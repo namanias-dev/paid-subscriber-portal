@@ -133,6 +133,11 @@ export const SEED_TEMPLATES: SeedTemplate[] = [
     gateway_template_id: "1777178519743722233",
     body: "To pay your installment, login: https://www.namanias.com/login. Open Course Card > View & Pay > select Installment > Pay. Confirmation will follow. Naman Sharma IAS Academy." },
 
+  /** Primary installment chase — amount + login code. DLT 1777178513223214410. */
+  { id: "installment_reminder", name: "Installment Reminder", use_case: "PAYMENT", message_type: "service", trigger_event: null, audience_type: "installment_reminder",
+    gateway_template_id: "1777178513223214410",
+    body: "Hi {first_name}, your course fee installment no. {No_of_Installment} of Rs.{Fee_in_Rs} is due. Login: {login_url} Code: {login_code} to complete payment. Naman Sharma IAS Academy." },
+
   // Portal Access — Access At Risk sequences. Named tokens map onto DLT {#var#}
   // positions; bodies are byte-exact with the approved registrations.
   // DLT registrations use positional {#var#}; portal bodies use named tokens in

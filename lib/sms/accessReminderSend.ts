@@ -16,6 +16,7 @@ import { isRemindedStatus } from "./installmentAttribution";
 import {
   ACCESS_BLOCKED_TEMPLATE_ID,
   ACCESS_EXPIRING_TEMPLATE_ID,
+  ACCESS_INSTALLMENT_REMINDER_TEMPLATE_ID,
 } from "./accessReminderConstants";
 import {
   accessPhonesSentToday,
@@ -29,7 +30,11 @@ import { getActionActor } from "../adminGuard";
 import { getSupabaseAdmin } from "../supabase";
 import type { CourseEnrollment } from "../types";
 
-const ACCESS_TEMPLATE_SET = new Set([ACCESS_BLOCKED_TEMPLATE_ID, ACCESS_EXPIRING_TEMPLATE_ID]);
+const ACCESS_TEMPLATE_SET = new Set([
+  ACCESS_BLOCKED_TEMPLATE_ID,
+  ACCESS_EXPIRING_TEMPLATE_ID,
+  ACCESS_INSTALLMENT_REMINDER_TEMPLATE_ID,
+]);
 
 export interface AccessSendResult {
   ok: true;
@@ -92,7 +97,11 @@ export async function sendAccessReminderOne(input: {
   }
 
   let followUpScheduled = false;
-  if (input.scheduleFollowUps !== false && result.logId && preview.installmentKey) {
+  // installment_reminder already carries login URL + code — drop +30m instructions.
+  const wantFollowUp =
+    input.scheduleFollowUps !== false &&
+    preview.templateId !== ACCESS_INSTALLMENT_REMINDER_TEMPLATE_ID;
+  if (wantFollowUp && result.logId && preview.installmentKey) {
     const { normalizeIndianMobile } = await import("../phone");
     const digits = normalizeIndianMobile(enrollment.phone).digits10;
     if (digits) {
@@ -316,6 +325,8 @@ export async function scheduleAccessFollowUpsForJob(
   for (const log of logs) {
     if (!isRemindedStatus(log.status)) continue;
     if (!log.template_id || !ACCESS_TEMPLATE_SET.has(log.template_id)) continue;
+    // No +30m follow-up for installment_reminder primary.
+    if (log.template_id === ACCESS_INSTALLMENT_REMINDER_TEMPLATE_ID) continue;
     if (!log.course_enrollment_id || log.installment_no == null || !log.normalized_mobile) continue;
     const source = byEnrollment.get(log.course_enrollment_id);
     const queued = await scheduleFollowUp({

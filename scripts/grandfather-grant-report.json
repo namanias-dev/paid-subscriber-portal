@@ -1,0 +1,119 @@
+{
+  "granted": 63,
+  "failed": [],
+  "tightened": 0,
+  "missingCode": [
+    {
+      "name": "Sejalpreet kaur",
+      "phone": "8146280926",
+      "enrollmentId": "d2823995-1d4a-4ce0-878d-87eb9f067320",
+      "reason": "name_mismatch"
+    }
+  ],
+  "spots": [
+    {
+      "name": "Krishna Gupta",
+      "liveAllowed": false,
+      "grantExp": "2026-08-11T18:30:00+00:00",
+      "scheduleStatus": "blocked"
+    },
+    {
+      "name": "Amandeep Kaur",
+      "liveAllowed": false,
+      "grantExp": "2026-08-11T18:30:00+00:00",
+      "scheduleStatus": "blocked"
+    },
+    {
+      "name": "Harshita",
+      "liveAllowed": false,
+      "grantExp": "2026-08-11T18:30:00+00:00",
+      "scheduleStatus": "blocked"
+    }
+  ],
+  "pilotSendable": [
+    {
+      "name": "Amandeep Kaur",
+      "enrollmentId": "32a11079-0822-4130-bb23-f08ee74faf94",
+      "msg": "Hi Amandeep, your course fee installment no. 2 of Rs.8000 is due. Login: https://www.namanias.com/login Code: RSNV8SF to complete payment. Naman Sharma IAS Academy.",
+      "fee": 8000,
+      "inst": 2,
+      "code": "RSNV8SF"
+    },
+    {
+      "name": "Krishna Gupta",
+      "enrollmentId": "78088310-1121-4362-a4f1-8d314f115daa",
+      "msg": "Hi Krishna, your course fee installment no. 2 of Rs.10000 is due. Login: https://www.namanias.com/login Code: NVXPMRU to complete payment. Naman Sharma IAS Academy.",
+      "fee": 10000,
+      "inst": 2,
+      "code": "NVXPMRU"
+    },
+    {
+      "name": "Neha",
+      "enrollmentId": "332f0473-6673-4872-85b1-ff2b670ae3e5",
+      "msg": "Hi Neha, your course fee installment no. 2 of Rs.5750 is due. Login: https://www.namanias.com/login Code: 64KT3Y9 to complete payment. Naman Sharma IAS Academy.",
+      "fee": 5750,
+      "inst": 2,
+      "code": "64KT3Y9"
+    },
+    {
+      "name": "Preeti",
+      "enrollmentId": "14bbc324-0351-45ff-8412-029c96f48a3d",
+      "msg": "Hi Preeti, your course fee installment no. 2 of Rs.10000 is due. Login: https://www.namanias.com/login Code: DMP8B7E to complete payment. Naman Sharma IAS Academy.",
+      "fee": 10000,
+      "inst": 2,
+      "code": "DMP8B7E"
+    },
+    {
+      "name": "Simranjeet Singh",
+      "enrollmentId": "7a48493c-422c-45a1-be82-3acea1f32ac6",
+      "msg": "Hi Simranjeet, your course fee installment no. 2 of Rs.15000 is due. Login: https://www.namanias.com/login Code: BVDRYZ7 to complete payment. Naman Sharma IAS Academy.",
+      "fee": 15000,
+      "inst": 2,
+      "code": "BVDRYZ7"
+    },
+    {
+      "name": "Harsha",
+      "enrollmentId": "12755ad2-dfef-41cf-9bf2-267e15bd22ec",
+      "msg": "Hi Harsha, your course fee installment no. 2 of Rs.10000 is due. Login: https://www.namanias.com/login Code: MSJS23A to complete payment. Naman Sharma IAS Academy.",
+      "fee": 10000,
+      "inst": 2,
+      "code": "MSJS23A"
+    },
+    {
+      "name": "Amanpreet Kaur",
+      "enrollmentId": "b7565b1a-7270-4aca-a113-5a758e2f8e13",
+      "msg": "Hi Amanpreet, your course fee installment no. 2 of Rs.9666 is due. Login: https://www.namanias.com/login Code: B8J9ZDT to complete payment. Naman Sharma IAS Academy.",
+      "fee": 9666,
+      "inst": 2,
+      "code": "B8J9ZDT"
+    },
+    {
+      "name": "Shruti verma",
+      "enrollmentId": "88853448-ed4d-44d7-b5f7-5a789f72d24c",
+      "msg": "Hi Shruti, your course fee installment no. 2 of Rs.5000 is due. Login: https://www.namanias.com/login Code: AX2SJBZ to complete payment. Naman Sharma IAS Academy.",
+      "fee": 5000,
+      "inst": 2,
+      "code": "AX2SJBZ"
+    },
+    {
+      "name": "Gaganpreet singh",
+      "enrollmentId": "386f17a9-6a2c-4aac-af45-4b04c40a124f",
+      "msg": "Hi Gaganpreet, your course fee installment no. 2 of Rs.10000 is due. Login: https://www.namanias.com/login Code: F9M5PPN to complete payment. Naman Sharma IAS Academy.",
+      "fee": 10000,
+      "inst": 2,
+      "code": "F9M5PPN"
+    },
+    {
+      "name": "Harshita",
+      "enrollmentId": "838fb641-5bef-4a6a-9bc2-56161e332dca",
+      "msg": "Hi Harshita, your course fee installment no. 2 of Rs.19333 is due. Login: https://www.namanias.com/login Code: UK9NXMX to complete payment. Naman Sharma IAS Academy.",
+      "fee": 19333,
+      "inst": 2,
+      "code": "UK9NXMX"
+    }
+  ],
+  "pilotExcludedMissingCode": [],
+  "expiresAt": "2026-08-11T18:30:00.000Z",
+  "armed": false,
+  "sent": 0
+}

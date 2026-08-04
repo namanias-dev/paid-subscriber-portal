@@ -25,6 +25,7 @@ import { istWholeDaysUntil } from "./accessDays";
 import {
   ACCESS_BLOCKED_TEMPLATE_ID,
   ACCESS_EXPIRING_TEMPLATE_ID,
+  ACCESS_INSTALLMENT_REMINDER_TEMPLATE_ID,
   ACCESS_MAX_BULK,
 } from "./accessReminderConstants";
 import type { Course, CourseEnrollment, CourseAccessOverride } from "../types";
@@ -48,6 +49,7 @@ export type AccessReminderBlockReason =
   | "days_not_positive"
   | "access_restored"
   | "data_inconsistency"
+  | "missing_login_code"
   | "render_blocked"
   | "invalid_body"
   | "kill_switch"
@@ -140,7 +142,11 @@ const RESOLVER_REASONS: Record<string, AccessReminderBlockReason> = {
   missing_phone: "missing_phone",
 };
 
-const ACCESS_TEMPLATE_IDS = [ACCESS_BLOCKED_TEMPLATE_ID, ACCESS_EXPIRING_TEMPLATE_ID] as const;
+const ACCESS_TEMPLATE_IDS = [
+  ACCESS_BLOCKED_TEMPLATE_ID,
+  ACCESS_EXPIRING_TEMPLATE_ID,
+  ACCESS_INSTALLMENT_REMINDER_TEMPLATE_ID,
+] as const;
 
 export interface AccessReminderContext {
   templates: Map<string, SmsTemplate>;
@@ -189,14 +195,17 @@ export async function buildAccessReminderContext(
   )];
 
   const since = new Date(now - REPEAT_WARN_WINDOW_HOURS * 3600_000).toISOString();
-  const [blockedDefaults, expiringDefaults, optedOut, recentBlocked, recentExpiring, allBlocked, allExpiring] = await Promise.all([
+  const [blockedDefaults, expiringDefaults, installmentDefaults, optedOut, recentBlocked, recentExpiring, recentInstallment, allBlocked, allExpiring, allInstallment] = await Promise.all([
     getResolvedDefaults(ACCESS_BLOCKED_TEMPLATE_ID),
     getResolvedDefaults(ACCESS_EXPIRING_TEMPLATE_ID),
+    getResolvedDefaults(ACCESS_INSTALLMENT_REMINDER_TEMPLATE_ID),
     optedOutSet(digits),
     listLogs({ from: since, templateId: ACCESS_BLOCKED_TEMPLATE_ID, limit: 5000 }),
     listLogs({ from: since, templateId: ACCESS_EXPIRING_TEMPLATE_ID, limit: 5000 }),
+    listLogs({ from: since, templateId: ACCESS_INSTALLMENT_REMINDER_TEMPLATE_ID, limit: 5000 }),
     listLogs({ templateId: ACCESS_BLOCKED_TEMPLATE_ID, limit: 5000 }),
     listLogs({ templateId: ACCESS_EXPIRING_TEMPLATE_ID, limit: 5000 }),
+    listLogs({ templateId: ACCESS_INSTALLMENT_REMINDER_TEMPLATE_ID, limit: 5000 }),
   ]);
   const buyers = await resolveBuyersByPhones(digits);
 
@@ -204,7 +213,7 @@ export async function buildAccessReminderContext(
   const delivered = (s: string) => ["SENT", "DELIVERED", "QUEUED"].includes(s);
 
   const recentByMobile = new Map<string, string>();
-  for (const l of [...recentBlocked, ...recentExpiring]) {
+  for (const l of [...recentBlocked, ...recentExpiring, ...recentInstallment]) {
     if (!wanted.has(l.normalized_mobile) || !delivered(l.status)) continue;
     const at = l.sent_at || l.created_at;
     const prev = recentByMobile.get(l.normalized_mobile);
@@ -212,7 +221,7 @@ export async function buildAccessReminderContext(
   }
 
   const priorCountByMobile = new Map<string, number>();
-  for (const l of [...allBlocked, ...allExpiring]) {
+  for (const l of [...allBlocked, ...allExpiring, ...allInstallment]) {
     if (!wanted.has(l.normalized_mobile) || !delivered(l.status)) continue;
     priorCountByMobile.set(l.normalized_mobile, (priorCountByMobile.get(l.normalized_mobile) || 0) + 1);
   }
@@ -236,6 +245,7 @@ export async function buildAccessReminderContext(
       varDefaults: new Map([
         [ACCESS_BLOCKED_TEMPLATE_ID, blockedDefaults],
         [ACCESS_EXPIRING_TEMPLATE_ID, expiringDefaults],
+        [ACCESS_INSTALLMENT_REMINDER_TEMPLATE_ID, installmentDefaults],
       ]),
       optedOut, buyers, recentByMobile, priorCountByMobile, courses, overridesByPhoneCourse, now,
     },
@@ -248,8 +258,11 @@ export type AccessTemplatePick =
 
 /**
  * Reminder eligibility follows the SCHEDULE, not a temporary access grant.
- * Copy stays truthful: blocked+grant → Expiring (days to override end), never
- * "access paused" while the grant is holding the door open.
+ *
+ * Roles (approved templates only):
+ *   installment_reminder  — notice while a grant holds the door (grandfather / −7d path)
+ *   portal_access_expiring — genuine dated grace notice (no grant)
+ *   portal_access_blocked  — lectures actually gated (blocked, no grant)
  */
 export function pickAccessTemplate(input: {
   scheduleAccess: LectureAccess;
@@ -268,27 +281,30 @@ export function pickAccessTemplate(input: {
   const scheduleBlocked = schedule.status === "blocked" && schedule.reason === "overdue";
   const scheduleGrace = schedule.status === "grace";
 
+  // Enforcement: lectures gated, no grant → blocked template.
   if (scheduleBlocked && !grant) {
     return { templateId: ACCESS_BLOCKED_TEMPLATE_ID, daysSource: "grace", daysEndAt: schedule.graceEndsAt ?? null, scheduleStatus: "blocked" };
   }
+  // Grandfather / temporary restore: grant holding door while schedule overdue → installment_reminder.
   if (scheduleBlocked && grant) {
     return {
-      templateId: ACCESS_EXPIRING_TEMPLATE_ID,
+      templateId: ACCESS_INSTALLMENT_REMINDER_TEMPLATE_ID,
       daysSource: "override",
       daysEndAt: grant.expires_at,
       scheduleStatus: "blocked_with_grant",
     };
   }
+  // Genuine dated grace notice (classic 15d) — expiring copy.
   if (scheduleGrace && !grant) {
     return { templateId: ACCESS_EXPIRING_TEMPLATE_ID, daysSource: "grace", daysEndAt: schedule.graceEndsAt ?? null, scheduleStatus: "grace" };
   }
   if (scheduleGrace && grant) {
-    // Prefer the nearer of grace-end vs grant expiry for truthful "expires in N days".
     const graceEnd = schedule.graceEndsAt ? Date.parse(schedule.graceEndsAt) : Infinity;
     const grantEnd = grant.expires_at ? Date.parse(grant.expires_at) : Infinity;
     const useGrant = grantEnd <= graceEnd;
+    // Grant during grace still uses installment_reminder (amount + code).
     return {
-      templateId: ACCESS_EXPIRING_TEMPLATE_ID,
+      templateId: ACCESS_INSTALLMENT_REMINDER_TEMPLATE_ID,
       daysSource: useGrant ? "override" : "grace",
       daysEndAt: useGrant ? grant.expires_at : (schedule.graceEndsAt ?? null),
       scheduleStatus: "grace_with_grant",
@@ -404,6 +420,14 @@ export function buildAccessReminderFor(
     ? buyer.login_code
     : "";
 
+  if (pick.templateId === ACCESS_INSTALLMENT_REMINDER_TEMPLATE_ID && !loginCode) {
+    return fail(
+      "missing_login_code",
+      "login_code is required for installment_reminder — buyer missing, ambiguous, or name mismatch. Exclude from send.",
+      partial,
+    );
+  }
+
   const recipientVars: Record<string, string> = {
     name: enrollment.student_name,
     first_name: String(enrollment.student_name || "").trim().split(/\s+/)[0] || "",
@@ -431,7 +455,10 @@ export function buildAccessReminderFor(
   if (partial.daysSingularCosmetic) {
     warnings.push('Approved copy reads "1 days" (immutable DLT text) — cosmetic only.');
   }
-  if (grant?.expires_at) {
+  if (grant?.expires_at && pick.templateId === ACCESS_INSTALLMENT_REMINDER_TEMPLATE_ID) {
+    warnings.push(`Access grant active until ${grant.expires_at.slice(0, 10)} — installment_reminder (amount+code); grant restores lectures.`);
+  }
+  if (grant?.expires_at && pick.templateId === ACCESS_EXPIRING_TEMPLATE_ID) {
     warnings.push(`Access grant active until ${grant.expires_at.slice(0, 10)} — Expiring template uses days to that date, not "access paused".`);
   }
   if (r.unpaidCount > 1) {
