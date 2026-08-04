@@ -4,12 +4,12 @@
  * Ship defaults: killSwitch OFF, dryRun ON, enabled FALSE — so a cron tick
  * only LOGS what would send. Real sends require an explicit settings flip.
  *
- * Cadence / caps / quiet hours live in accessReminderConstants.ts.
+ * §5 Cadence: TAPER_DAY_OFFSETS (not daily). Gated by MC rule enabled=false.
+ * Constants live in accessReminderConstants.ts + accessReminderTaper.ts.
  */
 import {
   getAllCourseEnrollments, getAllCourses, getAllAccessOverrides, getCourseEnrollmentById, pageThrough,
 } from "../dataProvider";
-import { lectureAccessForCourse } from "../entitlements";
 import { maskMobile, normalizeIndianMobile } from "../phone";
 import { istYMD } from "../dates";
 import { getSupabaseAdmin } from "../supabase";
@@ -19,23 +19,24 @@ import { scheduleFollowUp } from "./installmentFollowUp";
 import {
   buildAccessReminderContext,
   buildAccessReminderFor,
+  activeAccessGrant,
   type AccessReminderPreview,
 } from "./accessReminderService";
-import { istHour, istWeekday } from "./accessDays";
+import { istHour } from "./accessDays";
 import {
   ACCESS_AUTO_CAP_PER_INSTALLMENT,
-  ACCESS_BLOCKED_REPEAT_DAYS,
   ACCESS_BLOCKED_TEMPLATE_ID,
   ACCESS_DAILY_VOLUME_CEILING,
   ACCESS_EXPIRING_TEMPLATE_ID,
   ACCESS_INSTALLMENT_REMINDER_TEMPLATE_ID,
-  ACCESS_GRACE_WEEKDAYS_IST,
   ACCESS_MANUAL_DEDUP_HOURS,
   ACCESS_MAX_AUTO_PER_PHONE_PER_DAY,
   ACCESS_POST_TRANSFER_SKIP_HOURS,
   ACCESS_QUIET_HOURS_IST,
   ACCESS_RAMP_FIRST_RUN,
+  TAPER_HARD_CAP,
 } from "./accessReminderConstants";
+import { isTaperCallTaskDay, isTaperSendDay } from "./accessReminderTaper";
 import {
   getAccessReminderSettings,
   listCapsForEnrollments,
@@ -53,7 +54,7 @@ export type AutoSkipReason =
   | "disabled"
   | "quiet_hours"
   | "not_cadence_day"
-  | "blocked_too_soon"
+  | "streak_paused"
   | "cap_reached"
   | "excluded"
   | "phone_day_dedupe"
@@ -94,18 +95,6 @@ export interface AutoRunReport {
 function inQuietHours(now: number): boolean {
   const h = istHour(now);
   return h < ACCESS_QUIET_HOURS_IST.startHour || h >= ACCESS_QUIET_HOURS_IST.endHour;
-}
-
-function isGraceCadenceDay(now: number): boolean {
-  const wd = istWeekday(now);
-  return (ACCESS_GRACE_WEEKDAYS_IST as readonly number[]).includes(wd);
-}
-
-function daysSince(iso: string | null | undefined, now: number): number | null {
-  if (!iso) return null;
-  const t = Date.parse(iso);
-  if (!Number.isFinite(t)) return null;
-  return Math.floor((now - t) / 86_400_000);
 }
 
 async function recentManualAccessSend(digits: Set<string>, now: number): Promise<Set<string>> {
@@ -188,6 +177,7 @@ export async function planAccessAutomation(now = Date.now()): Promise<AutoRunRep
 
   // ONE shared at-risk definition with the admin list (active paid + schedule risk / grant).
   const { isAccessAtRiskEnrollment } = await import("../accessAtRisk");
+  const { lectureAccessForCourse } = await import("../entitlements");
   const risk = enrollments.filter((e) => {
     const ovr = overrides.find((o) => o.phone === e.phone && o.course_id === e.course_id);
     const access = lectureAccessForCourse(byId.get(e.course_id), e, undefined, false, now);
@@ -212,9 +202,12 @@ export async function planAccessAutomation(now = Date.now()): Promise<AutoRunRep
     const n = normalizeIndianMobile(e.phone || "");
     if (n.ok && n.digits10) digits.add(n.digits10);
   }
-  const [manualRecent, autoToday] = await Promise.all([
+  const [manualRecent, autoToday, streakMap] = await Promise.all([
     recentManualAccessSend(digits, now),
     autoSentPhonesToday(now),
+    import("./installmentReminderStreak").then((m) =>
+      m.listReminderStreaksByEnrollmentIds(risk.map((e) => e.id)),
+    ),
   ]);
 
   const candidates: AutoCandidate[] = [];
@@ -272,19 +265,28 @@ export async function planAccessAutomation(now = Date.now()): Promise<AutoRunRep
       continue;
     }
 
-    // Cadence
-    if (preview.accessStatus === "grace") {
-      if (!isGraceCadenceDay(now)) {
-        candidates.push({ ...base, skipReason: "not_cadence_day" });
-        continue;
-      }
-    } else if (preview.accessStatus === "blocked") {
-      const last = cap?.last_auto_sent_at;
-      const since = daysSince(last, now);
-      if (last && since != null && since < ACCESS_BLOCKED_REPEAT_DAYS) {
-        candidates.push({ ...base, skipReason: "blocked_too_soon" });
-        continue;
-      }
+    // §5 Taper cadence — fire only on TAPER_DAY_OFFSETS matching today IST vs due date.
+    const dueDate = preview.dueDate;
+    if (!dueDate) {
+      candidates.push({ ...base, skipReason: "not_cadence_day" });
+      continue;
+    }
+
+    const streak = streakMap.get(capKey(e.id, preview.installmentNo!));
+    if (streak?.paused) {
+      candidates.push({ ...base, skipReason: "streak_paused" });
+      continue;
+    }
+    if ((streak?.consecutiveDays ?? 0) >= TAPER_HARD_CAP) {
+      candidates.push({ ...base, skipReason: "cap_reached" });
+      continue;
+    }
+
+    const override = ctx.ctx.overridesByPhoneCourse.get(`${e.phone}::${e.course_id}`);
+    const grant = activeAccessGrant(override, now);
+    if (!isTaperSendDay({ dueDateIso: dueDate, grant, now })) {
+      candidates.push({ ...base, skipReason: "not_cadence_day" });
+      continue;
     }
 
     // Dry-run must still show who WOULD send once the window opens — quiet hours
@@ -388,6 +390,10 @@ export async function runAccessAutomation(now = Date.now()): Promise<AutoRunRepo
     if (!e) continue;
 
     const variables = Object.fromEntries(c.preview.variables.map((v) => [v.token, v.value]));
+    const today = istYMD(new Date(now))!;
+    const taperKey = c.preview.dueDate
+      ? `taper:${e.id}:${c.preview.installmentKey.installmentNo}:${today}:${c.preview.templateId}`
+      : undefined;
     const result = await sendSms({
       mobile: e.phone,
       templateId: c.preview.templateId,
@@ -402,6 +408,7 @@ export async function runAccessAutomation(now = Date.now()): Promise<AutoRunRepo
       audienceType: "access_risk",
       installmentKey: c.preview.installmentKey,
       enforceWindow: true,
+      dedupeKey: taperKey,
     });
     if (!result.ok || !result.logId) continue;
 
@@ -423,7 +430,8 @@ export async function runAccessAutomation(now = Date.now()): Promise<AutoRunRepo
 
     try {
       const { appendStudentAccessEvent } = await import("../studentAccessEvents");
-      const { recordReminderStreakSend, REMINDER_STREAK_HARD_CAP, markStreakCallTaskCreated } = await import("./installmentReminderStreak");
+      const { recordReminderStreakSend, markStreakCallTaskCreated, getReminderStreak } = await import("./installmentReminderStreak");
+      const dueDate = c.preview.dueDate;
       await appendStudentAccessEvent({
         studentId: e.student_id ?? null,
         phone: e.phone,
@@ -436,22 +444,25 @@ export async function runAccessAutomation(now = Date.now()): Promise<AutoRunRepo
         bodySent: c.preview.body,
         installmentNo: c.preview.installmentKey.installmentNo,
         relatedEventId: result.logId,
-        meta: { trigger: "installment_access_reminder" },
+        meta: { trigger: "installment_access_reminder", taper: true },
       });
       const streak = await recordReminderStreakSend({
         enrollmentId: c.enrollmentId,
         installmentNo: c.preview.installmentKey.installmentNo,
       });
-      if (streak.hitCap) {
-        const { createCollectionsCallTask } = await import("../accessActions");
-        await createCollectionsCallTask({
-          enrollmentId: c.enrollmentId,
-          actor: { id: null, name: "system" },
-          reason: "reminder_streak_cap_10",
-          installmentNo: c.preview.installmentKey.installmentNo,
-        });
-        await markStreakCallTaskCreated(c.enrollmentId, c.preview.installmentKey.installmentNo);
-        void REMINDER_STREAK_HARD_CAP;
+      const callTaskDay = dueDate ? isTaperCallTaskDay(dueDate, now) : false;
+      if (streak.hitCap || callTaskDay) {
+        const prev = await getReminderStreak(c.enrollmentId, c.preview.installmentKey.installmentNo);
+        if (!prev?.callTaskCreated) {
+          const { createCollectionsCallTask } = await import("../accessActions");
+          await createCollectionsCallTask({
+            enrollmentId: c.enrollmentId,
+            actor: { id: null, name: "system" },
+            reason: streak.hitCap ? "reminder_streak_cap_10" : "taper_p10_call",
+            installmentNo: c.preview.installmentKey.installmentNo,
+          });
+          await markStreakCallTaskCreated(c.enrollmentId, c.preview.installmentKey.installmentNo);
+        }
       }
     } catch { /* non-fatal */ }
 

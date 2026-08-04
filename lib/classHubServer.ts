@@ -1,5 +1,6 @@
 import { getCourseContent, getClassHubViews, getAllQuizzes, getAllCourses, getPublishedContent, getAttemptsByUser, getCourseEnrollmentsByPhone, getAccessOverridesByPhone, getLectureProgressByLearner } from "./dataProvider";
 import { quizUnlockCourseIds, canAccessLecture, type Learner, type LectureAccess } from "./entitlements";
+import { formatINR } from "./dates";
 import { getAttemptStatusForLearner } from "./quizAttemptStatus";
 import { assembleClassHubSections, totalNewCount, type ClassHubSection } from "./classHub";
 import { buildPerformanceData, PERFORMANCE_SECTION, type PerformanceData } from "./performance";
@@ -8,12 +9,22 @@ import type { Course, ContentItem, Quiz, ClassHubView } from "./types";
 
 /** Short, calm chip text for a hosted lecture's access state. */
 function accessChip(a: LectureAccess): string | null {
+  const due = a.amountDue != null && a.amountDue > 0 ? formatINR(a.amountDue) : null;
   switch (a.status) {
     case "public": return null;
     case "active": return a.expiresAt ? `Renews ${new Date(a.expiresAt).toLocaleDateString("en-IN")}` : "Access active";
     case "expiring": return a.daysLeft != null ? `Expires in ${a.daysLeft} day${a.daysLeft === 1 ? "" : "s"}` : "Expiring soon";
-    case "grace": return a.daysLeft != null ? `Complete installment in ${a.daysLeft} day${a.daysLeft === 1 ? "" : "s"}` : "Installment due";
-    case "blocked": return a.reason === "overdue" ? "Locked — complete pending installment" : a.reason === "expired" ? "Access expired" : "Locked";
+    case "grace":
+      if (a.daysLeft != null) {
+        return due
+          ? `${due} due · ${a.daysLeft} day${a.daysLeft === 1 ? "" : "s"} left`
+          : `Complete installment in ${a.daysLeft} day${a.daysLeft === 1 ? "" : "s"}`;
+      }
+      return due ? `${due} due · installment pending` : "Installment due";
+    case "blocked":
+      if (a.reason === "overdue") return due ? `Locked · ${due} due` : "Locked — complete pending installment";
+      if (a.reason === "expired") return "Access expired";
+      return "Locked";
     case "login": return "Log in to watch";
     default: return null;
   }

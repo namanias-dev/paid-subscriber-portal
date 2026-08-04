@@ -1,7 +1,10 @@
 import { getBuyerSession } from "@/lib/session";
 import { getPlanChangeNoticesForPhone } from "@/lib/dataProvider";
 import { deriveEnrollment } from "@/lib/installments";
+import { getPrimaryAccessAwarenessForPhone } from "@/lib/accessAwarenessServer";
 import PaymentPlanNoticeModal, { type PlanChangeNotice } from "@/components/portal/PaymentPlanNoticeModal";
+import AccessAwarenessBanner from "@/components/access/AccessAwarenessBanner";
+import type { AccessAwarenessBanner as AccessBannerData } from "@/lib/accessAwareness";
 
 /**
  * Portal shell. On any portal page, if the signed-in student has an
@@ -10,10 +13,15 @@ import PaymentPlanNoticeModal, { type PlanChangeNotice } from "@/components/port
  */
 export default async function PortalLayout({ children }: { children: React.ReactNode }) {
   let notice: PlanChangeNotice | null = null;
+  let accessBanner: AccessBannerData | null = null;
   try {
     const session = await getBuyerSession();
     if (session?.phone) {
-      const pending = await getPlanChangeNoticesForPhone(session.phone);
+      const [pending, banner] = await Promise.all([
+        getPlanChangeNoticesForPhone(session.phone),
+        getPrimaryAccessAwarenessForPhone(session.phone),
+      ]);
+      accessBanner = banner;
       if (pending.length > 0) {
         const e = pending[0];
         const d = deriveEnrollment(e);
@@ -33,6 +41,11 @@ export default async function PortalLayout({ children }: { children: React.React
 
   return (
     <>
+      {accessBanner && (
+        <div className="container-wide pt-4">
+          <AccessAwarenessBanner banner={accessBanner} compact />
+        </div>
+      )}
       {children}
       {notice && <PaymentPlanNoticeModal notice={notice} />}
     </>

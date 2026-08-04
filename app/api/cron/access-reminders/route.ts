@@ -11,8 +11,8 @@ export const maxDuration = 60;
 
 /**
  * Access At Risk automation tick — gated by Mission Control rule
- * `installment_access_reminder` (enabled + schedule_time). Defaults send nothing.
- * Same scanner as sms-dispatch; this cron is the 11:00 IST dedicated slot.
+ * `installment_access_reminder` (enabled + schedule_time). §5 taper cadence;
+ * ship with enabled=false — zero sends until staff arms the MC rule.
  */
 async function run(req: Request) {
   if (!authorizeCron(req, process.env.CRON_SECRET)) {

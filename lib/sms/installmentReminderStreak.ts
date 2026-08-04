@@ -6,8 +6,10 @@
 import { getSupabaseAdmin } from "../supabase";
 import { getCourseEnrollmentsByPhone } from "../dataProvider";
 import { istYMD } from "../dates";
+import { TAPER_HARD_CAP } from "./accessReminderConstants";
 
-export const REMINDER_STREAK_HARD_CAP = 10;
+/** @deprecated Use TAPER_HARD_CAP from accessReminderConstants */
+export const REMINDER_STREAK_HARD_CAP = TAPER_HARD_CAP;
 
 export async function getReminderStreak(
   enrollmentId: string,
@@ -41,13 +43,11 @@ export async function recordReminderStreakSend(input: {
   const prev = await getReminderStreak(input.enrollmentId, input.installmentNo);
   let next = 1;
   if (prev?.lastSentYmd === today) {
+    // Same IST day — idempotent re-run (max one msg/day).
     next = prev.consecutiveDays;
   } else if (prev?.lastSentYmd) {
-    // Consecutive calendar days only — gap resets.
-    const prevMs = Date.parse(`${prev.lastSentYmd}T12:00:00+05:30`);
-    const todayMs = Date.parse(`${today}T12:00:00+05:30`);
-    const dayGap = Math.round((todayMs - prevMs) / 86_400_000);
-    next = dayGap === 1 ? prev.consecutiveDays + 1 : 1;
+    // Taper path: each send increments total count (not consecutive calendar days).
+    next = prev.consecutiveDays + 1;
   }
   await db.from("installment_reminder_streaks").upsert(
     {
@@ -61,7 +61,28 @@ export async function recordReminderStreakSend(input: {
     },
     { onConflict: "course_enrollment_id,installment_no" },
   );
-  return { consecutiveDays: next, hitCap: next >= REMINDER_STREAK_HARD_CAP };
+  return { consecutiveDays: next, hitCap: next >= TAPER_HARD_CAP };
+}
+
+export async function listReminderStreaksByEnrollmentIds(
+  enrollmentIds: string[],
+): Promise<Map<string, NonNullable<Awaited<ReturnType<typeof getReminderStreak>>>>> {
+  const db = getSupabaseAdmin();
+  const out = new Map<string, NonNullable<Awaited<ReturnType<typeof getReminderStreak>>>>();
+  if (!db || !enrollmentIds.length) return out;
+  const { data } = await db
+    .from("installment_reminder_streaks")
+    .select("course_enrollment_id, installment_no, consecutive_days, last_sent_ymd, paused, call_task_created")
+    .in("course_enrollment_id", enrollmentIds);
+  for (const row of data || []) {
+    out.set(`${row.course_enrollment_id}::${row.installment_no}`, {
+      consecutiveDays: Number(row.consecutive_days) || 0,
+      lastSentYmd: row.last_sent_ymd ? String(row.last_sent_ymd) : null,
+      paused: !!row.paused,
+      callTaskCreated: !!row.call_task_created,
+    });
+  }
+  return out;
 }
 
 export async function pauseReminderStreak(input: {

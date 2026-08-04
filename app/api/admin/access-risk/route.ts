@@ -14,8 +14,10 @@ import { flagNeedsCall } from "@/lib/sms/accessCapStore";
 import {
   ACCESS_BLOCKED_TEMPLATE_ID,
   ACCESS_EXPIRING_TEMPLATE_ID,
+  ACCESS_INSTALLMENT_REMINDER_TEMPLATE_ID,
 } from "@/lib/sms/accessReminderConstants";
 import { istWholeDaysUntil } from "@/lib/sms/accessDays";
+import { istTodayYMD, istYMD } from "@/lib/dates";
 import {
   isAccessAtRiskEnrollment,
   humanRemindInaction,
@@ -24,6 +26,7 @@ import {
   daysOverdueFromSchedule,
 } from "@/lib/accessAtRisk";
 import { ttlCached } from "@/lib/ttlCache";
+import type { AccessRiskSummaryData } from "@/lib/accessRiskSummary";
 
 export const dynamic = "force-dynamic";
 
@@ -90,20 +93,50 @@ async function buildAccessRiskPayload() {
   }
 
   const since = new Date(now - 90 * DAY).toISOString();
-  const [blockedLogs, expiringLogs, bulk] = await Promise.all([
+  const todayYmd = istTodayYMD();
+  const todayStart = new Date(`${todayYmd}T00:00:00+05:30`).toISOString();
+  const riskIds = riskEnrollments.map((e) => e.id);
+  const { resolveBuyersByPhones } = await import("@/lib/sms/store");
+  const { normalizeIndianMobile } = await import("@/lib/phone");
+  const { getSupabaseAdmin } = await import("@/lib/supabase");
+  const phones = [...new Set(riskEnrollments.map((e) => normalizeIndianMobile(e.phone).digits10).filter(Boolean))] as string[];
+  const [blockedLogs, expiringLogs, installmentLogs, todayAccessLogs, bulk, buyersByPhone] = await Promise.all([
     listLogs({ from: since, templateId: ACCESS_BLOCKED_TEMPLATE_ID, limit: 5000 }),
     listLogs({ from: since, templateId: ACCESS_EXPIRING_TEMPLATE_ID, limit: 5000 }),
-    buildBulkAccessReminders(riskEnrollments.map((e) => e.id), { now }),
+    listLogs({ from: since, templateId: ACCESS_INSTALLMENT_REMINDER_TEMPLATE_ID, limit: 5000 }),
+    listLogs({ from: todayStart, limit: 5000 }),
+    buildBulkAccessReminders(riskIds, { now }),
+    resolveBuyersByPhones(phones),
   ]);
   const previewByEnrollment = new Map(bulk.previews.map((p) => [p.enrollmentId, p]));
 
+  const reminderCountByEnrollment = new Map<string, number>();
   const lastByEnrollment = new Map<string, string>();
-  for (const l of [...blockedLogs, ...expiringLogs]) {
+  for (const l of [...blockedLogs, ...expiringLogs, ...installmentLogs]) {
     if (!l.course_enrollment_id) continue;
     if (!["SENT", "DELIVERED", "QUEUED"].includes(l.status)) continue;
+    reminderCountByEnrollment.set(
+      l.course_enrollment_id,
+      (reminderCountByEnrollment.get(l.course_enrollment_id) || 0) + 1,
+    );
     const at = l.sent_at || l.created_at;
     const prev = lastByEnrollment.get(l.course_enrollment_id);
     if (!prev || prev < at) lastByEnrollment.set(l.course_enrollment_id, at);
+  }
+
+  const callTaskByEnrollment = new Map<string, { status: string; reason: string | null }>();
+  const db = getSupabaseAdmin();
+  if (db && riskIds.length) {
+    const { data: tasks } = await db
+      .from("collections_call_tasks")
+      .select("course_enrollment_id,status,reason,updated_at")
+      .in("course_enrollment_id", riskIds)
+      .order("updated_at", { ascending: false });
+    for (const t of tasks || []) {
+      const id = String(t.course_enrollment_id);
+      if (callTaskByEnrollment.has(id)) continue;
+      callTaskByEnrollment.set(id, { status: String(t.status || "open"), reason: t.reason ? String(t.reason) : null });
+    }
   }
 
   const failureByEnrollment = new Map<string, { failed: number; verifying: number }>();
@@ -131,7 +164,8 @@ async function buildAccessRiskPayload() {
       const preview = previewByEnrollment.get(e.id);
       const nextUnpaid = nextUnpaidDatedLine(e.schedule);
       const needsCall = !!cap?.needs_call;
-      const remindEnabled = !!preview?.sendable && !needsCall;
+      // remindEnabled = can SMS; selection is independent (every row selectable).
+      const remindEnabled = !!preview?.sendable;
       const inactionReason = remindEnabled ? null : humanRemindInaction({
         blockReason: preview?.blockReason,
         blockDetail: preview?.blockDetail,
@@ -141,21 +175,30 @@ async function buildAccessRiskPayload() {
         nextUnpaid,
         scheduleStatus: schedule.status,
       });
+      const digits = normalizeIndianMobile(e.phone).digits10;
+      const buyer = digits ? buyersByPhone.get(digits) : undefined;
+      const totalFee = e.total_fee || 0;
+      const amountPaid = e.amount_paid || 0;
+      const pctPaid = totalFee > 0 ? Math.round((amountPaid / totalFee) * 100) : 0;
+      const callTask = callTaskByEnrollment.get(e.id) || null;
       return {
         enrollmentId: e.id,
         studentId: e.student_id ?? null,
         phone: e.phone,
         student: e.student_name,
         email: e.email,
+        loginCode: buyer?.status === "ok" ? (buyer.login_code || null) : null,
         courseId: e.course_id,
         courseTitle: e.course_title || byId.get(e.course_id)?.title || "Course",
         batchLabel: e.batch_label,
         planType: e.plan_type,
         enrollmentStatus: e.status,
-        amountDue: schedule.amountDue ?? Math.max(0, (e.total_fee || 0) - (e.amount_paid || 0)),
-        amountPaid: e.amount_paid,
-        totalFee: e.total_fee,
+        amountDue: schedule.amountDue ?? Math.max(0, totalFee - amountPaid),
+        amountPaid,
+        totalFee,
+        pctPaid,
         daysOverdue,
+        dueDate: nextUnpaid?.due ? String(nextUnpaid.due).slice(0, 10) : null,
         installmentNo,
         progressLabel: paymentProgressLabel(d),
         access: live,
@@ -168,9 +211,13 @@ async function buildAccessRiskPayload() {
           daysLeft: grant.expires_at ? istWholeDaysUntil(grant.expires_at, now) : null,
         } : null,
         autoUsed: cap?.auto_sequences_used ?? 0,
+        remindersSent: reminderCountByEnrollment.get(e.id) ?? 0,
         needsCall,
         needsCallReason: cap?.excluded_reason ?? null,
         lastRemindedAt: lastByEnrollment.get(e.id) ?? cap?.last_auto_sent_at ?? null,
+        lastContactAt: lastByEnrollment.get(e.id) ?? cap?.last_auto_sent_at ?? null,
+        callTaskStatus: callTask?.status ?? (needsCall ? "flagged" : null),
+        callTaskReason: callTask?.reason ?? cap?.excluded_reason ?? null,
         paymentFailures: fail?.failed ?? 0,
         verifyingStuck: fail?.verifying ?? 0,
         remindEnabled,
@@ -186,22 +233,37 @@ async function buildAccessRiskPayload() {
       return d !== 0 ? d : b.daysOverdue - a.daysOverdue;
     });
 
-  const activeGrants = rows.filter((r) => r.grant).map((r) => ({
-    student: r.student,
-    phone: r.phone,
-    courseTitle: r.courseTitle,
-    expiresAt: r.grant!.expiresAt,
-    createdBy: r.grant!.createdBy,
-    reason: r.grant!.note,
-    amountDue: r.amountDue,
-    scheduleStatus: r.scheduleAccess.status,
-  }));
-
   const settings = await getAccessReminderSettings();
 
   const blocked = rows.filter((r) => r.scheduleAccess.status === "blocked").length;
   const grace = rows.filter((r) => r.scheduleAccess.status === "grace").length;
   const moneyOverdue = rows.filter((r) => r.daysOverdue > 0).length;
+
+  const accessTemplateIds = new Set([ACCESS_BLOCKED_TEMPLATE_ID, ACCESS_EXPIRING_TEMPLATE_ID]);
+  const remindersSentToday = todayAccessLogs.filter((l) => {
+    if (!l.template_id || !accessTemplateIds.has(l.template_id)) return false;
+    if (!["SENT", "DELIVERED", "QUEUED"].includes(l.status)) return false;
+    const at = l.sent_at || l.created_at;
+    return istYMD(at) === todayYmd;
+  }).length;
+
+  const outstandingByTier: Record<string, number> = {};
+  let totalOutstanding = 0;
+  for (const r of rows) {
+    const tier = (r.planType || "unknown").toLowerCase();
+    const amt = r.amountDue || 0;
+    outstandingByTier[tier] = (outstandingByTier[tier] || 0) + amt;
+    totalOutstanding += amt;
+  }
+
+  const summary: AccessRiskSummaryData = {
+    blockedCount: blocked,
+    graceCount: grace,
+    activeExtensions: rows.filter((r) => r.grant?.expiresAt).length,
+    outstandingByTier,
+    remindersSentToday,
+    totalOutstanding,
+  };
 
   // Ladder step counts (separate from ACCESS_AUTO_CAP) — additive table may be empty pre-migration.
   let ladderByEnrollment = new Map<string, number>();
@@ -218,9 +280,22 @@ async function buildAccessRiskPayload() {
     ladderCap: 5,
   }));
 
+  // Kept for API compat — UI no longer shows leakage report.
+  const activeGrants = rowsWithLadder.filter((r) => r.grant).map((r) => ({
+    student: r.student,
+    phone: r.phone,
+    courseTitle: r.courseTitle,
+    expiresAt: r.grant!.expiresAt,
+    createdBy: r.grant!.createdBy,
+    reason: r.grant!.note,
+    amountDue: r.amountDue,
+    scheduleStatus: r.scheduleAccess.status,
+  }));
+
   return {
     ok: true as const,
     rows: rowsWithLadder,
+    summary,
     grants: activeGrants,
     paymentFailureTotals: failureScan.totals,
     indefiniteOverrides: overrides.filter((o) => o.mode === "grant" && !o.expires_at).length,

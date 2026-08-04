@@ -21,11 +21,33 @@ export const ACCESS_FOLLOW_UP_DELAY_MINUTES = 30;
 /** Max automated sequences (step1+step2) per student per installment, lifetime. */
 export const ACCESS_AUTO_CAP_PER_INSTALLMENT = 5;
 
-/** Blocked cadence: re-send every N days while still blocked (after the first). */
+/**
+ * §5 Taper cadence — IST day offsets relative to installment due date.
+ * Fires ONLY on these days (not daily). Nine SMS points; +10 also triggers call task.
+ * Hard cap 10 total reminders per installment (see TAPER_HARD_CAP).
+ */
+export const TAPER_DAY_OFFSETS = [-7, -3, -1, 0, 1, 3, 5, 7, 10] as const;
+
+/** Max taper reminders per installment before call-task escalation. */
+export const TAPER_HARD_CAP = 10;
+
+/** @deprecated Replaced by TAPER_DAY_OFFSETS — kept for legacy tests only. */
 export const ACCESS_BLOCKED_REPEAT_DAYS = 2;
 
-/** Grace cadence: IST weekdays (0=Sun … 6=Sat). Mon + Thu. */
+/** @deprecated Replaced by TAPER_DAY_OFFSETS — kept for legacy tests only. */
 export const ACCESS_GRACE_WEEKDAYS_IST = [1, 4] as const;
+
+/**
+ * §6 — 63 grandfather cohort mid-window (5–12 Aug 2026 IST).
+ * Pilot/queued notice on 5 Aug is separate (grandfather_notice_queue).
+ * From 6 Aug only taper points landing before 12 Aug apply; max one msg/day.
+ */
+export const GRANDFATHER_MID_WINDOW = {
+  pilotNoticeYmd: "2026-08-05",
+  taperStartYmd: "2026-08-06",
+  windowEndYmd: "2026-08-12",
+  grantExpiresAt: "2026-08-11T18:30:00.000Z",
+} as const;
 
 /** Quiet hours in IST (inclusive start, exclusive end). Outside → queue. */
 export const ACCESS_QUIET_HOURS_IST = { startHour: 9, endHour: 20 } as const;

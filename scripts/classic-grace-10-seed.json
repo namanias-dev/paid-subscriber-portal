@@ -1,0 +1,61 @@
+{
+  "cohort": "classic_grace_10",
+  "count": 10,
+  "armed": false,
+  "armedCount": 0,
+  "scheduled_for": "2026-08-06T11:00:00+05:30",
+  "template": "portal_access_blocked",
+  "sent": 0,
+  "students": [
+    {
+      "name": "Srushti",
+      "enrollmentId": "15af13bc-ca2e-4541-b24e-b72b765c0eb7",
+      "phone": "9595264646"
+    },
+    {
+      "name": "Devanshi",
+      "enrollmentId": "00d1d15f-9150-42ed-b6b2-205de3c4f8b0",
+      "phone": "8091696526"
+    },
+    {
+      "name": "Vidhi",
+      "enrollmentId": "f3aad933-44df-4051-82a2-49962188f9a3",
+      "phone": "8307523821"
+    },
+    {
+      "name": "Rahul Kumar",
+      "enrollmentId": "8f4658a2-7420-4a4e-842d-f91ce4b73f2a",
+      "phone": "9416479966"
+    },
+    {
+      "name": "Simran Chaudhary",
+      "enrollmentId": "c5a9042c-d157-4afe-8c11-e71c92a5e036",
+      "phone": "9041285334"
+    },
+    {
+      "name": "Shubham Mishra",
+      "enrollmentId": "66ebea7d-afd4-4ae6-b92e-c79d5840391a",
+      "phone": "9878412319"
+    },
+    {
+      "name": "Amar Sharma",
+      "enrollmentId": "1bec9809-a334-4dcf-9d2b-835129302e1e",
+      "phone": "9417375560"
+    },
+    {
+      "name": "Ramneek Kaur",
+      "enrollmentId": "2fcfff6b-ebef-4062-a7ed-9a57075520ef",
+      "phone": "8699381770"
+    },
+    {
+      "name": "Prakriti",
+      "enrollmentId": "27ac7597-0033-4daa-98d6-764316e6216b",
+      "phone": "8699698743"
+    },
+    {
+      "name": "Aman Sharma",
+      "enrollmentId": "71992ab3-5214-42b5-a80e-7595afc7da01",
+      "phone": "8968456773"
+    }
+  ]
+}

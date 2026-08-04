@@ -168,7 +168,10 @@ export async function createCollectionsCallTask(input: {
   actor: AccessActionActor;
   reason?: string;
   installmentNo?: number | null;
+  /** Next instalment amount (logged on timeline only). */
   amountDue?: number | null;
+  /** Total fee − paid. Stored as amount_due — the number staff should quote. */
+  outstanding?: number | null;
   daysOverdue?: number | null;
 }): Promise<{ ok: true; created: boolean } | { ok: false; error: string }> {
   const e = await getCourseEnrollmentById(input.enrollmentId);
@@ -176,14 +179,21 @@ export async function createCollectionsCallTask(input: {
   const db = getSupabaseAdmin();
   if (!db) return { ok: false, error: "Database not configured" };
 
+  const outstanding =
+    input.outstanding != null
+      ? input.outstanding
+      : Math.max(0, (e.total_fee || 0) - (e.amount_paid || 0));
+  // Keep reason stable — unique (enrollment, installment_no, reason).
   const reason = input.reason || "manual_call_task";
+
   const { error } = await db.from("collections_call_tasks").upsert(
     {
       course_enrollment_id: e.id,
       installment_no: input.installmentNo ?? null,
       student_name: e.student_name,
       phone: e.phone,
-      amount_due: input.amountDue ?? null,
+      // Staff quote = total outstanding (not next-instalment line alone).
+      amount_due: outstanding,
       days_overdue: input.daysOverdue ?? null,
       reason,
       status: "open",
@@ -201,9 +211,12 @@ export async function createCollectionsCallTask(input: {
     eventType: "call_task_created",
     actor: input.actor.name || input.actor.id || "admin",
     channel: "call_task",
-    amount: input.amountDue ?? null,
+    amount: outstanding,
     installmentNo: input.installmentNo ?? null,
-    reason,
+    reason:
+      input.amountDue != null
+        ? `${reason} · instalment ₹${Math.round(input.amountDue).toLocaleString("en-IN")} · outstanding ₹${Math.round(outstanding).toLocaleString("en-IN")}`
+        : reason,
   });
 
   return { ok: true, created: true };

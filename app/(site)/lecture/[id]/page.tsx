@@ -3,10 +3,12 @@ import { notFound } from "next/navigation";
 import { ArrowLeft, Lock, LogIn } from "lucide-react";
 import { getContentById, getLectureProgress } from "@/lib/dataProvider";
 import { resolveLectureAccess } from "@/lib/entitlements";
+import { getPrimaryAccessAwarenessForPhone } from "@/lib/accessAwarenessServer";
 import { r2Configured, signGetUrl } from "@/lib/r2";
-import { formatISTDate } from "@/lib/dates";
+import { formatISTDate, formatINR } from "@/lib/dates";
 import LecturePlayer from "@/components/lecture/LecturePlayer";
 import LectureComments from "@/components/lecture/LectureComments";
+import AccessAwarenessBanner from "@/components/access/AccessAwarenessBanner";
 
 export const dynamic = "force-dynamic";
 
@@ -27,11 +29,20 @@ export default async function LecturePage({ params }: { params: { id: string } }
     : hubHome;
 
   if (!access.allowed) {
+    const accessBanner = learner?.phone && courseId
+      ? await getPrimaryAccessAwarenessForPhone(learner.phone, courseId)
+      : null;
+
     return (
       <div className="container-wide section">
         <Link href={hubHome} className="inline-flex items-center gap-1.5 text-sm font-medium text-ink2 hover:text-primary">
           <ArrowLeft size={15} /> Back
         </Link>
+        {accessBanner ? (
+          <div className="mx-auto mt-6 max-w-md">
+            <AccessAwarenessBanner banner={accessBanner} />
+          </div>
+        ) : (
         <div className="mx-auto mt-8 max-w-md rounded-2xl border border-line bg-surface p-8 text-center">
           <div className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-surface2 text-ink2">
             {access.reason === "login" ? <LogIn size={24} /> : <Lock size={24} />}
@@ -46,7 +57,7 @@ export default async function LecturePage({ params }: { params: { id: string } }
             <>
               <h1 className="mt-4 font-heading text-xl font-bold">Complete your pending installment to continue</h1>
               <p className="mt-1 text-sm text-ink2">
-                Your access is paused after the grace period{access.amountDue ? ` — ₹${access.amountDue.toLocaleString("en-IN")} due` : ""}. Your progress is saved.
+                Your access is paused after the grace period{access.amountDue ? ` — ${formatINR(access.amountDue)} due` : ""}. Your progress is saved.
               </p>
               <Link href="/portal" className="btn btn-primary mt-5">Pay pending installment</Link>
             </>
@@ -64,9 +75,14 @@ export default async function LecturePage({ params }: { params: { id: string } }
             </>
           )}
         </div>
+        )}
       </div>
     );
   }
+
+  const accessBannerGrace = learner?.phone && courseId && (access.status === "grace")
+    ? await getPrimaryAccessAwarenessForPhone(learner.phone, courseId)
+    : null;
 
   const [progress, notesUrl] = await Promise.all([
     learner?.studentId ? getLectureProgress(learner.studentId, rec.id) : Promise.resolve(null),
@@ -78,6 +94,11 @@ export default async function LecturePage({ params }: { params: { id: string } }
       <Link href={backHref} className="inline-flex items-center gap-1.5 text-sm font-medium text-ink2 hover:text-primary">
         <ArrowLeft size={15} /> Back to Class Hub
       </Link>
+      {accessBannerGrace && (
+        <div className="mt-4">
+          <AccessAwarenessBanner banner={accessBannerGrace} compact />
+        </div>
+      )}
       <LecturePlayer
         recordingId={rec.id}
         title={rec.title}

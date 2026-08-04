@@ -12,7 +12,7 @@ import { sendViaGateway, sendBulkViaGateway, fetchDeliveryStatuses, checkBalance
 import { gatewayConfigured, smsEnvEnabled, loginUrlForTemplate, bulkChunkSize, SMS_DEFAULT_SENDER_ID, SMS_DEFAULT_ROUTE } from "./config";
 import { getResolvedDefaults } from "./variables";
 import { prepareAndRenderSms } from "./renderPipeline";
-import type { SmsLog, SmsLogStatus } from "./types";
+import type { SmsLog, SmsLogStatus, SmsTemplate } from "./types";
 import { isPromoTemplate, nextPromoDispatchAt } from "./promoQuietHours";
 import { enqueuePromo } from "./promoQueue";
 
@@ -179,6 +179,38 @@ async function resolveSendVars(templateId: string, vars: Record<string, string |
   return mergeSendVars(templateId, await getResolvedDefaults(templateId), vars);
 }
 
+export type TemplateGateCode = "TEMPLATE_MISSING" | "TEMPLATE_NOT_APPROVED" | "TEMPLATE_NO_DLT_ID";
+
+export type TemplateGateResult =
+  | { ok: true; template: SmsTemplate }
+  | { ok: false; code: TemplateGateCode; detail: string };
+
+/** Loud template gate — used by sendSms / sendBatch (not silent skip). */
+export function gateSendTemplate(t: SmsTemplate | null, templateId: string): TemplateGateResult {
+  if (!t) {
+    return { ok: false, code: "TEMPLATE_MISSING", detail: `Template "${templateId}" is not configured.` };
+  }
+  if (!(t.status === "active" || t.status === "approved")) {
+    return {
+      ok: false,
+      code: "TEMPLATE_NOT_APPROVED",
+      detail: `Template "${templateId}" status is "${t.status}" — must be active or approved before sending.`,
+    };
+  }
+  if (!t.gateway_template_id) {
+    return {
+      ok: false,
+      code: "TEMPLATE_NO_DLT_ID",
+      detail: `Template "${templateId}" has no gateway_template_id (DLT id).`,
+    };
+  }
+  return { ok: true, template: t };
+}
+
+function logTemplateGateFailure(gate: Extract<TemplateGateResult, { ok: false }>, path: string): void {
+  console.error(`[SMS] ${gate.code} path=${path} — ${gate.detail}`);
+}
+
 /**
  * Render + validate without sending (preview / dispatch dry-run). Runs the SAME
  * hard send guard the send path runs, so a preview can never look sendable when
@@ -209,10 +241,13 @@ export async function sendSms(input: SendSmsInput): Promise<SendSmsResult> {
   if (!smsEnvEnabled() || !settings.enabled) return { ok: false, skipped: "disabled" };
 
   // 2. template gate
-  const t = await getTemplate(input.templateId);
-  if (!t) return { ok: false, skipped: "template_missing" };
-  if (!(t.status === "active" || t.status === "approved")) return { ok: false, skipped: "not_approved" };
-  if (!t.gateway_template_id) return { ok: false, skipped: "no_dlt_id" };
+  const tRaw = await getTemplate(input.templateId);
+  const gate = gateSendTemplate(tRaw, input.templateId);
+  if (!gate.ok) {
+    logTemplateGateFailure(gate, "sendSms");
+    return { ok: false, skipped: gate.code, error: gate.detail };
+  }
+  const t = gate.template;
   // No promo route: promotional templates may never go to the "all" audience.
   if (t.message_type === "promotional" && input.audienceType === "all") return { ok: false, skipped: "promotional_all_blocked" };
 
@@ -329,7 +364,7 @@ export async function sendSms(input: SendSmsInput): Promise<SendSmsResult> {
   const res = await sendViaGateway({
     digits10: normalized,
     message: text,
-    templateId: t.gateway_template_id,
+    templateId: t.gateway_template_id!,
     senderId: t.sender_id || SMS_DEFAULT_SENDER_ID,
     route: t.route || SMS_DEFAULT_ROUTE,
     scheduleTime: input.scheduleTime || undefined,
@@ -435,10 +470,16 @@ export async function sendBatch(input: {
   // ---- global gates (reject whole batch) ----
   const settings = await getSettings();
   if (!smsEnvEnabled() || !settings.enabled) { skip("disabled", input.recipients.length); return out; }
-  const t = await getTemplate(input.templateId);
-  if (!t) { skip("template_missing", input.recipients.length); return out; }
-  if (!(t.status === "active" || t.status === "approved")) { skip("not_approved", input.recipients.length); return out; }
-  if (!t.gateway_template_id) { skip("no_dlt_id", input.recipients.length); return out; }
+  const tRaw = await getTemplate(input.templateId);
+  const gate = gateSendTemplate(tRaw, input.templateId);
+  if (!gate.ok) {
+    logTemplateGateFailure(gate, "sendBatch");
+    skip(gate.code, input.recipients.length);
+    out.aborted = true;
+    out.abortReason = gate.code;
+    return out;
+  }
+  const t = gate.template;
   if (t.message_type === "promotional" && input.audienceType === "all") { skip("promotional_all_blocked", input.recipients.length); return out; }
 
   // ---- per-recipient screening (all safeguards BEFORE batching) ----
@@ -682,7 +723,7 @@ export async function sendBatch(input: {
     const bulk = await sendBulkViaGateway({
       digits10List: rows.map((r) => r.e.normalized),
       message,
-      templateId: t.gateway_template_id,
+      templateId: t.gateway_template_id!,
       senderId: t.sender_id || SMS_DEFAULT_SENDER_ID,
       route: t.route || SMS_DEFAULT_ROUTE,
       scheduleTime: input.scheduleTime || undefined,

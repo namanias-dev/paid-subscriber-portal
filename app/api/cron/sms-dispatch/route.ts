@@ -239,10 +239,43 @@ async function run(req: Request) {
       result.installment_overdue_skipped = 1;
     }
 
-    // ---- Mission Control: installment_access_reminder (daily-until-paid scanner) ----
-    // Framework extension: sms_auto_rules cannot express stateful "daily until paid,
-    // cap 10" — this trigger's enabled + schedule_time gate the existing scanner so
-    // every send/log stays visible in Mission Control. Ship disabled until armed.
+    // ---- DLT flag reconciliation (heal stuck drafts on approved seeds) ----
+    try {
+      const { reconcileDltTemplateFlags } = await import("@/lib/sms/dltReconcile");
+      // Once per IST day in the 11:00 window.
+      if (istMins >= 11 * 60 && istMins < 11 * 60 + 10) {
+        const rec = await reconcileDltTemplateFlags();
+        result.dlt_reconcile_checked = rec.checked;
+        result.dlt_reconcile_healed = rec.healed.length;
+      }
+    } catch { /* non-fatal */ }
+
+    // ---- Grandfather notice queue (armed pilot / queued cohorts) ----
+    // Arm switch is grandfather_notice_queue.armed — not MC rule.enabled.
+    try {
+      const {
+        drainArmedGrandfatherNotices,
+        maybeAutoArmQueued53,
+      } = await import("@/lib/sms/grandfatherNoticeSend");
+      const schedMins = 11 * 60; // 11:00 IST
+      if (istMins >= schedMins && istMins < schedMins + 10) {
+        // After pilot day: try auto-arm 53 if delivery ≥8/10 (no-op if already armed / held).
+        const auto = await maybeAutoArmQueued53("2026-08-06");
+        result.grandfather_53_armed = auto.armed;
+        result.grandfather_53_held = auto.held ? 1 : 0;
+        result.grandfather_pilot_ok = auto.pilot.ok ? 1 : 0;
+        result.grandfather_pilot_accepted = auto.pilot.deliveredOrAccepted;
+
+        const gf = await drainArmedGrandfatherNotices();
+        result.grandfather_scanned = gf.scanned;
+        result.grandfather_sent = gf.sent;
+        result.grandfather_failed = gf.failed;
+        result.grandfather_skipped = gf.skipped;
+      }
+    } catch { /* non-fatal */ }
+
+    // ---- Mission Control: installment_access_reminder (§5 taper scanner) ----
+    // TAPER_DAY_OFFSETS cadence — not daily-until-paid. MC rule enabled=false at ship.
     try {
       const accessRule = await getRule("installment_access_reminder");
       if (accessRule?.enabled) {
