@@ -578,7 +578,7 @@ export function deriveCollections(
   const base = deriveEnrollment(enr, now);
   const schedule = enr.schedule || [];
   const overdueLines = schedule.filter(
-    (s) => isLineOutstanding(s) && s.due != null && new Date(s.due).getTime() < now,
+    (s) => isLineOutstanding(s) && s.due != null && (Number(s.amount) || 0) > 0 && new Date(s.due).getTime() < now,
   );
   const overdueAmount = overdueLines.reduce((a, s) => a + (s.amount || 0), 0);
   let daysOverdue = 0;

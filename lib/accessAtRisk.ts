@@ -93,6 +93,18 @@ export function nextUnpaidDatedLine(schedule: InstallmentItem[] | null | undefin
 }
 
 /**
+ * Whole days past the gating unpaid line's due date (same line lectureAccess uses).
+ * 0 when not past due.
+ */
+export function daysOverdueFromSchedule(enrollment: Pick<CourseEnrollment, "schedule">, now = Date.now()): number {
+  const line = nextUnpaidDatedLine(enrollment.schedule);
+  if (!line?.due) return 0;
+  const due = Date.parse(line.due);
+  if (!Number.isFinite(due) || now <= due) return 0;
+  return Math.floor((now - due) / 86_400_000);
+}
+
+/**
  * Human reason when Remind should be disabled on a row. Prefer concrete next-due
  * / grant / opt-out / needs_call copy over a bare "excluded".
  */

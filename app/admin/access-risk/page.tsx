@@ -34,6 +34,8 @@ interface RiskRow {
   riskKind?: string | null;
   grant: { expiresAt: string | null; note: string | null; createdBy: string | null; daysLeft: number | null } | null;
   autoUsed: number;
+  ladderUsed?: number;
+  ladderCap?: number;
   needsCall: boolean;
   needsCallReason: string | null;
   lastRemindedAt: string | null;
@@ -60,6 +62,15 @@ interface AccessRiskPayload {
     rampLimit: number;
     dailyCeiling: number;
     quietHours: boolean;
+  };
+  listMeta?: {
+    total: number;
+    remindEnabled: number;
+    notActionable: number;
+    genuinelyBlocked?: number;
+    genuinelyGrace?: number;
+    moneyOverdueAligned?: number;
+    note?: string;
   };
 }
 
@@ -166,7 +177,15 @@ export default function AccessRiskAdmin() {
 
   return (
     <div>
-      <PageHeader title="Access at Risk" subtitle="Overdue / grace — % paid, days overdue, auto follow-ups (N/5), locked Y/N, ₹ outstanding. Read-only on access rules." />
+      <PageHeader title="Access at Risk" subtitle="Live lectureAccessForCourse only — no due-date heuristics. Ladder N/5 is instalment steps (−7/−3/due/+3/+7); Auto N/5 is the separate access-SMS cap." />
+      {full?.listMeta && (
+        <div className="mb-3 flex flex-wrap gap-3 text-xs text-ink2">
+          <span className="pill pill-red">Blocked {full.listMeta.genuinelyBlocked ?? blocked}</span>
+          <span className="pill pill-amber">Grace {full.listMeta.genuinelyGrace ?? grace}</span>
+          <span className="pill pill-gray">Money overdue (aligned) {full.listMeta.moneyOverdueAligned ?? "—"}</span>
+          <span className="text-muted">{full.listMeta.note}</span>
+        </div>
+      )}
       <AtRiskTabs active="access" />
 
       <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-5">
@@ -249,7 +268,7 @@ export default function AccessRiskAdmin() {
                   aria-label="Select all actionable students matching the current filters"
                 />
               </th>
-              {["Student", "Course", "Progress", "₹ Due", "Schedule", "Grant", "Auto", "Actions"].map((h) => (
+              {["Student", "Course", "Progress", "₹ Due", "Schedule", "Grant", "Ladder", "Auto", "Actions"].map((h) => (
                 <th key={h} className="whitespace-nowrap px-4 py-3 font-semibold">{h}</th>
               ))}
             </tr>
@@ -313,7 +332,10 @@ export default function AccessRiskAdmin() {
                       </>
                     ) : "—"}
                   </td>
-                  <td className="px-4 py-3 text-xs tabular-nums">
+                  <td className="px-4 py-3 text-xs tabular-nums" title="Instalment ladder steps fired (−7/−3/due/+3/+7)">
+                    {r.ladderUsed ?? 0}/{r.ladderCap ?? 5}
+                  </td>
+                  <td className="px-4 py-3 text-xs tabular-nums" title="Access-SMS auto sequences (separate cap)">
                     <span className={r.needsCall ? "font-semibold text-danger" : "text-ink2"}>
                       {r.autoUsed}/{ACCESS_AUTO_CAP_PER_INSTALLMENT}
                     </span>

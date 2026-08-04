@@ -44,6 +44,10 @@
     {
       "path": "/api/cron/telegram-reports",
       "schedule": "35 * * * *"
+    },
+    {
+      "path": "/api/cron/access-reminders",
+      "schedule": "30 4 * * *"
     }
   ]
 }

@@ -11,6 +11,8 @@ import ReminderStatePill from "@/components/admin/sms/ReminderStatePill";
 import PendingFollowUps from "@/components/admin/sms/PendingFollowUps";
 import { formatINR, formatISTDate } from "@/lib/dates";
 import { deriveCollections } from "@/lib/installments";
+import { lectureAccessForCourse } from "@/lib/entitlements";
+import { isScheduleCollectionsRisk } from "@/lib/accessAtRisk";
 import { isOutstandingInstallment } from "@/lib/sms/installmentAttribution";
 import { normalizeIndianMobile } from "@/lib/phone";
 import type { TrackingPayload } from "@/lib/sms/installmentTracking";
@@ -46,13 +48,14 @@ export default function CollectionsWorklist() {
   const [sort, setSort] = useState<SortKey>("overdue");
   const [q, setQ] = useState("");
   const [overdueOnly, setOverdueOnly] = useState(true);
+  /** When on, only rows whose live lectureAccess is blocked/grace — matches Access at Risk. */
+  const [liveAccessRiskOnly, setLiveAccessRiskOnly] = useState(true);
   const [staleOnly, setStaleOnly] = useState(false);
   const [staleDays, setStaleDays] = useState(DEFAULT_STALE_DAYS);
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
   // Reminder→payment state, computed server-side in ONE indexed query.
   const [tracking, setTracking] = useState<TrackingPayload | null>(null);
-  // Bumped after a send so the pending-follow-ups panel re-reads the queue.
   const [sendCount, setSendCount] = useState(0);
   const loadTracking = useCallback(() => {
     fetch("/api/admin/sms/installment-reminder/tracking")
@@ -63,14 +66,23 @@ export default function CollectionsWorklist() {
   useEffect(loadTracking, [loadTracking]);
   const afterSend = useCallback(() => { loadTracking(); setSendCount((n) => n + 1); }, [loadTracking]);
 
-  // Confirmed, non-cancelled enrollments with money outstanding. Overdue-only is
-  // the default and reproduces this page's original filter exactly.
+  const courseById = useMemo(() => new Map((courses.data || []).map((c) => [c.id, c])), [courses.data]);
+  const now = useMemo(() => Date.now(), [enr.data]);
+
+  // Live lectureAccessForCourse (default) so this desk matches Access at Risk.
   const scoped = useMemo(() => {
     return (enr.data || [])
       .filter((e) => e.amount_paid > 0 && e.status !== "cancelled")
-      .map((e) => ({ e, d: deriveCollections(e) }))
-      .filter(({ d }) => (overdueOnly ? d.overdueAmount > 0 : d.remaining > 0));
-  }, [enr.data, overdueOnly]);
+      .map((e) => {
+        const d = deriveCollections(e);
+        const scheduleAccess = lectureAccessForCourse(courseById.get(e.course_id), e, undefined, false, now);
+        return { e, d, scheduleAccess };
+      })
+      .filter(({ d, scheduleAccess }) => {
+        if (liveAccessRiskOnly) return isScheduleCollectionsRisk(scheduleAccess);
+        return overdueOnly ? d.overdueAmount > 0 : d.remaining > 0;
+      });
+  }, [enr.data, overdueOnly, liveAccessRiskOnly, courseById, now]);
 
   const courseOptions = useMemo(() => {
     const m = new Map<string, string>();
@@ -196,7 +208,10 @@ export default function CollectionsWorklist() {
           <span className="grid h-11 w-11 place-items-center rounded-2xl bg-danger/10 text-danger"><AlertTriangle size={20} /></span>
           <div>
             <p className="font-heading text-2xl font-extrabold tabular-nums text-danger">{formatINR(scopeOverdue)} overdue</p>
-            <p className="text-sm text-ink2">across {rows.length} student{rows.length === 1 ? "" : "s"} in {scopeLabel}</p>
+            <p className="text-sm text-ink2">
+              across {rows.length} student{rows.length === 1 ? "" : "s"} in {scopeLabel}
+              {liveAccessRiskOnly ? " · live access blocked/grace (matches Access at Risk)" : ""}
+            </p>
             {/* Correlation only — describes timing, never claims a reminder caused a payment. */}
             {aggregate && (
               <p className="mt-1 text-xs text-muted" title="Timing only. A student who paid after a reminder may have paid regardless.">
@@ -245,8 +260,12 @@ export default function CollectionsWorklist() {
 
       {/* Reminder-specific filters. Overdue-only is ON by default — the safe case. */}
       <div className="mb-4 flex flex-wrap items-center gap-x-5 gap-y-2 px-1 text-xs text-ink2">
-        <label className="inline-flex items-center gap-2" title="Only students whose next due installment is already past due">
-          <input type="checkbox" checked={overdueOnly} onChange={(e) => setOverdueOnly(e.target.checked)} className="h-3.5 w-3.5 accent-[color:var(--primary)]" />
+        <label className="inline-flex items-center gap-2" title="Only students whose live lectureAccessForCourse is blocked or in grace — same list as Access at Risk">
+          <input type="checkbox" checked={liveAccessRiskOnly} onChange={(e) => setLiveAccessRiskOnly(e.target.checked)} className="h-3.5 w-3.5 accent-[color:var(--primary)]" />
+          Live access risk only
+        </label>
+        <label className="inline-flex items-center gap-2" title="Only students whose next due installment is already past due (money heuristic; ignored when live access risk is on)">
+          <input type="checkbox" checked={overdueOnly} onChange={(e) => setOverdueOnly(e.target.checked)} disabled={liveAccessRiskOnly} className="h-3.5 w-3.5 accent-[color:var(--primary)] disabled:opacity-40" />
           Overdue only
         </label>
         <label className="inline-flex items-center gap-2" title="Students already reminded who still have not paid that installment">
@@ -293,13 +312,13 @@ export default function CollectionsWorklist() {
                     aria-label="Select all students matching the current filters"
                   />
                 </th>
-                {["Student", "Course / Batch", "Overdue", "Days", "Missed", "Balance", "Next due", "Reminder", ""].map((h) => (
-                  <th key={h} className="whitespace-nowrap px-4 py-3 font-semibold">{h}</th>
+                {["Student", "Course / Batch", "Access", "Overdue", "Days", "Missed", "Balance", "Next due", "Reminder", ""].map((h) => (
+                  <th key={h || "actions"} className="whitespace-nowrap px-4 py-3 font-semibold">{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {rows.map(({ e, d }) => (
+              {rows.map(({ e, d, scheduleAccess }) => (
                 <tr key={e.id} className={`border-b border-line last:border-0 hover:bg-surface2 ${selected.has(e.id) ? "bg-primary/5" : ""}`}>
                   <td className="px-3 py-3">
                     <input
@@ -322,6 +341,11 @@ export default function CollectionsWorklist() {
                   <td className="px-4 py-3">
                     <div className="text-ink2">{e.course_title}</div>
                     {e.batch_label && <div className="text-xs text-muted">{e.batch_label}</div>}
+                  </td>
+                  <td className="px-4 py-3">
+                    <span className={`pill text-[10px] ${scheduleAccess.status === "blocked" ? "pill-red" : scheduleAccess.status === "grace" ? "pill-amber" : "pill-gray"}`}>
+                      {scheduleAccess.status}
+                    </span>
                   </td>
                   <td className="px-4 py-3 font-semibold tabular-nums text-danger">{formatINR(d.overdueAmount)}</td>
                   <td className="px-4 py-3 tabular-nums">{d.daysOverdue}d</td>

@@ -21,6 +21,7 @@ import {
   humanRemindInaction,
   nextUnpaidDatedLine,
   classifyAccessAtRisk,
+  daysOverdueFromSchedule,
 } from "@/lib/accessAtRisk";
 import { ttlCached } from "@/lib/ttlCache";
 
@@ -38,7 +39,7 @@ export async function GET() {
     return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   }
 
-  const cached = await ttlCached("admin:access-risk:v1", ACCESS_RISK_CACHE_MS, () => buildAccessRiskPayload());
+  const cached = await ttlCached("admin:access-risk:v2-live", ACCESS_RISK_CACHE_MS, () => buildAccessRiskPayload());
   return NextResponse.json({ ...cached.value, cache: cached.cache });
 }
 
@@ -121,8 +122,7 @@ async function buildAccessRiskPayload() {
       const live = lectureAccessForCourse(byId.get(e.course_id), e, override, false, now);
       const grant = activeAccessGrant(override, now);
       const classified = classifyAccessAtRisk({ enrollment: e, scheduleAccess: schedule, override, now });
-      const dueMs = schedule.graceEndsAt ? (Date.parse(schedule.graceEndsAt) - 15 * DAY) : 0;
-      const daysOverdue = dueMs && now > dueMs ? Math.floor((now - dueMs) / DAY) : 0;
+      const daysOverdue = daysOverdueFromSchedule(e, now);
       const resolved = resolveInstallmentForEnrollment(e, now);
       const installmentNo = resolved.ok ? resolved.resolved.installmentNo : null;
       const cap = capByEnrollment.get(e.id);
@@ -199,16 +199,39 @@ async function buildAccessRiskPayload() {
 
   const settings = await getAccessReminderSettings();
 
+  const blocked = rows.filter((r) => r.scheduleAccess.status === "blocked").length;
+  const grace = rows.filter((r) => r.scheduleAccess.status === "grace").length;
+  const moneyOverdue = rows.filter((r) => r.daysOverdue > 0).length;
+
+  // Ladder step counts (separate from ACCESS_AUTO_CAP) — additive table may be empty pre-migration.
+  let ladderByEnrollment = new Map<string, number>();
+  try {
+    const { listLadderStepCounts } = await import("@/lib/sms/installmentLadderStore");
+    ladderByEnrollment = await listLadderStepCounts(rows.map((r) => r.enrollmentId));
+  } catch {
+    ladderByEnrollment = new Map();
+  }
+
+  const rowsWithLadder = rows.map((r) => ({
+    ...r,
+    ladderUsed: ladderByEnrollment.get(r.enrollmentId) ?? 0,
+    ladderCap: 5,
+  }));
+
   return {
     ok: true as const,
-    rows,
+    rows: rowsWithLadder,
     grants: activeGrants,
     paymentFailureTotals: failureScan.totals,
     indefiniteOverrides: overrides.filter((o) => o.mode === "grant" && !o.expires_at).length,
     listMeta: {
-      total: rows.length,
-      remindEnabled: rows.filter((r) => r.remindEnabled).length,
-      notActionable: rows.filter((r) => !r.remindEnabled).length,
+      total: rowsWithLadder.length,
+      remindEnabled: rowsWithLadder.filter((r) => r.remindEnabled).length,
+      notActionable: rowsWithLadder.filter((r) => !r.remindEnabled).length,
+      genuinelyBlocked: blocked,
+      genuinelyGrace: grace,
+      moneyOverdueAligned: moneyOverdue,
+      note: "Counts from lectureAccessForCourse only (no due-date heuristics).",
     },
     automation: {
       killSwitch: settings.killSwitch,
