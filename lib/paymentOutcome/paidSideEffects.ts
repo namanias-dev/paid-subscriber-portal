@@ -64,7 +64,7 @@ export async function runPaidTerminalSideEffects(
 
   // Stop access/installment reminder automation the moment money clears.
   try {
-    const { stopRemindersOnPaid } = await import("../accessActions");
+    const { stopRemindersOnPaid } = await import("../accessReminderStop");
     await stopRemindersOnPaid({
       phone: payment.phone,
       enrollmentId: payment.enrollment_id ?? null,

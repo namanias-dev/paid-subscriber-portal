@@ -12,9 +12,8 @@ import {
 } from "./dataProvider";
 import { validateAccessGrant, ACCESS_GRANT_MAX_DAYS_DEFAULT } from "./accessOverridePolicy";
 import { appendStudentAccessEvent } from "./studentAccessEvents";
-import { sendAccessReminderOne } from "./sms/accessReminderSend";
+import { pauseReminderStreak } from "./sms/installmentReminderStreak";
 import { getSupabaseAdmin } from "./supabase";
-import { pauseReminderStreak, clearReminderStreak } from "./sms/installmentReminderStreak";
 
 export type AccessActionActor = { id: string | null; name: string };
 
@@ -122,6 +121,7 @@ export async function remindCourseAccess(input: {
   | { ok: true; logId: string | null; followUpScheduled: boolean }
   | { ok: false; error: string; reason?: string | null }
 > {
+  const { sendAccessReminderOne } = await import("./sms/accessReminderSend");
   const result = await sendAccessReminderOne({
     enrollmentId: input.enrollmentId,
     actorUserId: input.actor.id,
@@ -210,20 +210,3 @@ export async function createCollectionsCallTask(input: {
 }
 
 export { ACCESS_GRANT_MAX_DAYS_DEFAULT };
-
-/** Stop daily reminder streak when installment is paid (called from PAID side effects). */
-export async function stopRemindersOnPaid(input: {
-  phone: string;
-  enrollmentId?: string | null;
-  courseId?: string | null;
-}): Promise<void> {
-  await clearReminderStreak({
-    courseEnrollmentId: input.enrollmentId ?? null,
-    phone: input.phone,
-    courseId: input.courseId ?? null,
-  });
-  const { cancelPendingFollowUpsForEnrollment } = await import("./sms/installmentFollowUp");
-  if (input.enrollmentId) {
-    await cancelPendingFollowUpsForEnrollment(input.enrollmentId, "installment_paid").catch(() => undefined);
-  }
-}
