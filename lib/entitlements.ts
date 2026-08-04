@@ -267,17 +267,21 @@ function recordingCourseIds(rec: Pick<ContentItem, "course_ids" | "course_id">):
 }
 
 /**
- * Earliest OUTSTANDING installment that has a due date — the binding constraint
- * for EMI/seat access. Cancelled/waived lines are skipped (they're not owed).
+ * Earliest OUTSTANDING installment that actually gates access:
+ * unpaid, not cancelled/waived, has a due date, and amount > 0.
+ *
+ * ₹0 / null-amount lines and due=null legacy lines must NOT gate —
+ * they are treated as satisfied for access (rows left untouched).
  * `grace`, when present, is an explicit grace-end fed into the SAME 15-day window.
  */
-function earliestUnpaidDue(enrollment: CourseEnrollment): { due: number; amount: number; grace: number | null } | null {
+function earliestUnpaidDue(enrollment: CourseEnrollment): { due: number; amount: number; grace: number | null; no: number } | null {
   const items = (enrollment.schedule || [])
-    .filter((i) => isLineOutstanding(i) && i.due)
+    .filter((i) => isLineOutstanding(i) && i.due && (Number(i.amount) || 0) > 0)
     .map((i) => ({
       due: Date.parse(i.due as string) || 0,
-      amount: i.amount,
+      amount: Number(i.amount) || 0,
       grace: i.grace ? (Date.parse(i.grace) || null) : null,
+      no: i.no,
     }))
     .filter((i) => i.due > 0)
     .sort((a, b) => a.due - b.due);

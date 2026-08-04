@@ -83,10 +83,10 @@ export function classifyAccessAtRisk(input: {
   return { onList: true, kind, scheduleStatus, inactionReason: null };
 }
 
-/** Next unpaid dated installment (installment/seat/full), for staff copy. */
+/** Next unpaid dated installment with amount > 0 (installment/seat/full), for staff copy. */
 export function nextUnpaidDatedLine(schedule: InstallmentItem[] | null | undefined): InstallmentItem | null {
   const items = (schedule || [])
-    .filter((s) => !s.paid && s.status !== "cancelled" && s.status !== "waived" && s.due)
+    .filter((s) => !s.paid && s.status !== "cancelled" && s.status !== "waived" && s.due && (Number(s.amount) || 0) > 0)
     .slice()
     .sort((a, b) => Date.parse(a.due as string) - Date.parse(b.due as string));
   return items[0] ?? null;
