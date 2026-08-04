@@ -319,6 +319,11 @@ export interface EazypayVerifyHints {
   ezpaytranid?: string | null;
   amount?: number | string | null;
   paymentmode?: string | null;
+  /**
+   * @deprecated Ignored. Sending trandate makes ICICI return NotInitiated for
+   * settled payments (false EXPIRED). Kept on the type for callers that still
+   * pass it — eazypayVerify always blanks it.
+   */
   trandate?: string | null;
   timeoutMs?: number;
 }
@@ -469,6 +474,10 @@ export async function eazypayVerify(
   // Full parameter set per the ICICI doc. Primary lookup is by our own
   // pgreferenceno; the rest are sent when known and left blank otherwise (the
   // doc allows blanks for a reference-based lookup). dstatus is optional.
+  //
+  // CRITICAL: never send `trandate`. Empirically (2026-08-04) any trandate
+  // value makes EazyPGVerify return status=NotInitiated for settled Success
+  // rows, which falsely EXPIRE real payments after callback stores the date.
   const blankOr = (v: unknown) => (v === null || v === undefined || v === "" ? "" : String(v).trim());
   const qs = new URLSearchParams({
     merchantid: getMerchantId(),
@@ -476,7 +485,7 @@ export async function eazypayVerify(
     ezpaytranid: blankOr(opts?.ezpaytranid),
     amount: blankOr(opts?.amount),
     paymentmode: blankOr(opts?.paymentmode),
-    trandate: blankOr(opts?.trandate),
+    trandate: "", // intentionally blank — see comment above (opts.trandate ignored)
   });
   const dstatus = getVerifyDstatus();
   if (dstatus) qs.set("dstatus", dstatus);

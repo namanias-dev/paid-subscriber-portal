@@ -3027,7 +3027,7 @@ async function decidePaymentOutcome(
     ezpaytranid: row.gateway_ref,
     amount: row.amount,
     paymentmode: row.payment_mode,
-    trandate: row.transaction_date,
+    // never pass trandate — ICICI returns false NotInitiated (see eazypayVerify)
   });
   if (live.reachable) {
     return {

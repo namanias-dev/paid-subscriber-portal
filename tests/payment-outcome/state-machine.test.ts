@@ -32,6 +32,7 @@ describe("mapVerifyStatus", () => {
   });
   it("FAILED → failed", () => assert.equal(mapVerifyStatus("FAILED"), "failed"));
   it("NotInitiated → expired", () => assert.equal(mapVerifyStatus("NotInitiated"), "expired"));
+  it("Success → paid (ICICI settled token)", () => assert.equal(mapVerifyStatus("Success"), "paid"));
 });
 
 describe("7 integrity cases", () => {

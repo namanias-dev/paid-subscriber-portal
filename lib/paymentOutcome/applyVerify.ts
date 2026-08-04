@@ -101,11 +101,15 @@ export async function applyVerifyForReference(
   if (opts.precomputed) {
     live = opts.precomputed;
   } else {
+    // ICICI EazyPGVerify returns status=NotInitiated when `trandate` is sent
+    // (any format), even for settled Success/RIP rows. Empirically confirmed
+    // 2026-08-04: reference-only → Success; +trandate → NotInitiated → false EXPIRED.
+    // Never pass trandate. Optional ezpaytranid/amount/paymentmode are safe alone.
     live = await eazypayVerify(ref, {
       ezpaytranid: row.gateway_ref,
       amount: row.amount,
       paymentmode: row.payment_mode,
-      trandate: row.transaction_date,
+      // trandate intentionally omitted — see above
     });
   }
 
@@ -214,7 +218,8 @@ export async function applyVerifyForReference(
         tgLog("payment_confirm_failed", { ref, error: (e as Error).message }, "warn"),
       );
     } else {
-      // Backfill: supersede siblings + status analytics; no student SMS/TG alerts.
+      // Backfill / bulk reconcile: still supersede + analytics; no student SMS/TG.
+      // Course finalize + ensureBuyer already ran above.
       const { supersedeUnpaidSiblings } = await import("../paymentSupersede");
       const { recordPaymentStatusChanged } = await import("../analytics/server");
       await recordPaymentStatusChanged(fresh, "PAID", "verify_backfill").catch(() => {});

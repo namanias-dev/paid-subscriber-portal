@@ -40,6 +40,7 @@ export async function POST(req: Request) {
     limit: typeof body.limit === "number" ? Math.min(Math.max(body.limit, 1), 1000) : 500,
     storedOnly: body.storedOnly === true,
     withDetails: body.withDetails === true,
+    silentStudentNotify: body.silentStudentNotify === true,
     actor: actor ? { id: actor.id, name: actor.name, role: actor.role, isSuper: actor.isSuper } : null,
   };
 
