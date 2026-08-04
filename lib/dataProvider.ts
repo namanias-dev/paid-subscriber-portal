@@ -3008,6 +3008,10 @@ export interface ReverifyOptions {
   actor?: ReverifyActor | null;
   /** Skip student SMS/Telegram (90d backfill). Ops summary handled by caller. */
   silentStudentNotify?: boolean;
+  /** Inclusive lower bound on payments.created_at (ISO). */
+  createdAfter?: string;
+  /** Inclusive upper bound on payments.created_at (ISO). */
+  createdBefore?: string;
 }
 
 /**
@@ -3126,6 +3130,8 @@ export async function reverifyPayments(opts: ReverifyOptions = {}): Promise<Reve
     const statuses = (opts.statuses ?? NONPAID_STATUSES).filter((s) => !PAID_STATUSES.includes(s));
     query = query.in("status", statuses).in("item_type", itemTypes);
   }
+  if (opts.createdAfter) query = query.gte("created_at", opts.createdAfter);
+  if (opts.createdBefore) query = query.lte("created_at", opts.createdBefore);
   const { data } = await query;
   let rows = (data as Payment[] | null) ?? [];
   // Hard guard: never operate on a paid row, even if asked by reference.
@@ -3144,8 +3150,12 @@ export async function reverifyPayments(opts: ReverifyOptions = {}): Promise<Reve
       continue;
     }
     // Sole terminal writer — shared with QStash worker + callback follow-up.
+    // fromReverify is ALWAYS true here: admin button, cron backstop, bulk sweeps.
+    // Failure Telegram cannot bypass this — it is not an optional caller flag.
     const { applyVerifyForReference } = await import("./paymentOutcome");
     const applied = await applyVerifyForReference(row.reference_no, {
+      fromReverify: true,
+      // PAID flips still notify unless caller explicitly silences (rare backfill).
       silentStudentNotify: opts.silentStudentNotify === true,
       actor: opts.actor,
     });

@@ -262,3 +262,49 @@ export async function backfillSupersession(opts: { apply: boolean }): Promise<Ba
 
   return report;
 }
+
+/**
+ * Mark a redundant PAID row as a reconcile-duplicate of the kept gateway-truth
+ * PAID row. Does NOT change status (PAID guard untouched). Idempotent.
+ */
+export async function markPaidDuplicateOf(
+  redundant: Payment,
+  keep: Payment,
+  reason: string,
+  actor: SupersedeActor = SYSTEM_ACTOR,
+): Promise<{ ok: boolean; error?: string }> {
+  const db = getSupabaseAdmin();
+  if (!db) return { ok: false, error: "no_db" };
+  if (!isPaidStatus(redundant.status) || !isPaidStatus(keep.status)) {
+    return { ok: false, error: "both_must_be_paid" };
+  }
+  if (redundant.id === keep.id) return { ok: false, error: "same_row" };
+  if (redundant.duplicate_of_payment_id === keep.id) return { ok: true };
+
+  const { error } = await db
+    .from("payments")
+    .update({
+      duplicate_of_payment_id: keep.id,
+      duplicate_reconciled_at: nowISO(),
+      duplicate_reconcile_reason: reason.slice(0, 500),
+    })
+    .eq("id", redundant.id)
+    .eq("status", redundant.status); // status unchanged; equality only
+
+  if (error) return { ok: false, error: error.message };
+
+  await logLedger(db, {
+    action: "supersede",
+    payment: redundant,
+    actor,
+    reason: reason.slice(0, 500),
+    metadata: {
+      kind: "paid_duplicate_reconcile",
+      duplicate_of_payment_id: keep.id,
+      keep_reference_no: keep.reference_no,
+      redundant_reference_no: redundant.reference_no,
+    },
+  });
+  return { ok: true };
+}
+

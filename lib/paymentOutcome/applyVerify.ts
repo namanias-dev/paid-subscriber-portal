@@ -22,6 +22,12 @@ function demoMode(): boolean {
 export interface ApplyVerifyOptions {
   /** Skip student SMS/Telegram and per-order ops payment alerts (backfill). */
   silentStudentNotify?: boolean;
+  /**
+   * Set by reverifyPayments (admin button, cron backstop, bulk). Suppresses
+   * FAILED/EXPIRED Telegram + payment_failed SMS. PAID flips still notify
+   * unless silentStudentNotify. Live QStash/callback verify must leave this false.
+   */
+  fromReverify?: boolean;
   /** Skip live ICICI call — use provided result (tests). */
   precomputed?: EazypayVerifyResult | null;
   actor?: { id: string; name: string | null; role: string | null; isSuper: boolean } | null;
@@ -213,7 +219,7 @@ export async function applyVerifyForReference(
     }
     if (!opts.silentStudentNotify) {
       const { recordPaymentPaid } = await import("../analytics/server");
-      await recordPaymentPaid(fresh, "verify").catch(() => {});
+      await recordPaymentPaid(fresh, opts.fromReverify ? "reverify" : "verify").catch(() => {});
       await notifyPaymentConfirmedOnce(fresh).catch((e) =>
         tgLog("payment_confirm_failed", { ref, error: (e as Error).message }, "warn"),
       );
@@ -229,7 +235,9 @@ export async function applyVerifyForReference(
   } else if (newlyPaid && (target === "FAILED" || target === "EXPIRED")) {
     const { getPaymentByReference } = await import("../dataProvider");
     const fresh = (await getPaymentByReference(ref)) || row;
-    if (!opts.silentStudentNotify && target === "FAILED") {
+    // Reverify path: never flood ops Telegram / payment_failed SMS for historical
+    // FAILED discoveries. Live QStash verify (fromReverify unset) still alerts.
+    if (!opts.silentStudentNotify && !opts.fromReverify && target === "FAILED") {
       const { recordPaymentStatusChanged } = await import("../analytics/server");
       await recordPaymentStatusChanged(fresh, "FAILED", "verify").catch(() => {});
     }

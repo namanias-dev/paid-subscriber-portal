@@ -1,5 +1,5 @@
 import { getSupabaseAdmin } from "./supabase";
-import { recordPaymentPaid, recordStaffReview, recordProofUploaded } from "./analytics/server";
+import { recordStaffReview, recordProofUploaded } from "./analytics/server";
 import {
   getPaymentById,
   getPaymentByReference,
@@ -577,9 +577,16 @@ export async function acceptPaymentManually(
     }
   };
 
-  // Idempotent: already paid -> ensure proof reflects it, no re-grant.
+  // Idempotent: already paid -> ensure proof reflects it; still complete notify
+  // if the historic proof path never claimed payment_confirmed_notified_at.
   if (isPaidStatus(payment.status)) {
     await markProofAccepted();
+    try {
+      const { notifyPaymentConfirmedOnce } = await import("./paymentOutcome/confirmOnce");
+      await notifyPaymentConfirmedOnce(payment);
+    } catch {
+      /* already notified or best-effort */
+    }
     return { ok: true, alreadyPaid: true };
   }
 
@@ -603,9 +610,21 @@ export async function acceptPaymentManually(
   await bumpBuyerSessionVersion(r.phone).catch(() => null);
 
   await markProofAccepted();
-  // Analytics (best-effort, idempotent): the manual accept is a PAID milestone +
-  // a staff decision. recordPaymentPaid dedupes against any later cron/callback.
-  void recordPaymentPaid({ ...payment, status: "PAID" }, "staff").catch(() => {});
+  // Same PAID side-effect completion as ICICI Verify: analytics chokepoint +
+  // guaranteed student confirmation SMS (notifyPaymentConfirmedOnce). fireAutoSms
+  // alone can no-op on missing login_code; confirmOnce is the reliable student path.
+  try {
+    const { recordPaymentPaid } = await import("./analytics/server");
+    await recordPaymentPaid({ ...payment, status: "PAID" }, "staff");
+  } catch {
+    /* best-effort */
+  }
+  try {
+    const { notifyPaymentConfirmedOnce } = await import("./paymentOutcome/confirmOnce");
+    await notifyPaymentConfirmedOnce({ ...payment, status: "PAID" });
+  } catch {
+    /* best-effort — never roll back PAID */
+  }
   void recordStaffReview(payment, "approved", opts.adminId, opts.note ?? null).catch(() => {});
   return { ok: true };
 }

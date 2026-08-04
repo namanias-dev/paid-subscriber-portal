@@ -41,6 +41,8 @@ export async function POST(req: Request) {
     storedOnly: body.storedOnly === true,
     withDetails: body.withDetails === true,
     silentStudentNotify: body.silentStudentNotify === true,
+    createdAfter: typeof body.createdAfter === "string" ? body.createdAfter : undefined,
+    createdBefore: typeof body.createdBefore === "string" ? body.createdBefore : undefined,
     actor: actor ? { id: actor.id, name: actor.name, role: actor.role, isSuper: actor.isSuper } : null,
   };
 

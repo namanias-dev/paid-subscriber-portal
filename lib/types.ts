@@ -1512,6 +1512,10 @@ export interface Payment {
   superseded_by_payment_id?: string | null;
   superseded_at?: string | null;
   superseded_reason?: string | null;
+  // --- Duplicate PAID reconcile (proof vs gateway). Status stays PAID; guard intact. ---
+  duplicate_of_payment_id?: string | null;
+  duplicate_reconciled_at?: string | null;
+  duplicate_reconcile_reason?: string | null;
   // --- Late-registration migration (webinar): item_slug is re-pointed to the
   // target webinar so portal access follows; these preserve the original linkage
   // + who/when/why. No revenue is duplicated — the same row simply moves. ---

@@ -83,6 +83,27 @@ export async function notifyPaymentConfirmedOnce(p: Payment): Promise<boolean> {
   const n = normalizeIndianMobile(p.phone);
   const mobile = n.ok && n.digits10 ? n.digits10 : (p.phone || "").replace(/\D/g, "").slice(-10);
 
+  // Resolve login_code the same way fireAutoSms does — payment_successful requires it.
+  let loginCode = "";
+  try {
+    const { resolveBuyerByPhone, firstNamesMatch } = await import("../sms/store");
+    if (mobile) {
+      const r = await resolveBuyerByPhone(mobile);
+      if (r.status === "ok" && r.login_code && firstNamesMatch(p.student_name, r.name)) {
+        loginCode = r.login_code;
+      } else if (r.status === "ok" && r.login_code && !p.student_name) {
+        loginCode = r.login_code;
+      }
+    }
+  } catch {
+    /* leave empty — missing_vars fails closed */
+  }
+
+  // Same dedupe shape as fireAutoSms(payment_success) so analytics + confirmOnce
+  // cannot deliver two payment_successful SMS for one PAID transition.
+  const entityId = p.reference_no || p.id;
+  const dedupeKey = `payment_success:payment_successful:${mobile || p.phone}:${entityId}`;
+
   // SMS via existing template path when possible; fall back to payment_successful.
   let smsOk = false;
   for (let attempt = 1; attempt <= 3; attempt++) {
@@ -95,6 +116,7 @@ export async function notifyPaymentConfirmedOnce(p: Payment): Promise<boolean> {
           item_short: p.item || "",
           amount: String(p.amount),
           payment_status: "PAID",
+          login_code: loginCode,
           // Extra free-text if template supports — body still from template.
           custom_message: body,
         },
@@ -102,8 +124,14 @@ export async function notifyPaymentConfirmedOnce(p: Payment): Promise<boolean> {
         triggerEvent: TRIGGERS.payment_success,
         relatedEntity: { payment_id: p.id, student_name: p.student_name },
         allowRecentOverride: true,
+        dedupeKey,
       });
       if (res.ok) {
+        smsOk = true;
+        break;
+      }
+      // Already sent via fireAutoSms / prior confirm — treat as success for the claim.
+      if (res.skipped === "duplicate" || res.skipped === "dedupe" || /duplicate|dedupe/i.test(String(res.error || res.skipped || ""))) {
         smsOk = true;
         break;
       }
