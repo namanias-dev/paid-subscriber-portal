@@ -166,7 +166,7 @@ export default function AccessRiskAdmin() {
 
   return (
     <div>
-      <PageHeader title="Access at Risk" subtitle="Schedule lens — blocked/grace students stay visible even when a temporary grant is holding access open." />
+      <PageHeader title="Access at Risk" subtitle="Overdue / grace — % paid, days overdue, auto follow-ups (N/5), locked Y/N, ₹ outstanding. Read-only on access rules." />
       <AtRiskTabs active="access" />
 
       <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-5">
@@ -287,6 +287,11 @@ export default function AccessRiskAdmin() {
                   <td className="px-4 py-3 text-xs">
                     <div>{r.progressLabel}</div>
                     <div className="text-muted">{formatINR(r.amountPaid)} / {formatINR(r.totalFee)}</div>
+                    <div className="tabular-nums text-muted">
+                      {r.totalFee > 0 ? `${Math.round((r.amountPaid / r.totalFee) * 100)}% paid` : "—"}
+                      {" · "}
+                      locked {r.access?.allowed === false || r.scheduleAccess?.status === "blocked" ? "Y" : "N"}
+                    </div>
                   </td>
                   <td className="px-4 py-3 font-semibold">{formatINR(r.amountDue)}</td>
                   <td className="px-4 py-3">

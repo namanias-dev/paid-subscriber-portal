@@ -92,6 +92,7 @@ import type {
   Announcement,
 } from "./types";
 import { deriveEnrollment, enrollmentStatusFromSchedule, installmentsSummary, planCourseEnrollment, resolveEmiConfig, isLineCancelledOrWaived, isLineOutstanding, isActiveEnrollment, isAttemptEnrollment } from "./installments";
+import { findOldestOutstandingIndex } from "./installmentAllocation";
 import { scheduleAsCheckoutIntent } from "./enrollmentScope";
 import { materializeScheduleDues, needsDueMaterialization } from "./scheduleDues";
 import { resolveEnrollmentBatchStart } from "./batchStart";
@@ -4553,12 +4554,20 @@ export async function finalizeCoursePaymentByReference(
     // Pay full / pay remaining: settle every outstanding line in one payment.
     schedule.forEach((s, i) => { if (!s.paid) markPaid(i); });
     paymentLabel = enrollment.plan_type === "full" ? "Full Payment" : "Full Remaining Payment";
-  } else {
-    const idx = schedule.findIndex((s) => s.no === (payment.installment_no ?? (kind === "seat" ? 0 : -1)) && !s.paid);
-    const fallbackIdx = idx === -1 ? schedule.findIndex((s) => s.kind === kind && !s.paid) : idx;
+  } else if (kind === "seat") {
+    // Seat stays exact-match (or first unpaid seat) — not mixed with EMI lines.
+    const idx = schedule.findIndex((s) => s.no === (payment.installment_no ?? 0) && s.kind === "seat" && !s.paid);
+    const fallbackIdx = idx === -1 ? schedule.findIndex((s) => s.kind === "seat" && !s.paid) : idx;
     if (fallbackIdx >= 0) {
       markPaid(fallbackIdx);
       paymentLabel = schedule[fallbackIdx].label;
+    }
+  } else {
+    // Instalments: oldest outstanding first (due, then no) — ignore stamped installment_no for clearing.
+    const oldestIdx = findOldestOutstandingIndex(schedule, "installment");
+    if (oldestIdx >= 0) {
+      markPaid(oldestIdx);
+      paymentLabel = schedule[oldestIdx].label;
     }
   }
 
@@ -4802,10 +4811,16 @@ export async function recordOfflineCoursePayment(
     installmentNo = item.no;
     label = item.label;
   } else {
-    const item =
+    // Prefer explicit admin pick for the *amount*; clearing still uses oldest-first in finalize.
+    // When no pick, stamp the oldest outstanding line (due, then no).
+    let item =
       input.installmentNo != null
         ? schedule.find((s) => s.kind === "installment" && s.no === input.installmentNo && !s.paid)
-        : schedule.find((s) => s.kind === "installment" && !s.paid);
+        : null;
+    if (!item) {
+      const idx = findOldestOutstandingIndex(schedule, "installment");
+      item = idx >= 0 ? schedule[idx] : undefined;
+    }
     if (!item) return { ok: false, error: "No outstanding installment to record." };
     amount = item.amount;
     installmentNo = item.no;
@@ -4930,8 +4945,14 @@ function applyPaidPaymentToSchedule(schedule: InstallmentItem[], payment: Paymen
     schedule.forEach((s, i) => { if (!s.paid && !isLineCancelledOrWaived(s)) mark(i); });
     return;
   }
-  const exact = schedule.findIndex((s) => s.no === (payment.installment_no ?? (kind === "seat" ? 0 : -1)) && !s.paid && !isLineCancelledOrWaived(s));
-  const idx = exact === -1 ? schedule.findIndex((s) => s.kind === kind && !s.paid && !isLineCancelledOrWaived(s)) : exact;
+  if (kind === "seat") {
+    const exact = schedule.findIndex((s) => s.no === (payment.installment_no ?? 0) && s.kind === "seat" && !s.paid && !isLineCancelledOrWaived(s));
+    const idx = exact === -1 ? schedule.findIndex((s) => s.kind === "seat" && !s.paid && !isLineCancelledOrWaived(s)) : exact;
+    if (idx >= 0) mark(idx);
+    return;
+  }
+  // Instalments: oldest outstanding first — stamped installment_no is audit-only.
+  const idx = findOldestOutstandingIndex(schedule, "installment");
   if (idx >= 0) mark(idx);
 }
 
