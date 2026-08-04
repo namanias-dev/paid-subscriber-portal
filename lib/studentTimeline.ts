@@ -587,6 +587,11 @@ const ACCESS_ACTION_TITLES: Record<string, string> = {
   call_task_created: "Call task created",
   access_blocked: "Access blocked",
   access_restored: "Access restored",
+  proof_uploaded: "Payment proof uploaded",
+  proof_approved: "Payment proof approved",
+  proof_rejected: "Payment proof rejected",
+  proof_superseded: "Payment proof superseded",
+  provisional_access_granted: "Provisional access granted",
 };
 
 /** Unified student_access_events → timeline (actor system | staff). */

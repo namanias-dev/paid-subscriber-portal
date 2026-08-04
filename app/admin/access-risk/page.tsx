@@ -13,6 +13,7 @@ import { ACCESS_AUTO_CAP_PER_INSTALLMENT } from "@/lib/sms/accessReminderConstan
 import { ACCESS_GRANT_MAX_DAYS_DEFAULT } from "@/lib/accessOverridePolicy";
 import { formatINR } from "@/lib/dates";
 import AccessRiskSummary from "@/components/admin/access/AccessRiskSummary";
+import InstallmentProofReviewPanel from "@/components/admin/access/InstallmentProofReviewPanel";
 
 interface RiskRow {
   enrollmentId: string;
@@ -51,10 +52,17 @@ interface RiskRow {
   verifyingStuck: number;
   remindEnabled?: boolean;
   inactionReason?: string | null;
+  pendingProof?: {
+    id: string;
+    filesCount: number;
+    submittedAt: string;
+    ageMinutes: number;
+  } | null;
 }
 
 interface AccessRiskPayload {
   rows: RiskRow[];
+  pendingProofCount?: number;
   paymentFailureTotals: {
     failedStudents: number; verifyingStuckStudents: number; failedRows: number; verifyingStuckRows: number;
   };
@@ -86,7 +94,7 @@ interface AccessRiskPayload {
   };
 }
 
-type SortKey = "days_overdue" | "pct_paid" | "amount_due" | "course" | "name" | "contacted";
+type SortKey = "days_overdue" | "pct_paid" | "amount_due" | "course" | "name" | "contacted" | "oldest_pending";
 
 const STATUS_PILL: Record<string, string> = { blocked: "pill-red", grace: "pill-amber", expiring: "pill-amber" };
 
@@ -95,6 +103,14 @@ function pctTone(pct: number): string {
   if (pct < 50) return "text-amber-700 font-semibold";
   if (pct < 75) return "text-ink2";
   return "text-emerald-700";
+}
+
+function proofAgeLabel(minutes: number): string {
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
 }
 
 function csvEscape(v: string | number | null | undefined): string {
@@ -114,6 +130,7 @@ export default function AccessRiskAdmin() {
   const [grantTarget, setGrantTarget] = useState<RiskRow | null>(null);
   const [auditFor, setAuditFor] = useState<string | null>(null);
   const [auditEvents, setAuditEvents] = useState<{ created_at: string; event_type: string; actor: string | null; reason: string | null }[]>([]);
+  const [reviewTarget, setReviewTarget] = useState<RiskRow | null>(null);
   const [full, setFull] = useState<AccessRiskPayload | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -147,6 +164,7 @@ export default function AccessRiskAdmin() {
     else if (filter === "payment_fail") rows = rows.filter((r) => r.paymentFailures >= 2 || r.verifyingStuck > 0);
     else if (filter === "uncontacted") rows = rows.filter((r) => !r.lastContactAt && !r.lastRemindedAt);
     else if (filter === "contacted") rows = rows.filter((r) => !!(r.lastContactAt || r.lastRemindedAt));
+    else if (filter === "proof_uploaded") rows = rows.filter((r) => !!r.pendingProof);
     if (courseFilter) rows = rows.filter((r) => r.courseId === courseFilter);
 
     const mul = sortAsc ? 1 : -1;
@@ -161,6 +179,14 @@ export default function AccessRiskAdmin() {
           const bc = b.lastContactAt || b.lastRemindedAt || "";
           return mul * ac.localeCompare(bc);
         }
+        case "oldest_pending": {
+          const ap = a.pendingProof?.submittedAt || "";
+          const bp = b.pendingProof?.submittedAt || "";
+          if (!ap && !bp) return 0;
+          if (!ap) return 1;
+          if (!bp) return -1;
+          return ap.localeCompare(bp);
+        }
         default: return mul * (a.daysOverdue - b.daysOverdue);
       }
     });
@@ -172,6 +198,7 @@ export default function AccessRiskAdmin() {
   const grantCount = listSource.filter((r) => !!r.grant).length;
   const notActionable = listSource.filter((r) => !r.remindEnabled).length;
   const uncontacted = listSource.filter((r) => !r.lastContactAt && !r.lastRemindedAt).length;
+  const pendingProofCount = full?.pendingProofCount ?? listSource.filter((r) => r.pendingProof).length;
   const totalDue = listSource.reduce((s, r) => s + (r.amountDue || 0), 0);
 
   // Every filtered row is selectable (grey-row fix — remindEnabled no longer gates checkboxes).
@@ -353,6 +380,13 @@ export default function AccessRiskAdmin() {
       <PageHeader
         title="Access at Risk"
         subtitle="Lectures = live playback (grant wins). Schedule = money risk (ignores grant). Bulk actions use unified handlers."
+        action={
+          pendingProofCount > 0 ? (
+            <span className="inline-flex items-center rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-900">
+              {pendingProofCount} proof{pendingProofCount === 1 ? "" : "s"} awaiting review
+            </span>
+          ) : undefined
+        }
       />
       {full?.summary && <AccessRiskSummary summary={full.summary} />}
       <AtRiskTabs active="access" />
@@ -383,6 +417,7 @@ export default function AccessRiskAdmin() {
           ["uncontacted", `Uncontacted (${uncontacted})`],
           ["contacted", "Contacted"],
           ["not_actionable", `Remind blocked (${notActionable})`],
+          ["proof_uploaded", `Proof uploaded (${pendingProofCount})`],
         ] as const).map(([f, label]) => (
           <button key={f || "all"} onClick={() => setFilter(f)} className={`pill ${filter === f ? "pill-blue" : "pill-gray"}`}>
             {label}
@@ -411,6 +446,7 @@ export default function AccessRiskAdmin() {
           <option value="course">Sort: course</option>
           <option value="name">Sort: name</option>
           <option value="contacted">Sort: last contact</option>
+          <option value="oldest_pending">Sort: oldest pending proof</option>
         </select>
         <button onClick={() => setSortAsc((v) => !v)} className="pill pill-gray">{sortAsc ? "Asc" : "Desc"}</button>
         <button onClick={exportCsv} className="pill pill-gray">CSV export</button>
@@ -471,6 +507,11 @@ export default function AccessRiskAdmin() {
                     <div className="text-xs text-muted">{r.phone}</div>
                     {r.inactionReason && !r.remindEnabled && (
                       <div className="mt-0.5 text-[10px] font-semibold text-amber-800" title={r.inactionReason}>{r.inactionReason}</div>
+                    )}
+                    {r.pendingProof && (
+                      <span className="mt-1 inline-flex pill pill-amber text-[10px]">
+                        Proof · {r.pendingProof.filesCount} file{r.pendingProof.filesCount === 1 ? "" : "s"} · {proofAgeLabel(r.pendingProof.ageMinutes)}
+                      </span>
                     )}
                   </td>
                   <td className="px-3 py-3">
@@ -540,6 +581,15 @@ export default function AccessRiskAdmin() {
                         <button disabled={busy === r.enrollmentId} onClick={() => { setGrantTarget(r); setGrantReason(""); }} className="text-primary disabled:opacity-50">+{ACCESS_GRANT_MAX_DAYS_DEFAULT}d</button>
                       )}
                       <button type="button" onClick={() => void openAudit(r)} className="text-ink2">Audit</button>
+                      {r.pendingProof && (
+                        <button
+                          type="button"
+                          onClick={() => setReviewTarget(r)}
+                          className="font-semibold text-amber-800 hover:underline"
+                        >
+                          Review proof
+                        </button>
+                      )}
                       <a href={`tel:${r.phone}`} className="text-ink2">Call</a>
                     </div>
                   </td>
@@ -582,6 +632,19 @@ export default function AccessRiskAdmin() {
             </div>
           </div>
         </div>
+      )}
+
+      {reviewTarget?.pendingProof && (
+        <InstallmentProofReviewPanel
+          proofId={reviewTarget.pendingProof.id}
+          student={reviewTarget.student}
+          pctPaid={reviewTarget.pctPaid ?? (reviewTarget.totalFee > 0 ? Math.round((reviewTarget.amountPaid / reviewTarget.totalFee) * 100) : 0)}
+          amountPaid={reviewTarget.amountPaid}
+          totalFee={reviewTarget.totalFee}
+          amountDue={reviewTarget.amountDue}
+          onClose={() => setReviewTarget(null)}
+          onUpdated={() => { setReviewTarget(null); reload(); }}
+        />
       )}
 
       {auditFor && (

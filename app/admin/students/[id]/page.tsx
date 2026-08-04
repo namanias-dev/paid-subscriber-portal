@@ -43,6 +43,7 @@ import { useToast } from "@/components/ui/Toast";
 import { formatINR, formatISTDate, formatISTDateTime, isoToISTInput } from "@/lib/dates";
 import TransferModal from "@/components/admin/enrollments/TransferModal";
 import StudentHistory from "@/components/admin/students/StudentHistory";
+import InstallmentProofsSection from "@/components/admin/students/InstallmentProofsSection";
 import { resolveEmiConfig, payInFullTotal, planCourseEnrollment, installmentStatus, deriveEnrollment } from "@/lib/installments";
 import { downloadReceiptPdf, type ReceiptContact } from "@/lib/receiptPdf";
 import type { Student, PaymentReceipt, Course, Webinar, InstallmentItem, PaymentPlan } from "@/lib/types";
@@ -695,6 +696,19 @@ export default function StudentProfilePage({ params }: { params: { id: string } 
       </Card>
 
       {/* ---------------- PAYMENTS LEDGER ---------------- */}
+      <Card title="Installment payment proofs" icon={<Receipt size={17} />}>
+        <InstallmentProofsSection
+          phone={s.phone}
+          studentName={s.name}
+          pctPaid={profile.totals.totalPaid > 0 && profile.totals.outstanding + profile.totals.totalPaid > 0
+            ? Math.round((profile.totals.totalPaid / (profile.totals.totalPaid + profile.totals.outstanding)) * 100)
+            : 0}
+          amountPaid={profile.totals.totalPaid}
+          totalFee={profile.totals.totalPaid + profile.totals.outstanding}
+          amountDue={profile.totals.outstanding}
+        />
+      </Card>
+
       <Card title="Payments ledger" icon={<Receipt size={17} />}>
         {profile.ledger.length === 0 ? (
           <Empty>No payments recorded yet.</Empty>

@@ -109,6 +109,13 @@ export function paymentProofKey(paymentId: string, fileId: string, ext: string):
   return `payment-proofs/${paymentId || "_"}/${fileId}.${safeExt}`;
 }
 
+/** Private key for installment payment-proof files (claims — not payment rows). */
+export function installmentProofKey(studentId: string, installmentNo: number, fileId: string, ext: string): string {
+  const safeExt = (ext || "").replace(/[^a-z0-9]/gi, "").toLowerCase() || "bin";
+  const sid = (studentId || "_").replace(/[^a-zA-Z0-9_-]/g, "") || "_";
+  return `installment-proofs/${sid}/${installmentNo}/${fileId}.${safeExt}`;
+}
+
 /**
  * Public media asset (images, PDFs, brochures, covers, logos …). These replace
  * the old Supabase `media` bucket. Keys live under `media/` and are served via

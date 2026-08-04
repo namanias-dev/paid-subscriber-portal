@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import {
   CheckCircle2,
@@ -28,10 +28,12 @@ export default function CoursePaymentsPanel({
   enrollment,
   receipts,
   classHubHref,
+  initialInstallmentNo,
 }: {
   enrollment: CourseEnrollment;
   receipts: PaymentReceipt[];
   classHubHref: string | null;
+  initialInstallmentNo?: number | null;
 }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -43,11 +45,26 @@ export default function CoursePaymentsPanel({
 
   const d = deriveEnrollment(enrollment);
   const receiptByRef = new Map(receipts.map((r) => [r.reference_no, r]));
+  const deepLinkHandled = useRef(false);
 
   function askPay(action: "installment" | "full", amount: number, label: string, installmentNo?: number, key?: string) {
     setError(null);
     setCaution({ action, installmentNo, key: key || action, label, amount });
   }
+
+  useEffect(() => {
+    if (!initialInstallmentNo || deepLinkHandled.current) return;
+    const item = enrollment.schedule.find(
+      (i) =>
+        i.no === initialInstallmentNo &&
+        !i.paid &&
+        i.status !== "cancelled" &&
+        i.kind === "installment",
+    );
+    if (!item) return;
+    deepLinkHandled.current = true;
+    askPay("installment", item.amount, item.label, item.no, `i${item.no}`);
+  }, [initialInstallmentNo, enrollment.schedule]);
 
   async function pay(action: "installment" | "full", installmentNo?: number, key?: string) {
     setError(null);

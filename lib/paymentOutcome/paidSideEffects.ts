@@ -74,6 +74,18 @@ export async function runPaidTerminalSideEffects(
     tgLog("paid_side_effects_stop_reminders_failed", { ref, error: (e as Error).message }, "warn");
   }
 
+  // Supersede installment payment proofs (claims) when real money lands. Additive — never touches payments.
+  try {
+    const { supersedeProofsOnPaid } = await import("../installmentPaymentProofs");
+    await supersedeProofsOnPaid({
+      phone: payment.phone,
+      enrollmentId: payment.enrollment_id ?? null,
+      installmentNo: payment.installment_no ?? null,
+    });
+  } catch (e) {
+    tgLog("paid_side_effects_supersede_proofs_failed", { ref, error: (e as Error).message }, "warn");
+  }
+
   if (opts.silentStudentNotify) {
     const { supersedeUnpaidSiblings } = await import("../paymentSupersede");
     const { recordPaymentStatusChanged } = await import("../analytics/server");

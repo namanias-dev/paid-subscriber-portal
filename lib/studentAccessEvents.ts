@@ -12,7 +12,13 @@ export type StudentAccessEventType =
   | "extension_expired"
   | "call_task_created"
   | "access_blocked"
-  | "access_restored";
+  | "access_restored"
+  | "proof_uploaded"
+  | "proof_approved"
+  | "proof_rejected"
+  | "provisional_access_granted"
+  | "proof_superseded"
+  | "admin_flag";
 
 export interface AppendAccessEventInput {
   studentId?: string | null;

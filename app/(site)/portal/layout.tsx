@@ -3,6 +3,7 @@ import { getPlanChangeNoticesForPhone } from "@/lib/dataProvider";
 import { deriveEnrollment } from "@/lib/installments";
 import { getPrimaryAccessAwarenessForPhone } from "@/lib/accessAwarenessServer";
 import PaymentPlanNoticeModal, { type PlanChangeNotice } from "@/components/portal/PaymentPlanNoticeModal";
+import InstallmentProofPopupLazy from "@/components/portal/InstallmentProofPopupLazy";
 import AccessAwarenessBanner from "@/components/access/AccessAwarenessBanner";
 import type { AccessAwarenessBanner as AccessBannerData } from "@/lib/accessAwareness";
 
@@ -48,6 +49,7 @@ export default async function PortalLayout({ children }: { children: React.React
       )}
       {children}
       {notice && <PaymentPlanNoticeModal notice={notice} />}
+      <InstallmentProofPopupLazy />
     </>
   );
 }

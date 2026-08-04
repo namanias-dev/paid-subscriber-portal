@@ -9,7 +9,13 @@ import CoursePaymentsPanel from "@/components/portal/CoursePaymentsPanel";
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: "Course payments", robots: { index: false, follow: false } };
 
-export default async function PortalCoursePage({ params }: { params: { id: string } }) {
+export default async function PortalCoursePage({
+  params,
+  searchParams,
+}: {
+  params: { id: string };
+  searchParams?: { installment?: string };
+}) {
   const session = await getBuyerSession();
   if (!session) redirect(`/portal/login?next=${encodeURIComponent(`/portal/course/${params.id}`)}`);
 
@@ -30,6 +36,9 @@ export default async function PortalCoursePage({ params }: { params: { id: strin
   const allReceipts = await getReceiptsByPhone(session.phone);
   const receipts = allReceipts.filter((r) => r.enrollment_id === enrollment.id);
   const classHubHref = enrollment.amount_paid > 0 ? `/portal/class/${enrollment.course_id}` : null;
+  const installmentParam = searchParams?.installment;
+  const initialInstallmentNo =
+    installmentParam && /^\d+$/.test(installmentParam) ? Number(installmentParam) : null;
 
   return (
     <div className="container-wide section">
@@ -37,7 +46,12 @@ export default async function PortalCoursePage({ params }: { params: { id: strin
         <ArrowLeft size={16} /> Back to my portal
       </Link>
       <div className="mx-auto mt-4 max-w-2xl">
-        <CoursePaymentsPanel enrollment={enrollment} receipts={receipts} classHubHref={classHubHref} />
+        <CoursePaymentsPanel
+          enrollment={enrollment}
+          receipts={receipts}
+          classHubHref={classHubHref}
+          initialInstallmentNo={initialInstallmentNo}
+        />
       </div>
     </div>
   );

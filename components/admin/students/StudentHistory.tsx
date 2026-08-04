@@ -21,6 +21,7 @@ const FILTERS: { key: TimelineEventType | "all"; label: string }[] = [
   { key: "access_cap", label: "Access cap" },
   { key: "access_exclusion", label: "Access automation" },
   { key: "access_override", label: "Access grant" },
+  { key: "access_action", label: "Access / proofs" },
 ];
 
 function typePill(t: TimelineEventType): string {
@@ -33,6 +34,7 @@ function typePill(t: TimelineEventType): string {
     case "access_cap": return "pill-red";
     case "access_exclusion": return "pill-amber";
     case "access_override": return "pill-blue";
+    case "access_action": return "pill-amber";
     default: return "pill";
   }
 }

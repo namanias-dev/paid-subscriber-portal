@@ -274,10 +274,40 @@ async function buildAccessRiskPayload() {
     ladderByEnrollment = new Map();
   }
 
+  const pendingProofByEnrollment = new Map<
+    string,
+    { id: string; filesCount: number; submittedAt: string; ageMinutes: number }
+  >();
+  let pendingProofCount = 0;
+  if (db && riskIds.length) {
+    const { data: pendingProofs } = await db
+      .from("installment_payment_proofs")
+      .select("id, course_enrollment_id, submitted_at, files")
+      .eq("status", "pending")
+      .in("course_enrollment_id", riskIds);
+    for (const p of pendingProofs || []) {
+      pendingProofCount += 1;
+      const enrId = String(p.course_enrollment_id);
+      const submittedAt = String(p.submitted_at);
+      const ageMinutes = Math.max(0, Math.floor((now - new Date(submittedAt).getTime()) / 60_000));
+      const entry = {
+        id: String(p.id),
+        filesCount: Array.isArray(p.files) ? p.files.length : 0,
+        submittedAt,
+        ageMinutes,
+      };
+      const prev = pendingProofByEnrollment.get(enrId);
+      if (!prev || submittedAt < prev.submittedAt) {
+        pendingProofByEnrollment.set(enrId, entry);
+      }
+    }
+  }
+
   const rowsWithLadder = rows.map((r) => ({
     ...r,
     ladderUsed: ladderByEnrollment.get(r.enrollmentId) ?? 0,
     ladderCap: 5,
+    pendingProof: pendingProofByEnrollment.get(r.enrollmentId) ?? null,
   }));
 
   // Kept for API compat — UI no longer shows leakage report.
@@ -295,6 +325,7 @@ async function buildAccessRiskPayload() {
   return {
     ok: true as const,
     rows: rowsWithLadder,
+    pendingProofCount,
     summary,
     grants: activeGrants,
     paymentFailureTotals: failureScan.totals,
