@@ -5563,11 +5563,13 @@ export async function findRecentOpenPaymentForItem(
   return (data as Payment) ?? null;
 }
 
-/** Recent open payment attempt for a specific installment on an enrollment (dedupe). */
+/** Recent open payment attempt for a specific installment on an enrollment (dedupe).
+ * Window matches checkout-abandon (~30m): reuse INITIATED/PENDING/VERIFYING/UNCONFIRMED
+ * so rapid retries do not spawn a fourth EXPIRED row (Aayush pattern). */
 export async function findRecentOpenInstallmentPayment(
   enrollmentId: string,
   installmentNo: number,
-  withinMs = 120000,
+  withinMs = 30 * 60_000,
 ): Promise<Payment | null> {
   const id = (enrollmentId || "").trim();
   if (!id) return null;
@@ -5580,12 +5582,53 @@ export async function findRecentOpenInstallmentPayment(
     .eq("enrollment_id", id)
     .eq("installment_no", installmentNo)
     .is("deleted_at", null)
-    .in("status", ["INITIATED", "PENDING", "VERIFYING"])
+    .in("status", ["INITIATED", "PENDING", "VERIFYING", "UNCONFIRMED", "pending"])
     .gte("created_at", since)
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
   return (data as Payment) ?? null;
+}
+
+/**
+ * When starting a NEW installment attempt, flag prior unpaid attempts for the
+ * same enrollment+installment_no as superseded (status unchanged). Prevents the
+ * portal from treating a pile of EXPIRED retries as active dues noise.
+ */
+export async function supersedePriorInstallmentAttempts(
+  enrollmentId: string,
+  installmentNo: number,
+  keepPaymentId: string,
+  reason = "Superseded by a newer installment checkout attempt",
+): Promise<number> {
+  const db = getSupabaseAdmin();
+  if (!db) return 0;
+  const { data } = await db
+    .from("payments")
+    .select("id,status,is_superseded")
+    .eq("enrollment_id", enrollmentId)
+    .eq("installment_no", installmentNo)
+    .neq("id", keepPaymentId)
+    .is("deleted_at", null)
+    .not("status", "in", "(PAID,captured,SUCCESS,success,paid)")
+    .limit(50);
+  const rows = (data || []) as { id: string; status: string; is_superseded?: boolean | null }[];
+  let n = 0;
+  const now = new Date().toISOString();
+  for (const r of rows) {
+    if (r.is_superseded) continue;
+    const { error } = await db
+      .from("payments")
+      .update({
+        is_superseded: true,
+        superseded_by_payment_id: keepPaymentId,
+        superseded_at: now,
+        superseded_reason: reason.slice(0, 500),
+      })
+      .eq("id", r.id);
+    if (!error) n += 1;
+  }
+  return n;
 }
 
 // ==================== PAYMENT EDIT / SOFT-DELETE / RESTORE (super-admin) ====================

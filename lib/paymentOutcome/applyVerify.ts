@@ -12,7 +12,6 @@ import {
 import type { Payment } from "../types";
 import { isPaidStatus, type TerminalStatus } from "./states";
 import { cancelVerifyLadder } from "./qstashLadder";
-import { notifyPaymentConfirmedOnce } from "./confirmOnce";
 import { tgLog } from "../telegram/log";
 
 function demoMode(): boolean {
@@ -209,28 +208,14 @@ export async function applyVerifyForReference(
   }
 
   if (newlyPaid && target === "PAID") {
-    const { ensureBuyer, finalizeCoursePaymentByReference, getPaymentByReference } = await import(
-      "../dataProvider"
-    );
+    const { getPaymentByReference } = await import("../dataProvider");
     const fresh = (await getPaymentByReference(ref)) || row;
-    await ensureBuyer(fresh.phone, fresh.student_name).catch(() => null);
-    if (fresh.item_type === "course") {
-      await finalizeCoursePaymentByReference(ref).catch(() => null);
-    }
-    if (!opts.silentStudentNotify) {
-      const { recordPaymentPaid } = await import("../analytics/server");
-      await recordPaymentPaid(fresh, opts.fromReverify ? "reverify" : "verify").catch(() => {});
-      await notifyPaymentConfirmedOnce(fresh).catch((e) =>
-        tgLog("payment_confirm_failed", { ref, error: (e as Error).message }, "warn"),
-      );
-    } else {
-      // Backfill / bulk reconcile: still supersede + analytics; no student SMS/TG.
-      // Course finalize + ensureBuyer already ran above.
-      const { supersedeUnpaidSiblings } = await import("../paymentSupersede");
-      const { recordPaymentStatusChanged } = await import("../analytics/server");
-      await recordPaymentStatusChanged(fresh, "PAID", "verify_backfill").catch(() => {});
-      void supersedeUnpaidSiblings(fresh).catch(() => {});
-    }
+    const { runPaidTerminalSideEffects } = await import("./paidSideEffects");
+    await runPaidTerminalSideEffects(fresh, {
+      source: opts.silentStudentNotify ? "verify_backfill" : opts.fromReverify ? "reverify" : "verify",
+      silentStudentNotify: opts.silentStudentNotify === true,
+      bumpSession: true,
+    });
     await cancelVerifyLadder(fresh).catch(() => {});
   } else if (newlyPaid && (target === "FAILED" || target === "EXPIRED")) {
     const { getPaymentByReference } = await import("../dataProvider");

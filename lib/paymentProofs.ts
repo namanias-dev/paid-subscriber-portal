@@ -10,9 +10,6 @@ import {
   getWebinarPaymentStatusMap,
   getWebinarRegistrationIdsByPhone,
   isPaidStatus,
-  ensureBuyer,
-  bumpBuyerSessionVersion,
-  finalizeCoursePaymentByReference,
   getAllCourseEnrollments,
   getAdminAccounts,
   getAllStaffAccessGrants,
@@ -577,15 +574,15 @@ export async function acceptPaymentManually(
     }
   };
 
-  // Idempotent: already paid -> ensure proof reflects it; still complete notify
-  // if the historic proof path never claimed payment_confirmed_notified_at.
+  // Idempotent: already paid -> ensure proof + re-run PAID side effects so a
+  // historic PAID-without-finalize row still unlocks Class Hub / notify once.
   if (isPaidStatus(payment.status)) {
     await markProofAccepted();
     try {
-      const { notifyPaymentConfirmedOnce } = await import("./paymentOutcome/confirmOnce");
-      await notifyPaymentConfirmedOnce(payment);
+      const { runPaidTerminalSideEffects } = await import("./paymentOutcome/paidSideEffects");
+      await runPaidTerminalSideEffects(payment, { source: "staff", bumpSession: true });
     } catch {
-      /* already notified or best-effort */
+      /* best-effort */
     }
     return { ok: true, alreadyPaid: true };
   }
@@ -596,35 +593,18 @@ export async function acceptPaymentManually(
     .update({ status: "PAID" })
     .eq("id", payment.id)
     .not("status", "in", `(${[...PAID].join(",")})`)
-    .select("id,phone,student_name,reference_no,item_type")
+    .select("*")
     .maybeSingle();
 
-  // Reuse the EXISTING PAID side-effect path (same as the ICICI verifier).
-  const r = (upd as Pick<Payment, "phone" | "student_name" | "reference_no" | "item_type"> | null) || payment;
-  await ensureBuyer(r.phone, r.student_name).catch(() => null);
-  if (r.item_type === "course" && r.reference_no) {
-    await finalizeCoursePaymentByReference(r.reference_no).catch(() => null);
+  const fresh = ((upd as Payment | null) || { ...payment, status: "PAID" }) as Payment;
+  try {
+    const { runPaidTerminalSideEffects } = await import("./paymentOutcome/paidSideEffects");
+    await runPaidTerminalSideEffects(fresh, { source: "staff", bumpSession: true });
+  } catch {
+    /* never roll back PAID */
   }
-  // This buyer's access just changed — invalidate their sessions on all devices so
-  // the new paid access shows up everywhere (not just where the admin clicked).
-  await bumpBuyerSessionVersion(r.phone).catch(() => null);
 
   await markProofAccepted();
-  // Same PAID side-effect completion as ICICI Verify: analytics chokepoint +
-  // guaranteed student confirmation SMS (notifyPaymentConfirmedOnce). fireAutoSms
-  // alone can no-op on missing login_code; confirmOnce is the reliable student path.
-  try {
-    const { recordPaymentPaid } = await import("./analytics/server");
-    await recordPaymentPaid({ ...payment, status: "PAID" }, "staff");
-  } catch {
-    /* best-effort */
-  }
-  try {
-    const { notifyPaymentConfirmedOnce } = await import("./paymentOutcome/confirmOnce");
-    await notifyPaymentConfirmedOnce({ ...payment, status: "PAID" });
-  } catch {
-    /* best-effort — never roll back PAID */
-  }
   void recordStaffReview(payment, "approved", opts.adminId, opts.note ?? null).catch(() => {});
   return { ok: true };
 }

@@ -6,6 +6,7 @@ import {
   createPayment,
   getPaymentByReference,
   findRecentOpenInstallmentPayment,
+  supersedePriorInstallmentAttempts,
 } from "@/lib/dataProvider";
 import { ATTR_COOKIE, parseAttrCookie, flattenForStamp } from "@/lib/attribution";
 import { adCaptureStampFromState, EMPTY_AD_CAPTURE_STAMP } from "@/lib/marketing/adCaptureStamp";
@@ -38,7 +39,6 @@ export async function POST(req: Request) {
     const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
     const enrollmentId = String(body.enrollmentId || "");
     const action = String(body.action || "installment") as "installment" | "full";
-    const installmentNo = body.installmentNo != null ? Math.round(Number(body.installmentNo)) : null;
 
     const enrollment = await getCourseEnrollmentById(enrollmentId);
     if (!enrollment) return NextResponse.json({ ok: false, error: "Enrollment not found." }, { status: 404 });
@@ -65,10 +65,12 @@ export async function POST(req: Request) {
       payInstallmentNo = derived.nextPayable?.no ?? 0;
       label = `${enrollment.course_title} — Full Remaining`;
     } else {
-      const target = (enrollment.schedule || []).find(
-        (s) => s.kind === "installment" && !s.paid && (installmentNo == null || s.no === installmentNo)
-      );
-      if (!target) return NextResponse.json({ ok: false, error: "No payable installment found." }, { status: 400 });
+      // Force chronological next unpaid line only — prevents out-of-order pays
+      // (Aayush: Installment 3 paid while Installment 1 still open → grace lock).
+      const target = derived.nextPayable;
+      if (!target || target.kind !== "installment") {
+        return NextResponse.json({ ok: false, error: "No payable installment found." }, { status: 400 });
+      }
       amount = target.amount;
       kind = "installment";
       payInstallmentNo = target.no;
@@ -79,34 +81,46 @@ export async function POST(req: Request) {
 
     const subMerchantId = eazypaySubMerchantId("course", enrollment.course_slug);
 
-    // Idempotency dedupe: a double-click on the same installment within 2 min
-    // re-uses the existing open attempt instead of creating a second PENDING row
-    // (which could otherwise over-apply to the next installment on finalize).
-    const recentOpen = await findRecentOpenInstallmentPayment(enrollment.id, payInstallmentNo, 120000);
+    // Idempotency: reuse open attempt for same installment within abandon window.
+    const recentOpen = await findRecentOpenInstallmentPayment(enrollment.id, payInstallmentNo);
     if (recentOpen && recentOpen.reference_no && Math.round(recentOpen.amount) === Math.round(amount)) {
       if (isEazypayConfigured()) {
-        const url = buildPaymentUrl({ referenceNo: recentOpen.reference_no, subMerchantId, amount, name: enrollment.student_name, email: enrollment.email || `${enrollment.phone}@guest.namanias.com`, mobile: enrollment.phone });
-        if (url) return NextResponse.json({ ok: true, referenceNo: recentOpen.reference_no, paymentUrl: url, reused: true });
+        const url = buildPaymentUrl({
+          referenceNo: recentOpen.reference_no,
+          subMerchantId,
+          amount,
+          name: enrollment.student_name,
+          email: enrollment.email || `${enrollment.phone}@guest.namanias.com`,
+          mobile: enrollment.phone,
+        });
+        if (url) {
+          return NextResponse.json({
+            ok: true,
+            referenceNo: recentOpen.reference_no,
+            paymentUrl: url,
+            reused: true,
+          });
+        }
       } else {
-        return NextResponse.json({ ok: true, demo: true, referenceNo: recentOpen.reference_no, paymentUrl: `/payment/status?ref=${encodeURIComponent(recentOpen.reference_no)}&demo=1`, reused: true });
+        return NextResponse.json({
+          ok: true,
+          demo: true,
+          referenceNo: recentOpen.reference_no,
+          paymentUrl: `/payment/status?ref=${encodeURIComponent(recentOpen.reference_no)}&demo=1`,
+          reused: true,
+        });
       }
     }
 
     const referenceNo = await uniqueReference("course");
 
-    // Attribution snapshot from the first-party cookie (best-effort; never blocks)
-    // so installment/full-pay checkouts also carry source + campaign (any-touch),
-    // matching the new-checkout path in create-payment.
     const attr = parseAttrCookie(cookies().get(ATTR_COOKIE)?.value);
     const attrFlat = flattenForStamp(attr);
-    // Full ad-hierarchy stamp (feature-flagged, default ON). When the flag is
-    // off, spread EMPTY_AD_CAPTURE_STAMP so the write path is byte-identical
-    // to pre-shipment (all NULLs for the new columns).
     const adStamp = isFullCaptureEnabled()
       ? adCaptureStampFromState(attr)
       : EMPTY_AD_CAPTURE_STAMP;
 
-    await createPayment({
+    const created = await createPayment({
       student_name: enrollment.student_name,
       phone: enrollment.phone,
       email: enrollment.email,
@@ -114,7 +128,6 @@ export async function POST(req: Request) {
       item_type: "course",
       item_slug: enrollment.course_slug,
       amount,
-      // Checkout opened — a click, not money in flight (see create-payment).
       status: "INITIATED",
       gateway: PAYMENT_GATEWAY,
       reference_no: referenceNo,
@@ -130,6 +143,10 @@ export async function POST(req: Request) {
       ...adStamp,
     });
     void stampBuyerAttribution(enrollment.phone, attr).catch(() => {});
+
+    if (created?.id) {
+      void supersedePriorInstallmentAttempts(enrollment.id, payInstallmentNo, created.id).catch(() => {});
+    }
 
     const gatewayEmail = enrollment.email || `${enrollment.phone}@guest.namanias.com`;
     if (isEazypayConfigured()) {

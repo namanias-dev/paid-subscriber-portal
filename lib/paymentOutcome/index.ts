@@ -14,6 +14,7 @@ export {
 } from "./qstashLadder";
 export { maybeNotifyLadderOkOnce } from "./ladderOkNotify";
 export { notifyPaymentConfirmedOnce } from "./confirmOnce";
+export { runPaidTerminalSideEffects } from "./paidSideEffects";
 export {
   PAID_STATUSES,
   OPEN_STATUSES,
