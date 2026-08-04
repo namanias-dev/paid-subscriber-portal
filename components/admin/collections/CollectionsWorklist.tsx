@@ -53,35 +53,54 @@ export default function CollectionsWorklist() {
   const [staleDays, setStaleDays] = useState(DEFAULT_STALE_DAYS);
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
-  // Reminder→payment state, computed server-side in ONE indexed query.
   const [tracking, setTracking] = useState<TrackingPayload | null>(null);
   const [sendCount, setSendCount] = useState(0);
+  /** Live schedule access from /api/admin/access-risk (lectureAccessForCourse server-side). */
+  const [liveRisk, setLiveRisk] = useState<Map<string, LiveAccessChip>>(new Map());
   const loadTracking = useCallback(() => {
     fetch("/api/admin/sms/installment-reminder/tracking")
       .then((r) => (r.ok ? r.json() : null))
       .then((j) => { if (j?.ok) setTracking(j.tracking as TrackingPayload); })
       .catch(() => { /* the table still works without pills */ });
   }, []);
+  const loadLiveRisk = useCallback(() => {
+    fetch("/api/admin/access-risk")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => {
+        if (!j?.ok || !Array.isArray(j.rows)) return;
+        const m = new Map<string, LiveAccessChip>();
+        for (const row of j.rows) {
+          m.set(row.enrollmentId, {
+            status: row.scheduleAccess?.status || "—",
+            reason: row.scheduleAccess?.reason,
+          });
+        }
+        setLiveRisk(m);
+      })
+      .catch(() => { /* collections still works on money heuristic */ });
+  }, []);
   useEffect(loadTracking, [loadTracking]);
+  useEffect(loadLiveRisk, [loadLiveRisk]);
   const afterSend = useCallback(() => { loadTracking(); setSendCount((n) => n + 1); }, [loadTracking]);
 
-  const courseById = useMemo(() => new Map((courses.data || []).map((c) => [c.id, c])), [courses.data]);
-  const now = useMemo(() => Date.now(), [enr.data]);
-
-  // Live lectureAccessForCourse (default) so this desk matches Access at Risk.
+  // Live access risk (default) uses Access at Risk rows — same lectureAccessForCourse source.
   const scoped = useMemo(() => {
     return (enr.data || [])
       .filter((e) => e.amount_paid > 0 && e.status !== "cancelled")
       .map((e) => {
         const d = deriveCollections(e);
-        const scheduleAccess = lectureAccessForCourse(courseById.get(e.course_id), e, undefined, false, now);
+        const chip = liveRisk.get(e.id);
+        const scheduleAccess = chip || { status: "unknown" };
         return { e, d, scheduleAccess };
       })
-      .filter(({ d, scheduleAccess }) => {
-        if (liveAccessRiskOnly) return isScheduleCollectionsRisk(scheduleAccess);
+      .filter(({ e, d, scheduleAccess }) => {
+        if (liveAccessRiskOnly) {
+          if (liveRisk.size === 0) return d.overdueAmount > 0; // loading fallback
+          return liveRisk.has(e.id);
+        }
         return overdueOnly ? d.overdueAmount > 0 : d.remaining > 0;
       });
-  }, [enr.data, overdueOnly, liveAccessRiskOnly, courseById, now]);
+  }, [enr.data, overdueOnly, liveAccessRiskOnly, liveRisk]);
 
   const courseOptions = useMemo(() => {
     const m = new Map<string, string>();
