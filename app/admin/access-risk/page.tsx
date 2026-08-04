@@ -268,7 +268,7 @@ export default function AccessRiskAdmin() {
                   aria-label="Select all actionable students matching the current filters"
                 />
               </th>
-              {["Student", "Course", "Progress", "₹ Due", "Schedule", "Grant", "Ladder", "Auto", "Actions"].map((h) => (
+              {["Student", "Course", "Progress", "₹ Due", "Schedule", "Lectures", "Ladder", "Auto", "Actions"].map((h) => (
                 <th key={h} className="whitespace-nowrap px-4 py-3 font-semibold">{h}</th>
               ))}
             </tr>
@@ -309,14 +309,25 @@ export default function AccessRiskAdmin() {
                     <div className="tabular-nums text-muted">
                       {r.totalFee > 0 ? `${Math.round((r.amountPaid / r.totalFee) * 100)}% paid` : "—"}
                       {" · "}
-                      locked {r.access?.allowed === false || r.scheduleAccess?.status === "blocked" ? "Y" : "N"}
+                      lectures {r.access?.allowed ? "open" : "locked"}
                     </div>
+                    {r.access?.allowed && r.scheduleAccess?.status === "blocked" && (
+                      <div className="mt-0.5 text-[10px] font-semibold text-amber-700" title="Schedule = money risk (no grant). Lectures = live playback (grant wins).">
+                        mismatch: schedule blocked · lectures open via grant
+                      </div>
+                    )}
+                    {!r.access?.allowed && r.scheduleAccess?.status !== "blocked" && r.scheduleAccess?.status !== "grace" && (
+                      <div className="mt-0.5 text-[10px] font-semibold text-danger">
+                        mismatch: schedule {r.scheduleAccess?.status || "—"} · lectures locked
+                      </div>
+                    )}
                   </td>
                   <td className="px-4 py-3 font-semibold">{formatINR(r.amountDue)}</td>
                   <td className="px-4 py-3">
                     <span className={`pill ${STATUS_PILL[r.scheduleAccess?.status] || "pill-gray"} text-[10px]`}>
                       {r.scheduleAccess?.status || "—"}
                     </span>
+                    <div className="mt-0.5 text-[10px] text-muted">money risk (ignores grant)</div>
                     {r.scheduleAccess?.status === "grace" && r.scheduleAccess.daysLeft != null && (
                       <div className="mt-0.5 text-[10px] text-muted">{r.scheduleAccess.daysLeft}d left</div>
                     )}
@@ -325,12 +336,16 @@ export default function AccessRiskAdmin() {
                     )}
                   </td>
                   <td className="px-4 py-3 text-xs">
+                    <span className={`pill ${r.access?.allowed ? "pill-green" : "pill-red"} text-[10px]`}>
+                      {r.access?.allowed ? (r.access.status || "open") : "locked"}
+                    </span>
+                    <div className="mt-0.5 text-[10px] text-muted">playback (grant wins)</div>
                     {r.grant ? (
                       <>
-                        <span className="pill pill-blue text-[10px]">until {r.grant.expiresAt?.slice(0, 10)}</span>
+                        <span className="mt-1 inline-block pill pill-blue text-[10px]">until {r.grant.expiresAt?.slice(0, 10)}</span>
                         <div className="mt-0.5 text-[10px] text-muted">{r.grant.createdBy || "staff"}{r.grant.note ? ` · ${r.grant.note}` : ""}</div>
                       </>
-                    ) : "—"}
+                    ) : null}
                   </td>
                   <td className="px-4 py-3 text-xs tabular-nums" title="Instalment ladder steps fired (−7/−3/due/+3/+7)">
                     {r.ladderUsed ?? 0}/{r.ladderCap ?? 5}

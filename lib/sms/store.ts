@@ -147,7 +147,7 @@ export async function ensureSeeded(): Promise<void> {
   const db = getSupabaseAdmin();
   if (!db) return;
   try {
-    const { data } = await db.from("sms_templates").select("id, gateway_template_id, body_template");
+    const { data } = await db.from("sms_templates").select("id, gateway_template_id, body_template, status, is_active");
     const byId = new Map((data || []).map((r: Row) => [String(r.id), r]));
     const have = new Set(byId.keys());
     const missing = SEED_TEMPLATES.filter((s) => !have.has(s.id)).map((s) => {
@@ -161,22 +161,31 @@ export async function ensureSeeded(): Promise<void> {
       };
     });
     if (missing.length) await db.from("sms_templates").insert(missing);
-    // Heal existing rows for DLT-approved seeds whose id/body have drifted.
+    // Heal DLT-approved seeds: id/body drift, and never leave access/installment
+    // DLT templates stuck in draft (that silently disables Remind for everyone).
     for (const s of SEED_TEMPLATES) {
       if (!s.gateway_template_id) continue;
       const row = byId.get(s.id);
       if (!row) continue;
       const idDrift = String(row.gateway_template_id ?? "") !== s.gateway_template_id;
       const bodyDrift = String(row.body_template ?? "") !== s.body;
-      if (!idDrift && !bodyDrift) continue;
+      const accessFamily = s.id === "portal_access_expiring"
+        || s.id === "portal_access_blocked"
+        || s.id === "installment_reminder"
+        || s.id === "installment_instructions";
+      const status = String(row.status || "");
+      const stuckDraft = accessFamily && status !== "active" && status !== "approved";
+      if (!idDrift && !bodyDrift && !stuckDraft) continue;
       const patch: Record<string, unknown> = {
         gateway_template_id: s.gateway_template_id,
         body_template: s.body,
         variables: uniqueVariables(s.body),
         updated_at: nowISO(),
       };
-      // First-time wiring (no id yet) → make it send-ready.
-      if (!row.gateway_template_id) { patch.status = "approved"; patch.is_active = true; }
+      if (!row.gateway_template_id || stuckDraft) {
+        patch.status = "approved";
+        patch.is_active = true;
+      }
       await db.from("sms_templates").update(patch).eq("id", s.id);
     }
     // seed rules too

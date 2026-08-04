@@ -181,10 +181,21 @@ export async function buildAccessReminderContext(
   const now = opts.now ?? Date.now();
 
   const templates = new Map<string, SmsTemplate>();
+  const templateGateErrors: string[] = [];
   for (const id of ACCESS_TEMPLATE_IDS) {
     const g = await gateTemplate(id);
-    if (!g.ok) return g;
+    if (!g.ok) {
+      templateGateErrors.push(`${id}: ${g.detail}`);
+      continue; // load what we can; pickAccessTemplate fails loudly if its pick is missing
+    }
     templates.set(id, g.template);
+  }
+  if (templates.size === 0) {
+    return {
+      ok: false,
+      reason: "template_inactive",
+      detail: templateGateErrors.join(" · ") || "No access reminder templates are send-ready.",
+    };
   }
 
   const digits = [...new Set(
