@@ -11,8 +11,6 @@ import ReminderStatePill from "@/components/admin/sms/ReminderStatePill";
 import PendingFollowUps from "@/components/admin/sms/PendingFollowUps";
 import { formatINR, formatISTDate } from "@/lib/dates";
 import { deriveCollections } from "@/lib/installments";
-import { lectureAccessForCourse } from "@/lib/entitlements";
-import { isScheduleCollectionsRisk } from "@/lib/accessAtRisk";
 import { isOutstandingInstallment } from "@/lib/sms/installmentAttribution";
 import { normalizeIndianMobile } from "@/lib/phone";
 import type { TrackingPayload } from "@/lib/sms/installmentTracking";
@@ -20,6 +18,7 @@ import type { CourseEnrollment, Course } from "@/lib/types";
 
 type EnrollmentRow = CourseEnrollment & { student_id: string | null };
 type SortKey = "overdue" | "daysOverdue" | "nextDue" | "name" | "course";
+type LiveAccessChip = { status: string; reason?: string };
 
 /** Default for the "reminded, still unpaid after N days" filter. */
 const DEFAULT_STALE_DAYS = 3;
