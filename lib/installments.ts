@@ -15,7 +15,6 @@ import {
 
 export {
   enrollmentFeeStateFromEnrollment,
-  getEnrollmentFeeState,
   assertOrderAmountWithinOutstanding,
   isFeeLineOutstanding,
   isLinePartiallyPaid,

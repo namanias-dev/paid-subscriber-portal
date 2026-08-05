@@ -253,17 +253,6 @@ export function enrollmentFeeStateFromEnrollment(
   };
 }
 
-/** Server entry — loads enrollment then derives. Never writes. */
-export async function getEnrollmentFeeState(
-  enrollmentId: string,
-  now = Date.now(),
-): Promise<EnrollmentFeeState | null> {
-  const { getCourseEnrollmentById } = await import("./dataProvider");
-  const enr = await getCourseEnrollmentById(enrollmentId);
-  if (!enr) return null;
-  return enrollmentFeeStateFromEnrollment(enr, now);
-}
-
 /** Reject gateway/order amounts that exceed outstanding (server-side only). */
 export function assertOrderAmountWithinOutstanding(
   amount: number,

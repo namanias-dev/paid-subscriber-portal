@@ -1,7 +1,7 @@
 "use client";
 
 import { formatINR, formatISTDate } from "@/lib/dates";
-import { installmentStatus } from "@/lib/installments";
+import { installmentStatus, isTrueCancelledLine } from "@/lib/installments";
 import type { InstallmentItem } from "@/lib/types";
 
 /**
@@ -14,6 +14,7 @@ export type LineStatus = ReturnType<typeof installmentStatus>;
 
 export const LINE_META: Record<LineStatus, { label: string; pill: string; dot: string }> = {
   paid: { label: "Paid", pill: "pill-green", dot: "var(--success)" },
+  partially_paid: { label: "Partially paid", pill: "pill-amber", dot: "var(--warning)" },
   overdue: { label: "Overdue", pill: "pill-red", dot: "var(--danger)" },
   "due-soon": { label: "Due soon", pill: "pill-amber", dot: "var(--warning)" },
   upcoming: { label: "Upcoming", pill: "pill-gray", dot: "var(--muted)" },
@@ -28,7 +29,9 @@ export function LinePill({ status }: { status: LineStatus }) {
 
 /** Full installment schedule for one enrollment — colour-coded, accessible. */
 export function InstallmentSchedule({ schedule, now = Date.now() }: { schedule: InstallmentItem[]; now?: number }) {
-  const lines = (schedule || []).filter((s) => s.kind !== "seat" || (s.amount || 0) > 0 || s.paid);
+  const lines = (schedule || []).filter(
+    (s) => !isTrueCancelledLine(s) && (s.kind !== "seat" || (s.amount || 0) > 0 || s.paid),
+  );
   if (lines.length === 0) {
     return <p className="px-1 py-2 text-xs text-muted">No installment schedule on this enrollment.</p>;
   }
@@ -49,11 +52,20 @@ export function InstallmentSchedule({ schedule, now = Date.now() }: { schedule: 
           {lines.map((s, i) => {
             const st = installmentStatus(s, now);
             const cancelled = st === "cancelled" || st === "waived";
+            const partial = st === "partially_paid";
+            const allocated = Number(s.paid_amount) || 0;
             return (
               <tr key={`${s.no}-${i}`} className="border-b border-line last:border-0">
                 <td className="px-3 py-2 tabular-nums text-muted">{s.no === 0 ? "—" : s.no}</td>
                 <td className={`px-3 py-2 ${cancelled ? "text-muted line-through" : "text-ink"}`}>{s.label}</td>
-                <td className="px-3 py-2 text-right font-medium tabular-nums">{formatINR(s.amount || 0)}</td>
+                <td className="px-3 py-2 text-right font-medium tabular-nums">
+                  {formatINR(s.amount || 0)}
+                  {partial ? (
+                    <span className="mt-0.5 block text-[10px] font-normal text-muted">
+                      {formatINR(allocated)} received
+                    </span>
+                  ) : null}
+                </td>
                 <td className="px-3 py-2 tabular-nums text-ink2">{s.due ? formatISTDate(s.due) : "—"}</td>
                 <td className="px-3 py-2 tabular-nums text-ink2">{s.paid && s.paid_at ? formatISTDate(s.paid_at) : "—"}</td>
                 <td className="px-3 py-2"><LinePill status={st} /></td>
