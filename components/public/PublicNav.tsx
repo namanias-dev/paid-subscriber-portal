@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
@@ -74,6 +74,7 @@ export default function PublicNav({
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
+  const headerRef = useRef<HTMLElement>(null);
   const LINKS = links;
   const hasLogo = !!logoUrl?.trim();
   const h = Math.min(96, Math.max(28, Number(logoHeight) || 48));
@@ -105,6 +106,19 @@ export default function PublicNav({
     window.addEventListener("scroll", onScroll, { passive: true });
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
+
+  // Runtime header height → --header-h (access bar sticks below this; never hardcode top-14).
+  useEffect(() => {
+    const el = headerRef.current;
+    if (!el) return;
+    const sync = () => {
+      document.documentElement.style.setProperty("--header-h", `${el.offsetHeight}px`);
+    };
+    sync();
+    const ro = new ResizeObserver(sync);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [scrolled, announcements?.length]);
 
   // Lock body scroll + Esc to close while the drawer is open.
   useEffect(() => {
@@ -146,6 +160,7 @@ export default function PublicNav({
   return (
     <>
     <header
+      ref={headerRef}
       className={`sticky top-0 z-50 border-b backdrop-blur-xl transition-all duration-300 motion-reduce:transition-none ${
         scrolled
           ? "border-white/10 bg-[rgba(8,20,50,0.94)] shadow-[0_10px_30px_-12px_rgba(0,0,0,0.55)]"

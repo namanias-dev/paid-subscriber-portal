@@ -1,23 +1,27 @@
 "use client";
 
 import { useEffect, useId, useRef } from "react";
-import { Lock, X } from "lucide-react";
+import AccessNotice from "./AccessNotice";
 import { requestInstallmentProofUpload } from "./ippEvents";
+import type { InstallmentProofPromptProps } from "@/lib/installmentProofTypes";
 
 /**
- * Soft lock sheet for gated Class Hub surfaces.
- * Mobile: bottom sheet · Desktop: centred modal.
+ * Soft lock sheet — uses AccessNotice sheetHeader + same action tokens.
  */
 export default function ContentLockSheet({
   open,
   onClose,
   installmentNo,
   payHref,
+  courseTitle = "Course",
+  amountDue = 0,
 }: {
   open: boolean;
   onClose: () => void;
   installmentNo: number | null;
   payHref: string;
+  courseTitle?: string;
+  amountDue?: number;
 }) {
   const titleId = useId();
   const panelRef = useRef<HTMLDivElement>(null);
@@ -43,54 +47,57 @@ export default function ContentLockSheet({
   if (!open) return null;
 
   const n = installmentNo ?? 1;
+  const prompt: InstallmentProofPromptProps = {
+    state: "blocked",
+    enrollmentId: "lock-sheet",
+    courseId: "",
+    courseTitle,
+    installmentNo: n,
+    amountDue,
+    dueDate: null,
+    daysLeft: null,
+    liveAccessAllowed: false,
+    payHref,
+    pendingProof: null,
+  };
 
   return (
     <div className="fixed inset-0 z-[80] flex items-end justify-center sm:items-center sm:p-4" role="presentation">
-      <button
-        type="button"
-        className="absolute inset-0 bg-black/40"
-        aria-label="Close"
-        onClick={onClose}
-      />
+      <button type="button" className="absolute inset-0 bg-black/45" aria-label="Close" onClick={onClose} />
       <div
         ref={panelRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className="relative z-10 w-full max-w-md rounded-t-2xl border border-line bg-surface p-5 shadow-xl sm:rounded-2xl"
+        className="relative z-10 w-full max-w-md overflow-visible rounded-t-2xl sm:rounded-2xl"
       >
-        <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-line sm:hidden" aria-hidden />
-        <div className="flex items-start justify-between gap-3">
-          <div className="grid h-10 w-10 place-items-center rounded-xl bg-slate-100 text-slate-600">
-            <Lock size={18} aria-hidden />
+        <div className="mx-auto mb-0 h-1 w-10 rounded-full bg-white/40 sm:hidden" aria-hidden />
+        <AccessNotice variant="sheetHeader" prompt={prompt} />
+        <div className="space-y-2 bg-[#7F1D1D] px-4 pb-5 pt-3">
+          <p id={titleId} className="sr-only">
+            This unlocks as soon as instalment {n} is cleared.
+          </p>
+          <p className="text-sm text-white/90">
+            This unlocks as soon as instalment {n} is cleared. Pay online or share proof if you&apos;ve already transferred.
+          </p>
+          <div className="flex flex-col gap-2 pt-1">
+            <a
+              href={payHref}
+              className="inline-flex min-h-12 items-center justify-center rounded-xl bg-white px-3 text-sm font-semibold text-[#B91C1C] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+            >
+              Pay now
+            </a>
+            <button
+              type="button"
+              onClick={() => {
+                onClose();
+                requestInstallmentProofUpload();
+              }}
+              className="inline-flex min-h-12 items-center justify-center rounded-xl border border-white/24 bg-white/14 px-3 text-sm font-semibold text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+            >
+              Already paid
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="grid h-11 w-11 place-items-center rounded-xl text-muted hover:bg-surface2"
-            aria-label="Close"
-          >
-            <X size={18} />
-          </button>
-        </div>
-        <h2 id={titleId} className="mt-3 font-heading text-lg font-bold leading-snug text-ink whitespace-normal break-words [overflow-wrap:anywhere]">
-          This unlocks as soon as instalment {n} is cleared.
-        </h2>
-        <p className="mt-1 text-sm text-ink2 whitespace-normal">Pay online or share proof if you&apos;ve already transferred.</p>
-        <div className="mt-5 grid grid-cols-1 gap-2 sm:grid-cols-1">
-          <a href={payHref} className="btn btn-primary min-h-[44px] w-full justify-center active:scale-[0.98]">
-            Pay now
-          </a>
-          <button
-            type="button"
-            onClick={() => {
-              onClose();
-              requestInstallmentProofUpload();
-            }}
-            className="btn btn-secondary min-h-[44px] w-full justify-center whitespace-normal px-3 active:scale-[0.98]"
-          >
-            I&apos;ve already paid
-          </button>
         </div>
       </div>
     </div>

@@ -25,7 +25,7 @@ export default async function SiteLayout({ children }: { children: React.ReactNo
     "Hi, I have a question about your courses / webinars."
   );
   return (
-    <div className="flex min-h-screen flex-col">
+    <div className="flex min-h-dvh flex-col">
       <PublicNav
         logoUrl={settings.logo_url}
         logoAlt={settings.logo_alt}

@@ -201,6 +201,8 @@ export async function buildInstallmentProofPrompt(
             : null;
 
     const payHref = `/portal/course/${e.id}?installment=${unpaid.no}`;
+    const pctPaid =
+      e.total_fee > 0 ? Math.min(100, Math.max(0, Math.round(((e.amount_paid || 0) / e.total_fee) * 100))) : null;
 
     if (pending) {
       cands.push({
@@ -215,6 +217,7 @@ export async function buildInstallmentProofPrompt(
         daysLeft,
         liveAccessAllowed: live.allowed,
         payHref,
+        pctPaid,
         pendingProof: {
           id: pending.id,
           submittedAt: pending.submitted_at,
@@ -239,6 +242,7 @@ export async function buildInstallmentProofPrompt(
         daysLeft: null,
         liveAccessAllowed: false,
         payHref,
+        pctPaid,
         pendingProof: null,
       });
       continue;
@@ -262,6 +266,7 @@ export async function buildInstallmentProofPrompt(
         daysLeft: daysLeft ?? daysToDue,
         liveAccessAllowed: true,
         payHref,
+        pctPaid,
         pendingProof: null,
       });
     }

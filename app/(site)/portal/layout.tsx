@@ -4,14 +4,13 @@ import { deriveEnrollment } from "@/lib/installments";
 import { getPrimaryAccessAwarenessForPhone } from "@/lib/accessAwarenessServer";
 import { studentPopupEnabledForPhone } from "@/lib/installmentProofFlags";
 import PaymentPlanNoticeModal, { type PlanChangeNotice } from "@/components/portal/PaymentPlanNoticeModal";
-import InstallmentProofPopupLazy from "@/components/portal/InstallmentProofPopupLazy";
+import PortalAccessChrome from "@/components/portal/PortalAccessChrome";
 import AccessAwarenessBanner from "@/components/access/AccessAwarenessBanner";
 import type { AccessAwarenessBanner as AccessBannerData } from "@/lib/accessAwareness";
 
 /**
- * Portal shell. Installment notice: ONE system for flag-scoped phones (pinned bar
- * via InstallmentProofPopupLazy). Legacy AccessAwarenessBanner only for others
- * so Stage-4 awareness is not stripped mid-rollout.
+ * Portal shell. Flag-scoped phones: AccessNotice sticky bar (PortalAccessChrome).
+ * Others: legacy Stage-4 AccessAwarenessBanner only — never both.
  */
 export default async function PortalLayout({ children }: { children: React.ReactNode }) {
   let notice: PlanChangeNotice | null = null;
@@ -42,7 +41,7 @@ export default async function PortalLayout({ children }: { children: React.React
     }
   } catch { /* never block the portal on the notice */ }
 
-  return (
+  const body = (
     <>
       {accessBanner && (
         <div className="container-wide pt-4">
@@ -51,7 +50,10 @@ export default async function PortalLayout({ children }: { children: React.React
       )}
       {children}
       {notice && <PaymentPlanNoticeModal notice={notice} />}
-      <InstallmentProofPopupLazy />
     </>
   );
+
+  // Always mount chrome for authenticated portal so prompt fetch + upload sheet work;
+  // bar only renders when flag+prompt say so.
+  return <PortalAccessChrome>{body}</PortalAccessChrome>;
 }

@@ -18,6 +18,8 @@ export {
 } from "./ippEvents";
 
 const H24 = 24 * 60 * 60 * 1000;
+/** v3 — resets QA / prior dismissals from fixed-bar era. */
+const SNOOZE_KEY = (enrollmentId: string) => `ipp_bar_snooze_v3_${enrollmentId}`;
 
 type SheetMode = "closed" | "upload" | "view" | "notice";
 
@@ -83,6 +85,11 @@ export function useInstallmentAccess(): InstallmentAccessCtx {
   return v;
 }
 
+/**
+ * Portal chrome: bar FIRST (in-flow sticky), then page children, then sheets.
+ * Must wrap portal page content so the bar is not mounted after children
+ * (that was the CLS / overlay bug — spacer lived at the document end).
+ */
 export default function InstallmentAccessShell({ children }: { children?: ReactNode }) {
   const [prompt, setPrompt] = useState<InstallmentProofPromptProps | null>(null);
   const [enabled, setEnabled] = useState(false);
@@ -128,15 +135,14 @@ export default function InstallmentAccessShell({ children }: { children?: ReactN
 
   const snoozeExpiring = useCallback(() => {
     if (!prompt || prompt.state !== "expiring") return;
-    // v2 key — resets any prior QA / student dismissals from the one-row bar era.
-    storageSet(`ipp_bar_snooze_v2_${prompt.enrollmentId}`, String(Date.now()));
+    storageSet(SNOOZE_KEY(prompt.enrollmentId), String(Date.now()));
     setSnoozeTick((n) => n + 1);
   }, [prompt]);
 
   const barVisible = useMemo(() => {
     if (!enabled || !prompt) return false;
     if (prompt.state === "expiring") {
-      return !isWithin24h(storageGet(`ipp_bar_snooze_v2_${prompt.enrollmentId}`));
+      return !isWithin24h(storageGet(SNOOZE_KEY(prompt.enrollmentId)));
     }
     return prompt.state === "blocked" || prompt.state === "pending_review";
   }, [enabled, prompt, snoozeTick]);
@@ -160,7 +166,7 @@ export default function InstallmentAccessShell({ children }: { children?: ReactN
 
   return (
     <Ctx.Provider value={value}>
-      {barVisible && prompt && <PinnedAccessBar prompt={prompt} />}
+      {barVisible && prompt ? <PinnedAccessBar prompt={prompt} /> : null}
       {children}
     </Ctx.Provider>
   );

@@ -24,6 +24,8 @@ export interface InstallmentProofPromptProps {
   /** True when lectureAccessForCourse(..., override).allowed — never show blocked if true. */
   liveAccessAllowed: boolean;
   payHref: string;
+  /** 0–100 display-only for the bar progress line. */
+  pctPaid?: number | null;
   pendingProof: {
     id: string;
     submittedAt: string;

@@ -6,12 +6,13 @@ import InstallmentAccessShell from "./access/InstallmentAccessShell";
 const InstallmentProofPopup = dynamic(() => import("./InstallmentProofPopup"), { ssr: false });
 
 /**
- * Portal access notice shell: pinned bar (primary) + on-demand upload sheet.
- * Auto-opening the notice modal was removed so it cannot compete with the bar.
+ * Wraps portal page content so the sticky AccessNotice bar is the first in-flow
+ * child (before route children) — never mounted after the page.
  */
-export default function InstallmentProofPopupLazy() {
+export default function PortalAccessChrome({ children }: { children: React.ReactNode }) {
   return (
     <InstallmentAccessShell>
+      {children}
       <InstallmentProofPopup />
     </InstallmentAccessShell>
   );

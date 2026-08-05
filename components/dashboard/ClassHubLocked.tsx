@@ -14,12 +14,16 @@ export function LockedAction({
   payHref,
   className = "",
   staggerIndex = 0,
+  courseTitle,
+  amountDue,
 }: {
   label: string;
   installmentNo: number | null;
   payHref: string;
   className?: string;
   staggerIndex?: number;
+  courseTitle?: string;
+  amountDue?: number;
 }) {
   const [open, setOpen] = useState(false);
   const delay = Math.min(staggerIndex, 3) * 40;
@@ -29,7 +33,7 @@ export function LockedAction({
         type="button"
         onClick={() => setOpen(true)}
         aria-label={`${label} (locked)`}
-        className={`inline-flex min-h-[44px] cursor-not-allowed items-center justify-center gap-2 rounded-xl border border-line bg-slate-100 px-4 text-sm font-semibold text-slate-500 opacity-80 transition-opacity duration-300 motion-reduce:transition-none ${className}`}
+        className={`inline-flex min-h-12 cursor-not-allowed items-center justify-center gap-2 rounded-xl border border-line bg-slate-100 px-4 text-sm font-semibold text-slate-500 opacity-80 transition-opacity duration-300 motion-reduce:transition-none ${className}`}
         style={{ animationDelay: `${delay}ms` }}
       >
         <Lock size={16} aria-hidden />
@@ -40,6 +44,8 @@ export function LockedAction({
         onClose={() => setOpen(false)}
         installmentNo={installmentNo}
         payHref={payHref}
+        courseTitle={courseTitle}
+        amountDue={amountDue}
       />
     </>
   );
@@ -50,11 +56,15 @@ export function LockedCard({
   installmentNo,
   payHref,
   staggerIndex = 0,
+  courseTitle,
+  amountDue,
 }: {
   children: ReactNode;
   installmentNo: number | null;
   payHref: string;
   staggerIndex?: number;
+  courseTitle?: string;
+  amountDue?: number;
 }) {
   const [open, setOpen] = useState(false);
   const delay = Math.min(staggerIndex, 3) * 40;
@@ -68,7 +78,7 @@ export function LockedCard({
         aria-label="Locked content"
       >
         <span className="pointer-events-none block grayscale">{children}</span>
-        <span className="absolute right-3 top-3 grid h-8 w-8 place-items-center rounded-full bg-white/90 text-slate-600 shadow-sm">
+        <span className="absolute right-3 top-3 grid size-8 place-items-center rounded-full bg-white/90 text-slate-600 shadow-sm">
           <Lock size={14} aria-hidden />
         </span>
       </button>
@@ -77,6 +87,8 @@ export function LockedCard({
         onClose={() => setOpen(false)}
         installmentNo={installmentNo}
         payHref={payHref}
+        courseTitle={courseTitle}
+        amountDue={amountDue}
       />
     </>
   );
