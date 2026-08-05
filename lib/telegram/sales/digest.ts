@@ -41,13 +41,20 @@ function daysFromNowIso(days: number): string {
   return new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10);
 }
 
+/**
+ * Most recent 10/15/20 IST slot that has already started (catch-up like ops).
+ * Cron runs at :35 UTC (= :05 IST), so we must NOT require minute 30–50 IST —
+ * that window never overlaps the cron and digests never fired.
+ */
 export function salesDigestDueNow(d = new Date()): { due: boolean; slot: string | null } {
   if (inSalesQuietHours(d)) return { due: false, slot: null };
   const parts = istNowParts(d);
-  // Cron is hourly at :35 — accept window minute 30–50 for the hour.
-  if (parts.minute < 30 || parts.minute > 50) return { due: false, slot: null };
-  if (!(DIGEST_HOURS as readonly number[]).includes(parts.hour)) return { due: false, slot: null };
-  return { due: true, slot: `sales:digest:${parts.ymd}:${parts.hour}` };
+  let dueHour: number | null = null;
+  for (const h of DIGEST_HOURS) {
+    if (h <= parts.hour) dueHour = h;
+  }
+  if (dueHour == null) return { due: false, slot: null };
+  return { due: true, slot: `sales:digest:${parts.ymd}:${dueHour}` };
 }
 
 async function alreadySentSlot(slot: string): Promise<boolean> {
@@ -391,11 +398,10 @@ export async function runSalesDigestIfDue(opts?: { force?: boolean }): Promise<{
       return { ok: true, sent: false, slot: due.slot, flushed: 0 };
     }
 
-    // 10:00 slot flushes quiet/rate queue first
-    const parts = istNowParts();
+    // Drain quiet/rate backlog whenever we are awake (or on force).
     let flushed = 0;
-    if (opts?.force || parts.hour === 10) {
-      flushed = await flushSalesQueuedAlerts();
+    if (opts?.force || !inSalesQuietHours()) {
+      flushed = await flushSalesQueuedAlerts({ force: !!opts?.force });
     }
 
     const html = await buildSalesDigestHtml();

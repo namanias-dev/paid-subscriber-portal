@@ -306,13 +306,15 @@ async function run(req: Request) {
     try {
       const salesMod = await import("@/lib/telegram/sales");
       const abandon = await salesMod.sweepCheckoutAbandoned().catch(() => ({ checked: 0, alerted: 0 }));
+      // Drain quiet/rate backlog on every awake tick (independent of digest due).
+      const flushed = await salesMod.flushSalesQueuedAlerts().catch(() => 0);
       const digestSales = await salesMod.runSalesDigestIfDue().catch(() => ({
         ok: false,
         sent: false,
         slot: null,
         flushed: 0,
       }));
-      sales = { abandon, digest: digestSales };
+      sales = { abandon, flushed, digest: digestSales };
     } catch (e) {
       sales = { error: (e as Error).message };
     }

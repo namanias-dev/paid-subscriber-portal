@@ -41,6 +41,30 @@ describe("sales telegram format", () => {
   });
 });
 
+describe("sales digest schedule", () => {
+  it("is due at :05 IST (cron :35 UTC) for 10/15/20 slots", async () => {
+    const { salesDigestDueNow } = await import("../../lib/telegram/sales/digest");
+    const cases: Array<{ iso: string; dueHour: number }> = [
+      { iso: "2026-08-05T10:05:00+05:30", dueHour: 10 },
+      { iso: "2026-08-05T15:05:00+05:30", dueHour: 15 },
+      { iso: "2026-08-05T20:05:00+05:30", dueHour: 20 },
+      { iso: "2026-08-05T12:40:00+05:30", dueHour: 10 }, // catch-up until 15
+    ];
+    for (const c of cases) {
+      const got = salesDigestDueNow(new Date(c.iso));
+      assert.equal(got.due, true, c.iso);
+      assert.equal(got.slot, `sales:digest:2026-08-05:${c.dueHour}`, c.iso);
+    }
+  });
+
+  it("is not due during quiet hours or before first slot", async () => {
+    const { salesDigestDueNow } = await import("../../lib/telegram/sales/digest");
+    assert.equal(salesDigestDueNow(new Date("2026-08-05T08:05:00+05:30")).due, false);
+    assert.equal(salesDigestDueNow(new Date("2026-08-05T21:05:00+05:30")).due, false);
+    assert.equal(salesDigestDueNow(new Date("2026-08-05T22:40:00+05:30")).due, false);
+  });
+});
+
 describe("sales digest revenue hygiene", () => {
   it("digest HTML has no collections/revenue/conversion aggregate wording", async () => {
     // build may hit empty demo DB — still must not invent revenue lines

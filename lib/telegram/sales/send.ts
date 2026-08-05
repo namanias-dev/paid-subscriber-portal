@@ -495,10 +495,15 @@ export async function salesAlertPaymentSucceeded(input: {
   });
 }
 
-/** Flush quiet/rate queue (called from 10:00 digest). Never throws. */
-export async function flushSalesQueuedAlerts(): Promise<number> {
+/**
+ * Flush quiet/rate queue. Never throws.
+ * Called from digest + every awake telegram-reports cron tick so backlog
+ * does not depend on the 10:00 digest actually firing.
+ */
+export async function flushSalesQueuedAlerts(opts?: { force?: boolean }): Promise<number> {
   try {
-    const { drainSalesQueue } = await import("./dedupe");
+    const { drainSalesQueue, inSalesQuietHours } = await import("./dedupe");
+    if (inSalesQuietHours() && !opts?.force) return 0;
     const items = await drainSalesQueue();
     let sent = 0;
     for (const item of items) {
@@ -518,6 +523,10 @@ export async function flushSalesQueuedAlerts(): Promise<number> {
           message_id: (res.result as { message_id?: number } | undefined)?.message_id ?? null,
           chat_id: (process.env.TELEGRAM_SALES_CHAT_ID || "").trim() || null,
         });
+      } else {
+        // Put back so next awake tick can retry.
+        await enqueueSalesAlert(item);
+        tgLog("sales_queue_item_send_failed", { event: item.event, error: res.description }, "warn");
       }
     }
     return sent;
