@@ -37,7 +37,7 @@ export async function extendCourseAccess(input: {
   actor: AccessActionActor;
   elevated?: boolean;
   enrollmentId?: string | null;
-}): Promise<{ ok: true; days: number } | { ok: false; error: string; code?: string }> {
+}): Promise<{ ok: true; days: number; expiresAt: string } | { ok: false; error: string; code?: string }> {
   const reason = input.reason.trim();
   const check = validateAccessGrant({
     expiresAt: input.expiresAt,
@@ -46,12 +46,32 @@ export async function extendCourseAccess(input: {
   });
   if (!check.ok) return { ok: false, error: check.detail, code: check.error };
 
+  // Loosen-only: never shorten an existing dated grant.
+  // e.g. grandfather to 12 Aug + provisional now+7d (11 Aug) → keep 12 Aug.
+  const db = getSupabaseAdmin();
+  let effectiveExpiresAt = input.expiresAt;
+  if (db) {
+    const { data: existing } = await db
+      .from("course_access_overrides")
+      .select("mode,expires_at")
+      .eq("phone", input.phone.trim())
+      .eq("course_id", input.courseId)
+      .maybeSingle();
+    if (existing?.mode === "grant" && existing.expires_at) {
+      const existingMs = Date.parse(String(existing.expires_at));
+      const newMs = Date.parse(input.expiresAt);
+      if (Number.isFinite(existingMs) && Number.isFinite(newMs) && existingMs > newMs) {
+        effectiveExpiresAt = String(existing.expires_at);
+      }
+    }
+  }
+
   const before = await scheduleFingerprint(input.phone, input.courseId);
   await upsertAccessOverride({
     phone: input.phone,
     course_id: input.courseId,
     mode: "grant",
-    expires_at: input.expiresAt,
+    expires_at: effectiveExpiresAt,
     note: reason,
     created_by: input.actor.name || input.actor.id || "admin",
   });
@@ -68,6 +88,11 @@ export async function extendCourseAccess(input: {
     reason: "extension_granted",
   });
 
+  const effectiveDays = Math.max(
+    1,
+    Math.ceil((Date.parse(effectiveExpiresAt) - Date.now()) / 86_400_000),
+  );
+
   await appendStudentAccessEvent({
     phone: input.phone,
     courseId: input.courseId,
@@ -76,10 +101,15 @@ export async function extendCourseAccess(input: {
     actor: input.actor.name || input.actor.id || "admin",
     channel: "admin",
     reason,
-    meta: { days: check.days, expires_at: input.expiresAt },
+    meta: {
+      days: effectiveDays,
+      expires_at: effectiveExpiresAt,
+      requested_expires_at: input.expiresAt,
+      loosen_only: effectiveExpiresAt !== input.expiresAt,
+    },
   });
 
-  return { ok: true, days: check.days };
+  return { ok: true, days: effectiveDays, expiresAt: effectiveExpiresAt };
 }
 
 export async function revokeCourseExtension(input: {

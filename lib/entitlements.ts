@@ -298,7 +298,7 @@ export function lectureAccessForCourse(
   enrollment: CourseEnrollment | undefined,
   override: CourseAccessOverride | undefined,
   hasLegacyAccess: boolean,
-  now: number,
+  now: number = Date.now(),
 ): LectureAccess {
   // 1) Admin manual override wins.
   if (override) {

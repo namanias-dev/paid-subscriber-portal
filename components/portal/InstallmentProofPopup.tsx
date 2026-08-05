@@ -718,7 +718,8 @@ function PendingReviewSlide({
         <p className="text-sm leading-relaxed text-ink2">
           We received your payment details
           {pendingProof?.submittedAt ? ` on ${formatShortDate(pendingProof.submittedAt)}` : ""}.
-          Our team will confirm shortly and restore access when verified.
+          Our team will review them shortly. Once approved, access is restored right away — check back
+          here or on your Class Hub; we&apos;ll also update this screen.
         </p>
 
         <div className="flex flex-col gap-2">
