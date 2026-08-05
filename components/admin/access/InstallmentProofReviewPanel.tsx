@@ -38,6 +38,10 @@ function ageLabel(minutes: number): string {
   return `${days}d ago`;
 }
 
+function isHeicMime(mime: string): boolean {
+  return mime === "image/heic" || mime === "image/heif";
+}
+
 function isPdf(mime: string): boolean {
   return mime === "application/pdf" || mime.endsWith("/pdf");
 }
@@ -64,6 +68,7 @@ export default function InstallmentProofReviewPanel({
   const [fileIndex, setFileIndex] = useState(0);
   const [fileUrl, setFileUrl] = useState<string | null>(null);
   const [fileLoading, setFileLoading] = useState(false);
+  const [imgFailed, setImgFailed] = useState(false);
   const [zoom, setZoom] = useState(1);
   const [busy, setBusy] = useState<"approve" | "reject" | null>(null);
   const [rejectReason, setRejectReason] = useState("");
@@ -104,6 +109,7 @@ export default function InstallmentProofReviewPanel({
     let cancelled = false;
     setFileLoading(true);
     setFileUrl(null);
+    setImgFailed(false);
     setZoom(1);
     void (async () => {
       try {
@@ -307,7 +313,7 @@ export default function InstallmentProofReviewPanel({
 
                   <div className="overflow-hidden rounded-xl border border-line bg-surface2">
                     {fileLoading && <p className="p-8 text-center text-sm text-muted">Loading file…</p>}
-                    {!fileLoading && fileUrl && currentFile && isImage(currentFile.mime) && (
+                    {!fileLoading && fileUrl && currentFile && isImage(currentFile.mime) && !imgFailed && (
                       <div className="max-h-[420px] overflow-auto p-2">
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
@@ -315,7 +321,20 @@ export default function InstallmentProofReviewPanel({
                           alt={currentFile.original_name || "Payment proof"}
                           style={{ transform: `scale(${zoom})`, transformOrigin: "top left" }}
                           className="max-w-none rounded-lg"
+                          onError={() => setImgFailed(true)}
                         />
+                      </div>
+                    )}
+                    {!fileLoading && fileUrl && currentFile && isImage(currentFile.mime) && imgFailed && (
+                      <div className="p-6 text-center text-sm">
+                        <p className="text-muted">
+                          {isHeicMime(currentFile.mime)
+                            ? "This HEIC can’t preview in this browser."
+                            : "Preview failed."}
+                        </p>
+                        <a href={fileUrl} target="_blank" rel="noopener noreferrer" className="mt-2 inline-block text-primary hover:underline">
+                          Download / open file
+                        </a>
                       </div>
                     )}
                     {!fileLoading && fileUrl && currentFile && isPdf(currentFile.mime) && (

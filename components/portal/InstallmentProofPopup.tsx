@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useId, useRef, useState } from "react";
-import { Calendar, Check, FileText, ImageIcon, Upload, X } from "lucide-react";
+import { Calendar, Camera, Check, FileText, ImageIcon, Upload, X } from "lucide-react";
 import { formatINR } from "@/lib/dates";
 import type {
   InstallmentProofFileMeta,
@@ -11,16 +11,50 @@ import type {
 const H24 = 24 * 60 * 60 * 1000;
 const MAX_FILES = 3;
 const MAX_BYTES = 10 * 1024 * 1024;
-const ALLOWED_TYPES = new Set([
-  "image/jpeg",
-  "image/png",
-  "image/webp",
-  "image/heic",
-  "image/heif",
-  "application/pdf",
-]);
-const ACCEPT =
-  "image/jpeg,image/png,image/webp,image/heic,image/heif,application/pdf,.pdf,.jpg,.jpeg,.png,.webp,.heic";
+/** MIME-only accept — extension lists grey out Photo Library assets on iOS. */
+const ACCEPT = "image/*,application/pdf";
+
+function isAllowedClientFile(file: File): boolean {
+  const type = file.type || "";
+  if (type === "application/pdf" || type.startsWith("image/")) return true;
+  // iOS often omits type for HEIC / Screenshots — fall back to extension.
+  const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
+  return ["pdf", "jpg", "jpeg", "png", "webp", "heic", "heif"].includes(ext);
+}
+
+function looksLikeHeic(file: File): boolean {
+  return /heic|heif/i.test(file.type) || /\.hei[cf]$/i.test(file.name);
+}
+
+/**
+ * iPhone HEIC is accepted server-side but most desktop admin browsers cannot
+ * paint it. Decode on-device (Safari can) and upload JPEG so staff can review;
+ * if decode fails, upload the original HEIC unchanged.
+ */
+async function toAdminViewableFile(file: File): Promise<File> {
+  if (!looksLikeHeic(file)) return file;
+  try {
+    const bitmap = await createImageBitmap(file);
+    const canvas = document.createElement("canvas");
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return file;
+    ctx.drawImage(bitmap, 0, 0);
+    bitmap.close();
+    const blob = await new Promise<Blob | null>((resolve) =>
+      canvas.toBlob(resolve, "image/jpeg", 0.92),
+    );
+    if (!blob) return file;
+    const base = file.name.replace(/\.hei[cf]$/i, "") || "photo";
+    return new File([blob], `${base}.jpg`, {
+      type: "image/jpeg",
+      lastModified: file.lastModified,
+    });
+  } catch {
+    return file;
+  }
+}
 
 const FOCUSABLE =
   'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
@@ -88,7 +122,7 @@ function formatShortDate(iso: string | null): string {
 function shouldShowPrompt(prompt: InstallmentProofPromptProps): boolean {
   if (prompt.state === "none") return false;
   if (prompt.state === "expiring") {
-    if (isWithin24h(storageGet(`ipp_bar_snooze_v3_${prompt.enrollmentId}`))) return false;
+    if (isWithin24h(storageGet(`ipp_bar_snooze_v4_${prompt.enrollmentId}`))) return false;
     if (isWithin24h(storageGet(`ipp_expiring_seen_${prompt.enrollmentId}`))) return false;
     return true;
   }
@@ -113,7 +147,7 @@ function markShown(prompt: InstallmentProofPromptProps): void {
 }
 
 function snoozeExpiring(enrollmentId: string): void {
-  storageSet(`ipp_bar_snooze_v3_${enrollmentId}`, String(Date.now()));
+  storageSet(`ipp_bar_snooze_v4_${enrollmentId}`, String(Date.now()));
 }
 
 function dismissBlocked(enrollmentId: string): void {
@@ -124,6 +158,7 @@ export default function InstallmentProofPopup() {
   const titleId = useId();
   const panelRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
 
   const [open, setOpen] = useState(false);
   const [prompt, setPrompt] = useState<InstallmentProofPromptProps | null>(null);
@@ -336,10 +371,7 @@ export default function InstallmentProofPopup() {
     const next: LocalFile[] = [];
 
     for (const file of chosen) {
-      const type = file.type || "";
-      const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
-      const heic = ext === "heic" || ext === "heif";
-      if (!ALLOWED_TYPES.has(type) && !heic) {
+      if (!isAllowedClientFile(file)) {
         setError("Please use PDF, JPG, PNG, WebP, or HEIC files.");
         continue;
       }
@@ -347,7 +379,10 @@ export default function InstallmentProofPopup() {
         setError("Each file can be up to 10 MB.");
         continue;
       }
-      const isImage = type.startsWith("image/") || heic;
+      const type = file.type || "";
+      const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
+      const isPdf = type === "application/pdf" || ext === "pdf";
+      const isImage = !isPdf && (type.startsWith("image/") || looksLikeHeic(file) || type === "");
       next.push({
         id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
         file,
@@ -357,6 +392,7 @@ export default function InstallmentProofPopup() {
 
     if (next.length) setLocalFiles((prev) => [...prev, ...next].slice(0, MAX_FILES));
     if (fileInputRef.current) fileInputRef.current.value = "";
+    if (cameraInputRef.current) cameraInputRef.current.value = "";
   }
 
   function removeFile(id: string) {
@@ -382,8 +418,9 @@ export default function InstallmentProofPopup() {
     try {
       for (let i = 0; i < localFiles.length; i++) {
         const lf = localFiles[i]!;
+        const uploadFile = await toAdminViewableFile(lf.file);
         const form = new FormData();
-        form.append("file", lf.file);
+        form.append("file", uploadFile);
         form.append("installmentNo", String(prompt.installmentNo));
         const res = await fetch("/api/portal/installment-proofs", { method: "PUT", body: form });
         const json = await res.json();
@@ -526,6 +563,7 @@ export default function InstallmentProofPopup() {
             uploadDone={uploadDone}
             error={error}
             fileInputRef={fileInputRef}
+            cameraInputRef={cameraInputRef}
             onBack={() => setSlide("main")}
             onAddFiles={addFiles}
             onRemoveFile={removeFile}
@@ -535,6 +573,7 @@ export default function InstallmentProofPopup() {
             onStudentComment={setStudentComment}
             onSubmit={submitProof}
             onBrowse={() => fileInputRef.current?.click()}
+            onTakePhoto={() => cameraInputRef.current?.click()}
           />
         ) : slide === "view" ? (
           <ViewSlide
@@ -795,6 +834,7 @@ function UploadSlide({
   uploadDone,
   error,
   fileInputRef,
+  cameraInputRef,
   onBack,
   onAddFiles,
   onRemoveFile,
@@ -804,6 +844,7 @@ function UploadSlide({
   onStudentComment,
   onSubmit,
   onBrowse,
+  onTakePhoto,
 }: {
   titleId: string;
   heading: string;
@@ -820,6 +861,7 @@ function UploadSlide({
   uploadDone: boolean;
   error: string | null;
   fileInputRef: React.RefObject<HTMLInputElement>;
+  cameraInputRef: React.RefObject<HTMLInputElement>;
   onBack: () => void;
   onAddFiles: (list: FileList | null) => void;
   onRemoveFile: (id: string) => void;
@@ -829,8 +871,10 @@ function UploadSlide({
   onStudentComment: (v: string) => void;
   onSubmit: () => void;
   onBrowse: () => void;
+  onTakePhoto: () => void;
 }) {
   const [dragOver, setDragOver] = useState(false);
+  const atCap = uploadBusy || localFiles.length >= MAX_FILES;
 
   return (
     <div className="max-h-[85vh] overflow-y-auto">
@@ -865,21 +909,41 @@ function UploadSlide({
           <Upload className="mx-auto text-muted" size={28} />
           <p className="mt-2 text-sm font-medium text-ink">Drop files here or browse</p>
           <p className="mt-1 text-xs text-muted">PDF, JPG, PNG, WebP, HEIC · up to {MAX_FILES} files · 10 MB each</p>
-          <button
-            type="button"
-            data-ipp-autofocus
-            onClick={onBrowse}
-            disabled={uploadBusy || localFiles.length >= MAX_FILES}
-            className="btn btn-secondary mt-3 text-sm disabled:opacity-60"
-          >
-            Choose files
-          </button>
+          <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
+            <button
+              type="button"
+              data-ipp-autofocus
+              onClick={onBrowse}
+              disabled={atCap}
+              className="btn btn-secondary text-sm disabled:opacity-60"
+            >
+              Choose files
+            </button>
+            <button
+              type="button"
+              onClick={onTakePhoto}
+              disabled={atCap}
+              className="btn btn-secondary inline-flex items-center gap-1.5 text-sm disabled:opacity-60"
+            >
+              <Camera size={14} aria-hidden />
+              Take photo
+            </button>
+          </div>
+          {/* Default picker: no capture — iOS offers Photo Library, Camera, Browse */}
           <input
             ref={fileInputRef}
             type="file"
             accept={ACCEPT}
-            capture="environment"
             multiple
+            className="hidden"
+            onChange={(e) => onAddFiles(e.target.files)}
+          />
+          {/* Explicit camera-only path */}
+          <input
+            ref={cameraInputRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
             className="hidden"
             onChange={(e) => onAddFiles(e.target.files)}
           />
