@@ -25,7 +25,7 @@ import {
   paidWebinarRegistrationCount,
   paidWebinarRegsOnYmd,
 } from "../../webinarReg";
-import { buildKeyboard } from "../botApi";
+import { buildKeyboard, pinChatMessage } from "../botApi";
 import { sendToChannel, salesChannelConfigured } from "../channels";
 import { tgLog } from "../log";
 import { istNowParts } from "../reports/format";
@@ -411,7 +411,14 @@ export async function runSalesDigestIfDue(opts?: { force?: boolean }): Promise<{
         { label: "Access at Risk", url: `${base}/admin/access-risk` },
       ]),
     });
-    if (res.ok && !opts?.force) await markSlot(due.slot);
+    if (res.ok) {
+      const messageId = (res.result as { message_id?: number } | undefined)?.message_id;
+      const chatId = (process.env.TELEGRAM_SALES_CHAT_ID || "").trim();
+      if (messageId != null && chatId) {
+        await pinChatMessage(chatId, messageId).catch(() => null);
+      }
+      if (!opts?.force) await markSlot(due.slot);
+    }
     return { ok: res.ok, sent: !!res.ok, slot: due.slot, flushed };
   } catch (e) {
     tgLog("sales_digest_failed", { error: (e as Error).message }, "error");

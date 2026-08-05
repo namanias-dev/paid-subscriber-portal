@@ -1,16 +1,10 @@
 /**
  * Sales channel instant alerts — fire-and-forget, isolated from ops + payments.
  */
-import { buildKeyboard } from "../botApi";
-import { sendToChannel, salesChannelConfigured } from "../channels";
 import { tgLog } from "../log";
-import {
-  alreadyDeduped,
-  enqueueSalesAlert,
-  markDeduped,
-  tryConsumeRateSlot,
-  type SalesEventType,
-} from "./dedupe";
+import { type SalesEventType } from "./dedupe";
+import { deliverSalesAlert, sweepSalesOutbox } from "./deliver";
+export { fireSalesAlert, sweepSalesOutbox } from "./deliver";
 import {
   classifyCheckoutLead,
   loadEnrollmentSalesContext,
@@ -25,7 +19,6 @@ import {
   optionalSalesInr,
   salesPhone,
 } from "./format";
-import { salesAlertsEnabled } from "./settings";
 import type { CourseEnrollment, Payment } from "../../types";
 
 function clean(value: unknown): string | null {
@@ -53,6 +46,17 @@ function compactDate(value: string | null | undefined): string | null {
   return Number.isFinite(ms) ? formatIstShort(new Date(ms)) : null;
 }
 
+function waitingLabel(since: string | null | undefined): string | null {
+  if (!since) return null;
+  const ms = Date.parse(since);
+  if (!Number.isFinite(ms)) return null;
+  const mins = Math.max(0, Math.round((Date.now() - ms) / 60_000));
+  if (mins < 60) return `Waiting: ${mins}m`;
+  const hours = Math.round(mins / 60);
+  if (hours < 48) return `Waiting: ${hours}h`;
+  return `Waiting: ${Math.round(hours / 24)}d`;
+}
+
 function enrollmentLines(
   context: EnrollmentSalesContext | null,
   opts?: { installmentNo?: number | null; amountLabel?: string; amount?: number | null },
@@ -73,8 +77,12 @@ function enrollmentLines(
     context.balance ? `Balance ${optionalSalesInr(context.balance)}` : null,
   ].filter(Boolean);
   if (money.length) lines.push(money.join(" · "));
-  if (context.nextInstallmentDate) {
-    lines.push(`Next instalment: ${escapeHtml(compactDate(context.nextInstallmentDate) || context.nextInstallmentDate)}`);
+  if (context.nextInstallmentDate || context.nextInstallmentAmount) {
+    const amt = optionalSalesInr(context.nextInstallmentAmount);
+    const when = context.nextInstallmentDate
+      ? escapeHtml(compactDate(context.nextInstallmentDate) || context.nextInstallmentDate)
+      : null;
+    lines.push(`Next instalment: ${[amt, when && `due ${when}`].filter(Boolean).join(" · ")}`);
   }
   if (context.accessStatus) lines.push(`Access: ${escapeHtml(context.accessStatus)}`);
   return lines.filter((line): line is string => !!line);
@@ -93,54 +101,13 @@ export async function safeSalesContext<T>(
 }
 
 async function deliverOrQueue(input: {
+  eventId: string;
   event: SalesEventType;
   phone: string;
   html: string;
   buttons: { label: string; url: string }[];
-}): Promise<"sent" | "queued" | "skipped" | "failed"> {
-  if (!salesChannelConfigured()) return "skipped";
-  if (!(await salesAlertsEnabled())) return "skipped";
-  if (await alreadyDeduped(input.event, input.phone)) return "skipped";
-
-  // No quiet hours — Sales & Admissions alerts deliver 24×7.
-  if (!(await tryConsumeRateSlot())) {
-    await enqueueSalesAlert({
-      ...input,
-      queuedAt: new Date().toISOString(),
-      reason: "rate",
-    });
-    await markDeduped(input.event, input.phone);
-    return "queued";
-  }
-
-  const res = await sendToChannel("sales", {
-    text: input.html,
-    parse_mode: "HTML",
-    disable_web_page_preview: true,
-    disable_notification: false,
-    reply_markup: buildKeyboard(input.buttons.map((b) => ({ label: b.label, url: b.url }))),
-  });
-  if (res.ok) {
-    const messageId = (res.result as { message_id?: number } | undefined)?.message_id ?? null;
-    await markDeduped(input.event, input.phone, {
-      message_id: messageId,
-      chat_id: (process.env.TELEGRAM_SALES_CHAT_ID || "").trim() || null,
-    });
-    return "sent";
-  }
-  tgLog("sales_alert_send_failed", { event: input.event, error: res.description }, "warn");
-  return "failed";
-}
-
-/** Fire-and-forget — never throws to caller. */
-export function fireSalesAlert(task: () => Promise<unknown>): void {
-  void (async () => {
-    try {
-      await task();
-    } catch (e) {
-      tgLog("sales_alert_exception", { error: (e as Error).message }, "error");
-    }
-  })();
+}): Promise<"sent" | "skipped" | "failed"> {
+  return deliverSalesAlert(input);
 }
 
 export async function salesAlertPaymentFailed(input: {
@@ -180,6 +147,7 @@ export async function salesAlertPaymentFailed(input: {
     .filter(Boolean)
     .join("\n");
   await deliverOrQueue({
+    eventId: `payment_failed:${input.payment?.reference_no || input.payment?.id || input.phone}`,
     event: "payment_failed",
     phone: input.phone,
     html,
@@ -217,6 +185,7 @@ export async function salesAlertCheckoutAbandoned(input: {
     .filter(Boolean)
     .join("\n");
   await deliverOrQueue({
+    eventId: `checkout_abandoned:${input.payment?.reference_no || input.payment?.id || input.phone}`,
     event: "checkout_abandoned",
     phone: input.phone,
     html,
@@ -252,6 +221,7 @@ export async function salesAlertLinkExpired(input: {
     .filter(Boolean)
     .join("\n");
   await deliverOrQueue({
+    eventId: `payment_link_expired:${input.payment?.reference_no || input.payment?.id || input.phone}`,
     event: "payment_link_expired",
     phone: input.phone,
     html,
@@ -269,6 +239,8 @@ export async function salesAlertInstallmentProof(input: {
   enrollmentId?: string | null;
   proofId?: string | null;
   enrollment?: CourseEnrollment | null;
+  waitingSince?: string | null;
+  eventId?: string | null;
 }): Promise<void> {
   const link = adminStudentDeepLink({
     studentId: input.studentId,
@@ -288,25 +260,31 @@ export async function salesAlertInstallmentProof(input: {
       }),
     "installment_proof_uploaded",
   );
+  const expected = context?.nextInstallmentAmount || null;
+  const claimed = input.amount;
+  const pct = context?.progressPct;
   const html = [
     `📎 <b>Proof uploaded — needs review</b> · ${escapeHtml(input.name || "Student")}`,
     phoneLine(input.phone),
     clean(input.course || context?.enrollment.course_title)
       ? `Course: ${escapeHtml((input.course || context?.enrollment.course_title)!)}`
       : null,
-    ...enrollmentLines(context, {
-      installmentNo: input.installmentNo,
-      amountLabel: "Claimed",
-      amount: input.amount,
-    }),
+    `Instalment ${input.installmentNo}${context?.installmentTotal ? ` of ${context.installmentTotal}` : ""}`,
+    claimed != null ? `Claimed: ${optionalSalesInr(claimed)}` : null,
+    expected != null ? `Instalment amount: ${optionalSalesInr(expected)}` : null,
+    pct != null ? `Paid so far: ${pct}%` : null,
     context?.dueDate
       ? `Due: ${escapeHtml(compactDate(context.dueDate) || context.dueDate)}`
       : null,
+    waitingLabel(input.waitingSince),
     formatIstShort(new Date()),
   ]
     .filter(Boolean)
     .join("\n");
   await deliverOrQueue({
+    eventId:
+      input.eventId ||
+      `installment_proof:${input.proofId || input.enrollmentId || input.phone}:${input.installmentNo}`,
     event: "installment_proof_uploaded",
     phone: input.phone,
     html,
@@ -350,6 +328,7 @@ export async function salesAlertWebinarProof(input: {
     .filter(Boolean)
     .join("\n");
   await deliverOrQueue({
+    eventId: `webinar_proof:${input.proofId || input.payment?.id || input.phone}`,
     event: "webinar_proof_uploaded",
     phone: input.phone,
     html,
@@ -366,6 +345,7 @@ export async function salesAlertAdmission(input: {
   enrollmentId?: string | null;
   enrollment?: CourseEnrollment | null;
   source?: string | null;
+  eventId?: string | null;
 }): Promise<void> {
   const link = adminStudentDeepLink({ studentId: input.studentId, phone: input.phone });
   const context = await safeSalesContext(
@@ -380,20 +360,22 @@ export async function salesAlertAdmission(input: {
   );
   const amount = optionalSalesInr(input.amount);
   const html = [
-    `🟢 <b>New admission</b> · ${escapeHtml(input.name || "Student")}`,
+    `🟢 <b>New enrollment</b> · ${escapeHtml(input.name || "Student")}`,
     phoneLine(input.phone),
     clean(input.course) ? `Course: ${escapeHtml(input.course)}` : null,
-    context?.plan ? `Plan: ${escapeHtml(context.plan)}` : null,
-    amount ? `Paid: ${amount}` : null,
-    context?.plan === "instalment" && context.balance
-      ? `Balance: ${optionalSalesInr(context.balance)}`
-      : null,
+    context?.totalFee ? `Total fee: ${optionalSalesInr(context.totalFee)}` : null,
+    context?.discount ? `Discount: ${optionalSalesInr(context.discount)}` : null,
+    amount ? `Paid now: ${amount}` : null,
+    context?.paid ? `Paid to date: ${optionalSalesInr(context.paid)}` : null,
+    context?.balance ? `Remaining: ${optionalSalesInr(context.balance)}` : null,
+    context?.plan ? `Plan: ${escapeHtml(context.plan === "full" ? "full" : "instalments")}` : null,
     clean(input.source) ? `Source: ${escapeHtml(input.source!)}` : null,
     formatIstShort(new Date()),
   ]
     .filter(Boolean)
     .join("\n");
   await deliverOrQueue({
+    eventId: input.eventId || `admission:${input.enrollmentId || input.phone}:${Math.round(input.amount)}`,
     event: "admission",
     phone: input.phone,
     html,
@@ -410,6 +392,7 @@ export async function salesAlertInstallmentPaid(input: {
   studentId?: string | null;
   enrollmentId?: string | null;
   enrollment?: CourseEnrollment | null;
+  eventId?: string | null;
 }): Promise<void> {
   const link = adminStudentDeepLink({ studentId: input.studentId, phone: input.phone });
   const context = await safeSalesContext(
@@ -437,6 +420,9 @@ export async function salesAlertInstallmentPaid(input: {
     .filter(Boolean)
     .join("\n");
   await deliverOrQueue({
+    eventId:
+      input.eventId ||
+      `installment_paid:${input.enrollmentId || input.phone}:${input.installmentNo || 0}:${Math.round(input.amount)}`,
     event: "installment_paid",
     phone: input.phone,
     html,
@@ -457,27 +443,47 @@ export async function salesAlertPartialPayment(input: {
   studentId?: string | null;
   enrollmentId?: string | null;
   enrollment?: CourseEnrollment | null;
+  eventId?: string | null;
 }): Promise<void> {
   const link = adminStudentDeepLink({ studentId: input.studentId, phone: input.phone });
+  const context = await safeSalesContext(
+    () =>
+      loadEnrollmentSalesContext({
+        phone: input.phone,
+        course: input.course,
+        enrollmentId: input.enrollmentId,
+        enrollment: input.enrollment,
+        installmentNo: input.installmentNo,
+      }),
+    "installment_partial",
+  );
   const paid = optionalSalesInr(input.amountPaid);
   const shortfall = optionalSalesInr(input.shortfallCarried);
-  const nextAmt = optionalSalesInr(input.nextAmount);
-  const nextDue = compactDate(input.nextDue);
+  const nextAmt = optionalSalesInr(input.nextAmount || context?.nextInstallmentAmount);
+  const nextDue = compactDate(input.nextDue || context?.nextInstallmentDate);
   const html = [
     `🟠 <b>Partial instalment</b> · ${escapeHtml(input.name || "Student")}`,
     phoneLine(input.phone),
     clean(input.course) ? `Course: ${escapeHtml(input.course)}` : null,
-    input.installmentNo != null ? `Instalment ${input.installmentNo}` : null,
-    paid ? `Paid: ${paid}` : null,
+    input.installmentNo != null
+      ? `Instalment ${input.installmentNo}${context?.installmentTotal ? ` of ${context.installmentTotal}` : ""}`
+      : null,
+    paid ? `Paid now: ${paid}` : null,
+    context?.totalFee ? `Total fee: ${optionalSalesInr(context.totalFee)}` : null,
+    context?.paid ? `Paid to date: ${optionalSalesInr(context.paid)}` : null,
+    context?.balance ? `Remaining: ${optionalSalesInr(context.balance)}` : null,
     shortfall ? `Shortfall carried: ${shortfall}` : null,
     nextAmt
-      ? `Next due: ${nextAmt}${nextDue ? ` on ${escapeHtml(nextDue)}` : ""}`
+      ? `Next instalment: ${nextAmt}${nextDue ? ` · due ${escapeHtml(nextDue)}` : ""}`
       : null,
     formatIstShort(new Date()),
   ]
     .filter(Boolean)
     .join("\n");
   await deliverOrQueue({
+    eventId:
+      input.eventId ||
+      `installment_partial:${input.enrollmentId || input.phone}:${input.installmentNo || 0}:${Math.round(input.amountPaid)}`,
     event: "installment_partial",
     phone: input.phone,
     html,
@@ -493,6 +499,7 @@ export async function salesAlertPaymentSucceeded(input: {
   studentId?: string | null;
   enrollmentId?: string | null;
   enrollment?: CourseEnrollment | null;
+  eventId?: string | null;
 }): Promise<void> {
   const link = adminStudentDeepLink({ studentId: input.studentId, phone: input.phone });
   const context = await safeSalesContext(
@@ -519,6 +526,9 @@ export async function salesAlertPaymentSucceeded(input: {
     .filter(Boolean)
     .join("\n");
   await deliverOrQueue({
+    eventId:
+      input.eventId ||
+      `payment_succeeded:${input.enrollmentId || input.phone}:${Math.round(input.amount)}`,
     event: "payment_succeeded",
     phone: input.phone,
     html,
@@ -530,35 +540,111 @@ export async function salesAlertPaymentSucceeded(input: {
  * Flush rate-limit backlog. Never throws.
  * Called from digest + every telegram-reports cron tick.
  */
+
+export async function salesAlertWebinarRegistration(input: {
+  name: string;
+  phone: string;
+  webinar: string;
+  webinarDate?: string | null;
+  amountPaid?: number | null;
+  registrationsSoFar?: number | null;
+  eventId?: string | null;
+}): Promise<void> {
+  const link = adminStudentDeepLink({ phone: input.phone });
+  const html = [
+    `🎟 <b>Webinar registration</b> · ${escapeHtml(input.name || "Student")}`,
+    phoneLine(input.phone),
+    clean(input.webinar) ? `Webinar: ${escapeHtml(input.webinar)}` : null,
+    input.webinarDate ? `Date: ${escapeHtml(compactDate(input.webinarDate) || input.webinarDate)}` : null,
+    optionalSalesInr(input.amountPaid) ? `Amount paid: ${optionalSalesInr(input.amountPaid)}` : `Amount paid: free`,
+    input.registrationsSoFar != null ? `Registrations so far: ${input.registrationsSoFar}` : null,
+    formatIstShort(new Date()),
+  ].filter(Boolean).join("\n");
+  await deliverOrQueue({
+    eventId: input.eventId || `webinar_reg:${input.phone}:${input.webinar}`,
+    event: "webinar_registration",
+    phone: input.phone,
+    html,
+    buttons: [{ label: "Open in admin", url: link }],
+  });
+}
+
+export async function salesAlertWebinarPayment(input: {
+  name: string;
+  phone: string;
+  webinar: string;
+  webinarDate?: string | null;
+  amount: number;
+  method?: string | null;
+  receiptNo?: string | null;
+  registrationsSoFar?: number | null;
+  eventId?: string | null;
+}): Promise<void> {
+  const link = adminStudentDeepLink({ phone: input.phone });
+  const html = [
+    `💳 <b>Webinar payment</b> · ${escapeHtml(input.name || "Student")}`,
+    phoneLine(input.phone),
+    clean(input.webinar) ? `Webinar: ${escapeHtml(input.webinar)}` : null,
+    input.webinarDate ? `Date: ${escapeHtml(compactDate(input.webinarDate) || input.webinarDate)}` : null,
+    optionalSalesInr(input.amount) ? `Amount: ${optionalSalesInr(input.amount)}` : null,
+    clean(input.method) ? `Method: ${escapeHtml(input.method!)}` : null,
+    clean(input.receiptNo) ? `Receipt: ${escapeHtml(input.receiptNo!)}` : null,
+    input.registrationsSoFar != null ? `Registrations so far: ${input.registrationsSoFar}` : null,
+    formatIstShort(new Date()),
+  ].filter(Boolean).join("\n");
+  await deliverOrQueue({
+    eventId: input.eventId || `webinar_pay:${input.phone}:${Math.round(input.amount)}:${input.receiptNo || "x"}`,
+    event: "webinar_payment",
+    phone: input.phone,
+    html,
+    buttons: [{ label: "Open in admin", url: link }],
+  });
+}
+
+export async function salesAlertNewLead(input: {
+  name: string;
+  phone: string;
+  source?: string | null;
+  courseInterest?: string | null;
+  leadId?: string | null;
+  eventId?: string | null;
+}): Promise<void> {
+  const link = adminStudentDeepLink({ phone: input.phone });
+  const html = [
+    `🆕 <b>New lead</b> · ${escapeHtml(input.name || "Lead")}`,
+    phoneLine(input.phone),
+    clean(input.source) ? `Source: ${escapeHtml(input.source!)}` : null,
+    clean(input.courseInterest) ? `Course interest: ${escapeHtml(input.courseInterest!)}` : null,
+    formatIstShort(new Date()),
+  ].filter(Boolean).join("\n");
+  await deliverOrQueue({
+    eventId: input.eventId || `lead:${input.leadId || input.phone}`,
+    event: "new_lead",
+    phone: input.phone,
+    html,
+    buttons: [{ label: "Open in admin", url: link }],
+  });
+}
+
 export async function flushSalesQueuedAlerts(_opts?: { force?: boolean }): Promise<number> {
   try {
+    // Drain legacy rate-queue if any remain, then sweep outbox.
     const { drainSalesQueue } = await import("./dedupe");
+    const { deliverSalesAlert: deliver } = await import("./deliver");
     const items = await drainSalesQueue();
     let sent = 0;
     for (const item of items) {
-      if (!(await tryConsumeRateSlot())) {
-        await enqueueSalesAlert(item);
-        continue;
-      }
-      const res = await sendToChannel("sales", {
-        text: item.html + `\n<i>Queued (${item.reason})</i>`,
-        parse_mode: "HTML",
-        disable_web_page_preview: true,
-        reply_markup: buildKeyboard(item.buttons.map((b) => ({ label: b.label, url: b.url }))),
+      const r = await deliver({
+        eventId: `legacy_queue:${item.event}:${item.phone}:${item.queuedAt}`,
+        event: item.event,
+        phone: item.phone,
+        html: item.html,
+        buttons: item.buttons,
       });
-      if (res.ok) {
-        sent++;
-        await markDeduped(item.event, item.phone, {
-          message_id: (res.result as { message_id?: number } | undefined)?.message_id ?? null,
-          chat_id: (process.env.TELEGRAM_SALES_CHAT_ID || "").trim() || null,
-        });
-      } else {
-        // Put back so next awake tick can retry.
-        await enqueueSalesAlert(item);
-        tgLog("sales_queue_item_send_failed", { event: item.event, error: res.description }, "warn");
-      }
+      if (r === "sent") sent++;
     }
-    return sent;
+    const sweep = await sweepSalesOutbox(40);
+    return sent + sweep.sent;
   } catch (e) {
     tgLog("sales_queue_flush_failed", { error: (e as Error).message }, "error");
     return 0;

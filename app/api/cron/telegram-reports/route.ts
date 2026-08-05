@@ -80,6 +80,12 @@ async function run(req: Request) {
       return NextResponse.json({ ok, channel: "sales", ts: Date.now() });
     }
 
+    if (action === "sales_prove") {
+      const { proveSalesPipeline } = await import("@/lib/telegram/sales/prove");
+      const prove = await proveSalesPipeline();
+      return NextResponse.json({ ok: prove.ok, prove, ts: Date.now() });
+    }
+
     if (action === "sales_digest") {
       const salesMod = await import("@/lib/telegram/sales");
       const digest = await salesMod.runSalesDigestIfDue({ force: true });

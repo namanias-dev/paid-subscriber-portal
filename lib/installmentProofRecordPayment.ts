@@ -260,21 +260,24 @@ export async function approveAndRecordInstallmentProof(input: {
           ? { ...updated, schedule: plan.scheduleAfter }
           : { ...fresh, schedule: plan.scheduleAfter };
         try {
-          const { salesAlertPartialPayment } = await import("./telegram/sales/send");
-          await salesAlertPartialPayment({
-            name: enrollmentAfter.student_name,
-            phone: enrollmentAfter.phone,
-            course: enrollmentAfter.course_title,
-            amountPaid: payment.amount,
-            shortfallCarried: plan.carriedOut,
-            nextAmount: plan.nextAmountDue,
-            nextDue: enrollmentAfter.schedule?.find((l) => l.no === plan.toNo)?.due ?? null,
-            installmentNo: proof.installment_no,
-            enrollmentId: enrollmentAfter.id,
-            enrollment: enrollmentAfter,
+          const { fireSalesAlert, salesAlertPartialPayment } = await import("./telegram/sales");
+          fireSalesAlert(async () => {
+            await salesAlertPartialPayment({
+              name: enrollmentAfter.student_name,
+              phone: enrollmentAfter.phone,
+              course: enrollmentAfter.course_title,
+              amountPaid: payment.amount,
+              shortfallCarried: plan.carriedOut,
+              nextAmount: plan.nextAmountDue,
+              nextDue: enrollmentAfter.schedule?.find((l) => l.no === plan.toNo)?.due ?? null,
+              installmentNo: proof.installment_no,
+              enrollmentId: enrollmentAfter.id,
+              enrollment: enrollmentAfter,
+              eventId: `installment_partial:${proof.id || enrollmentAfter.id}:${proof.installment_no}`,
+            });
           });
-        } catch {
-          /* sales alert best-effort */
+        } catch (e) {
+          console.error("[sales] partial alert failed", (e as Error).message);
         }
       }
     }

@@ -2387,6 +2387,21 @@ function fireLeadCreated(lead: Lead, sourceForm?: string | null, attribution?: L
     entity: { lead_id: lead.id },
     entityId: lead.id,
   });
+  // Sales Telegram — new lead (INSERT only). waitUntil + outbox; never blocks create.
+  void import("./telegram/sales")
+    .then((m) =>
+      m.fireSalesAlert(async () => {
+        await m.salesAlertNewLead({
+          name: lead.name || "Lead",
+          phone: lead.phone || "",
+          source: lead.source || sourceForm || null,
+          courseInterest: lead.course_interest ?? null,
+          leadId: lead.id,
+          eventId: `lead:${lead.id}`,
+        });
+      }),
+    )
+    .catch(() => {});
 }
 export async function updateLead(id: string, patch: Partial<Lead>): Promise<Lead | null> {
   if (demoMode()) {
@@ -2740,7 +2755,23 @@ export async function registerWebinar(
   let webinarSlug: string | null = null;
   let webinarPrice = 0;
   let webinarSmsShort: string | null = null;
-  if (db) { try { const { data } = await db.from("webinars").select("title, slug, price, sms_short_title").eq("id", webinarId).maybeSingle(); webinarTitle = (data?.title as string) ?? null; webinarSlug = (data as { slug?: string } | null)?.slug ?? null; webinarPrice = Number((data as { price?: number } | null)?.price ?? 0) || 0; webinarSmsShort = (data as { sms_short_title?: string | null } | null)?.sms_short_title ?? null; } catch { /* ignore */ } }
+  let webinarDatetime: string | null = null;
+  if (db) {
+    try {
+      const { data } = await db
+        .from("webinars")
+        .select("title, slug, price, sms_short_title, datetime")
+        .eq("id", webinarId)
+        .maybeSingle();
+      webinarTitle = (data?.title as string) ?? null;
+      webinarSlug = (data as { slug?: string } | null)?.slug ?? null;
+      webinarPrice = Number((data as { price?: number } | null)?.price ?? 0) || 0;
+      webinarSmsShort = (data as { sms_short_title?: string | null } | null)?.sms_short_title ?? null;
+      webinarDatetime = (data as { datetime?: string } | null)?.datetime ?? null;
+    } catch {
+      /* ignore */
+    }
+  }
   const isFreeWebinar = webinarPrice <= 0;
   // Analytics (best-effort, idempotent): a webinar registration milestone. The
   // attribution snapshot (from the nsa_attr cookie, passed by the route) rides the
@@ -2774,6 +2805,34 @@ export async function registerWebinar(
   // so a later payment can be traced back to the original campaign even months later
   // and cross-device (the report falls back to buyers.first_touch.campaign).
   void stampBuyerAttribution(phone, attr ?? null).catch(() => {});
+  // Sales Telegram — webinar registration (free or paid intent). Never blocks register.
+  void import("./telegram/sales")
+    .then(async (m) => {
+      let regs: number | null = null;
+      try {
+        if (db) {
+          const { count } = await db
+            .from("webinar_registrations")
+            .select("id", { count: "exact", head: true })
+            .eq("webinar_id", webinarId);
+          regs = typeof count === "number" ? count : null;
+        }
+      } catch {
+        /* ignore */
+      }
+      m.fireSalesAlert(async () => {
+        await m.salesAlertWebinarRegistration({
+          name,
+          phone,
+          webinar: webinarTitle || webinarSlug || webinarId,
+          webinarDate: webinarDatetime,
+          amountPaid: isFreeWebinar ? 0 : null,
+          registrationsSoFar: regs,
+          eventId: `webinar_reg:${webinarId}:${String(phone).replace(/\D/g, "").slice(-10)}`,
+        });
+      });
+    })
+    .catch(() => {});
   return { ok: true };
 }
 

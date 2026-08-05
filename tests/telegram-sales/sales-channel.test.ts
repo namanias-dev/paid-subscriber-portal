@@ -90,6 +90,12 @@ describe("sales quiet hours disabled", () => {
     assert.equal(inSalesQuietHours(new Date("2026-08-05T22:30:00+05:30")), false);
     assert.equal(inSalesQuietHours(new Date("2026-08-05T12:00:00+05:30")), false);
   });
+
+  it("has no rate limit (tryConsumeRateSlot always true)", async () => {
+    const { tryConsumeRateSlot, RATE_LIMIT_PER_MIN } = await import("../../lib/telegram/sales/dedupe");
+    assert.equal(RATE_LIMIT_PER_MIN, Number.POSITIVE_INFINITY);
+    assert.equal(await tryConsumeRateSlot(), true);
+  });
 });
 
 describe("sales channel isolation", () => {

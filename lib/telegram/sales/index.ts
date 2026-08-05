@@ -14,8 +14,13 @@ export {
   salesAlertInstallmentPaid,
   salesAlertPartialPayment,
   salesAlertPaymentSucceeded,
+  salesAlertWebinarRegistration,
+  salesAlertWebinarPayment,
+  salesAlertNewLead,
   flushSalesQueuedAlerts,
+  sweepSalesOutbox,
 } from "./send";
+export { proveSalesPipeline } from "./prove";
 export { runSalesDigestIfDue, buildSalesDigestHtml, salesDigestDueNow } from "./digest";
 export { sweepCheckoutAbandoned, fireAbandonSweep } from "./abandoned";
 export {

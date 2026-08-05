@@ -274,16 +274,50 @@ export async function recordPaymentPaid(p: Payment, source = "system"): Promise<
               await m.salesAlertInstallmentPaid({
                 ...base,
                 installmentNo: p.installment_no ?? null,
+                eventId: `installment_paid:${ref}`,
               });
             } else {
               await m.salesAlertAdmission({
                 ...base,
                 source: p.attribution_source ?? null,
+                eventId: `admission:${ref}`,
               });
-              await m.salesAlertPaymentSucceeded(base);
+              await m.salesAlertPaymentSucceeded({
+                ...base,
+                eventId: `payment_succeeded:${ref}`,
+              });
             }
           }),
         )
+        .catch(() => {});
+    } else if (p.item_type === "webinar") {
+      void import("../telegram/sales")
+        .then(async (m) => {
+          const { getPayments, getWebinars } = await import("../dataProvider");
+          const { paidWebinarRegistrationCount } = await import("../webinarReg");
+          const [payments, webinars] = await Promise.all([getPayments(), getWebinars()]);
+          const key = String(p.item_slug || p.item || "").trim();
+          const webinar =
+            webinars.find(
+              (w) =>
+                w.id === p.item_slug ||
+                w.slug === p.item_slug ||
+                w.title === p.item,
+            ) || null;
+          m.fireSalesAlert(async () => {
+            await m.salesAlertWebinarPayment({
+              name: p.student_name || "Student",
+              phone: p.phone,
+              webinar: webinar?.title || p.item || key || "Webinar",
+              webinarDate: webinar?.datetime || null,
+              amount: Number(p.amount) || 0,
+              method: (p as { payment_mode?: string | null }).payment_mode || p.gateway || null,
+              receiptNo: p.reference_no || p.receipt_no || null,
+              registrationsSoFar: key ? paidWebinarRegistrationCount(payments, key) : null,
+              eventId: `webinar_pay:${ref}`,
+            });
+          });
+        })
         .catch(() => {});
     }
     if (p.item_type === "course") {

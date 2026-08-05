@@ -39,7 +39,7 @@
     },
     {
       "path": "/api/cron/telegram-dispatch",
-      "schedule": "*/5 * * * *"
+      "schedule": "*/2 * * * *"
     },
     {
       "path": "/api/cron/telegram-reports",

@@ -15,9 +15,14 @@ export type SalesEventType =
   | "admission"
   | "installment_paid"
   | "installment_partial"
-  | "payment_succeeded";
+  | "payment_succeeded"
+  | "webinar_registration"
+  | "webinar_payment"
+  | "new_lead"
+  | "prove_transport";
 
-const RATE_LIMIT_PER_MIN = 8;
+/** No rate limit on Sales & Admissions — always allow (kept for legacy queue drain). */
+const RATE_LIMIT_PER_MIN = Number.POSITIVE_INFINITY;
 
 /** Always false — Sales channel stays live 24×7 (kept for callers/tests). */
 export function inSalesQuietHours(_d = new Date()): boolean {
@@ -70,28 +75,10 @@ export async function markDeduped(
     );
 }
 
-/** Returns true if under rate limit (and increments). False → overflow. */
+/** Returns true if under rate limit (and increments). False → overflow.
+ * Sales channel: always true (no rate limiting). */
 export async function tryConsumeRateSlot(): Promise<boolean> {
-  const db = getSupabaseAdmin();
-  if (!db) return true;
-  const { ymd, hour, minute } = istNowParts();
-  const key = `sales:rate:${ymd}:${hour}:${minute}`;
-  try {
-    const { data } = await db.from("telegram_report_snapshots").select("id,metrics").eq("slot_key", key).maybeSingle();
-    const count = Number((data?.metrics as { count?: number } | null)?.count || 0);
-    if (count >= RATE_LIMIT_PER_MIN) return false;
-    await db.from("telegram_report_snapshots").upsert(
-      {
-        slot_key: key,
-        kind: "sales_rate",
-        metrics: { count: count + 1 },
-      },
-      { onConflict: "slot_key" },
-    );
-    return true;
-  } catch {
-    return true;
-  }
+  return true;
 }
 
 export interface QueuedSalesAlert {

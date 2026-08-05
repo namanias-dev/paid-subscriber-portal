@@ -7,7 +7,8 @@ import {
   getWebinars,
 } from "../../dataProvider";
 import { lectureAccessForCourse } from "../../entitlements";
-import { deriveEnrollment, isActiveEnrollment, isLineOutstanding } from "../../installments";
+import { enrollmentFeeStateFromEnrollment } from "../../enrollmentFeeState";
+import { deriveEnrollment, isActiveEnrollment } from "../../installments";
 import { isPaidStatus } from "../../paymentsAgg";
 import type { CourseEnrollment, Payment } from "../../types";
 import { paidWebinarRegistrationCount } from "../../webinarReg";
@@ -17,11 +18,14 @@ export interface EnrollmentSalesContext {
   totalFee: number | null;
   paid: number | null;
   balance: number | null;
+  discount: number | null;
   installmentTotal: number | null;
   nextInstallmentDate: string | null;
+  nextInstallmentAmount: number | null;
   dueDate: string | null;
   accessStatus: "active" | "blocked" | null;
   plan: "full" | "instalment" | null;
+  progressPct: number | null;
 }
 
 function phone10(raw: string | null | undefined): string {
@@ -94,6 +98,7 @@ async function loadEnrollmentSalesContextUncached(
   ]);
   const enrollment = opts.enrollment || matchingEnrollment(rows, opts);
   if (!enrollment) return null;
+  const fee = enrollmentFeeStateFromEnrollment(enrollment);
   const derived = deriveEnrollment(enrollment);
   const course = courses.find(
     (c) =>
@@ -103,25 +108,25 @@ async function loadEnrollmentSalesContextUncached(
   );
   const override = overrides.find((o) => o.course_id === enrollment.course_id);
   const access = lectureAccessForCourse(course, enrollment, override, false);
-  const outstanding = (enrollment.schedule || [])
-    .filter((line) => line.kind !== "seat" && isLineOutstanding(line))
-    .sort((a, b) => String(a.due || "").localeCompare(String(b.due || "")));
   const installmentTotal =
+    positive(fee.installmentTotal) ||
     positive(enrollment.installment_count) ||
-    (enrollment.schedule || []).filter((line) => line.kind !== "seat").length ||
+    (enrollment.schedule || []).filter((line) => line.kind === "installment").length ||
     null;
   return {
     enrollment,
-    totalFee: positive(enrollment.total_fee),
-    paid: positive(derived.paid),
-    balance: positive(derived.remaining),
+    totalFee: positive(fee.totalFee) || positive(enrollment.total_fee),
+    paid: positive(fee.netPaid) || positive(derived.paid),
+    balance: positive(fee.outstanding) || positive(derived.remaining),
+    discount: positive(fee.discount),
     installmentTotal,
-    nextInstallmentDate: outstanding[0]?.due || null,
+    nextInstallmentDate: fee.nextDueInstalment?.dueDate || null,
+    nextInstallmentAmount: positive(fee.nextDueInstalment?.amountDue),
     dueDate:
       (opts.installmentNo != null
         ? (enrollment.schedule || []).find((line) => line.no === opts.installmentNo)?.due
         : null) ||
-      outstanding[0]?.due ||
+      fee.nextDueInstalment?.dueDate ||
       null,
     accessStatus: access.allowed ? "active" : "blocked",
     plan:
@@ -132,6 +137,7 @@ async function loadEnrollmentSalesContextUncached(
             enrollment.plan_type === "emi"
           ? "instalment"
           : null,
+    progressPct: fee.progressPct,
   };
 }
 
@@ -230,26 +236,28 @@ export function enrollmentContextFromSnapshot(
   enrollment: CourseEnrollment,
   accessStatus?: "active" | "blocked" | null,
 ): EnrollmentSalesContext {
+  const fee = enrollmentFeeStateFromEnrollment(enrollment);
   const derived = deriveEnrollment(enrollment);
-  const outstanding = (enrollment.schedule || [])
-    .filter((line) => line.kind !== "seat" && isLineOutstanding(line))
-    .sort((a, b) => String(a.due || "").localeCompare(String(b.due || "")));
   const installmentTotal =
+    positive(fee.installmentTotal) ||
     positive(enrollment.installment_count) ||
     (enrollment.schedule || []).filter((line) => line.kind !== "seat").length ||
     null;
   return {
     enrollment,
-    totalFee: positive(enrollment.total_fee),
-    paid: positive(derived.paid),
-    balance: positive(derived.remaining),
+    totalFee: positive(fee.totalFee) || positive(enrollment.total_fee),
+    paid: positive(fee.netPaid) || positive(derived.paid),
+    balance: positive(fee.outstanding) || positive(derived.remaining),
+    discount: positive(fee.discount),
     installmentTotal,
-    nextInstallmentDate: outstanding[0]?.due || null,
-    dueDate: outstanding[0]?.due || null,
+    nextInstallmentDate: fee.nextDueInstalment?.dueDate || null,
+    nextInstallmentAmount: positive(fee.nextDueInstalment?.amountDue),
+    dueDate: fee.nextDueInstalment?.dueDate || null,
     accessStatus: accessStatus ?? null,
     plan:
       enrollment.payment_plan === "FULL" || enrollment.plan_type === "full"
         ? "full"
         : "instalment",
+    progressPct: fee.progressPct,
   };
 }
