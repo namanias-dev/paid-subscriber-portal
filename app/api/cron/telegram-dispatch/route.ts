@@ -9,7 +9,10 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 async function run(req: Request) {
-  if (!authorizeCron(req, process.env.CRON_SECRET)) {
+  const authorized =
+    authorizeCron(req, process.env.CRON_SECRET) ||
+    authorizeCron(req, process.env.TELEGRAM_WEBHOOK_SECRET);
+  if (!authorized) {
     return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   }
   try {
