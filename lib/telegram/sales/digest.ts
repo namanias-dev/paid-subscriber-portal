@@ -33,7 +33,6 @@ import { SITE_URL } from "../../config";
 import { escapeHtml, optionalSalesInr, salesPhone } from "./format";
 import { salesDigestEnabled } from "./settings";
 import { flushSalesQueuedAlerts } from "./send";
-import { inSalesQuietHours } from "./dedupe";
 
 const DIGEST_HOURS = [10, 15, 20] as const;
 
@@ -47,7 +46,6 @@ function daysFromNowIso(days: number): string {
  * that window never overlaps the cron and digests never fired.
  */
 export function salesDigestDueNow(d = new Date()): { due: boolean; slot: string | null } {
-  if (inSalesQuietHours(d)) return { due: false, slot: null };
   const parts = istNowParts(d);
   let dueHour: number | null = null;
   for (const h of DIGEST_HOURS) {
@@ -398,11 +396,8 @@ export async function runSalesDigestIfDue(opts?: { force?: boolean }): Promise<{
       return { ok: true, sent: false, slot: due.slot, flushed: 0 };
     }
 
-    // Drain quiet/rate backlog whenever we are awake (or on force).
-    let flushed = 0;
-    if (opts?.force || !inSalesQuietHours()) {
-      flushed = await flushSalesQueuedAlerts({ force: !!opts?.force });
-    }
+    // Drain rate-limit backlog before posting digest.
+    const flushed = await flushSalesQueuedAlerts({ force: !!opts?.force });
 
     const html = await buildSalesDigestHtml();
     const base = (SITE_URL || "https://www.namanias.com").replace(/\/$/, "");

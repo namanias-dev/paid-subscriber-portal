@@ -57,11 +57,17 @@ describe("sales digest schedule", () => {
     }
   });
 
-  it("is not due during quiet hours or before first slot", async () => {
+  it("is not due before the first 10:00 IST slot", async () => {
     const { salesDigestDueNow } = await import("../../lib/telegram/sales/digest");
     assert.equal(salesDigestDueNow(new Date("2026-08-05T08:05:00+05:30")).due, false);
-    assert.equal(salesDigestDueNow(new Date("2026-08-05T21:05:00+05:30")).due, false);
-    assert.equal(salesDigestDueNow(new Date("2026-08-05T22:40:00+05:30")).due, false);
+    assert.equal(salesDigestDueNow(new Date("2026-08-05T09:59:00+05:30")).due, false);
+  });
+
+  it("stays due overnight for 20:00 catch-up (no quiet hours)", async () => {
+    const { salesDigestDueNow } = await import("../../lib/telegram/sales/digest");
+    const late = salesDigestDueNow(new Date("2026-08-05T22:40:00+05:30"));
+    assert.equal(late.due, true);
+    assert.equal(late.slot, "sales:digest:2026-08-05:20");
   });
 });
 
@@ -74,6 +80,15 @@ describe("sales digest revenue hygiene", () => {
     assert.doesNotMatch(html, /conversion/i);
     assert.doesNotMatch(html, /total revenue/i);
     assert.doesNotMatch(html, /₹\d+(\.\d+)?L/);
+  });
+});
+
+describe("sales quiet hours disabled", () => {
+  it("inSalesQuietHours is always false (24×7 alerts)", async () => {
+    const { inSalesQuietHours } = await import("../../lib/telegram/sales/dedupe");
+    assert.equal(inSalesQuietHours(new Date("2026-08-05T02:00:00+05:30")), false);
+    assert.equal(inSalesQuietHours(new Date("2026-08-05T22:30:00+05:30")), false);
+    assert.equal(inSalesQuietHours(new Date("2026-08-05T12:00:00+05:30")), false);
   });
 });
 

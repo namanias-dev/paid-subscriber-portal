@@ -131,7 +131,7 @@ async function run(req: Request) {
         sales_alerts_enabled: alerts,
         sales_digest_enabled: digest,
         schedule: "10:00,15:00,20:00 IST",
-        quiet_hours: "21:00–08:00 IST",
+        quiet_hours: "none — instant alerts 24×7",
         abandon_window: "30m–2h",
         ts: Date.now(),
       });
@@ -306,7 +306,7 @@ async function run(req: Request) {
     try {
       const salesMod = await import("@/lib/telegram/sales");
       const abandon = await salesMod.sweepCheckoutAbandoned().catch(() => ({ checked: 0, alerted: 0 }));
-      // Drain quiet/rate backlog on every awake tick (independent of digest due).
+      // Drain rate-limit backlog on every tick (independent of digest due).
       const flushed = await salesMod.flushSalesQueuedAlerts().catch(() => 0);
       const digestSales = await salesMod.runSalesDigestIfDue().catch(() => ({
         ok: false,

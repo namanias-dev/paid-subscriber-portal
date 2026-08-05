@@ -1,5 +1,6 @@
 /**
- * Dedup / rate-limit / quiet-hours queue for sales Telegram.
+ * Dedup / rate-limit queue for sales Telegram.
+ * Sales & Admissions has NO quiet hours — instant alerts always deliver.
  * Reuses telegram_report_snapshots (slot_key unique) — no new migration.
  */
 import { getSupabaseAdmin } from "../../supabase";
@@ -16,12 +17,10 @@ export type SalesEventType =
   | "payment_succeeded";
 
 const RATE_LIMIT_PER_MIN = 8;
-const QUIET_START = 21; // 21:00 IST inclusive
-const QUIET_END = 8; // 08:00 IST exclusive
 
-export function inSalesQuietHours(d = new Date()): boolean {
-  const { hour } = istNowParts(d);
-  return hour >= QUIET_START || hour < QUIET_END;
+/** Always false — Sales channel stays live 24×7 (kept for callers/tests). */
+export function inSalesQuietHours(_d = new Date()): boolean {
+  return false;
 }
 
 function phoneKey(phone: string): string {
@@ -100,7 +99,7 @@ export interface QueuedSalesAlert {
   html: string;
   buttons: { label: string; url: string }[];
   queuedAt: string;
-  reason: "quiet" | "rate";
+  reason: "rate" | "quiet"; // "quiet" retained for any legacy queued rows
 }
 
 export async function enqueueSalesAlert(item: QueuedSalesAlert): Promise<void> {

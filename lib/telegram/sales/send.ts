@@ -7,7 +7,6 @@ import { tgLog } from "../log";
 import {
   alreadyDeduped,
   enqueueSalesAlert,
-  inSalesQuietHours,
   markDeduped,
   tryConsumeRateSlot,
   type SalesEventType,
@@ -103,16 +102,7 @@ async function deliverOrQueue(input: {
   if (!(await salesAlertsEnabled())) return "skipped";
   if (await alreadyDeduped(input.event, input.phone)) return "skipped";
 
-  if (inSalesQuietHours()) {
-    await enqueueSalesAlert({
-      ...input,
-      queuedAt: new Date().toISOString(),
-      reason: "quiet",
-    });
-    await markDeduped(input.event, input.phone);
-    return "queued";
-  }
-
+  // No quiet hours — Sales & Admissions alerts deliver 24×7.
   if (!(await tryConsumeRateSlot())) {
     await enqueueSalesAlert({
       ...input,
@@ -496,14 +486,12 @@ export async function salesAlertPaymentSucceeded(input: {
 }
 
 /**
- * Flush quiet/rate queue. Never throws.
- * Called from digest + every awake telegram-reports cron tick so backlog
- * does not depend on the 10:00 digest actually firing.
+ * Flush rate-limit backlog. Never throws.
+ * Called from digest + every telegram-reports cron tick.
  */
-export async function flushSalesQueuedAlerts(opts?: { force?: boolean }): Promise<number> {
+export async function flushSalesQueuedAlerts(_opts?: { force?: boolean }): Promise<number> {
   try {
-    const { drainSalesQueue, inSalesQuietHours } = await import("./dedupe");
-    if (inSalesQuietHours() && !opts?.force) return 0;
+    const { drainSalesQueue } = await import("./dedupe");
     const items = await drainSalesQueue();
     let sent = 0;
     for (const item of items) {
