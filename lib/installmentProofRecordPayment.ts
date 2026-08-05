@@ -274,6 +274,7 @@ export async function approveAndRecordInstallmentProof(input: {
               enrollmentId: enrollmentAfter.id,
               enrollment: enrollmentAfter,
               eventId: `installment_partial:${proof.id || enrollmentAfter.id}:${proof.installment_no}`,
+              occurredAt: payment.created_at || new Date().toISOString(),
             });
           });
         } catch (e) {

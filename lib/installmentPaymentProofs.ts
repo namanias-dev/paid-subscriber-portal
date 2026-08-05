@@ -417,6 +417,8 @@ export async function submitInstallmentProof(input: {
             enrollmentId: e.id,
             proofId: proof.id,
             enrollment: e,
+            waitingSince: proof.created_at ?? null,
+            occurredAt: proof.created_at || new Date().toISOString(),
           });
         }),
       )
@@ -479,6 +481,8 @@ export async function submitInstallmentProof(input: {
           enrollmentId: e.id,
           proofId: proof.id,
           enrollment: e,
+          waitingSince: proof.created_at ?? null,
+          occurredAt: proof.created_at || new Date().toISOString(),
         });
       }),
     )

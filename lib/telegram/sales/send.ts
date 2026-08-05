@@ -19,6 +19,8 @@ import {
   optionalSalesInr,
   salesPhone,
 } from "./format";
+import { enqueueSalesLeadBatch } from "./leadBatch";
+import { salesLeadBatchingEnabled } from "./settings";
 import type { CourseEnrollment, Payment } from "../../types";
 
 function clean(value: unknown): string | null {
@@ -106,6 +108,7 @@ async function deliverOrQueue(input: {
   phone: string;
   html: string;
   buttons: { label: string; url: string }[];
+  occurredAt?: string | Date | null;
 }): Promise<"sent" | "skipped" | "failed"> {
   return deliverSalesAlert(input);
 }
@@ -118,6 +121,7 @@ export async function salesAlertPaymentFailed(input: {
   reason?: string | null;
   studentId?: string | null;
   payment?: Payment | null;
+  occurredAt?: string | Date | null;
 }): Promise<void> {
   const link = adminStudentDeepLink({ studentId: input.studentId, phone: input.phone });
   const context = await safeSalesContext(
@@ -152,6 +156,7 @@ export async function salesAlertPaymentFailed(input: {
     phone: input.phone,
     html,
     buttons: [{ label: "Open in admin", url: link }],
+    occurredAt: input.payment?.created_at ?? new Date(),
   });
 }
 
@@ -165,6 +170,7 @@ export async function salesAlertCheckoutAbandoned(input: {
   payment?: Payment | null;
   allPayments?: readonly Payment[] | null;
   studentId?: string | null;
+  occurredAt?: string | Date | null;
 }): Promise<void> {
   const link = adminStudentDeepLink({ studentId: input.studentId, phone: input.phone });
   const amount = optionalSalesInr(input.amount ?? input.payment?.amount);
@@ -202,6 +208,7 @@ export async function salesAlertLinkExpired(input: {
   wasOpened?: boolean | null;
   payment?: Payment | null;
   studentId?: string | null;
+  occurredAt?: string | Date | null;
 }): Promise<void> {
   const link = adminStudentDeepLink({ studentId: input.studentId, phone: input.phone });
   const amount = optionalSalesInr(input.amount ?? input.payment?.amount);
@@ -241,6 +248,7 @@ export async function salesAlertInstallmentProof(input: {
   enrollment?: CourseEnrollment | null;
   waitingSince?: string | null;
   eventId?: string | null;
+  occurredAt?: string | Date | null;
 }): Promise<void> {
   const link = adminStudentDeepLink({
     studentId: input.studentId,
@@ -298,6 +306,7 @@ export async function salesAlertWebinarProof(input: {
   studentId?: string | null;
   proofId?: string | null;
   payment?: Payment | null;
+  occurredAt?: string | Date | null;
 }): Promise<void> {
   const link = adminStudentDeepLink({
     studentId: input.studentId,
@@ -346,6 +355,7 @@ export async function salesAlertAdmission(input: {
   enrollment?: CourseEnrollment | null;
   source?: string | null;
   eventId?: string | null;
+  occurredAt?: string | Date | null;
 }): Promise<void> {
   const link = adminStudentDeepLink({ studentId: input.studentId, phone: input.phone });
   const context = await safeSalesContext(
@@ -393,6 +403,7 @@ export async function salesAlertInstallmentPaid(input: {
   enrollmentId?: string | null;
   enrollment?: CourseEnrollment | null;
   eventId?: string | null;
+  occurredAt?: string | Date | null;
 }): Promise<void> {
   const link = adminStudentDeepLink({ studentId: input.studentId, phone: input.phone });
   const context = await safeSalesContext(
@@ -444,6 +455,7 @@ export async function salesAlertPartialPayment(input: {
   enrollmentId?: string | null;
   enrollment?: CourseEnrollment | null;
   eventId?: string | null;
+  occurredAt?: string | Date | null;
 }): Promise<void> {
   const link = adminStudentDeepLink({ studentId: input.studentId, phone: input.phone });
   const context = await safeSalesContext(
@@ -500,6 +512,7 @@ export async function salesAlertPaymentSucceeded(input: {
   enrollmentId?: string | null;
   enrollment?: CourseEnrollment | null;
   eventId?: string | null;
+  occurredAt?: string | Date | null;
 }): Promise<void> {
   const link = adminStudentDeepLink({ studentId: input.studentId, phone: input.phone });
   const context = await safeSalesContext(
@@ -549,6 +562,7 @@ export async function salesAlertWebinarRegistration(input: {
   amountPaid?: number | null;
   registrationsSoFar?: number | null;
   eventId?: string | null;
+  occurredAt?: string | Date | null;
 }): Promise<void> {
   const link = adminStudentDeepLink({ phone: input.phone });
   const html = [
@@ -579,6 +593,7 @@ export async function salesAlertWebinarPayment(input: {
   receiptNo?: string | null;
   registrationsSoFar?: number | null;
   eventId?: string | null;
+  occurredAt?: string | Date | null;
 }): Promise<void> {
   const link = adminStudentDeepLink({ phone: input.phone });
   const html = [
@@ -608,6 +623,7 @@ export async function salesAlertNewLead(input: {
   courseInterest?: string | null;
   leadId?: string | null;
   eventId?: string | null;
+  occurredAt?: string | Date | null;
 }): Promise<void> {
   const link = adminStudentDeepLink({ phone: input.phone });
   const html = [
@@ -617,12 +633,31 @@ export async function salesAlertNewLead(input: {
     clean(input.courseInterest) ? `Course interest: ${escapeHtml(input.courseInterest!)}` : null,
     formatIstShort(new Date()),
   ].filter(Boolean).join("\n");
+  const eventId = input.eventId || `lead:${input.leadId || input.phone}`;
+  const buttons = [{ label: "Open in admin", url: link }];
+  // Batching DEFAULT OFF — when SALES_LEAD_BATCHING=1, queue instead of instant send.
+  // Payments/proofs never use this path.
+  if (salesLeadBatchingEnabled()) {
+    await enqueueSalesLeadBatch({
+      name: input.name,
+      phone: input.phone,
+      source: input.source,
+      courseInterest: input.courseInterest,
+      leadId: input.leadId,
+      eventId,
+      html,
+      buttons,
+      queuedAt: new Date().toISOString(),
+    });
+    return;
+  }
   await deliverOrQueue({
-    eventId: input.eventId || `lead:${input.leadId || input.phone}`,
+    eventId,
     event: "new_lead",
     phone: input.phone,
     html,
-    buttons: [{ label: "Open in admin", url: link }],
+    buttons,
+    occurredAt: input.occurredAt ?? new Date(),
   });
 }
 

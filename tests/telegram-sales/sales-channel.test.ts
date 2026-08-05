@@ -96,6 +96,17 @@ describe("sales quiet hours disabled", () => {
     assert.equal(RATE_LIMIT_PER_MIN, Number.POSITIVE_INFINITY);
     assert.equal(await tryConsumeRateSlot(), true);
   });
+
+  it("lead batching defaults OFF", async () => {
+    const prev = process.env.SALES_LEAD_BATCHING;
+    delete process.env.SALES_LEAD_BATCHING;
+    const { salesLeadBatchingEnabled, salesLeadBatchIntervalMinutes } = await import(
+      "../../lib/telegram/sales/settings"
+    );
+    assert.equal(salesLeadBatchingEnabled(), false);
+    assert.equal(salesLeadBatchIntervalMinutes(), 20);
+    if (prev != null) process.env.SALES_LEAD_BATCHING = prev;
+  });
 });
 
 describe("sales channel isolation", () => {

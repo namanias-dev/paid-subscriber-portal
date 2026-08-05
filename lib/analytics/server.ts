@@ -275,16 +275,19 @@ export async function recordPaymentPaid(p: Payment, source = "system"): Promise<
                 ...base,
                 installmentNo: p.installment_no ?? null,
                 eventId: `installment_paid:${ref}`,
+                occurredAt: p.created_at || new Date().toISOString(),
               });
             } else {
               await m.salesAlertAdmission({
                 ...base,
                 source: p.attribution_source ?? null,
                 eventId: `admission:${ref}`,
+                occurredAt: p.created_at || new Date().toISOString(),
               });
               await m.salesAlertPaymentSucceeded({
                 ...base,
                 eventId: `payment_succeeded:${ref}`,
+                occurredAt: p.created_at || new Date().toISOString(),
               });
             }
           }),
@@ -315,6 +318,7 @@ export async function recordPaymentPaid(p: Payment, source = "system"): Promise<
               receiptNo: p.reference_no || p.receipt_no || null,
               registrationsSoFar: key ? paidWebinarRegistrationCount(payments, key) : null,
               eventId: `webinar_pay:${ref}`,
+              occurredAt: p.created_at || new Date().toISOString(),
             });
           });
         })

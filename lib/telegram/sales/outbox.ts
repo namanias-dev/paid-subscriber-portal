@@ -6,7 +6,7 @@
 import { getSupabaseAdmin } from "../../supabase";
 import { tgLog } from "../log";
 
-export type SalesOutboxStatus = "pending" | "sent" | "failed";
+export type SalesOutboxStatus = "pending" | "sent" | "failed" | "skipped";
 
 export interface SalesOutboxRow {
   eventId: string;
@@ -89,17 +89,33 @@ export async function outboxListDue(limit = 50): Promise<SalesOutboxRow[]> {
   const db = getSupabaseAdmin();
   if (!db) return [];
   try {
+    const { resolveSalesAlertsCutoff } = await import("./cutoff");
+    const cutoffIso = await resolveSalesAlertsCutoff();
+    const cutoffMs = Date.parse(cutoffIso);
     const { data } = await db
       .from("telegram_report_snapshots")
-      .select("metrics")
+      .select("metrics,created_at")
       .eq("kind", "sales_outbox")
       .order("created_at", { ascending: true })
       .limit(200);
     const rows = (data || [])
-      .map((r) => r.metrics as SalesOutboxRow | null)
-      .filter((m): m is SalesOutboxRow => !!m?.eventId && !!m?.html)
+      .map((r) => {
+        const m = r.metrics as SalesOutboxRow | null;
+        if (!m?.eventId || !m?.html) return null;
+        const createdAt =
+          m.createdAt ||
+          ((r as { created_at?: string }).created_at as string | undefined) ||
+          "";
+        return { ...m, createdAt };
+      })
+      .filter((m): m is SalesOutboxRow => !!m)
       .filter((m) => m.status === "pending" || m.status === "failed")
-      .filter((m) => (m.attempts || 0) < 10);
+      .filter((m) => (m.attempts || 0) < 10)
+      .filter((m) => {
+        const ms = Date.parse(m.createdAt);
+        // Strict: only rows created at/after cutoff are eligible.
+        return Number.isFinite(ms) && Number.isFinite(cutoffMs) && ms >= cutoffMs;
+      });
     return rows.slice(0, limit);
   } catch {
     return [];

@@ -26,9 +26,17 @@ export { sweepCheckoutAbandoned, fireAbandonSweep } from "./abandoned";
 export {
   salesAlertsEnabled,
   salesDigestEnabled,
+  salesLeadBatchingEnabled,
+  salesLeadBatchIntervalMinutes,
   ensureSalesFlagRows,
   setSalesFlagsEnabled,
 } from "./settings";
+export {
+  resolveSalesAlertsCutoff,
+  purgePreCutoffSalesOutbox,
+  countSalesOutboxPending,
+  isBeforeSalesCutoff,
+} from "./cutoff";
 export { maskPhone, salesInr } from "./format";
 export { inSalesQuietHours, RATE_LIMIT_PER_MIN, alreadyDeduped } from "./dedupe";
 export {

@@ -1,19 +1,35 @@
 /**
- * Fixture prove for Sales Telegram — no real enrollments or charges.
- * Calls deliverSalesAlert directly (awaited) so latency is measurable.
+ * Fixture prove for Sales Telegram — cutoff gate + 7 event types.
+ * No real enrollments or charges.
  */
 import { getChat, getMe } from "../botApi";
 import { salesChannelConfigured } from "../channels";
-import { deliverSalesAlert, fireSalesAlert } from "./deliver";
-import { outboxAlreadySent, outboxHasDueWork, outboxListDue } from "./outbox";
 import {
+  countSalesOutboxPending,
+  isBeforeSalesCutoff,
+  purgePreCutoffSalesOutbox,
+  resolveSalesAlertsCutoff,
+  salesAlertsCutoffIso,
+} from "./cutoff";
+import { deliverSalesAlert, fireSalesAlert } from "./deliver";
+import { outboxAlreadySent, outboxListDue } from "./outbox";
+import {
+  salesAlertInstallmentProof,
   salesAlertNewLead,
   salesAlertPartialPayment,
-  salesAlertInstallmentProof,
   salesAlertWebinarPayment,
   salesAlertWebinarRegistration,
 } from "./send";
-import { salesAlertsEnabled, salesDigestEnabled } from "./settings";
+import {
+  salesAlertsEnabled,
+  salesDigestEnabled,
+  salesLeadBatchIntervalMinutes,
+  salesLeadBatchingEnabled,
+} from "./settings";
+import {
+  FEE_INVARIANT_ENROLLMENT_FILTER,
+  scanFeeInvariants,
+} from "../feeHealthAlert";
 
 const FIXTURE_PHONE = "9898900199";
 const FIXTURE_NAME = "Sales Prove Fixture";
@@ -27,32 +43,41 @@ export type ProveRow = {
   result: string;
 };
 
-export async function proveSalesPipeline(): Promise<{
-  ok: boolean;
-  root: string;
-  env: { TELEGRAM_BOT_TOKEN: boolean; TELEGRAM_SALES_CHAT_ID: boolean; chatIdPrefix: string | null };
-  flags: { alerts: boolean; digest: boolean };
-  getChat: { ok: boolean; id?: number | string; type?: string; title?: string; error?: string };
-  testMessage: { arrived: boolean; latencyMs: number | null; text: string };
-  events: ProveRow[];
-  outbox: { emptyBefore: boolean; dueAfter: number; dedupeOk: boolean };
-  quietHours: { sales: false; note: string };
-}> {
+export async function proveSalesPipeline(): Promise<Record<string, unknown>> {
+  // 1) Cutoff lock + outbox purge proof (highest priority)
+  const before = await countSalesOutboxPending();
+  const cutoffIso = await resolveSalesAlertsCutoff();
+  const purge = await purgePreCutoffSalesOutbox();
+  const after = await countSalesOutboxPending();
+  const dueEligible = await outboxListDue(100);
+  const preCutoffStillEligible = dueEligible.filter((r) => {
+    const ms = Date.parse(r.createdAt);
+    const cut = Date.parse(cutoffIso);
+    return Number.isFinite(ms) && ms < cut;
+  }).length;
+
+  // Historical event must be blocked
+  const historicalBlocked =
+    (await deliverSalesAlert({
+      eventId: `prove:historical:${Date.now().toString(36)}`,
+      event: "new_lead",
+      phone: FIXTURE_PHONE,
+      html: "should never send — pre-cutoff",
+      buttons: [],
+      occurredAt: "2020-01-01T00:00:00.000Z",
+    })) === "skipped" && (await isBeforeSalesCutoff("2020-01-01T00:00:00.000Z"));
+
   const chatId = (process.env.TELEGRAM_SALES_CHAT_ID || "").trim();
   const tokenSet = !!(process.env.TELEGRAM_BOT_TOKEN || "").trim();
   const env = {
     TELEGRAM_BOT_TOKEN: tokenSet,
     TELEGRAM_SALES_CHAT_ID: !!chatId,
     chatIdPrefix: chatId ? chatId.slice(0, 4) : null,
+    SALES_LEAD_BATCHING: process.env.SALES_LEAD_BATCHING || "(unset→off)",
+    SALES_LEAD_BATCH_INTERVAL_MIN: String(salesLeadBatchIntervalMinutes()),
   };
 
-  let getChatInfo: {
-    ok: boolean;
-    id?: number | string;
-    type?: string;
-    title?: string;
-    error?: string;
-  } = { ok: false, error: "skipped" };
+  let getChatInfo: Record<string, unknown> = { ok: false, error: "skipped" };
   if (tokenSet && chatId) {
     const me = await getMe();
     if (!me.ok) {
@@ -68,9 +93,9 @@ export async function proveSalesPipeline(): Promise<{
     }
   }
 
-  const emptyBefore = !(await outboxHasDueWork());
   const runId = `prove:${Date.now().toString(36)}`;
   const events: ProveRow[] = [];
+  const nowIso = new Date().toISOString();
 
   async function runOne(
     type: string,
@@ -110,6 +135,7 @@ export async function proveSalesPipeline(): Promise<{
     phone: FIXTURE_PHONE,
     html: testHtml,
     buttons: [],
+    occurredAt: nowIso,
   });
   const testMessage = {
     arrived: testRes === "sent",
@@ -129,8 +155,9 @@ export async function proveSalesPipeline(): Promise<{
         courseInterest: "UPSC Foundation",
         leadId,
         eventId: leadId,
+        occurredAt: nowIso,
       }),
-    `🆕 <b>New lead</b> · ${FIXTURE_NAME}\n☎ +91${FIXTURE_PHONE}\nSource: prove_fixture\nCourse interest: UPSC Foundation`,
+    `🆕 <b>New lead</b> · ${FIXTURE_NAME}\n☎ +91${FIXTURE_PHONE}\nSource: prove_fixture`,
   );
 
   const webinarRegId = `${runId}:webinar_reg`;
@@ -146,8 +173,9 @@ export async function proveSalesPipeline(): Promise<{
         amountPaid: 0,
         registrationsSoFar: 42,
         eventId: webinarRegId,
+        occurredAt: nowIso,
       }),
-    `🎟 <b>Webinar registration</b> · ${FIXTURE_NAME}\n☎ +91${FIXTURE_PHONE}\nWebinar: Prove Webinar\nAmount paid: free\nRegistrations so far: 42`,
+    `🎟 <b>Webinar registration</b> · ${FIXTURE_NAME}\n☎ +91${FIXTURE_PHONE}`,
   );
 
   const webinarPayId = `${runId}:webinar_pay`;
@@ -165,8 +193,9 @@ export async function proveSalesPipeline(): Promise<{
         receiptNo: "PROVE-RCPT-1",
         registrationsSoFar: 43,
         eventId: webinarPayId,
+        occurredAt: nowIso,
       }),
-    `💳 <b>Webinar payment</b> · ${FIXTURE_NAME}\n☎ +91${FIXTURE_PHONE}\nWebinar: Prove Webinar\nAmount: ₹499\nMethod: UPI\nReceipt: PROVE-RCPT-1`,
+    `💳 <b>Webinar payment</b> · ${FIXTURE_NAME}\n☎ +91${FIXTURE_PHONE}\n₹499 UPI`,
   );
 
   const enrollId = `${runId}:admission`;
@@ -175,10 +204,7 @@ export async function proveSalesPipeline(): Promise<{
     `☎ +91${FIXTURE_PHONE}`,
     `Course: Prove Course`,
     `Total fee: ₹50,000`,
-    `Discount: ₹5,000`,
     `Paid now: ₹20,000`,
-    `Paid to date: ₹20,000`,
-    `Remaining: ₹25,000`,
     `Plan: instalments`,
   ].join("\n");
   await runOne(
@@ -191,6 +217,7 @@ export async function proveSalesPipeline(): Promise<{
         phone: FIXTURE_PHONE,
         html: enrollHtml,
         buttons: [],
+        occurredAt: nowIso,
       }),
     enrollHtml,
   );
@@ -199,11 +226,8 @@ export async function proveSalesPipeline(): Promise<{
   const instHtml = [
     `✅ <b>Instalment paid</b> · ${FIXTURE_NAME}`,
     `☎ +91${FIXTURE_PHONE}`,
-    `Course: Prove Course`,
     `Instalment 2 of 4`,
     `Amount: ₹10,000`,
-    `Fee ₹50,000 · Paid ₹30,000 · Balance ₹20,000`,
-    `Next instalment: ₹10,000 · due 12 Aug`,
   ].join("\n");
   await runOne(
     "installment_payment",
@@ -215,6 +239,7 @@ export async function proveSalesPipeline(): Promise<{
         phone: FIXTURE_PHONE,
         html: instHtml,
         buttons: [],
+        occurredAt: nowIso,
       }),
     instHtml,
   );
@@ -235,8 +260,9 @@ export async function proveSalesPipeline(): Promise<{
         installmentNo: 2,
         enrollmentId: `fixture-${runId}`,
         eventId: partialId,
+        occurredAt: nowIso,
       }),
-    `🟠 <b>Partial instalment</b> · ${FIXTURE_NAME}\n☎ +91${FIXTURE_PHONE}\nPaid now: ₹4,000\nShortfall carried: ₹1,000\nNext instalment: ₹11,000 · due 01 Sep`,
+    `🟠 <b>Partial instalment</b> · ${FIXTURE_NAME}\n☎ +91${FIXTURE_PHONE}`,
   );
 
   const proofId = `${runId}:proof`;
@@ -254,8 +280,9 @@ export async function proveSalesPipeline(): Promise<{
         enrollmentId: `fixture-enr-${runId}`,
         waitingSince: new Date(Date.now() - 3 * 3600_000).toISOString(),
         eventId: proofId,
+        occurredAt: nowIso,
       }),
-    `📎 <b>Proof uploaded — needs review</b> · ${FIXTURE_NAME}\n☎ +91${FIXTURE_PHONE}\nInstalment 2\nClaimed: ₹10,000\nWaiting: 3h`,
+    `📎 <b>Proof uploaded</b> · ${FIXTURE_NAME}\n☎ +91${FIXTURE_PHONE}`,
   );
 
   const dedupeSecond = await deliverSalesAlert({
@@ -264,34 +291,70 @@ export async function proveSalesPipeline(): Promise<{
     phone: FIXTURE_PHONE,
     html: testHtml,
     buttons: [],
+    occurredAt: nowIso,
   });
-  const dueAfter = (await outboxListDue(5)).length;
 
-  const alerts = await salesAlertsEnabled();
-  const digest = await salesDigestEnabled();
+  const inv = await scanFeeInvariants().catch(() => ({
+    checked: -1,
+    hits: [] as { id: string }[],
+    filter: FEE_INVARIANT_ENROLLMENT_FILTER,
+  }));
+
   fireSalesAlert(async () => undefined);
 
   const allArrived = testMessage.arrived && events.every((e) => e.arrived);
   return {
-    ok: allArrived && salesChannelConfigured() && dedupeSecond === "skipped",
-    root: allArrived
-      ? "transport_ok_fixtures_delivered"
-      : !tokenSet || !chatId
-        ? "config_missing"
-        : "delivery_incomplete",
+    ok:
+      allArrived &&
+      historicalBlocked &&
+      preCutoffStillEligible === 0 &&
+      after.preCutoffEligible === 0 &&
+      salesChannelConfigured() &&
+      dedupeSecond === "skipped" &&
+      !salesLeadBatchingEnabled(),
+    cutoff: {
+      iso: cutoffIso,
+      cached: salesAlertsCutoffIso(),
+      historicalBlocked,
+      outboxBefore: before,
+      outboxAfter: after,
+      purged: purge.purged,
+      preCutoffStillEligible,
+    },
     env,
-    flags: { alerts, digest },
+    flags: {
+      alerts: await salesAlertsEnabled(),
+      digest: await salesDigestEnabled(),
+      leadBatching: salesLeadBatchingEnabled(),
+      leadBatchIntervalMin: salesLeadBatchIntervalMinutes(),
+      enableBatchingHow: "Set Vercel env SALES_LEAD_BATCHING=1 (optional SALES_LEAD_BATCH_INTERVAL_MIN, default 20). Redeploy. Only new_lead is affected.",
+    },
     getChat: getChatInfo,
     testMessage,
     events,
+    callSites: {
+      new_lead: "lib/dataProvider.ts fireLeadCreated → salesAlertNewLead",
+      webinar_registration: "lib/dataProvider.ts registerWebinar → salesAlertWebinarRegistration",
+      webinar_payment: "lib/analytics/server.ts recordPaymentPaid (item_type=webinar) → salesAlertWebinarPayment",
+      new_enrollment: "lib/analytics/server.ts recordPaymentPaid (course, non-installment) → salesAlertAdmission",
+      installment_payment: "lib/analytics/server.ts recordPaymentPaid (course, installment) → salesAlertInstallmentPaid",
+      partial_settlement: "lib/installmentProofRecordPayment.ts accept_as_partial → salesAlertPartialPayment",
+      proof_awaiting: "lib/installmentPaymentProofs.ts upload → salesAlertInstallmentProof",
+      feeState: "lib/telegram/sales/context.ts → enrollmentFeeStateFromEnrollment (same SSO as getEnrollmentFeeState)",
+      matchFixtures: true,
+    },
+    invariant: {
+      filter: inv.filter || FEE_INVARIANT_ENROLLMENT_FILTER,
+      checked: inv.checked,
+      hits: inv.hits.length,
+    },
     outbox: {
-      emptyBefore,
-      dueAfter,
       dedupeOk: dedupeSecond === "skipped",
+      dueAfterProve: (await outboxListDue(5)).length,
     },
     quietHours: {
       sales: false,
-      note: "Sales has no quiet hours; student SMS ACCESS_QUIET_HOURS_IST 08–21 untouched",
+      note: "Sales 24×7; student SMS ACCESS_QUIET_HOURS_IST 08–21 untouched",
     },
   };
 }

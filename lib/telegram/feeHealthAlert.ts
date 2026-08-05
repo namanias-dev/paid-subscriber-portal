@@ -19,18 +19,44 @@ export type FeeInvariantHit = {
   reason: string;
 };
 
+/**
+ * Pinned enrollment filter for the fee-invariant denominator.
+ *
+ * IN:
+ *   - status NOT IN (cancelled, transferred_out)
+ *   - AND isActiveEnrollment: (amount_paid > 0 OR status === "fully_paid")
+ *
+ * OUT:
+ *   - cancelled
+ *   - transferred_out
+ *   - any other row with amount_paid <= 0 and status !== "fully_paid"
+ *
+ * This is the sole definition — do not ad-hoc filter elsewhere.
+ */
+export const FEE_INVARIANT_ENROLLMENT_FILTER = {
+  in: "active paid enrollments: not cancelled/transferred_out AND (amount_paid > 0 OR status=fully_paid)",
+  out: "cancelled, transferred_out, unpaid inactive rows",
+} as const;
+
+export function enrollmentInFeeInvariantDenom(e: {
+  status?: string | null;
+  amount_paid?: number | null;
+}): boolean {
+  return isActiveEnrollment(e as Parameters<typeof isActiveEnrollment>[0]);
+}
+
 /** Lightweight invariant scan (pay-full, negative, overpay). */
 export async function scanFeeInvariants(limit = 50_000): Promise<{
   checked: number;
   hits: FeeInvariantHit[];
+  filter: typeof FEE_INVARIANT_ENROLLMENT_FILTER;
 }> {
   const all = await getAllCourseEnrollments();
   const hits: FeeInvariantHit[] = [];
   let checked = 0;
   for (const e of all) {
     if (checked >= limit) break;
-    if (e.status === "cancelled" || e.status === "transferred_out") continue;
-    if (!isActiveEnrollment(e) && (e.amount_paid || 0) <= 0) continue;
+    if (!enrollmentInFeeInvariantDenom(e)) continue;
     checked++;
     const fee = enrollmentFeeStateFromEnrollment(e);
     if (fee.payFullRemainingAmount !== fee.outstanding) {
@@ -56,7 +82,7 @@ export async function scanFeeInvariants(limit = 50_000): Promise<{
       });
     }
   }
-  return { checked, hits };
+  return { checked, hits, filter: FEE_INVARIANT_ENROLLMENT_FILTER };
 }
 
 async function postOpsAlert(html: string): Promise<boolean> {

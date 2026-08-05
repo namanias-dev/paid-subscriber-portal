@@ -2398,6 +2398,7 @@ function fireLeadCreated(lead: Lead, sourceForm?: string | null, attribution?: L
           courseInterest: lead.course_interest ?? null,
           leadId: lead.id,
           eventId: `lead:${lead.id}`,
+          occurredAt: lead.created_at || new Date().toISOString(),
         });
       }),
     )
@@ -2829,6 +2830,7 @@ export async function registerWebinar(
           amountPaid: isFreeWebinar ? 0 : null,
           registrationsSoFar: regs,
           eventId: `webinar_reg:${webinarId}:${String(phone).replace(/\D/g, "").slice(-10)}`,
+          occurredAt: new Date().toISOString(),
         });
       });
     })

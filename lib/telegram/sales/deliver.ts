@@ -1,11 +1,14 @@
 /**
  * Sales channel delivery — inline waitUntil, retry, outbox. No quiet hours,
  * no rate limit, no MC gating. Never throws to payment/user paths.
+ *
+ * Hard cutoff: events occurred before SALES_ALERTS_CUTOFF never send.
  */
 import { waitUntil } from "@vercel/functions";
 import { buildKeyboard } from "../botApi";
 import { sendToChannel, salesChannelConfigured } from "../channels";
 import { tgLog } from "../log";
+import { isBeforeSalesCutoff, purgePreCutoffSalesOutbox, resolveSalesAlertsCutoff } from "./cutoff";
 import { salesAlertsEnabled } from "./settings";
 import {
   outboxAlreadySent,
@@ -22,6 +25,8 @@ export type SalesDeliverInput = {
   phone: string;
   html: string;
   buttons: { label: string; url: string }[];
+  /** When the underlying business event occurred. Pre-cutoff → never alert. */
+  occurredAt?: string | Date | null;
 };
 
 function sleep(ms: number): Promise<void> {
@@ -63,10 +68,26 @@ export async function deliverSalesAlert(input: SalesDeliverInput): Promise<"sent
     tgLog("sales_alert_skipped", { reason: "alerts_disabled", eventId: input.eventId, event: input.event }, "warn");
     return "skipped";
   }
+  await resolveSalesAlertsCutoff();
+  const occurredAt = input.occurredAt ?? new Date();
+  if (await isBeforeSalesCutoff(occurredAt)) {
+    tgLog(
+      "sales_alert_skipped",
+      {
+        reason: "pre_cutoff",
+        eventId: input.eventId,
+        event: input.event,
+        occurredAt: occurredAt instanceof Date ? occurredAt.toISOString() : occurredAt,
+      },
+      "info",
+    );
+    return "skipped";
+  }
   if (await outboxAlreadySent(input.eventId)) return "skipped";
 
   const now = new Date().toISOString();
   const prev = await outboxGet(input.eventId);
+  if (prev?.status === "skipped") return "skipped";
   let attempts = prev?.attempts || 0;
 
   // Seed pending row so sweeper can see it if process dies mid-retry.
@@ -141,11 +162,18 @@ export function fireSalesAlert(task: () => Promise<unknown>): void {
   }
 }
 
-/** Sweeper: send pending/failed outbox rows. No-op when empty. */
-export async function sweepSalesOutbox(limit = 40): Promise<{ due: number; sent: number; failed: number }> {
+/** Sweeper: purge pre-cutoff first, then send only post-cutoff pending/failed. Idle when empty. */
+export async function sweepSalesOutbox(limit = 40): Promise<{
+  due: number;
+  sent: number;
+  failed: number;
+  purged: number;
+  cutoffIso: string;
+}> {
+  const { purged, cutoffIso } = await purgePreCutoffSalesOutbox();
   const { outboxListDue } = await import("./outbox");
   const due = await outboxListDue(limit);
-  if (!due.length) return { due: 0, sent: 0, failed: 0 };
+  if (!due.length) return { due: 0, sent: 0, failed: 0, purged, cutoffIso };
   let sent = 0;
   let failed = 0;
   for (const row of due) {
@@ -155,9 +183,10 @@ export async function sweepSalesOutbox(limit = 40): Promise<{ due: number; sent:
       phone: row.phone,
       html: row.html,
       buttons: row.buttons || [],
+      occurredAt: row.createdAt,
     });
     if (result === "sent") sent++;
     else if (result === "failed") failed++;
   }
-  return { due: due.length, sent, failed };
+  return { due: due.length, sent, failed, purged, cutoffIso };
 }

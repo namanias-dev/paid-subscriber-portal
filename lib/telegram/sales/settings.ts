@@ -1,6 +1,10 @@
 /**
  * Kill switches for sales Telegram (toggle without deploy via app_feature_flags).
  * Keys: sales_alerts_enabled, sales_digest_enabled (enabled column = on/off).
+ *
+ * Lead batching (env only, default OFF):
+ *   SALES_LEAD_BATCHING=1             → enable (only new_lead; payments/proofs never batch)
+ *   SALES_LEAD_BATCH_INTERVAL_MIN=20  → batch window minutes (unused while off)
  */
 import { getSupabaseAdmin } from "../../supabase";
 
@@ -31,6 +35,22 @@ export async function salesAlertsEnabled(): Promise<boolean> {
 export async function salesDigestEnabled(): Promise<boolean> {
   if ((process.env.TELEGRAM_SALES_DIGEST_ENABLED || "").trim() === "0") return false;
   return flagEnabled(DIGEST_KEY, true);
+}
+
+/**
+ * Lead batching — DEFAULT OFF. When off, every new_lead fires instantly.
+ * Enable by setting env SALES_LEAD_BATCHING=1 (Vercel env + redeploy).
+ * Only affects new_lead; payments and proofs are never batchable.
+ */
+export function salesLeadBatchingEnabled(): boolean {
+  const v = (process.env.SALES_LEAD_BATCHING || "").trim().toLowerCase();
+  return v === "1" || v === "true" || v === "on" || v === "yes";
+}
+
+/** Batch window minutes. Default 20. Unused while SALES_LEAD_BATCHING is off. */
+export function salesLeadBatchIntervalMinutes(): number {
+  const n = Number((process.env.SALES_LEAD_BATCH_INTERVAL_MIN || "20").trim());
+  return Number.isFinite(n) && n > 0 ? Math.round(n) : 20;
 }
 
 /** Ensure flag rows exist (idempotent). Defaults enabled=true. */
