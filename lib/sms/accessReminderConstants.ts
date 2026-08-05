@@ -50,7 +50,8 @@ export const GRANDFATHER_MID_WINDOW = {
 } as const;
 
 /** Quiet hours in IST (inclusive start, exclusive end). Outside → queue. */
-export const ACCESS_QUIET_HOURS_IST = { startHour: 9, endHour: 20 } as const;
+/** Quiet hours IST: no auto SMS from 21:00 through 07:59 (active 08:00–20:59). */
+export const ACCESS_QUIET_HOURS_IST = { startHour: 8, endHour: 21 } as const;
 
 /** Never more than one automated access SMS per phone per calendar day (IST). */
 export const ACCESS_MAX_AUTO_PER_PHONE_PER_DAY = 1;

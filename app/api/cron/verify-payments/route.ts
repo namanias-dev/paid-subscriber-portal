@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { reverifyPayments } from "@/lib/dataProvider";
-import { countAmountPaidDrift } from "@/lib/amountPaidCache";
+import { runFeeHealthCheckAndAlert } from "@/lib/telegram/feeHealthAlert";
 
 export const dynamic = "force-dynamic";
 // Live ICICI Verify calls are ~1s each; a due-row sweep needs headroom. 300s is
@@ -14,8 +14,8 @@ export const maxDuration = 300;
  * to T+3 days) against ICICI's Verify URL + stored callback evidence, upgrading
  * to PAID / FAILED / ABANDONED as ICICI dictates. A timer never produces FAILED.
  *
- * Also reports amount_paid cache drift vs fee-state (read-only invariant check —
- * no new cron).
+ * Also runs amount_paid drift + fee invariant checks; if either is non-zero,
+ * posts an alert to the ops Telegram channel naming affected enrollments.
  *
  * Vercel Hobby allows only DAILY Vercel crons, so the real cadence comes from a
  * FREE external scheduler (cron-job.org / GitHub Actions) hitting this endpoint
@@ -35,20 +35,27 @@ async function run(req: Request) {
   }
   try {
     const result = await reverifyPayments({ onlyDue: true, limit: 500 });
-    let amountPaidDrift: { drift: number; checked: number } | null = null;
+    let feeHealth: Awaited<ReturnType<typeof runFeeHealthCheckAndAlert>> | null = null;
     try {
-      const d = await countAmountPaidDrift();
-      amountPaidDrift = { drift: d.drift, checked: d.checked };
-      if (d.drift > 0) {
-        console.warn(
-          `[cron/verify-payments] amount_paid drift=${d.drift}/${d.checked}`,
-          d.samples.slice(0, 5),
-        );
+      feeHealth = await runFeeHealthCheckAndAlert();
+      if (feeHealth.drift > 0 || feeHealth.invariantHits > 0) {
+        console.warn("[cron/verify-payments] fee health", feeHealth);
       }
     } catch (e) {
-      console.warn("[cron/verify-payments] amount_paid drift check failed:", (e as Error).message);
+      console.warn("[cron/verify-payments] fee health check failed:", (e as Error).message);
     }
-    return NextResponse.json({ ok: true, result, amountPaidDrift, ts: Date.now() });
+    return NextResponse.json({
+      ok: true,
+      result,
+      amountPaidDrift: feeHealth
+        ? { drift: feeHealth.drift, checked: feeHealth.driftChecked }
+        : null,
+      feeInvariants: feeHealth
+        ? { hits: feeHealth.invariantHits, checked: feeHealth.invariantChecked }
+        : null,
+      feeHealthAlerted: feeHealth?.alerted ?? false,
+      ts: Date.now(),
+    });
   } catch (e) {
     console.error("[cron/verify-payments] failed:", (e as Error).message);
     return NextResponse.json({ ok: false, error: (e as Error).message }, { status: 500 });
