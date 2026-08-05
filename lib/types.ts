@@ -695,7 +695,14 @@ export type InstallmentKind = "seat" | "installment" | "full";
  * backward compatibility; `status` adds non-outstanding states an admin can set.
  * "waived" and "cancelled" are NOT outstanding and never block course access.
  */
-export type InstallmentLineStatus = "pending" | "paid" | "overdue" | "waived" | "cancelled";
+export type InstallmentLineStatus =
+  | "pending"
+  | "paid"
+  | "overdue"
+  | "waived"
+  | "cancelled"
+  /** Partial settlement — money received, shortfall remains (or carried in Phase 2). */
+  | "partially_paid";
 
 /** One line in a course enrollment's payment schedule (seat + installments). */
 export interface InstallmentItem {

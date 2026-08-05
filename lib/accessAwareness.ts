@@ -8,6 +8,7 @@ import { isScheduleCollectionsRisk, nextUnpaidDatedLine } from "./accessAtRisk";
 import { activeAccessGrant } from "./sms/accessReminderService";
 import { istWholeDaysUntil } from "./sms/accessDays";
 import type { Course, CourseEnrollment, CourseAccessOverride } from "./types";
+import { enrollmentFeeStateFromEnrollment } from "./enrollmentFeeState";
 import {
   type AccessAwarenessBanner,
   type AccessAwarenessVariant,
@@ -40,7 +41,10 @@ export function accessAwarenessForEnrollment(
   const live = lectureAccessForCourse(course, enrollment, override, false, now);
   const grant = activeAccessGrant(override, now);
   const unpaid = nextUnpaidDatedLine(enrollment.schedule);
-  const amountDue = schedule.amountDue ?? unpaid?.amount ?? Math.max(0, (enrollment.total_fee || 0) - (enrollment.amount_paid || 0));
+  const amountDue =
+    schedule.amountDue ??
+    unpaid?.amount ??
+    enrollmentFeeStateFromEnrollment(enrollment).outstanding;
 
   return {
     variant,

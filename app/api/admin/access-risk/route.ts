@@ -24,6 +24,7 @@ import {
   nextUnpaidDatedLine,
   classifyAccessAtRisk,
   daysOverdueFromSchedule,
+  outstandingAmount,
 } from "@/lib/accessAtRisk";
 import { ttlCached } from "@/lib/ttlCache";
 import type { AccessRiskSummaryData } from "@/lib/accessRiskSummary";
@@ -72,7 +73,7 @@ async function buildAccessRiskPayload() {
     const grant = activeAccessGrant(override, now);
     if (!grant?.expires_at) continue;
     const days = istWholeDaysUntil(grant.expires_at, now);
-    const owed = Math.max(0, (e.total_fee || 0) - (e.amount_paid || 0));
+    const owed = outstandingAmount(e);
     if (days != null && days > 0 && days <= ACCESS_GRANT_EXPIRING_SOON_DAYS && owed > 0) {
       await flagNeedsCall({
         courseEnrollmentId: e.id,
@@ -178,8 +179,8 @@ async function buildAccessRiskPayload() {
       const digits = normalizeIndianMobile(e.phone).digits10;
       const buyer = digits ? buyersByPhone.get(digits) : undefined;
       const totalFee = e.total_fee || 0;
-      const amountPaid = e.amount_paid || 0;
-      const pctPaid = totalFee > 0 ? Math.round((amountPaid / totalFee) * 100) : 0;
+      const amountPaid = d.paid;
+      const pctPaid = d.progressPct;
       const callTask = callTaskByEnrollment.get(e.id) || null;
       return {
         enrollmentId: e.id,

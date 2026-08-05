@@ -14,6 +14,7 @@ import { validateAccessGrant, ACCESS_GRANT_MAX_DAYS_DEFAULT } from "./accessOver
 import { appendStudentAccessEvent } from "./studentAccessEvents";
 import { pauseReminderStreak } from "./sms/installmentReminderStreak";
 import { getSupabaseAdmin } from "./supabase";
+import { enrollmentFeeStateFromEnrollment } from "./enrollmentFeeState";
 
 export type AccessActionActor = { id: string | null; name: string };
 
@@ -212,7 +213,7 @@ export async function createCollectionsCallTask(input: {
   const outstanding =
     input.outstanding != null
       ? input.outstanding
-      : Math.max(0, (e.total_fee || 0) - (e.amount_paid || 0));
+      : enrollmentFeeStateFromEnrollment(e).outstanding;
   // Keep reason stable — unique (enrollment, installment_no, reason).
   const reason = input.reason || "manual_call_task";
 

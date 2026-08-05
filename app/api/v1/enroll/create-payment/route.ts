@@ -19,7 +19,7 @@ import {
   eazypaySubMerchantId,
   PAYMENT_GATEWAY,
 } from "@/lib/eazypay";
-import { planCourseEnrollment, deriveEnrollment } from "@/lib/installments";
+import { planCourseEnrollment, deriveEnrollment, assertOrderAmountWithinOutstanding, enrollmentFeeStateFromEnrollment } from "@/lib/installments";
 import { scheduleAsCheckoutIntent } from "@/lib/enrollmentScope";
 import { validateCoupon, couponDiscountReason, parseCouponCodeFromReason } from "@/lib/coupons";
 import type { CourseEnrollment } from "@/lib/types";
@@ -179,17 +179,22 @@ export async function POST(req: Request) {
     if (existing && (existing.amount_paid || 0) > 0) {
       // Has real money — RESUME: pay the next outstanding line of the existing plan
       // (never re-plan or re-apply a coupon; discount already baked into total/schedule).
-      const next = deriveEnrollment(existing).nextPayable;
+      const fee = enrollmentFeeStateFromEnrollment(existing);
+      const next = fee.nextDueInstalment;
       if (!next) {
         return NextResponse.json(
           { ok: false, alreadyPaid: true, error: "This course is already fully paid. Log in to your portal to access it." },
           { status: 409 },
         );
       }
+      const guard = assertOrderAmountWithinOutstanding(next.amountDue, fee.outstanding);
+      if (!guard.ok) {
+        return NextResponse.json({ ok: false, error: guard.error }, { status: 400 });
+      }
       enrollment = existing;
-      firstAmount = next.amount;
+      firstAmount = next.amountDue;
       firstKind = next.kind;
-      firstInstallmentNo = next.no;
+      firstInstallmentNo = next.n;
     } else if (existing) {
       await cancelStalePendingPayments(existing.id).catch(() => null);
       const prevCode = parseCouponCodeFromReason(existing.discount_reason);

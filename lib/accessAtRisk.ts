@@ -8,6 +8,8 @@ import { formatISTDate } from "./dates";
 import type { CourseEnrollment, CourseAccessOverride, InstallmentItem } from "./types";
 import type { LectureAccess } from "./entitlements";
 import { activeAccessGrant } from "./sms/accessReminderService";
+import { enrollmentFeeStateFromEnrollment } from "./enrollmentFeeState";
+import { isFeeLineOutstanding } from "./enrollmentFeeState";
 
 export { countsTowardCapacity, isPhantomEnrollment, isActiveEnrollment } from "./enrollmentScope";
 
@@ -32,7 +34,18 @@ export function isScheduleCollectionsRisk(access: Pick<LectureAccess, "status" |
   return false;
 }
 
-export function outstandingAmount(e: Pick<CourseEnrollment, "total_fee" | "amount_paid">): number {
+export function outstandingAmount(
+  e: Pick<CourseEnrollment, "id" | "total_fee" | "amount_paid" | "schedule" | "discount_amount"> | Pick<CourseEnrollment, "total_fee" | "amount_paid">,
+): number {
+  if ("schedule" in e && e.schedule) {
+    return enrollmentFeeStateFromEnrollment({
+      id: "id" in e && e.id ? e.id : "_",
+      total_fee: e.total_fee,
+      schedule: e.schedule,
+      discount_amount: "discount_amount" in e ? e.discount_amount : 0,
+      amount_paid: e.amount_paid,
+    }).outstanding;
+  }
   return Math.max(0, (e.total_fee || 0) - (e.amount_paid || 0));
 }
 
@@ -86,7 +99,7 @@ export function classifyAccessAtRisk(input: {
 /** All unpaid dated installments with amount > 0, sorted by due date ascending. */
 export function unpaidDatedLines(schedule: InstallmentItem[] | null | undefined): InstallmentItem[] {
   return (schedule || [])
-    .filter((s) => !s.paid && s.status !== "cancelled" && s.status !== "waived" && s.due && (Number(s.amount) || 0) > 0)
+    .filter((s) => isFeeLineOutstanding(s) && s.due && (Number(s.amount) || 0) > 0)
     .slice()
     .sort((a, b) => Date.parse(a.due as string) - Date.parse(b.due as string));
 }

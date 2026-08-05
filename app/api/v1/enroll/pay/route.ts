@@ -19,7 +19,7 @@ import {
   eazypaySubMerchantId,
   PAYMENT_GATEWAY,
 } from "@/lib/eazypay";
-import { deriveEnrollment } from "@/lib/installments";
+import { assertOrderAmountWithinOutstanding, enrollmentFeeStateFromEnrollment } from "@/lib/installments";
 
 export const dynamic = "force-dynamic";
 
@@ -49,8 +49,8 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: "Complete your seat booking first." }, { status: 400 });
     }
 
-    const derived = deriveEnrollment(enrollment);
-    if (derived.remaining <= 0) {
+    const fee = enrollmentFeeStateFromEnrollment(enrollment);
+    if (fee.outstanding <= 0) {
       return NextResponse.json({ ok: false, error: "This course is already fully paid." }, { status: 400 });
     }
 
@@ -60,24 +60,31 @@ export async function POST(req: Request) {
     let label: string;
 
     if (action === "full") {
-      amount = derived.remaining;
+      amount = fee.payFullRemainingAmount;
       kind = "full";
-      payInstallmentNo = derived.nextPayable?.no ?? 0;
+      payInstallmentNo = fee.nextDueInstalment?.n ?? 0;
       label = `${enrollment.course_title} — Full Remaining`;
     } else {
       // Force chronological next unpaid line only — prevents out-of-order pays
       // (Aayush: Installment 3 paid while Installment 1 still open → grace lock).
-      const target = derived.nextPayable;
+      const target = fee.nextDueInstalment;
       if (!target || target.kind !== "installment") {
         return NextResponse.json({ ok: false, error: "No payable installment found." }, { status: 400 });
       }
-      amount = target.amount;
+      amount = target.amountDue;
       kind = "installment";
-      payInstallmentNo = target.no;
+      payInstallmentNo = target.n;
       label = `${enrollment.course_title} — ${target.label}`;
     }
 
     if (amount <= 0) return NextResponse.json({ ok: false, error: "Nothing to pay." }, { status: 400 });
+    const guard = assertOrderAmountWithinOutstanding(amount, fee.outstanding);
+    if (!guard.ok) {
+      return NextResponse.json({ ok: false, error: guard.error }, { status: 400 });
+    }
+
+    // Ignore any client-supplied amount — server fee state is authoritative.
+    void body.amount;
 
     const subMerchantId = eazypaySubMerchantId("course", enrollment.course_slug);
 

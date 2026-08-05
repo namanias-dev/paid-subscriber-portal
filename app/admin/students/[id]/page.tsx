@@ -990,7 +990,9 @@ function DiscountModal({ course, busy, onClose, onSave }: { course: CourseCard; 
   const maxDiscount = Math.max(0, course.total - course.paid);
   const newTotal = course.total - discount;
   const newRemaining = Math.max(0, newTotal - course.paid);
-  const outstandingCount = (course.schedule || []).filter((s) => !s.paid && s.status !== "cancelled" && s.status !== "waived").length;
+  const outstandingCount = (course.schedule || []).filter(
+    (s) => !s.paid && s.status !== "waived" && !(s.status === "cancelled" && !(Number(s.paid_amount) || 0)),
+  ).length;
   const perLine = outstandingCount > 0 ? Math.floor(newRemaining / outstandingCount) : 0;
   const tooBig = discount > maxDiscount;
   const valid = discount > 0 && !tooBig;
@@ -1193,7 +1195,15 @@ function ManagePlanModal({ course, onClose, request, onPay, onDone }: {
   // The reminder always references the OLDEST unpaid installment, so the action
   // only appears on that row — offering it per-row would imply staff can chase
   // an arbitrary installment, which the DLT template cannot express.
-  const oldestUnpaidNo = sched.find((s) => s.kind === "installment" && !s.paid && s.status !== "cancelled" && s.status !== "waived")?.no ?? null;
+  const oldestUnpaidNo =
+    sched.find(
+      (s) =>
+        s.kind === "installment" &&
+        !s.paid &&
+        s.status !== "waived" &&
+        !(s.status === "cancelled" && !(Number(s.paid_amount) || 0)) &&
+        !(Number(s.paid_amount) > 0 && Number(s.paid_amount) < Number(s.amount)),
+    )?.no ?? null;
 
   async function run(body: Record<string, unknown>, key: string, okMsg: string) {
     setBusy(key); setError(null);
@@ -1217,15 +1227,24 @@ function ManagePlanModal({ course, onClose, request, onPay, onDone }: {
         <div className="divide-y divide-line rounded-xl border border-line">
           {sched.map((item) => {
             const st = installmentStatus(item);
-            const editable = !item.paid && st !== "cancelled" && st !== "waived";
+            const partial = st === "partially_paid";
+            const allocated = Number(item.paid_amount) || 0;
+            const remaining = Math.max(0, (Number(item.amount) || 0) - allocated);
+            const editable = !item.paid && !partial && st !== "cancelled" && st !== "waived";
             return (
               <div key={item.no} className="px-3 py-2.5">
                 <div className="flex items-center justify-between gap-2">
                   <div className="min-w-0">
                     <p className="truncate text-sm font-semibold">{item.label}</p>
                     <p className="text-xs text-muted">
-                      {item.paid ? `Paid${item.paid_at ? ` · ${formatISTDate(item.paid_at)}` : ""}` : item.due ? `Due ${formatISTDate(item.due)}` : "Due now"}
-                      <span className={`ml-1.5 pill ${st === "paid" ? "pill-green" : st === "overdue" ? "pill-red" : st === "waived" || st === "cancelled" ? "pill-gray" : "pill-amber"}`}>{st}</span>
+                      {item.paid
+                        ? `Paid${item.paid_at ? ` · ${formatISTDate(item.paid_at)}` : ""}`
+                        : partial
+                          ? `${formatINR(allocated)} received · ${formatINR(remaining)} remaining`
+                          : item.due
+                            ? `Due ${formatISTDate(item.due)}`
+                            : "Due now"}
+                      <span className={`ml-1.5 pill ${st === "paid" ? "pill-green" : st === "overdue" ? "pill-red" : st === "partially_paid" ? "pill-amber" : st === "waived" || st === "cancelled" ? "pill-gray" : "pill-amber"}`}>{st.replace("_", " ")}</span>
                     </p>
                   </div>
                   <span className={`shrink-0 font-semibold ${item.paid ? "text-muted line-through" : st === "cancelled" || st === "waived" ? "text-muted line-through" : ""}`}>{formatINR(item.amount)}</span>

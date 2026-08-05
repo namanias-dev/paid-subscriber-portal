@@ -12,7 +12,7 @@ import {
   CreditCard,
 } from "lucide-react";
 import { formatINR, formatISTDate } from "@/lib/dates";
-import { deriveEnrollment, installmentStatus } from "@/lib/installments";
+import { deriveEnrollment, installmentStatus, isTrueCancelledLine, isLinePartiallyPaid, lineAllocatedAmount } from "@/lib/installments";
 import type { CourseEnrollment, PaymentReceipt } from "@/lib/types";
 import PaymentCautionModal from "@/components/public/PaymentCautionModal";
 
@@ -58,12 +58,14 @@ export default function CoursePaymentsPanel({
       (i) =>
         i.no === initialInstallmentNo &&
         !i.paid &&
-        i.status !== "cancelled" &&
-        i.kind === "installment",
+        !isTrueCancelledLine(i) &&
+        i.kind === "installment" &&
+        !isLinePartiallyPaid(i),
     );
     if (!item) return;
     deepLinkHandled.current = true;
-    askPay("installment", item.amount, item.label, item.no, `i${item.no}`);
+    const due = Math.max(0, (Number(item.amount) || 0) - lineAllocatedAmount(item)) || item.amount;
+    askPay("installment", due, item.label, item.no, `i${item.no}`);
   }, [initialInstallmentNo, enrollment.schedule]);
 
   async function pay(action: "installment" | "full", installmentNo?: number, key?: string) {
@@ -171,41 +173,54 @@ export default function CoursePaymentsPanel({
       <div className="ca-card p-0">
         <h3 className="border-b border-[var(--ca-slate-200)] px-5 py-3.5 font-heading text-base font-bold text-[var(--ca-navy-900)]">Payment schedule</h3>
         <div className="divide-y divide-[var(--ca-slate-200)]">
-          {/* Cancelled/superseded lines are hidden so an old plan's demand never lingers. */}
-          {enrollment.schedule.filter((item) => item.status !== "cancelled").map((item) => {
+          {/* True cancels (no money) hidden; partially_paid (incl. cancelled-with-money) stays visible. */}
+          {enrollment.schedule.filter((item) => !isTrueCancelledLine(item)).map((item) => {
             const st = installmentStatus(item);
             const receipt = item.reference_no ? receiptByRef.get(item.reference_no) : null;
             const waived = st === "waived";
+            const partial = st === "partially_paid";
+            const allocated = lineAllocatedAmount(item);
+            const remaining = Math.max(0, (Number(item.amount) || 0) - allocated);
+            const isNext = d.nextPayable?.no === item.no;
             return (
               <div key={item.no} className="flex items-center justify-between gap-3 px-5 py-3">
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
                     <StatusIcon st={st} />
                     <span className="font-semibold text-[var(--ca-navy-900)]">{item.label}</span>
+                    {partial && (
+                      <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-800">
+                        Partially paid
+                      </span>
+                    )}
                   </div>
                   <p className="mt-0.5 pl-6 text-xs text-[var(--ca-slate-700)]">
                     {item.paid
                       ? `Paid${item.paid_at ? ` · ${formatISTDate(item.paid_at)}` : ""}`
-                      : waived
-                        ? "Waived by the academy"
-                        : item.due
-                          ? `Due ${formatISTDate(item.due)}`
-                          : "Due now"}
+                      : partial
+                        ? `${formatINR(allocated)} received · ${formatINR(remaining)} remaining`
+                        : waived
+                          ? "Waived by the academy"
+                          : item.due
+                            ? `Due ${formatISTDate(item.due)}`
+                            : "Due now"}
                     {st === "overdue" && <span className="ml-1 font-bold text-red-600">· OVERDUE</span>}
-                    {st === "due-soon" && !item.paid && <span className="ml-1 font-semibold text-amber-600">· Due soon</span>}
+                    {st === "due-soon" && !item.paid && !partial && <span className="ml-1 font-semibold text-amber-600">· Due soon</span>}
                   </p>
                 </div>
                 <div className="flex shrink-0 items-center gap-3">
-                  <span className={`font-heading font-bold ${item.paid || waived ? "text-[var(--ca-slate-400)] line-through" : "text-[var(--ca-navy-900)]"}`}>{formatINR(item.amount)}</span>
+                  <span className={`font-heading font-bold ${item.paid || waived ? "text-[var(--ca-slate-400)] line-through" : "text-[var(--ca-navy-900)]"}`}>
+                    {formatINR(item.amount)}
+                  </span>
                   {item.paid && receipt ? (
                     <Link href={`/portal/receipt/${encodeURIComponent(receipt.receipt_no)}`} className="ca-focus inline-flex items-center gap-1 rounded-lg border border-[var(--ca-slate-300)] px-2 py-1 text-xs font-semibold text-[var(--ca-navy-600)] hover:bg-[var(--ca-slate-50)]">
                       <Download size={13} /> Receipt
                     </Link>
-                  ) : !item.paid && !waived && item.kind === "installment" && d.nextPayable?.no !== item.no ? (
+                  ) : isNext && item.kind === "installment" ? (
                     <button
-                      onClick={() => askPay("installment", item.amount, item.label, item.no, `i${item.no}`)}
+                      onClick={() => askPay("installment", d.nextPayable!.amount, item.label, item.no, `i${item.no}`)}
                       disabled={!!busy}
-                      className="ca-focus rounded-lg border border-[var(--ca-slate-300)] px-2.5 py-1 text-xs font-semibold text-[var(--ca-navy-600)] hover:bg-[var(--ca-slate-50)] disabled:opacity-60"
+                      className="ca-focus rounded-lg border border-[var(--ca-gold)] bg-[var(--ca-gold-soft)] px-2.5 py-1 text-xs font-semibold text-[var(--ca-navy-900)] hover:bg-[var(--ca-gold)]/20 disabled:opacity-60"
                     >
                       {busy === `i${item.no}` ? "…" : "Pay now"}
                     </button>
@@ -257,6 +272,7 @@ export default function CoursePaymentsPanel({
 
 function StatusIcon({ st }: { st: string }) {
   if (st === "paid" || st === "waived") return <CheckCircle2 size={16} className={st === "waived" ? "text-[var(--ca-slate-400)]" : "text-emerald-600"} />;
+  if (st === "partially_paid") return <Clock size={16} className="text-amber-600" />;
   if (st === "overdue") return <AlertTriangle size={16} className="text-red-600" />;
   return <Clock size={16} className="text-[var(--ca-slate-400)]" />;
 }

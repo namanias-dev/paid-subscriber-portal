@@ -15,6 +15,7 @@ import {
 import { derivedBatchLabelFromStart } from "./batchStart";
 import { lectureAccessForCourse } from "./entitlements";
 import { isActiveEnrollment, isLineOutstanding } from "./installments";
+import { enrollmentFeeStateFromEnrollment } from "./enrollmentFeeState";
 import { validateAccessGrant } from "./accessOverridePolicy";
 import { activeAccessGrant } from "./sms/accessReminderService";
 import type { Course, CourseEnrollment, CourseAccessOverride, CourseBatch } from "./types";
@@ -360,7 +361,7 @@ export async function planAmnestyCohort(input: {
     const start = startForCourse(e.course_id);
     const access = scheduleAccessWithStart(e, start, now);
     const pay = phoneHasJulyPayment(e.phone, e.id, input.payments);
-    const owed = Math.max(0, (e.total_fee || 0) - (e.amount_paid || 0));
+    const owed = enrollmentFeeStateFromEnrollment(e).outstanding;
 
     if (e.course_id === SAARTHI_OLD_ID) {
       if (pay.paidInJuly) { paidJuly++; paidJulyOwed += owed; }

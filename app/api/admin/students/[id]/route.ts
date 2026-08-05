@@ -190,8 +190,22 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
         createdAt: e.created_at,
         source: "course",
         unpaid: (e.schedule || [])
-          .filter((s) => !s.paid && s.status !== "cancelled" && s.status !== "waived")
-          .map((s) => ({ kind: s.kind, no: s.no, label: s.label, amount: s.amount, due: s.due })),
+          .filter((s) => !s.paid && s.status !== "waived" && !(s.status === "cancelled" && !(Number(s.paid_amount) || 0)))
+          .map((s) => {
+            const allocated = Number(s.paid_amount) || 0;
+            const remaining = Math.max(0, (Number(s.amount) || 0) - allocated);
+            const partial = !s.paid && allocated > 0 && remaining > 0;
+            return {
+              kind: s.kind,
+              no: s.no,
+              label: s.label,
+              amount: partial ? remaining : s.amount,
+              due: s.due,
+              status: partial ? "partially_paid" : s.status || (s.paid ? "paid" : "pending"),
+              allocated: partial ? allocated : undefined,
+              original: partial ? s.amount : undefined,
+            };
+          }),
         paymentPlan,
         installmentCount: e.installment_count,
         schedule: e.schedule || [],

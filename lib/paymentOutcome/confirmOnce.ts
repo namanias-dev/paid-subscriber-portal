@@ -10,6 +10,7 @@ import { sendSms } from "../sms/service";
 import { TRIGGERS } from "../sms/templates";
 import { tgLog } from "../telegram/log";
 import { formatIstShort } from "../telegram/reports/format";
+import { enrollmentFeeStateFromEnrollment } from "../enrollmentFeeState";
 
 function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
@@ -42,7 +43,7 @@ async function buildConfirmBody(p: Payment): Promise<string> {
       const { getCourseEnrollmentById } = await import("../dataProvider");
       const enr = await getCourseEnrollmentById(p.enrollment_id);
       if (enr) {
-        const rem = Math.max(0, (enr.total_fee || 0) - (enr.amount_paid || 0));
+        const rem = enrollmentFeeStateFromEnrollment(enr).outstanding;
         remaining = `\nRemaining balance ${formatINR(rem)}`;
       }
     } catch {

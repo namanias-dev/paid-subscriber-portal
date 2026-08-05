@@ -5,6 +5,29 @@ import type {
   CourseEnrollment,
   InstallmentItem,
 } from "./types";
+import {
+  enrollmentFeeStateFromEnrollment,
+  isFeeLineOutstanding,
+  isLinePartiallyPaid,
+  isTrueCancelledLine,
+  lineAllocatedAmount,
+} from "./enrollmentFeeState";
+
+export {
+  enrollmentFeeStateFromEnrollment,
+  getEnrollmentFeeState,
+  assertOrderAmountWithinOutstanding,
+  isFeeLineOutstanding,
+  isLinePartiallyPaid,
+  isTrueCancelledLine,
+  lineAllocatedAmount,
+} from "./enrollmentFeeState";
+export type {
+  EnrollmentFeeState,
+  EnrollmentFeeLineState,
+  EnrollmentFeeNextDue,
+  FeeLineStatus,
+} from "./enrollmentFeeState";
 
 /** Defaults for the seat + EMI plan, applied on top of admin config. */
 export const EMI_DEFAULTS = {
@@ -491,8 +514,10 @@ export function isAttemptEnrollment(e: Pick<CourseEnrollment, "status" | "amount
 }
 
 /** A line the student still owes money on (drives next-payable + 15-day access grace). */
-export function isLineOutstanding(item: Pick<InstallmentItem, "paid" | "status">): boolean {
-  return !item.paid && !isLineCancelledOrWaived(item);
+export function isLineOutstanding(
+  item: Pick<InstallmentItem, "paid" | "status" | "amount" | "paid_amount">,
+): boolean {
+  return isFeeLineOutstanding(item);
 }
 
 export interface EnrollmentDerived {
@@ -512,34 +537,36 @@ export interface EnrollmentDerived {
   hasOverdue: boolean;
 }
 
-/** Derive payment progress from the schedule (schedule is the source of truth). */
-export function deriveEnrollment(enr: Pick<CourseEnrollment, "total_fee" | "schedule">, now = Date.now()): EnrollmentDerived {
-  const schedule = enr.schedule || [];
-  // Full line amounts when paid; partial `paid_amount` on still-outstanding lines.
-  const paid = schedule.reduce((a, s) => {
-    if (isLineCancelledOrWaived(s)) return a;
-    if (s.paid) return a + (s.amount || 0);
-    const partial = Number(s.paid_amount) || 0;
-    return a + (partial > 0 ? partial : 0);
-  }, 0);
-  const remaining = Math.max(0, enr.total_fee - paid);
-  // Installments that still count toward the plan (paid, or outstanding — not cancelled/waived).
-  const installments = schedule.filter((s) => s.kind === "installment" && (s.paid || !isLineCancelledOrWaived(s)));
-  const paidInstallments = installments.filter((s) => s.paid).length;
-  const seatLines = schedule.filter((s) => s.kind === "seat" && s.paid);
-  const nextPayable = schedule.find((s) => isLineOutstanding(s)) || null;
-  const hasOverdue = schedule.some((s) => isLineOutstanding(s) && s.due != null && new Date(s.due).getTime() < now);
+/**
+ * Derive payment progress from the schedule via getEnrollmentFeeState.
+ * FEE STATE — do not ad-hoc sum schedule amounts / amount_paid for paid,
+ * outstanding, progress, or next-due. Use getEnrollmentFeeState /
+ * enrollmentFeeStateFromEnrollment, or this adapter.
+ * Grep guard: tests/enrollment-fee-state/no-adhoc-sums.test.ts
+ */
+export function deriveEnrollment(
+  enr: Pick<CourseEnrollment, "id" | "total_fee" | "schedule" | "discount_amount" | "amount_paid"> | Pick<CourseEnrollment, "total_fee" | "schedule">,
+  now = Date.now(),
+): EnrollmentDerived {
+  const withId = {
+    id: "id" in enr && enr.id ? enr.id : "_",
+    total_fee: enr.total_fee,
+    schedule: enr.schedule,
+    discount_amount: "discount_amount" in enr ? enr.discount_amount : 0,
+    amount_paid: "amount_paid" in enr ? enr.amount_paid : 0,
+  };
+  const s = enrollmentFeeStateFromEnrollment(withId, now);
   return {
-    paid,
-    remaining,
-    nextPayable,
-    paidCount: paidInstallments,
-    installmentTotal: installments.length,
-    seatPaid: seatLines.length > 0,
-    seatPaidAmount: seatLines.reduce((a, s) => a + (s.amount || 0), 0),
-    progressPct: enr.total_fee > 0 ? Math.round((paid / enr.total_fee) * 100) : 0,
-    isFullyPaid: remaining <= 0,
-    hasOverdue,
+    paid: s.netPaid,
+    remaining: s.outstanding,
+    nextPayable: s.nextPayableItem,
+    paidCount: s.paidCount,
+    installmentTotal: s.installmentTotal,
+    seatPaid: s.seatPaid,
+    seatPaidAmount: s.seatPaidAmount,
+    progressPct: s.progressPct,
+    isFullyPaid: s.isFullyPaid,
+    hasOverdue: s.hasOverdue,
   };
 }
 
@@ -586,7 +613,11 @@ export function deriveCollections(
   const overdueLines = schedule.filter(
     (s) => isLineOutstanding(s) && s.due != null && (Number(s.amount) || 0) > 0 && new Date(s.due).getTime() < now,
   );
-  const overdueAmount = overdueLines.reduce((a, s) => a + (s.amount || 0), 0);
+  // Use line remainder, never full face when a partial is recorded.
+  const overdueAmount = overdueLines.reduce((a, s) => {
+    const rem = Math.max(0, (Number(s.amount) || 0) - lineAllocatedAmount(s));
+    return a + rem;
+  }, 0);
   let daysOverdue = 0;
   if (overdueLines.length > 0) {
     const earliest = Math.min(...overdueLines.map((s) => new Date(s.due as string).getTime()));
@@ -603,10 +634,14 @@ export function deriveCollections(
 }
 
 /** Display status for a schedule line. */
-export function installmentStatus(item: InstallmentItem, now = Date.now()): "paid" | "overdue" | "due-soon" | "upcoming" | "waived" | "cancelled" {
+export function installmentStatus(
+  item: InstallmentItem,
+  now = Date.now(),
+): "paid" | "partially_paid" | "overdue" | "due-soon" | "upcoming" | "waived" | "cancelled" {
   if (item.paid) return "paid";
   if (item.status === "waived") return "waived";
-  if (item.status === "cancelled") return "cancelled";
+  if (isLinePartiallyPaid(item)) return "partially_paid";
+  if (isTrueCancelledLine(item) || item.status === "cancelled") return "cancelled";
   if (item.due == null) return "due-soon";
   const t = new Date(item.due).getTime();
   if (t < now) return "overdue";
