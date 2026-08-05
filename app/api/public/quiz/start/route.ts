@@ -43,6 +43,24 @@ export async function POST(req: Request) {
       );
     }
 
+    // Instalment playback gate — same SoT as pinned bar / Class Hub (lectureAccessForCourse + override).
+    // Expiring students stay allowed; only blocked overdue playback is rejected.
+    if (learner && gate.unlockCourseIds.length > 0) {
+      const { learnerHasOpenPlaybackForCourses } = await import("@/lib/coursePlaybackAccess");
+      const open = await learnerHasOpenPlaybackForCourses(learner.phone, gate.unlockCourseIds);
+      if (!open) {
+        return NextResponse.json(
+          {
+            ok: false,
+            reason: "overdue",
+            error: "This unlocks as soon as your pending instalment is cleared.",
+            unlockCourseIds: gate.unlockCourseIds,
+          },
+          { status: 403 },
+        );
+      }
+    }
+
     // HARD AUTH GATE: even for a free quiz that "allows" everyone, the taker must
     // be a known, logged-in learner. Anonymous → lead form (which logs them in),
     // so the attempt is always attributable to a student. No guest attempts.

@@ -13,6 +13,8 @@ import PerformanceDashboard from "./PerformanceDashboard";
 import OverallPerformance from "./OverallPerformance";
 import PremiumVideoCard from "@/components/public/PremiumVideoCard";
 import SubjectFolderCard from "@/components/public/SubjectFolderCard";
+import ContentLockSheet from "@/components/portal/access/ContentLockSheet";
+import { LockedCard } from "@/components/dashboard/ClassHubLocked";
 
 const OVERALL_SECTION = "overall";
 type TabId = ClassHubSectionId | typeof PERFORMANCE_SECTION | typeof OVERALL_SECTION;
@@ -36,12 +38,22 @@ export default function ClassHubBatch({
   sections,
   performance,
   initialTab,
+  playbackLocked = false,
+  lockPayHref = "/portal",
+  lockInstallmentNo = null,
 }: {
   courseId: string;
   sections: ClassHubSection[];
   performance: PerformanceData;
   /** Optional deep-link target (e.g. "overall") to open a specific tab on load. */
   initialTab?: string;
+  /**
+   * When true, recordings / notes / CA / quizzes are locked.
+   * MUST be derived from lectureAccessForCourse(..., override) — same SoT as the pinned bar.
+   */
+  playbackLocked?: boolean;
+  lockPayHref?: string;
+  lockInstallmentNo?: number | null;
 }) {
   const hasContent = sections.some((s) => s.items.length > 0);
   const hasPerformance = performance.quizzes.length > 0 || performance.history.length > 0;
@@ -62,9 +74,14 @@ export default function ClassHubBatch({
   const [active, setActive] = useState<TabId>(initial);
   const [query, setQuery] = useState("");
   const [openSubject, setOpenSubject] = useState<string | null>(null);
+  const [lockOpen, setLockOpen] = useState(false);
   const marked = useRef<Set<string>>(new Set());
 
   const selectTab = (id: TabId) => {
+    if (playbackLocked && id !== OVERALL_SECTION) {
+      setLockOpen(true);
+      return;
+    }
     setActive(id);
     setQuery("");
     setOpenSubject(null);
@@ -131,8 +148,24 @@ export default function ClassHubBatch({
 
   const showSearch = !onPerformance && !onOverall && activeSection && sectionItems.length > 0 && !showFolders;
 
+  // If deep-linked into a gated tab while locked, fall back to Overall or first view + sheet.
+  useEffect(() => {
+    if (!playbackLocked) return;
+    if (active !== OVERALL_SECTION) {
+      setActive(hasContent || hasPerformance ? OVERALL_SECTION : active);
+      setLockOpen(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playbackLocked]);
+
   return (
     <section>
+      <ContentLockSheet
+        open={lockOpen}
+        onClose={() => setLockOpen(false)}
+        installmentNo={lockInstallmentNo}
+        payHref={lockPayHref}
+      />
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="flex items-center gap-2 font-heading text-lg font-bold">
           <PlayCircle size={18} className="text-[var(--ca-gold)]" /> Batch content
@@ -171,7 +204,10 @@ export default function ClassHubBatch({
             >
               {Icon && <Icon size={15} aria-hidden="true" className="shrink-0" />}
               <span className="truncate">{t.label}</span>
-              {count > 0 && (
+              {playbackLocked && t.id !== OVERALL_SECTION && (
+                <Lock size={13} className="shrink-0 opacity-70" aria-hidden="true" />
+              )}
+              {count > 0 && !playbackLocked && (
                 <span className="inline-flex shrink-0 items-center rounded-full bg-[#16a34a] px-1.5 text-[11px] font-extrabold leading-5 text-white">
                   {count}
                 </span>
@@ -193,7 +229,13 @@ export default function ClassHubBatch({
       )}
 
       <div className="mt-5">
-        {onOverall ? (
+        {playbackLocked && !onOverall ? (
+          <LockedCard installmentNo={lockInstallmentNo} payHref={lockPayHref}>
+            <div className="rounded-2xl border border-line bg-surface p-10 text-center text-sm text-muted">
+              Recordings, notes, quizzes and materials unlock when your instalment clears.
+            </div>
+          </LockedCard>
+        ) : onOverall ? (
           <OverallPerformance courseId={courseId} />
         ) : onPerformance ? (
           <PerformanceDashboard data={performance} />

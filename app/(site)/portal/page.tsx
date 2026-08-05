@@ -12,6 +12,7 @@ import PortalLogoutButton from "@/components/portal/PortalLogoutButton";
 import PaymentRecovery from "@/components/portal/PaymentRecovery";
 import LeadPromoBanner, { type PromoItem } from "@/components/portal/LeadPromoBanner";
 import EnrolledCard from "@/components/portal/EnrolledCard";
+import AlreadyPaidButton from "@/components/portal/AlreadyPaidButton";
 import Ga4RoleStamp, { type Ga4Role } from "@/components/analytics/Ga4RoleStamp";
 
 const courseCover = (c: { cover_image_url?: string | null; image?: string | null; mobile_image_url?: string | null } | undefined) =>
@@ -307,6 +308,16 @@ export default async function PortalDashboardPage() {
                     ) : (
                       <span className="font-semibold text-success">Fully paid ✓</span>
                     )
+                  }
+                  footerSlot={
+                    d.remaining > 0 ? (
+                      <div className="mt-2 flex flex-wrap items-center gap-3">
+                        <Link href={`/portal/class/${e.course_id}`} className="text-sm font-semibold text-ink2 hover:text-primary">
+                          Class Hub
+                        </Link>
+                        <AlreadyPaidButton />
+                      </div>
+                    ) : null
                   }
                 />
               );

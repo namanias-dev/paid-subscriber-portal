@@ -190,10 +190,9 @@ export default function InstallmentProofPopup() {
         const json = (await res.json()) as PromptResponse;
         if (cancelled || !json.ok || !json.enabled || !json.prompt) return;
         const p = json.prompt;
-        if (p.state === "none" || !shouldShowPrompt(p)) return;
-        markShown(p);
+        if (p.state === "none") return;
+        // Primary notice is the pinned bar — do NOT auto-open this modal (no duplicate).
         setPrompt(p);
-        setOpen(true);
       } catch {
         /* non-fatal */
       } finally {
@@ -202,6 +201,46 @@ export default function InstallmentProofPopup() {
     })();
     return () => {
       cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    const onUpload = () => {
+      setSlide("upload");
+      setOpen(true);
+      setError(null);
+      setUploadDone(false);
+    };
+    const onView = () => {
+      setSlide("view");
+      setOpen(true);
+    };
+    const onNotice = () => {
+      setSlide("main");
+      setOpen(true);
+    };
+    const onRefresh = () => {
+      void (async () => {
+        try {
+          const res = await fetch("/api/portal/installment-proofs/prompt", { cache: "no-store" });
+          const json = (await res.json()) as PromptResponse;
+          if (json.ok && json.enabled && json.prompt && json.prompt.state !== "none") {
+            setPrompt(json.prompt);
+          }
+        } catch {
+          /* ignore */
+        }
+      })();
+    };
+    window.addEventListener("ipp:open-upload", onUpload);
+    window.addEventListener("ipp:open-view", onView);
+    window.addEventListener("ipp:open-notice", onNotice);
+    window.addEventListener("ipp:refresh", onRefresh);
+    return () => {
+      window.removeEventListener("ipp:open-upload", onUpload);
+      window.removeEventListener("ipp:open-view", onView);
+      window.removeEventListener("ipp:open-notice", onNotice);
+      window.removeEventListener("ipp:refresh", onRefresh);
     };
   }, []);
 
@@ -396,6 +435,8 @@ export default function InstallmentProofPopup() {
         });
         setSlide("main");
         setUploadDone(false);
+        window.dispatchEvent(new CustomEvent("ipp:refresh"));
+
         setUploadBusy(false);
         setLocalFiles((prev) => {
           prev.forEach((f) => {

@@ -1,9 +1,11 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { ArrowLeft, Lock, ShieldCheck } from "lucide-react";
-import { getEnrollments, getAllCourses, getLibraryDocsByIds, getOrientationVideosForTarget, getCourseEnrollmentsByPhone } from "@/lib/dataProvider";
+import { getEnrollments, getAllCourses, getLibraryDocsByIds, getOrientationVideosForTarget, getCourseEnrollmentsByPhone, getAccessOverridesByPhone } from "@/lib/dataProvider";
 import { hasCourseAccess } from "@/lib/courseAccess";
 import { resolveLearner } from "@/lib/entitlements";
+import { computeCoursePlaybackAccess } from "@/lib/coursePlaybackAccess";
+import { nextUnpaidDatedLine } from "@/lib/accessAtRisk";
 import { getClassHubSectionsForCourse, getClassHubPerformance } from "@/lib/classHubServer";
 import { resolveEnrollmentBatchId, resolveLiveClass } from "@/lib/courseZoom";
 import ClassHubContent from "@/components/dashboard/ClassHubContent";
@@ -42,9 +44,23 @@ export default async function ClassHubPage({ params }: { params: { courseId: str
   }
 
   const courseEnrollments = isStaff ? [] : await getCourseEnrollmentsByPhone(learner.phone);
+  const overrides = isStaff ? [] : await getAccessOverridesByPhone(learner.phone);
   const enrollment = courseEnrollments.find((e) => e.course_id === course.id && e.status !== "cancelled") || null;
+  const override = overrides.find((o) => o.course_id === course.id);
+  // Staff preview bypasses installment lock. Students: SoT = lectureAccessForCourse + override.
+  const playback = isStaff
+    ? { allowed: true as const }
+    : computeCoursePlaybackAccess(course, enrollment || undefined, override);
+  const playbackLocked = !playback.allowed;
+  const unpaid = enrollment ? nextUnpaidDatedLine(enrollment.schedule) : null;
+  const lockPayHref = enrollment ? `/portal/course/${enrollment.id}` : "/portal";
+  const lockInstallmentNo = unpaid?.no ?? null;
+
   const batchId = resolveEnrollmentBatchId(course, enrollment);
   const live = resolveLiveClass(course, batchId);
+  const liveSafe = playbackLocked
+    ? { ...live, zoom_link: null, zoom_meeting_id: null, zoom_passcode: null, zoom_note: null }
+    : live;
 
   const ar = course.after_registration || {};
   const [docs, orientationVideos, sections, performance] = await Promise.all([
@@ -53,6 +69,7 @@ export default async function ClassHubPage({ params }: { params: { courseId: str
     getClassHubSectionsForCourse(course.id, learner),
     getClassHubPerformance(course.id, learner, courses),
   ]);
+  const docsSafe = playbackLocked ? docs.map((d) => ({ ...d, file_url: "" })) : docs;
 
   return (
     <div className="space-y-6">
@@ -75,9 +92,24 @@ export default async function ClassHubPage({ params }: { params: { courseId: str
         </div>
       </section>
 
-      <ClassHubContent course={course} docs={docs} orientationVideos={orientationVideos} live={live} />
+      <ClassHubContent
+        course={course}
+        docs={docsSafe}
+        orientationVideos={playbackLocked ? [] : orientationVideos}
+        live={liveSafe}
+        playbackLocked={playbackLocked}
+        lockPayHref={lockPayHref}
+        lockInstallmentNo={lockInstallmentNo}
+      />
 
-      <ClassHubBatch courseId={course.id} sections={sections} performance={performance} />
+      <ClassHubBatch
+        courseId={course.id}
+        sections={sections}
+        performance={performance}
+        playbackLocked={playbackLocked}
+        lockPayHref={lockPayHref}
+        lockInstallmentNo={lockInstallmentNo}
+      />
     </div>
   );
 }

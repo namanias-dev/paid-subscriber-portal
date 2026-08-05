@@ -3,9 +3,11 @@ import { redirect } from "next/navigation";
 import type { Metadata } from "next";
 import { ArrowLeft, Lock } from "lucide-react";
 import { getBuyerSession } from "@/lib/session";
-import { getAllCourses, getLibraryDocsByIds, paidCourseIdsForPhone, getOrientationVideosForTarget, getCourseEnrollmentsByPhone } from "@/lib/dataProvider";
+import { getAllCourses, getLibraryDocsByIds, paidCourseIdsForPhone, getOrientationVideosForTarget, getCourseEnrollmentsByPhone, getAccessOverridesByPhone } from "@/lib/dataProvider";
 import { hasCourseAccess } from "@/lib/courseAccess";
 import { resolveLearner } from "@/lib/entitlements";
+import { computeCoursePlaybackAccess } from "@/lib/coursePlaybackAccess";
+import { nextUnpaidDatedLine } from "@/lib/accessAtRisk";
 import { getClassHubSectionsForCourse, getClassHubPerformance } from "@/lib/classHubServer";
 import { buildPerformanceData } from "@/lib/performance";
 import { resolveEnrollmentBatchId, resolveLiveClass } from "@/lib/courseZoom";
@@ -25,10 +27,11 @@ export default async function PortalClassHubPage({
   const session = await getBuyerSession();
   if (!session) redirect(`/portal/login?next=${encodeURIComponent(`/portal/class/${params.courseId}`)}`);
 
-  const [courses, paidCourseIds, courseEnrollments] = await Promise.all([
+  const [courses, paidCourseIds, courseEnrollments, overrides] = await Promise.all([
     getAllCourses(),
     paidCourseIdsForPhone(session.phone),
     getCourseEnrollmentsByPhone(session.phone),
+    getAccessOverridesByPhone(session.phone),
   ]);
   const course = courses.find((c) => c.id === params.courseId);
 
@@ -48,8 +51,20 @@ export default async function PortalClassHubPage({
   }
 
   const enrollment = courseEnrollments.find((e) => e.course_id === course.id && e.status !== "cancelled") || null;
+  const override = overrides.find((o) => o.course_id === course.id);
+  // SoT — same lectureAccessForCourse path as the pinned access bar.
+  const playback = computeCoursePlaybackAccess(course, enrollment || undefined, override);
+  const playbackLocked = !playback.allowed;
+  const unpaid = enrollment ? nextUnpaidDatedLine(enrollment.schedule) : null;
+  const lockPayHref = enrollment ? `/portal/course/${enrollment.id}` : "/portal";
+  const lockInstallmentNo = unpaid?.no ?? null;
+
   const batchId = resolveEnrollmentBatchId(course, enrollment);
   const live = resolveLiveClass(course, batchId);
+  // Strip Zoom credentials server-side when blocked — never ship href/meeting id to HTML.
+  const liveSafe = playbackLocked
+    ? { ...live, zoom_link: null, zoom_meeting_id: null, zoom_passcode: null, zoom_note: null }
+    : live;
 
   const ar = course.after_registration || {};
   const [docs, orientationVideos, learner] = await Promise.all([
@@ -57,6 +72,11 @@ export default async function PortalClassHubPage({
     getOrientationVideosForTarget("course", course.id, { publishedOnly: true }),
     resolveLearner(),
   ]);
+
+  // When playback locked, do not pass downloadable file URLs into the client tree.
+  const docsSafe = playbackLocked
+    ? docs.map((d) => ({ ...d, file_url: "" }))
+    : docs;
 
   const accessExpired = !!learner && !learner.courseIds.includes(course.id);
   const [sections, performance] = accessExpired
@@ -81,7 +101,15 @@ export default async function PortalClassHubPage({
         </div>
       </section>
 
-      <ClassHubContent course={course} docs={docs} orientationVideos={orientationVideos} live={live} />
+      <ClassHubContent
+        course={course}
+        docs={docsSafe}
+        orientationVideos={playbackLocked ? [] : orientationVideos}
+        live={liveSafe}
+        playbackLocked={playbackLocked}
+        lockPayHref={lockPayHref}
+        lockInstallmentNo={lockInstallmentNo}
+      />
 
       {accessExpired ? (
         <div className="rounded-2xl border border-amber-200 bg-amber-50 p-6 text-center">
@@ -89,7 +117,15 @@ export default async function PortalClassHubPage({
           <p className="mt-1 text-sm text-amber-800">Renew to regain recordings, notes, tests and current affairs. Your progress is saved.</p>
         </div>
       ) : (
-        <ClassHubBatch courseId={course.id} sections={sections} performance={performance} initialTab={searchParams?.tab} />
+        <ClassHubBatch
+          courseId={course.id}
+          sections={sections}
+          performance={performance}
+          initialTab={searchParams?.tab}
+          playbackLocked={playbackLocked}
+          lockPayHref={lockPayHref}
+          lockInstallmentNo={lockInstallmentNo}
+        />
       )}
     </div>
   );
