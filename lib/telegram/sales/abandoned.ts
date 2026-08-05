@@ -4,7 +4,6 @@
  */
 import { getPayments } from "../../dataProvider";
 import { isPaidStatus } from "../../paymentsAgg";
-import { getSupabaseAdmin } from "../../supabase";
 import { tgLog } from "../log";
 import { salesAlertCheckoutAbandoned, fireSalesAlert } from "./send";
 import { salesChannelConfigured } from "../channels";
@@ -44,20 +43,15 @@ export async function sweepCheckoutAbandoned(): Promise<{ checked: number; alert
       );
       if (paidLater) continue;
 
-      let studentId: string | null = null;
-      const db = getSupabaseAdmin();
-      if (db) {
-        const { data } = await db.from("students").select("id").eq("phone", phone).maybeSingle();
-        studentId = data?.id ? String(data.id) : null;
-      }
-
       const minutesAgo = (now - new Date(p.created_at).getTime()) / 60_000;
       await salesAlertCheckoutAbandoned({
         name: p.student_name || "Student",
         phone,
         course: p.item || p.item_slug || "Course",
+        amount: Number(p.amount) || null,
         minutesAgo,
-        studentId,
+        payment: p,
+        allPayments: pays,
       });
       alerted++;
     }

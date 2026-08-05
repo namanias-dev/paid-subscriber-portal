@@ -115,6 +115,12 @@ async function run(req: Request) {
       return NextResponse.json({ ok: finish.ok, finish, ts: Date.now() });
     }
 
+    if (action === "sales_seed_edit") {
+      const salesMod = await import("@/lib/telegram/sales");
+      const edit = await salesMod.editSeedMessagesInPlace();
+      return NextResponse.json({ ok: edit.ok, edit, ts: Date.now() });
+    }
+
     if (action === "sales_go_live") {
       const salesMod = await import("@/lib/telegram/sales");
       await salesMod.setSalesFlagsEnabled(true);

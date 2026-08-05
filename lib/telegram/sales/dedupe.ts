@@ -46,14 +46,22 @@ export async function alreadyDeduped(event: SalesEventType, phone: string): Prom
   }
 }
 
-export async function markDeduped(event: SalesEventType, phone: string): Promise<void> {
+export async function markDeduped(
+  event: SalesEventType,
+  phone: string,
+  metadata?: Record<string, unknown>,
+): Promise<void> {
   const db = getSupabaseAdmin();
   if (!db) return;
   const key = salesDedupKey(event, phone);
   await db
     .from("telegram_report_snapshots")
     .upsert(
-      { slot_key: key, kind: "sales_dedupe", metrics: { event, phone: phoneKey(phone) } },
+      {
+        slot_key: key,
+        kind: "sales_dedupe",
+        metrics: { event, phone: phoneKey(phone), ...(metadata || {}) },
+      },
       { onConflict: "slot_key" },
     )
     .then(

@@ -191,6 +191,17 @@ export async function pinChatMessage(
   });
 }
 
+export async function editMessageText(opts: {
+  chat_id: string | number;
+  message_id: number;
+  text: string;
+  parse_mode?: "HTML" | "Markdown" | "MarkdownV2";
+  disable_web_page_preview?: boolean;
+  reply_markup?: { inline_keyboard?: InlineKeyboardButton[][] };
+}): Promise<TelegramApiResult<{ message_id: number } | boolean>> {
+  return callMethod("editMessageText", opts as unknown as Record<string, unknown>);
+}
+
 export async function getMe(): Promise<
   TelegramApiResult<{ id: number; username?: string; first_name?: string }>
 > {

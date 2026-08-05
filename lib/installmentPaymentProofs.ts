@@ -409,11 +409,13 @@ export async function submitInstallmentProof(input: {
           await m.salesAlertInstallmentProof({
             name: e.student_name || "Student",
             phone: e.phone,
+            course: e.course_title,
             installmentNo: input.installmentNo,
             amount: input.claimedAmount ?? expectedAmount,
             studentId: student?.id ?? null,
             enrollmentId: e.id,
             proofId: proof.id,
+            enrollment: e,
           });
         }),
       )
@@ -469,11 +471,13 @@ export async function submitInstallmentProof(input: {
         await m.salesAlertInstallmentProof({
           name: e.student_name || "Student",
           phone: e.phone,
+          course: e.course_title,
           installmentNo: input.installmentNo,
           amount: input.claimedAmount ?? expectedAmount,
           studentId: student?.id ?? null,
           enrollmentId: e.id,
           proofId: proof.id,
+          enrollment: e,
         });
       }),
     )

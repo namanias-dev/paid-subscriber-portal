@@ -5,7 +5,7 @@
 import { getPayments } from "../../dataProvider";
 import { isPaidStatus } from "../../paymentsAgg";
 import { getSupabaseAdmin } from "../../supabase";
-import { buildKeyboard, pinChatMessage } from "../botApi";
+import { buildKeyboard, editMessageText, pinChatMessage } from "../botApi";
 import { sendToChannel, salesChannelConfigured } from "../channels";
 import { tgLog } from "../log";
 import { formatIstShort, istNowParts } from "../reports/format";
@@ -20,7 +20,8 @@ import {
   adminStudentDeepLink,
   escapeHtml,
   maskPhone,
-  salesInr,
+  optionalSalesInr,
+  salesPhone,
 } from "./format";
 import { SITE_URL } from "../../config";
 
@@ -84,15 +85,25 @@ async function msgAlreadyPosted(ev: SeedEvent): Promise<boolean> {
   return alreadyDeduped(ev.event, ev.phone);
 }
 
-async function markMsgPosted(ev: SeedEvent): Promise<void> {
+async function markMsgPosted(ev: SeedEvent, messageId: number): Promise<void> {
   const db = getSupabaseAdmin();
-  await markDeduped(ev.event, ev.phone);
+  const chatId = (process.env.TELEGRAM_SALES_CHAT_ID || "").trim() || null;
+  await markDeduped(ev.event, ev.phone, { message_id: messageId, chat_id: chatId });
   if (!db) return;
   await db.from("telegram_report_snapshots").upsert(
     {
       slot_key: seedMsgKey(ev),
       kind: "sales_seed_msg",
-      metrics: { event: ev.event, phone: phone10(ev.phone), ref: ev.ref, at: ev.at },
+      metrics: {
+        event: ev.event,
+        phone: phone10(ev.phone),
+        ref: ev.ref,
+        at: ev.at,
+        message_id: messageId,
+        chat_id: chatId,
+        message_html: ev.html,
+        buttons: ev.buttons,
+      },
     },
     { onConflict: "slot_key" },
   );
@@ -149,7 +160,11 @@ export async function collectTodaySalesSeedEvents(now = new Date()): Promise<{
         html: wrapSeedHtml(
           [
             `🔴 <b>Payment failed</b> · ${escapeHtml(name)}`,
-            `${escapeHtml(course)} · ${salesInr(Number(p.amount) || 0)} · ${escapeHtml(maskPhone(phone))}`,
+            [
+              escapeHtml(course),
+              optionalSalesInr(Number(p.amount)),
+              escapeHtml(salesPhone(phone) || ""),
+            ].filter(Boolean).join(" · "),
             reason ? `Reason: ${escapeHtml(String(reason))}` : null,
             when,
           ]
@@ -170,7 +185,7 @@ export async function collectTodaySalesSeedEvents(now = new Date()): Promise<{
         html: wrapSeedHtml(
           [
             `⚪ <b>Link expired unused</b> · ${escapeHtml(name)}`,
-            `${escapeHtml(course)} · ${escapeHtml(maskPhone(phone))}`,
+            `${escapeHtml(course)} · ${escapeHtml(salesPhone(phone) || "")}`,
             when,
           ].join("\n"),
         ),
@@ -190,7 +205,7 @@ export async function collectTodaySalesSeedEvents(now = new Date()): Promise<{
           [
             `🟡 <b>Started checkout, didn't pay</b> · ${escapeHtml(name)}`,
             `${escapeHtml(course)} · opened ${minutesAgo} min ago`,
-            `${escapeHtml(maskPhone(phone))} · ${when}`,
+            `${escapeHtml(salesPhone(phone) || "")} · ${when}`,
           ].join("\n"),
         ),
       });
@@ -223,7 +238,7 @@ export async function collectTodaySalesSeedEvents(now = new Date()): Promise<{
             [
               `🟡 <b>Started checkout, didn't pay</b> · ${escapeHtml(name)}`,
               `${escapeHtml(course)} · opened ${minutesAgo} min ago`,
-              `${escapeHtml(maskPhone(phone))} · ${when}`,
+              `${escapeHtml(salesPhone(phone) || "")} · ${when}`,
             ].join("\n"),
           ),
         });
@@ -242,8 +257,12 @@ export async function collectTodaySalesSeedEvents(now = new Date()): Promise<{
           html: wrapSeedHtml(
             [
               `✅ <b>Instalment paid</b> · ${escapeHtml(name)}`,
-              `${escapeHtml(course)} · Inst ${p.installment_no ?? "?"} · ${salesInr(Number(p.amount) || 0)}`,
-              `${escapeHtml(maskPhone(phone))} · ${when}`,
+              [
+                escapeHtml(course),
+                p.installment_no != null ? `Inst ${p.installment_no}` : null,
+                optionalSalesInr(Number(p.amount)),
+              ].filter(Boolean).join(" · "),
+              `${escapeHtml(salesPhone(phone) || "")} · ${when}`,
             ].join("\n"),
           ),
         });
@@ -258,7 +277,11 @@ export async function collectTodaySalesSeedEvents(now = new Date()): Promise<{
           html: wrapSeedHtml(
             [
               `🟢 <b>New admission</b> · ${escapeHtml(name)}`,
-              `${escapeHtml(course)} · ${salesInr(Number(p.amount) || 0)} · ${escapeHtml(maskPhone(phone))}`,
+              [
+                escapeHtml(course),
+                optionalSalesInr(Number(p.amount)),
+                escapeHtml(salesPhone(phone) || ""),
+              ].filter(Boolean).join(" · "),
               when,
             ].join("\n"),
           ),
@@ -273,7 +296,11 @@ export async function collectTodaySalesSeedEvents(now = new Date()): Promise<{
           html: wrapSeedHtml(
             [
               `💚 <b>Payment succeeded</b> · ${escapeHtml(name)}`,
-              `${escapeHtml(course)} · ${salesInr(Number(p.amount) || 0)} · ${escapeHtml(maskPhone(phone))}`,
+              [
+                escapeHtml(course),
+                optionalSalesInr(Number(p.amount)),
+                escapeHtml(salesPhone(phone) || ""),
+              ].filter(Boolean).join(" · "),
               when,
             ].join("\n"),
           ),
@@ -314,7 +341,11 @@ export async function collectTodaySalesSeedEvents(now = new Date()): Promise<{
           html: wrapSeedHtml(
             [
               `📎 <b>Proof uploaded — needs review</b> · Student`,
-              `Instalment ${pr.installment_no ?? "?"} · ${salesInr(amt != null ? Number(amt) : null)} · ${escapeHtml(maskPhone(phone))}`,
+              [
+                pr.installment_no != null ? `Instalment ${pr.installment_no}` : null,
+                optionalSalesInr(amt != null ? Number(amt) : null),
+                escapeHtml(salesPhone(phone) || ""),
+              ].filter(Boolean).join(" · "),
               formatIstShort(String(pr.created_at)),
             ].join("\n"),
           ),
@@ -348,7 +379,7 @@ export async function collectTodaySalesSeedEvents(now = new Date()): Promise<{
           html: wrapSeedHtml(
             [
               `📎 <b>Webinar proof uploaded</b> · ${escapeHtml(pay?.student_name || "Student")}`,
-              `${escapeHtml(maskPhone(phone))} · ${formatIstShort(String(pr.created_at))}`,
+              `${escapeHtml(salesPhone(phone) || "")} · ${formatIstShort(String(pr.created_at))}`,
             ].join("\n"),
           ),
         });
@@ -504,8 +535,8 @@ export async function runSalesTodaySeed(opts: {
         continue;
       }
       const res = await sendWithRetry(ev.html, ev.buttons);
-      if (res.ok) {
-        await markMsgPosted(ev);
+      if (res.ok && res.messageId != null) {
+        await markMsgPosted(ev, res.messageId);
         posted++;
       } else {
         failed++;
@@ -644,6 +675,56 @@ export async function finishSalesSeedDigest(ymd = SEED_DAY): Promise<{
 /** Prove live path would no-op on a seeded phone+event. */
 export async function proveSeedDedup(phone: string, event: SalesEventType): Promise<boolean> {
   return alreadyDeduped(event, phone);
+}
+
+/**
+ * Edit only seed rows that captured both Telegram message_id and replacement
+ * HTML. Legacy rows without message_id are deliberately left untouched.
+ */
+export async function editSeedMessagesInPlace(): Promise<{
+  ok: boolean;
+  edited: number;
+  skipped: number;
+  failed: number;
+}> {
+  const db = getSupabaseAdmin();
+  const chatId = (process.env.TELEGRAM_SALES_CHAT_ID || "").trim();
+  if (!db || !chatId) return { ok: false, edited: 0, skipped: 0, failed: 0 };
+  const { data } = await db
+    .from("telegram_report_snapshots")
+    .select("slot_key,metrics")
+    .in("kind", ["sales_seed_msg", "sales_seed_digest"])
+    .order("created_at", { ascending: true })
+    .limit(SEED_CAP);
+  let edited = 0;
+  let skipped = 0;
+  let failed = 0;
+  for (const row of data || []) {
+    const metrics = (row.metrics || {}) as {
+      message_id?: number;
+      message_html?: string;
+      buttons?: { label: string; url: string }[];
+    };
+    if (!metrics.message_id || !metrics.message_html) {
+      skipped++;
+      continue;
+    }
+    const res = await editMessageText({
+      chat_id: chatId,
+      message_id: metrics.message_id,
+      text: metrics.message_html,
+      parse_mode: "HTML",
+      disable_web_page_preview: true,
+      reply_markup: buildKeyboard(metrics.buttons || []),
+    });
+    if (res.ok || (res.description || "").toLowerCase().includes("message is not modified")) {
+      edited++;
+    } else {
+      failed++;
+    }
+    await sleep(THROTTLE_MS);
+  }
+  return { ok: failed === 0, edited, skipped, failed };
 }
 
 export { SEED_CAP, SEED_DAY, salesDedupKey };

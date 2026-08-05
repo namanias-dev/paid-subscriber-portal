@@ -182,6 +182,7 @@ export async function recordPaymentStatusChanged(p: Payment, toStatus: string, s
             course: p.item || p.item_slug || "Item",
             amount: Number(p.amount) || 0,
             reason: p.verify_status || p.response_code || null,
+            payment: p,
           });
         }),
       )
@@ -196,6 +197,9 @@ export async function recordPaymentStatusChanged(p: Payment, toStatus: string, s
               name: p.student_name || "Student",
               phone: p.phone,
               course: p.item || p.item_slug || "Item",
+              amount: Number(p.amount) || null,
+              sentAt: p.created_at,
+              payment: p,
             });
           }
         }),
@@ -264,6 +268,7 @@ export async function recordPaymentPaid(p: Payment, source = "system"): Promise<
               phone: p.phone,
               course: p.item || p.item_slug || "Course",
               amount: Number(p.amount) || 0,
+              enrollmentId: p.enrollment_id ?? null,
             };
             if (p.payment_kind === "installment") {
               await m.salesAlertInstallmentPaid({
@@ -271,7 +276,10 @@ export async function recordPaymentPaid(p: Payment, source = "system"): Promise<
                 installmentNo: p.installment_no ?? null,
               });
             } else {
-              await m.salesAlertAdmission(base);
+              await m.salesAlertAdmission({
+                ...base,
+                source: p.attribution_source ?? null,
+              });
               await m.salesAlertPaymentSucceeded(base);
             }
           }),
@@ -328,6 +336,7 @@ export async function recordProofUploaded(p: Payment, proofId: string): Promise<
             name: p.student_name || "Student",
             phone: p.phone,
             proofId,
+            payment: p,
           });
         }),
       )

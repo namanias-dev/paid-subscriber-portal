@@ -12,8 +12,86 @@ import {
   tryConsumeRateSlot,
   type SalesEventType,
 } from "./dedupe";
-import { adminStudentDeepLink, escapeHtml, formatIstShort, maskPhone, salesInr } from "./format";
+import {
+  classifyCheckoutLead,
+  loadEnrollmentSalesContext,
+  loadFailureSalesContext,
+  loadWebinarProofSalesContext,
+  type EnrollmentSalesContext,
+} from "./context";
+import {
+  adminStudentDeepLink,
+  escapeHtml,
+  formatIstShort,
+  optionalSalesInr,
+  salesPhone,
+} from "./format";
 import { salesAlertsEnabled } from "./settings";
+import type { CourseEnrollment, Payment } from "../../types";
+
+function clean(value: unknown): string | null {
+  const text = String(value ?? "").trim();
+  return text && text !== "null" && text !== "undefined" ? text : null;
+}
+
+function phoneLine(phone: string): string | null {
+  const value = salesPhone(phone);
+  return value ? `☎ ${escapeHtml(value)}` : null;
+}
+
+function ordinal(value: number): string {
+  const mod100 = value % 100;
+  if (mod100 >= 11 && mod100 <= 13) return `${value}th`;
+  if (value % 10 === 1) return `${value}st`;
+  if (value % 10 === 2) return `${value}nd`;
+  if (value % 10 === 3) return `${value}rd`;
+  return `${value}th`;
+}
+
+function compactDate(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const ms = Date.parse(value);
+  return Number.isFinite(ms) ? formatIstShort(new Date(ms)) : null;
+}
+
+function enrollmentLines(
+  context: EnrollmentSalesContext | null,
+  opts?: { installmentNo?: number | null; amountLabel?: string; amount?: number | null },
+): string[] {
+  if (!context) return [];
+  const lines: (string | null)[] = [];
+  const no = opts?.installmentNo;
+  if (no != null && no > 0) {
+    lines.push(
+      `Instalment ${no}${context.installmentTotal ? ` of ${context.installmentTotal}` : ""}`,
+    );
+  }
+  const amount = optionalSalesInr(opts?.amount);
+  if (amount) lines.push(`${opts?.amountLabel || "Amount"}: ${amount}`);
+  const money = [
+    context.totalFee ? `Fee ${optionalSalesInr(context.totalFee)}` : null,
+    context.paid ? `Paid ${optionalSalesInr(context.paid)}` : null,
+    context.balance ? `Balance ${optionalSalesInr(context.balance)}` : null,
+  ].filter(Boolean);
+  if (money.length) lines.push(money.join(" · "));
+  if (context.nextInstallmentDate) {
+    lines.push(`Next instalment: ${escapeHtml(compactDate(context.nextInstallmentDate) || context.nextInstallmentDate)}`);
+  }
+  if (context.accessStatus) lines.push(`Access: ${escapeHtml(context.accessStatus)}`);
+  return lines.filter((line): line is string => !!line);
+}
+
+export async function safeSalesContext<T>(
+  task: () => Promise<T>,
+  event: SalesEventType,
+): Promise<T | null> {
+  try {
+    return await task();
+  } catch (error) {
+    tgLog("sales_enrichment_failed", { event, error: (error as Error).message }, "warn");
+    return null;
+  }
+}
 
 async function deliverOrQueue(input: {
   event: SalesEventType;
@@ -53,7 +131,11 @@ async function deliverOrQueue(input: {
     reply_markup: buildKeyboard(input.buttons.map((b) => ({ label: b.label, url: b.url }))),
   });
   if (res.ok) {
-    await markDeduped(input.event, input.phone);
+    const messageId = (res.result as { message_id?: number } | undefined)?.message_id ?? null;
+    await markDeduped(input.event, input.phone, {
+      message_id: messageId,
+      chat_id: (process.env.TELEGRAM_SALES_CHAT_ID || "").trim() || null,
+    });
     return "sent";
   }
   tgLog("sales_alert_send_failed", { event: input.event, error: res.description }, "warn");
@@ -78,13 +160,32 @@ export async function salesAlertPaymentFailed(input: {
   amount: number;
   reason?: string | null;
   studentId?: string | null;
+  payment?: Payment | null;
 }): Promise<void> {
   const link = adminStudentDeepLink({ studentId: input.studentId, phone: input.phone });
+  const context = await safeSalesContext(
+    () =>
+      loadFailureSalesContext({
+        phone: input.phone,
+        course: input.course,
+        at: input.payment?.created_at || new Date(),
+      }),
+    "payment_failed",
+  );
+  const amount = optionalSalesInr(input.amount);
   const html = [
     `🔴 <b>Payment failed</b> · ${escapeHtml(input.name || "Student")}`,
-    `${escapeHtml(input.course || "Course")} · ${salesInr(input.amount)} · ${escapeHtml(maskPhone(input.phone))}`,
-    input.reason ? `Reason: ${escapeHtml(input.reason)}` : null,
-    formatIstShort(new Date()),
+    phoneLine(input.phone),
+    clean(input.course) ? `Course: ${escapeHtml(input.course)}` : null,
+    amount ? `Attempted: ${amount}` : null,
+    clean(input.reason) ? `Reason: ${escapeHtml(input.reason!)}` : null,
+    context?.attemptToday ? `${ordinal(context.attemptToday)} attempt today` : null,
+    context?.paidBefore === true
+      ? "Payment history: paid before"
+      : context?.paidBefore === false
+        ? "Payment history: no prior payment"
+        : null,
+    formatIstShort(input.payment?.created_at || new Date()),
   ]
     .filter(Boolean)
     .join("\n");
@@ -101,14 +202,30 @@ export async function salesAlertCheckoutAbandoned(input: {
   phone: string;
   course: string;
   minutesAgo: number;
+  amount?: number | null;
+  leadKind?: "new lead" | "returning" | null;
+  payment?: Payment | null;
+  allPayments?: readonly Payment[] | null;
   studentId?: string | null;
 }): Promise<void> {
   const link = adminStudentDeepLink({ studentId: input.studentId, phone: input.phone });
+  const amount = optionalSalesInr(input.amount ?? input.payment?.amount);
+  const leadKind =
+    input.leadKind ||
+    (input.payment && input.allPayments
+      ? classifyCheckoutLead(input.payment, input.allPayments)
+      : null);
   const html = [
     `🟡 <b>Started checkout, didn't pay</b> · ${escapeHtml(input.name || "Student")}`,
-    `${escapeHtml(input.course || "Course")} · opened ${Math.max(1, Math.round(input.minutesAgo))} min ago`,
-    `${escapeHtml(maskPhone(input.phone))} · ${formatIstShort(new Date())}`,
-  ].join("\n");
+    phoneLine(input.phone),
+    clean(input.course) ? `Course: ${escapeHtml(input.course)}` : null,
+    amount ? `Amount: ${amount}` : null,
+    `Opened ${Math.max(1, Math.round(input.minutesAgo))} min ago`,
+    leadKind ? `Lead: ${escapeHtml(leadKind)}` : null,
+    formatIstShort(input.payment?.created_at || new Date()),
+  ]
+    .filter(Boolean)
+    .join("\n");
   await deliverOrQueue({
     event: "checkout_abandoned",
     phone: input.phone,
@@ -121,14 +238,29 @@ export async function salesAlertLinkExpired(input: {
   name: string;
   phone: string;
   course: string;
+  amount?: number | null;
+  sentAt?: string | null;
+  wasOpened?: boolean | null;
+  payment?: Payment | null;
   studentId?: string | null;
 }): Promise<void> {
   const link = adminStudentDeepLink({ studentId: input.studentId, phone: input.phone });
+  const amount = optionalSalesInr(input.amount ?? input.payment?.amount);
+  const sentAt = input.sentAt || input.payment?.created_at || null;
   const html = [
     `⚪ <b>Link expired unused</b> · ${escapeHtml(input.name || "Student")}`,
-    `${escapeHtml(input.course || "Course")} · ${escapeHtml(maskPhone(input.phone))}`,
-    formatIstShort(new Date()),
-  ].join("\n");
+    phoneLine(input.phone),
+    clean(input.course) ? `Course: ${escapeHtml(input.course)}` : null,
+    amount ? `Amount: ${amount}` : null,
+    sentAt ? `Link sent: ${escapeHtml(formatIstShort(sentAt))}` : null,
+    input.wasOpened === true
+      ? "Opened: yes"
+      : input.wasOpened === false
+        ? "Opened: no"
+        : null,
+  ]
+    .filter(Boolean)
+    .join("\n");
   await deliverOrQueue({
     event: "payment_link_expired",
     phone: input.phone,
@@ -140,11 +272,13 @@ export async function salesAlertLinkExpired(input: {
 export async function salesAlertInstallmentProof(input: {
   name: string;
   phone: string;
+  course?: string | null;
   installmentNo: number;
   amount: number | null;
   studentId?: string | null;
   enrollmentId?: string | null;
   proofId?: string | null;
+  enrollment?: CourseEnrollment | null;
 }): Promise<void> {
   const link = adminStudentDeepLink({
     studentId: input.studentId,
@@ -153,11 +287,35 @@ export async function salesAlertInstallmentProof(input: {
     proofId: input.proofId,
     review: "installment_proof",
   });
+  const context = await safeSalesContext(
+    () =>
+      loadEnrollmentSalesContext({
+        phone: input.phone,
+        course: input.course,
+        enrollmentId: input.enrollmentId,
+        enrollment: input.enrollment,
+        installmentNo: input.installmentNo,
+      }),
+    "installment_proof_uploaded",
+  );
   const html = [
     `📎 <b>Proof uploaded — needs review</b> · ${escapeHtml(input.name || "Student")}`,
-    `Instalment ${input.installmentNo} · ${salesInr(input.amount)} · ${escapeHtml(maskPhone(input.phone))}`,
+    phoneLine(input.phone),
+    clean(input.course || context?.enrollment.course_title)
+      ? `Course: ${escapeHtml((input.course || context?.enrollment.course_title)!)}`
+      : null,
+    ...enrollmentLines(context, {
+      installmentNo: input.installmentNo,
+      amountLabel: "Claimed",
+      amount: input.amount,
+    }),
+    context?.dueDate
+      ? `Due: ${escapeHtml(compactDate(context.dueDate) || context.dueDate)}`
+      : null,
     formatIstShort(new Date()),
-  ].join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
   await deliverOrQueue({
     event: "installment_proof_uploaded",
     phone: input.phone,
@@ -171,6 +329,7 @@ export async function salesAlertWebinarProof(input: {
   phone: string;
   studentId?: string | null;
   proofId?: string | null;
+  payment?: Payment | null;
 }): Promise<void> {
   const link = adminStudentDeepLink({
     studentId: input.studentId,
@@ -178,10 +337,28 @@ export async function salesAlertWebinarProof(input: {
     proofId: input.proofId,
     review: "payment_proof",
   });
+  const context = input.payment
+    ? await safeSalesContext(
+        () => loadWebinarProofSalesContext(input.payment!),
+        "webinar_proof_uploaded",
+      )
+    : null;
+  const amount = optionalSalesInr(context?.amount);
   const html = [
     `📎 <b>Webinar proof uploaded</b> · ${escapeHtml(input.name || "Student")}`,
-    `${escapeHtml(maskPhone(input.phone))} · ${formatIstShort(new Date())}`,
-  ].join("\n");
+    phoneLine(input.phone),
+    context?.webinarName ? `Webinar: ${escapeHtml(context.webinarName)}` : null,
+    context?.webinarDate
+      ? `Date: ${escapeHtml(formatIstShort(context.webinarDate))}`
+      : null,
+    amount ? `Amount: ${amount}` : null,
+    context?.registrations != null
+      ? `Registrations: ${context.registrations}`
+      : null,
+    formatIstShort(new Date()),
+  ]
+    .filter(Boolean)
+    .join("\n");
   await deliverOrQueue({
     event: "webinar_proof_uploaded",
     phone: input.phone,
@@ -196,13 +373,36 @@ export async function salesAlertAdmission(input: {
   course: string;
   amount: number;
   studentId?: string | null;
+  enrollmentId?: string | null;
+  enrollment?: CourseEnrollment | null;
+  source?: string | null;
 }): Promise<void> {
   const link = adminStudentDeepLink({ studentId: input.studentId, phone: input.phone });
+  const context = await safeSalesContext(
+    () =>
+      loadEnrollmentSalesContext({
+        phone: input.phone,
+        course: input.course,
+        enrollmentId: input.enrollmentId,
+        enrollment: input.enrollment,
+      }),
+    "admission",
+  );
+  const amount = optionalSalesInr(input.amount);
   const html = [
     `🟢 <b>New admission</b> · ${escapeHtml(input.name || "Student")}`,
-    `${escapeHtml(input.course || "Course")} · ${salesInr(input.amount)} · ${escapeHtml(maskPhone(input.phone))}`,
+    phoneLine(input.phone),
+    clean(input.course) ? `Course: ${escapeHtml(input.course)}` : null,
+    context?.plan ? `Plan: ${escapeHtml(context.plan)}` : null,
+    amount ? `Paid: ${amount}` : null,
+    context?.plan === "instalment" && context.balance
+      ? `Balance: ${optionalSalesInr(context.balance)}`
+      : null,
+    clean(input.source) ? `Source: ${escapeHtml(input.source!)}` : null,
     formatIstShort(new Date()),
-  ].join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
   await deliverOrQueue({
     event: "admission",
     phone: input.phone,
@@ -218,13 +418,34 @@ export async function salesAlertInstallmentPaid(input: {
   amount: number;
   installmentNo?: number | null;
   studentId?: string | null;
+  enrollmentId?: string | null;
+  enrollment?: CourseEnrollment | null;
 }): Promise<void> {
   const link = adminStudentDeepLink({ studentId: input.studentId, phone: input.phone });
+  const context = await safeSalesContext(
+    () =>
+      loadEnrollmentSalesContext({
+        phone: input.phone,
+        course: input.course,
+        enrollmentId: input.enrollmentId,
+        enrollment: input.enrollment,
+        installmentNo: input.installmentNo,
+      }),
+    "installment_paid",
+  );
   const html = [
     `✅ <b>Instalment paid</b> · ${escapeHtml(input.name || "Student")}`,
-    `${escapeHtml(input.course || "Course")} · Inst ${input.installmentNo ?? "?"} · ${salesInr(input.amount)}`,
-    `${escapeHtml(maskPhone(input.phone))} · ${formatIstShort(new Date())}`,
-  ].join("\n");
+    phoneLine(input.phone),
+    clean(input.course) ? `Course: ${escapeHtml(input.course)}` : null,
+    ...enrollmentLines(context, {
+      installmentNo: input.installmentNo,
+      amountLabel: "Amount",
+      amount: input.amount,
+    }),
+    formatIstShort(new Date()),
+  ]
+    .filter(Boolean)
+    .join("\n");
   await deliverOrQueue({
     event: "installment_paid",
     phone: input.phone,
@@ -239,13 +460,33 @@ export async function salesAlertPaymentSucceeded(input: {
   course: string;
   amount: number;
   studentId?: string | null;
+  enrollmentId?: string | null;
+  enrollment?: CourseEnrollment | null;
 }): Promise<void> {
   const link = adminStudentDeepLink({ studentId: input.studentId, phone: input.phone });
+  const context = await safeSalesContext(
+    () =>
+      loadEnrollmentSalesContext({
+        phone: input.phone,
+        course: input.course,
+        enrollmentId: input.enrollmentId,
+        enrollment: input.enrollment,
+      }),
+    "payment_succeeded",
+  );
+  const amount = optionalSalesInr(input.amount);
   const html = [
     `💚 <b>Payment succeeded</b> · ${escapeHtml(input.name || "Student")}`,
-    `${escapeHtml(input.course || "Course")} · ${salesInr(input.amount)} · ${escapeHtml(maskPhone(input.phone))}`,
+    phoneLine(input.phone),
+    clean(input.course) ? `Course: ${escapeHtml(input.course)}` : null,
+    amount ? `Paid: ${amount}` : null,
+    context?.totalFee ? `Fee: ${optionalSalesInr(context.totalFee)}` : null,
+    context?.paid ? `Paid so far: ${optionalSalesInr(context.paid)}` : null,
+    context?.balance ? `Balance: ${optionalSalesInr(context.balance)}` : null,
     formatIstShort(new Date()),
-  ].join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
   await deliverOrQueue({
     event: "payment_succeeded",
     phone: input.phone,
@@ -271,7 +512,13 @@ export async function flushSalesQueuedAlerts(): Promise<number> {
         disable_web_page_preview: true,
         reply_markup: buildKeyboard(item.buttons.map((b) => ({ label: b.label, url: b.url }))),
       });
-      if (res.ok) sent++;
+      if (res.ok) {
+        sent++;
+        await markDeduped(item.event, item.phone, {
+          message_id: (res.result as { message_id?: number } | undefined)?.message_id ?? null,
+          chat_id: (process.env.TELEGRAM_SALES_CHAT_ID || "").trim() || null,
+        });
+      }
     }
     return sent;
   } catch (e) {

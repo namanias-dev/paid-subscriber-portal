@@ -9,8 +9,23 @@ export function maskPhone(raw: string | null | undefined): string {
   return `${d.slice(0, 5)}•••${d.slice(-2)}`;
 }
 
+/**
+ * Sales-channel-only dialable phone text. Telegram mobile auto-links E.164
+ * numbers; keep it plain text (not <code>) so one tap opens the dialler.
+ */
+export function salesPhone(raw: string | null | undefined): string | null {
+  const d = String(raw || "").replace(/\D/g, "").slice(-10);
+  return d.length === 10 ? `+91${d}` : null;
+}
+
 export function salesInr(amount: number | null | undefined): string {
   if (amount == null || !Number.isFinite(amount)) return "—";
+  return formatINR(Math.round(amount));
+}
+
+/** Missing/zero money is omitted by message builders, never rendered as ₹0. */
+export function optionalSalesInr(amount: number | null | undefined): string | null {
+  if (amount == null || !Number.isFinite(amount) || amount <= 0) return null;
   return formatINR(Math.round(amount));
 }
 
