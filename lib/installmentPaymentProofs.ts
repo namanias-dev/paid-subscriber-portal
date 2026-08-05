@@ -17,7 +17,7 @@ import { activeAccessGrant } from "./sms/accessReminderService";
 import { istWholeDaysUntil } from "./sms/accessDays";
 import { extendCourseAccess } from "./accessActions";
 import { appendStudentAccessEvent } from "./studentAccessEvents";
-import { putObject, signGetUrl, installmentProofKey, r2Configured } from "./r2";
+import { putObject, signGetUrl, installmentProofKey, r2Configured, isInstallmentProofStudentId } from "./r2";
 import {
   detectInstallmentProofMime,
   stripExifIfJpeg,
@@ -303,16 +303,29 @@ export async function uploadInstallmentProofFile(input: {
   if (input.buffer.length > INSTALLMENT_PROOF_MAX_BYTES) {
     return { ok: false, error: "Each file must be 10 MB or smaller." };
   }
+  // Canonical storage path is installment-proofs/{students.id}/… — never phone.
+  let studentId = (input.studentId || "").trim();
+  if (!studentId) {
+    const db = getSupabaseAdmin();
+    const digits = input.phone.replace(/\D/g, "").slice(-10);
+    if (db && digits) {
+      const { data: stu } = await db.from("students").select("id").eq("phone", digits).maybeSingle();
+      studentId = stu?.id ? String(stu.id) : "";
+    }
+  }
+  if (!studentId) {
+    return { ok: false, error: "Student record required before uploading proof." };
+  }
   const mime = detectInstallmentProofMime(input.buffer);
   if (!mime) return { ok: false, error: "Only PDF, JPG, PNG, WEBP, or HEIC are accepted." };
   const cleaned = stripExifIfJpeg(input.buffer, mime);
   const fileId = randomUUID().slice(0, 12);
-  const path = installmentProofKey(
-    input.studentId || input.phone.replace(/\D/g, "").slice(-10),
-    input.installmentNo,
-    fileId,
-    extForMime(mime),
-  );
+  let path: string;
+  try {
+    path = installmentProofKey(studentId, input.installmentNo, fileId, extForMime(mime));
+  } catch {
+    return { ok: false, error: "Student record required before uploading proof." };
+  }
   await putObject(path, cleaned, mime);
   return {
     ok: true,
@@ -597,6 +610,9 @@ export async function supersedeProofsOnPaid(input: {
 
 export async function signedProofFileUrl(path: string): Promise<string | null> {
   if (!path.startsWith("installment-proofs/")) return null;
+  // Reject legacy phone-shaped prefixes; canonical is installment-proofs/{students.id}/…
+  const segment = path.slice("installment-proofs/".length).split("/")[0] || "";
+  if (!isInstallmentProofStudentId(segment)) return null;
   if (!r2Configured()) return null;
   return signGetUrl(path, SIGNED_URL_TTL);
 }

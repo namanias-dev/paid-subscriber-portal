@@ -2,11 +2,11 @@
  * Feature flag for student installment-proof popup.
  * Admin review surfaces ignore this — kill switch only disables the student popup.
  *
- * QA disposable phones can be allowlisted via `meta.qa_phones` (and the hardcoded
- * seed set) without joining grandfather_notice_queue / cohort 73 / armed batches.
+ * QA disposable phones are allowlisted only via `meta.qa_phones` (set by qa:reset,
+ * cleared by qa:teardown). Hardcoded seed phones in qaInstallmentProofStudents are
+ * for script safety guards only — they do not enable the live popup by themselves.
  */
 import { getSupabaseAdmin } from "./supabase";
-import { QA_INSTALLMENT_PROOF_PHONE_LIST } from "./qaInstallmentProofStudents";
 
 export type InstallmentProofPopupScope = "off" | "cohort_73" | "all";
 
@@ -94,11 +94,10 @@ export async function phoneInInstallmentProofCohort73(phone: string): Promise<bo
   return false;
 }
 
-/** Disposable popup-QA phones (hardcoded seed set ∪ flag meta.qa_phones). */
+/** Disposable popup-QA phones from flag meta.qa_phones only (not hardcoded seed). */
 export async function phoneInInstallmentProofQaAllowlist(phone: string): Promise<boolean> {
   const digits = normalizePhone10(phone);
   if (!digits) return false;
-  if (QA_INSTALLMENT_PROOF_PHONE_LIST.includes(digits)) return true;
   const flag = await getInstallmentProofPopupFlag();
   return flag.qaPhones.includes(digits);
 }

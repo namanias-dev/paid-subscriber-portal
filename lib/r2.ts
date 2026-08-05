@@ -109,11 +109,27 @@ export function paymentProofKey(paymentId: string, fileId: string, ext: string):
   return `payment-proofs/${paymentId || "_"}/${fileId}.${safeExt}`;
 }
 
-/** Private key for installment payment-proof files (claims — not payment rows). */
+/** Private key for installment payment-proof files (claims — not payment rows).
+ * Canonical prefix is always `installment-proofs/{students.id}/…` — never phone. */
 export function installmentProofKey(studentId: string, installmentNo: number, fileId: string, ext: string): string {
   const safeExt = (ext || "").replace(/[^a-z0-9]/gi, "").toLowerCase() || "bin";
-  const sid = (studentId || "_").replace(/[^a-zA-Z0-9_-]/g, "") || "_";
-  return `installment-proofs/${sid}/${installmentNo}/${fileId}.${safeExt}`;
+  return `${installmentProofPrefix(studentId)}${installmentNo}/${fileId}.${safeExt}`;
+}
+
+/** Canonical R2 prefix for a student's installment proofs: `installment-proofs/{students.id}/`. */
+export function installmentProofPrefix(studentId: string): string {
+  const sid = (studentId || "").trim();
+  if (!isInstallmentProofStudentId(sid)) {
+    throw new Error(`installmentProofPrefix: refuse non-student-id key segment (${sid || "empty"})`);
+  }
+  return `installment-proofs/${sid}/`;
+}
+
+/** True when the segment is a students.id UUID — rejects 10-digit phone leftovers. */
+export function isInstallmentProofStudentId(segment: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    (segment || "").trim(),
+  );
 }
 
 /**

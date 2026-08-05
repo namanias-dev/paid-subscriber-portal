@@ -13,6 +13,8 @@ import {
   QA_INSTALLMENT_PROOF_COURSE_ID,
   QA_INSTALLMENT_PROOF_MARKER,
   QA_INSTALLMENT_PROOF_PHONE_LIST,
+  QA_INSTALLMENT_PROOF_STUDENT_IDS,
+  QA_INSTALLMENT_PROOF_STUDENT_ID_LIST,
   QA_INSTALLMENT_PROOF_STUDENTS,
 } from "../lib/qaInstallmentProofStudents";
 import {
@@ -32,10 +34,11 @@ import {
   phoneInInstallmentProofCohort73,
   studentPopupEnabledForPhone,
 } from "../lib/installmentProofFlags";
-import { deleteObject, listAllObjects } from "../lib/r2";
+import { deleteObject, installmentProofPrefix, listAllObjects } from "../lib/r2";
 import { addOptOut, isOptedOut, removeOptOut } from "../lib/sms/store";
 import { setExcluded } from "../lib/sms/accessCapStore";
 import { getSupabaseAdmin } from "../lib/supabase";
+import { listProofPaymentsAwaitingFinance } from "../lib/installmentProofRecordPayment";
 
 type QaKey = keyof typeof QA_INSTALLMENT_PROOF_STUDENTS;
 
@@ -75,7 +78,7 @@ function isoDaysFromNow(days: number): string {
   return new Date(Date.now() + days * 86_400_000).toISOString();
 }
 
-async function safetyCheck(phone: string, key: QaKey): Promise<void> {
+async function safetyCheck(phone: string, key: QaKey, opts?: { teardown?: boolean }): Promise<void> {
   const allow = QA_INSTALLMENT_PROOF_PHONE_LIST;
   if (!allow.includes(phone)) {
     throw new Error(`REFUSE: phone ${phone} not in QA allowlist (key=${key})`);
@@ -84,8 +87,22 @@ async function safetyCheck(phone: string, key: QaKey): Promise<void> {
   if (spec.phone !== phone) {
     throw new Error(`REFUSE: phone/key mismatch ${phone} vs ${key}`);
   }
+  const expectedStudentId = QA_INSTALLMENT_PROOF_STUDENT_IDS[key];
+  if (!QA_INSTALLMENT_PROOF_STUDENT_ID_LIST.includes(expectedStudentId)) {
+    throw new Error(`REFUSE: student id ${expectedStudentId} not in QA student-id allowlist`);
+  }
 
   const db = getSupabaseAdmin()!;
+  const { data: stu } = await db.from("students").select("id,phone,notes").eq("phone", phone).maybeSingle();
+  if (stu?.id && stu.id !== expectedStudentId) {
+    throw new Error(
+      `REFUSE: live students.id=${stu.id} ≠ allowlisted ${expectedStudentId} for ${key} — abort`,
+    );
+  }
+  if (stu?.id && !QA_INSTALLMENT_PROOF_STUDENT_ID_LIST.includes(stu.id)) {
+    throw new Error(`REFUSE: students.id ${stu.id} not in QA student-id allowlist`);
+  }
+
   if (await phoneInInstallmentProofCohort73(phone)) {
     throw new Error(`REFUSE: ${key} appears in cohort 73 / grandfather path`);
   }
@@ -105,9 +122,23 @@ async function safetyCheck(phone: string, key: QaKey): Promise<void> {
     throw new Error(`REFUSE: ${key} matches an armed batch row`);
   }
 
+  // Cap / taper: teardown deletes QA caps; refuse only if a non-QA-marked cap exists for this phone.
+  try {
+    const { data: caps } = await db
+      .from("access_reminder_caps")
+      .select("course_enrollment_id,excluded,reason")
+      .eq("normalized_mobile", phone);
+    const foreign = (caps || []).filter((c) => !String(c.reason || "").includes(QA_INSTALLMENT_PROOF_MARKER));
+    if (foreign.length) {
+      throw new Error(`REFUSE: ${key} has non-QA access_reminder_caps row`);
+    }
+  } catch (e) {
+    if (e instanceof Error && e.message.startsWith("REFUSE:")) throw e;
+  }
+
   const enrollments = await getCourseEnrollmentsByPhone(phone);
   const enrollmentIds = enrollments.map((e) => e.id);
-  if (enrollmentIds.length) {
+  if (!opts?.teardown && enrollmentIds.length) {
     try {
       const { count: tasks } = await db
         .from("access_call_tasks")
@@ -119,30 +150,35 @@ async function safetyCheck(phone: string, key: QaKey): Promise<void> {
       }
     } catch (e) {
       if (e instanceof Error && e.message.startsWith("REFUSE:")) throw e;
-      /* table may not exist */
     }
   }
 
-  const payments = await getPaymentsByPhone(phone);
-  for (const p of payments) {
+  // Include soft-deleted for gateway refuse
+  const { data: allPays } = await db
+    .from("payments")
+    .select("id,amount,status,gateway,payment_source,reference_no,deleted_at")
+    .eq("phone", phone);
+  for (const p of allPays || []) {
     const src = String(p.payment_source || "");
     const isProof = src === "student_proof" || src === "student_proof_reversal";
     const isQaSeatRef = String(p.reference_no || "").startsWith("QA-PROOF-");
-    if (isPaidStatus(p.status) && !isProof && !isQaSeatRef && p.gateway && p.gateway !== "offline") {
+    const isOffProof =
+      String(p.reference_no || "").startsWith("OFF-PROOF-") ||
+      String(p.reference_no || "").startsWith("OFF-REV-");
+    if (p.gateway && p.gateway !== "offline" && isPaidStatus(String(p.status))) {
       throw new Error(
-        `REFUSE: ${key} has non-student_proof gateway payment ${p.id} gateway=${p.gateway} amount=${p.amount}`,
+        `REFUSE: ${key} has gateway payment ${p.id} gateway=${p.gateway} amount=${p.amount}`,
       );
     }
-    // Any non-proof, non-QA offline paid row that's not the seat baseline pattern
     if (
-      isPaidStatus(p.status) &&
+      !opts?.teardown &&
+      isPaidStatus(String(p.status)) &&
       !isProof &&
       !isQaSeatRef &&
+      !isOffProof &&
       p.gateway === "offline" &&
-      Math.abs(p.amount) > 0 &&
-      !String(p.reference_no || "").startsWith("QA-PROOF-")
+      Math.abs(Number(p.amount)) > 0
     ) {
-      // Seat baseline may not exist as a payment row; refuse unknown offline money.
       throw new Error(
         `REFUSE: ${key} has unexpected offline payment ${p.id} amount=${p.amount} ref=${p.reference_no}`,
       );
@@ -154,9 +190,12 @@ async function safetyCheck(phone: string, key: QaKey): Promise<void> {
       safety: "ok",
       key,
       phone,
+      student_id_allowlist: expectedStudentId,
+      live_student_id: stu?.id ?? null,
+      teardown: !!opts?.teardown,
       env: process.env.NODE_ENV || "development",
       live_supabase: !!(process.env.NEXT_PUBLIC_SUPABASE_URL || "").trim(),
-      note: "QA allowlist passed; proceeding only with --confirm",
+      note: "QA student-id allowlist passed; proceeding only with --confirm",
     }),
   );
 }
@@ -570,20 +609,234 @@ async function reseedOne(key: QaKey) {
 async function teardownAll() {
   const db = getSupabaseAdmin()!;
   const phones = QA_INSTALLMENT_PROOF_PHONE_LIST;
-  for (const key of Object.keys(QA_INSTALLMENT_PROOF_STUDENTS) as QaKey[]) {
-    await safetyCheck(QA_INSTALLMENT_PROOF_STUDENTS[key].phone, key);
-  }
-  const plans = [];
-  for (const key of Object.keys(QA_INSTALLMENT_PROOF_STUDENTS) as QaKey[]) {
-    plans.push(await planDeletes(QA_INSTALLMENT_PROOF_STUDENTS[key].phone, key));
-  }
-  console.log(JSON.stringify({ will_delete: plans }, null, 2));
+  const runId = `qa-teardown-${Date.now().toString(36)}`;
+  const startedAt = new Date().toISOString();
 
+  for (const key of Object.keys(QA_INSTALLMENT_PROOF_STUDENTS) as QaKey[]) {
+    await safetyCheck(QA_INSTALLMENT_PROOF_STUDENTS[key].phone, key, { teardown: true });
+  }
+
+  type TeardownPlan = {
+    key: QaKey;
+    phone: string;
+    student_id: string;
+    enrollment_ids: string[];
+    payments: unknown[];
+    proofs: unknown[];
+    overrides: unknown[];
+    audits: number;
+    events: number;
+    call_tasks: number;
+    caps: number;
+    receipts: number;
+    buyers: unknown[];
+    students: unknown[];
+    r2_keys: string[];
+    r2_prefixes: string[];
+  };
+
+  const plans: TeardownPlan[] = [];
+  for (const key of Object.keys(QA_INSTALLMENT_PROOF_STUDENTS) as QaKey[]) {
+    const phone = QA_INSTALLMENT_PROOF_STUDENTS[key].phone;
+    const studentId = QA_INSTALLMENT_PROOF_STUDENT_IDS[key];
+    const { data: enrollments } = await db.from("course_enrollments").select("id,status").eq("phone", phone);
+    const enrollmentIds = (enrollments || []).map((e) => e.id);
+    const { data: payments } = await db
+      .from("payments")
+      .select("id,amount,status,payment_source,reference_no,gateway,deleted_at")
+      .eq("phone", phone);
+    const { data: proofsByEnr } = enrollmentIds.length
+      ? await db
+          .from("installment_payment_proofs")
+          .select("id,status,files,student_id,course_enrollment_id")
+          .in("course_enrollment_id", enrollmentIds)
+      : { data: [] as unknown[] };
+    const { data: proofsByStu } = await db
+      .from("installment_payment_proofs")
+      .select("id,status,files,student_id,course_enrollment_id")
+      .eq("student_id", studentId);
+    const proofsMap = new Map<string, (typeof proofsByEnr extends (infer T)[] | null ? T : never)>();
+    for (const p of [...(proofsByEnr || []), ...(proofsByStu || [])] as { id: string }[]) {
+      proofsMap.set(p.id, p as never);
+    }
+    const proofs = [...proofsMap.values()] as {
+      id: string;
+      status: string;
+      files: unknown;
+      student_id: string | null;
+    }[];
+
+    const { data: overrides } = await db.from("course_access_overrides").select("id,note").eq("phone", phone);
+    const { count: audits } = enrollmentIds.length
+      ? await db
+          .from("installment_allocation_audit")
+          .select("*", { count: "exact", head: true })
+          .in("enrollment_id", enrollmentIds)
+      : { count: 0 };
+    const { count: events } = enrollmentIds.length
+      ? await db
+          .from("student_access_events")
+          .select("*", { count: "exact", head: true })
+          .or(
+            [
+              `course_enrollment_id.in.(${enrollmentIds.join(",")})`,
+              `student_id.eq.${studentId}`,
+              `phone.eq.${phone}`,
+            ].join(","),
+          )
+      : await db
+          .from("student_access_events")
+          .select("*", { count: "exact", head: true })
+          .or(`student_id.eq.${studentId},phone.eq.${phone}`);
+    let callTasks = 0;
+    if (enrollmentIds.length) {
+      try {
+        const { count } = await db
+          .from("access_call_tasks")
+          .select("*", { count: "exact", head: true })
+          .in("course_enrollment_id", enrollmentIds);
+        callTasks = count || 0;
+      } catch {
+        /* optional */
+      }
+    }
+    let caps = 0;
+    try {
+      const { count } = await db
+        .from("access_reminder_caps")
+        .select("*", { count: "exact", head: true })
+        .or(
+          enrollmentIds.length
+            ? `course_enrollment_id.in.(${enrollmentIds.join(",")}),normalized_mobile.eq.${phone}`
+            : `normalized_mobile.eq.${phone}`,
+        );
+      caps = count || 0;
+    } catch {
+      /* optional */
+    }
+    let receipts = 0;
+    if (enrollmentIds.length) {
+      try {
+        const { count } = await db
+          .from("payment_receipts")
+          .select("*", { count: "exact", head: true })
+          .in("enrollment_id", enrollmentIds);
+        receipts = count || 0;
+      } catch {
+        /* optional */
+      }
+    }
+    const { data: buyers } = await db
+      .from("buyers")
+      .select("id,phone,login_code,session_version")
+      .eq("phone", phone);
+    const { data: students } = await db.from("students").select("id,phone,name").eq("phone", phone);
+
+    const r2Keys: string[] = [];
+    for (const p of proofs) {
+      for (const f of Array.isArray(p.files) ? p.files : []) {
+        const keyPath = String((f as { path?: string; key?: string }).path || (f as { key?: string }).key || "");
+        if (keyPath) r2Keys.push(keyPath);
+      }
+    }
+    // Canonical prefix = student_id; also wipe legacy phone prefix once.
+    const prefixes = [
+      installmentProofPrefix(studentId),
+      `installment-proofs/${phone}/`, // legacy only — never written going forward
+    ];
+    for (const prefix of prefixes) {
+      try {
+        for (const o of await listAllObjects(prefix)) if (o.key) r2Keys.push(o.key);
+      } catch {
+        /* optional */
+      }
+    }
+
+    plans.push({
+      key,
+      phone,
+      student_id: studentId,
+      enrollment_ids: enrollmentIds,
+      payments: payments || [],
+      proofs,
+      overrides: overrides || [],
+      audits: audits || 0,
+      events: events || 0,
+      call_tasks: callTasks,
+      caps,
+      receipts,
+      buyers: buyers || [],
+      students: students || [],
+      r2_keys: [...new Set(r2Keys)],
+      r2_prefixes: prefixes,
+    });
+  }
+
+  console.log(JSON.stringify({ run_id: runId, started_at: startedAt, will_delete: plans }, null, 2));
+
+  // Execute deletes — only allowlisted phones / student ids.
   for (const plan of plans) {
-    await wipeProofResidue(plan.phone, plan.enrollmentIds, plan.delete_r2_keys);
-    await db.from("course_enrollments").delete().eq("phone", plan.phone);
-    await db.from("students").delete().eq("phone", plan.phone);
+    if (!QA_INSTALLMENT_PROOF_PHONE_LIST.includes(plan.phone)) {
+      throw new Error(`REFUSE teardown wipe: phone ${plan.phone}`);
+    }
+    if (!QA_INSTALLMENT_PROOF_STUDENT_ID_LIST.includes(plan.student_id)) {
+      throw new Error(`REFUSE teardown wipe: student_id ${plan.student_id}`);
+    }
+
+    for (const key of plan.r2_keys) {
+      await deleteObject(key);
+    }
+
+    // Payments as a set (baseline + proof + reversal) for this phone only.
+    const { error: payErr } = await db.from("payments").delete().eq("phone", plan.phone);
+    if (payErr) throw new Error(`payments delete failed: ${payErr.message}`);
+
+    if (plan.enrollment_ids.length) {
+      await db.from("installment_payment_proofs").delete().in("course_enrollment_id", plan.enrollment_ids);
+      await db.from("installment_allocation_audit").delete().in("enrollment_id", plan.enrollment_ids);
+      await db.from("student_access_events").delete().in("course_enrollment_id", plan.enrollment_ids);
+      try {
+        await db.from("access_reminder_caps").delete().in("course_enrollment_id", plan.enrollment_ids);
+      } catch {
+        /* optional */
+      }
+      try {
+        await db.from("access_call_tasks").delete().in("course_enrollment_id", plan.enrollment_ids);
+      } catch {
+        /* optional */
+      }
+      try {
+        await db.from("payment_receipts").delete().in("enrollment_id", plan.enrollment_ids);
+      } catch {
+        /* optional */
+      }
+    }
+    // Also by student_id / phone for any orphaned rows
+    await db.from("installment_payment_proofs").delete().eq("student_id", plan.student_id);
+    await db
+      .from("student_access_events")
+      .delete()
+      .or(`student_id.eq.${plan.student_id},phone.eq.${plan.phone}`);
+    await db.from("course_access_overrides").delete().eq("phone", plan.phone);
+    try {
+      await db.from("access_reminder_caps").delete().eq("normalized_mobile", plan.phone);
+    } catch {
+      /* optional */
+    }
+    try {
+      await db.from("payment_action_log").delete().eq("phone", plan.phone);
+    } catch {
+      /* optional */
+    }
+
+    const { error: enrErr } = await db.from("course_enrollments").delete().eq("phone", plan.phone);
+    if (enrErr) throw new Error(`enrollments delete failed: ${enrErr.message}`);
+
+    // Revoke login: bump then delete buyer
+    await bumpBuyerSessionVersion(plan.phone).catch(() => null);
     await db.from("buyers").delete().eq("phone", plan.phone);
+    await db.from("students").delete().eq("id", plan.student_id);
+    await db.from("students").delete().eq("phone", plan.phone);
     await removeOptOut(plan.phone);
   }
 
@@ -607,7 +860,173 @@ async function teardownAll() {
       .eq("key", "installment_proof_popup");
   }
 
-  return { phones, ok: true };
+  const asserted = await assertTeardownZero();
+  console.log(
+    JSON.stringify({
+      run_id: runId,
+      finished_at: new Date().toISOString(),
+      log: "qa_teardown_complete",
+      asserted,
+    }, null, 2),
+  );
+  return { phones, student_ids: QA_INSTALLMENT_PROOF_STUDENT_ID_LIST, run_id: runId, asserted, ok: true };
+}
+
+async function countEq(
+  table: string,
+  filter: { col: string; val: string } | { col: string; vals: string[] },
+): Promise<number> {
+  const db = getSupabaseAdmin()!;
+  try {
+    let q = db.from(table).select("*", { count: "exact", head: true });
+    if ("vals" in filter) q = q.in(filter.col, filter.vals);
+    else q = q.eq(filter.col, filter.val);
+    const { count, error } = await q;
+    if (error) return -1; // table missing / column missing → surface as non-zero fail only if unexpected
+    return count || 0;
+  } catch {
+    return -1;
+  }
+}
+
+async function assertTeardownZero() {
+  const db = getSupabaseAdmin()!;
+  const phones = QA_INSTALLMENT_PROOF_PHONE_LIST;
+  const studentIds = QA_INSTALLMENT_PROOF_STUDENT_ID_LIST;
+  const counts: Record<string, number> = {};
+
+  for (const phone of phones) {
+    counts[`payments:phone:${phone}`] = await countEq("payments", { col: "phone", val: phone });
+    counts[`course_enrollments:phone:${phone}`] = await countEq("course_enrollments", {
+      col: "phone",
+      val: phone,
+    });
+    counts[`course_access_overrides:phone:${phone}`] = await countEq("course_access_overrides", {
+      col: "phone",
+      val: phone,
+    });
+    counts[`buyers:phone:${phone}`] = await countEq("buyers", { col: "phone", val: phone });
+    counts[`students:phone:${phone}`] = await countEq("students", { col: "phone", val: phone });
+    counts[`student_access_events:phone:${phone}`] = await countEq("student_access_events", {
+      col: "phone",
+      val: phone,
+    });
+    counts[`installment_payment_proofs:phone:${phone}`] = await countEq("installment_payment_proofs", {
+      col: "phone",
+      val: phone,
+    });
+    counts[`grandfather_notice_queue:phone:${phone}`] = await countEq("grandfather_notice_queue", {
+      col: "phone",
+      val: phone,
+    });
+    counts[`payment_action_log:phone:${phone}`] = await countEq("payment_action_log", {
+      col: "phone",
+      val: phone,
+    });
+    counts[`payment_receipts:phone:${phone}`] = await countEq("payment_receipts", {
+      col: "phone",
+      val: phone,
+    });
+  }
+  for (const sid of studentIds) {
+    counts[`students:id:${sid}`] = await countEq("students", { col: "id", val: sid });
+    counts[`installment_payment_proofs:student_id:${sid}`] = await countEq("installment_payment_proofs", {
+      col: "student_id",
+      val: sid,
+    });
+    counts[`student_access_events:student_id:${sid}`] = await countEq("student_access_events", {
+      col: "student_id",
+      val: sid,
+    });
+  }
+
+  // Audits / caps / call tasks / receipts via enrollment_id — enrollments already 0 so these should be 0;
+  // also scan audit by phone if column exists.
+  for (const phone of phones) {
+    try {
+      const { count } = await db
+        .from("installment_allocation_audit")
+        .select("*", { count: "exact", head: true })
+        .eq("phone", phone);
+      counts[`installment_allocation_audit:phone:${phone}`] = count || 0;
+    } catch {
+      counts[`installment_allocation_audit:phone:${phone}`] = 0;
+    }
+    try {
+      const { count } = await db
+        .from("access_reminder_caps")
+        .select("*", { count: "exact", head: true })
+        .eq("normalized_mobile", phone);
+      counts[`access_reminder_caps:phone:${phone}`] = count || 0;
+    } catch {
+      counts[`access_reminder_caps:phone:${phone}`] = 0;
+    }
+  }
+
+  const r2: Record<string, number> = {};
+  for (const sid of studentIds) {
+    const prefix = installmentProofPrefix(sid);
+    try {
+      r2[prefix] = (await listAllObjects(prefix)).length;
+    } catch {
+      r2[prefix] = -1;
+    }
+  }
+  for (const phone of phones) {
+    const legacy = `installment-proofs/${phone}/`;
+    try {
+      r2[legacy] = (await listAllObjects(legacy)).length;
+    } catch {
+      r2[legacy] = -1;
+    }
+  }
+
+  let finance_queue_qa = 0;
+  try {
+    const q = await listProofPaymentsAwaitingFinance();
+    finance_queue_qa = (q || []).filter((r) =>
+      phones.includes(String(r.payment?.phone || "").replace(/\D/g, "").slice(-10)),
+    ).length;
+  } catch {
+    finance_queue_qa = -1;
+  }
+  counts["finance_queue_qa"] = finance_queue_qa;
+
+  // Flag scope
+  const { data: flag } = await db
+    .from("app_feature_flags")
+    .select("meta")
+    .eq("key", "installment_proof_popup")
+    .maybeSingle();
+  const qaPhones = Array.isArray((flag?.meta as { qa_phones?: unknown })?.qa_phones)
+    ? ((flag!.meta as { qa_phones: unknown[] }).qa_phones as unknown[]).map(String)
+    : [];
+  const flag_residue = qaPhones.filter((p) => phones.includes(p.replace(/\D/g, "").slice(-10))).length;
+  counts["flag_qa_phones_residue"] = flag_residue;
+
+  for (const phone of phones) {
+    if (await studentPopupEnabledForPhone(phone)) {
+      throw new Error(`ASSERT FAIL ${phone} still in installment_proof_popup scope`);
+    }
+  }
+
+  const nonzero = Object.entries({ ...counts, ...Object.fromEntries(Object.entries(r2).map(([k, v]) => [`r2:${k}`, v])) }).filter(
+    ([, n]) => n !== 0,
+  );
+  if (nonzero.length) {
+    throw new Error(
+      `ASSERT FAIL teardown residue: ${JSON.stringify(Object.fromEntries(nonzero), null, 2)}`,
+    );
+  }
+
+  // Phones absent from armed / queue
+  for (const phone of phones) {
+    if (await phoneInInstallmentProofCohort73(phone)) {
+      throw new Error(`ASSERT FAIL ${phone} still in cohort 73`);
+    }
+  }
+
+  return { counts, r2, flag_qa_phones: qaPhones, ok: true };
 }
 
 async function main() {
@@ -624,7 +1043,7 @@ async function main() {
     console.error("REFUSE: missing --confirm. Print-only dry plan:");
     if (args.mode === "teardown") {
       for (const key of Object.keys(QA_INSTALLMENT_PROOF_STUDENTS) as QaKey[]) {
-        await safetyCheck(QA_INSTALLMENT_PROOF_STUDENTS[key].phone, key);
+        await safetyCheck(QA_INSTALLMENT_PROOF_STUDENTS[key].phone, key, { teardown: true });
         console.log(JSON.stringify(await planDeletes(QA_INSTALLMENT_PROOF_STUDENTS[key].phone, key), null, 2));
       }
     } else {
