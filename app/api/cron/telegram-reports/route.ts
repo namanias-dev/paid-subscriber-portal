@@ -90,7 +90,13 @@ async function run(req: Request) {
       const salesMod = await import("@/lib/telegram/sales");
       const dry = url.searchParams.get("dry") === "1" || url.searchParams.get("confirm") !== "1";
       // Real seed: disable live flags first so pilot can't race-double with seed.
-      if (!dry) await salesMod.setSalesFlagsEnabled(false);
+      // Skip disable when the run is already complete (idempotent re-entry).
+      if (!dry) {
+        const { seedRunAlreadyComplete } = await import("@/lib/telegram/sales/seed");
+        if (!(await seedRunAlreadyComplete())) {
+          await salesMod.setSalesFlagsEnabled(false);
+        }
+      }
       const result = await salesMod.runSalesTodaySeed({ dryRun: dry, confirm: !dry });
       return NextResponse.json({
         ok: result.ok,
