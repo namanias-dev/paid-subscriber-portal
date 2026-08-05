@@ -15,9 +15,12 @@ export type StudentAccessEventType =
   | "access_restored"
   | "proof_uploaded"
   | "proof_approved"
+  | "proof_approved_recorded"
   | "proof_rejected"
   | "provisional_access_granted"
   | "proof_superseded"
+  | "payment_recorded"
+  | "proof_payment_reversed"
   | "admin_flag";
 
 export interface AppendAccessEventInput {

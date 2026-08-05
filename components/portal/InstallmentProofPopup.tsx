@@ -167,6 +167,10 @@ export default function InstallmentProofPopup() {
   const [mounted, setMounted] = useState(false);
 
   const [localFiles, setLocalFiles] = useState<LocalFile[]>([]);
+  const [selectedLine, setSelectedLine] = useState<{ no: number; amount: number; due: string | null } | null>(
+    null,
+  );
+  const [showClaimedAmount, setShowClaimedAmount] = useState(false);
   const [claimedAmount, setClaimedAmount] = useState("");
   const [claimedDate, setClaimedDate] = useState("");
   const [referenceUtr, setReferenceUtr] = useState("");
@@ -191,6 +195,8 @@ export default function InstallmentProofPopup() {
       });
       return [];
     });
+    setSelectedLine(null);
+    setShowClaimedAmount(false);
     setClaimedAmount("");
     setClaimedDate("");
     setReferenceUtr("");
@@ -245,6 +251,8 @@ export default function InstallmentProofPopup() {
       setOpen(true);
       setError(null);
       setUploadDone(false);
+      setSelectedLine(null);
+      setShowClaimedAmount(false);
     };
     const onView = () => {
       setSlide("view");
@@ -334,6 +342,13 @@ export default function InstallmentProofPopup() {
     setError(null);
     setUploadDone(false);
     setUploadProgress(0);
+    setSelectedLine(null);
+    setShowClaimedAmount(false);
+  }
+
+  function selectInstallmentLine(no: number) {
+    const line = prompt?.unpaidInstallments?.find((u) => u.no === no);
+    if (line) setSelectedLine(line);
   }
 
   async function openView() {
@@ -408,6 +423,7 @@ export default function InstallmentProofPopup() {
       setError("Please attach at least one file.");
       return;
     }
+    const installmentNo = selectedLine?.no ?? prompt.installmentNo;
     setUploadBusy(true);
     setError(null);
     setUploadProgress(0);
@@ -421,7 +437,7 @@ export default function InstallmentProofPopup() {
         const uploadFile = await toAdminViewableFile(lf.file);
         const form = new FormData();
         form.append("file", uploadFile);
-        form.append("installmentNo", String(prompt.installmentNo));
+        form.append("installmentNo", String(installmentNo));
         const res = await fetch("/api/portal/installment-proofs", { method: "PUT", body: form });
         const json = await res.json();
         if (!json.ok || !json.file) {
@@ -435,10 +451,10 @@ export default function InstallmentProofPopup() {
 
       const body: Record<string, unknown> = {
         enrollmentId: prompt.enrollmentId,
-        installmentNo: prompt.installmentNo,
+        installmentNo,
         files: uploaded,
       };
-      if (claimedAmount.trim()) body.claimedAmount = Number(claimedAmount);
+      if (showClaimedAmount && claimedAmount.trim()) body.claimedAmount = Number(claimedAmount);
       if (claimedDate) body.claimedPaidDate = claimedDate;
       if (referenceUtr.trim()) body.referenceUtr = referenceUtr.trim();
       if (studentComment.trim()) body.studentComment = studentComment.trim();
@@ -481,6 +497,8 @@ export default function InstallmentProofPopup() {
           });
           return [];
         });
+        setSelectedLine(null);
+        setShowClaimedAmount(false);
         setClaimedAmount("");
         setClaimedDate("");
         setReferenceUtr("");
@@ -492,10 +510,11 @@ export default function InstallmentProofPopup() {
     }
   }
 
-  if (!mounted || !open || !prompt) return null;
+  if (!mounted || !open) return null;
+  if (!prompt && slide !== "upload") return null;
 
   const daysLabel =
-    prompt.daysLeft != null
+    prompt?.daysLeft != null
       ? prompt.daysLeft <= 0
         ? "today"
         : prompt.daysLeft === 1
@@ -503,8 +522,11 @@ export default function InstallmentProofPopup() {
           : `${prompt.daysLeft} days`
       : null;
 
-  const uploadHeading = prompt.pendingProof ? "Add to what you sent" : "Share your payment proof";
-  const showClose = prompt.state === "blocked" || prompt.state === "pending_review" || slide !== "main";
+  const uploadHeading = prompt?.pendingProof ? "Add to what you sent" : "Share your payment proof";
+  const showClose = prompt?.state === "blocked" || prompt?.state === "pending_review" || slide !== "main";
+  const uploadInstallmentNo = selectedLine?.no ?? prompt?.installmentNo ?? null;
+  const uploadAmountDue = selectedLine?.amount ?? prompt?.amountDue ?? null;
+  const uploadDueDate = selectedLine?.due ?? prompt?.dueDate ?? null;
 
   return (
     <div
@@ -516,7 +538,7 @@ export default function InstallmentProofPopup() {
       <button
         type="button"
         aria-label="Close dialog backdrop"
-        onClick={prompt.state === "expiring" ? remindLater : handleDismiss}
+        onClick={prompt?.state === "expiring" ? remindLater : handleDismiss}
         className="absolute inset-0 bg-black/40 backdrop-blur-[12px]"
         style={reduceMotion ? undefined : { animation: "ipp-fade 180ms ease-out forwards" }}
       />
@@ -550,11 +572,21 @@ export default function InstallmentProofPopup() {
           <UploadSlide
             titleId={titleId}
             heading={uploadHeading}
-            courseTitle={prompt.courseTitle}
-            installmentNo={prompt.installmentNo}
-            amountDue={prompt.amountDue}
+            courseTitle={prompt?.courseTitle ?? "Your course"}
+            installmentNo={uploadInstallmentNo}
+            amountDue={uploadAmountDue}
+            dueDate={uploadDueDate}
+            unpaidInstallments={prompt?.unpaidInstallments}
+            onSelectInstallment={selectInstallmentLine}
             localFiles={localFiles}
             claimedAmount={claimedAmount}
+            showClaimedAmount={showClaimedAmount}
+            onToggleClaimedAmount={() =>
+              setShowClaimedAmount((prev) => {
+                if (prev) setClaimedAmount("");
+                return !prev;
+              })
+            }
             claimedDate={claimedDate}
             referenceUtr={referenceUtr}
             studentComment={studentComment}
@@ -584,7 +616,7 @@ export default function InstallmentProofPopup() {
             onBack={() => setSlide("main")}
             onAddMore={openUpload}
           />
-        ) : prompt.state === "pending_review" ? (
+        ) : !prompt ? null : prompt.state === "pending_review" ? (
           <PendingReviewSlide
             titleId={titleId}
             courseTitle={prompt.courseTitle}
@@ -824,8 +856,13 @@ function UploadSlide({
   courseTitle,
   installmentNo,
   amountDue,
+  dueDate,
+  unpaidInstallments,
+  onSelectInstallment,
   localFiles,
   claimedAmount,
+  showClaimedAmount,
+  onToggleClaimedAmount,
   claimedDate,
   referenceUtr,
   studentComment,
@@ -849,10 +886,15 @@ function UploadSlide({
   titleId: string;
   heading: string;
   courseTitle: string;
-  installmentNo: number;
-  amountDue: number;
+  installmentNo: number | null;
+  amountDue: number | null;
+  dueDate: string | null;
+  unpaidInstallments?: Array<{ no: number; amount: number; due: string | null }>;
+  onSelectInstallment: (no: number) => void;
   localFiles: LocalFile[];
   claimedAmount: string;
+  showClaimedAmount: boolean;
+  onToggleClaimedAmount: () => void;
   claimedDate: string;
   referenceUtr: string;
   studentComment: string;
@@ -875,6 +917,7 @@ function UploadSlide({
 }) {
   const [dragOver, setDragOver] = useState(false);
   const atCap = uploadBusy || localFiles.length >= MAX_FILES;
+  const fullyPaidUp = installmentNo == null || amountDue == null || amountDue <= 0;
 
   return (
     <div className="max-h-[85vh] overflow-y-auto">
@@ -885,164 +928,213 @@ function UploadSlide({
         <h2 id={titleId} className="mt-2 text-lg font-bold text-ink">
           {heading}
         </h2>
-        <p className="mt-1 text-sm text-ink2">
-          {courseTitle} · Instalment {installmentNo} · {formatINR(amountDue)}
-        </p>
+        <p className="mt-1 text-sm text-ink2">{courseTitle}</p>
       </div>
 
-      <div className="space-y-4 px-6 py-5">
-        <div
-          className={`rounded-2xl border-2 border-dashed px-4 py-6 text-center transition ${
-            dragOver ? "border-primary/50 bg-blue-50/50" : "border-line bg-surface"
-          }`}
-          onDragOver={(e) => {
-            e.preventDefault();
-            setDragOver(true);
-          }}
-          onDragLeave={() => setDragOver(false)}
-          onDrop={(e) => {
-            e.preventDefault();
-            setDragOver(false);
-            onAddFiles(e.dataTransfer.files);
-          }}
-        >
-          <Upload className="mx-auto text-muted" size={28} />
-          <p className="mt-2 text-sm font-medium text-ink">Drop files here or browse</p>
-          <p className="mt-1 text-xs text-muted">PDF, JPG, PNG, WebP, HEIC · up to {MAX_FILES} files · 10 MB each</p>
-          <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
-            <button
-              type="button"
-              data-ipp-autofocus
-              onClick={onBrowse}
-              disabled={atCap}
-              className="btn btn-secondary text-sm disabled:opacity-60"
-            >
-              Choose files
-            </button>
-            <button
-              type="button"
-              onClick={onTakePhoto}
-              disabled={atCap}
-              className="btn btn-secondary inline-flex items-center gap-1.5 text-sm disabled:opacity-60"
-            >
-              <Camera size={14} aria-hidden />
-              Take photo
-            </button>
-          </div>
-          {/* Default picker: no capture — iOS offers Photo Library, Camera, Browse */}
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept={ACCEPT}
-            multiple
-            className="hidden"
-            onChange={(e) => onAddFiles(e.target.files)}
-          />
-          {/* Explicit camera-only path */}
-          <input
-            ref={cameraInputRef}
-            type="file"
-            accept="image/*"
-            capture="environment"
-            className="hidden"
-            onChange={(e) => onAddFiles(e.target.files)}
-          />
+      {fullyPaidUp ? (
+        <div className="px-6 py-10 text-center">
+          <div className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-emerald-50 text-2xl">✓</div>
+          <p className="mt-4 text-sm font-semibold text-ink">You&apos;re fully paid up</p>
+          <p className="mt-1 text-sm text-ink2">There&apos;s nothing due right now, so there&apos;s nothing to upload.</p>
         </div>
+      ) : (
+        <div className="space-y-4 px-6 py-5">
+          <div className="rounded-xl border border-line bg-surface px-3 py-2.5">
+            <p className="text-sm font-semibold text-ink">
+              Instalment {installmentNo} · {formatINR(amountDue)}
+              {dueDate ? ` · due ${formatShortDate(dueDate)}` : ""}
+            </p>
+            <p className="mt-1 text-xs text-ink2">
+              If you&apos;ve paid this, upload your proof below and we&apos;ll confirm it shortly.
+            </p>
+          </div>
 
-        {localFiles.length > 0 && (
-          <div className="grid grid-cols-3 gap-2">
-            {localFiles.map((f) => (
-              <div key={f.id} className="relative overflow-hidden rounded-xl border border-line bg-surface">
-                {f.preview ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={f.preview} alt="" className="aspect-square w-full object-cover" />
-                ) : (
-                  <div className="flex aspect-square flex-col items-center justify-center gap-1 p-2 text-muted">
-                    <FileText size={22} />
-                    <span className="line-clamp-2 text-[10px]">{f.file.name}</span>
-                  </div>
-                )}
+          {unpaidInstallments && unpaidInstallments.length > 1 && (
+            <label className="block">
+              <span className="text-xs font-semibold text-ink">Paying a different instalment?</span>
+              <select
+                value={installmentNo ?? ""}
+                onChange={(e) => onSelectInstallment(Number(e.target.value))}
+                disabled={uploadBusy}
+                className="input mt-1 w-full text-sm"
+              >
+                {unpaidInstallments.map((u) => (
+                  <option key={u.no} value={u.no}>
+                    Instalment {u.no} · {formatINR(u.amount)}
+                    {u.due ? ` · due ${formatShortDate(u.due)}` : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+
+          <div
+            className={`rounded-2xl border-2 border-dashed px-4 py-6 text-center transition ${
+              dragOver ? "border-primary/50 bg-blue-50/50" : "border-line bg-surface"
+            }`}
+            onDragOver={(e) => {
+              e.preventDefault();
+              setDragOver(true);
+            }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={(e) => {
+              e.preventDefault();
+              setDragOver(false);
+              onAddFiles(e.dataTransfer.files);
+            }}
+          >
+            <Upload className="mx-auto text-muted" size={28} />
+            <p className="mt-2 text-sm font-medium text-ink">Drop files here or browse</p>
+            <p className="mt-1 text-xs text-muted">PDF, JPG, PNG, WebP, HEIC · up to {MAX_FILES} files · 10 MB each</p>
+            <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
+              <button
+                type="button"
+                data-ipp-autofocus
+                onClick={onBrowse}
+                disabled={atCap}
+                className="btn btn-secondary text-sm disabled:opacity-60"
+              >
+                Choose files
+              </button>
+              <button
+                type="button"
+                onClick={onTakePhoto}
+                disabled={atCap}
+                className="btn btn-secondary inline-flex items-center gap-1.5 text-sm disabled:opacity-60"
+              >
+                <Camera size={14} aria-hidden />
+                Take photo
+              </button>
+            </div>
+            {/* Default picker: no capture — iOS offers Photo Library, Camera, Browse */}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept={ACCEPT}
+              multiple
+              className="hidden"
+              onChange={(e) => onAddFiles(e.target.files)}
+            />
+            {/* Explicit camera-only path */}
+            <input
+              ref={cameraInputRef}
+              type="file"
+              accept="image/*"
+              capture="environment"
+              className="hidden"
+              onChange={(e) => onAddFiles(e.target.files)}
+            />
+          </div>
+
+          {localFiles.length > 0 && (
+            <div className="grid grid-cols-3 gap-2">
+              {localFiles.map((f) => (
+                <div key={f.id} className="relative overflow-hidden rounded-xl border border-line bg-surface">
+                  {f.preview ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={f.preview} alt="" className="aspect-square w-full object-cover" />
+                  ) : (
+                    <div className="flex aspect-square flex-col items-center justify-center gap-1 p-2 text-muted">
+                      <FileText size={22} />
+                      <span className="line-clamp-2 text-[10px]">{f.file.name}</span>
+                    </div>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => onRemoveFile(f.id)}
+                    disabled={uploadBusy}
+                    aria-label="Remove file"
+                    className="absolute right-1 top-1 rounded-full bg-white/90 p-0.5 text-muted shadow hover:text-ink disabled:opacity-60"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div>
+              {showClaimedAmount ? (
+                <label className="block">
+                  <span className="text-xs font-semibold text-ink">Amount you paid</span>
+                  <input
+                    type="number"
+                    min={0}
+                    value={claimedAmount}
+                    onChange={(e) => onClaimedAmount(e.target.value)}
+                    placeholder={String(amountDue)}
+                    className="input mt-1 w-full text-sm"
+                    disabled={uploadBusy}
+                    autoFocus
+                  />
+                </label>
+              ) : (
                 <button
                   type="button"
-                  onClick={() => onRemoveFile(f.id)}
+                  onClick={onToggleClaimedAmount}
                   disabled={uploadBusy}
-                  aria-label="Remove file"
-                  className="absolute right-1 top-1 rounded-full bg-white/90 p-0.5 text-muted shadow hover:text-ink disabled:opacity-60"
+                  className="text-xs font-medium text-primary underline-offset-2 hover:underline disabled:opacity-60"
                 >
-                  <X size={14} />
+                  I paid a different amount
                 </button>
-              </div>
-            ))}
+              )}
+            </div>
+            <label className="block">
+              <span className="text-xs font-semibold text-ink">Date paid (optional)</span>
+              <input
+                type="date"
+                value={claimedDate}
+                onChange={(e) => onClaimedDate(e.target.value)}
+                className="input mt-1 w-full text-sm"
+                disabled={uploadBusy}
+              />
+            </label>
           </div>
-        )}
 
-        <div className="grid gap-3 sm:grid-cols-2">
           <label className="block">
-            <span className="text-xs font-semibold text-ink">Amount (optional)</span>
+            <span className="text-xs font-semibold text-ink">UTR / reference (optional)</span>
             <input
-              type="number"
-              min={0}
-              value={claimedAmount}
-              onChange={(e) => onClaimedAmount(e.target.value)}
-              placeholder={String(amountDue)}
+              type="text"
+              value={referenceUtr}
+              onChange={(e) => onReferenceUtr(e.target.value)}
+              maxLength={80}
               className="input mt-1 w-full text-sm"
               disabled={uploadBusy}
             />
           </label>
+
           <label className="block">
-            <span className="text-xs font-semibold text-ink">Date paid (optional)</span>
-            <input
-              type="date"
-              value={claimedDate}
-              onChange={(e) => onClaimedDate(e.target.value)}
+            <span className="text-xs font-semibold text-ink">Comment (optional)</span>
+            <textarea
+              value={studentComment}
+              onChange={(e) => onStudentComment(e.target.value)}
+              maxLength={500}
+              rows={3}
+              placeholder="Anything else that helps us verify…"
               className="input mt-1 w-full text-sm"
               disabled={uploadBusy}
             />
+            <span className="text-[11px] text-muted">{studentComment.length}/500</span>
           </label>
+
+          {error && <p className="text-sm text-amber-800">{error}</p>}
+
+          <div className="flex items-center gap-3">
+            {(uploadBusy || uploadDone) && (
+              <ProgressRing progress={uploadDone ? 100 : uploadProgress} done={uploadDone} />
+            )}
+            <button
+              type="button"
+              onClick={onSubmit}
+              disabled={uploadBusy || uploadDone || !localFiles.length}
+              className="btn btn-primary flex-1 disabled:opacity-60"
+            >
+              {uploadDone ? "Submitted" : uploadBusy ? "Uploading…" : "Submit for review"}
+            </button>
+          </div>
         </div>
-
-        <label className="block">
-          <span className="text-xs font-semibold text-ink">UTR / reference (optional)</span>
-          <input
-            type="text"
-            value={referenceUtr}
-            onChange={(e) => onReferenceUtr(e.target.value)}
-            maxLength={80}
-            className="input mt-1 w-full text-sm"
-            disabled={uploadBusy}
-          />
-        </label>
-
-        <label className="block">
-          <span className="text-xs font-semibold text-ink">Comment (optional)</span>
-          <textarea
-            value={studentComment}
-            onChange={(e) => onStudentComment(e.target.value)}
-            maxLength={500}
-            rows={3}
-            placeholder="Anything else that helps us verify…"
-            className="input mt-1 w-full text-sm"
-            disabled={uploadBusy}
-          />
-          <span className="text-[11px] text-muted">{studentComment.length}/500</span>
-        </label>
-
-        {error && <p className="text-sm text-amber-800">{error}</p>}
-
-        <div className="flex items-center gap-3">
-          {(uploadBusy || uploadDone) && (
-            <ProgressRing progress={uploadDone ? 100 : uploadProgress} done={uploadDone} />
-          )}
-          <button
-            type="button"
-            onClick={onSubmit}
-            disabled={uploadBusy || uploadDone || !localFiles.length}
-            className="btn btn-primary flex-1 disabled:opacity-60"
-          >
-            {uploadDone ? "Submitted" : uploadBusy ? "Uploading…" : "Submit for review"}
-          </button>
-        </div>
-      </div>
+      )}
     </div>
   );
 }

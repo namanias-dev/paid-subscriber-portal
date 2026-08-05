@@ -4566,8 +4566,27 @@ export async function finalizeCoursePaymentByReference(
     // Instalments: oldest outstanding first (due, then no) — ignore stamped installment_no for clearing.
     const oldestIdx = findOldestOutstandingIndex(schedule, "installment");
     if (oldestIdx >= 0) {
-      markPaid(oldestIdx);
-      paymentLabel = schedule[oldestIdx].label;
+      const line = schedule[oldestIdx]!;
+      const payAmt = Math.round(Number(payment.amount) || 0);
+      const prevPartial = Math.round(Number(line.paid_amount) || 0);
+      const isProofPartial =
+        payment.payment_source === "student_proof" &&
+        payAmt > 0 &&
+        prevPartial + payAmt < (line.amount || 0);
+      if (isProofPartial) {
+        // Record partial against the oldest line; leave unpaid until remainder clears.
+        schedule[oldestIdx] = {
+          ...line,
+          paid_amount: prevPartial + payAmt,
+          reference_no: referenceNo,
+          gateway_ref: gatewayRef,
+          payment_id: payment.id,
+        };
+        paymentLabel = `${line.label} (partial)`;
+      } else {
+        markPaid(oldestIdx);
+        paymentLabel = schedule[oldestIdx]!.label;
+      }
     }
   }
 
@@ -4778,6 +4797,19 @@ export interface OfflineCoursePaymentInput {
   /** IST-correct ISO instant of the payment (defaults to now). */
   dateISO?: string;
   note?: string | null;
+  /**
+   * Optional amount to record (admin confirm / proof path). Defaults to the
+   * schedule line (or remaining for kind=full). Capped at remaining — never
+   * creates a silent credit. Finalize still allocates oldest-first.
+   */
+  amountOverride?: number | null;
+  /** Deterministic reference for idempotency (e.g. OFF-PROOF-{id}). */
+  referenceNo?: string | null;
+  /** Additive tags — student_proof path. */
+  proofId?: string | null;
+  paymentSource?: string | null;
+  recordedBy?: string | null;
+  financeVerified?: boolean;
 }
 
 /**
@@ -4788,7 +4820,10 @@ export interface OfflineCoursePaymentInput {
  */
 export async function recordOfflineCoursePayment(
   input: OfflineCoursePaymentInput
-): Promise<{ ok: true; enrollment: CourseEnrollment; receipt: PaymentReceipt } | { ok: false; error: string }> {
+): Promise<
+  | { ok: true; enrollment: CourseEnrollment; receipt: PaymentReceipt; payment: Payment }
+  | { ok: false; error: string }
+> {
   const enrollment = await getCourseEnrollmentById(input.enrollmentId);
   if (!enrollment) return { ok: false, error: "Enrollment not found." };
   const schedule = enrollment.schedule || [];
@@ -4827,14 +4862,38 @@ export async function recordOfflineCoursePayment(
     label = item.label;
   }
 
-  const ref = await uniqueOfflineRef();
+  const remainingCap = deriveEnrollment(enrollment).remaining;
+  if (remainingCap <= 0) return { ok: false, error: "This enrollment is already fully paid." };
+
+  if (input.amountOverride != null && Number.isFinite(input.amountOverride)) {
+    const override = Math.round(Number(input.amountOverride));
+    if (override <= 0) return { ok: false, error: "Amount must be greater than zero." };
+    // Cap at remaining — never invent a credit balance.
+    amount = Math.min(override, remainingCap);
+    // Overpay covering more than one line → settle remaining balance as full.
+    if (override >= remainingCap && kind === "installment") {
+      kind = "full";
+      installmentNo = 0;
+      label = "";
+    }
+  }
+
+  // Idempotent: reuse existing reference if already finalized.
+  const ref = (input.referenceNo || "").trim() || (await uniqueOfflineRef());
+  const existingPay = await getPaymentByReference(ref);
+  if (existingPay && isPaidStatus(existingPay.status)) {
+    const finalized = await finalizeCoursePaymentByReference(ref);
+    if (!finalized) return { ok: false, error: "Could not apply the payment." };
+    return { ok: true, enrollment: finalized.enrollment, receipt: finalized.receipt, payment: existingPay };
+  }
+
   const dateISO = input.dateISO || new Date().toISOString();
   const itemLabel =
     kind === "full"
       ? `${enrollment.course_title} — Remaining balance`
       : `${enrollment.course_title} — ${label || (kind === "seat" ? "Book Your Seat" : "Installment")}`;
 
-  await createPayment({
+  const payment = await createPayment({
     student_name: enrollment.student_name,
     phone: enrollment.phone,
     email: enrollment.email,
@@ -4855,11 +4914,35 @@ export async function recordOfflineCoursePayment(
     enrollment_id: enrollment.id,
     payment_kind: kind,
     installment_no: installmentNo,
-  });
+    proof_id: input.proofId || null,
+    payment_source: input.paymentSource || null,
+    recorded_by: input.recordedBy || null,
+    finance_verified: input.financeVerified ?? false,
+  } as CreatePaymentInput);
+
+  // Tag columns — ensure via direct update after create.
+  if (input.proofId || input.paymentSource || input.recordedBy) {
+    const db = getSupabaseAdmin();
+    if (db) {
+      try {
+        await db
+          .from("payments")
+          .update({
+            proof_id: input.proofId || null,
+            payment_source: input.paymentSource || null,
+            recorded_by: input.recordedBy || null,
+            finance_verified: input.financeVerified ?? false,
+          })
+          .eq("id", payment.id);
+      } catch {
+        /* best-effort tags */
+      }
+    }
+  }
 
   const finalized = await finalizeCoursePaymentByReference(ref);
   if (!finalized) return { ok: false, error: "Could not apply the payment." };
-  return { ok: true, enrollment: finalized.enrollment, receipt: finalized.receipt };
+  return { ok: true, enrollment: finalized.enrollment, receipt: finalized.receipt, payment };
 }
 
 // ==================== ADMIN: PAYMENT-PLAN CONVERSION + INSTALLMENT MANAGEMENT ====================

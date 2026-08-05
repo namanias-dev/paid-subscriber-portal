@@ -589,9 +589,12 @@ const ACCESS_ACTION_TITLES: Record<string, string> = {
   access_restored: "Access restored",
   proof_uploaded: "Payment proof uploaded",
   proof_approved: "Payment proof approved",
+  proof_approved_recorded: "Payment proof approved & recorded",
   proof_rejected: "Payment proof rejected",
   proof_superseded: "Payment proof superseded",
   provisional_access_granted: "Provisional access granted",
+  payment_recorded: "Payment recorded",
+  proof_payment_reversed: "Proof payment reversed",
 };
 
 /** Unified student_access_events → timeline (actor system | staff). */

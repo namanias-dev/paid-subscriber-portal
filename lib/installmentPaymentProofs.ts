@@ -12,7 +12,7 @@ import {
   findStudentByPhone,
 } from "./dataProvider";
 import { lectureAccessForCourse } from "./entitlements";
-import { nextUnpaidDatedLine } from "./accessAtRisk";
+import { nextUnpaidDatedLine, unpaidDatedLines } from "./accessAtRisk";
 import { activeAccessGrant } from "./sms/accessReminderService";
 import { istWholeDaysUntil } from "./sms/accessDays";
 import { extendCourseAccess } from "./accessActions";
@@ -186,8 +186,14 @@ export async function buildInstallmentProofPrompt(
     const ovr = overrides.find((o) => o.course_id === e.course_id);
     // LIVE playback path — grant wins.
     const live = lectureAccessForCourse(course, e, ovr, false, now);
-    const unpaid = nextUnpaidDatedLine(e.schedule);
+    const unpaidLines = unpaidDatedLines(e.schedule);
+    const unpaid = unpaidLines[0] ?? nextUnpaidDatedLine(e.schedule);
     if (!unpaid || !(unpaid.amount > 0)) continue;
+    const unpaidInstallments = unpaidLines.map((l) => ({
+      no: l.no,
+      amount: l.amount,
+      due: l.due ? String(l.due).slice(0, 10) : null,
+    }));
 
     const pending = await getPendingProofForEnrollment(e.id, unpaid.no);
     const grant = activeAccessGrant(ovr, now);
@@ -214,6 +220,7 @@ export async function buildInstallmentProofPrompt(
         installmentNo: unpaid.no,
         amountDue: unpaid.amount,
         dueDate: unpaid.due ? String(unpaid.due).slice(0, 10) : null,
+        unpaidInstallments,
         daysLeft,
         liveAccessAllowed: live.allowed,
         payHref,
@@ -239,6 +246,7 @@ export async function buildInstallmentProofPrompt(
         installmentNo: unpaid.no,
         amountDue: unpaid.amount,
         dueDate: unpaid.due ? String(unpaid.due).slice(0, 10) : null,
+        unpaidInstallments,
         daysLeft: null,
         liveAccessAllowed: false,
         payHref,
@@ -263,6 +271,7 @@ export async function buildInstallmentProofPrompt(
         installmentNo: unpaid.no,
         amountDue: unpaid.amount,
         dueDate: unpaid.due ? String(unpaid.due).slice(0, 10) : null,
+        unpaidInstallments,
         daysLeft: daysLeft ?? daysToDue,
         liveAccessAllowed: true,
         payHref,
@@ -346,6 +355,8 @@ export async function submitInstallmentProof(input: {
   const student = await findStudentByPhone(input.phone);
   const comment = input.studentComment?.trim() ? input.studentComment.trim().slice(0, 500) : null;
   const existing = await getPendingProofForEnrollment(input.enrollmentId, input.installmentNo);
+  const scheduleLine = (e.schedule || []).find((s) => s.no === input.installmentNo) || null;
+  const expectedAmount = scheduleLine?.amount ?? null;
 
   if (existing) {
     const merged = [...existing.files, ...input.files].slice(0, INSTALLMENT_PROOF_MAX_FILES);
@@ -357,6 +368,8 @@ export async function submitInstallmentProof(input: {
         claimed_paid_date: input.claimedPaidDate ?? existing.claimed_paid_date,
         reference_utr: input.referenceUtr ?? existing.reference_utr,
         student_comment: comment ?? existing.student_comment,
+        expected_amount: expectedAmount,
+        expected_installment_no: input.installmentNo,
         updated_at: new Date().toISOString(),
       })
       .eq("id", existing.id)
@@ -392,6 +405,8 @@ export async function submitInstallmentProof(input: {
       claimed_paid_date: input.claimedPaidDate || null,
       reference_utr: input.referenceUtr?.trim() || null,
       student_comment: comment,
+      expected_amount: expectedAmount,
+      expected_installment_no: input.installmentNo,
       files: input.files,
       status: "pending",
       submitted_at: new Date().toISOString(),

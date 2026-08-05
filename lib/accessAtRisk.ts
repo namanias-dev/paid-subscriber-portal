@@ -83,13 +83,17 @@ export function classifyAccessAtRisk(input: {
   return { onList: true, kind, scheduleStatus, inactionReason: null };
 }
 
-/** Next unpaid dated installment with amount > 0 (installment/seat/full), for staff copy. */
-export function nextUnpaidDatedLine(schedule: InstallmentItem[] | null | undefined): InstallmentItem | null {
-  const items = (schedule || [])
+/** All unpaid dated installments with amount > 0, sorted by due date ascending. */
+export function unpaidDatedLines(schedule: InstallmentItem[] | null | undefined): InstallmentItem[] {
+  return (schedule || [])
     .filter((s) => !s.paid && s.status !== "cancelled" && s.status !== "waived" && s.due && (Number(s.amount) || 0) > 0)
     .slice()
     .sort((a, b) => Date.parse(a.due as string) - Date.parse(b.due as string));
-  return items[0] ?? null;
+}
+
+/** Next unpaid dated installment with amount > 0 (installment/seat/full), for staff copy. */
+export function nextUnpaidDatedLine(schedule: InstallmentItem[] | null | undefined): InstallmentItem | null {
+  return unpaidDatedLines(schedule)[0] ?? null;
 }
 
 /**

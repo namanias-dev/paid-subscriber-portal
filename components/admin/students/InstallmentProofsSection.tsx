@@ -25,13 +25,15 @@ interface ProofListItem {
 const STATUS_PILL: Record<InstallmentProofStatus, string> = {
   pending: "pill-amber",
   approved: "pill-green",
+  approved_recorded: "pill-green",
   rejected: "pill-red",
   superseded: "pill-gray",
 };
 
 const STATUS_LABEL: Record<InstallmentProofStatus, string> = {
   pending: "Pending review",
-  approved: "Approved",
+  approved: "Approved (access only)",
+  approved_recorded: "Approved & recorded",
   rejected: "Rejected",
   superseded: "Superseded",
 };

@@ -1525,6 +1525,15 @@ export interface Payment {
   moved_by?: string | null;
   move_reason?: string | null;
   is_moved_registration?: boolean | null;
+  // --- Student installment-proof → offline payment (additive) ---
+  proof_id?: string | null;
+  payment_source?: string | null;
+  finance_verified?: boolean | null;
+  recorded_by?: string | null;
+  reversed_at?: string | null;
+  reversed_by?: string | null;
+  reversal_reason?: string | null;
+  reversal_of_payment_id?: string | null;
 }
 
 // ----------------------------- Payment proof (self-service recovery) -----------------------------

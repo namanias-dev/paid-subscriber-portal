@@ -515,7 +515,13 @@ export interface EnrollmentDerived {
 /** Derive payment progress from the schedule (schedule is the source of truth). */
 export function deriveEnrollment(enr: Pick<CourseEnrollment, "total_fee" | "schedule">, now = Date.now()): EnrollmentDerived {
   const schedule = enr.schedule || [];
-  const paid = schedule.filter((s) => s.paid).reduce((a, s) => a + s.amount, 0);
+  // Full line amounts when paid; partial `paid_amount` on still-outstanding lines.
+  const paid = schedule.reduce((a, s) => {
+    if (isLineCancelledOrWaived(s)) return a;
+    if (s.paid) return a + (s.amount || 0);
+    const partial = Number(s.paid_amount) || 0;
+    return a + (partial > 0 ? partial : 0);
+  }, 0);
   const remaining = Math.max(0, enr.total_fee - paid);
   // Installments that still count toward the plan (paid, or outstanding — not cancelled/waived).
   const installments = schedule.filter((s) => s.kind === "installment" && (s.paid || !isLineCancelledOrWaived(s)));
