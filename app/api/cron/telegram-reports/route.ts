@@ -103,6 +103,12 @@ async function run(req: Request) {
       });
     }
 
+    if (action === "sales_seed_digest") {
+      const salesMod = await import("@/lib/telegram/sales");
+      const finish = await salesMod.finishSalesSeedDigest();
+      return NextResponse.json({ ok: finish.ok, finish, ts: Date.now() });
+    }
+
     if (action === "sales_go_live") {
       const salesMod = await import("@/lib/telegram/sales");
       await salesMod.setSalesFlagsEnabled(true);

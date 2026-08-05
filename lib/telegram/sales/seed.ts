@@ -434,6 +434,9 @@ export async function runSalesTodaySeed(opts: {
     : null;
 
   if (await seedRunAlreadyComplete(collected.ymd)) {
+    const finish = dryRun
+      ? { digestPosted: false, digestPinned: false }
+      : await finishSalesSeedDigest(collected.ymd);
     return {
       ok: true,
       dryRun,
@@ -446,8 +449,8 @@ export async function runSalesTodaySeed(opts: {
       omitted: collected.omitted,
       oldestAt,
       newestAt,
-      digestPosted: false,
-      digestPinned: false,
+      digestPosted: finish.digestPosted,
+      digestPinned: finish.digestPinned,
       preview,
     };
   }
@@ -537,6 +540,19 @@ export async function runSalesTodaySeed(opts: {
         digestPinned = !!pin.ok;
       }
     }
+    if (digestPosted) {
+      const db = getSupabaseAdmin();
+      if (db) {
+        await db.from("telegram_report_snapshots").upsert(
+          {
+            slot_key: `sales:seed:digest:${collected.ymd}`,
+            kind: "sales_seed_digest",
+            metrics: { digestPosted, digestPinned, ymd: collected.ymd },
+          },
+          { onConflict: "slot_key" },
+        );
+      }
+    }
   } catch (e) {
     tgLog("sales_seed_digest_failed", { error: (e as Error).message }, "error");
   }
@@ -547,6 +563,8 @@ export async function runSalesTodaySeed(opts: {
     skipped,
     failed,
     omitted: collected.omitted,
+    digestPosted,
+    digestPinned,
     finished_at: new Date().toISOString(),
   });
 
@@ -566,6 +584,61 @@ export async function runSalesTodaySeed(opts: {
     digestPinned,
     preview,
   };
+}
+
+/** Post/pin seed digest only if not yet recorded (safe after interrupted seed). */
+export async function finishSalesSeedDigest(ymd = SEED_DAY): Promise<{
+  ok: boolean;
+  digestPosted: boolean;
+  digestPinned: boolean;
+  skipped: boolean;
+}> {
+  const db = getSupabaseAdmin();
+  if (!db) return { ok: false, digestPosted: false, digestPinned: false, skipped: false };
+  const digestKey = `sales:seed:digest:${ymd}`;
+  const { data: existing } = await db.from("telegram_report_snapshots").select("metrics").eq("slot_key", digestKey).maybeSingle();
+  if ((existing?.metrics as { digestPosted?: boolean } | null)?.digestPosted) {
+    return {
+      ok: true,
+      digestPosted: true,
+      digestPinned: !!(existing?.metrics as { digestPinned?: boolean }).digestPinned,
+      skipped: true,
+    };
+  }
+
+  let digestPosted = false;
+  let digestPinned = false;
+  try {
+    let html = await buildSalesDigestHtml();
+    html = `${SEED_PREFIX} · seeded summary\n${html}`;
+    const base = (SITE_URL || "https://www.namanias.com").replace(/\/$/, "");
+    const res = await sendWithRetry(html, [
+      { label: "Admissions", url: `${base}/admin/course-payments` },
+      { label: "Access at Risk", url: `${base}/admin/access-risk` },
+    ]);
+    digestPosted = res.ok;
+    if (res.ok && res.messageId != null) {
+      const chatId = (process.env.TELEGRAM_SALES_CHAT_ID || "").trim();
+      if (chatId) {
+        const pin = await pinChatMessage(chatId, res.messageId);
+        digestPinned = !!pin.ok;
+      }
+    }
+  } catch (e) {
+    tgLog("sales_seed_digest_finish_failed", { error: (e as Error).message }, "error");
+  }
+
+  if (digestPosted) {
+    await db.from("telegram_report_snapshots").upsert(
+      {
+        slot_key: digestKey,
+        kind: "sales_seed_digest",
+        metrics: { digestPosted, digestPinned, ymd },
+      },
+      { onConflict: "slot_key" },
+    );
+  }
+  return { ok: digestPosted, digestPosted, digestPinned, skipped: false };
 }
 
 /** Prove live path would no-op on a seeded phone+event. */

@@ -25,7 +25,7 @@ export {
 } from "./settings";
 export { maskPhone, salesInr } from "./format";
 export { inSalesQuietHours, RATE_LIMIT_PER_MIN, alreadyDeduped } from "./dedupe";
-export { runSalesTodaySeed, collectTodaySalesSeedEvents, proveSeedDedup, SEED_DAY } from "./seed";
+export { runSalesTodaySeed, collectTodaySalesSeedEvents, proveSeedDedup, finishSalesSeedDigest, SEED_DAY } from "./seed";
 
 /** Optional one-shot smoke (gated — never on every deploy). */
 export async function maybeSalesSmokeMessage(): Promise<boolean> {
