@@ -403,6 +403,21 @@ export async function submitInstallmentProof(input: {
       reason: `Added files (${input.files.length}); total ${merged.length}`,
       meta: { proofId: proof.id, filesCount: merged.length },
     });
+    void import("./telegram/sales")
+      .then((m) =>
+        m.fireSalesAlert(async () => {
+          await m.salesAlertInstallmentProof({
+            name: e.student_name || "Student",
+            phone: e.phone,
+            installmentNo: input.installmentNo,
+            amount: input.claimedAmount ?? expectedAmount,
+            studentId: student?.id ?? null,
+            enrollmentId: e.id,
+            proofId: proof.id,
+          });
+        }),
+      )
+      .catch(() => {});
     return { ok: true, proof };
   }
 
@@ -448,6 +463,21 @@ export async function submitInstallmentProof(input: {
     reason: `Proof uploaded (${input.files.length} file${input.files.length === 1 ? "" : "s"})`,
     meta: { proofId: proof.id, filesCount: input.files.length },
   });
+  void import("./telegram/sales")
+    .then((m) =>
+      m.fireSalesAlert(async () => {
+        await m.salesAlertInstallmentProof({
+          name: e.student_name || "Student",
+          phone: e.phone,
+          installmentNo: input.installmentNo,
+          amount: input.claimedAmount ?? expectedAmount,
+          studentId: student?.id ?? null,
+          enrollmentId: e.id,
+          proofId: proof.id,
+        });
+      }),
+    )
+    .catch(() => {});
   return { ok: true, proof };
 }
 

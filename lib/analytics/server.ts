@@ -172,6 +172,35 @@ export async function recordPaymentStatusChanged(p: Payment, toStatus: string, s
     void import("../telegram/reports/alerts")
       .then((m) => m.fireReportGatewayFailure(p))
       .catch(() => {});
+    // Sales channel — isolated; never awaits into payment path.
+    void import("../telegram/sales")
+      .then((m) =>
+        m.fireSalesAlert(async () => {
+          await m.salesAlertPaymentFailed({
+            name: p.student_name || "Student",
+            phone: p.phone,
+            course: p.item || p.item_slug || "Item",
+            amount: Number(p.amount) || 0,
+            reason: p.verify_status || p.response_code || null,
+          });
+        }),
+      )
+      .catch(() => {});
+  }
+  if (toStatus === "EXPIRED" || toStatus === "ABANDONED") {
+    void import("../telegram/sales")
+      .then((m) =>
+        m.fireSalesAlert(async () => {
+          if (toStatus === "EXPIRED") {
+            await m.salesAlertLinkExpired({
+              name: p.student_name || "Student",
+              phone: p.phone,
+              course: p.item || p.item_slug || "Item",
+            });
+          }
+        }),
+      )
+      .catch(() => {});
   }
 }
 
@@ -267,6 +296,19 @@ export async function recordProofUploaded(p: Payment, proofId: string): Promise<
   });
   // Auto-SMS (disabled by default): payment proof received.
   fireAutoSms({ trigger: TRIGGERS.proof_uploaded, phone: p.phone, name: p.student_name, vars: { item_short: p.item }, entity: smsEntityForPayment(p), entityId: ref });
+  if (p.item_type === "webinar") {
+    void import("../telegram/sales")
+      .then((m) =>
+        m.fireSalesAlert(async () => {
+          await m.salesAlertWebinarProof({
+            name: p.student_name || "Student",
+            phone: p.phone,
+            proofId,
+          });
+        }),
+      )
+      .catch(() => {});
+  }
 }
 
 export async function recordStaffReview(p: Payment, decision: "approved" | "rejected", staffId: string | null, reason?: string | null): Promise<void> {

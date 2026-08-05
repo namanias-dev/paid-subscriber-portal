@@ -73,6 +73,19 @@ async function run(req: Request) {
       });
     }
 
+    if (action === "sales_smoke") {
+      const salesMod = await import("@/lib/telegram/sales");
+      process.env.TELEGRAM_SALES_SMOKE = "1";
+      const ok = await salesMod.maybeSalesSmokeMessage();
+      return NextResponse.json({ ok, channel: "sales", ts: Date.now() });
+    }
+
+    if (action === "sales_digest") {
+      const salesMod = await import("@/lib/telegram/sales");
+      const digest = await salesMod.runSalesDigestIfDue({ force: true });
+      return NextResponse.json({ ok: digest.ok, digest, ts: Date.now() });
+    }
+
     if (action === "seat_alert_test") {
       const pays = await getPayments();
       const seat = [...pays]
@@ -192,7 +205,22 @@ async function run(req: Request) {
       noLogins: await alertNoLoginsIfStale().catch(() => false),
       webinar24h: await alertWebinarReminders24h().catch(() => 0),
     };
-    return NextResponse.json({ ok: true, digest, alerts, ts: Date.now() });
+    // Sales channel — fully isolated; failures never affect ops digest/alerts.
+    let sales: unknown = null;
+    try {
+      const salesMod = await import("@/lib/telegram/sales");
+      const abandon = await salesMod.sweepCheckoutAbandoned().catch(() => ({ checked: 0, alerted: 0 }));
+      const digestSales = await salesMod.runSalesDigestIfDue().catch(() => ({
+        ok: false,
+        sent: false,
+        slot: null,
+        flushed: 0,
+      }));
+      sales = { abandon, digest: digestSales };
+    } catch (e) {
+      sales = { error: (e as Error).message };
+    }
+    return NextResponse.json({ ok: true, digest, alerts, sales, ts: Date.now() });
   } catch (e) {
     return NextResponse.json({ ok: false, error: (e as Error).message }, { status: 500 });
   }
