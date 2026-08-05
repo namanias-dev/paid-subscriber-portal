@@ -59,4 +59,30 @@ export async function ensureSalesFlagRows(): Promise<void> {
   }
 }
 
+/** Explicitly set both sales kill switches (idempotent upsert). */
+export async function setSalesFlagsEnabled(enabled: boolean): Promise<void> {
+  const db = getSupabaseAdmin();
+  if (!db) return;
+  const now = new Date().toISOString();
+  for (const key of [ALERTS_KEY, DIGEST_KEY]) {
+    await db
+      .from("app_feature_flags")
+      .upsert(
+        {
+          key,
+          enabled,
+          scope: "all",
+          kill_switch: false,
+          meta: { note: "Telegram sales channel — toggle without deploy" },
+          updated_at: now,
+        },
+        { onConflict: "key" },
+      )
+      .then(
+        () => null,
+        () => null,
+      );
+  }
+}
+
 export { ALERTS_KEY, DIGEST_KEY };

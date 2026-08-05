@@ -11,6 +11,8 @@ import { salesChannelConfigured } from "../channels";
 import { salesAlertsEnabled } from "./settings";
 
 const ABANDON_MINUTES = 30;
+/** Live sweep only looks at recent opens — never historical. */
+const ABANDON_MAX_AGE_MS = 2 * 3600_000;
 
 export async function sweepCheckoutAbandoned(): Promise<{ checked: number; alerted: number }> {
   try {
@@ -24,7 +26,7 @@ export async function sweepCheckoutAbandoned(): Promise<{ checked: number; alert
       const st = String(p.status || "").toUpperCase();
       if (st !== "INITIATED" && st !== "PENDING" && st !== "UNCONFIRMED") return false;
       const age = now - new Date(p.created_at).getTime();
-      return age >= ABANDON_MINUTES * 60_000 && age < 24 * 3600_000;
+      return age >= ABANDON_MINUTES * 60_000 && age < ABANDON_MAX_AGE_MS;
     });
 
     let alerted = 0;

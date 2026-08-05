@@ -190,6 +190,70 @@ export async function salesAlertWebinarProof(input: {
   });
 }
 
+export async function salesAlertAdmission(input: {
+  name: string;
+  phone: string;
+  course: string;
+  amount: number;
+  studentId?: string | null;
+}): Promise<void> {
+  const link = adminStudentDeepLink({ studentId: input.studentId, phone: input.phone });
+  const html = [
+    `🟢 <b>New admission</b> · ${escapeHtml(input.name || "Student")}`,
+    `${escapeHtml(input.course || "Course")} · ${salesInr(input.amount)} · ${escapeHtml(maskPhone(input.phone))}`,
+    formatIstShort(new Date()),
+  ].join("\n");
+  await deliverOrQueue({
+    event: "admission",
+    phone: input.phone,
+    html,
+    buttons: [{ label: "Open in admin", url: link }],
+  });
+}
+
+export async function salesAlertInstallmentPaid(input: {
+  name: string;
+  phone: string;
+  course: string;
+  amount: number;
+  installmentNo?: number | null;
+  studentId?: string | null;
+}): Promise<void> {
+  const link = adminStudentDeepLink({ studentId: input.studentId, phone: input.phone });
+  const html = [
+    `✅ <b>Instalment paid</b> · ${escapeHtml(input.name || "Student")}`,
+    `${escapeHtml(input.course || "Course")} · Inst ${input.installmentNo ?? "?"} · ${salesInr(input.amount)}`,
+    `${escapeHtml(maskPhone(input.phone))} · ${formatIstShort(new Date())}`,
+  ].join("\n");
+  await deliverOrQueue({
+    event: "installment_paid",
+    phone: input.phone,
+    html,
+    buttons: [{ label: "Open in admin", url: link }],
+  });
+}
+
+export async function salesAlertPaymentSucceeded(input: {
+  name: string;
+  phone: string;
+  course: string;
+  amount: number;
+  studentId?: string | null;
+}): Promise<void> {
+  const link = adminStudentDeepLink({ studentId: input.studentId, phone: input.phone });
+  const html = [
+    `💚 <b>Payment succeeded</b> · ${escapeHtml(input.name || "Student")}`,
+    `${escapeHtml(input.course || "Course")} · ${salesInr(input.amount)} · ${escapeHtml(maskPhone(input.phone))}`,
+    formatIstShort(new Date()),
+  ].join("\n");
+  await deliverOrQueue({
+    event: "payment_succeeded",
+    phone: input.phone,
+    html,
+    buttons: [{ label: "Open in admin", url: link }],
+  });
+}
+
 /** Flush quiet/rate queue (called from 10:00 digest). Never throws. */
 export async function flushSalesQueuedAlerts(): Promise<number> {
   try {

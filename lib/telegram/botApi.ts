@@ -179,6 +179,18 @@ export async function getChat(
   return callMethod("getChat", { chat_id: chatId });
 }
 
+/** Pin a message in a channel/group. Never throws via callMethod. */
+export async function pinChatMessage(
+  chatId: string | number,
+  messageId: number,
+): Promise<TelegramApiResult<boolean>> {
+  return callMethod<boolean>("pinChatMessage", {
+    chat_id: chatId,
+    message_id: messageId,
+    disable_notification: true,
+  });
+}
+
 export async function getMe(): Promise<
   TelegramApiResult<{ id: number; username?: string; first_name?: string }>
 > {

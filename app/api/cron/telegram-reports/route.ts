@@ -16,7 +16,7 @@ import { assertReportsChannel } from "@/lib/telegram/reports/channelGuard";
 import { getReportSettings, maskChannelId } from "@/lib/telegram/reports/settings";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 120;
+export const maxDuration = 300;
 
 async function run(req: Request) {
   const authorized =
@@ -84,6 +84,84 @@ async function run(req: Request) {
       const salesMod = await import("@/lib/telegram/sales");
       const digest = await salesMod.runSalesDigestIfDue({ force: true });
       return NextResponse.json({ ok: digest.ok, digest, ts: Date.now() });
+    }
+
+    if (action === "sales_seed") {
+      const salesMod = await import("@/lib/telegram/sales");
+      const dry = url.searchParams.get("dry") === "1" || url.searchParams.get("confirm") !== "1";
+      // Real seed: disable live flags first so pilot can't race-double with seed.
+      if (!dry) await salesMod.setSalesFlagsEnabled(false);
+      const result = await salesMod.runSalesTodaySeed({ dryRun: dry, confirm: !dry });
+      return NextResponse.json({
+        ok: result.ok,
+        dryRun: result.dryRun,
+        seed: result,
+        note: dry
+          ? "Dry-run only — pass confirm=1 to post"
+          : "Seed finished; call action=sales_go_live to enable flags",
+        ts: Date.now(),
+      });
+    }
+
+    if (action === "sales_go_live") {
+      const salesMod = await import("@/lib/telegram/sales");
+      await salesMod.setSalesFlagsEnabled(true);
+      const alerts = await salesMod.salesAlertsEnabled();
+      const digest = await salesMod.salesDigestEnabled();
+      return NextResponse.json({
+        ok: true,
+        sales_alerts_enabled: alerts,
+        sales_digest_enabled: digest,
+        schedule: "10:00,15:00,20:00 IST",
+        quiet_hours: "21:00–08:00 IST",
+        abandon_window: "30m–2h",
+        ts: Date.now(),
+      });
+    }
+
+    if (action === "sales_prove_dedup") {
+      const salesMod = await import("@/lib/telegram/sales");
+      const phone = url.searchParams.get("phone") || "";
+      const event = (url.searchParams.get("event") || "admission") as
+        | "admission"
+        | "payment_succeeded"
+        | "installment_paid";
+      const before = await salesMod.alreadyDeduped(event, phone);
+      if (phone) {
+        if (event === "admission") {
+          await salesMod.salesAlertAdmission({
+            name: "Dedup prove",
+            phone,
+            course: "Prove",
+            amount: 1,
+          });
+        } else if (event === "payment_succeeded") {
+          await salesMod.salesAlertPaymentSucceeded({
+            name: "Dedup prove",
+            phone,
+            course: "Prove",
+            amount: 1,
+          });
+        } else {
+          await salesMod.salesAlertInstallmentPaid({
+            name: "Dedup prove",
+            phone,
+            course: "Prove",
+            amount: 1,
+            installmentNo: 1,
+          });
+        }
+      }
+      const after = await salesMod.alreadyDeduped(event, phone);
+      return NextResponse.json({
+        ok: true,
+        phone_tail: phone.slice(-4),
+        event,
+        alreadyDedupedBefore: before,
+        alreadyDedupedAfter: after,
+        noDuplicate: before === true,
+        ts: Date.now(),
+      });
     }
 
     if (action === "seat_alert_test") {

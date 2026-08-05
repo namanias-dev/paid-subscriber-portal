@@ -10,13 +10,22 @@ export {
   salesAlertLinkExpired,
   salesAlertInstallmentProof,
   salesAlertWebinarProof,
+  salesAlertAdmission,
+  salesAlertInstallmentPaid,
+  salesAlertPaymentSucceeded,
   flushSalesQueuedAlerts,
 } from "./send";
 export { runSalesDigestIfDue, buildSalesDigestHtml, salesDigestDueNow } from "./digest";
 export { sweepCheckoutAbandoned, fireAbandonSweep } from "./abandoned";
-export { salesAlertsEnabled, salesDigestEnabled, ensureSalesFlagRows } from "./settings";
+export {
+  salesAlertsEnabled,
+  salesDigestEnabled,
+  ensureSalesFlagRows,
+  setSalesFlagsEnabled,
+} from "./settings";
 export { maskPhone, salesInr } from "./format";
-export { inSalesQuietHours, RATE_LIMIT_PER_MIN } from "./dedupe";
+export { inSalesQuietHours, RATE_LIMIT_PER_MIN, alreadyDeduped } from "./dedupe";
+export { runSalesTodaySeed, collectTodaySalesSeedEvents, proveSeedDedup, SEED_DAY } from "./seed";
 
 /** Optional one-shot smoke (gated — never on every deploy). */
 export async function maybeSalesSmokeMessage(): Promise<boolean> {

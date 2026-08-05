@@ -254,6 +254,30 @@ export async function recordPaymentPaid(p: Payment, source = "system"): Promise<
     void import("../telegram/reports/alerts")
       .then((m) => m.fireReportPaymentPaid(p))
       .catch(() => {});
+    // Sales channel — course paid only; dedupe shared with seed (no double-post).
+    if (p.item_type === "course") {
+      void import("../telegram/sales")
+        .then((m) =>
+          m.fireSalesAlert(async () => {
+            const base = {
+              name: p.student_name || "Student",
+              phone: p.phone,
+              course: p.item || p.item_slug || "Course",
+              amount: Number(p.amount) || 0,
+            };
+            if (p.payment_kind === "installment") {
+              await m.salesAlertInstallmentPaid({
+                ...base,
+                installmentNo: p.installment_no ?? null,
+              });
+            } else {
+              await m.salesAlertAdmission(base);
+              await m.salesAlertPaymentSucceeded(base);
+            }
+          }),
+        )
+        .catch(() => {});
+    }
     if (p.item_type === "course") {
       fireAutoSms({ trigger: TRIGGERS.course_enrolled, phone: p.phone, name: p.student_name, vars: { item_short: p.item }, entity: smsEntityForPayment(p), entityId: ref });
     } else if (p.item_type === "webinar") {

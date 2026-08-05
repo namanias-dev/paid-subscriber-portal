@@ -10,7 +10,10 @@ export type SalesEventType =
   | "checkout_abandoned"
   | "payment_link_expired"
   | "installment_proof_uploaded"
-  | "webinar_proof_uploaded";
+  | "webinar_proof_uploaded"
+  | "admission"
+  | "installment_paid"
+  | "payment_succeeded";
 
 const RATE_LIMIT_PER_MIN = 8;
 const QUIET_START = 21; // 21:00 IST inclusive
@@ -25,12 +28,16 @@ function phoneKey(phone: string): string {
   return String(phone || "").replace(/\D/g, "").slice(-10) || "unknown";
 }
 
+export function salesDedupKey(event: SalesEventType, phone: string, ymd?: string): string {
+  const day = ymd || istNowParts().ymd;
+  return `sales:dedupe:${event}:${phoneKey(phone)}:${day}`;
+}
+
 /** One alert per student+event per 24h IST day. Returns true if already sent. */
 export async function alreadyDeduped(event: SalesEventType, phone: string): Promise<boolean> {
   const db = getSupabaseAdmin();
   if (!db) return false;
-  const { ymd } = istNowParts();
-  const key = `sales:dedupe:${event}:${phoneKey(phone)}:${ymd}`;
+  const key = salesDedupKey(event, phone);
   try {
     const { data } = await db.from("telegram_report_snapshots").select("id").eq("slot_key", key).maybeSingle();
     return !!data;
@@ -42,8 +49,7 @@ export async function alreadyDeduped(event: SalesEventType, phone: string): Prom
 export async function markDeduped(event: SalesEventType, phone: string): Promise<void> {
   const db = getSupabaseAdmin();
   if (!db) return;
-  const { ymd } = istNowParts();
-  const key = `sales:dedupe:${event}:${phoneKey(phone)}:${ymd}`;
+  const key = salesDedupKey(event, phone);
   await db
     .from("telegram_report_snapshots")
     .upsert(
