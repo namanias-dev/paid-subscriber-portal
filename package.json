@@ -8,6 +8,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
+    "qa:reset": "tsx --require ./scripts/react-cache-shim.cjs scripts/qa-reset-installment-proof-students.ts",
+    "qa:teardown": "tsx --require ./scripts/react-cache-shim.cjs scripts/qa-reset-installment-proof-students.ts --teardown",
     "test": "node --import tsx --import ./scripts/_react-cache-shim.mjs --test tests/journey-automation/*.test.ts tests/lead-migration/*.test.ts tests/payment-source-restore/*.test.ts tests/lead-crm-fixture-fallback/*.test.ts tests/ops-storage-guard/*.test.ts tests/ops-auth-attempts-ttl/*.test.ts tests/lead-jsonb-slimming/*.test.ts tests/legacy-crm-phase2/*.test.ts tests/legacy-crm-phase3/*.test.ts tests/legacy-crm-phase4/*.test.ts tests/lead-status-consolidation/*.test.ts tests/lead-behaviour-status/*.test.ts tests/seed-fixture-removal/*.test.ts tests/sms-installment-resolver/*.test.ts tests/sms-installment-attribution/*.test.ts tests/sms-installment-sequence/*.test.ts tests/sms-retry-failed-only/*.test.ts tests/enrollment-transfer/*.test.ts tests/quiz-print-blank-pdf/*.test.ts tests/paid-student-visibility/*.test.ts tests/student-timeline/*.test.ts tests/row-cap/*.test.ts tests/sms-access-reminder/*.test.ts tests/sms-dlt-var-clamp/*.test.ts tests/access-at-risk/*.test.ts tests/db-circuit/*.test.ts tests/legacy-lead-match/*.test.ts tests/legacy-campaign-funnel/*.test.ts tests/meta-leadgen/*.test.ts tests/executive-overview/*.test.ts tests/checkout-coupon/*.test.ts tests/payment-outcome/*.test.ts"
   },
   "dependencies": {

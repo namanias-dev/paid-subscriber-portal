@@ -18,8 +18,8 @@ export {
 } from "./ippEvents";
 
 const H24 = 24 * 60 * 60 * 1000;
-/** v4 — resets QA / prior dismissals after iOS picker fix. */
-const SNOOZE_KEY = (enrollmentId: string) => `ipp_bar_snooze_v4_${enrollmentId}`;
+/** v5 — resets QA / prior dismissals after proof-record reverse grant fix. */
+const SNOOZE_KEY = (enrollmentId: string) => `ipp_bar_snooze_v5_${enrollmentId}`;
 
 type SheetMode = "closed" | "upload" | "view" | "notice";
 

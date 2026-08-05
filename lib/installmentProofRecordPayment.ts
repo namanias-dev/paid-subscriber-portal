@@ -11,6 +11,7 @@ import {
   bumpBuyerSessionVersion,
   getReceiptByReference,
   updateCourseEnrollment,
+  deleteAccessOverride,
 } from "./dataProvider";
 import { deriveEnrollment, enrollmentStatusFromSchedule, isLineOutstanding } from "./installments";
 import { findOldestOutstandingIndex } from "./installmentAllocation";
@@ -431,6 +432,24 @@ export async function reverseProofRecordedPayment(input: {
         updated_at: new Date().toISOString(),
       })
       .eq("id", payment.proof_id);
+  }
+
+  // Revoke provisional proof grants so outstanding + grace recompute to blocked/expiring.
+  // Otherwise reverse leaves lectureAccess live.allowed=true and State B never fires.
+  if (enrollment) {
+    const { data: ovr } = await db
+      .from("course_access_overrides")
+      .select("id,note,mode")
+      .eq("phone", payment.phone)
+      .eq("course_id", enrollment.course_id)
+      .maybeSingle();
+    const note = String(ovr?.note || "");
+    if (
+      ovr?.mode === "grant" &&
+      (/payment proof approved/i.test(note) || /pending finance reconciliation/i.test(note))
+    ) {
+      await deleteAccessOverride(payment.phone, enrollment.course_id);
+    }
   }
 
   await bumpBuyerSessionVersion(payment.phone).catch(() => null);
