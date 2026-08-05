@@ -73,11 +73,11 @@ export default function ContentLockSheet({
             <X size={18} />
           </button>
         </div>
-        <h2 id={titleId} className="mt-3 font-heading text-lg font-bold text-ink">
+        <h2 id={titleId} className="mt-3 font-heading text-lg font-bold leading-snug text-ink whitespace-normal break-words [overflow-wrap:anywhere]">
           This unlocks as soon as instalment {n} is cleared.
         </h2>
-        <p className="mt-1 text-sm text-ink2">Pay online or share proof if you&apos;ve already transferred.</p>
-        <div className="mt-5 flex flex-col gap-2">
+        <p className="mt-1 text-sm text-ink2 whitespace-normal">Pay online or share proof if you&apos;ve already transferred.</p>
+        <div className="mt-5 grid grid-cols-1 gap-2 sm:grid-cols-1">
           <a href={payHref} className="btn btn-primary min-h-[44px] w-full justify-center active:scale-[0.98]">
             Pay now
           </a>
@@ -87,7 +87,7 @@ export default function ContentLockSheet({
               onClose();
               requestInstallmentProofUpload();
             }}
-            className="btn btn-secondary min-h-[44px] w-full justify-center active:scale-[0.98]"
+            className="btn btn-secondary min-h-[44px] w-full justify-center whitespace-normal px-3 active:scale-[0.98]"
           >
             I&apos;ve already paid
           </button>

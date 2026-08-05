@@ -88,7 +88,7 @@ function formatShortDate(iso: string | null): string {
 function shouldShowPrompt(prompt: InstallmentProofPromptProps): boolean {
   if (prompt.state === "none") return false;
   if (prompt.state === "expiring") {
-    if (isWithin24h(storageGet(`ipp_snooze_${prompt.enrollmentId}`))) return false;
+    if (isWithin24h(storageGet(`ipp_bar_snooze_v2_${prompt.enrollmentId}`))) return false;
     if (isWithin24h(storageGet(`ipp_expiring_seen_${prompt.enrollmentId}`))) return false;
     return true;
   }
@@ -113,7 +113,7 @@ function markShown(prompt: InstallmentProofPromptProps): void {
 }
 
 function snoozeExpiring(enrollmentId: string): void {
-  storageSet(`ipp_snooze_${enrollmentId}`, String(Date.now()));
+  storageSet(`ipp_bar_snooze_v2_${enrollmentId}`, String(Date.now()));
 }
 
 function dismissBlocked(enrollmentId: string): void {

@@ -128,14 +128,15 @@ export default function InstallmentAccessShell({ children }: { children?: ReactN
 
   const snoozeExpiring = useCallback(() => {
     if (!prompt || prompt.state !== "expiring") return;
-    storageSet(`ipp_snooze_${prompt.enrollmentId}`, String(Date.now()));
+    // v2 key — resets any prior QA / student dismissals from the one-row bar era.
+    storageSet(`ipp_bar_snooze_v2_${prompt.enrollmentId}`, String(Date.now()));
     setSnoozeTick((n) => n + 1);
   }, [prompt]);
 
   const barVisible = useMemo(() => {
     if (!enabled || !prompt) return false;
     if (prompt.state === "expiring") {
-      return !isWithin24h(storageGet(`ipp_snooze_${prompt.enrollmentId}`));
+      return !isWithin24h(storageGet(`ipp_bar_snooze_v2_${prompt.enrollmentId}`));
     }
     return prompt.state === "blocked" || prompt.state === "pending_review";
   }, [enabled, prompt, snoozeTick]);
