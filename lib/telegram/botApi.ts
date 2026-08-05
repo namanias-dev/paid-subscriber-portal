@@ -191,6 +191,17 @@ export async function pinChatMessage(
   });
 }
 
+/** Delete a message. Telegram may refuse messages older than ~48h. */
+export async function deleteMessage(
+  chatId: string | number,
+  messageId: number,
+): Promise<TelegramApiResult<boolean>> {
+  return callMethod<boolean>("deleteMessage", {
+    chat_id: chatId,
+    message_id: messageId,
+  });
+}
+
 export async function editMessageText(opts: {
   chat_id: string | number;
   message_id: number;

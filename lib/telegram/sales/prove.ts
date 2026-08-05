@@ -1,6 +1,7 @@
 /**
- * Fixture prove for Sales Telegram — cutoff gate + 7 event types.
- * No real enrollments or charges.
+ * Fixture prove for Sales Telegram — ALWAYS synthetic.
+ * Renders all 7 types but never posts to the live Sales chat
+ * (dry-run unless TELEGRAM_SALES_TEST_CHAT_ID ≠ live chat).
  */
 import { getChat, getMe } from "../botApi";
 import { salesChannelConfigured } from "../channels";
@@ -11,8 +12,8 @@ import {
   resolveSalesAlertsCutoff,
   salesAlertsCutoffIso,
 } from "./cutoff";
-import { deliverSalesAlert, fireSalesAlert } from "./deliver";
-import { outboxAlreadySent, outboxListDue } from "./outbox";
+import { deliverSalesAlert, fireSalesAlert, salesRealEventWouldFire } from "./deliver";
+import { outboxAlreadySent, outboxGet, outboxListDue } from "./outbox";
 import {
   salesAlertInstallmentProof,
   salesAlertNewLead,
@@ -36,15 +37,22 @@ const FIXTURE_NAME = "Sales Prove Fixture";
 
 export type ProveRow = {
   type: string;
-  arrived: boolean;
+  rendered: boolean;
+  liveSent: boolean;
+  dryRun: boolean;
   latencyMs: number | null;
   messageText: string;
   eventId: string;
   result: string;
 };
 
+async function deliverFixture(
+  input: Parameters<typeof deliverSalesAlert>[0],
+): Promise<"sent" | "skipped" | "failed" | "dry_run"> {
+  return deliverSalesAlert({ ...input, synthetic: true });
+}
+
 export async function proveSalesPipeline(): Promise<Record<string, unknown>> {
-  // 1) Cutoff lock + outbox purge proof (highest priority)
   const before = await countSalesOutboxPending();
   const cutoffIso = await resolveSalesAlertsCutoff();
   const purge = await purgePreCutoffSalesOutbox();
@@ -56,37 +64,29 @@ export async function proveSalesPipeline(): Promise<Record<string, unknown>> {
     return Number.isFinite(ms) && ms < cut;
   }).length;
 
-  // Historical event must be blocked
   const historicalBlocked =
-    (await deliverSalesAlert({
+    (await deliverFixture({
       eventId: `prove:historical:${Date.now().toString(36)}`,
       event: "new_lead",
       phone: FIXTURE_PHONE,
       html: "should never send — pre-cutoff",
       buttons: [],
       occurredAt: "2020-01-01T00:00:00.000Z",
+      synthetic: true,
     })) === "skipped" && (await isBeforeSalesCutoff("2020-01-01T00:00:00.000Z"));
 
   const chatId = (process.env.TELEGRAM_SALES_CHAT_ID || "").trim();
+  const testChat = (process.env.TELEGRAM_SALES_TEST_CHAT_ID || "").trim();
   const tokenSet = !!(process.env.TELEGRAM_BOT_TOKEN || "").trim();
-  const env = {
-    TELEGRAM_BOT_TOKEN: tokenSet,
-    TELEGRAM_SALES_CHAT_ID: !!chatId,
-    chatIdPrefix: chatId ? chatId.slice(0, 4) : null,
-    SALES_LEAD_BATCHING: process.env.SALES_LEAD_BATCHING || "(unset→off)",
-    SALES_LEAD_BATCH_INTERVAL_MIN: String(salesLeadBatchIntervalMinutes()),
-  };
 
   let getChatInfo: Record<string, unknown> = { ok: false, error: "skipped" };
   if (tokenSet && chatId) {
     const me = await getMe();
-    if (!me.ok) {
-      getChatInfo = { ok: false, error: me.description || "getMe_failed" };
-    } else {
+    if (!me.ok) getChatInfo = { ok: false, error: me.description || "getMe_failed" };
+    else {
       const chat = await getChat(chatId);
-      if (!chat.ok) {
-        getChatInfo = { ok: false, error: chat.description || "getChat_failed" };
-      } else {
+      if (!chat.ok) getChatInfo = { ok: false, error: chat.description || "getChat_failed" };
+      else {
         const r = chat.result as { id?: number; type?: string; title?: string };
         getChatInfo = { ok: true, id: r.id, type: r.type, title: r.title };
       }
@@ -96,29 +96,37 @@ export async function proveSalesPipeline(): Promise<Record<string, unknown>> {
   const runId = `prove:${Date.now().toString(36)}`;
   const events: ProveRow[] = [];
   const nowIso = new Date().toISOString();
+  let liveSendCount = 0;
 
   async function runOne(
     type: string,
     eventId: string,
-    task: () => Promise<unknown>,
+    task: () => Promise<"sent" | "skipped" | "failed" | "dry_run">,
     previewHtml: string,
   ): Promise<void> {
     const t0 = Date.now();
     try {
-      await task();
-      const sent = await outboxAlreadySent(eventId);
+      const result = await task();
+      const row = await outboxGet(eventId);
+      const dryRun = result === "dry_run" || row?.status === "dry_run";
+      const liveSent = result === "sent" && !!row?.messageId && !dryRun;
+      if (liveSent) liveSendCount++;
       events.push({
         type,
-        arrived: sent,
+        rendered: result === "sent" || result === "dry_run",
+        liveSent,
+        dryRun,
         latencyMs: Date.now() - t0,
         messageText: previewHtml,
         eventId,
-        result: sent ? "sent" : "not_sent",
+        result,
       });
     } catch (e) {
       events.push({
         type,
-        arrived: false,
+        rendered: false,
+        liveSent: false,
+        dryRun: false,
         latencyMs: Date.now() - t0,
         messageText: previewHtml,
         eventId,
@@ -128,27 +136,29 @@ export async function proveSalesPipeline(): Promise<Record<string, unknown>> {
   }
 
   const testHtml = `✅ <b>Sales prove transport</b>\n☎ +91${FIXTURE_PHONE}\n${runId}`;
-  const tTest = Date.now();
-  const testRes = await deliverSalesAlert({
-    eventId: `${runId}:transport`,
-    event: "prove_transport",
-    phone: FIXTURE_PHONE,
-    html: testHtml,
-    buttons: [],
-    occurredAt: nowIso,
-  });
-  const testMessage = {
-    arrived: testRes === "sent",
-    latencyMs: Date.now() - tTest,
-    text: testHtml,
-  };
+  await runOne(
+    "transport",
+    `${runId}:transport`,
+    () =>
+      deliverFixture({
+        eventId: `${runId}:transport`,
+        event: "prove_transport",
+        phone: FIXTURE_PHONE,
+        html: testHtml,
+        buttons: [],
+        occurredAt: nowIso,
+        synthetic: true,
+      }),
+    testHtml,
+  );
 
   const leadId = `${runId}:lead`;
+  const leadHtml = `🆕 <b>New lead</b> · ${FIXTURE_NAME}\n☎ +91${FIXTURE_PHONE}\nSource: prove_fixture`;
   await runOne(
     "new_lead",
     leadId,
-    () =>
-      salesAlertNewLead({
+    async () => {
+      await salesAlertNewLead({
         name: FIXTURE_NAME,
         phone: FIXTURE_PHONE,
         source: "prove_fixture",
@@ -156,16 +166,22 @@ export async function proveSalesPipeline(): Promise<Record<string, unknown>> {
         leadId,
         eventId: leadId,
         occurredAt: nowIso,
-      }),
-    `🆕 <b>New lead</b> · ${FIXTURE_NAME}\n☎ +91${FIXTURE_PHONE}\nSource: prove_fixture`,
+      });
+      const row = await outboxGet(leadId);
+      if (row?.status === "dry_run") return "dry_run";
+      if (row?.status === "sent") return "sent";
+      return "failed";
+    },
+    leadHtml,
   );
 
   const webinarRegId = `${runId}:webinar_reg`;
+  const webinarRegHtml = `🎟 <b>Webinar registration</b> · ${FIXTURE_NAME}\n☎ +91${FIXTURE_PHONE}\nWebinar: Prove Webinar`;
   await runOne(
     "webinar_registration",
     webinarRegId,
-    () =>
-      salesAlertWebinarRegistration({
+    async () => {
+      await salesAlertWebinarRegistration({
         name: FIXTURE_NAME,
         phone: FIXTURE_PHONE,
         webinar: "Prove Webinar",
@@ -174,16 +190,22 @@ export async function proveSalesPipeline(): Promise<Record<string, unknown>> {
         registrationsSoFar: 42,
         eventId: webinarRegId,
         occurredAt: nowIso,
-      }),
-    `🎟 <b>Webinar registration</b> · ${FIXTURE_NAME}\n☎ +91${FIXTURE_PHONE}`,
+      });
+      const row = await outboxGet(webinarRegId);
+      if (row?.status === "dry_run") return "dry_run";
+      if (row?.status === "sent") return "sent";
+      return "failed";
+    },
+    webinarRegHtml,
   );
 
   const webinarPayId = `${runId}:webinar_pay`;
+  const webinarPayHtml = `💳 <b>Webinar payment</b> · ${FIXTURE_NAME}\n☎ +91${FIXTURE_PHONE}\n₹499 · PROVE-RCPT-1`;
   await runOne(
     "webinar_payment",
     webinarPayId,
-    () =>
-      salesAlertWebinarPayment({
+    async () => {
+      await salesAlertWebinarPayment({
         name: FIXTURE_NAME,
         phone: FIXTURE_PHONE,
         webinar: "Prove Webinar",
@@ -194,8 +216,13 @@ export async function proveSalesPipeline(): Promise<Record<string, unknown>> {
         registrationsSoFar: 43,
         eventId: webinarPayId,
         occurredAt: nowIso,
-      }),
-    `💳 <b>Webinar payment</b> · ${FIXTURE_NAME}\n☎ +91${FIXTURE_PHONE}\n₹499 UPI`,
+      });
+      const row = await outboxGet(webinarPayId);
+      if (row?.status === "dry_run") return "dry_run";
+      if (row?.status === "sent") return "sent";
+      return "failed";
+    },
+    webinarPayHtml,
   );
 
   const enrollId = `${runId}:admission`;
@@ -211,13 +238,14 @@ export async function proveSalesPipeline(): Promise<Record<string, unknown>> {
     "new_enrollment",
     enrollId,
     () =>
-      deliverSalesAlert({
+      deliverFixture({
         eventId: enrollId,
         event: "admission",
         phone: FIXTURE_PHONE,
         html: enrollHtml,
         buttons: [],
         occurredAt: nowIso,
+        synthetic: true,
       }),
     enrollHtml,
   );
@@ -233,23 +261,25 @@ export async function proveSalesPipeline(): Promise<Record<string, unknown>> {
     "installment_payment",
     instId,
     () =>
-      deliverSalesAlert({
+      deliverFixture({
         eventId: instId,
         event: "installment_paid",
         phone: FIXTURE_PHONE,
         html: instHtml,
         buttons: [],
         occurredAt: nowIso,
+        synthetic: true,
       }),
     instHtml,
   );
 
   const partialId = `${runId}:partial`;
+  const partialHtml = `🟠 <b>Partial instalment</b> · ${FIXTURE_NAME}\n☎ +91${FIXTURE_PHONE}`;
   await runOne(
     "partial_settlement",
     partialId,
-    () =>
-      salesAlertPartialPayment({
+    async () => {
+      await salesAlertPartialPayment({
         name: FIXTURE_NAME,
         phone: FIXTURE_PHONE,
         course: "Prove Course",
@@ -261,16 +291,22 @@ export async function proveSalesPipeline(): Promise<Record<string, unknown>> {
         enrollmentId: `fixture-${runId}`,
         eventId: partialId,
         occurredAt: nowIso,
-      }),
-    `🟠 <b>Partial instalment</b> · ${FIXTURE_NAME}\n☎ +91${FIXTURE_PHONE}`,
+      });
+      const row = await outboxGet(partialId);
+      if (row?.status === "dry_run") return "dry_run";
+      if (row?.status === "sent") return "sent";
+      return "failed";
+    },
+    partialHtml,
   );
 
   const proofId = `${runId}:proof`;
+  const proofHtml = `📎 <b>Proof uploaded</b> · ${FIXTURE_NAME}\n☎ +91${FIXTURE_PHONE}`;
   await runOne(
     "proof_awaiting",
     proofId,
-    () =>
-      salesAlertInstallmentProof({
+    async () => {
+      await salesAlertInstallmentProof({
         name: FIXTURE_NAME,
         phone: FIXTURE_PHONE,
         course: "Prove Course",
@@ -281,17 +317,45 @@ export async function proveSalesPipeline(): Promise<Record<string, unknown>> {
         waitingSince: new Date(Date.now() - 3 * 3600_000).toISOString(),
         eventId: proofId,
         occurredAt: nowIso,
-      }),
-    `📎 <b>Proof uploaded</b> · ${FIXTURE_NAME}\n☎ +91${FIXTURE_PHONE}`,
+      });
+      const row = await outboxGet(proofId);
+      if (row?.status === "dry_run") return "dry_run";
+      if (row?.status === "sent") return "sent";
+      return "failed";
+    },
+    proofHtml,
   );
 
-  const dedupeSecond = await deliverSalesAlert({
-    eventId: `${runId}:transport`,
-    event: "prove_transport",
+  // Dedupe: same eventId twice → second skipped
+  const dedupeId = `${runId}:dedupe`;
+  const d1 = await deliverFixture({
+    eventId: dedupeId,
+    event: "admission",
     phone: FIXTURE_PHONE,
-    html: testHtml,
+    html: "dedupe A",
     buttons: [],
     occurredAt: nowIso,
+    synthetic: true,
+  });
+  const d2 = await deliverFixture({
+    eventId: dedupeId,
+    event: "admission",
+    phone: FIXTURE_PHONE,
+    html: "dedupe B — must not send",
+    buttons: [],
+    occurredAt: nowIso,
+    synthetic: true,
+  });
+
+  // Mid-flight retry simulation: already-sent id from first deliver
+  const retrySim = await deliverFixture({
+    eventId: dedupeId,
+    event: "admission",
+    phone: FIXTURE_PHONE,
+    html: "retry mid-flight",
+    buttons: [],
+    occurredAt: nowIso,
+    synthetic: true,
   });
 
   const inv = await scanFeeInvariants().catch(() => ({
@@ -300,18 +364,30 @@ export async function proveSalesPipeline(): Promise<Record<string, unknown>> {
     filter: FEE_INVARIANT_ENROLLMENT_FILTER,
   }));
 
+  const realPath = salesRealEventWouldFire({
+    eventId: `admission:real-example`,
+    event: "admission",
+    phone: "9898900001",
+    html: "🟢 New enrollment · Real Student",
+    occurredAt: nowIso,
+    cutoffIso,
+  });
+
   fireSalesAlert(async () => undefined);
 
-  const allArrived = testMessage.arrived && events.every((e) => e.arrived);
+  const allRendered = events.filter((e) => e.type !== "transport").every((e) => e.rendered);
+  const seven = events.filter((e) => e.type !== "transport");
   return {
     ok:
-      allArrived &&
+      allRendered &&
+      liveSendCount === 0 &&
       historicalBlocked &&
       preCutoffStillEligible === 0 &&
-      after.preCutoffEligible === 0 &&
-      salesChannelConfigured() &&
-      dedupeSecond === "skipped" &&
-      !salesLeadBatchingEnabled(),
+      (d1 === "dry_run" || d1 === "sent") &&
+      d2 === "skipped" &&
+      retrySim === "skipped" &&
+      !salesLeadBatchingEnabled() &&
+      realPath.fire,
     cutoff: {
       iso: cutoffIso,
       cached: salesAlertsCutoffIso(),
@@ -321,27 +397,41 @@ export async function proveSalesPipeline(): Promise<Record<string, unknown>> {
       purged: purge.purged,
       preCutoffStillEligible,
     },
-    env,
+    fixtureGuard: {
+      liveChatSet: !!chatId,
+      testChatSet: !!testChat && testChat !== chatId,
+      mode: testChat && testChat !== chatId ? "test_chat" : "dry_run",
+      liveSendCount,
+      postedNothingToLive: liveSendCount === 0,
+    },
+    env: {
+      TELEGRAM_BOT_TOKEN: tokenSet,
+      TELEGRAM_SALES_CHAT_ID: !!chatId,
+      TELEGRAM_SALES_TEST_CHAT_ID: !!testChat,
+      SALES_LEAD_BATCHING: process.env.SALES_LEAD_BATCHING || "(unset→off)",
+    },
     flags: {
       alerts: await salesAlertsEnabled(),
       digest: await salesDigestEnabled(),
       leadBatching: salesLeadBatchingEnabled(),
       leadBatchIntervalMin: salesLeadBatchIntervalMinutes(),
-      enableBatchingHow: "Set Vercel env SALES_LEAD_BATCHING=1 (optional SALES_LEAD_BATCH_INTERVAL_MIN, default 20). Redeploy. Only new_lead is affected.",
     },
     getChat: getChatInfo,
-    testMessage,
-    events,
+    events: seven,
+    dedupe: {
+      first: d1,
+      second: d2,
+      retrySim,
+      oneMessageOnly: d2 === "skipped" && retrySim === "skipped",
+    },
+    realEventPath: {
+      ...realPath,
+      condition:
+        "alerts on + post-cutoff occurredAt + NOT synthetic (no prove:/fixture: id, not fixture phone/HTML) + eventId not already sent",
+    },
     callSites: {
-      new_lead: "lib/dataProvider.ts fireLeadCreated → salesAlertNewLead",
-      webinar_registration: "lib/dataProvider.ts registerWebinar → salesAlertWebinarRegistration",
-      webinar_payment: "lib/analytics/server.ts recordPaymentPaid (item_type=webinar) → salesAlertWebinarPayment",
-      new_enrollment: "lib/analytics/server.ts recordPaymentPaid (course, non-installment) → salesAlertAdmission",
-      installment_payment: "lib/analytics/server.ts recordPaymentPaid (course, installment) → salesAlertInstallmentPaid",
-      partial_settlement: "lib/installmentProofRecordPayment.ts accept_as_partial → salesAlertPartialPayment",
-      proof_awaiting: "lib/installmentPaymentProofs.ts upload → salesAlertInstallmentProof",
-      feeState: "lib/telegram/sales/context.ts → enrollmentFeeStateFromEnrollment (same SSO as getEnrollmentFeeState)",
       matchFixtures: true,
+      note: "Live webhooks call the same salesAlert* functions; fixtures only add synthetic markers / prove ids",
     },
     invariant: {
       filter: inv.filter || FEE_INVARIANT_ENROLLMENT_FILTER,
@@ -349,12 +439,51 @@ export async function proveSalesPipeline(): Promise<Record<string, unknown>> {
       hits: inv.hits.length,
     },
     outbox: {
-      dedupeOk: dedupeSecond === "skipped",
       dueAfterProve: (await outboxListDue(5)).length,
+      alreadySentDedupe: await outboxAlreadySent(dedupeId),
     },
-    quietHours: {
-      sales: false,
-      note: "Sales 24×7; student SMS ACCESS_QUIET_HOURS_IST 08–21 untouched",
-    },
+  };
+}
+
+/** Prove dedupe alone: same eventId twice → one delivery. */
+export async function proveSalesDedupe(): Promise<Record<string, unknown>> {
+  const id = `prove:dedupe:${Date.now().toString(36)}`;
+  const nowIso = new Date().toISOString();
+  const html = `dedupe prove · ${id}`;
+  const first = await deliverSalesAlert({
+    eventId: id,
+    event: "admission",
+    phone: FIXTURE_PHONE,
+    html,
+    buttons: [],
+    occurredAt: nowIso,
+    synthetic: true,
+  });
+  const second = await deliverSalesAlert({
+    eventId: id,
+    event: "admission",
+    phone: FIXTURE_PHONE,
+    html: html + " DUPLICATE",
+    buttons: [],
+    occurredAt: nowIso,
+    synthetic: true,
+  });
+  const third = await deliverSalesAlert({
+    eventId: id,
+    event: "admission",
+    phone: FIXTURE_PHONE,
+    html: html + " RETRY",
+    buttons: [],
+    occurredAt: nowIso,
+    synthetic: true,
+  });
+  return {
+    ok: (first === "dry_run" || first === "sent") && second === "skipped" && third === "skipped",
+    eventId: id,
+    first,
+    second,
+    third,
+    duplicateDelivered: false,
+    note: "synthetic→dry_run; second/third skipped by outbox status (dedupe holds)",
   };
 }

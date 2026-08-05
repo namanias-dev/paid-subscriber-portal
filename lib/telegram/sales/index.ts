@@ -20,7 +20,10 @@ export {
   flushSalesQueuedAlerts,
   sweepSalesOutbox,
 } from "./send";
-export { proveSalesPipeline } from "./prove";
+export { proveSalesPipeline, proveSalesDedupe } from "./prove";
+export { purgeFixtureSalesMessages, listFixtureSalesOutbox, isSalesFixturePayload } from "./purgeFixtures";
+export { reportUnpaidInvariantGap } from "./unpaidGapReport";
+export { salesRealEventWouldFire } from "./deliver";
 export { runSalesDigestIfDue, buildSalesDigestHtml, salesDigestDueNow } from "./digest";
 export { sweepCheckoutAbandoned, fireAbandonSweep } from "./abandoned";
 export {

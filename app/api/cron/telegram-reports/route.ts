@@ -86,6 +86,37 @@ async function run(req: Request) {
       return NextResponse.json({ ok: prove.ok, prove, ts: Date.now() });
     }
 
+    if (action === "sales_purge_fixtures") {
+      const { listFixtureSalesOutbox, purgeFixtureSalesMessages } = await import(
+        "@/lib/telegram/sales/purgeFixtures"
+      );
+      const intended = await listFixtureSalesOutbox();
+      const purge = await purgeFixtureSalesMessages();
+      return NextResponse.json({
+        ok: purge.summary.failed === 0,
+        intendedCount: intended.length,
+        intended: purge.intended.map((i) => ({
+          messageId: i.messageId,
+          eventId: i.eventId,
+          html: i.html.slice(0, 200),
+        })),
+        purge,
+        ts: Date.now(),
+      });
+    }
+
+    if (action === "sales_prove_dedupe") {
+      const { proveSalesDedupe } = await import("@/lib/telegram/sales/prove");
+      const dedupe = await proveSalesDedupe();
+      return NextResponse.json({ ok: dedupe.ok, dedupe, ts: Date.now() });
+    }
+
+    if (action === "sales_unpaid_gap") {
+      const { reportUnpaidInvariantGap } = await import("@/lib/telegram/sales/unpaidGapReport");
+      const gap = await reportUnpaidInvariantGap();
+      return NextResponse.json({ ok: true, gap, ts: Date.now() });
+    }
+
     if (action === "sales_digest") {
       const salesMod = await import("@/lib/telegram/sales");
       const digest = await salesMod.runSalesDigestIfDue({ force: true });

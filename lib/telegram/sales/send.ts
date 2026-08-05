@@ -109,7 +109,7 @@ async function deliverOrQueue(input: {
   html: string;
   buttons: { label: string; url: string }[];
   occurredAt?: string | Date | null;
-}): Promise<"sent" | "skipped" | "failed"> {
+}): Promise<"sent" | "skipped" | "failed" | "dry_run"> {
   return deliverSalesAlert(input);
 }
 

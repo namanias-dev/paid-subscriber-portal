@@ -6,7 +6,7 @@
 import { getSupabaseAdmin } from "../../supabase";
 import { tgLog } from "../log";
 
-export type SalesOutboxStatus = "pending" | "sent" | "failed" | "skipped";
+export type SalesOutboxStatus = "pending" | "sent" | "failed" | "skipped" | "dry_run";
 
 export interface SalesOutboxRow {
   eventId: string;
@@ -19,6 +19,7 @@ export interface SalesOutboxRow {
   lastError: string | null;
   createdAt: string;
   updatedAt: string;
+  messageId?: number | null;
 }
 
 function slotKey(eventId: string): string {
@@ -61,10 +62,10 @@ export async function outboxUpsert(row: SalesOutboxRow): Promise<void> {
     );
 }
 
-/** True if this eventId already sent (dedupe). */
+/** True if this eventId already sent (dedupe) or dry-ran. */
 export async function outboxAlreadySent(eventId: string): Promise<boolean> {
   const row = await outboxGet(eventId);
-  return row?.status === "sent";
+  return row?.status === "sent" || row?.status === "dry_run";
 }
 
 export async function outboxMarkSent(eventId: string, messageId: number | null): Promise<void> {
@@ -81,7 +82,7 @@ export async function outboxMarkSent(eventId: string, messageId: number | null):
     lastError: null,
     createdAt: prev?.createdAt || now,
     updatedAt: now,
-    ...(messageId != null ? { messageId } as unknown as object : {}),
+    messageId: messageId ?? null,
   });
 }
 
