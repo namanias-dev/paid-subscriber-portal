@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight, X, ZoomIn, ZoomOut } from "lucide-react";
 import { useToast } from "@/components/ui/Toast";
 import { formatINR, formatISTDate, istTodayYMD } from "@/lib/dates";
+import { recommendPartialAccept } from "@/lib/partialSettlement";
 import type { InstallmentProofFileMeta, InstallmentProofStatus } from "@/lib/installmentProofTypes";
 
 interface ProofDetail {
@@ -95,6 +96,9 @@ export default function InstallmentProofReviewPanel({
   const [confirmDate, setConfirmDate] = useState("");
   const [confirmUtr, setConfirmUtr] = useState("");
   const [seenProof, setSeenProof] = useState(false);
+  const [partialDecision, setPartialDecision] = useState<"accept_as_partial" | "record_keep_open">(
+    "record_keep_open",
+  );
 
   const loadProof = useCallback(async () => {
     setLoading(true);
@@ -203,6 +207,11 @@ export default function InstallmentProofReviewPanel({
     setConfirmUtr(preview.claimed.utr || "");
     setSeenProof(false);
     setShowReject(false);
+    const rec = recommendPartialAccept({
+      lineAmount: preview.expected.amount || 0,
+      amountReceived: preview.claimed.amount || defaultAmount,
+    });
+    setPartialDecision(rec.recommend ? "accept_as_partial" : "record_keep_open");
     setShowConfirm(true);
   }
 
@@ -230,6 +239,8 @@ export default function InstallmentProofReviewPanel({
       return;
     }
     setBusy("approve_record");
+    const expectedAmt = preview?.expected.amount || 0;
+    const isPartial = expectedAmt > 0 && amountNum > 0 && amountNum < expectedAmt;
     const { ok, error: err, alreadyRecorded, alreadyPaidSuperseded } = await postAction({
       action: "approve_record",
       proof_id: proofId,
@@ -237,6 +248,7 @@ export default function InstallmentProofReviewPanel({
       payment_date: confirmDate,
       reference_utr: confirmUtr.trim() || null,
       seen_proof: true,
+      decision: isPartial ? partialDecision : "record_keep_open",
     });
     setBusy(null);
     if (ok) {
@@ -460,6 +472,64 @@ export default function InstallmentProofReviewPanel({
                     />
                     <span>I have seen proof of this payment</span>
                   </label>
+
+                  {preview &&
+                    Number(confirmAmount) > 0 &&
+                    preview.expected.amount > 0 &&
+                    Number(confirmAmount) < preview.expected.amount && (
+                      <fieldset className="rounded-lg border border-amber-200 bg-amber-50/60 p-3 text-sm">
+                        <legend className="px-1 text-xs font-semibold uppercase tracking-wide text-amber-900">
+                          Partial payment decision
+                        </legend>
+                        {(() => {
+                          const rec = recommendPartialAccept({
+                            lineAmount: preview.expected.amount,
+                            amountReceived: Number(confirmAmount),
+                          });
+                          return (
+                            <p className="mb-2 text-xs text-ink2">
+                              {rec.pctOfLine}% of instalment
+                              {rec.recommend
+                                ? ` · recommendation: accept as partial (≥${rec.thresholdPct}%) — never auto-applied`
+                                : ` · below ${rec.thresholdPct}% threshold — keep open recommended`}
+                            </p>
+                          );
+                        })()}
+                        <label className="flex items-start gap-2 py-1">
+                          <input
+                            type="radio"
+                            name="partial-decision"
+                            checked={partialDecision === "accept_as_partial"}
+                            onChange={() => setPartialDecision("accept_as_partial")}
+                            className="mt-1"
+                          />
+                          <span>
+                            <b>A — Accept as partial</b>
+                            <span className="block text-xs text-muted">
+                              Allocate payment and carry shortfall to the next instalment
+                            </span>
+                          </span>
+                        </label>
+                        <label className="flex items-start gap-2 py-1">
+                          <input
+                            type="radio"
+                            name="partial-decision"
+                            checked={partialDecision === "record_keep_open"}
+                            onChange={() => setPartialDecision("record_keep_open")}
+                            className="mt-1"
+                          />
+                          <span>
+                            <b>B — Record but keep open</b>
+                            <span className="block text-xs text-muted">
+                              Allocate money; leave residual on this instalment (no carry)
+                            </span>
+                          </span>
+                        </label>
+                        <p className="mt-1 text-xs text-muted">
+                          C — Reject is the Reject button (typed reason required). Actor + timestamp are logged.
+                        </p>
+                      </fieldset>
+                    )}
                 </div>
               )}
 

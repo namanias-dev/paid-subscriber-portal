@@ -12,6 +12,7 @@ import {
   findStudentByPhone,
 } from "./dataProvider";
 import { lectureAccessForCourse } from "./entitlements";
+import { enrollmentFeeStateFromEnrollment } from "./enrollmentFeeState";
 import { nextUnpaidDatedLine, unpaidDatedLines } from "./accessAtRisk";
 import { activeAccessGrant } from "./sms/accessReminderService";
 import { istWholeDaysUntil } from "./sms/accessDays";
@@ -207,8 +208,8 @@ export async function buildInstallmentProofPrompt(
             : null;
 
     const payHref = `/portal/course/${e.id}?installment=${unpaid.no}`;
-    const pctPaid =
-      e.total_fee > 0 ? Math.min(100, Math.max(0, Math.round(((e.amount_paid || 0) / e.total_fee) * 100))) : null;
+    const fee = enrollmentFeeStateFromEnrollment(e, now);
+    const pctPaid = fee.progressPct;
 
     if (pending) {
       cands.push({

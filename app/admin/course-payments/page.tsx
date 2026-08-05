@@ -35,7 +35,7 @@ type FeeFilter = "all" | "paid" | "outstanding" | "overdue";
 function matchesFeeFilter(e: CourseEnrollment, f: FeeFilter): boolean {
   if (f === "all") return true;
   if (f === "overdue") return deriveEnrollment(e).hasOverdue;
-  const remaining = Math.max(0, e.total_fee - e.amount_paid);
+  const remaining = deriveEnrollment(e).remaining;
   if (f === "paid") return remaining <= 0;
   if (f === "outstanding") return remaining > 0;
   return true;
@@ -90,8 +90,8 @@ function summarize(
   capacity: number | null,
 ): CohortSummary {
   const totalFees = list.reduce((a, e) => a + e.total_fee, 0);
-  const coll = list.reduce((a, e) => a + e.amount_paid, 0);
-  const remaining = list.reduce((a, e) => a + Math.max(0, e.total_fee - e.amount_paid), 0);
+  const coll = list.reduce((a, e) => a + deriveEnrollment(e).paid, 0);
+  const remaining = list.reduce((a, e) => a + deriveEnrollment(e).remaining, 0);
   const courseTitle = list[0]?.course_title || fallbackTitle;
   return {
     courseId,
@@ -119,10 +119,10 @@ export default function CoursePaymentsAdmin() {
   const courses = useAdminData<Course[]>("/api/admin/courses", "courses");
   if (enr.loading) return <LoadingBlock />;
 
-  // Only show confirmed enrollments (seat or full paid); ignore abandoned drafts.
+  // Existence gate only — amount_paid > 0 means "ever paid something"; money math uses fee state.
   const all = (enr.data || []).filter((e) => e.amount_paid > 0 && e.status !== "cancelled");
-  const courseFeesCollected = all.reduce((a, e) => a + e.amount_paid, 0);
-  const outstanding = all.reduce((a, e) => a + Math.max(0, e.total_fee - e.amount_paid), 0);
+  const courseFeesCollected = all.reduce((a, e) => a + deriveEnrollment(e).paid, 0);
+  const outstanding = all.reduce((a, e) => a + deriveEnrollment(e).remaining, 0);
   // Counts share the SAME predicate as the table filter → guaranteed reconciliation.
   const paidCount = all.filter((e) => matchesFeeFilter(e, "paid")).length;
   const outstandingCount = all.filter((e) => matchesFeeFilter(e, "outstanding")).length;

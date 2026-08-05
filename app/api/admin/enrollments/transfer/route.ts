@@ -4,6 +4,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { getCourseEnrollmentById, getAllCourses } from "@/lib/dataProvider";
 import { planTransfer, transferIsPermitted } from "@/lib/enrollmentTransfer";
+import { enrollmentFeeStateFromEnrollment } from "@/lib/enrollmentFeeState";
 import { buildBatchLabel, batchTimings } from "@/lib/installments";
 import type { Course } from "@/lib/types";
 
@@ -73,6 +74,7 @@ export async function POST(req: Request) {
   const { enrollment, courses, sourceCourse, targetCourse } = ctx;
 
   // Step 1 + step 2 data: the current state, and what may be chosen.
+  const fee = enrollmentFeeStateFromEnrollment(enrollment);
   const shell = {
     ok: true as const,
     current: {
@@ -85,8 +87,8 @@ export async function POST(req: Request) {
       status: enrollment.status,
       planType: enrollment.plan_type,
       totalFee: enrollment.total_fee,
-      amountPaid: enrollment.amount_paid,
-      outstanding: Math.max(0, (enrollment.total_fee || 0) - (enrollment.amount_paid || 0)),
+      amountPaid: fee.netPaid,
+      outstanding: fee.outstanding,
       schedule: enrollment.schedule ?? [],
       createdAt: enrollment.created_at,
     },

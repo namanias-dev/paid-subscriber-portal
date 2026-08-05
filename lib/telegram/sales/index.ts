@@ -12,6 +12,7 @@ export {
   salesAlertWebinarProof,
   salesAlertAdmission,
   salesAlertInstallmentPaid,
+  salesAlertPartialPayment,
   salesAlertPaymentSucceeded,
   flushSalesQueuedAlerts,
 } from "./send";

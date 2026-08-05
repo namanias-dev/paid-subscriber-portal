@@ -9,9 +9,9 @@
  * money (partial proof approval that left status=cancelled). True cancels
  * (cancelled + no money) are excluded.
  *
- * Phase 1: carriedIn/carriedOut are always 0 (carry-forward writes are Phase 2).
- * partially_paid lines are NOT next-payable (Pay now targets the next open line)
- * but their remaining still sits in enrollment outstanding until Phase 2 carry.
+ * Carry-forward: `carried_in` / `carried_out` are adjustment rows on the line —
+ * never mutate the next installment's base `amount`. remaining =
+ * max(0, original + carriedIn − allocated − carriedOut).
  */
 import type { CourseEnrollment, InstallmentItem, InstallmentLineStatus } from "./types";
 
@@ -29,7 +29,7 @@ export interface EnrollmentFeeLineState {
   no: number;
   kind: InstallmentItem["kind"];
   label: string;
-  /** Original plan amount (never mutated by carry in Phase 1). */
+  /** Original plan amount (never mutated by carry). */
   original: number;
   allocated: number;
   carriedIn: number;
@@ -73,6 +73,14 @@ export interface EnrollmentFeeState {
   hasOverdue: boolean;
 }
 
+function lineCarriedIn(line: Pick<InstallmentItem, "carried_in">): number {
+  return Math.max(0, Math.round(Number(line.carried_in) || 0));
+}
+
+function lineCarriedOut(line: Pick<InstallmentItem, "carried_out">): number {
+  return Math.max(0, Math.round(Number(line.carried_out) || 0));
+}
+
 /** Money already applied to a schedule line (full or partial). */
 export function lineAllocatedAmount(line: Pick<InstallmentItem, "paid" | "amount" | "paid_amount" | "status">): number {
   if (line.status === "waived") return 0;
@@ -86,31 +94,56 @@ export function isTrueCancelledLine(line: Pick<InstallmentItem, "status" | "paid
   return lineAllocatedAmount(line) <= 0;
 }
 
+export function lineRemainingAmount(
+  line: Pick<InstallmentItem, "paid" | "amount" | "paid_amount" | "status" | "carried_in" | "carried_out">,
+): number {
+  if (line.paid || line.status === "paid" || line.status === "waived") return 0;
+  if (isTrueCancelledLine(line)) return 0;
+  const original = Math.max(0, Number(line.amount) || 0);
+  const allocated = lineAllocatedAmount(line);
+  return Math.max(0, original + lineCarriedIn(line) - allocated - lineCarriedOut(line));
+}
+
 /**
- * Partial settlement: money received but line not fully closed.
- * Heals cancelled-with-money (proof path bug) into partially_paid for READS only.
+ * Partial settlement: money received but line not fully closed as paid=true.
+ * Heals cancelled-with-money into partially_paid for READS. After carry-out
+ * closes remaining, status stays partially_paid with remaining 0.
  */
-export function isLinePartiallyPaid(line: Pick<InstallmentItem, "paid" | "amount" | "paid_amount" | "status">): boolean {
+export function isLinePartiallyPaid(
+  line: Pick<InstallmentItem, "paid" | "amount" | "paid_amount" | "status" | "carried_in" | "carried_out">,
+): boolean {
   if (line.paid) return false;
   if (line.status === "waived") return false;
   if (line.status === "partially_paid") return true;
   const allocated = lineAllocatedAmount(line);
-  const amount = Math.max(0, Number(line.amount) || 0);
-  if (allocated <= 0 || amount <= 0) return false;
-  return allocated < amount;
+  if (allocated <= 0) return false;
+  const original = Math.max(0, Number(line.amount) || 0);
+  const target = original + lineCarriedIn(line);
+  if (allocated < target) return true;
+  // Allocated covers base but carried_out closed the rest without paid=true.
+  return lineCarriedOut(line) > 0;
 }
 
 /**
- * Still chasing this line for next-pay / overdue / access sequencing.
- * partially_paid is settled for sequencing (Phase 1); shortfall stays in outstanding.
+ * Still chasing this line for next-pay / overdue sequencing.
+ * partially_paid (even with residual before carry) is not the Pay-now target;
+ * after carry-out remaining is 0 and the next open line is chased.
  */
-export function isFeeLineOutstanding(line: Pick<InstallmentItem, "paid" | "status" | "amount" | "paid_amount">): boolean {
-  if (line.paid) return false;
-  if (line.status === "waived") return false;
+export function isFeeLineOutstanding(
+  line: Pick<InstallmentItem, "paid" | "status" | "amount" | "paid_amount" | "carried_in" | "carried_out">,
+): boolean {
+  if (line.paid || line.status === "waived") return false;
   if (isTrueCancelledLine(line)) return false;
+  if (line.status === "cancelled" && lineAllocatedAmount(line) <= 0) return false;
   if (isLinePartiallyPaid(line)) return false;
-  if (line.status === "cancelled") return false;
-  return true;
+  return lineRemainingAmount(line) > 0;
+}
+
+/** Alias — next-pay / ladder / AAR use the same open-line rule. */
+export function isFeeLineSequencingOpen(
+  line: Pick<InstallmentItem, "paid" | "status" | "amount" | "paid_amount" | "carried_in" | "carried_out">,
+): boolean {
+  return isFeeLineOutstanding(line);
 }
 
 function resolveLineStatus(line: InstallmentItem, now: number): FeeLineStatus {
@@ -149,20 +182,22 @@ export function enrollmentFeeStateFromEnrollment(
   const instalments: EnrollmentFeeLineState[] = schedule.map((line) => {
     const original = Math.max(0, Number(line.amount) || 0);
     const allocated = lineAllocatedAmount(line);
+    const carriedIn = lineCarriedIn(line);
+    const carriedOut = lineCarriedOut(line);
     const status = resolveLineStatus(line, now);
     const hidden = status === "cancelled" && allocated <= 0;
     const remaining =
       status === "paid" || status === "waived" || hidden
         ? 0
-        : Math.max(0, original - allocated);
+        : Math.max(0, original + carriedIn - allocated - carriedOut);
     return {
       no: line.no,
       kind: line.kind,
       label: line.label,
       original,
       allocated,
-      carriedIn: 0,
-      carriedOut: 0,
+      carriedIn,
+      carriedOut,
       remaining,
       status,
       dueDate: line.due,
@@ -189,7 +224,6 @@ export function enrollmentFeeStateFromEnrollment(
   const visibleInstallments = instalments.filter(
     (l) => l.kind === "installment" && !l.hidden && l.status !== "waived",
   );
-  // Treat legacy-labeled installment lines as plan installments when they are the seat substitute.
   const planInstallments = visibleInstallments.filter((l) => !/legacy|pre-portal/i.test(l.label));
   const paidCount = planInstallments.filter((l) => l.status === "paid").length;
   const installmentTotal = planInstallments.length;
@@ -197,10 +231,7 @@ export function enrollmentFeeStateFromEnrollment(
   const seatLines = instalments.filter((l) => l.kind === "seat" && l.status === "paid");
   const seatPaidAmount = seatLines.reduce((a, l) => a + l.allocated, 0);
 
-  const nextIdx = schedule.findIndex((line, i) => {
-    const st = instalments[i]!;
-    return !st.hidden && isFeeLineOutstanding(line);
-  });
+  const nextIdx = schedule.findIndex((line) => isFeeLineSequencingOpen(line));
   const nextLine = nextIdx >= 0 ? schedule[nextIdx]! : null;
   const nextState = nextIdx >= 0 ? instalments[nextIdx]! : null;
 
@@ -210,8 +241,8 @@ export function enrollmentFeeStateFromEnrollment(
           n: nextLine.no,
           label: nextLine.label,
           baseAmount: nextState.original,
-          carriedIn: 0,
-          amountDue: nextState.remaining > 0 ? nextState.remaining : nextState.original,
+          carriedIn: nextState.carriedIn,
+          amountDue: nextState.remaining > 0 ? nextState.remaining : nextState.original + nextState.carriedIn,
           dueDate: nextLine.due,
           kind: nextLine.kind,
         }
@@ -220,7 +251,6 @@ export function enrollmentFeeStateFromEnrollment(
   const nextPayableItem: InstallmentItem | null = nextLine
     ? {
         ...nextLine,
-        // Surface amountDue for gateway/UI that still read `.amount` on nextPayable.
         amount: nextDueInstalment?.amountDue ?? nextLine.amount,
         status: (nextState?.status === "partially_paid"
           ? "partially_paid"
@@ -229,7 +259,7 @@ export function enrollmentFeeStateFromEnrollment(
     : null;
 
   const hasOverdue = instalments.some(
-    (l) => l.status === "overdue" && !l.hidden,
+    (l) => l.status === "overdue" && !l.hidden && l.remaining > 0,
   );
 
   return {

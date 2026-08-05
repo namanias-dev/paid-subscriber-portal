@@ -101,7 +101,7 @@ export default function DuplicateEnrollmentsPage() {
 
                 <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                   {g.enrollments.map((e) => {
-                    const outstanding = Math.max(0, e.total_fee - e.amount_paid);
+                    const outstanding = e.outstanding;
                     const isKeep = selectedKeep === e.id;
                     return (
                       <label key={e.id} className={`cursor-pointer rounded-xl border-2 p-3 text-sm transition ${isKeep ? "border-primary bg-primary/5" : "border-line"}`}>

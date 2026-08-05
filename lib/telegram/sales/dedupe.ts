@@ -14,6 +14,7 @@ export type SalesEventType =
   | "webinar_proof_uploaded"
   | "admission"
   | "installment_paid"
+  | "installment_partial"
   | "payment_succeeded";
 
 const RATE_LIMIT_PER_MIN = 8;

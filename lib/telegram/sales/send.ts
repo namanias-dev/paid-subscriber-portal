@@ -444,6 +444,47 @@ export async function salesAlertInstallmentPaid(input: {
   });
 }
 
+/** Partial payment with shortfall carried to next instalment — full phone. */
+export async function salesAlertPartialPayment(input: {
+  name: string;
+  phone: string;
+  course: string;
+  amountPaid: number;
+  shortfallCarried: number;
+  nextAmount: number;
+  nextDue?: string | null;
+  installmentNo?: number | null;
+  studentId?: string | null;
+  enrollmentId?: string | null;
+  enrollment?: CourseEnrollment | null;
+}): Promise<void> {
+  const link = adminStudentDeepLink({ studentId: input.studentId, phone: input.phone });
+  const paid = optionalSalesInr(input.amountPaid);
+  const shortfall = optionalSalesInr(input.shortfallCarried);
+  const nextAmt = optionalSalesInr(input.nextAmount);
+  const nextDue = compactDate(input.nextDue);
+  const html = [
+    `🟠 <b>Partial instalment</b> · ${escapeHtml(input.name || "Student")}`,
+    phoneLine(input.phone),
+    clean(input.course) ? `Course: ${escapeHtml(input.course)}` : null,
+    input.installmentNo != null ? `Instalment ${input.installmentNo}` : null,
+    paid ? `Paid: ${paid}` : null,
+    shortfall ? `Shortfall carried: ${shortfall}` : null,
+    nextAmt
+      ? `Next due: ${nextAmt}${nextDue ? ` on ${escapeHtml(nextDue)}` : ""}`
+      : null,
+    formatIstShort(new Date()),
+  ]
+    .filter(Boolean)
+    .join("\n");
+  await deliverOrQueue({
+    event: "installment_partial",
+    phone: input.phone,
+    html,
+    buttons: [{ label: "Open in admin", url: link }],
+  });
+}
+
 export async function salesAlertPaymentSucceeded(input: {
   name: string;
   phone: string;

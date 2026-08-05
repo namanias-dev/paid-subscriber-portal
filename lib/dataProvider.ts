@@ -1,5 +1,7 @@
 import { cache } from "react";
 import { getSupabaseAdmin, getSupabasePublic } from "./supabase";
+import { syncAmountPaidFromFeeState } from "./amountPaidCache";
+import { enrollmentFeeStateFromEnrollment } from "./enrollmentFeeState";
 import * as mock from "./mockData";
 import { computeExpiry, isExpired, isExpiringSoon, yesterdayISODate, todayISODate, formatINR, formatISTDate } from "./dates";
 import { generateAccessCode } from "./codeGenerator";
@@ -4577,6 +4579,8 @@ export async function finalizeCoursePaymentByReference(
         // Record partial against the oldest line; leave unpaid until remainder clears.
         schedule[oldestIdx] = {
           ...line,
+          paid: false,
+          status: "partially_paid",
           paid_amount: prevPartial + payAmt,
           reference_no: referenceNo,
           gateway_ref: gatewayRef,
@@ -4593,11 +4597,12 @@ export async function finalizeCoursePaymentByReference(
   const derived = deriveEnrollment({ total_fee: enrollment.total_fee, schedule });
   const status = enrollmentStatusFromSchedule({ total_fee: enrollment.total_fee, schedule, plan_type: enrollment.plan_type });
 
-  const updated = (await updateCourseEnrollment(enrollment.id, {
+  const updatedBase = (await updateCourseEnrollment(enrollment.id, {
     schedule,
-    amount_paid: derived.paid,
     status,
-  })) || { ...enrollment, schedule, amount_paid: derived.paid, status };
+  })) || { ...enrollment, schedule, status };
+  await syncAmountPaidFromFeeState({ ...updatedBase, schedule });
+  const updated = { ...updatedBase, schedule, amount_paid: derived.paid, status };
 
   // Build the immutable receipt from the ledger-consistent derived values.
   const summary = installmentsSummary({ total_fee: updated.total_fee, schedule }, formatINR, formatISTDate);
@@ -5060,9 +5065,10 @@ export async function recomputeCourseEnrollment(enrollmentId: string): Promise<C
   for (const p of paid) applyPaidPaymentToSchedule(schedule, p);
   const derived = deriveEnrollment({ total_fee: enr.total_fee, schedule });
   const status = enrollmentStatusFromSchedule({ total_fee: enr.total_fee, schedule, plan_type: enr.plan_type });
-  const updated = await updateCourseEnrollment(enrollmentId, { schedule, amount_paid: derived.paid, status });
+  const updatedBase = await updateCourseEnrollment(enrollmentId, { schedule, status });
+  await syncAmountPaidFromFeeState({ ...(updatedBase || enr), schedule });
   if (enr.phone) await bumpBuyerSessionVersion(enr.phone).catch(() => null);
-  return updated || { ...enr, schedule, amount_paid: derived.paid, status };
+  return updatedBase ? { ...updatedBase, schedule, amount_paid: derived.paid, status } : { ...enr, schedule, amount_paid: derived.paid, status };
 }
 
 // ==================== IMPORTED / LEGACY PAYMENT LEDGER BACKFILL ====================
@@ -5312,13 +5318,17 @@ export async function findDuplicateEnrollmentGroups(limitGroups = 200): Promise<
       student_name: sorted.find((e) => e.student_name)?.student_name || sorted[0].student_name,
       count: sorted.length,
       hasMultiplePaid: paidCount > 1,
-      enrollments: sorted.map((e) => ({
-        id: e.id,
-        status: e.status,
-        total_fee: e.total_fee,
-        amount_paid: e.amount_paid || 0,
-        created_at: e.created_at,
-      })),
+      enrollments: sorted.map((e) => {
+        const fee = enrollmentFeeStateFromEnrollment(e);
+        return {
+          id: e.id,
+          status: e.status,
+          total_fee: e.total_fee,
+          amount_paid: fee.netPaid,
+          outstanding: fee.outstanding,
+          created_at: e.created_at,
+        };
+      }),
     });
   }
   return groups.sort((a, b) => b.count - a.count).slice(0, limitGroups);
@@ -5961,7 +5971,6 @@ export async function changeEnrollmentPaymentPlan(
     previous_payment_plan: oldPlan,
     total_fee: totalFee,
     installment_count: installmentCount,
-    amount_paid: derivedAfter.paid,
     status,
     payment_plan_changed_at: changedAt,
     payment_plan_changed_by: input.changedBy ?? null,
@@ -5969,6 +5978,7 @@ export async function changeEnrollmentPaymentPlan(
     plan_change_notice_pending: true,
     plan_change_notice_seen_at: null,
   });
+  await syncAmountPaidFromFeeState({ ...(updated || enrollment), schedule, total_fee: totalFee });
   const finalEnrollment = updated || {
     ...enrollment,
     schedule,
@@ -6062,7 +6072,8 @@ export async function updateInstallmentLine(
 
   const status = enrollmentStatusFromSchedule({ total_fee: totalFee, schedule, plan_type: e.plan_type });
   const derived = deriveEnrollment({ total_fee: totalFee, schedule });
-  const updated = await updateCourseEnrollment(e.id, { schedule, total_fee: totalFee, amount_paid: derived.paid, status });
+  const updated = await updateCourseEnrollment(e.id, { schedule, total_fee: totalFee, status });
+  await syncAmountPaidFromFeeState({ ...(updated || e), schedule, total_fee: totalFee });
   return { ok: true, enrollment: updated || { ...e, schedule, total_fee: totalFee, amount_paid: derived.paid, status } };
 }
 
@@ -6128,7 +6139,6 @@ export async function applyEnrollmentDiscount(
   const updated = await updateCourseEnrollment(e.id, {
     total_fee: newTotal,
     schedule,
-    amount_paid: derived.paid,
     status,
     discount_amount: (e.discount_amount || 0) + discount,
     original_total_fee: e.original_total_fee ?? e.total_fee,
@@ -6136,6 +6146,7 @@ export async function applyEnrollmentDiscount(
     discount_applied_by: input.appliedBy ?? null,
     discount_applied_at: now,
   });
+  await syncAmountPaidFromFeeState({ ...(updated || e), schedule, total_fee: newTotal });
   const finalEnrollment = updated || {
     ...e,
     total_fee: newTotal,

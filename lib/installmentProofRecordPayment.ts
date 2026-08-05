@@ -15,6 +15,8 @@ import {
 } from "./dataProvider";
 import { deriveEnrollment, enrollmentStatusFromSchedule, isLineOutstanding } from "./installments";
 import { findOldestOutstandingIndex } from "./installmentAllocation";
+import { planCarryForwardIdempotent } from "./partialSettlement";
+import { syncAmountPaidFromFeeState } from "./amountPaidCache";
 import { runPaidTerminalSideEffects } from "./paymentOutcome/paidSideEffects";
 import { appendStudentAccessEvent } from "./studentAccessEvents";
 import { istInputToISO } from "./dates";
@@ -101,6 +103,8 @@ export async function approveAndRecordInstallmentProof(input: {
   paymentDate?: string | null;
   referenceUtr?: string | null;
   seenProofConfirmed: boolean;
+  /** A/B/C admin decision — never auto-executed. Default keep-open for partials. */
+  decision?: "accept_as_partial" | "record_keep_open" | "reject";
 }): Promise<ApproveAndRecordResult> {
   if (!input.seenProofConfirmed) {
     return { ok: false, error: "Confirm you have seen proof of this payment.", code: "checkbox" };
@@ -228,16 +232,64 @@ export async function approveAndRecordInstallmentProof(input: {
   const payment = recorded.payment;
   await runPaidTerminalSideEffects(payment, { source: "offline", bumpSession: true });
 
+  // A/B decision: accept_as_partial applies carry-forward; record_keep_open leaves residual open.
+  let enrollmentAfter = recorded.enrollment;
+  const decision = input.decision || "record_keep_open";
+  if (decision === "accept_as_partial") {
+    const fresh = await getCourseEnrollmentById(e.id);
+    if (fresh) {
+      const plan = planCarryForwardIdempotent({
+        enrollment: fresh,
+        fromNo: proof.installment_no,
+      });
+      if (plan.ok && !plan.alreadyApplied) {
+        const status = enrollmentStatusFromSchedule({
+          total_fee: fresh.total_fee,
+          schedule: plan.scheduleAfter,
+          plan_type: fresh.plan_type,
+        });
+        const updated = await updateCourseEnrollment(fresh.id, {
+          schedule: plan.scheduleAfter,
+          status,
+        });
+        await syncAmountPaidFromFeeState({
+          ...(updated || fresh),
+          schedule: plan.scheduleAfter,
+        });
+        enrollmentAfter = updated
+          ? { ...updated, schedule: plan.scheduleAfter }
+          : { ...fresh, schedule: plan.scheduleAfter };
+        try {
+          const { salesAlertPartialPayment } = await import("./telegram/sales/send");
+          await salesAlertPartialPayment({
+            name: enrollmentAfter.student_name,
+            phone: enrollmentAfter.phone,
+            course: enrollmentAfter.course_title,
+            amountPaid: payment.amount,
+            shortfallCarried: plan.carriedOut,
+            nextAmount: plan.nextAmountDue,
+            nextDue: enrollmentAfter.schedule?.find((l) => l.no === plan.toNo)?.due ?? null,
+            installmentNo: proof.installment_no,
+            enrollmentId: enrollmentAfter.id,
+            enrollment: enrollmentAfter,
+          });
+        } catch {
+          /* sales alert best-effort */
+        }
+      }
+    }
+  }
+
   await writeAllocationAudit({
     enrollmentId: e.id,
     studentName: e.student_name,
     phone: e.phone,
     amountPaidBefore: beforePaid,
-    amountPaidAfter: recorded.enrollment.amount_paid,
+    amountPaidAfter: enrollmentAfter.amount_paid,
     scheduleBefore: beforeSchedule,
-    scheduleAfter: recorded.enrollment.schedule,
+    scheduleAfter: enrollmentAfter.schedule,
     appliedBy: input.actor.name || "admin",
-    note: `student_proof:${proof.id}`,
+    note: `student_proof:${proof.id}:decision:${decision}`,
   });
 
   const db = getSupabaseAdmin();

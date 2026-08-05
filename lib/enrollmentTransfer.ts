@@ -16,6 +16,7 @@
  *      or a warning, never an assumption.
  */
 import { addDaysISO } from "./dates";
+import { enrollmentFeeStateFromEnrollment } from "./enrollmentFeeState";
 import { batchTimings, buildBatchLabel, effectiveCourseForBatch, payInFullTotal } from "./installments";
 import type { Course, CourseBatch, CourseEnrollment, InstallmentItem } from "./types";
 
@@ -290,9 +291,10 @@ export function planTransfer(input: PlanTransferInput): TransferPlan {
   const planType = String(e.plan_type ?? "full").toLowerCase();
   const newTotal = planType === "full" ? payInFullTotal(effTarget) : Math.round(effTarget.price || 0);
   const oldTotal = Math.round(e.total_fee || 0);
-  const amountPaid = Math.round(e.amount_paid || 0);
+  const fee = enrollmentFeeStateFromEnrollment(e);
+  const amountPaid = Math.round(fee.netPaid);
   const delta = newTotal - oldTotal;
-  const oldOutstanding = Math.max(0, oldTotal - amountPaid);
+  const oldOutstanding = Math.max(0, fee.outstanding);
   const newOutstanding = Math.max(0, newTotal - amountPaid);
   const creditDue = Math.max(0, amountPaid - newTotal);
 

@@ -8,8 +8,7 @@ import { formatISTDate } from "./dates";
 import type { CourseEnrollment, CourseAccessOverride, InstallmentItem } from "./types";
 import type { LectureAccess } from "./entitlements";
 import { activeAccessGrant } from "./sms/accessReminderService";
-import { enrollmentFeeStateFromEnrollment } from "./enrollmentFeeState";
-import { isFeeLineOutstanding } from "./enrollmentFeeState";
+import { enrollmentFeeStateFromEnrollment, isFeeLineOutstanding, lineRemainingAmount } from "./enrollmentFeeState";
 
 export { countsTowardCapacity, isPhantomEnrollment, isActiveEnrollment } from "./enrollmentScope";
 
@@ -96,10 +95,12 @@ export function classifyAccessAtRisk(input: {
   return { onList: true, kind, scheduleStatus, inactionReason: null };
 }
 
-/** All unpaid dated installments with amount > 0, sorted by due date ascending. */
+/** All unpaid dated installments with remaining > 0, sorted by due date ascending.
+ *  Surfaces amountDue (base + carried_in − allocated) on `.amount` for SMS/ladder. */
 export function unpaidDatedLines(schedule: InstallmentItem[] | null | undefined): InstallmentItem[] {
   return (schedule || [])
-    .filter((s) => isFeeLineOutstanding(s) && s.due && (Number(s.amount) || 0) > 0)
+    .filter((s) => isFeeLineOutstanding(s) && s.due && lineRemainingAmount(s) > 0)
+    .map((s) => ({ ...s, amount: lineRemainingAmount(s) }))
     .slice()
     .sort((a, b) => Date.parse(a.due as string) - Date.parse(b.due as string));
 }

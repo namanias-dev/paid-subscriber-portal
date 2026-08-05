@@ -86,6 +86,17 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true, proof: r.proof });
   }
   if (action === "approve_record") {
+    const decisionRaw = String(body.decision || "record_keep_open");
+    const decision =
+      decisionRaw === "accept_as_partial" || decisionRaw === "record_keep_open" || decisionRaw === "reject"
+        ? decisionRaw
+        : "record_keep_open";
+    if (decision === "reject") {
+      return NextResponse.json(
+        { ok: false, error: "Use action=reject for rejections." },
+        { status: 400 },
+      );
+    }
     const r = await approveAndRecordInstallmentProof({
       proofId: String(body.proof_id || ""),
       actor,
@@ -93,6 +104,7 @@ export async function POST(req: Request) {
       paymentDate: body.payment_date ? String(body.payment_date) : null,
       referenceUtr: body.reference_utr ? String(body.reference_utr) : null,
       seenProofConfirmed: body.seen_proof === true,
+      decision,
     });
     if (!r.ok) return NextResponse.json({ ok: false, error: r.error, code: r.code }, { status: 400 });
     return NextResponse.json({
@@ -101,6 +113,7 @@ export async function POST(req: Request) {
       payment: r.payment,
       alreadyRecorded: r.alreadyRecorded || false,
       alreadyPaidSuperseded: r.alreadyPaidSuperseded || false,
+      decision,
     });
   }
   if (action === "grant_only") {

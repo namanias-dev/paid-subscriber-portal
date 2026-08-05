@@ -728,6 +728,10 @@ export interface InstallmentItem {
   grace?: string | null;
   /** Amount actually received against this line (usually equals `amount` when paid). */
   paid_amount?: number | null;
+  /** Shortfall pushed onto a later line (Phase 2 partial settlement). Does not change `amount`. */
+  carried_out?: number | null;
+  /** Shortfall received from an earlier line. Does not change `amount`; raises amount due. */
+  carried_in?: number | null;
   /** Ledger payment id that settled this line, if any. */
   payment_id?: string | null;
   /** True for a staff-built custom installment (never exposed in public checkout). */
@@ -1638,7 +1642,9 @@ export interface DuplicateEnrollmentGroup {
     id: string;
     status: string;
     total_fee: number;
+    /** Fee-state net paid (not the denorm column). */
     amount_paid: number;
+    outstanding: number;
     created_at: string;
   }[];
 }

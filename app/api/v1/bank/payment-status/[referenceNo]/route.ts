@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getPaymentByReference, ensureBuyer, finalizeCoursePaymentByReference } from "@/lib/dataProvider";
+import { enrollmentFeeStateFromEnrollment } from "@/lib/enrollmentFeeState";
 import { isEazypayConfigured, verifyStatusSignature, itemTypeFromReference } from "@/lib/eazypay";
 
 export const dynamic = "force-dynamic";
@@ -23,6 +24,7 @@ async function emiExtras(referenceNo: string) {
   const res = await finalizeCoursePaymentByReference(referenceNo).catch(() => null);
   if (!res) return {};
   const { enrollment, receipt } = res;
+  const fee = enrollmentFeeStateFromEnrollment(enrollment);
   return {
     receiptNo: receipt.receipt_no,
     enrollment: {
@@ -31,8 +33,8 @@ async function emiExtras(referenceNo: string) {
       courseSlug: enrollment.course_slug,
       planType: enrollment.plan_type,
       totalFee: enrollment.total_fee,
-      amountPaid: enrollment.amount_paid,
-      remaining: Math.max(0, enrollment.total_fee - enrollment.amount_paid),
+      amountPaid: fee.netPaid,
+      remaining: fee.outstanding,
       status: enrollment.status,
       schedule: enrollment.schedule,
     },

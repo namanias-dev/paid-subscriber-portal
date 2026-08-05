@@ -9,6 +9,7 @@
 import type { CourseEnrollment } from "../types";
 import { nextUnpaidDatedLine, daysOverdueFromSchedule } from "../accessAtRisk";
 import { lectureAccessForCourse, type LectureAccess } from "../entitlements";
+import { enrollmentFeeStateFromEnrollment } from "../enrollmentFeeState";
 import type { Course } from "../types";
 
 export const LADDER_STEPS = ["m7", "m3", "d0", "p3", "p7_call"] as const;
@@ -138,7 +139,8 @@ export function evaluateEnrollmentForBackfill(input: {
   const dfd = daysFromDue(line.due, now);
   if (!(dfd >= 0)) return null; // not yet overdue — forward ladder handles later
   const live = lectureAccessForCourse(input.course, e, undefined, false, now);
-  const pct = e.total_fee > 0 ? Math.round((100 * (e.amount_paid || 0)) / e.total_fee) : 0;
+  const fee = enrollmentFeeStateFromEnrollment(e, now);
+  const pct = fee.progressPct;
   const daysOverdue = daysOverdueFromSchedule(e, now);
   const bucket = classifyBackfillBucket({
     daysOverdue,
