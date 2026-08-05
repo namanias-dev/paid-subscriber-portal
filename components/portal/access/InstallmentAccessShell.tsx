@@ -18,8 +18,8 @@ export {
 } from "./ippEvents";
 
 const H24 = 24 * 60 * 60 * 1000;
-/** v5 — resets QA / prior dismissals after proof-record reverse grant fix. */
-const SNOOZE_KEY = (enrollmentId: string) => `ipp_bar_snooze_v5_${enrollmentId}`;
+/** v6 — clears prior dismissals after QA reset hard-clean. */
+const SNOOZE_KEY = (enrollmentId: string) => `ipp_bar_snooze_v6_${enrollmentId}`;
 
 type SheetMode = "closed" | "upload" | "view" | "notice";
 

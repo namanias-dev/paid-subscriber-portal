@@ -18,6 +18,7 @@ import {
 import {
   addCourseEnrollment,
   bumpBuyerSessionVersion,
+  createPayment,
   ensureBuyer,
   getAllCourses,
   getCourseEnrollmentsByPhone,
@@ -25,6 +26,7 @@ import {
   isPaidStatus,
 } from "../lib/dataProvider";
 import { lectureAccessForCourse } from "../lib/entitlements";
+import { deriveEnrollment } from "../lib/installments";
 import { buildInstallmentProofPrompt } from "../lib/installmentPaymentProofs";
 import {
   phoneInInstallmentProofCohort73,
@@ -185,12 +187,21 @@ async function planDeletes(phone: string, key: QaKey) {
       if (keyPath) r2Keys.push(keyPath);
     }
   }
-  // Also list by phone prefix under installment-proofs/
+  // Also list by phone + student_id prefixes under installment-proofs/
   try {
     const listed = await listAllObjects(`installment-proofs/${phone}`);
     for (const o of listed) if (o.key) r2Keys.push(o.key);
   } catch {
     /* optional */
+  }
+  const { data: stu } = await db.from("students").select("id").eq("phone", phone).maybeSingle();
+  if (stu?.id) {
+    try {
+      const listed = await listAllObjects(`installment-proofs/${stu.id}`);
+      for (const o of listed) if (o.key) r2Keys.push(o.key);
+    } catch {
+      /* optional */
+    }
   }
 
   return {
@@ -212,14 +223,50 @@ async function planDeletes(phone: string, key: QaKey) {
 
 async function wipeProofResidue(phone: string, enrollmentIds: string[], r2Keys: string[]) {
   const db = getSupabaseAdmin()!;
+  if (!QA_INSTALLMENT_PROOF_PHONE_LIST.includes(phone)) {
+    throw new Error(`REFUSE wipe: ${phone} not QA allowlist`);
+  }
   let r2Deleted = 0;
-  for (const key of r2Keys) {
+  for (const key of [...new Set(r2Keys)]) {
     if (await deleteObject(key)) r2Deleted += 1;
   }
+
+  // Delete student_proof + student_proof_reversal (+ OFF-PROOF/OFF-REV) together.
+  // Also clear prior QA-PROOF seat baselines so reseed leaves exactly one ₹5k row.
+  // Includes soft-deleted rows — getPaymentsByPhone hides deleted_at (prior wipe hole).
+  const { data: wipedPays, error: payErr } = await db
+    .from("payments")
+    .delete()
+    .eq("phone", phone)
+    .or(
+      [
+        "payment_source.eq.student_proof",
+        "payment_source.eq.student_proof_reversal",
+        "reference_no.like.OFF-PROOF-%",
+        "reference_no.like.OFF-REV-%",
+        "reference_no.like.QA-PROOF-%",
+      ].join(","),
+    )
+    .select("id,amount,payment_source,reference_no,status");
+  if (payErr) throw new Error(`payment wipe failed: ${payErr.message}`);
+
+  // Belt-and-suspenders: any remaining payments for this allowlisted phone (should be none).
+  const { data: leftover, error: leftErr } = await db
+    .from("payments")
+    .delete()
+    .eq("phone", phone)
+    .select("id,amount,payment_source,reference_no,status");
+  if (leftErr) throw new Error(`payment full wipe failed: ${leftErr.message}`);
+
   if (enrollmentIds.length) {
     await db.from("installment_payment_proofs").delete().in("course_enrollment_id", enrollmentIds);
     await db.from("student_access_events").delete().in("course_enrollment_id", enrollmentIds);
     await db.from("access_reminder_caps").delete().in("course_enrollment_id", enrollmentIds);
+    try {
+      await db.from("installment_allocation_audit").delete().in("enrollment_id", enrollmentIds);
+    } catch {
+      /* optional */
+    }
     try {
       await db.from("access_call_tasks").delete().in("course_enrollment_id", enrollmentIds);
     } catch {
@@ -233,13 +280,135 @@ async function wipeProofResidue(phone: string, enrollmentIds: string[], r2Keys: 
   }
   await db.from("course_access_overrides").delete().eq("phone", phone);
 
-  const payments = await getPaymentsByPhone(phone);
-  for (const p of payments) {
-    if (p.payment_source === "student_proof" || p.payment_source === "student_proof_reversal") {
-      await db.from("payments").delete().eq("id", p.id);
+  return {
+    r2Deleted,
+    wipedPayments: [...(wipedPays || []), ...(leftover || [])],
+  };
+}
+
+async function assertCleanEndState(input: {
+  key: QaKey;
+  phone: string;
+  enrollmentId: string;
+  expectedState: "blocked" | "expiring";
+  expectedPaid: number;
+  expectedOutstanding: number;
+}) {
+  const db = getSupabaseAdmin()!;
+  const enrollments = await getCourseEnrollmentsByPhone(input.phone);
+  const active = enrollments.filter((e) => e.status !== "cancelled" && e.status !== "transferred_out");
+  if (active.length !== 1) {
+    throw new Error(`ASSERT FAIL ${input.key}: expected 1 active enrollment, got ${active.length}`);
+  }
+  const e = active[0]!;
+  if (e.id !== input.enrollmentId) {
+    throw new Error(`ASSERT FAIL ${input.key}: enrollment id mismatch`);
+  }
+  const derived = deriveEnrollment(e);
+  if (Math.round(derived.paid) !== input.expectedPaid) {
+    throw new Error(
+      `ASSERT FAIL ${input.key}: net paid=${derived.paid} expected=${input.expectedPaid} (fully-paid drift)`,
+    );
+  }
+  if (Math.round(derived.remaining) !== input.expectedOutstanding) {
+    throw new Error(
+      `ASSERT FAIL ${input.key}: outstanding=${derived.remaining} expected=${input.expectedOutstanding}`,
+    );
+  }
+  const inst1 = (e.schedule || []).find((s) => s.kind === "installment" && s.no === 1);
+  if (!inst1 || inst1.paid) {
+    throw new Error(`ASSERT FAIL ${input.key}: Instalment 1 must be unpaid`);
+  }
+
+  const { data: pays } = await db
+    .from("payments")
+    .select("id,amount,status,payment_source,reference_no,deleted_at")
+    .eq("phone", input.phone);
+  const livePays = (pays || []).filter((p) => !p.deleted_at);
+  const proofPays = livePays.filter(
+    (p) =>
+      p.payment_source === "student_proof" ||
+      p.payment_source === "student_proof_reversal" ||
+      String(p.reference_no || "").startsWith("OFF-PROOF-") ||
+      String(p.reference_no || "").startsWith("OFF-REV-"),
+  );
+  if (proofPays.length) {
+    throw new Error(
+      `ASSERT FAIL ${input.key}: ${proofPays.length} proof/reversal payment(s) survived: ${JSON.stringify(proofPays)}`,
+    );
+  }
+  const paidSum = livePays
+    .filter((p) => isPaidStatus(String(p.status)))
+    .reduce((a, p) => a + Number(p.amount || 0), 0);
+  if (Math.round(paidSum) !== input.expectedPaid) {
+    throw new Error(
+      `ASSERT FAIL ${input.key}: payments PAID sum=${paidSum} expected baseline ${input.expectedPaid}`,
+    );
+  }
+  if (livePays.length !== 1) {
+    throw new Error(
+      `ASSERT FAIL ${input.key}: expected exactly 1 baseline payment row, got ${livePays.length}: ${JSON.stringify(livePays)}`,
+    );
+  }
+
+  const { count: proofN } = await db
+    .from("installment_payment_proofs")
+    .select("*", { count: "exact", head: true })
+    .eq("course_enrollment_id", e.id);
+  if ((proofN || 0) > 0) throw new Error(`ASSERT FAIL ${input.key}: ${proofN} proof rows remain`);
+
+  const { data: ovrs } = await db.from("course_access_overrides").select("id").eq("phone", input.phone);
+  if ((ovrs || []).length) throw new Error(`ASSERT FAIL ${input.key}: access override remains`);
+
+  const courses = await getAllCourses();
+  const course = courses.find((c) => c.id === e.course_id);
+  const live = lectureAccessForCourse(course, e, undefined, false, Date.now());
+  const prompt = await buildInstallmentProofPrompt(input.phone);
+  if (input.expectedState === "blocked") {
+    if (live.allowed) throw new Error(`ASSERT FAIL ${input.key}: live.allowed must be false`);
+    if (prompt?.state !== "blocked") {
+      throw new Error(`ASSERT FAIL ${input.key}: prompt=${prompt?.state} expected blocked`);
+    }
+  } else {
+    if (!live.allowed) throw new Error(`ASSERT FAIL ${input.key}: live.allowed must be true`);
+    if (prompt?.state !== "expiring") {
+      throw new Error(`ASSERT FAIL ${input.key}: prompt=${prompt?.state} expected expiring`);
     }
   }
-  return { r2Deleted };
+
+  // R2 prefix empty
+  const r2Keys: string[] = [];
+  try {
+    for (const prefix of [`installment-proofs/${input.phone}`, `installment-proofs/`]) {
+      /* phone + student id checked below */
+    }
+    const listed = await listAllObjects(`installment-proofs/${input.phone}`);
+    r2Keys.push(...listed.map((o) => o.key).filter(Boolean) as string[]);
+  } catch {
+    /* */
+  }
+  const { data: stu } = await db.from("students").select("id").eq("phone", input.phone).maybeSingle();
+  if (stu?.id) {
+    try {
+      const listed = await listAllObjects(`installment-proofs/${stu.id}`);
+      r2Keys.push(...listed.map((o) => o.key).filter(Boolean) as string[]);
+    } catch {
+      /* */
+    }
+  }
+  if (r2Keys.length) {
+    throw new Error(`ASSERT FAIL ${input.key}: R2 residue ${JSON.stringify(r2Keys)}`);
+  }
+
+  return {
+    paid: derived.paid,
+    outstanding: derived.remaining,
+    prompt_state: prompt?.state,
+    live_allowed: live.allowed,
+    payments: livePays,
+    proofs: 0,
+    r2: 0,
+  };
 }
 
 async function reseedOne(key: QaKey) {
@@ -255,11 +424,12 @@ async function reseedOne(key: QaKey) {
 
   const db = getSupabaseAdmin()!;
   const now = new Date().toISOString();
-  await db
-    .from("course_enrollments")
-    .update({ status: "cancelled", updated_at: now })
-    .eq("phone", phone)
-    .neq("status", "cancelled");
+
+  // Hard-delete prior enrollments (cancel leaves ghost rows that confuse portal UIs).
+  if (enrollmentIds.length) {
+    const { error: enrDelErr } = await db.from("course_enrollments").delete().in("id", enrollmentIds);
+    if (enrDelErr) throw new Error(`enrollment delete failed: ${enrDelErr.message}`);
+  }
 
   const courses = await getAllCourses();
   const course = courses.find((c) => c.id === QA_INSTALLMENT_PROOF_COURSE_ID);
@@ -268,10 +438,10 @@ async function reseedOne(key: QaKey) {
   const buyer = await ensureBuyer(phone, spec.name);
   if (!buyer?.login_code) throw new Error(`ensureBuyer failed for ${phone}`);
 
-  const due =
-    spec.state === "expiring" ? isoDaysFromNow(5) : isoDaysFromNow(-30);
+  const due = spec.state === "expiring" ? isoDaysFromNow(5) : isoDaysFromNow(-30);
   const seat = 5_000;
   const balance = 20_000;
+  const seatRef = `QA-PROOF-${spec.key.toUpperCase()}-SEAT-${Date.now().toString(36).toUpperCase()}`;
   const schedule = [
     {
       no: 0,
@@ -282,7 +452,7 @@ async function reseedOne(key: QaKey) {
       due: null,
       grace: null,
       paid_at: now,
-      reference_no: `QA-PROOF-${spec.key.toUpperCase()}-SEAT`,
+      reference_no: seatRef,
     },
     {
       no: 1,
@@ -312,6 +482,34 @@ async function reseedOne(key: QaKey) {
     payment_plan: "EMI",
   });
 
+  // Genuine ₹5,000 baseline payment row (not student_proof).
+  process.env.ALLOW_TEST_DB_WRITES = "1";
+  await createPayment({
+    student_name: spec.name,
+    phone,
+    email: null,
+    item: `${course.title} — Book Your Seat`,
+    item_type: "course",
+    item_slug: course.slug || "safalta-online-foundation",
+    amount: seat,
+    status: "PAID",
+    gateway: "offline",
+    reference_no: seatRef,
+    gateway_ref: "QA baseline seat",
+    payment_mode: "QA baseline",
+    mode: "QA baseline",
+    transaction_amount: seat,
+    transaction_date: now,
+    created_at: now,
+    razorpay_payment_id: null,
+    enrollment_id: enrollment.id,
+    payment_kind: "seat",
+    installment_no: 0,
+    payment_source: null,
+    finance_verified: true,
+    recorded_by: "qa-reset",
+  });
+
   await db
     .from("students")
     .update({ notes: `${QA_INSTALLMENT_PROOF_MARKER} key=${spec.key}`, name: spec.name })
@@ -327,7 +525,6 @@ async function reseedOne(key: QaKey) {
     normalizedMobile: phone,
   });
 
-  // Ensure flag allowlist still contains this phone
   const { data: flag } = await db
     .from("app_feature_flags")
     .select("meta")
@@ -346,28 +543,27 @@ async function reseedOne(key: QaKey) {
 
   await bumpBuyerSessionVersion(phone).catch(() => null);
 
-  const live = lectureAccessForCourse(course, enrollment, undefined, false, Date.now());
-  const prompt = await buildInstallmentProofPrompt(phone);
-  const paymentsLeft = await getPaymentsByPhone(phone);
-  const proofPaysLeft = paymentsLeft.filter(
-    (p) => p.payment_source === "student_proof" || p.payment_source === "student_proof_reversal",
-  );
+  const expectedState = spec.state === "expiring" ? ("expiring" as const) : ("blocked" as const);
+  const asserted = await assertCleanEndState({
+    key,
+    phone,
+    enrollmentId: enrollment.id,
+    expectedState,
+    expectedPaid: seat,
+    expectedOutstanding: balance,
+  });
 
   return {
     key,
     phone,
     login_code: buyer.login_code,
     enrollment_id: enrollment.id,
-    outstanding: balance,
     wiped,
-    live: { allowed: live.allowed, status: live.status, reason: live.reason },
-    prompt_state: prompt?.state ?? null,
-    expected_state: spec.state === "expiring" ? "expiring" : "blocked",
+    asserted,
     popup_enabled: await studentPopupEnabledForPhone(phone),
     in73: await phoneInInstallmentProofCohort73(phone),
     sms_opted_out: await isOptedOut(phone),
-    proof_payments_left: proofPaysLeft.length,
-    snooze_key: "ipp_bar_snooze_v5_* (client localStorage bumped)",
+    snooze_key: "ipp_bar_snooze_v6_*",
   };
 }
 
@@ -459,12 +655,24 @@ async function main() {
     if (r.in73) throw new Error(`${r.key} leaked into 73`);
     if (!r.sms_opted_out) throw new Error(`${r.key} not opted out`);
     if (!r.popup_enabled) throw new Error(`${r.key} popup not enabled`);
-    if (r.proof_payments_left !== 0) throw new Error(`${r.key} still has proof payments`);
-    if (r.prompt_state !== r.expected_state) {
-      throw new Error(`${r.key} prompt=${r.prompt_state} expected=${r.expected_state} live=${JSON.stringify(r.live)}`);
+    if (Math.round(r.asserted.paid) !== 5000) {
+      throw new Error(`${r.key} asserted paid=${r.asserted.paid} (want 5000)`);
     }
-    if (r.expected_state === "blocked" && r.live.allowed) {
+    if (Math.round(r.asserted.outstanding) !== 20000) {
+      throw new Error(`${r.key} asserted outstanding=${r.asserted.outstanding} (want 20000)`);
+    }
+    if (r.asserted.proofs !== 0 || r.asserted.r2 !== 0) {
+      throw new Error(`${r.key} proofs/r2 not zero`);
+    }
+    const want = r.key === "qa_blocked" ? "blocked" : "expiring";
+    if (r.asserted.prompt_state !== want) {
+      throw new Error(`${r.key} prompt=${r.asserted.prompt_state} expected=${want}`);
+    }
+    if (want === "blocked" && r.asserted.live_allowed) {
       throw new Error(`${r.key} must be blocked on live playback`);
+    }
+    if (want === "expiring" && !r.asserted.live_allowed) {
+      throw new Error(`${r.key} must have live access`);
     }
   }
 
