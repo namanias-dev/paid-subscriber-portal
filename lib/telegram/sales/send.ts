@@ -554,28 +554,73 @@ export async function salesAlertPaymentSucceeded(input: {
  * Called from digest + every telegram-reports cron tick.
  */
 
+/**
+ * Amount line for webinar_registration only.
+ * Free only when genuinely free (known price ≤ 0). Never render missing lookup as free.
+ */
+export function formatWebinarRegistrationAmountLine(input: {
+  amountPaid?: number | null;
+  /** false = webinar price lookup failed / unknown — never lie as Free */
+  amountKnown?: boolean;
+}): string {
+  if (input.amountKnown === false) return "Amount paid: unknown";
+  if (input.amountPaid === 0) return "Amount paid: Free";
+  const paid = optionalSalesInr(input.amountPaid);
+  if (paid) return `Amount paid: ${paid}`;
+  return "Amount paid: unknown";
+}
+
+/** Pure HTML body for webinar_registration (shared by send + dry-run prove). */
+export function formatSalesWebinarRegistrationHtml(input: {
+  name: string;
+  phone: string;
+  webinar: string;
+  webinarDate?: string | null;
+  amountPaid?: number | null;
+  amountKnown?: boolean;
+  registrationsSoFar?: number | null;
+  now?: Date;
+}): string {
+  return [
+    `🎟 <b>Webinar registration</b> · ${escapeHtml(input.name || "Student")}`,
+    phoneLine(input.phone),
+    clean(input.webinar) ? `Webinar: ${escapeHtml(input.webinar)}` : null,
+    input.webinarDate ? `Date: ${escapeHtml(compactDate(input.webinarDate) || input.webinarDate)}` : null,
+    formatWebinarRegistrationAmountLine({
+      amountPaid: input.amountPaid,
+      amountKnown: input.amountKnown,
+    }),
+    input.registrationsSoFar != null ? `Registrations so far: ${input.registrationsSoFar}` : null,
+    formatIstShort(input.now || new Date()),
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
 export async function salesAlertWebinarRegistration(input: {
   name: string;
   phone: string;
   webinar: string;
   webinarDate?: string | null;
   amountPaid?: number | null;
+  /** false when price lookup failed — renders "unknown", never "free" */
+  amountKnown?: boolean;
   registrationsSoFar?: number | null;
   eventId?: string | null;
   occurredAt?: string | Date | null;
+  /** Registration row id — one alert per registration ever */
+  registrationId?: string | null;
 }): Promise<void> {
   const link = adminStudentDeepLink({ phone: input.phone });
-  const html = [
-    `🎟 <b>Webinar registration</b> · ${escapeHtml(input.name || "Student")}`,
-    phoneLine(input.phone),
-    clean(input.webinar) ? `Webinar: ${escapeHtml(input.webinar)}` : null,
-    input.webinarDate ? `Date: ${escapeHtml(compactDate(input.webinarDate) || input.webinarDate)}` : null,
-    optionalSalesInr(input.amountPaid) ? `Amount paid: ${optionalSalesInr(input.amountPaid)}` : `Amount paid: free`,
-    input.registrationsSoFar != null ? `Registrations so far: ${input.registrationsSoFar}` : null,
-    formatIstShort(new Date()),
-  ].filter(Boolean).join("\n");
+  const html = formatSalesWebinarRegistrationHtml(input);
+  const phone10 = String(input.phone || "").replace(/\D/g, "").slice(-10);
+  const eventId =
+    input.eventId ||
+    (input.registrationId
+      ? `webinar_reg:${input.registrationId}`
+      : `webinar_reg:${phone10}:${input.webinar}`);
   await deliverOrQueue({
-    eventId: input.eventId || `webinar_reg:${input.phone}:${input.webinar}`,
+    eventId,
     event: "webinar_registration",
     phone: input.phone,
     html,

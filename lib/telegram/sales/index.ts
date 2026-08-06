@@ -27,6 +27,15 @@ export { salesRealEventWouldFire } from "./deliver";
 export { runSalesDigestIfDue, buildSalesDigestHtml, salesDigestDueNow } from "./digest";
 export { sweepCheckoutAbandoned, fireAbandonSweep } from "./abandoned";
 export {
+  countSalesWebinarRegistrationsSoFar,
+  legacyRawWebinarRegistrationRowCount,
+  countDistinctWebinarRegistrationPhones,
+} from "./webinarRegistrationCount";
+export {
+  formatSalesWebinarRegistrationHtml,
+  formatWebinarRegistrationAmountLine,
+} from "./send";
+export {
   salesAlertsEnabled,
   salesDigestEnabled,
   salesLeadBatchingEnabled,

@@ -2715,6 +2715,7 @@ export async function registerWebinar(
     return { ok: true };
   }
   const db = getSupabaseAdmin();
+  let registrationId: string | null = null;
   if (db) {
     try {
       // FIRST-PARTY CONVERSION CAPTURE: persist the acquisition source + campaign
@@ -2745,9 +2746,34 @@ export async function registerWebinar(
       if (isFullCaptureEnabled()) {
         Object.assign(insertRow, adCaptureStampFromState(attr ?? null));
       }
-      await db.from("webinar_registrations").insert(insertRow);
+      const { data: inserted } = await db
+        .from("webinar_registrations")
+        .insert(insertRow)
+        .select("id")
+        .maybeSingle();
+      registrationId = (inserted as { id?: string } | null)?.id ?? null;
     } catch {
-      /* ignore */
+      /* ignore — lookup below */
+    }
+    if (!registrationId) {
+      try {
+        const phone10 = String(phone).replace(/\D/g, "").slice(-10);
+        const { data: rows } = await db
+          .from("webinar_registrations")
+          .select("id, phone")
+          .eq("webinar_id", webinarId)
+          .order("created_at", { ascending: false })
+          .limit(40);
+        const hit = (rows || []).find((r) => {
+          const p = String((r as { phone?: string }).phone || "")
+            .replace(/\D/g, "")
+            .slice(-10);
+          return p === phone10;
+        }) as { id?: string } | undefined;
+        registrationId = hit?.id ?? null;
+      } catch {
+        /* ignore */
+      }
     }
   }
   // Title + slug + price fetched cheaply (price decides the confirmation-SMS timing;
@@ -2755,6 +2781,7 @@ export async function registerWebinar(
   let webinarTitle: string | null = null;
   let webinarSlug: string | null = null;
   let webinarPrice = 0;
+  let webinarPriceKnown = false;
   let webinarSmsShort: string | null = null;
   let webinarDatetime: string | null = null;
   if (db) {
@@ -2764,11 +2791,14 @@ export async function registerWebinar(
         .select("title, slug, price, sms_short_title, datetime")
         .eq("id", webinarId)
         .maybeSingle();
-      webinarTitle = (data?.title as string) ?? null;
-      webinarSlug = (data as { slug?: string } | null)?.slug ?? null;
-      webinarPrice = Number((data as { price?: number } | null)?.price ?? 0) || 0;
-      webinarSmsShort = (data as { sms_short_title?: string | null } | null)?.sms_short_title ?? null;
-      webinarDatetime = (data as { datetime?: string } | null)?.datetime ?? null;
+      if (data) {
+        webinarPriceKnown = true;
+        webinarTitle = (data?.title as string) ?? null;
+        webinarSlug = (data as { slug?: string } | null)?.slug ?? null;
+        webinarPrice = Number((data as { price?: number } | null)?.price ?? 0) || 0;
+        webinarSmsShort = (data as { sms_short_title?: string | null } | null)?.sms_short_title ?? null;
+        webinarDatetime = (data as { datetime?: string } | null)?.datetime ?? null;
+      }
     } catch {
       /* ignore */
     }
@@ -2809,27 +2839,24 @@ export async function registerWebinar(
   // Sales Telegram — webinar registration (free or paid intent). Never blocks register.
   void import("./telegram/sales")
     .then(async (m) => {
-      let regs: number | null = null;
-      try {
-        if (db) {
-          const { count } = await db
-            .from("webinar_registrations")
-            .select("id", { count: "exact", head: true })
-            .eq("webinar_id", webinarId);
-          regs = typeof count === "number" ? count : null;
-        }
-      } catch {
-        /* ignore */
-      }
+      const { countSalesWebinarRegistrationsSoFar } = await import(
+        "./telegram/sales/webinarRegistrationCount"
+      );
+      const regs = await countSalesWebinarRegistrationsSoFar(webinarId);
+      const phone10 = String(phone).replace(/\D/g, "").slice(-10);
       m.fireSalesAlert(async () => {
         await m.salesAlertWebinarRegistration({
           name,
           phone,
           webinar: webinarTitle || webinarSlug || webinarId,
           webinarDate: webinarDatetime,
-          amountPaid: isFreeWebinar ? 0 : null,
+          amountPaid: webinarPriceKnown ? webinarPrice : null,
+          amountKnown: webinarPriceKnown,
           registrationsSoFar: regs,
-          eventId: `webinar_reg:${webinarId}:${String(phone).replace(/\D/g, "").slice(-10)}`,
+          registrationId,
+          eventId: registrationId
+            ? `webinar_reg:${registrationId}`
+            : `webinar_reg:${webinarId}:${phone10}`,
           occurredAt: new Date().toISOString(),
         });
       });

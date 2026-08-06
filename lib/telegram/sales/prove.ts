@@ -187,6 +187,7 @@ export async function proveSalesPipeline(): Promise<Record<string, unknown>> {
         webinar: "Prove Webinar",
         webinarDate: "2026-08-12T10:00:00+05:30",
         amountPaid: 0,
+        amountKnown: true,
         registrationsSoFar: 42,
         eventId: webinarRegId,
         occurredAt: nowIso,
