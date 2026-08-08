@@ -9,7 +9,7 @@ import { isAppBusy } from "@/lib/appBusy";
  *  1. AUTO-REFRESH stale bundles — compares this client's baked-in build id with
  *     the live /api/version. If a newer deploy is live it reloads to the fresh
  *     bundle (deferred to a subtle banner if the user is mid-task, e.g. a quiz).
- *     Checked on mount, tab refocus, and a slow 5-min interval (no tight loop).
+ *     Checked on mount, tab refocus (debounced 10 min), and a 60-min interval.
  *  2. CACHE PURGE — registers the root /sw.js worker that clears CacheStorage on
  *     activate so a returning device can't be pinned to an old cache.
  *  3. SESSION SELF-HEAL — if a session cookie is present but invalid (logged out
@@ -20,7 +20,8 @@ import { isAppBusy } from "@/lib/appBusy";
  */
 
 const OWN_VERSION = process.env.NEXT_PUBLIC_BUILD_ID || "dev";
-const CHECK_INTERVAL_MS = 5 * 60 * 1000;
+const CHECK_INTERVAL_MS = 60 * 60 * 1000;
+const FOCUS_DEBOUNCE_MS = 10 * 60 * 1000;
 const MIN_GAP_MS = 30 * 1000;
 const TRIED_KEY = "nsa_refresh_tried";
 const HEAL_KEY = "nsa_heal_tried";
@@ -28,6 +29,8 @@ const HEAL_KEY = "nsa_heal_tried";
 export default function ClientHealth() {
   const [updateReady, setUpdateReady] = useState(false);
   const lastCheck = useRef(0);
+  const lastFocusCheck = useRef(0);
+  const etagRef = useRef<string | null>(null);
   const isDev = OWN_VERSION.startsWith("dev");
 
   const refresh = useCallback(() => {
@@ -44,8 +47,13 @@ export default function ClientHealth() {
     if (now - lastCheck.current < MIN_GAP_MS) return;
     lastCheck.current = now;
     try {
-      const res = await fetch("/api/version", { cache: "no-store" });
+      const headers: HeadersInit = {};
+      if (etagRef.current) headers["If-None-Match"] = etagRef.current;
+      const res = await fetch("/api/version", { headers });
+      if (res.status === 304) return;
       if (!res.ok) return;
+      const nextEtag = res.headers.get("etag");
+      if (nextEtag) etagRef.current = nextEtag;
       const data = (await res.json()) as { version?: string };
       const live = data.version || "";
       if (!live) return;
@@ -101,18 +109,24 @@ export default function ClientHealth() {
     return () => { cancelled = true; };
   }, [refresh]);
 
-  // Version watch: mount + interval + tab refocus.
+  // Version watch: mount + interval + tab refocus (10-min debounce).
   useEffect(() => {
     if (isDev) return;
     checkVersion();
     const interval = setInterval(checkVersion, CHECK_INTERVAL_MS);
-    const onVisible = () => { if (document.visibilityState === "visible") checkVersion(); };
-    document.addEventListener("visibilitychange", onVisible);
-    window.addEventListener("focus", checkVersion);
+    const onFocusOrVisible = () => {
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+      const now = Date.now();
+      if (now - lastFocusCheck.current < FOCUS_DEBOUNCE_MS) return;
+      lastFocusCheck.current = now;
+      checkVersion();
+    };
+    document.addEventListener("visibilitychange", onFocusOrVisible);
+    window.addEventListener("focus", onFocusOrVisible);
     return () => {
       clearInterval(interval);
-      document.removeEventListener("visibilitychange", onVisible);
-      window.removeEventListener("focus", checkVersion);
+      document.removeEventListener("visibilitychange", onFocusOrVisible);
+      window.removeEventListener("focus", onFocusOrVisible);
     };
   }, [isDev, checkVersion]);
 
