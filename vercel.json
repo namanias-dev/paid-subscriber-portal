@@ -3,7 +3,6 @@
   "regions": [
     "bom1"
   ],
-  "ignoreCommand": "exit 0",
   "functions": {
     "app/api/cron/telegram-reports/route.ts": {
       "maxDuration": 120
