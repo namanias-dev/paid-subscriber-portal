@@ -12,14 +12,6 @@ if [ -z "$CHANGED" ]; then
   exit 0
 fi
 
-echo "$CHANGED" | while IFS= read -r f; do
-  [ -z "$f" ] && continue
-  case "$f" in
-    *.md|docs|docs/*|reports|reports/*|analysis|analysis/*|*.canvas.tsx) ;;
-    *) exit 0 ;; # real change → build (exits the while subshell!)
-  esac
-done
-# The while runs in a subshell — detect via a flag file instead:
 needs_build=0
 while IFS= read -r f; do
   [ -z "$f" ] && continue
