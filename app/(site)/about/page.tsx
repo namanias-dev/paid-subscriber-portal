@@ -5,7 +5,7 @@ import { getSiteSettings } from "@/lib/dataProvider";
 import { DEFAULT_ABOUT } from "@/lib/homeDefaults";
 
 export const metadata = { title: "About — Naman Sharma IAS Academy" };
-export const dynamic = "force-dynamic";
+export const revalidate = 3600;
 
 export default async function AboutPage() {
   const settings = await getSiteSettings();

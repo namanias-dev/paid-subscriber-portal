@@ -14,7 +14,7 @@ import { caMetadata, caDateLabel, caMonthLabel, groupByDate } from "@/lib/caView
 import { SITE_URL, ACADEMY } from "@/lib/config";
 import type { CaArticle } from "@/lib/types";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 600;
 
 export function generateMetadata(): Metadata {
   return caMetadata({

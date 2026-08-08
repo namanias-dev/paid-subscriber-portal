@@ -5,7 +5,7 @@ import { whatsappLink } from "@/lib/phone";
 import { directionsUrl, mapEmbedUrl } from "@/lib/maps";
 
 export const metadata = { title: "Contact — Naman Sharma IAS Academy" };
-export const dynamic = "force-dynamic";
+export const revalidate = 3600;
 
 export default async function ContactPage() {
   const { brand } = await getSiteSettings();

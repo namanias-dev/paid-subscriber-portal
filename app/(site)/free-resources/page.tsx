@@ -3,6 +3,8 @@ import { Newspaper, PenLine, FileDown, Map as MapIcon, PlaySquare, Send } from "
 import Reveal, { Stagger, StaggerItem } from "@/components/ui/Reveal";
 import { ACADEMY } from "@/lib/config";
 
+export const revalidate = 3600;
+
 export const metadata = { title: "Free Resources — Naman Sharma IAS Academy" };
 
 const RES: { icon: LucideIcon; title: string; desc: string; href: string; cta: string }[] = [

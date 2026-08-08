@@ -8,6 +8,8 @@ import Link from "next/link";
 const CONTACT_EMAIL = "namanstudycircle@gmail.com";
 const LAST_UPDATED = "30 July 2026";
 
+export const revalidate = 3600;
+
 export const metadata: Metadata = {
   title: "Terms of Service — Naman Sharma IAS Academy",
   description:

@@ -9,7 +9,7 @@ import { DEFAULT_CA_CATEGORIES, caCategoryName } from "@/lib/caConstants";
 import { caMetadata } from "@/lib/caView";
 import { ACADEMY } from "@/lib/config";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 600;
 
 const PER_PAGE = 18;
 

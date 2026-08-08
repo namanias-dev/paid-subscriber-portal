@@ -12,7 +12,7 @@ import {
 import { formatSalaryRange, JOB_TYPE_LABELS, ROLE_TYPE_LABELS } from "@/lib/careers/config";
 import { SITE_URL, ACADEMY } from "@/lib/config";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 600;
 
 export async function generateMetadata({ params }: { params: { slug: string } }): Promise<Metadata> {
   const p = await getPositionBySlug(params.slug);

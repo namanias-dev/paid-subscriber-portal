@@ -9,7 +9,7 @@ import { caMetadata, caDateLabel, groupByDate } from "@/lib/caView";
 import { ACADEMY } from "@/lib/config";
 import type { CaArticle, CaPdf } from "@/lib/types";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 600;
 
 export function generateMetadata(): Metadata {
   return caMetadata({

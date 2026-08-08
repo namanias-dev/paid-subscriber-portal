@@ -27,7 +27,7 @@ import { formatISTDate } from "@/lib/dates";
 import { SITE_URL, ACADEMY } from "@/lib/config";
 import type { CaPdf } from "@/lib/types";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 600;
 const BODY_ID = "resource-article-body";
 
 export async function generateMetadata({

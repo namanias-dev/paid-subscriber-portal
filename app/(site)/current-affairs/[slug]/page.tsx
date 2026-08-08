@@ -23,7 +23,7 @@ import { caMetadata, caDateLabel } from "@/lib/caView";
 import { SITE_URL, ACADEMY } from "@/lib/config";
 import type { CaArticle, CaPdf } from "@/lib/types";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 600;
 
 const BODY_ID = "ca-article-body";
 

@@ -4,7 +4,7 @@ import { getSiteSettings } from "@/lib/dataProvider";
 import TopperCard from "@/components/public/TopperCard";
 
 export const metadata = { title: "Results — Naman Sharma IAS Academy" };
-export const dynamic = "force-dynamic";
+export const revalidate = 600;
 
 const STORIES = [
   { name: "Manu Verma", air: "AIR 434", quote: "The small batch meant I could ask anything, anytime. Naman Sir's mentorship was the turning point in my preparation." },

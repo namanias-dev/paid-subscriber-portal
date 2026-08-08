@@ -10,7 +10,7 @@ import { caMetadata, caDateLabel, caEffectiveDate } from "@/lib/caView";
 import { caCategoryName } from "@/lib/caConstants";
 import { ACADEMY } from "@/lib/config";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 600;
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 

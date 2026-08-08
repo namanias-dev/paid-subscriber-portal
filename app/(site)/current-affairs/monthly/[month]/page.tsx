@@ -8,7 +8,7 @@ import { getPublicCaArticles, getCaPdfs } from "@/lib/dataProvider";
 import { caMetadata, caMonthLabel, caEffectiveDate } from "@/lib/caView";
 import { ACADEMY } from "@/lib/config";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 600;
 
 const MONTH_RE = /^\d{4}-\d{2}$/;
 

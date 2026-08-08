@@ -11,7 +11,7 @@ import ResourceCard from "@/components/public/resources/ResourceCard";
 import JourneyRoadmap from "@/components/public/resources/JourneyRoadmap";
 import ResourceSearch from "@/components/public/resources/ResourceSearch";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 600;
 
 export function generateMetadata(): Metadata {
   return resourceMetadata({

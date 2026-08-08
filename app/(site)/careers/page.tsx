@@ -5,7 +5,7 @@ import { listOpenPositions, getCareersSettings } from "@/lib/careers/store";
 import { formatSalaryRange, JOB_TYPE_LABELS, ROLE_TYPE_LABELS } from "@/lib/careers/config";
 import { SITE_URL, ACADEMY } from "@/lib/config";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 600;
 
 export const metadata: Metadata = {
   title: "Careers — Join Naman IAS Academy",
