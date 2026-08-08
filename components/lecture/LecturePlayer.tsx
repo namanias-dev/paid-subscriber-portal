@@ -12,7 +12,7 @@ import { FileText, Loader2, AlertTriangle } from "lucide-react";
  * subtle anti-piracy watermark. Respects prefers-reduced-motion.
  */
 const SPEEDS = [1, 1.25, 1.5, 2];
-const SAVE_EVERY_MS = 20000;
+const SAVE_EVERY_MS = 90_000;
 
 export default function LecturePlayer({
   recordingId,
@@ -42,7 +42,8 @@ export default function LecturePlayer({
   const [error, setError] = useState<string | null>(null);
   const [speed, setSpeed] = useState(1);
   const resumed = useRef(false);
-  const lastSaved = useRef(0);
+  const lastSavedAt = useRef(0);
+  const lastSavedPosition = useRef(-1);
 
   // Anti-piracy watermark: student identity + live IST clock, repositioned every
   // few seconds so it can't be cropped out and so a DevTools delete is re-applied
@@ -80,10 +81,14 @@ export default function LecturePlayer({
     return () => { alive = false; };
   }, [recordingId]);
 
-  const save = useCallback((completed = false) => {
+  const save = useCallback((completed = false, force = false) => {
     const v = videoRef.current;
     if (!v) return;
     const position = Math.floor(v.currentTime || 0);
+    // Skip no-op writes unless force (pause/seek/hide/unload) or completed.
+    if (!force && !completed && position === lastSavedPosition.current) return;
+    lastSavedPosition.current = position;
+    lastSavedAt.current = Date.now();
     const isDone = completed || (v.duration ? v.currentTime / v.duration >= 0.95 : false);
     const payload = JSON.stringify({ position, completed: isDone });
     try {
@@ -95,16 +100,24 @@ export default function LecturePlayer({
     } catch { /* ignore */ }
   }, [recordingId]);
 
-  // Periodic + lifecycle progress saving.
+  // Periodic + lifecycle progress saving (pause/seek/hide/unload still flush).
   useEffect(() => {
     const id = setInterval(() => {
       const v = videoRef.current;
-      if (v && !v.paused) save();
+      if (v && !v.paused) save(false, false);
     }, SAVE_EVERY_MS);
-    const onHide = () => save();
-    window.addEventListener("pagehide", onHide);
-    window.addEventListener("beforeunload", onHide);
-    return () => { clearInterval(id); window.removeEventListener("pagehide", onHide); window.removeEventListener("beforeunload", onHide); save(); };
+    const flush = () => save(false, true);
+    const onVis = () => { if (document.visibilityState === "hidden") flush(); };
+    window.addEventListener("pagehide", flush);
+    window.addEventListener("beforeunload", flush);
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      clearInterval(id);
+      window.removeEventListener("pagehide", flush);
+      window.removeEventListener("beforeunload", flush);
+      document.removeEventListener("visibilitychange", onVis);
+      flush();
+    };
   }, [save]);
 
   const onLoadedMeta = () => {
@@ -145,12 +158,9 @@ export default function LecturePlayer({
                 className="h-full w-full"
                 onContextMenu={(e) => e.preventDefault()}
                 onLoadedMetadata={onLoadedMeta}
-                onPause={() => save()}
-                onEnded={() => save(true)}
-                onTimeUpdate={() => {
-                  const now = Date.now();
-                  if (now - lastSaved.current > SAVE_EVERY_MS) { lastSaved.current = now; }
-                }}
+                onPause={() => save(false, true)}
+                onSeeked={() => save(false, true)}
+                onEnded={() => save(true, true)}
               />
               {watermark && (
                 <div
