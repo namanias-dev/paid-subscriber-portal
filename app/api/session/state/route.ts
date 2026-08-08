@@ -26,9 +26,16 @@ export async function GET() {
     getAdminSession(),
   ]);
   const authenticated = !!(buyer || student || admin);
+  const name = student?.name || buyer?.name || admin?.name || null;
 
   return NextResponse.json(
-    { authenticated, stale: !authenticated && hasCookie },
+    {
+      authenticated,
+      stale: !authenticated && hasCookie,
+      student: !!student,
+      buyer: !!buyer,
+      name,
+    },
     { headers: { "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0" } },
   );
 }

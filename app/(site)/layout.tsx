@@ -3,23 +3,18 @@ import PublicFooter from "@/components/public/PublicFooter";
 import FloatingWhatsApp from "@/components/public/FloatingWhatsApp";
 import AiCounselorMount from "@/components/ai-agent/AiCounselorMount";
 import { mergeSiteSettings } from "@/lib/homeDefaults";
-import { getStudentSession, getBuyerSession } from "@/lib/session";
 import { resolveNavTabs } from "@/lib/navConfig";
 import { whatsappLink } from "@/lib/phone";
 
 /**
- * SEV1 CPU rule: the public layout must NEVER touch Postgres.
+ * SEV1 CPU rule: the public layout must NEVER touch Postgres OR cookies().
+ * Reading sessions here forced every public page dynamic and defeated ISR.
+ * Auth chrome hydrates client-side in PublicNav when a session cookie exists.
  * Site chrome uses static defaults; live site_settings / webinars / What's New
  * are fetched only on pages that need them (home / webinars), under ISR.
- * Sessions are JWT cookie verifies — buyer version check is fail-open and rare.
  */
 export default async function SiteLayout({ children }: { children: React.ReactNode }) {
   const settings = mergeSiteSettings(null);
-  const [session, buyerSession] = await Promise.all([
-    getStudentSession().catch(() => null),
-    getBuyerSession().catch(() => null),
-  ]);
-  const userName = session?.name || buyerSession?.name || null;
   const waLink = whatsappLink(
     settings.brand.whatsapp || settings.brand.support_phone,
     "Hi, I have a question about your courses / webinars."
@@ -33,9 +28,9 @@ export default async function SiteLayout({ children }: { children: React.ReactNo
         showWordmark={settings.content.show_wordmark}
         wordmark={settings.content.wordmark}
         wordmarkSub={settings.content.wordmark_sub}
-        isLoggedIn={!!session}
-        portalLoggedIn={!!buyerSession}
-        userName={userName}
+        isLoggedIn={false}
+        portalLoggedIn={false}
+        userName={null}
         links={resolveNavTabs(settings.nav)}
         hasUpcomingWebinars={false}
         announcements={[]}

@@ -75,21 +75,54 @@ export default function PublicNav({
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
+  const [auth, setAuth] = useState({ isLoggedIn, portalLoggedIn, userName });
   const headerRef = useRef<HTMLElement>(null);
   const LINKS = links;
   const logoSrc = toPublicImageSrc(logoUrl);
   const hasLogo = !!logoSrc;
   const h = Math.min(96, Math.max(28, Number(logoHeight) || 48));
 
+  // Layout no longer reads cookies (keeps marketing/CA pages ISR-able). Hydrate
+  // login chrome client-side only when a session cookie is present.
+  useEffect(() => {
+    try {
+      if (!/(?:^|;\s*)(naman_buyer_token|naman_student_token|naman_admin_token)=/.test(document.cookie)) return;
+    } catch {
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/session/state", { cache: "no-store" });
+        if (!res.ok || cancelled) return;
+        const data = (await res.json()) as {
+          authenticated?: boolean;
+          student?: boolean;
+          buyer?: boolean;
+          name?: string | null;
+        };
+        if (!data.authenticated) return;
+        setAuth({
+          isLoggedIn: !!data.student,
+          portalLoggedIn: !!data.buyer && !data.student,
+          userName: data.name || null,
+        });
+      } catch {
+        /* ignore */
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
   const isActive = (href: string) => pathname === href || pathname.startsWith(href + "/");
 
   // Logged-in profile (student dashboard OR buyer portal share one premium treatment).
-  const loggedIn = isLoggedIn || portalLoggedIn;
-  const accountHref = isLoggedIn ? "/dashboard" : "/portal";
-  const accountSub = isLoggedIn ? "My Dashboard" : "My Portal";
-  const displayName = (userName?.trim() || (isLoggedIn ? "Student" : "My account")).split(" ").slice(0, 2).join(" ");
-  const initials = initialsOf(userName?.trim() || displayName);
-  const logout = isLoggedIn ? doLogout : doPortalLogout;
+  const loggedIn = auth.isLoggedIn || auth.portalLoggedIn;
+  const accountHref = auth.isLoggedIn ? "/dashboard" : "/portal";
+  const accountSub = auth.isLoggedIn ? "My Dashboard" : "My Portal";
+  const displayName = (auth.userName?.trim() || (auth.isLoggedIn ? "Student" : "My account")).split(" ").slice(0, 2).join(" ");
+  const initials = initialsOf(auth.userName?.trim() || displayName);
+  const logout = auth.isLoggedIn ? doLogout : doPortalLogout;
 
   const Avatar = ({ size = 36 }: { size?: number }) => (
     <span
