@@ -5,6 +5,7 @@ import { formatINR, formatISTDate } from "@/lib/dates";
 import { courseOfferingSummary } from "@/lib/courseView";
 import type { Course } from "@/lib/types";
 import type { CoursePurchaseView } from "@/lib/purchaseStatus";
+import { toPublicImageSrc } from "@/lib/publicMediaUrl";
 
 export function discountPct(price: number, original: number | null): number | null {
   if (!original || original <= price) return null;
@@ -13,7 +14,7 @@ export function discountPct(price: number, original: number | null): number | nu
 
 /** Premium course list card: cover image, glass depth, gold accents, clear price. */
 export default function CourseCard({ course, purchase }: { course: Course; purchase?: CoursePurchaseView | null }) {
-  const cover = course.cover_image_url || course.image || course.mobile_image_url || null;
+  const cover = toPublicImageSrc(course.cover_image_url || course.image || course.mobile_image_url) || null;
   const off = discountPct(course.price, course.original_price);
   const category = course.badge_label?.trim() || course.category;
   const cta = course.price === 0 ? "Start free" : "View course";

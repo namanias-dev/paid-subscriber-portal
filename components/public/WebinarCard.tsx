@@ -5,6 +5,7 @@ import SeatCounter from "./SeatCounter";
 import { formatINR, formatISTDateTime } from "@/lib/dates";
 import { webinarRegCountDisplay, WEBINAR_REGCOUNT_ENCOURAGE } from "@/lib/webinarLifecycle";
 import type { Webinar } from "@/lib/types";
+import { toPublicImageSrc } from "@/lib/publicMediaUrl";
 
 function statusBadge(status: Webinar["status"], badgeLabel?: string | null) {
   if (badgeLabel?.trim()) return { label: badgeLabel.trim(), tone: "bg-white/90 text-[var(--ca-navy-900)]", live: false };
@@ -30,7 +31,7 @@ export default function WebinarCard({
    * count entirely; we never fall back to the seeded webinars.registrations. */
   registeredCount?: number | null;
 }) {
-  const cover = w.cover_image_url || w.mobile_image_url || null;
+  const cover = toPublicImageSrc(w.cover_image_url || w.mobile_image_url) || null;
   const badge = statusBadge(w.status, w.badge_label);
   const priceLabel = w.price === 0 ? "Free" : formatINR(w.price);
   const seat = w.seat_config?.show ? w.seat_config : null;

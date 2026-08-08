@@ -25,20 +25,33 @@ const nextConfig = {
     },
   },
   images: {
+    // Keep optimized variants ≥31d so stable public media URLs stay HITs.
+    minimumCacheTTL: 60 * 60 * 24 * 31,
     remotePatterns: [
       // Supabase Storage public URLs (cover images, logo, portrait, etc.)
       { protocol: "https", hostname: "*.supabase.co" },
       { protocol: "https", hostname: "*.supabase.in" },
-      // The site's own media proxy (/api/media/*). Admin uploads (hero portrait,
-      // logo, etc.) are stored as absolute https URLs on this host and streamed
-      // from R2 via short-lived signed redirects. next/image must allow the host
-      // or it rejects the request with 400 INVALID_IMAGE_OPTIMIZE_REQUEST, which
-      // renders as a broken "?" image. Apex + www + any subdomain.
+      // Same-origin public `/media/*` stream (and legacy absolute namanias URLs).
       { protocol: "https", hostname: "namanias.com" },
       { protocol: "https", hostname: "*.namanias.com" },
-      // The R2 origin the media proxy redirects to (defensive: covers URLs that
-      // resolve/point straight at storage).
-      { protocol: "https", hostname: "*.r2.cloudflarestorage.com" },
+      // Optional R2 public bucket / custom CDN (CLOUDFLARE_R2_PUBLIC_BASE_URL).
+      // Never allow signed *.r2.cloudflarestorage.com — those thrash the cache.
+      { protocol: "https", hostname: "*.r2.dev" },
+      ...(() => {
+        const base = (
+          process.env.NEXT_PUBLIC_MEDIA_CDN_BASE ||
+          process.env.CLOUDFLARE_R2_PUBLIC_BASE_URL ||
+          ""
+        ).trim();
+        if (!base) return [];
+        try {
+          const { hostname, protocol } = new URL(base);
+          if (!hostname || (protocol !== "https:" && protocol !== "http:")) return [];
+          return [{ protocol: protocol.replace(":", ""), hostname }];
+        } catch {
+          return [];
+        }
+      })(),
     ],
     // Admin-uploaded logos may be SVG. These are trusted (admin-only uploads).
     dangerouslyAllowSVG: true,

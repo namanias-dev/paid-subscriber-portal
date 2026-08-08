@@ -6,6 +6,7 @@ import { DEFAULT_HERO } from "@/lib/homeDefaults";
 import type { HeroOffers } from "@/lib/homeCinematic/offers";
 import { rupees } from "@/lib/homeCinematic/offers";
 import type { TrustItem } from "@/lib/homeCinematic/trust";
+import { toPublicImageSrc } from "@/lib/publicMediaUrl";
 import HeroSceneLayer from "./HeroSceneLayer";
 import TrackedLink from "./TrackedLink";
 
@@ -24,13 +25,6 @@ import TrackedLink from "./TrackedLink";
  * Nothing here hardcodes ₹50 — if no masterclass session is open, the CTA
  * degrades to the webinars index and makes no price claim at all.
  */
-
-/** Media proxy lives on the apex host, which 308s to www — skip the hop. */
-function normalizePortraitUrl(url?: string | null): string | undefined {
-  const u = url?.trim();
-  if (!u) return undefined;
-  return u.replace(/^https?:\/\/namanias\.com\//i, "https://www.namanias.com/");
-}
 
 function startLabel(iso: string | null): string | null {
   if (!iso) return null;
@@ -55,7 +49,7 @@ export default function CinematicHero({ hero, offers, trust }: CinematicHeroProp
   const headline = (h.headline || DEFAULT_HERO.headline || "").trim();
   const subheading = h.subheading?.trim() || DEFAULT_HERO.subheading || "";
   const badge = h.badge?.trim();
-  const portrait = normalizePortraitUrl(h.portrait_url);
+  const portrait = toPublicImageSrc(h.portrait_url);
   const portraitAlt = h.portrait_alt?.trim() || "Naman Sir";
 
   // Gold-highlight the mentor's name without splitting the h1 into per-word

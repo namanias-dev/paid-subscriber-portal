@@ -1,8 +1,10 @@
 import Image from "next/image";
+import { toPublicImageSrc } from "@/lib/publicMediaUrl";
 
 /**
  * Responsive cover image with no layout shift (fixed aspect-ratio container).
  * Uses a separate mobile crop when provided, otherwise falls back to the main image.
+ * Sources are rewritten to stable public `/media/…` (or CDN) — never presigned R2.
  */
 export default function CoverImage({
   src,
@@ -15,9 +17,9 @@ export default function CoverImage({
   alt: string;
   priority?: boolean;
 }) {
-  const main = src || mobileSrc;
+  const main = toPublicImageSrc(src || mobileSrc);
   if (!main) return null;
-  const mob = mobileSrc || src || main;
+  const mob = toPublicImageSrc(mobileSrc || src) || main;
 
   return (
     <div className="relative mb-6 aspect-[16/9] w-full overflow-hidden rounded-2xl bg-surface2 sm:aspect-[2/1]">

@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { requireAnyPermission } from "@/lib/adminGuard";
 import { getSupabaseAdmin } from "@/lib/supabase";
-import { r2Configured, mediaAssetKey, putObject, publicCdnUrl } from "@/lib/r2";
-import { SITE_URL } from "@/lib/config";
+import { r2Configured, mediaAssetKey, putObject } from "@/lib/r2";
+import { stablePublicMediaUrl } from "@/lib/publicMediaUrl";
 
 // Shared media upload used by many editors (courses, webinars, library, home,
 // toppers, about, current affairs). Allow any content/settings manager.
@@ -43,12 +43,12 @@ export async function POST(req: Request) {
     const buffer = Buffer.from(await file.arrayBuffer());
 
     // Primary path: store the asset in Cloudflare R2 (single source of truth for
-    // all new file uploads). Returns an absolute URL — the public CDN base when
-    // configured, otherwise our /api/media proxy (which signs/redirects to R2).
+    // all new file uploads). Returns a stable public URL (CDN or `/media/…`) —
+    // never a presigned R2 link (those break next/image caching).
     if (r2Configured()) {
       const key = mediaAssetKey(folder, ext); // media/{folder}/{name}.{ext}
       await putObject(key, buffer, file.type || undefined);
-      const url = publicCdnUrl(key) || `${SITE_URL}/api/media/${key.slice("media/".length)}`;
+      const url = stablePublicMediaUrl(key);
       return NextResponse.json({ ok: true, url, path: key });
     }
 

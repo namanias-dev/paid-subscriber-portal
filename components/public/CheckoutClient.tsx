@@ -6,6 +6,7 @@ import Link from "next/link";
 import { trackClient } from "@/lib/analytics/client";
 import { ga4Event, readGaClientId } from "@/lib/analytics/ga4";
 import { useGa4FormTracking } from "@/lib/analytics/ga4Form";
+import { toPublicImageSrc } from "@/lib/publicMediaUrl";
 import {
   ArrowLeft,
   ShieldCheck,
@@ -263,7 +264,7 @@ export default function CheckoutClient({ course }: { course: Course }) {
             <div className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:p-5">
               <div className="relative h-24 w-full shrink-0 overflow-hidden rounded-xl sm:h-20 sm:w-32">
                 {(course.cover_image_url || course.image) ? (
-                  <Image src={(course.cover_image_url || course.image)!} alt={course.title} fill sizes="160px" className="object-cover" />
+                  <Image src={toPublicImageSrc(course.cover_image_url || course.image)!} alt={course.title} fill sizes="160px" className="object-cover" />
                 ) : (
                   <div className="ca-dark h-full w-full" />
                 )}

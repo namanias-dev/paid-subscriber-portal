@@ -135,7 +135,7 @@ export function isInstallmentProofStudentId(segment: string): boolean {
 /**
  * Public media asset (images, PDFs, brochures, covers, logos …). These replace
  * the old Supabase `media` bucket. Keys live under `media/` and are served via
- * the public CDN (if configured) or the `/api/media/[...]` proxy route.
+ * the public CDN (if configured) or the stable `/media/[...]` stream route.
  */
 export function mediaAssetKey(folder: string, ext: string): string {
   const safeFolder = (folder || "uploads").replace(/[^a-z0-9/_-]/gi, "").replace(/^\/+|\/+$/g, "") || "uploads";
@@ -146,8 +146,8 @@ export function mediaAssetKey(folder: string, ext: string): string {
 
 /**
  * Key for a document/notes file uploaded against a content_item (type notes /
- * booklet / pyq / …). Lives under `media/` so the existing public `/api/media`
- * proxy serves it with a STABLE url (never an expiring presigned link), and is
+ * booklet / pyq / …). Lives under `media/` so the public `/media/[...]`
+ * stream (or CDN) serves a STABLE url (never an expiring presigned link), and is
  * namespaced by the content id so replacing a file is deterministic.
  */
 export function contentNotesKey(contentId: string, ext: string): string {
@@ -161,6 +161,31 @@ export async function headObjectSize(key: string): Promise<number | null> {
   try {
     const out = await r2().send(new HeadObjectCommand({ Bucket: bucket(), Key: key }));
     return typeof out.ContentLength === "number" ? out.ContentLength : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Stream an object for public serving (no presign). Returns null if missing. */
+export async function getObject(
+  key: string,
+): Promise<{
+  body: { transformToWebStream: () => ReadableStream };
+  contentType?: string;
+  contentLength?: number;
+  etag?: string;
+} | null> {
+  try {
+    const out = await r2().send(new GetObjectCommand({ Bucket: bucket(), Key: key }));
+    if (!out.Body || typeof (out.Body as { transformToWebStream?: unknown }).transformToWebStream !== "function") {
+      return null;
+    }
+    return {
+      body: out.Body as { transformToWebStream: () => ReadableStream },
+      contentType: out.ContentType,
+      contentLength: typeof out.ContentLength === "number" ? out.ContentLength : undefined,
+      etag: out.ETag,
+    };
   } catch {
     return null;
   }
@@ -239,9 +264,12 @@ export async function putObject(key: string, body: Buffer | Uint8Array, contentT
   );
 }
 
-/** Public CDN URL (only used for public lectures explicitly opted into CDN caching). */
+/**
+ * Public CDN URL when CLOUDFLARE_R2_PUBLIC_BASE_URL is set (R2 custom domain or
+ * r2.dev). Prefer this over any app proxy so next/image never sees X-Amz-*.
+ */
 export function publicCdnUrl(key: string): string | null {
-  const base = process.env.CLOUDFLARE_R2_PUBLIC_BASE_URL;
+  const base = (process.env.CLOUDFLARE_R2_PUBLIC_BASE_URL || process.env.NEXT_PUBLIC_MEDIA_CDN_BASE || "").trim();
   return base ? `${base.replace(/\/$/, "")}/${key}` : null;
 }
 

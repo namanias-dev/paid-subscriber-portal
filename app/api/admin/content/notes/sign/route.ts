@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { requirePermission } from "@/lib/adminGuard";
 import { getContentById, updateContent } from "@/lib/dataProvider";
 import { r2Configured, signPutUrl, contentNotesKey } from "@/lib/r2";
-import { SITE_URL } from "@/lib/config";
+import { stablePublicMediaUrl } from "@/lib/publicMediaUrl";
 
 export const dynamic = "force-dynamic";
 
@@ -10,9 +10,9 @@ export const dynamic = "force-dynamic";
  * Presigned PUT for a document/notes file uploaded against a content_item
  * (type notes / booklet / pyq / mcq / current_affairs / …). The file goes
  * browser → R2 directly (bypasses the serverless request-body limit, so large
- * PDFs work), stored under `media/content-notes/<id>/…` so the existing public
- * `/api/media` proxy serves it with a STABLE url (never an expiring presigned
- * link). We persist a stable drive_link + the R2 key + size so it opens for
+ * PDFs work), stored under `media/content-notes/<id>/…` so the public
+ * `/media/…` (or CDN) URL stays stable — never an expiring presigned link.
+ * We persist a stable drive_link + the R2 key + size so it opens for
  * students and shows an accurate size in Content/LMS storage analytics.
  *
  * Additive: only touches the target content row's drive_link / notes_pdf_key /
@@ -60,7 +60,7 @@ export async function POST(req: Request) {
   if (!rec) return NextResponse.json({ ok: false, error: "Content not found" }, { status: 404 });
 
   const key = contentNotesKey(contentId, ext);
-  const stableUrl = `${SITE_URL}/api/media/${key.slice("media/".length)}`;
+  const stableUrl = stablePublicMediaUrl(key);
 
   try {
     const url = await signPutUrl(key, contentType, 600);

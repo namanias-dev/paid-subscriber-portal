@@ -7,6 +7,7 @@ import { motion, useReducedMotion } from "framer-motion";
 import { Calendar, Clock, User, ArrowRight, Video, GraduationCap, Package } from "lucide-react";
 import { formatISTDateTime } from "@/lib/dates";
 import { trackClient } from "@/lib/analytics/client";
+import { toPublicImageSrc } from "@/lib/publicMediaUrl";
 
 type Variant = "webinar" | "course" | "generic";
 type Tone = "gold" | "green" | "blue" | "amber" | "gray";
@@ -129,7 +130,8 @@ export default function EnrolledCard(props: EnrolledCardProps) {
 
   const ctaLabel = cta(props, phase, near);
   const Icon = ICON[variant];
-  const showImg = !!image && imgOk;
+  const cover = toPublicImageSrc(image);
+  const showImg = !!cover && imgOk;
 
   return (
     <motion.div
@@ -144,7 +146,7 @@ export default function EnrolledCard(props: EnrolledCardProps) {
           <div className="relative aspect-[16/9] w-full overflow-hidden bg-gradient-to-br from-[var(--ca-navy-900)] to-[var(--ca-navy-600)]">
             {showImg ? (
               <Image
-                src={image!}
+                src={cover!}
                 alt={title}
                 fill
                 sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"

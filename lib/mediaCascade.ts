@@ -81,15 +81,25 @@ export function resolveOwnKey(value: string | null | undefined): string | null {
     return path || null;
   }
 
-  // (B) Our stable media proxy: <site>/api/media/<rest>  → key = media/<rest>.
-  const mediaIdx = u.pathname.indexOf("/api/media/");
-  if (mediaIdx !== -1) {
-    const rest = u.pathname.slice(mediaIdx + "/api/media/".length).replace(/^\/+/, "");
+  // (B) Legacy proxy: <site>/api/media/<rest>  → key = media/<rest>.
+  const apiMediaIdx = u.pathname.indexOf("/api/media/");
+  if (apiMediaIdx !== -1) {
+    const rest = u.pathname.slice(apiMediaIdx + "/api/media/".length).replace(/^\/+/, "");
+    return rest ? `media/${rest}` : null;
+  }
+
+  // (B2) Stable public stream: <site>/media/<rest> → key = media/<rest>.
+  if (u.pathname === "/media" || u.pathname.startsWith("/media/")) {
+    const rest = u.pathname.slice("/media/".length).replace(/^\/+/, "");
     return rest ? `media/${rest}` : null;
   }
 
   // (C) Public CDN base (if configured): <cdnBase>/<key>.
-  const cdn = (process.env.CLOUDFLARE_R2_PUBLIC_BASE_URL || "").replace(/\/$/, "");
+  const cdn = (
+    process.env.CLOUDFLARE_R2_PUBLIC_BASE_URL ||
+    process.env.NEXT_PUBLIC_MEDIA_CDN_BASE ||
+    ""
+  ).replace(/\/$/, "");
   if (cdn && raw.startsWith(cdn + "/")) {
     return raw.slice(cdn.length + 1).split("?")[0] || null;
   }

@@ -1,16 +1,18 @@
 import Image from "next/image";
 import RichContent from "./RichContent";
 import type { LandingMentor } from "@/lib/landingView";
+import { toPublicImageSrc } from "@/lib/publicMediaUrl";
 
 export default function MentorCard({ mentor, title = "Meet your mentor" }: { mentor?: LandingMentor | null; title?: string }) {
   if (!mentor) return null;
+  const photo = toPublicImageSrc(mentor.image_url);
   return (
     <section className="mt-10">
       <h2 className="text-2xl font-extrabold">{title}</h2>
       <div className="card mt-4 flex flex-col gap-4 p-5 sm:flex-row sm:items-start">
-        {mentor.image_url && (
+        {photo && (
           <div className="relative h-24 w-24 shrink-0 overflow-hidden rounded-2xl bg-surface2">
-            <Image src={mentor.image_url} alt={mentor.name || "Mentor"} fill sizes="96px" className="object-cover" />
+            <Image src={photo} alt={mentor.name || "Mentor"} fill sizes="96px" className="object-cover" />
           </div>
         )}
         <div className="min-w-0">

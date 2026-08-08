@@ -5,6 +5,7 @@ import SeatCounter from "./SeatCounter";
 import { formatINR, formatISTDateTime } from "@/lib/dates";
 import { webinarRegCountDisplay, WEBINAR_REGCOUNT_ENCOURAGE } from "@/lib/webinarLifecycle";
 import type { Webinar } from "@/lib/types";
+import { toPublicImageSrc } from "@/lib/publicMediaUrl";
 
 /**
  * Above-the-fold hero card for the next live webinar on /webinars.
@@ -20,7 +21,7 @@ export default function FeaturedWebinarHero({
   registered?: boolean;
   registeredCount?: number;
 }) {
-  const cover = w.cover_image_url || w.mobile_image_url || null;
+  const cover = toPublicImageSrc(w.cover_image_url || w.mobile_image_url) || null;
   const priceLabel = w.price === 0 ? "Free" : formatINR(w.price);
   const seat = w.seat_config?.show ? w.seat_config : null;
   const regDisplay = webinarRegCountDisplay({

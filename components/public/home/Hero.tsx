@@ -8,6 +8,7 @@ import AshokaChakra from "@/components/public/AshokaChakra";
 import Counter from "@/components/ui/Counter";
 import { DEFAULT_HERO } from "@/lib/homeDefaults";
 import type { HeroConfig, HeroButtonStyle } from "@/lib/types";
+import { toPublicImageSrc } from "@/lib/publicMediaUrl";
 
 const FLOAT_CARDS = [
   { label: "Prelims", icon: "🎯", x: "left-2 top-6", d: 0 },
@@ -32,7 +33,7 @@ export default function Hero({ hero }: { hero?: HeroConfig }) {
   const words = headline.split(/\s+/);
   const stats = h.stats?.length ? h.stats : DEFAULT_HERO.stats!;
   const buttons = (h.buttons?.length ? h.buttons : DEFAULT_HERO.buttons!).filter((b) => b.enabled && b.label?.trim() && b.href?.trim());
-  const portrait = h.portrait_url?.trim();
+  const portrait = toPublicImageSrc(h.portrait_url);
 
   return (
     <section className="relative overflow-hidden bg-dotted">

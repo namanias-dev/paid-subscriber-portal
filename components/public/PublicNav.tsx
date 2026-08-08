@@ -15,6 +15,7 @@ import type { WhatsNewItem } from "@/lib/announcements";
 import { ACADEMY } from "@/lib/config";
 import { DEFAULT_NAV_TABS, type NavTab } from "@/lib/navConfig";
 import { requestLogout } from "@/lib/welcome";
+import { toPublicImageSrc } from "@/lib/publicMediaUrl";
 
 // Route logout through the global LogoutFlow (confirm + farewell + true logout).
 function doLogout() { requestLogout("/api/auth/logout", "/"); }
@@ -76,7 +77,8 @@ export default function PublicNav({
   const [scrolled, setScrolled] = useState(false);
   const headerRef = useRef<HTMLElement>(null);
   const LINKS = links;
-  const hasLogo = !!logoUrl?.trim();
+  const logoSrc = toPublicImageSrc(logoUrl);
+  const hasLogo = !!logoSrc;
   const h = Math.min(96, Math.max(28, Number(logoHeight) || 48));
 
   const isActive = (href: string) => pathname === href || pathname.startsWith(href + "/");
@@ -137,7 +139,7 @@ export default function PublicNav({
     <Link href="/" className="ca-focus flex items-center gap-2.5" aria-label={ACADEMY.name}>
       {hasLogo ? (
         <Image
-          src={logoUrl!.trim()}
+          src={logoSrc!}
           alt={logoAlt || ACADEMY.name}
           width={Math.round(h * 4)}
           height={h}

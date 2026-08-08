@@ -2,21 +2,10 @@ import Link from "next/link";
 import { ArrowRight, Sparkles } from "lucide-react";
 import { DEFAULT_HERO } from "@/lib/homeDefaults";
 import type { HeroConfig, HeroButtonStyle } from "@/lib/types";
+import { toPublicImageSrc } from "@/lib/publicMediaUrl";
 import HeroBackdrop from "./HeroBackdrop";
 import HeroStageV2 from "./HeroStageV2";
 import HeroCardCluster from "./HeroCardCluster";
-
-/**
- * Canonicalize an admin-uploaded portrait URL for next/image. The media proxy
- * lives on the apex `namanias.com`, which 308-redirects to `www` — rewriting it
- * up front skips a redirect hop for the image optimizer. Any other value
- * (Supabase URL, other host) is passed through untouched.
- */
-function normalizePortraitUrl(url?: string | null): string | undefined {
-  const u = url?.trim();
-  if (!u) return undefined;
-  return u.replace(/^https?:\/\/namanias\.com\//i, "https://www.namanias.com/");
-}
 
 const BTN_CLASS: Record<HeroButtonStyle, string> = {
   primary: "ca-btn ca-btn-gold",
@@ -41,7 +30,7 @@ export default function HeroV2({ hero }: { hero?: HeroConfig }) {
     (b) => b.enabled && b.label?.trim() && b.href?.trim(),
   );
   // Reuse the same admin-editable source the classic hero uses — never hardcoded.
-  const portrait = normalizePortraitUrl(h.portrait_url);
+  const portrait = toPublicImageSrc(h.portrait_url);
   const portraitAlt = h.portrait_alt?.trim() || "Naman Sir";
 
   // Highlight the mentor's name in gold without fragmenting the heading into

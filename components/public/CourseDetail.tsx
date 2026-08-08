@@ -17,6 +17,7 @@ import BatchCountdown from "@/components/public/BatchCountdown";
 import type { Course, LibraryDoc } from "@/lib/types";
 import type { LandingView } from "@/lib/landingView";
 import type { CoursePurchaseView } from "@/lib/purchaseStatus";
+import { toPublicImageSrc } from "@/lib/publicMediaUrl";
 
 const COURSE_FAQ = [
   { q: "Will I get recordings?", a: "Yes, recordings are available for all live sessions for the duration of your access." },
@@ -41,7 +42,7 @@ export default function CourseDetail({ course, related, comparison, view, brochu
   const priceVaries = summary.priceVaries;
   const displayPrice = summary.displayPrice;
   const priceLabel = course.price === 0 ? "Free" : priceVaries ? `From ${formatINR(displayPrice)}` : formatINR(course.price);
-  const cover = course.cover_image_url || course.image || course.mobile_image_url || null;
+  const cover = toPublicImageSrc(course.cover_image_url || course.image || course.mobile_image_url) || null;
   const enrollHref = purchase ? purchase.href : course.price === 0 ? `/enroll/${course.slug}` : `/courses/${course.slug}/enroll`;
   const enrollLabel = purchase ? purchase.cta : course.price === 0 ? "Book Now" : "Enroll Now";
   // Per-section visibility toggles (default ON so existing courses are unchanged).
