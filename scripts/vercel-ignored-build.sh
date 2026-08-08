@@ -1,16 +1,9 @@
 #!/usr/bin/env bash
-# Vercel Ignored Build Step.
-# Exit 0 → proceed with build. Exit 1 → skip build (docs-only change).
-#
-# Uses git pathspec excludes (not case/esac) so paths like app/(site)/… work.
+# Vercel Ignored Build Step. Exit 0 = build, Exit 1 = skip.
+# Skip only when every changed file is md / docs / reports / analysis.
 set -u
-
-if ! git rev-parse --verify HEAD^ >/dev/null 2>&1; then
-  exit 0
-fi
-
-# Exit 0 from --quiet ⇒ no non-docs changes ⇒ skip build.
-# Exit 1 from --quiet ⇒ there are code/config changes ⇒ build.
+[ "${VERCEL_ENV:-}" = production ] || exit 0
+git rev-parse --verify HEAD^ >/dev/null 2>&1 || exit 0
 if git diff --quiet HEAD^ HEAD -- \
   . \
   ':(exclude)*.md' \
@@ -22,8 +15,7 @@ if git diff --quiet HEAD^ HEAD -- \
   ':(exclude)analysis/**' \
   ':(exclude)*.canvas.tsx'
 then
-  echo "Ignored build: only docs/markdown/analysis files changed"
+  echo "Ignored build: docs/markdown/analysis only"
   exit 1
 fi
-
 exit 0
