@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # Vercel Ignored Build Step.
 # Exit 0 → proceed with build. Exit 1 → skip build (docs-only change).
+#
+# Do NOT use `case … esac` here: paths like app/(site)/… contain `)` which
+# terminates case patterns early and falsely skips real code builds.
 set -euo pipefail
 
 if ! git rev-parse --verify HEAD^ >/dev/null 2>&1; then
@@ -15,10 +18,18 @@ fi
 needs_build=0
 while IFS= read -r f; do
   [ -z "$f" ] && continue
-  case "$f" in
-    *.md|docs|docs/*|reports|reports/*|analysis|analysis/*|*.canvas.tsx) ;;
-    *) needs_build=1; break ;;
-  esac
+  if [[ "$f" == *.md \
+     || "$f" == docs \
+     || "$f" == docs/* \
+     || "$f" == reports \
+     || "$f" == reports/* \
+     || "$f" == analysis \
+     || "$f" == analysis/* \
+     || "$f" == *.canvas.tsx ]]; then
+    continue
+  fi
+  needs_build=1
+  break
 done <<LIST
 $CHANGED
 LIST
