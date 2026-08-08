@@ -3,7 +3,7 @@
   "regions": [
     "bom1"
   ],
-  "ignoreCommand": "bash scripts/vercel-ignored-build.sh",
+  "ignoreCommand": "exit 0",
   "functions": {
     "app/api/cron/telegram-reports/route.ts": {
       "maxDuration": 120
