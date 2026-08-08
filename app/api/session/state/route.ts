@@ -26,7 +26,7 @@ export async function GET() {
     getAdminSession(),
   ]);
   const authenticated = !!(buyer || student || admin);
-  const name = student?.name || buyer?.name || admin?.name || null;
+  const name = student?.name || buyer?.name || admin?.username || null;
 
   return NextResponse.json(
     {
