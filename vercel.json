@@ -3,7 +3,7 @@
   "regions": [
     "bom1"
   ],
-  "ignoreCommand": "exit 0",
+  "ignoreCommand": "[ \"$VERCEL_ENV\" = production ] || exit 0; git diff --quiet HEAD^ HEAD -- . ':(exclude)*.md' ':(exclude)docs' ':(exclude)docs/**' ':(exclude)reports' ':(exclude)reports/**' ':(exclude)analysis' ':(exclude)analysis/**' ':(exclude)*.canvas.tsx' && exit 1 || exit 0",
   "functions": {
     "app/api/cron/telegram-reports/route.ts": {
       "maxDuration": 120
