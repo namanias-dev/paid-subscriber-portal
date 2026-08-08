@@ -79,9 +79,18 @@ export default function ClientHealth() {
     }
   }, [isDev, refresh]);
 
-  // Session self-heal (run once on mount).
+  // Session self-heal (run once on mount) — only when a session cookie exists.
+  // Public pages with no session must not hit /api/session/state.
   useEffect(() => {
     let cancelled = false;
+    const hasSessionCookie = () => {
+      try {
+        return /(?:^|;\s*)(naman_buyer_token|naman_student_token|naman_admin_token)=/.test(document.cookie);
+      } catch {
+        return false;
+      }
+    };
+    if (!hasSessionCookie()) return;
     (async () => {
       try {
         const res = await fetch("/api/session/state", { cache: "no-store" });

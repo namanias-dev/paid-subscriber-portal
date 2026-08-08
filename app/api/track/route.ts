@@ -54,10 +54,19 @@ export async function POST(req: Request) {
 
     const props = (body.props && typeof body.props === "object" ? body.props : {}) as Record<string, unknown>;
 
+    // Rate-limit noisy beacons per IP; never throttle conversion/funnel events.
+    const noisy =
+      eventName === "page_view" ||
+      eventName === "session_start" ||
+      eventName.startsWith("scroll_depth");
+
     // Respond immediately; do DB work in the background with a hard budget.
     void (async () => {
-      const limited = await withDbBudget(rateLimited(`track-ip:${ip}`, 240, 60), 1500, "track_rate");
-      if (limited.ok && limited.value) return;
+      if (noisy) {
+        // Tighter than before (240→60/min) — page_view is already sampled at 10%.
+        const limited = await withDbBudget(rateLimited(`track-ip:${ip}`, 60, 60), 1500, "track_rate");
+        if (limited.ok && limited.value) return;
+      }
       await withDbBudget(writeEvent({
         event_name: eventName,
         visitor_id: visitorId,

@@ -11,9 +11,38 @@ const ROLLING_COOKIE_OPTS = {
 };
 
 /**
- * Route protection.
+ * Aggressive scrapers that hammer unauthenticated force-dynamic pages.
+ * Social preview UAs (facebookexternalhit, WhatsApp, Twitterbot, Slackbot) are
+ * intentionally NOT matched — they need real HTML/OG tags.
+ */
+const AGGRESSIVE_BOT_RE =
+  /AhrefsBot|SemrushBot|DotBot|MJ12bot|Bytespider|PetalBot|GPTBot|CCBot|ClaudeBot|DataForSeo|magpie-crawler|Amazonbot|Applebot-Extended|cohere-ai|Diffbot|ImagesiftBot|meta-externalagent/i;
+
+/** Still force-dynamic + public (no session) — expensive for scrapers. */
+function isUnauthForceDynamicPublic(pathname: string): boolean {
+  if (pathname === "/courses" || pathname.startsWith("/courses/")) return true;
+  if (pathname === "/enroll" || pathname.startsWith("/enroll/")) return true;
+  if (pathname === "/quizzes" || pathname.startsWith("/quizzes/")) return true;
+  if (pathname === "/home-cinematic" || pathname.startsWith("/home-cinematic/")) return true;
+  if (pathname === "/payment/status" || pathname.startsWith("/payment/")) return true;
+  if (pathname === "/current-affairs/saved") return true;
+  if (pathname.startsWith("/lecture/")) return true;
+  return false;
+}
+
+function hasAppSession(req: NextRequest): boolean {
+  return !!(
+    req.cookies.get(BUYER_COOKIE)?.value ||
+    req.cookies.get(STUDENT_COOKIE)?.value ||
+    req.cookies.get(ADMIN_COOKIE)?.value
+  );
+}
+
+/**
+ * Route protection + bot short-circuit.
  * - /dashboard*  -> requires a valid student token
- * - /admin*      -> requires a valid admin token (the bare /admin page is the login screen)
+ * - /portal*     -> requires a valid buyer token (except login)
+ * - Aggressive bots on unauthenticated force-dynamic public routes → 403
  * In DEMO MODE everything is allowed so the portal is fully explorable with zero setup.
  * Never throws — falls through to allow on any unexpected error.
  */
@@ -22,6 +51,18 @@ export async function middleware(req: NextRequest) {
     if (isDemoMode) return NextResponse.next();
 
     const { pathname } = req.nextUrl;
+    const ua = req.headers.get("user-agent") || "";
+
+    if (
+      !hasAppSession(req) &&
+      isUnauthForceDynamicPublic(pathname) &&
+      AGGRESSIVE_BOT_RE.test(ua)
+    ) {
+      return new NextResponse("Forbidden", {
+        status: 403,
+        headers: { "Cache-Control": "public, max-age=3600", "X-Robots-Tag": "noindex" },
+      });
+    }
 
     if (pathname.startsWith("/dashboard")) {
       const token = req.cookies.get(STUDENT_COOKIE)?.value;
@@ -84,5 +125,19 @@ export async function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/dashboard/:path*", "/portal/:path*"],
+  matcher: [
+    "/dashboard/:path*",
+    "/portal/:path*",
+    "/courses",
+    "/courses/:path*",
+    "/enroll",
+    "/enroll/:path*",
+    "/quizzes",
+    "/quizzes/:path*",
+    "/home-cinematic",
+    "/home-cinematic/:path*",
+    "/payment/:path*",
+    "/current-affairs/saved",
+    "/lecture/:path*",
+  ],
 };
