@@ -41,3 +41,15 @@ export function revalidatePublicSiteSettings(): void {
 export function revalidatePublicCareers(): void {
   revalidatePublicTags(PUBLIC_CACHE_TAGS.careers);
 }
+
+export function revalidatePublicCourses(): void {
+  revalidatePublicTags(PUBLIC_CACHE_TAGS.courses);
+}
+
+export function revalidatePublicWebinars(): void {
+  revalidatePublicTags(PUBLIC_CACHE_TAGS.webinars);
+}
+
+export function revalidatePublicQuizzes(): void {
+  revalidatePublicTags(PUBLIC_CACHE_TAGS.quizzes);
+}

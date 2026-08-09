@@ -7,6 +7,9 @@ import {
   revalidatePublicResources,
   revalidatePublicSiteSettings,
   revalidatePublicTags,
+  revalidatePublicCourses,
+  revalidatePublicWebinars,
+  revalidatePublicQuizzes,
 } from "./publicCache";
 import { syncAmountPaidFromFeeState } from "./amountPaidCache";
 import { enrollmentFeeStateFromEnrollment } from "./enrollmentFeeState";
@@ -1614,7 +1617,9 @@ export async function addCourse(input: Partial<Course>): Promise<Course> {
     mock.courses.unshift(row);
     return row;
   }
-  return dbInsert<Course>("courses", row as unknown as Record<string, unknown>);
+  const created = await dbInsert<Course>("courses", row as unknown as Record<string, unknown>);
+  revalidatePublicCourses();
+  return created;
 }
 export async function updateCourse(id: string, patch: Partial<Course>): Promise<Course | null> {
   if (demoMode()) {
@@ -1623,7 +1628,9 @@ export async function updateCourse(id: string, patch: Partial<Course>): Promise<
     mock.courses[idx] = { ...mock.courses[idx], ...patch };
     return mock.courses[idx];
   }
-  return dbUpdate<Course>("courses", id, patch as Record<string, unknown>);
+  const updated = await dbUpdate<Course>("courses", id, patch as Record<string, unknown>);
+  if (updated) revalidatePublicCourses();
+  return updated;
 }
 export async function deleteCourse(id: string): Promise<boolean> {
   if (demoMode()) {
@@ -1632,7 +1639,9 @@ export async function deleteCourse(id: string): Promise<boolean> {
     mock.courses.splice(idx, 1);
     return true;
   }
-  return dbDelete("courses", id);
+  const ok = await dbDelete("courses", id);
+  if (ok) revalidatePublicCourses();
+  return ok;
 }
 
 /**
@@ -2692,7 +2701,9 @@ export async function addWebinar(input: Partial<Webinar>): Promise<Webinar> {
     mock.webinars.unshift(row);
     return row;
   }
-  return dbInsert<Webinar>("webinars", row as unknown as Record<string, unknown>);
+  const created = await dbInsert<Webinar>("webinars", row as unknown as Record<string, unknown>);
+  revalidatePublicWebinars();
+  return created;
 }
 export async function updateWebinar(id: string, patch: Partial<Webinar>): Promise<Webinar | null> {
   if (demoMode()) {
@@ -2701,7 +2712,9 @@ export async function updateWebinar(id: string, patch: Partial<Webinar>): Promis
     mock.webinars[idx] = { ...mock.webinars[idx], ...patch };
     return mock.webinars[idx];
   }
-  return dbUpdate<Webinar>("webinars", id, patch as Record<string, unknown>);
+  const updated = await dbUpdate<Webinar>("webinars", id, patch as Record<string, unknown>);
+  if (updated) revalidatePublicWebinars();
+  return updated;
 }
 export async function deleteWebinar(id: string): Promise<boolean> {
   if (demoMode()) {
@@ -2710,7 +2723,9 @@ export async function deleteWebinar(id: string): Promise<boolean> {
     mock.webinars.splice(idx, 1);
     return true;
   }
-  return dbDelete("webinars", id);
+  const ok = await dbDelete("webinars", id);
+  if (ok) revalidatePublicWebinars();
+  return ok;
 }
 export async function registerWebinar(
   webinarId: string,
@@ -6974,7 +6989,9 @@ export async function addQuiz(input: Partial<Quiz>): Promise<Quiz> {
     mock.quizzes.unshift(row);
     return row;
   }
-  return dbInsert<Quiz>("quizzes", row as unknown as Record<string, unknown>);
+  const created = await dbInsert<Quiz>("quizzes", row as unknown as Record<string, unknown>);
+  revalidatePublicQuizzes();
+  return created;
 }
 export async function updateQuiz(id: string, patch: Partial<Quiz>): Promise<Quiz | null> {
   const next = { ...patch, updated_at: new Date().toISOString() };
@@ -6998,7 +7015,9 @@ export async function updateQuiz(id: string, patch: Partial<Quiz>): Promise<Quiz
     mock.quizzes[idx] = { ...mock.quizzes[idx], ...next };
     return mock.quizzes[idx];
   }
-  return dbUpdate<Quiz>("quizzes", id, next as Record<string, unknown>);
+  const updated = await dbUpdate<Quiz>("quizzes", id, next as Record<string, unknown>);
+  if (updated) revalidatePublicQuizzes();
+  return updated;
 }
 export async function deleteQuiz(id: string): Promise<boolean> {
   if (demoMode()) {
@@ -7009,7 +7028,9 @@ export async function deleteQuiz(id: string): Promise<boolean> {
     mock.quizQuestions.splice(0, mock.quizQuestions.length, ...keep);
     return true;
   }
-  return dbDelete("quizzes", id);
+  const ok = await dbDelete("quizzes", id);
+  if (ok) revalidatePublicQuizzes();
+  return ok;
 }
 
 // -------------------------- Quiz ↔ Questions -----------------------
