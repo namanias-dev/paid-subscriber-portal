@@ -2556,30 +2556,19 @@ export async function getWebinarBySlug(slug: string): Promise<Webinar | null> {
 
 /**
  * HONEST public registration count for one webinar (Problem 1). NEVER uses the
- * seeded `webinars.registrations` column. For a PAID webinar this is the number
- * of distinct people who actually paid; for a FREE webinar it's the number of
- * registration rows. Returns 0 (not a fabricated number) when there's nothing.
+ * seeded `webinars.registrations` column. For a PAID webinar this is
+ * count(distinct payer) via SECURITY DEFINER RPC (no phone rows leave Postgres);
+ * for a FREE webinar it's head-count on webinar_registrations.
+ * Always admin + no-store — payment/reg tables never enter the shared fetch cache.
  */
 export async function getWebinarRegisteredCount(w: Pick<Webinar, "id" | "slug" | "price">): Promise<number> {
-  const db = demoMode() ? null : (getSupabasePublic());
+  const db = demoMode() ? null : getSupabaseAdmin();
   if (!db) return 0;
   try {
     if ((w.price ?? 0) > 0) {
-      const payRows = await pageThrough<{ phone: string | null }>(() =>
-        db
-          .from("payments")
-          .select("phone,id")
-          .eq("item_type", "webinar")
-          .eq("item_slug", w.slug)
-          .in("status", ["PAID", "captured"])
-          .order("id", { ascending: true }),
-      );
-      const phones = new Set<string>();
-      for (const r of payRows) {
-        const p = (r.phone || "").trim();
-        if (p) phones.add(p);
-      }
-      return phones.size;
+      const { data, error } = await db.rpc("count_distinct_webinar_payers", { p_slug: w.slug });
+      if (error) throw error;
+      return Number(data ?? 0) || 0;
     }
     const { count } = await db
       .from("webinar_registrations")
@@ -2593,57 +2582,35 @@ export async function getWebinarRegisteredCount(w: Pick<Webinar, "id" | "slug" |
 
 /**
  * Batch version of getWebinarRegisteredCount for listings/home — scoped to the
- * webinars on the page (never whole-table scans). Returns a Map keyed by webinar id.
+ * webinars on the page. Returns Map<webinarId, number> only (never payment rows).
  */
 export async function getWebinarRegisteredCounts(
   webinars: Pick<Webinar, "id" | "slug" | "price">[],
 ): Promise<Map<string, number>> {
   const out = new Map<string, number>();
   for (const w of webinars) out.set(w.id, 0);
-  const db = demoMode() ? null : (getSupabasePublic());
+  const db = demoMode() ? null : getSupabaseAdmin();
   if (!db || webinars.length === 0) return out;
 
   try {
     const paid = webinars.filter((w) => (w.price ?? 0) > 0);
     const free = webinars.filter((w) => (w.price ?? 0) <= 0);
-    const paidBySlug = new Map<string, Set<string>>();
     if (paid.length) {
       const slugs = paid.map((w) => w.slug);
-      const payRows = await pageThrough<{ phone: string | null; item_slug: string | null }>(() =>
-        db
-          .from("payments")
-          .select("phone,item_slug,id")
-          .eq("item_type", "webinar")
-          .in("item_slug", slugs)
-          .in("status", ["PAID", "captured"])
-          .order("id", { ascending: true }),
-      );
-      for (const r of payRows) {
-        const slug = (r.item_slug || "").trim();
-        const phone = (r.phone || "").trim();
-        if (!slug || !phone) continue;
-        (paidBySlug.get(slug) || paidBySlug.set(slug, new Set()).get(slug)!).add(phone);
+      const { data, error } = await db.rpc("count_distinct_webinar_payers_batch", { p_slugs: slugs });
+      if (error) throw error;
+      const bySlug = new Map<string, number>();
+      for (const row of (data as { item_slug: string; cnt: number | string }[] | null) ?? []) {
+        bySlug.set(String(row.item_slug), Number(row.cnt) || 0);
       }
+      for (const w of paid) out.set(w.id, bySlug.get(w.slug) ?? 0);
     }
-    const regsById = new Map<string, number>();
-    if (free.length) {
-      const ids = free.map((w) => w.id);
-      const regRows = await pageThrough<{ webinar_id: string | null }>(() =>
-        db
-          .from("webinar_registrations")
-          .select("webinar_id,id")
-          .in("webinar_id", ids)
-          .order("id", { ascending: true }),
-      );
-      for (const r of regRows) {
-        const id = (r.webinar_id || "").trim();
-        if (!id) continue;
-        regsById.set(id, (regsById.get(id) || 0) + 1);
-      }
-    }
-
-    for (const w of webinars) {
-      out.set(w.id, (w.price ?? 0) > 0 ? (paidBySlug.get(w.slug)?.size ?? 0) : (regsById.get(w.id) ?? 0));
+    for (const w of free) {
+      const { count } = await db
+        .from("webinar_registrations")
+        .select("id", { count: "exact", head: true })
+        .eq("webinar_id", w.id);
+      out.set(w.id, count ?? 0);
     }
   } catch {
     /* degrade to zeros — public pages must still render */
