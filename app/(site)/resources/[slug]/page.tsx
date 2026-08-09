@@ -10,17 +10,15 @@ import ResourceCtas from "@/components/public/resources/ResourceCtas";
 import ResourceArticleView from "@/components/public/resources/ResourceArticleView";
 import ResourceCard from "@/components/public/resources/ResourceCard";
 import AppIcon from "@/components/ui/AppIcon";
+import ResourceViewBeacon from "@/components/public/resources/ResourceViewBeacon";
 import {
   getResourceBySlug,
   getPublicResources,
-  isResourcePublished,
-  incrementResourceView,
   getCaPdfById,
-  getAllQuizzes,
+  getPublicQuizzes,
   getPublicWebinars,
-  getAllCourses,
+  getPublishedCourses,
 } from "@/lib/dataProvider";
-import { getAdminSession } from "@/lib/session";
 import { resourceMetadata, computeRelatedResources, journeyResources } from "@/lib/resourceView";
 import { resourceCategoryName, resourceCategoryMeta, RESERVED_RESOURCE_SLUGS } from "@/lib/resourceConstants";
 import { formatISTDate } from "@/lib/dates";
@@ -28,14 +26,19 @@ import { SITE_URL, ACADEMY } from "@/lib/config";
 import type { CaPdf } from "@/lib/types";
 
 export const revalidate = 600;
+
+export async function generateStaticParams() {
+  const all = await getPublicResources();
+  const cats = Array.from(RESERVED_RESOURCE_SLUGS).map((slug) => ({ slug }));
+  return [...cats, ...all.map((r) => ({ slug: r.slug }))];
+}
+
 const BODY_ID = "resource-article-body";
 
 export async function generateMetadata({
   params,
-  searchParams,
 }: {
   params: { slug: string };
-  searchParams: Record<string, string | undefined>;
 }): Promise<Metadata> {
   // Category cluster page.
   if (RESERVED_RESOURCE_SLUGS.has(params.slug)) {
@@ -49,30 +52,27 @@ export async function generateMetadata({
   }
   const r = await getResourceBySlug(params.slug);
   if (!r) return { title: "Resource not found" };
-  const preview = searchParams.preview === "1";
   return resourceMetadata({
     title: r.title,
     description: r.summary,
     path: `/resources/${r.slug}`,
     seo: r.seo,
     image: r.featured_image,
-    indexable: isResourcePublished(r) && !preview,
+    indexable: true,
   });
 }
 
 export default async function ResourceOrCategoryPage({
   params,
-  searchParams,
 }: {
   params: { slug: string };
-  searchParams: Record<string, string | undefined>;
 }) {
   // ---- Category cluster page ----
   if (RESERVED_RESOURCE_SLUGS.has(params.slug)) {
     return <CategoryPage slug={params.slug} />;
   }
   // ---- Article page ----
-  return <ArticlePage slug={params.slug} preview={searchParams.preview === "1"} />;
+  return <ArticlePage slug={params.slug} />;
 }
 
 // ============================ CATEGORY CLUSTER ============================
@@ -123,16 +123,9 @@ async function CategoryPage({ slug }: { slug: string }) {
 }
 
 // ============================ ARTICLE ============================
-async function ArticlePage({ slug, preview }: { slug: string; preview: boolean }) {
+async function ArticlePage({ slug }: { slug: string }) {
   const article = await getResourceBySlug(slug);
   if (!article) notFound();
-
-  const published = isResourcePublished(article);
-  if (!published) {
-    const admin = await getAdminSession();
-    if (!(preview && admin)) notFound();
-  }
-  if (published && !preview) void incrementResourceView(article.id);
 
   const all = await getPublicResources();
 
@@ -149,8 +142,8 @@ async function ArticlePage({ slug, preview }: { slug: string; preview: boolean }
   // Attached PDFs (reuse CA PDF library).
   const pdfs = (await Promise.all((article.pdf_ids || []).map((id) => getCaPdfById(id)))).filter(Boolean) as CaPdf[];
 
-  // Related quizzes/webinars/courses by slug.
-  const [quizzes, webinars, courses] = await Promise.all([getAllQuizzes(), getPublicWebinars(), getAllCourses()]);
+  // Related quizzes/webinars/courses by slug (cached public catalogs).
+  const [quizzes, webinars, courses] = await Promise.all([getPublicQuizzes(), getPublicWebinars(), getPublishedCourses()]);
   const relQuizzes = (article.related?.quiz_slugs || []).map((s) => quizzes.find((q) => q.slug === s)).filter(Boolean);
   const relWebinars = (article.related?.webinar_slugs || []).map((s) => webinars.find((w) => w.slug === s)).filter(Boolean);
   const relCourses = (article.related?.course_slugs || []).map((s) => courses.find((c) => c.slug === s)).filter(Boolean);
@@ -201,7 +194,8 @@ async function ArticlePage({ slug, preview }: { slug: string; preview: boolean }
 
   return (
     <div className="pb-24 lg:pb-12">
-      {published && !preview && structuredOn && (
+      <ResourceViewBeacon id={article.id} />
+      {structuredOn && (
         <>
           <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }} />
           <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumb) }} />
@@ -211,15 +205,7 @@ async function ArticlePage({ slug, preview }: { slug: string; preview: boolean }
       )}
       <CaReadingProgress targetId={BODY_ID} />
 
-      {published && !preview && (
-        <ResourceArticleView slug={article.slug} category={article.category} title={article.title} />
-      )}
-
-      {preview && !published && (
-        <div className="bg-gradient-to-r from-[var(--ca-gold)] to-[var(--ca-gold-bright)] py-2 text-center text-sm font-semibold text-[var(--ca-navy-900)]">
-          Preview mode — this resource is <b>{article.status}</b> and not publicly visible.
-        </div>
-      )}
+      <ResourceArticleView slug={article.slug} category={article.category} title={article.title} />
 
       <div className="container-wide py-8">
         {/* Breadcrumbs */}

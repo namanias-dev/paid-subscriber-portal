@@ -8,65 +8,51 @@ import CaShareBar from "@/components/public/ca/CaShareBar";
 import CaPdfButton from "@/components/public/ca/CaPdfButton";
 import CaArticleCard from "@/components/public/ca/CaArticleCard";
 import CaLeadForm from "@/components/public/ca/CaLeadForm";
+import CaViewBeacon from "@/components/public/ca/CaViewBeacon";
 import {
   getCaArticleBySlug,
   getPublicCaArticles,
-  isCaPublished,
   getCaPdfById,
-  getQuizBySlug,
-  getQuizQuestions,
-  incrementCaView,
+  getPublicQuizBySlug,
 } from "@/lib/dataProvider";
-import { getAdminSession } from "@/lib/session";
 import { caCategoryName, caArticleTypeLabel } from "@/lib/caConstants";
 import { caMetadata, caDateLabel } from "@/lib/caView";
 import { SITE_URL, ACADEMY } from "@/lib/config";
-import type { CaArticle, CaPdf } from "@/lib/types";
+import type { CaPdf } from "@/lib/types";
 
 export const revalidate = 600;
+
+export async function generateStaticParams() {
+  const all = await getPublicCaArticles();
+  return all.map((a) => ({ slug: a.slug }));
+}
 
 const BODY_ID = "ca-article-body";
 
 export async function generateMetadata({
   params,
-  searchParams,
 }: {
   params: { slug: string };
-  searchParams: Record<string, string | undefined>;
 }): Promise<Metadata> {
   const a = await getCaArticleBySlug(params.slug);
   if (!a) return { title: "Article not found" };
-  const preview = searchParams.preview === "1";
-  const indexable = isCaPublished(a) && !preview;
   return caMetadata({
     title: a.title,
     description: a.summary,
     path: `/current-affairs/${a.seo?.canonical_slug?.trim() || a.slug}`,
     seo: a.seo,
     image: a.featured_image || a.thumbnail_image,
-    indexable,
+    indexable: true,
   });
 }
 
 export default async function CaArticlePage({
   params,
-  searchParams,
 }: {
   params: { slug: string };
-  searchParams: Record<string, string | undefined>;
 }) {
   const article = await getCaArticleBySlug(params.slug);
   if (!article) notFound();
-
-  const preview = searchParams.preview === "1";
-  const published = isCaPublished(article);
-  if (!published) {
-    const admin = await getAdminSession();
-    if (!(preview && admin)) notFound();
-  }
-
-  // Count a view (best-effort; only for live published reads).
-  if (published && !preview) void incrementCaView(article.id);
 
   const all = await getPublicCaArticles();
   const others = all.filter((a) => a.id !== article.id);
@@ -84,9 +70,8 @@ export default async function CaArticlePage({
   // PDFs attached.
   const pdfs = (await Promise.all((article.pdf_ids || []).map((id) => getCaPdfById(id)))).filter(Boolean) as CaPdf[];
 
-  // Related quiz.
-  const quiz = article.related_quiz_slug ? await getQuizBySlug(article.related_quiz_slug) : null;
-  const quizQuestions = quiz ? await getQuizQuestions(quiz.id) : [];
+  // Related quiz (link only — avoid loading questions in the ISR path).
+  const quiz = article.related_quiz_slug ? await getPublicQuizBySlug(article.related_quiz_slug) : null;
 
   const qr = article.quick_revision || {};
   const upsc = article.upsc || {};
@@ -127,7 +112,8 @@ export default async function CaArticlePage({
 
   return (
     <div className="pb-24 lg:pb-12">
-      {published && !preview && structuredOn && (
+      <CaViewBeacon id={article.id} />
+      {structuredOn && (
         <>
           <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }} />
           <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumb) }} />
@@ -135,12 +121,6 @@ export default async function CaArticlePage({
         </>
       )}
       <CaReadingProgress targetId={BODY_ID} />
-
-      {preview && !published && (
-        <div className="bg-gradient-to-r from-[var(--ca-gold)] to-[var(--ca-gold-bright)] py-2 text-center text-sm font-semibold text-[var(--ca-navy-900)]">
-          Preview mode — this article is <b>{article.status}</b> and not publicly visible.
-        </div>
-      )}
 
       <div className="container-wide py-8">
         {/* Breadcrumbs */}
@@ -260,7 +240,7 @@ export default async function CaArticlePage({
                   <div className="ca-orb" style={{ width: 200, height: 200, top: -100, right: -40, background: "rgba(212,175,55,0.18)" }} />
                   <p className="ca-eyebrow flex items-center gap-1.5"><ListChecks size={14} /> Test yourself</p>
                   <h2 className="mt-2 font-heading text-xl font-bold text-white">{quiz.title}</h2>
-                  <p className="mt-1 text-sm text-[var(--ca-slate-300)]">{quizQuestions.length} questions · Practice the related MCQs now.</p>
+                  <p className="mt-1 text-sm text-[var(--ca-slate-300)]">Practice the related MCQs now.</p>
                   <Link href={`/quizzes/${quiz.slug}`} className="ca-btn ca-btn-gold ca-focus mt-4">Attempt the quiz <ArrowRight size={16} /></Link>
                 </div>
               </section>

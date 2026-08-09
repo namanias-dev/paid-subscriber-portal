@@ -1,4 +1,6 @@
-import { getSupabaseAdmin } from "@/lib/supabase";
+import { unstable_cache } from "next/cache";
+import { getSupabaseAdmin, getSupabasePublic } from "@/lib/supabase";
+import { PUBLIC_CACHE_TAGS, revalidatePublicCareers } from "@/lib/publicCache";
 import type {
   CareerPosition,
   CareerApplication,
@@ -18,6 +20,11 @@ import { DEFAULT_CAREER_SUBJECTS, defaultFacultyFormFields } from "./config";
 
 function db() {
   return getSupabaseAdmin();
+}
+
+/** Public/ISR reads — must not use admin no-store fetch. */
+function publicDb() {
+  return getSupabasePublic();
 }
 
 function slugify(s: string): string {
@@ -92,29 +99,37 @@ function normApplication(r: Record<string, unknown>): CareerApplication {
 // --------------------------------------------------------------------------
 //  Settings
 // --------------------------------------------------------------------------
+const loadCareersSettings = unstable_cache(
+  async (): Promise<CareersSettings> => {
+    const client = publicDb();
+    const fallback: CareersSettings = {
+      id: "global",
+      accepting_applications: true,
+      subjects: DEFAULT_CAREER_SUBJECTS,
+      default_form_fields: defaultFacultyFormFields(),
+      notify_email: null,
+      updated_at: "",
+    };
+    if (!client) return fallback;
+    const { data } = await client.from("careers_settings").select("*").eq("id", "global").maybeSingle();
+    if (!data) return fallback;
+    const subjects = asArray<string>(data.subjects);
+    const fields = asArray<FormField>(data.default_form_fields);
+    return {
+      id: "global",
+      accepting_applications: data.accepting_applications !== false,
+      subjects: subjects.length ? subjects : DEFAULT_CAREER_SUBJECTS,
+      default_form_fields: fields.length ? fields : defaultFacultyFormFields(),
+      notify_email: (data.notify_email as string) ?? null,
+      updated_at: String(data.updated_at || ""),
+    };
+  },
+  ["public-careers-settings"],
+  { revalidate: 600, tags: [PUBLIC_CACHE_TAGS.careers] },
+);
+
 export async function getCareersSettings(): Promise<CareersSettings> {
-  const client = db();
-  const fallback: CareersSettings = {
-    id: "global",
-    accepting_applications: true,
-    subjects: DEFAULT_CAREER_SUBJECTS,
-    default_form_fields: defaultFacultyFormFields(),
-    notify_email: null,
-    updated_at: "",
-  };
-  if (!client) return fallback;
-  const { data } = await client.from("careers_settings").select("*").eq("id", "global").maybeSingle();
-  if (!data) return fallback;
-  const subjects = asArray<string>(data.subjects);
-  const fields = asArray<FormField>(data.default_form_fields);
-  return {
-    id: "global",
-    accepting_applications: data.accepting_applications !== false,
-    subjects: subjects.length ? subjects : DEFAULT_CAREER_SUBJECTS,
-    default_form_fields: fields.length ? fields : defaultFacultyFormFields(),
-    notify_email: (data.notify_email as string) ?? null,
-    updated_at: String(data.updated_at || ""),
-  };
+  return loadCareersSettings();
 }
 
 export async function updateCareersSettings(patch: Partial<CareersSettings>): Promise<CareersSettings> {
@@ -126,6 +141,7 @@ export async function updateCareersSettings(patch: Partial<CareersSettings>): Pr
   if (patch.default_form_fields !== undefined) row.default_form_fields = patch.default_form_fields;
   if (patch.notify_email !== undefined) row.notify_email = patch.notify_email;
   await client.from("careers_settings").upsert(row, { onConflict: "id" });
+  revalidatePublicCareers();
   return getCareersSettings();
 }
 
@@ -143,16 +159,24 @@ export async function listPositions(): Promise<CareerPosition[]> {
   return (data || []).map(normPosition);
 }
 
+const loadOpenPositions = unstable_cache(
+  async (): Promise<CareerPosition[]> => {
+    const client = publicDb();
+    if (!client) return [];
+    const { data } = await client
+      .from("careers_positions")
+      .select("*")
+      .eq("status", "open")
+      .order("display_order", { ascending: true })
+      .order("created_at", { ascending: false });
+    return (data || []).map(normPosition);
+  },
+  ["public-careers-open"],
+  { revalidate: 600, tags: [PUBLIC_CACHE_TAGS.careers] },
+);
+
 export async function listOpenPositions(): Promise<CareerPosition[]> {
-  const client = db();
-  if (!client) return [];
-  const { data } = await client
-    .from("careers_positions")
-    .select("*")
-    .eq("status", "open")
-    .order("display_order", { ascending: true })
-    .order("created_at", { ascending: false });
-  return (data || []).map(normPosition);
+  return loadOpenPositions();
 }
 
 export async function getPositionById(id: string): Promise<CareerPosition | null> {
@@ -162,11 +186,20 @@ export async function getPositionById(id: string): Promise<CareerPosition | null
   return data ? normPosition(data) : null;
 }
 
+const loadPositionBySlug = (slug: string) =>
+  unstable_cache(
+    async (): Promise<CareerPosition | null> => {
+      const client = publicDb();
+      if (!client) return null;
+      const { data } = await client.from("careers_positions").select("*").eq("slug", slug).maybeSingle();
+      return data ? normPosition(data) : null;
+    },
+    ["public-careers-slug", slug],
+    { revalidate: 600, tags: [PUBLIC_CACHE_TAGS.careers] },
+  );
+
 export async function getPositionBySlug(slug: string): Promise<CareerPosition | null> {
-  const client = db();
-  if (!client) return null;
-  const { data } = await client.from("careers_positions").select("*").eq("slug", slug).maybeSingle();
-  return data ? normPosition(data) : null;
+  return loadPositionBySlug(slug)();
 }
 
 async function uniqueSlug(base: string, excludeId?: string): Promise<string> {
@@ -211,6 +244,7 @@ export async function createPosition(input: Partial<CareerPosition>): Promise<Ca
   };
   const { data, error } = await client.from("careers_positions").insert(row).select().single();
   if (error) throw new Error(error.message);
+  revalidatePublicCareers();
   return normPosition(data);
 }
 
@@ -231,6 +265,7 @@ export async function updatePosition(id: string, patch: Partial<CareerPosition>)
     clean.slug = await uniqueSlug(patch.slug, id);
   }
   const { data } = await client.from("careers_positions").update(clean).eq("id", id).select().single();
+  revalidatePublicCareers();
   return data ? normPosition(data) : null;
 }
 
@@ -238,6 +273,7 @@ export async function deletePosition(id: string): Promise<boolean> {
   const client = db();
   if (!client) return false;
   const { error } = await client.from("careers_positions").delete().eq("id", id);
+  if (!error) revalidatePublicCareers();
   return !error;
 }
 

@@ -1,5 +1,13 @@
 import { cache } from "react";
+import { unstable_cache } from "next/cache";
 import { getSupabaseAdmin, getSupabasePublic } from "./supabase";
+import {
+  PUBLIC_CACHE_TAGS,
+  revalidatePublicCa,
+  revalidatePublicResources,
+  revalidatePublicSiteSettings,
+  revalidatePublicTags,
+} from "./publicCache";
 import { syncAmountPaidFromFeeState } from "./amountPaidCache";
 import { enrollmentFeeStateFromEnrollment } from "./enrollmentFeeState";
 import * as mock from "./mockData";
@@ -1506,10 +1514,21 @@ export async function getAllCourses(): Promise<Course[]> {
 // React.cache dedupes this within a single server request so layout + page +
 // getWhatsNew share one fetch. External contract (name, signature, return) is
 // unchanged; outside a request scope it is a transparent passthrough.
+const loadPublishedCourses = unstable_cache(
+  async (): Promise<Course[]> => {
+    if (demoMode()) return sortCoursesByOrder(mock.courses).filter((c) => c.status === "published" && c.active !== false);
+    const db = getSupabasePublic();
+    if (!db) return sortCoursesByOrder(mock.courses).filter((c) => c.status === "published" && c.active !== false);
+    const { data } = await db.from("courses").select("*").order("created_at", { ascending: false });
+    const rows = (data as Course[]) ?? [];
+    return sortCoursesByOrder(rows.length ? rows : [...mock.courses]).filter((c) => c.status === "published" && c.active !== false);
+  },
+  ["public-published-courses"],
+  { revalidate: 600, tags: [PUBLIC_CACHE_TAGS.courses] },
+);
+
 export const getPublishedCourses = cache(async function getPublishedCourses(): Promise<Course[]> {
-  const all = await getAllCourses();
-  // Public site: only published AND not disabled (Task 7).
-  return all.filter((c) => c.status === "published" && c.active !== false);
+  return loadPublishedCourses();
 });
 export async function getCourseBySlug(slug: string): Promise<Course | null> {
   const all = await getAllCourses();
@@ -2488,7 +2507,7 @@ export async function hasUpcomingWebinars(): Promise<boolean> {
   if (demoMode()) {
     v = mock.webinars.some(_isUpcomingWebinar);
   } else {
-    const db = getSupabasePublic() || getSupabaseAdmin();
+    const db = getSupabasePublic();
     if (!db) {
       v = mock.webinars.some(_isUpcomingWebinar);
     } else {
@@ -2506,22 +2525,29 @@ export async function hasUpcomingWebinars(): Promise<boolean> {
   return v;
 }
 /** Public webinars only — hides disabled items (Task 7). Request-deduped via React.cache. */
+const loadPublicWebinars = unstable_cache(
+  async (): Promise<Webinar[]> => {
+    if (demoMode()) return mock.webinars.filter((w) => w.active !== false);
+    const db = getSupabasePublic();
+    if (!db) return mock.webinars.filter((w) => w.active !== false);
+    const { data, error } = await db
+      .from("webinars")
+      .select("*")
+      .neq("active", false)
+      .order("datetime", { ascending: true });
+    if (error) throw new Error(`getPublicWebinars: ${error.message}`);
+    return (data as Webinar[]) ?? [];
+  },
+  ["public-webinars"],
+  { revalidate: 300, tags: [PUBLIC_CACHE_TAGS.webinars] },
+);
+
 export const getPublicWebinars = cache(async function getPublicWebinars(): Promise<Webinar[]> {
-  if (demoMode()) return mock.webinars.filter((w) => w.active !== false);
-  const db = getSupabasePublic() || getSupabaseAdmin();
-  if (!db) return mock.webinars.filter((w) => w.active !== false);
-  const { data, error } = await db
-    .from("webinars")
-    .select("*")
-    .neq("active", false)
-    .order("datetime", { ascending: true });
-  if (error) throw new Error(`getPublicWebinars: ${error.message}`);
-  const rows = (data as Webinar[]) ?? [];
-  return rows;
+  return loadPublicWebinars();
 });
 export async function getWebinarBySlug(slug: string): Promise<Webinar | null> {
   if (demoMode()) return mock.webinars.find((w) => w.slug === slug) ?? null;
-  const db = getSupabasePublic() || getSupabaseAdmin();
+  const db = getSupabasePublic();
   if (!db) return mock.webinars.find((w) => w.slug === slug) ?? null;
   const { data, error } = await db.from("webinars").select("*").eq("slug", slug).maybeSingle();
   if (error) throw new Error(`getWebinarBySlug: ${error.message}`);
@@ -2535,7 +2561,7 @@ export async function getWebinarBySlug(slug: string): Promise<Webinar | null> {
  * registration rows. Returns 0 (not a fabricated number) when there's nothing.
  */
 export async function getWebinarRegisteredCount(w: Pick<Webinar, "id" | "slug" | "price">): Promise<number> {
-  const db = demoMode() ? null : (getSupabasePublic() || getSupabaseAdmin());
+  const db = demoMode() ? null : (getSupabasePublic());
   if (!db) return 0;
   try {
     if ((w.price ?? 0) > 0) {
@@ -2574,7 +2600,7 @@ export async function getWebinarRegisteredCounts(
 ): Promise<Map<string, number>> {
   const out = new Map<string, number>();
   for (const w of webinars) out.set(w.id, 0);
-  const db = demoMode() ? null : (getSupabasePublic() || getSupabaseAdmin());
+  const db = demoMode() ? null : (getSupabasePublic());
   if (!db || webinars.length === 0) return out;
 
   try {
@@ -6659,19 +6685,27 @@ const demoSettings = (() => {
 
 /**
  * Public read — always returns a fully-populated settings object (merged with
- * defaults). React.cache dedupes it within a single server request so the shared
- * layout, the homepage and getWhatsNew hit the DB once. Contract unchanged.
+ * defaults). Cached in the Next data cache (tagged) so public pages stay ISR;
+ * React.cache still dedupes within a single request.
  */
+const loadSiteSettings = unstable_cache(
+  async (): Promise<SiteSettings> => {
+    if (demoMode()) return mergeSiteSettings(demoSettings);
+    const db = getSupabasePublic();
+    if (!db) return mergeSiteSettings(null);
+    try {
+      const { data } = await db.from("site_settings").select("*").eq("id", "home").maybeSingle();
+      return mergeSiteSettings(data as Partial<SiteSettings> | null);
+    } catch {
+      return mergeSiteSettings(null);
+    }
+  },
+  ["public-site-settings"],
+  { revalidate: 3600, tags: [PUBLIC_CACHE_TAGS.siteSettings] },
+);
+
 export const getSiteSettings = cache(async function getSiteSettings(): Promise<SiteSettings> {
-  if (demoMode()) return mergeSiteSettings(demoSettings);
-  const db = getSupabasePublic() || getSupabaseAdmin();
-  if (!db) return mergeSiteSettings(null);
-  try {
-    const { data } = await db.from("site_settings").select("*").eq("id", "home").maybeSingle();
-    return mergeSiteSettings(data as Partial<SiteSettings> | null);
-  } catch {
-    return mergeSiteSettings(null);
-  }
+  return loadSiteSettings();
 });
 
 /**
@@ -6709,6 +6743,7 @@ export async function updateSiteSettings(patch: Partial<SiteSettings>): Promise<
     .select()
     .single();
   if (error) throw new Error(error.message);
+  revalidatePublicSiteSettings();
   return mergeSiteSettings(data as Partial<SiteSettings>);
 }
 
@@ -6819,9 +6854,28 @@ export async function getAllQuizzes(): Promise<Quiz[]> {
   const rows = await dbSelect<Quiz>("quizzes");
   return rows.length ? rows : [];
 }
+
+const loadPublicQuizzes = unstable_cache(
+  async (): Promise<Quiz[]> => {
+    if (demoMode()) return mock.quizzes.filter((q) => q.status === "published" && q.is_public);
+    const db = getSupabasePublic();
+    if (!db) return mock.quizzes.filter((q) => q.status === "published" && q.is_public);
+    const { data } = await db.from("quizzes").select("*").order("created_at", { ascending: false });
+    const rows = (data as Quiz[]) ?? [];
+    return rows.filter((q) => q.status === "published" && q.is_public);
+  },
+  ["public-quizzes"],
+  { revalidate: 600, tags: [PUBLIC_CACHE_TAGS.quizzes] },
+);
+
 export async function getPublicQuizzes(): Promise<Quiz[]> {
-  const all = await getAllQuizzes();
-  return all.filter((q) => q.status === "published" && q.is_public);
+  return loadPublicQuizzes();
+}
+
+/** Published quiz by slug for public article/resource embeds (ISR-safe). */
+export async function getPublicQuizBySlug(slug: string): Promise<Quiz | null> {
+  const all = await loadPublicQuizzes();
+  return all.find((q) => q.slug === slug) ?? null;
 }
 export async function getQuizById(id: string): Promise<Quiz | null> {
   if (demoMode()) return mock.quizzes.find((q) => q.id === id) ?? null;
@@ -7328,17 +7382,35 @@ export async function getCaArticles(): Promise<CaArticle[]> {
   return (data as CaArticle[]) ?? [];
 }
 
-/** Public list: published, not future, newest first. */
-export async function getPublicCaArticles(): Promise<CaArticle[]> {
-  const all = await getCaArticles();
-  return all
-    .filter(isCaPublished)
-    .sort((a, b) => new Date(b.publish_at || b.created_at).getTime() - new Date(a.publish_at || a.created_at).getTime());
-}
+/** Public list: published, not future, newest first. Data-cache tagged for ISR. */
+export const getPublicCaArticles = unstable_cache(
+  async (): Promise<CaArticle[]> => {
+    if (demoMode()) {
+      return [...mock.caArticles]
+        .filter(isCaPublished)
+        .sort((a, b) => new Date(b.publish_at || b.created_at).getTime() - new Date(a.publish_at || a.created_at).getTime());
+    }
+    const db = getSupabasePublic();
+    if (!db) {
+      return [...mock.caArticles]
+        .filter(isCaPublished)
+        .sort((a, b) => new Date(b.publish_at || b.created_at).getTime() - new Date(a.publish_at || a.created_at).getTime());
+    }
+    const { data } = await db.from("ca_articles").select("*").order("publish_at", { ascending: false, nullsFirst: false });
+    return ((data as CaArticle[]) ?? [])
+      .filter(isCaPublished)
+      .sort((a, b) => new Date(b.publish_at || b.created_at).getTime() - new Date(a.publish_at || a.created_at).getTime());
+  },
+  ["public-ca-articles"],
+  { revalidate: 600, tags: [PUBLIC_CACHE_TAGS.caArticles] },
+);
 
-/** Returns the row regardless of status (admin/preview); callers gate on isCaPublished. */
+/**
+ * Public slug lookup (published only). Uses the tagged public list so article
+ * pages stay ISR. Admin/draft preview uses getCaArticleById / getCaArticles.
+ */
 export async function getCaArticleBySlug(slug: string): Promise<CaArticle | null> {
-  const all = await getCaArticles();
+  const all = await getPublicCaArticles();
   return all.find((a) => a.slug === slug) ?? null;
 }
 
@@ -7384,9 +7456,12 @@ export async function addCaArticle(input: Partial<CaArticle>): Promise<CaArticle
   } as CaArticle;
   if (demoMode()) {
     mock.caArticles.unshift(row);
+    revalidatePublicCa();
     return row;
   }
-  return dbInsert<CaArticle>("ca_articles", row as unknown as Record<string, unknown>);
+  const inserted = await dbInsert<CaArticle>("ca_articles", row as unknown as Record<string, unknown>);
+  revalidatePublicCa();
+  return inserted;
 }
 
 export async function updateCaArticle(id: string, patch: Partial<CaArticle>): Promise<CaArticle | null> {
@@ -7394,9 +7469,12 @@ export async function updateCaArticle(id: string, patch: Partial<CaArticle>): Pr
     const idx = mock.caArticles.findIndex((a) => a.id === id);
     if (idx === -1) return null;
     mock.caArticles[idx] = { ...mock.caArticles[idx], ...patch };
+    revalidatePublicCa();
     return mock.caArticles[idx];
   }
-  return dbUpdate<CaArticle>("ca_articles", id, patch as Record<string, unknown>);
+  const updated = await dbUpdate<CaArticle>("ca_articles", id, patch as Record<string, unknown>);
+  revalidatePublicCa();
+  return updated;
 }
 
 export async function deleteCaArticle(id: string): Promise<boolean> {
@@ -7404,9 +7482,12 @@ export async function deleteCaArticle(id: string): Promise<boolean> {
     const idx = mock.caArticles.findIndex((a) => a.id === id);
     if (idx === -1) return false;
     mock.caArticles.splice(idx, 1);
+    revalidatePublicCa();
     return true;
   }
-  return dbDelete("ca_articles", id);
+  const ok = await dbDelete("ca_articles", id);
+  if (ok) revalidatePublicCa();
+  return ok;
 }
 
 export async function incrementCaView(id: string): Promise<void> {
@@ -7432,8 +7513,21 @@ export async function getCaCategories(): Promise<CaCategory[]> {
   const { data } = await db.from("ca_categories").select("*").order("order", { ascending: true });
   return (data as CaCategory[]) ?? [];
 }
+
+const loadPublicCaCategories = unstable_cache(
+  async (): Promise<CaCategory[]> => {
+    if (demoMode()) return [...mock.caCategories];
+    const db = getSupabasePublic();
+    if (!db) return [...mock.caCategories];
+    const { data } = await db.from("ca_categories").select("*").order("order", { ascending: true });
+    return (data as CaCategory[]) ?? [];
+  },
+  ["public-ca-categories"],
+  { revalidate: 600, tags: [PUBLIC_CACHE_TAGS.caTaxonomy] },
+);
+
 export async function getCaCategoryBySlug(slug: string): Promise<CaCategory | null> {
-  const all = await getCaCategories();
+  const all = await loadPublicCaCategories();
   return all.find((c) => c.slug === slug) ?? null;
 }
 export async function addCaCategory(input: Partial<CaCategory>): Promise<CaCategory> {
@@ -7448,27 +7542,36 @@ export async function addCaCategory(input: Partial<CaCategory>): Promise<CaCateg
   } as CaCategory;
   if (demoMode()) {
     mock.caCategories.push(row);
+    revalidatePublicTags(PUBLIC_CACHE_TAGS.caTaxonomy);
     return row;
   }
-  return dbInsert<CaCategory>("ca_categories", row as unknown as Record<string, unknown>);
+  const inserted = await dbInsert<CaCategory>("ca_categories", row as unknown as Record<string, unknown>);
+  revalidatePublicTags(PUBLIC_CACHE_TAGS.caTaxonomy);
+  return inserted;
 }
 export async function updateCaCategory(id: string, patch: Partial<CaCategory>): Promise<CaCategory | null> {
   if (demoMode()) {
     const idx = mock.caCategories.findIndex((c) => c.id === id);
     if (idx === -1) return null;
     mock.caCategories[idx] = { ...mock.caCategories[idx], ...patch };
+    revalidatePublicTags(PUBLIC_CACHE_TAGS.caTaxonomy);
     return mock.caCategories[idx];
   }
-  return dbUpdate<CaCategory>("ca_categories", id, patch as Record<string, unknown>);
+  const updated = await dbUpdate<CaCategory>("ca_categories", id, patch as Record<string, unknown>);
+  revalidatePublicTags(PUBLIC_CACHE_TAGS.caTaxonomy);
+  return updated;
 }
 export async function deleteCaCategory(id: string): Promise<boolean> {
   if (demoMode()) {
     const idx = mock.caCategories.findIndex((c) => c.id === id);
     if (idx === -1) return false;
     mock.caCategories.splice(idx, 1);
+    revalidatePublicTags(PUBLIC_CACHE_TAGS.caTaxonomy);
     return true;
   }
-  return dbDelete("ca_categories", id);
+  const ok = await dbDelete("ca_categories", id);
+  if (ok) revalidatePublicTags(PUBLIC_CACHE_TAGS.caTaxonomy);
+  return ok;
 }
 
 // ---- Tags ----
@@ -7479,8 +7582,21 @@ export async function getCaTags(): Promise<CaTag[]> {
   const { data } = await db.from("ca_tags").select("*").order("name", { ascending: true });
   return (data as CaTag[]) ?? [];
 }
+
+const loadPublicCaTags = unstable_cache(
+  async (): Promise<CaTag[]> => {
+    if (demoMode()) return [...mock.caTags];
+    const db = getSupabasePublic();
+    if (!db) return [...mock.caTags];
+    const { data } = await db.from("ca_tags").select("*").order("name", { ascending: true });
+    return (data as CaTag[]) ?? [];
+  },
+  ["public-ca-tags"],
+  { revalidate: 600, tags: [PUBLIC_CACHE_TAGS.caTaxonomy] },
+);
+
 export async function getCaTagBySlug(slug: string): Promise<CaTag | null> {
-  const all = await getCaTags();
+  const all = await loadPublicCaTags();
   return all.find((t) => t.slug === slug) ?? null;
 }
 export async function addCaTag(input: Partial<CaTag>): Promise<CaTag> {
@@ -7493,27 +7609,36 @@ export async function addCaTag(input: Partial<CaTag>): Promise<CaTag> {
   } as CaTag;
   if (demoMode()) {
     mock.caTags.push(row);
+    revalidatePublicTags(PUBLIC_CACHE_TAGS.caTaxonomy);
     return row;
   }
-  return dbInsert<CaTag>("ca_tags", row as unknown as Record<string, unknown>);
+  const inserted = await dbInsert<CaTag>("ca_tags", row as unknown as Record<string, unknown>);
+  revalidatePublicTags(PUBLIC_CACHE_TAGS.caTaxonomy);
+  return inserted;
 }
 export async function updateCaTag(id: string, patch: Partial<CaTag>): Promise<CaTag | null> {
   if (demoMode()) {
     const idx = mock.caTags.findIndex((t) => t.id === id);
     if (idx === -1) return null;
     mock.caTags[idx] = { ...mock.caTags[idx], ...patch };
+    revalidatePublicTags(PUBLIC_CACHE_TAGS.caTaxonomy);
     return mock.caTags[idx];
   }
-  return dbUpdate<CaTag>("ca_tags", id, patch as Record<string, unknown>);
+  const updated = await dbUpdate<CaTag>("ca_tags", id, patch as Record<string, unknown>);
+  revalidatePublicTags(PUBLIC_CACHE_TAGS.caTaxonomy);
+  return updated;
 }
 export async function deleteCaTag(id: string): Promise<boolean> {
   if (demoMode()) {
     const idx = mock.caTags.findIndex((t) => t.id === id);
     if (idx === -1) return false;
     mock.caTags.splice(idx, 1);
+    revalidatePublicTags(PUBLIC_CACHE_TAGS.caTaxonomy);
     return true;
   }
-  return dbDelete("ca_tags", id);
+  const ok = await dbDelete("ca_tags", id);
+  if (ok) revalidatePublicTags(PUBLIC_CACHE_TAGS.caTaxonomy);
+  return ok;
 }
 
 // ---- PDF library ----
@@ -7524,8 +7649,22 @@ export async function getCaPdfs(): Promise<CaPdf[]> {
   const { data } = await db.from("ca_pdfs").select("*").order("created_at", { ascending: false });
   return (data as CaPdf[]) ?? [];
 }
+
+/** Cached PDF list for public pages (ISR). Admin mutations revalidate the tag. */
+export const getPublicCaPdfs = unstable_cache(
+  async (): Promise<CaPdf[]> => {
+    if (demoMode()) return [...mock.caPdfs];
+    const db = getSupabasePublic();
+    if (!db) return [...mock.caPdfs];
+    const { data } = await db.from("ca_pdfs").select("*").order("created_at", { ascending: false });
+    return (data as CaPdf[]) ?? [];
+  },
+  ["public-ca-pdfs"],
+  { revalidate: 600, tags: [PUBLIC_CACHE_TAGS.caPdfs] },
+);
+
 export async function getCaPdfById(id: string): Promise<CaPdf | null> {
-  const all = await getCaPdfs();
+  const all = await getPublicCaPdfs();
   return all.find((p) => p.id === id) ?? null;
 }
 /**
@@ -7534,7 +7673,7 @@ export async function getCaPdfById(id: string): Promise<CaPdf | null> {
  * Ordered by date_ref desc (newest day/month first), then created_at.
  */
 export async function getPublicCaPdfsByKind(kind: CaPdf["kind"]): Promise<CaPdf[]> {
-  const all = await getCaPdfs();
+  const all = await getPublicCaPdfs();
   return all
     .filter((p) => p.kind === kind && !!p.file_url)
     .sort((a, b) => {
@@ -7592,7 +7731,7 @@ export function isPublicCaPdf(pdf: CaPdf, publishedArticlePdfIds: Set<string>): 
  * their file_url is never shipped to the client. Newest first.
  */
 export async function getPublicDownloadablePdfs(): Promise<CaPdf[]> {
-  const [all, publishedArticlePdfIds] = await Promise.all([getCaPdfs(), getPublishedArticlePdfIds()]);
+  const [all, publishedArticlePdfIds] = await Promise.all([getPublicCaPdfs(), getPublishedArticlePdfIds()]);
   return all
     .filter((p) => isPublicCaPdf(p, publishedArticlePdfIds))
     .sort((a, b) => {
@@ -7623,27 +7762,36 @@ export async function addCaPdf(input: Partial<CaPdf>): Promise<CaPdf> {
   } as CaPdf;
   if (demoMode()) {
     mock.caPdfs.unshift(row);
+    revalidatePublicCa();
     return row;
   }
-  return dbInsert<CaPdf>("ca_pdfs", row as unknown as Record<string, unknown>);
+  const inserted = await dbInsert<CaPdf>("ca_pdfs", row as unknown as Record<string, unknown>);
+  revalidatePublicCa();
+  return inserted;
 }
 export async function updateCaPdf(id: string, patch: Partial<CaPdf>): Promise<CaPdf | null> {
   if (demoMode()) {
     const idx = mock.caPdfs.findIndex((p) => p.id === id);
     if (idx === -1) return null;
     mock.caPdfs[idx] = { ...mock.caPdfs[idx], ...patch };
+    revalidatePublicCa();
     return mock.caPdfs[idx];
   }
-  return dbUpdate<CaPdf>("ca_pdfs", id, { ...patch, updated_at: new Date().toISOString() } as Record<string, unknown>);
+  const updated = await dbUpdate<CaPdf>("ca_pdfs", id, { ...patch, updated_at: new Date().toISOString() } as Record<string, unknown>);
+  revalidatePublicCa();
+  return updated;
 }
 export async function deleteCaPdf(id: string): Promise<boolean> {
   if (demoMode()) {
     const idx = mock.caPdfs.findIndex((p) => p.id === id);
     if (idx === -1) return false;
     mock.caPdfs.splice(idx, 1);
+    revalidatePublicCa();
     return true;
   }
-  return dbDelete("ca_pdfs", id);
+  const ok = await dbDelete("ca_pdfs", id);
+  if (ok) revalidatePublicCa();
+  return ok;
 }
 export async function incrementCaPdfDownload(id: string): Promise<void> {
   if (demoMode()) {
@@ -7807,21 +7955,46 @@ export async function getResources(): Promise<Resource[]> {
 }
 
 /** Public list: published, not future. Ordered by journey order, then newest. */
-export async function getPublicResources(): Promise<Resource[]> {
-  const all = await getResources();
-  return all
-    .filter(isResourcePublished)
-    .sort((a, b) => {
-      const oa = a.order_index ?? 9999;
-      const ob = b.order_index ?? 9999;
-      if (oa !== ob) return oa - ob;
-      return new Date(b.publish_at || b.created_at).getTime() - new Date(a.publish_at || a.created_at).getTime();
-    });
-}
+export const getPublicResources = unstable_cache(
+  async (): Promise<Resource[]> => {
+    if (demoMode()) {
+      return [...mock.resources]
+        .filter(isResourcePublished)
+        .sort((a, b) => {
+          const oa = a.order_index ?? 9999;
+          const ob = b.order_index ?? 9999;
+          if (oa !== ob) return oa - ob;
+          return new Date(b.publish_at || b.created_at).getTime() - new Date(a.publish_at || a.created_at).getTime();
+        });
+    }
+    const db = getSupabasePublic();
+    if (!db) {
+      return [...mock.resources]
+        .filter(isResourcePublished)
+        .sort((a, b) => {
+          const oa = a.order_index ?? 9999;
+          const ob = b.order_index ?? 9999;
+          if (oa !== ob) return oa - ob;
+          return new Date(b.publish_at || b.created_at).getTime() - new Date(a.publish_at || a.created_at).getTime();
+        });
+    }
+    const { data } = await db.from("resources").select("*").order("order_index", { ascending: true }).order("updated_at", { ascending: false });
+    return ((data as Resource[]) ?? [])
+      .filter(isResourcePublished)
+      .sort((a, b) => {
+        const oa = a.order_index ?? 9999;
+        const ob = b.order_index ?? 9999;
+        if (oa !== ob) return oa - ob;
+        return new Date(b.publish_at || b.created_at).getTime() - new Date(a.publish_at || a.created_at).getTime();
+      });
+  },
+  ["public-resources"],
+  { revalidate: 600, tags: [PUBLIC_CACHE_TAGS.resources] },
+);
 
-/** Returns the row regardless of status (admin/preview); callers gate on isResourcePublished. */
+/** Public slug lookup (published only). Admin uses getResourceById / getResources. */
 export async function getResourceBySlug(slug: string): Promise<Resource | null> {
-  const all = await getResources();
+  const all = await getPublicResources();
   return all.find((r) => r.slug === slug) ?? null;
 }
 
@@ -7865,9 +8038,12 @@ export async function addResource(input: Partial<Resource>): Promise<Resource> {
   } as Resource;
   if (demoMode()) {
     mock.resources.unshift(row);
+    revalidatePublicResources();
     return row;
   }
-  return dbInsert<Resource>("resources", row as unknown as Record<string, unknown>);
+  const inserted = await dbInsert<Resource>("resources", row as unknown as Record<string, unknown>);
+  revalidatePublicResources();
+  return inserted;
 }
 
 export async function updateResource(id: string, patch: Partial<Resource>): Promise<Resource | null> {
@@ -7875,9 +8051,12 @@ export async function updateResource(id: string, patch: Partial<Resource>): Prom
     const idx = mock.resources.findIndex((r) => r.id === id);
     if (idx === -1) return null;
     mock.resources[idx] = { ...mock.resources[idx], ...patch };
+    revalidatePublicResources();
     return mock.resources[idx];
   }
-  return dbUpdate<Resource>("resources", id, patch as Record<string, unknown>);
+  const updated = await dbUpdate<Resource>("resources", id, patch as Record<string, unknown>);
+  revalidatePublicResources();
+  return updated;
 }
 
 export async function deleteResource(id: string): Promise<boolean> {
@@ -7885,9 +8064,12 @@ export async function deleteResource(id: string): Promise<boolean> {
     const idx = mock.resources.findIndex((r) => r.id === id);
     if (idx === -1) return false;
     mock.resources.splice(idx, 1);
+    revalidatePublicResources();
     return true;
   }
-  return dbDelete("resources", id);
+  const ok = await dbDelete("resources", id);
+  if (ok) revalidatePublicResources();
+  return ok;
 }
 
 export async function incrementResourceView(id: string): Promise<void> {

@@ -5,7 +5,7 @@ import { CalendarDays, ChevronLeft, ChevronRight, FileText, Clock, ListChecks, A
 import CaArticleCard from "@/components/public/ca/CaArticleCard";
 import CaPdfButton from "@/components/public/ca/CaPdfButton";
 import CaPageHeader from "@/components/public/ca/CaPageHeader";
-import { getPublicCaArticles, getPublicCaPdfsByKind, getQuizBySlug } from "@/lib/dataProvider";
+import { getPublicCaArticles, getPublicCaPdfsByKind, getPublicQuizBySlug } from "@/lib/dataProvider";
 import { caMetadata, caDateLabel, caEffectiveDate } from "@/lib/caView";
 import { caCategoryName } from "@/lib/caConstants";
 import { ACADEMY } from "@/lib/config";
@@ -13,6 +13,18 @@ import { ACADEMY } from "@/lib/config";
 export const revalidate = 600;
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+export async function generateStaticParams() {
+  const [articles, dailyPdfs] = await Promise.all([
+    getPublicCaArticles(),
+    getPublicCaPdfsByKind("daily"),
+  ]);
+  const dates = new Set<string>([
+    ...articles.map((a) => caEffectiveDate(a)),
+    ...dailyPdfs.map((p) => (p.date_ref || p.created_at).slice(0, 10)),
+  ]);
+  return Array.from(dates).filter((d) => DATE_RE.test(d)).map((date) => ({ date }));
+}
 
 export async function generateMetadata({ params }: { params: { date: string } }): Promise<Metadata> {
   const label = caDateLabel(params.date);
@@ -25,10 +37,8 @@ export async function generateMetadata({ params }: { params: { date: string } })
 
 export default async function DailyDate({
   params,
-  searchParams,
 }: {
   params: { date: string };
-  searchParams: Record<string, string | undefined>;
 }) {
   if (!DATE_RE.test(params.date)) notFound();
   const [articles, dailyPdfs] = await Promise.all([
@@ -50,16 +60,11 @@ export default async function DailyDate({
   const newerDate = idx > 0 ? allDates[idx - 1] : null;
   const olderDate = idx >= 0 && idx < allDates.length - 1 ? allDates[idx + 1] : null;
 
-  // Category filter (within this date only).
-  const activeCat = searchParams.cat || "";
   const cats = Array.from(new Set(dayArticles.map((a) => a.category_slug).filter(Boolean))) as string[];
-  const shownArticles = activeCat ? dayArticles.filter((a) => a.category_slug === activeCat) : dayArticles;
 
   // Related daily quiz: first quiz linked from any of the day's articles.
   const quizSlug = dayArticles.map((a) => a.related_quiz_slug).find(Boolean) || null;
-  const quiz = quizSlug ? await getQuizBySlug(quizSlug) : null;
-
-  const base = `/current-affairs/daily/${params.date}`;
+  const quiz = quizSlug ? await getPublicQuizBySlug(quizSlug) : null;
 
   return (
     <div className="bg-[var(--ca-slate-50)]">
@@ -114,15 +119,15 @@ export default async function DailyDate({
             <h2 className="mb-4 font-heading text-lg font-bold tracking-tight text-[var(--ca-navy-900)] sm:text-xl">Articles on this date</h2>
             {cats.length > 1 && (
               <div className="no-scrollbar mb-5 flex gap-2 overflow-x-auto pb-1">
-                <Link href={base} className={`ca-filter ca-focus ${!activeCat ? "ca-filter--active" : ""}`}>All</Link>
+                <span className="ca-filter ca-filter--active">All</span>
                 {cats.map((c) => (
-                  <Link key={c} href={`${base}?cat=${c}`} className={`ca-filter ca-focus ${activeCat === c ? "ca-filter--active" : ""}`}>{caCategoryName(c)}</Link>
+                  <Link key={c} href={`/current-affairs/category/${c}`} className="ca-filter ca-focus">{caCategoryName(c)}</Link>
                 ))}
               </div>
             )}
-            {shownArticles.length > 0 ? (
+            {dayArticles.length > 0 ? (
               <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
-                {shownArticles.map((a) => <CaArticleCard key={a.id} article={a} compact />)}
+                {dayArticles.map((a) => <CaArticleCard key={a.id} article={a} compact />)}
               </div>
             ) : (
               <p className="flex items-center gap-2 rounded-2xl border border-[var(--ca-slate-200)] bg-[var(--ca-slate-50)] p-8 text-center text-[var(--ca-slate-700)]"><FileText size={16} /> No individual articles for this date.</p>

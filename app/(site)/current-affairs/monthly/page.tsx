@@ -5,7 +5,7 @@ import CaPdfButton from "@/components/public/ca/CaPdfButton";
 import CaLeadForm from "@/components/public/ca/CaLeadForm";
 import CaPageHeader from "@/components/public/ca/CaPageHeader";
 import { CaIconChip } from "@/components/public/ca/CaIcons";
-import { getPublicCaArticles, getCaPdfs } from "@/lib/dataProvider";
+import { getPublicCaArticles, getPublicCaPdfs } from "@/lib/dataProvider";
 import { caMetadata, caMonthLabel, caEffectiveDate } from "@/lib/caView";
 import { ACADEMY } from "@/lib/config";
 
@@ -20,7 +20,7 @@ export function generateMetadata(): Metadata {
 }
 
 export default async function MonthlyIndex() {
-  const [articles, pdfs] = await Promise.all([getPublicCaArticles(), getCaPdfs()]);
+  const [articles, pdfs] = await Promise.all([getPublicCaArticles(), getPublicCaPdfs()]);
   const monthlyPdfs = pdfs.filter((p) => p.kind === "monthly").sort((a, b) => (a.date_ref || "") < (b.date_ref || "") ? 1 : -1);
 
   const months = Array.from(new Set(articles.map((a) => caEffectiveDate(a).slice(0, 7)))).sort().reverse();

@@ -8,11 +8,17 @@ import {
   getCareersSettings,
   resolveFormFields,
   toPublicPosition,
+  listOpenPositions,
 } from "@/lib/careers/store";
 import { formatSalaryRange, JOB_TYPE_LABELS, ROLE_TYPE_LABELS } from "@/lib/careers/config";
 import { SITE_URL, ACADEMY } from "@/lib/config";
 
 export const revalidate = 600;
+
+export async function generateStaticParams() {
+  const open = await listOpenPositions();
+  return open.map((p) => ({ slug: p.slug }));
+}
 
 export async function generateMetadata({ params }: { params: { slug: string } }): Promise<Metadata> {
   const p = await getPositionBySlug(params.slug);

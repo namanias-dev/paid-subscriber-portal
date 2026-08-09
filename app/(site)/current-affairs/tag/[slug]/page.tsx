@@ -10,7 +10,12 @@ import { ACADEMY } from "@/lib/config";
 
 export const revalidate = 600;
 
-const PER_PAGE = 18;
+export async function generateStaticParams() {
+  const all = await getPublicCaArticles();
+  const tags = new Set<string>();
+  for (const a of all) for (const tag of a.tags || []) if (tag) tags.add(tag);
+  return Array.from(tags).map((slug) => ({ slug }));
+}
 
 function titleize(slug: string): string {
   return slug.replace(/-/g, " ").replace(/\b\w/g, (m) => m.toUpperCase());
@@ -27,16 +32,12 @@ export async function generateMetadata({ params }: { params: { slug: string } })
   });
 }
 
-export default async function TagPage({ params, searchParams }: { params: { slug: string }; searchParams: Record<string, string | undefined> }) {
+export default async function TagPage({ params }: { params: { slug: string } }) {
   const all = await getPublicCaArticles();
   const items = all.filter((a) => (a.tags || []).includes(params.slug));
   const tag = await getCaTagBySlug(params.slug);
   if (items.length === 0 && !tag) notFound();
   const name = tag?.name || titleize(params.slug);
-
-  const page = Math.max(1, Number(searchParams.page) || 1);
-  const pageItems = items.slice((page - 1) * PER_PAGE, page * PER_PAGE);
-  const totalPages = Math.max(1, Math.ceil(items.length / PER_PAGE));
 
   return (
     <div>
@@ -50,18 +51,9 @@ export default async function TagPage({ params, searchParams }: { params: { slug
         {items.length === 0 ? (
           <p className="rounded-2xl border border-[var(--ca-slate-200)] bg-[var(--ca-slate-50)] p-10 text-center text-[var(--ca-slate-700)]">No articles with this tag yet.</p>
         ) : (
-          <>
-            <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-              {pageItems.map((a) => <CaArticleCard key={a.id} article={a} />)}
-            </div>
-            {totalPages > 1 && (
-              <div className="mt-8 flex items-center justify-center gap-3 text-sm">
-                {page > 1 && <Link href={`/current-affairs/tag/${params.slug}?page=${page - 1}`} className="ca-btn ca-btn-outline ca-focus">← Prev</Link>}
-                <span className="text-[var(--ca-slate-700)]">Page {page} of {totalPages}</span>
-                {page < totalPages && <Link href={`/current-affairs/tag/${params.slug}?page=${page + 1}`} className="ca-btn ca-btn-outline ca-focus">Next →</Link>}
-              </div>
-            )}
-          </>
+          <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+            {items.map((a) => <CaArticleCard key={a.id} article={a} />)}
+          </div>
         )}
       </div>
     </div>

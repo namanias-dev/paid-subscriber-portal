@@ -23,13 +23,12 @@ export const PUBLIC_DB_TIMEOUT_MS = Number(process.env.PUBLIC_DB_TIMEOUT_MS || 2
 export const ADMIN_DB_TIMEOUT_MS = Number(process.env.ADMIN_DB_TIMEOUT_MS || 5_000);
 
 /**
- * supabase-js calls global fetch. In the Next.js App Router, fetch responses
- * are cached in the Data Cache by default, which made public Server Components
- * serve STALE rows while dynamic route handlers saw fresh data. Force every
- * Supabase request to skip the cache so reads are always live — AND abort when
- * the DB is saturated so Vercel functions return instead of hanging to 504.
+ * Admin/API: always live (no-store). Public: allow the Data Cache so
+ * unstable_cache / ISR pages can prerender — public getters wrap these reads
+ * with tags (lib/publicCache.ts). Do not call getSupabasePublic from a public
+ * RSC without an unstable_cache wrapper.
  */
-function makeTimedFetch(timeoutMs: number): typeof fetch {
+function makeTimedFetch(timeoutMs: number, mode: "admin" | "public"): typeof fetch {
   return (input, init) => {
     const controller = new AbortController();
     const parent = init?.signal;
@@ -38,9 +37,13 @@ function makeTimedFetch(timeoutMs: number): typeof fetch {
       else parent.addEventListener("abort", () => controller.abort(parent.reason), { once: true });
     }
     const timer = setTimeout(() => controller.abort(new Error(`supabase_fetch_timeout_${timeoutMs}ms`)), timeoutMs);
+    const cacheInit =
+      mode === "admin"
+        ? { cache: "no-store" as RequestCache }
+        : { cache: "force-cache" as RequestCache, next: { revalidate: 600 } };
     return fetch(input as RequestInfo, {
       ...(init || {}),
-      cache: "no-store",
+      ...cacheInit,
       signal: controller.signal,
     }).finally(() => clearTimeout(timer));
   };
@@ -57,7 +60,7 @@ export function getSupabaseAdmin(): SupabaseClient | null {
   if (!adminClient) {
     adminClient = createClient(url, key, {
       auth: { persistSession: false },
-      global: { fetch: makeTimedFetch(ADMIN_DB_TIMEOUT_MS) },
+      global: { fetch: makeTimedFetch(ADMIN_DB_TIMEOUT_MS, "admin") },
     });
   }
   return adminClient;
@@ -67,7 +70,8 @@ export function getSupabaseAdmin(): SupabaseClient | null {
  * Public/read-mostly client — shorter timeout so visitor pages fail fast and
  * degrade instead of competing with admin/automation for hung connections.
  * Same service-role key (no anon role in this app); isolation is timeout + pool
- * release, not credentials.
+ * release, not credentials. Fetch uses force-cache so ISR/unstable_cache can
+ * prerender; always wrap public RSC reads in unstable_cache with tags.
  */
 export function getSupabasePublic(): SupabaseClient | null {
   const url = readEnv("NEXT_PUBLIC_SUPABASE_URL") || readEnv("SUPABASE_URL");
@@ -76,7 +80,7 @@ export function getSupabasePublic(): SupabaseClient | null {
   if (!publicClient) {
     publicClient = createClient(url, key, {
       auth: { persistSession: false },
-      global: { fetch: makeTimedFetch(PUBLIC_DB_TIMEOUT_MS) },
+      global: { fetch: makeTimedFetch(PUBLIC_DB_TIMEOUT_MS, "public") },
     });
   }
   return publicClient;

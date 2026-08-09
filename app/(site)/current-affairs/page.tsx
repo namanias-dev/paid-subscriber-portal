@@ -1,18 +1,19 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { CalendarDays, Archive, FileText, Compass, ArrowRight, TrendingUp, Download, Search, BookOpen } from "lucide-react";
+import { Suspense } from "react";
+import { CalendarDays, Archive, FileText, Compass, ArrowRight, TrendingUp, Download, BookOpen } from "lucide-react";
 import Reveal, { Stagger, StaggerItem } from "@/components/ui/Reveal";
 import CaArticleCard from "@/components/public/ca/CaArticleCard";
-import CaFilterChips from "@/components/public/ca/CaFilterChips";
+import CaHubFilters from "@/components/public/ca/CaHubFilters";
+import CaHubDefaultSections from "@/components/public/ca/CaHubDefaultSections";
 import CaLeadForm from "@/components/public/ca/CaLeadForm";
 import CaStickyCTA from "@/components/public/ca/CaStickyCTA";
 import CaPdfButton from "@/components/public/ca/CaPdfButton";
 import { CaIconChip, categoryIcon } from "@/components/public/ca/CaIcons";
-import { getPublicCaArticles, getCaPdfs } from "@/lib/dataProvider";
+import { getPublicCaArticles, getPublicCaPdfs } from "@/lib/dataProvider";
 import { DEFAULT_CA_CATEGORIES } from "@/lib/caConstants";
 import { caMetadata, caDateLabel, caMonthLabel, groupByDate } from "@/lib/caView";
 import { SITE_URL, ACADEMY } from "@/lib/config";
-import type { CaArticle } from "@/lib/types";
 
 export const revalidate = 600;
 
@@ -25,8 +26,6 @@ export function generateMetadata(): Metadata {
   });
 }
 
-const PER_PAGE = 12;
-
 const QUICK_LINKS = [
   { href: "#today", icon: CalendarDays, label: "Today's CA", sub: "Fresh, exam-ready briefs" },
   { href: "/current-affairs/daily", icon: Archive, label: "Daily Current Affairs PDFs", sub: "PDFs + each day's articles" },
@@ -34,43 +33,14 @@ const QUICK_LINKS = [
   { href: "#categories", icon: Compass, label: "Browse Topics", sub: "14 GS-aligned subjects" },
 ];
 
-function matchesFilters(a: CaArticle, type: string, gs: string, rel: string, q: string): boolean {
-  if (type && a.article_type !== type) return false;
-  if (gs && !(a.upsc?.gs_papers || []).includes(gs as never)) return false;
-  if (rel) {
-    const er = a.upsc?.exam_relevance;
-    if (rel === "prelims" && !(er === "prelims" || er === "both" || (a.upsc?.gs_papers || []).includes("Prelims" as never))) return false;
-    if (rel === "mains" && !(er === "mains" || er === "both")) return false;
-  }
-  if (q) {
-    const t = q.toLowerCase();
-    if (!`${a.title} ${a.summary} ${(a.tags || []).join(" ")}`.toLowerCase().includes(t)) return false;
-  }
-  return true;
-}
-
-export default async function CurrentAffairsHub({ searchParams }: { searchParams: Record<string, string | undefined> }) {
-  const [articles, pdfs] = await Promise.all([getPublicCaArticles(), getCaPdfs()]);
-
-  const type = searchParams.type || "";
-  const gs = searchParams.gs || "";
-  const rel = searchParams.rel || "";
-  const q = (searchParams.q || "").trim();
-  const sort = searchParams.sort || "newest";
-  const page = Math.max(1, Number(searchParams.page) || 1);
-
-  const filtered = articles.filter((a) => matchesFilters(a, type, gs, rel, q));
-  const isFiltering = !!(type || gs || rel || q);
+export default async function CurrentAffairsHub() {
+  const [articles, pdfs] = await Promise.all([getPublicCaArticles(), getPublicCaPdfs()]);
 
   const groups = groupByDate(articles);
   const todayGroup = groups[0];
   const monthlyPdfs = pdfs.filter((p) => p.kind === "monthly").slice(0, 4);
   const mostDownloaded = [...pdfs].filter((p) => p.download_count > 0).sort((a, b) => b.download_count - a.download_count).slice(0, 3);
   const trending = articles.filter((a) => a.trending).slice(0, 5);
-
-  const sorted = sort === "most_read" ? [...filtered].sort((a, b) => b.views - a.views) : filtered;
-  const pageItems = sorted.slice((page - 1) * PER_PAGE, page * PER_PAGE);
-  const totalPages = Math.max(1, Math.ceil(sorted.length / PER_PAGE));
 
   const breadcrumb = {
     "@context": "https://schema.org",
@@ -81,19 +51,10 @@ export default async function CurrentAffairsHub({ searchParams }: { searchParams
     ],
   };
 
-  const buildHref = (overrides: Record<string, string | number | undefined>) => {
-    const params = new URLSearchParams();
-    const merged = { type, gs, rel, q, sort, ...overrides };
-    Object.entries(merged).forEach(([k, v]) => { if (v) params.set(k, String(v)); });
-    const s = params.toString();
-    return `/current-affairs${s ? `?${s}` : ""}`;
-  };
-
   return (
     <div className="pb-24 lg:pb-12">
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumb) }} />
 
-      {/* Hero */}
       <section className="ca-dark ca-grain relative overflow-hidden">
         <div className="ca-orb" style={{ width: 360, height: 360, top: -140, right: -80, background: "rgba(212,175,55,0.16)" }} />
         <div className="ca-orb" style={{ width: 300, height: 300, bottom: -160, left: -100, background: "rgba(30,58,138,0.5)" }} />
@@ -116,7 +77,6 @@ export default async function CurrentAffairsHub({ searchParams }: { searchParams
             </div>
           </Reveal>
 
-          {/* Quick-link glass cards */}
           <Stagger className="mt-10 grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
             {QUICK_LINKS.map((c) => (
               <StaggerItem key={c.label} className="h-full">
@@ -135,40 +95,12 @@ export default async function CurrentAffairsHub({ searchParams }: { searchParams
       </section>
 
       <div className="container-wide py-12">
-        {/* Filters + search */}
-        <div className="mb-10 space-y-4">
-          <CaFilterChips />
-          <form action="/current-affairs" className="flex gap-2">
-            <div className="relative max-w-md flex-1">
-              <Search size={17} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--ca-slate-400)]" aria-hidden="true" />
-              <input name="q" defaultValue={q} placeholder="Search current affairs…" className="input ca-focus pl-9" />
-            </div>
-            {type && <input type="hidden" name="type" value={type} />}
-            <button className="ca-btn ca-btn-outline ca-focus">Search</button>
-          </form>
-        </div>
+        <Suspense fallback={<div className="mb-10 h-24 animate-pulse rounded-xl bg-[var(--ca-slate-100)]" />}>
+          <CaHubFilters articles={articles} />
+        </Suspense>
 
-        {isFiltering ? (
-          <section>
-            <h2 className="mb-6 font-heading text-2xl font-bold tracking-tight text-[var(--ca-navy-900)]">{sorted.length} result{sorted.length === 1 ? "" : "s"}</h2>
-            {pageItems.length === 0 ? (
-              <p className="rounded-2xl border border-[var(--ca-slate-200)] bg-[var(--ca-slate-50)] p-10 text-center text-[var(--ca-slate-700)]">No articles match these filters. <Link href="/current-affairs" className="font-semibold text-[var(--ca-navy-600)] underline">Clear filters</Link></p>
-            ) : (
-              <Stagger className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-                {pageItems.map((a) => <StaggerItem key={a.id} className="h-full"><CaArticleCard article={a} /></StaggerItem>)}
-              </Stagger>
-            )}
-            {totalPages > 1 && (
-              <div className="mt-8 flex items-center justify-center gap-3 text-sm">
-                {page > 1 && <Link href={buildHref({ page: page - 1 })} className="ca-btn ca-btn-outline ca-focus">← Prev</Link>}
-                <span className="text-[var(--ca-slate-700)]">Page {page} of {totalPages}</span>
-                {page < totalPages && <Link href={buildHref({ page: page + 1 })} className="ca-btn ca-btn-outline ca-focus">Next →</Link>}
-              </div>
-            )}
-          </section>
-        ) : (
-          <>
-            {/* Today's CA */}
+        <Suspense fallback={null}>
+          <CaHubDefaultSections>
             {todayGroup && (
               <section id="today" className="scroll-mt-24">
                 <div className="mb-6 flex items-end justify-between gap-3">
@@ -181,7 +113,6 @@ export default async function CurrentAffairsHub({ searchParams }: { searchParams
               </section>
             )}
 
-            {/* Category grid */}
             <section id="categories" className="mt-16 scroll-mt-24">
               <h2 className="mb-6 font-heading text-2xl font-bold tracking-tight text-[var(--ca-navy-900)] sm:text-3xl">Browse by topic</h2>
               <Stagger className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
@@ -197,7 +128,6 @@ export default async function CurrentAffairsHub({ searchParams }: { searchParams
               </Stagger>
             </section>
 
-            {/* Monthly PDFs */}
             {monthlyPdfs.length > 0 && (
               <section className="mt-16">
                 <div className="mb-6 flex items-end justify-between">
@@ -217,7 +147,6 @@ export default async function CurrentAffairsHub({ searchParams }: { searchParams
               </section>
             )}
 
-            {/* Recent by date */}
             {groups.length > 1 && (
               <section className="mt-16">
                 <h2 className="mb-6 font-heading text-2xl font-bold tracking-tight text-[var(--ca-navy-900)] sm:text-3xl">Recent days</h2>
@@ -235,7 +164,6 @@ export default async function CurrentAffairsHub({ searchParams }: { searchParams
               </section>
             )}
 
-            {/* Trending + most downloaded */}
             {(trending.length > 0 || mostDownloaded.length > 0) && (
               <section className="mt-16 grid gap-6 lg:grid-cols-2">
                 {trending.length > 0 && (
@@ -260,10 +188,9 @@ export default async function CurrentAffairsHub({ searchParams }: { searchParams
               </section>
             )}
 
-            {/* Lead capture */}
             <section className="mt-16"><CaLeadForm source="ca-hub" /></section>
-          </>
-        )}
+          </CaHubDefaultSections>
+        </Suspense>
       </div>
 
       <CaStickyCTA />

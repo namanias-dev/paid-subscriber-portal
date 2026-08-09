@@ -4,13 +4,19 @@ import { CalendarRange } from "lucide-react";
 import CaArticleCard from "@/components/public/ca/CaArticleCard";
 import CaPdfButton from "@/components/public/ca/CaPdfButton";
 import CaPageHeader from "@/components/public/ca/CaPageHeader";
-import { getPublicCaArticles, getCaPdfs } from "@/lib/dataProvider";
+import { getPublicCaArticles, getPublicCaPdfs } from "@/lib/dataProvider";
 import { caMetadata, caMonthLabel, caEffectiveDate } from "@/lib/caView";
 import { ACADEMY } from "@/lib/config";
 
 export const revalidate = 600;
 
 const MONTH_RE = /^\d{4}-\d{2}$/;
+
+export async function generateStaticParams() {
+  const articles = await getPublicCaArticles();
+  const months = Array.from(new Set(articles.map((a) => caEffectiveDate(a).slice(0, 7)))).filter((m) => MONTH_RE.test(m));
+  return months.map((month) => ({ month }));
+}
 
 export async function generateMetadata({ params }: { params: { month: string } }): Promise<Metadata> {
   const label = caMonthLabel(params.month);
@@ -23,7 +29,7 @@ export async function generateMetadata({ params }: { params: { month: string } }
 
 export default async function MonthlyMonth({ params }: { params: { month: string } }) {
   if (!MONTH_RE.test(params.month)) notFound();
-  const [articles, pdfs] = await Promise.all([getPublicCaArticles(), getCaPdfs()]);
+  const [articles, pdfs] = await Promise.all([getPublicCaArticles(), getPublicCaPdfs()]);
   const items = articles.filter((a) => caEffectiveDate(a).slice(0, 7) === params.month);
   const monthPdf = pdfs.find((p) => p.kind === "monthly" && p.date_ref === params.month);
 
