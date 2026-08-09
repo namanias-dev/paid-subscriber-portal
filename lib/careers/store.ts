@@ -1,5 +1,5 @@
 import { unstable_cache } from "next/cache";
-import { getSupabaseAdmin, getSupabasePublic } from "@/lib/supabase";
+import { getSupabaseAdmin, getSupabaseDataCache } from "@/lib/supabase";
 import { PUBLIC_CACHE_TAGS, revalidatePublicCareers } from "@/lib/publicCache";
 import type {
   CareerPosition,
@@ -24,7 +24,7 @@ function db() {
 
 /** Public/ISR reads — must not use admin no-store fetch. */
 function publicDb() {
-  return getSupabasePublic();
+  return getSupabaseDataCache();
 }
 
 function slugify(s: string): string {

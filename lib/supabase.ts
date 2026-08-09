@@ -2,6 +2,7 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
 let adminClient: SupabaseClient | null = null;
 let publicClient: SupabaseClient | null = null;
+let dataCacheClient: SupabaseClient | null = null;
 
 /**
  * Read env vars via computed access so Next.js does NOT inline them at build
@@ -79,4 +80,41 @@ export function getSupabasePublic(): SupabaseClient | null {
     });
   }
   return publicClient;
+}
+
+/**
+ * Client for bodies of unstable_cache / tagged public loaders only.
+ * force-cache is required so Next can SSG inside those wrappers; never use
+ * this outside an explicit cache boundary (PII / payment / mutation paths).
+ */
+export function getSupabaseDataCache(): SupabaseClient | null {
+  const url = readEnv("NEXT_PUBLIC_SUPABASE_URL") || readEnv("SUPABASE_URL");
+  const key = readEnv("SUPABASE_SERVICE_ROLE_KEY");
+  if (!url || !key) return null;
+  if (!dataCacheClient) {
+    dataCacheClient = createClient(url, key, {
+      auth: { persistSession: false },
+      global: {
+        fetch: (input, init) => {
+          const controller = new AbortController();
+          const parent = init?.signal;
+          if (parent) {
+            if (parent.aborted) controller.abort(parent.reason);
+            else parent.addEventListener("abort", () => controller.abort(parent.reason), { once: true });
+          }
+          const timer = setTimeout(
+            () => controller.abort(new Error(`supabase_fetch_timeout_${PUBLIC_DB_TIMEOUT_MS}ms`)),
+            PUBLIC_DB_TIMEOUT_MS
+          );
+          return fetch(input as RequestInfo, {
+            ...(init || {}),
+            cache: "force-cache",
+            next: { ...(init as any)?.next, revalidate: 600 },
+            signal: controller.signal,
+          }).finally(() => clearTimeout(timer));
+        },
+      },
+    });
+  }
+  return dataCacheClient;
 }

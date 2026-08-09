@@ -1,6 +1,6 @@
 import { cache } from "react";
 import { unstable_cache } from "next/cache";
-import { getSupabaseAdmin, getSupabasePublic } from "./supabase";
+import { getSupabaseAdmin, getSupabasePublic, getSupabaseDataCache } from "./supabase";
 import {
   PUBLIC_CACHE_TAGS,
   revalidatePublicCa,
@@ -1517,7 +1517,7 @@ export async function getAllCourses(): Promise<Course[]> {
 const loadPublishedCourses = unstable_cache(
   async (): Promise<Course[]> => {
     if (demoMode()) return sortCoursesByOrder(mock.courses).filter((c) => c.status === "published" && c.active !== false);
-    const db = getSupabasePublic();
+    const db = getSupabaseDataCache();
     if (!db) return sortCoursesByOrder(mock.courses).filter((c) => c.status === "published" && c.active !== false);
     const { data } = await db.from("courses").select("*").order("created_at", { ascending: false });
     const rows = (data as Course[]) ?? [];
@@ -2528,7 +2528,7 @@ export async function hasUpcomingWebinars(): Promise<boolean> {
 const loadPublicWebinars = unstable_cache(
   async (): Promise<Webinar[]> => {
     if (demoMode()) return mock.webinars.filter((w) => w.active !== false);
-    const db = getSupabasePublic();
+    const db = getSupabaseDataCache();
     if (!db) return mock.webinars.filter((w) => w.active !== false);
     const { data, error } = await db
       .from("webinars")
@@ -6691,7 +6691,7 @@ const demoSettings = (() => {
 const loadSiteSettings = unstable_cache(
   async (): Promise<SiteSettings> => {
     if (demoMode()) return mergeSiteSettings(demoSettings);
-    const db = getSupabasePublic();
+    const db = getSupabaseDataCache();
     if (!db) return mergeSiteSettings(null);
     try {
       const { data } = await db.from("site_settings").select("*").eq("id", "home").maybeSingle();
@@ -6858,7 +6858,7 @@ export async function getAllQuizzes(): Promise<Quiz[]> {
 const loadPublicQuizzes = unstable_cache(
   async (): Promise<Quiz[]> => {
     if (demoMode()) return mock.quizzes.filter((q) => q.status === "published" && q.is_public);
-    const db = getSupabasePublic();
+    const db = getSupabaseDataCache();
     if (!db) return mock.quizzes.filter((q) => q.status === "published" && q.is_public);
     const { data } = await db.from("quizzes").select("*").order("created_at", { ascending: false });
     const rows = (data as Quiz[]) ?? [];
@@ -7390,7 +7390,7 @@ export const getPublicCaArticles = unstable_cache(
         .filter(isCaPublished)
         .sort((a, b) => new Date(b.publish_at || b.created_at).getTime() - new Date(a.publish_at || a.created_at).getTime());
     }
-    const db = getSupabasePublic();
+    const db = getSupabaseDataCache();
     if (!db) {
       return [...mock.caArticles]
         .filter(isCaPublished)
@@ -7517,7 +7517,7 @@ export async function getCaCategories(): Promise<CaCategory[]> {
 const loadPublicCaCategories = unstable_cache(
   async (): Promise<CaCategory[]> => {
     if (demoMode()) return [...mock.caCategories];
-    const db = getSupabasePublic();
+    const db = getSupabaseDataCache();
     if (!db) return [...mock.caCategories];
     const { data } = await db.from("ca_categories").select("*").order("order", { ascending: true });
     return (data as CaCategory[]) ?? [];
@@ -7586,7 +7586,7 @@ export async function getCaTags(): Promise<CaTag[]> {
 const loadPublicCaTags = unstable_cache(
   async (): Promise<CaTag[]> => {
     if (demoMode()) return [...mock.caTags];
-    const db = getSupabasePublic();
+    const db = getSupabaseDataCache();
     if (!db) return [...mock.caTags];
     const { data } = await db.from("ca_tags").select("*").order("name", { ascending: true });
     return (data as CaTag[]) ?? [];
@@ -7654,7 +7654,7 @@ export async function getCaPdfs(): Promise<CaPdf[]> {
 export const getPublicCaPdfs = unstable_cache(
   async (): Promise<CaPdf[]> => {
     if (demoMode()) return [...mock.caPdfs];
-    const db = getSupabasePublic();
+    const db = getSupabaseDataCache();
     if (!db) return [...mock.caPdfs];
     const { data } = await db.from("ca_pdfs").select("*").order("created_at", { ascending: false });
     return (data as CaPdf[]) ?? [];
@@ -7967,7 +7967,7 @@ export const getPublicResources = unstable_cache(
           return new Date(b.publish_at || b.created_at).getTime() - new Date(a.publish_at || a.created_at).getTime();
         });
     }
-    const db = getSupabasePublic();
+    const db = getSupabaseDataCache();
     if (!db) {
       return [...mock.resources]
         .filter(isResourcePublished)
