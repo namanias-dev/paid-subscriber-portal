@@ -11,27 +11,53 @@
 # Always proceed if the diff touches app/, components/, lib/, api/, vercel.json,
 # package.json, or lockfiles — including paths with parentheses like app/(site)/….
 # Use [[ ]] glob matches (never case/esac): ')' in paths breaks case patterns.
+# Avoid bash process-substitution (< <(...)) — it breaks on Vercel’s build image.
 
 set -u
 
-if ! git rev-parse --verify HEAD^ >/dev/null 2>&1; then
-  echo "ignored-build: no HEAD^ — proceed"
+resolve_before() {
+  # Prefer Vercel’s previous SHA when the object exists in the clone.
+  if [ -n "${VERCEL_GIT_PREVIOUS_SHA:-}" ] && git cat-file -e "${VERCEL_GIT_PREVIOUS_SHA}^{commit}" 2>/dev/null; then
+    printf '%s\n' "$VERCEL_GIT_PREVIOUS_SHA"
+    return 0
+  fi
+  if git rev-parse --verify HEAD^ >/dev/null 2>&1; then
+    git rev-parse HEAD^
+    return 0
+  fi
+  # Shallow clone: deepen enough to see the parent commit.
+  git fetch --deepen=10 >/dev/null 2>&1 || true
+  if git rev-parse --verify HEAD^ >/dev/null 2>&1; then
+    git rev-parse HEAD^
+    return 0
+  fi
+  return 1
+}
+
+before="$(resolve_before || true)"
+if [ -z "${before:-}" ]; then
+  echo "ignored-build: no parent SHA — proceed (exit 1)"
   exit 1
 fi
 
-# Null-delimited so paths with spaces/newlines are safe; parentheses are fine.
+echo "ignored-build: diff ${before}..HEAD"
+
+tmp="$(mktemp)"
+trap 'rm -f "$tmp"' EXIT
+# Quoted pathspecs not needed for name-only; -z keeps parentheses/spaces safe.
+git diff --name-only -z "$before" HEAD -- >"$tmp" || true
+
 changed=()
 while IFS= read -r -d '' f; do
-  changed+=("$f")
-done < <(git diff --name-only -z HEAD^ HEAD --)
+  [ -n "$f" ] && changed+=("$f")
+done <"$tmp"
 
 if [ "${#changed[@]}" -eq 0 ]; then
-  echo "ignored-build: empty diff — proceed"
+  echo "ignored-build: empty diff — proceed (exit 1)"
   exit 1
 fi
 
 is_must_build() {
-  # $1 = path. Patterns are unquoted on the RHS of [[ == ]] (glob match).
   local f="$1"
   [[ "$f" == app || "$f" == app/* ]] && return 0
   [[ "$f" == components || "$f" == components/* ]] && return 0
