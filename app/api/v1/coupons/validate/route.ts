@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getCourseBySlug, getWebinarBySlug } from "@/lib/dataProvider";
+import { getCourseBySlug, getWebinarBySlugLive } from "@/lib/dataProvider";
 import { validateCoupon } from "@/lib/coupons";
 
 export const dynamic = "force-dynamic";
@@ -19,7 +19,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: "Coupons apply to courses or webinars only." }, { status: 400 });
     }
 
-    const item = itemType === "course" ? await getCourseBySlug(slug) : await getWebinarBySlug(slug);
+    const item = itemType === "course" ? await getCourseBySlug(slug) : await getWebinarBySlugLive(slug);
     if (!item) return NextResponse.json({ ok: false, error: "Item not found." }, { status: 404 });
 
     const base = Number(item.price) || 0;

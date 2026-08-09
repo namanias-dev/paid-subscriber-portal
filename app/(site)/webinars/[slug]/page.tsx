@@ -9,7 +9,7 @@ import StickyMobileCTA from "@/components/public/StickyMobileCTA";
 import LandingSections from "@/components/public/LandingSections";
 import BrochureCards from "@/components/public/BrochureCards";
 import WebinarNotFound from "@/components/public/WebinarNotFound";
-import { getWebinarBySlug, getWebinarById, getLibraryDocsByIds, getWebinarRegisteredCount } from "@/lib/dataProvider";
+import { getWebinarBySlugCached, getWebinarById, getLibraryDocsByIds, getWebinarRegisteredCount } from "@/lib/dataProvider";
 import { canRegisterForWebinar, EXPIRED_COPY, webinarRegCountDisplay, WEBINAR_REGCOUNT_ENCOURAGE } from "@/lib/webinarLifecycle";
 import { getPurchaseSnapshot, webinarStatus } from "@/lib/purchaseStatus";
 import { buildLandingView } from "@/lib/landingView";
@@ -36,7 +36,7 @@ async function withBudget<T>(work: Promise<T>, ms: number, fallback: T): Promise
 
 export async function generateMetadata({ params }: { params: { slug: string } }): Promise<Metadata> {
   try {
-    const w = await withBudget(getWebinarBySlug(params.slug), 2500, null);
+    const w = await withBudget(getWebinarBySlugCached(params.slug), 2500, null);
     if (!w) return { title: "Webinar not found" };
     if (w.active === false && w.status !== "completed") return { title: "Webinar not found" };
     const seo = w.seo || {};
@@ -61,10 +61,10 @@ export async function generateMetadata({ params }: { params: { slug: string } })
 }
 
 export default async function WebinarDetail({ params }: { params: { slug: string } }) {
-  let w: Awaited<ReturnType<typeof getWebinarBySlug>> = null;
+  let w: Awaited<ReturnType<typeof getWebinarBySlugCached>> = null;
   let dbFailed = false;
   try {
-    w = await getWebinarBySlug(params.slug);
+    w = await getWebinarBySlugCached(params.slug);
   } catch {
     dbFailed = true;
   }

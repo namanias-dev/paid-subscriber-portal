@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import {
   getCourseBySlug,
-  getWebinarBySlug,
+  getWebinarBySlugLive,
   getWebinarById,
   createPayment,
   getPaymentByReference,
@@ -57,7 +57,7 @@ async function resolveItem(itemType: ItemType, body: Record<string, unknown>): P
   }
   if (itemType === "webinar") {
     const slug = String(body.webinarSlug || body.slug || body.webinarId || "");
-    const webinar = await getWebinarBySlug(slug);
+    const webinar = await getWebinarBySlugLive(slug);
     if (!webinar) return null;
     if (webinar.active === false) return null;
     return { item: webinar.title, itemSlug: webinar.slug, amount: webinar.price, coupons: webinar.coupons, entityId: webinar.id, couponEntity: "webinar" };
@@ -114,7 +114,7 @@ export async function POST(req: Request) {
     // FEATURE 6 — server is the source of truth: never initiate a payment for a
     // webinar whose registration has closed/ended (auto-close or manual).
     if (itemType === "webinar") {
-      const webinar = await getWebinarBySlug(resolved.itemSlug);
+      const webinar = await getWebinarBySlugLive(resolved.itemSlug);
       if (webinar && !canRegisterForWebinar(webinar)) {
         let nextSlug: string | null = null;
         if (webinar.next_webinar_id) {

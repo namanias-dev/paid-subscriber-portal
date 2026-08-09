@@ -2545,13 +2545,36 @@ const loadPublicWebinars = unstable_cache(
 export const getPublicWebinars = cache(async function getPublicWebinars(): Promise<Webinar[]> {
   return loadPublicWebinars();
 });
-export async function getWebinarBySlug(slug: string): Promise<Webinar | null> {
-  if (demoMode()) return mock.webinars.find((w) => w.slug === slug) ?? null;
-  const db = getSupabasePublic();
-  if (!db) return mock.webinars.find((w) => w.slug === slug) ?? null;
-  const { data, error } = await db.from("webinars").select("*").eq("slug", slug).maybeSingle();
-  if (error) throw new Error(`getWebinarBySlug: ${error.message}`);
+
+/**
+ * Cached public webinar by slug (ISR / marketing). Uses the tagged public webinars
+ * list — never call this from payment, coupon, webhook, or mutation paths.
+ */
+export async function getWebinarBySlugCached(slug: string): Promise<Webinar | null> {
+  const s = (slug || "").trim();
+  if (!s) return null;
+  const all = await getPublicWebinars();
+  return all.find((w) => w.slug === s) ?? null;
+}
+
+/**
+ * Live webinar by slug — admin client, cache:"no-store". Required for checkout,
+ * coupons, capacity, and any POST / server action / webhook / mutation.
+ */
+export async function getWebinarBySlugLive(slug: string): Promise<Webinar | null> {
+  const s = (slug || "").trim();
+  if (!s) return null;
+  if (demoMode()) return mock.webinars.find((w) => w.slug === s) ?? null;
+  const db = getSupabaseAdmin();
+  if (!db) return mock.webinars.find((w) => w.slug === s) ?? null;
+  const { data, error } = await db.from("webinars").select("*").eq("slug", s).maybeSingle();
+  if (error) throw new Error(`getWebinarBySlugLive: ${error.message}`);
   return (data as Webinar | null) ?? null;
+}
+
+/** @deprecated Prefer getWebinarBySlugCached (display) or getWebinarBySlugLive (money). Defaults to Live for safety. */
+export async function getWebinarBySlug(slug: string): Promise<Webinar | null> {
+  return getWebinarBySlugLive(slug);
 }
 
 /**
