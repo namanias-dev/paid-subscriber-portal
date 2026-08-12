@@ -256,6 +256,8 @@ export async function approveAndRecordInstallmentProof(input: {
           ...(updated || fresh),
           schedule: plan.scheduleAfter,
         });
+        const { clearGrantOverrideOnFullyPaid } = await import("./dataProvider");
+        await clearGrantOverrideOnFullyPaid(fresh.phone, fresh.course_id, status);
         enrollmentAfter = updated
           ? { ...updated, schedule: plan.scheduleAfter }
           : { ...fresh, schedule: plan.scheduleAfter };

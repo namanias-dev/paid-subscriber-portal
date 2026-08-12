@@ -11,6 +11,7 @@ import {
 } from "./dataProvider";
 import { studentBlockReason } from "./studentAccess";
 import { isActiveEnrollment, isLineOutstanding } from "./installments";
+import { enrollmentFeeStateFromEnrollment } from "./enrollmentFeeState";
 import { resolveEnrollmentBatchStart } from "./batchStart";
 import type { Course, Quiz, CaPdf, ContentItem, CourseEnrollment, CourseAccessOverride } from "./types";
 
@@ -300,7 +301,9 @@ export function lectureAccessForCourse(
   hasLegacyAccess: boolean,
   now: number = Date.now(),
 ): LectureAccess {
-  // 1) Admin manual override wins.
+  // 1) Admin manual override wins while ACTIVE.
+  // Expired temporary grants must NOT permanently lock a student who later paid in full —
+  // fall through to enrollment / fee-state rules.
   if (override) {
     if (override.mode === "revoke") return { allowed: false, reason: "revoked", status: "blocked" };
     const exp = override.expires_at ? Date.parse(override.expires_at) || 0 : 0;
@@ -309,7 +312,7 @@ export function lectureAccessForCourse(
       const daysLeft = daysBetween(exp, now);
       return { allowed: true, reason: "active", status: daysLeft <= EXPIRING_SOON_DAYS ? "expiring" : "active", expiresAt: override.expires_at, daysLeft };
     }
-    return { allowed: false, reason: "expired", status: "blocked", expiresAt: override.expires_at };
+    // expired grant → continue
   }
 
   // 2) No enrollment row: legacy LMS student enrolment grants active access; else not enrolled.
@@ -327,8 +330,10 @@ export function lectureAccessForCourse(
     return { allowed: false, reason: "not_enrolled", status: "blocked" };
   }
 
-  // 3) Fully paid → full-payment access window from the course's own entitlements.
-  if (enrollment.status === "fully_paid") {
+  // 3) Fully paid (canonical fee-state OR status column) → course entitlements window.
+  // Guard: paid ≥ total due must never be blocked by a stale override or schedule quirk.
+  const fee = enrollmentFeeStateFromEnrollment(enrollment, now);
+  if (enrollment.status === "fully_paid" || fee.isFullyPaid) {
     const ent = course?.entitlements;
     if (!ent || ent.access_type !== "limited" || !ent.access_days) {
       return { allowed: true, reason: "lifetime", status: "active", expiresAt: null };

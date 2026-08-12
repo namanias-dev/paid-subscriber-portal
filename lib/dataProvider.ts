@@ -950,6 +950,28 @@ export async function deleteAccessOverride(phone: string, courseId: string): Pro
   await db.from("course_access_overrides").delete().eq("phone", p).eq("course_id", courseId);
 }
 
+/**
+ * When an enrollment reaches fully_paid, drop temporary grant overrides so access
+ * is driven by fee-state — not a stale expires_at that later blocks. Never clears revokes.
+ */
+export async function clearGrantOverrideOnFullyPaid(
+  phone: string,
+  courseId: string,
+  status: CourseEnrollment["status"] | string,
+): Promise<void> {
+  if (status !== "fully_paid") return;
+  const p = (phone || "").trim();
+  if (!p || !courseId) return;
+  if (demoMode()) {
+    const idx = mock.accessOverrides.findIndex((o) => o.phone === p && o.course_id === courseId && o.mode === "grant");
+    if (idx !== -1) mock.accessOverrides.splice(idx, 1);
+    return;
+  }
+  const db = getSupabaseAdmin();
+  if (!db) return;
+  await db.from("course_access_overrides").delete().eq("phone", p).eq("course_id", courseId).eq("mode", "grant");
+}
+
 // ============================ BOOKMARKS ============================
 export async function getBookmarks(studentId: string): Promise<Bookmark[]> {
   if (demoMode()) return mock.bookmarks.filter((b) => b.student_id === studentId);
@@ -4721,6 +4743,7 @@ export async function finalizeCoursePaymentByReference(
     status,
   })) || { ...enrollment, schedule, status };
   await syncAmountPaidFromFeeState({ ...updatedBase, schedule });
+  await clearGrantOverrideOnFullyPaid(enrollment.phone, enrollment.course_id, status);
   const updated = { ...updatedBase, schedule, amount_paid: derived.paid, status };
 
   // Build the immutable receipt from the ledger-consistent derived values.
