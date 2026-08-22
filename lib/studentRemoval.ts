@@ -2,7 +2,7 @@
  * Admin student removal — hard-delete vs archive.
  * Path is chosen by payment history, never by the operator.
  */
-import { ARCHIVE_NOTES_PREFIX, archivedPhoneSet, isArchivedStudent } from "./archivedStudents";
+import { archivedPhoneSet, isArchivedStudent, stripArchiveNotesPrefix } from "./archivedStudents";
 import { countsTowardCapacity } from "./enrollmentScope";
 import { deleteObject, listAllObjects, r2Configured, installmentProofPrefix } from "./r2";
 import { revalidatePublicCourses } from "./publicCache";
@@ -17,7 +17,7 @@ import {
 } from "./dataProvider";
 
 export type RemovalPath = "hard_delete" | "archive";
-export { isArchivedStudent, archivedPhoneSet, ARCHIVE_NOTES_PREFIX };
+export { isArchivedStudent, archivedPhoneSet };
 
 export interface RemovalPreview {
   path: RemovalPath;
@@ -30,6 +30,7 @@ export interface RemovalPreview {
   enrollments: { id: string; title: string; batch: string | null; status: string; amountPaid: number }[];
   paymentCount: number;
   proofCount: number;
+  alreadyArchived: boolean;
   warning: string;
 }
 
@@ -81,7 +82,7 @@ export async function detectRemovalPath(phone: string, studentId: string): Promi
 
 export async function previewStudentRemoval(studentId: string): Promise<RemovalPreview | null> {
   const student = await getStudentById(studentId);
-  if (!student || isArchivedStudent(student)) return null;
+  if (!student) return null;
   const supabase = db();
   const phone = student.phone;
   const detected = await detectRemovalPath(phone, studentId);
@@ -108,10 +109,12 @@ export async function previewStudentRemoval(studentId: string): Promise<RemovalP
     })),
     paymentCount: detected.paymentCount,
     proofCount: detected.proofCount,
-    warning:
-      detected.path === "hard_delete"
+    alreadyArchived: isArchivedStudent(student),
+    warning: isArchivedStudent(student)
+      ? "This student is already archived. Default is to leave records in place. Permanent delete requires typing the phone and DELETE."
+      : detected.path === "hard_delete"
         ? "This student has no payment history and will be permanently deleted"
-        : "This student has recorded payments and will be archived — financial records are kept.",
+        : "This student has recorded payments and will be archived — financial records are kept. Permanent delete is a separate, harder action.",
   };
 }
 
@@ -157,10 +160,18 @@ async function purgeR2Proofs(studentId: string): Promise<void> {
 export async function executeStudentRemoval(opts: {
   studentId: string;
   confirmPhone: string;
+  forceHardDelete?: boolean;
+  confirmWord?: string;
 }): Promise<{ ok: true; path: RemovalPath; preview: RemovalPreview } | { ok: false; error: string; status: number }> {
   const student = await getStudentById(opts.studentId);
   if (!student) return { ok: false, error: "Not found", status: 404 };
-  if (isArchivedStudent(student)) return { ok: false, error: "Already removed.", status: 409 };
+  const forceHardDelete = !!opts.forceHardDelete;
+  if (forceHardDelete && String(opts.confirmWord || "").trim() !== "DELETE") {
+    return { ok: false, error: "Type DELETE to permanently erase payment records.", status: 400 };
+  }
+  if (!forceHardDelete && isArchivedStudent(student)) {
+    return { ok: false, error: "Already archived. Use permanent delete to erase records.", status: 409 };
+  }
   const digits = (opts.confirmPhone || "").replace(/\D/g, "").slice(-10);
   const expect = (student.phone || "").replace(/\D/g, "").slice(-10);
   if (!digits || digits.length !== 10 || digits !== expect) {
@@ -187,16 +198,16 @@ export async function executeStudentRemoval(opts: {
 
   await bumpBuyerSessionVersion(phone);
 
-  if (preview.path === "archive") {
+  if (!forceHardDelete && preview.path === "archive") {
     const stamp = new Date().toISOString();
-    const notes = `${ARCHIVE_NOTES_PREFIX}${stamp}\n${student.notes || ""}`.slice(0, 8000);
+    const notes = stripArchiveNotesPrefix(student.notes);
     const patched = await updateStudent(student.id, {
       is_active: false,
       notes,
       archived_at: stamp,
     } as Partial<Student>);
     if (!patched) {
-      await updateStudent(student.id, { is_active: false, notes });
+      return { ok: false, error: "Could not set archived_at. Apply the archived_at migration first.", status: 500 };
     }
     if (supabase) {
       await supabase.from("buyers").update({ archived_at: stamp, updated_at: stamp }).eq("phone", phone);
@@ -205,7 +216,7 @@ export async function executeStudentRemoval(opts: {
     return { ok: true, path: "archive", preview };
   }
 
-  // Hard delete — no payment history.
+  // Hard delete (zero money, or explicit force including payment records).
   await purgeR2Proofs(student.id);
   const tablesPhone = [
     "installment_payment_proofs",
@@ -232,10 +243,14 @@ export async function executeStudentRemoval(opts: {
   try { await del("quiz_attempts", "user_id", student.id); } catch { /* */ }
   try { await del("enrollments", "student_id", student.id); } catch { /* */ }
   try { await del("access_call_tasks", "phone", phone); } catch { /* */ }
+  try { await del("lecture_comments", "student_id", student.id); } catch { /* */ }
+  try { await del("payments", "student_id", student.id); } catch { /* */ }
+  try { await del("payment_receipts", "student_id", student.id); } catch { /* */ }
+  try { await del("analytics_events", "phone", phone); } catch { /* */ }
+  try { await del("sms_logs", "normalized_mobile", phone); } catch { /* */ }
+  try { await del("sms_logs", "student_id", student.id); } catch { /* */ }
   if (supabase) {
     await supabase.from("telegram_subscribers").update({ linked_student_id: null }).eq("linked_student_id", student.id);
-    await supabase.from("sms_logs").update({ student_id: null }).eq("student_id", student.id);
-    await supabase.from("sms_logs").update({ student_id: null }).eq("normalized_mobile", phone);
   }
   await del("course_enrollments", "phone", phone);
   await del("buyers", "phone", phone);

@@ -1,7 +1,7 @@
 import { cache } from "react";
 import { unstable_cache } from "next/cache";
 import { getSupabaseAdmin, getSupabasePublic, getSupabaseDataCache } from "./supabase";
-import { archivedPhoneSet, isArchivedStudent } from "./archivedStudents";
+import { archivedPhoneSet, excludeArchivedRows, isArchivedStudent } from "./archivedStudents";
 import {
   PUBLIC_CACHE_TAGS,
   revalidatePublicCa,
@@ -256,10 +256,7 @@ export async function getStudents(): Promise<Student[]> {
   // cannot be searched for or opened, which reads to staff as "no profile".
   return pageThrough<Student>(() =>
     db.from("students").select("*").order("created_at", { ascending: false }).order("id", { ascending: true }),
-  ).then(async (rows) => {
-    const archived = await archivedPhoneSet();
-    return rows.filter((s) => !archived.has(s.phone) && !isArchivedStudent(s));
-  });
+  ).then(async (rows) => excludeArchivedRows(rows.filter((s) => !isArchivedStudent(s))));
 }
 
 export async function getStudentById(id: string): Promise<Student | null> {
@@ -3023,8 +3020,7 @@ export async function getPayments(): Promise<Payment[]> {
       .order("id", { ascending: true }),
   );
   const live = rows.length ? rows : demoPayments().filter((p) => !p.deleted_at);
-  const archived = await archivedPhoneSet();
-  return live.filter((p) => !archived.has(p.phone));
+  return excludeArchivedRows(live);
 }
 
 /** Soft-deleted payments only — powers the super-admin recoverable Trash view. */
@@ -4043,7 +4039,7 @@ export async function getBuyers(): Promise<Buyer[]> {
   // Paged: 1220 buyers today — an unpaged read hides the oldest 220 login codes.
   return pageThrough<Buyer>(() =>
     db.from("buyers").select("*").order("created_at", { ascending: false }).order("id", { ascending: true }),
-  );
+  ).then((rows) => excludeArchivedRows(rows.filter((b) => !b.archived_at)));
 }
 
 export async function getBuyerByPhone(phone: string): Promise<Buyer | null> {
@@ -4580,8 +4576,7 @@ export async function getAllCourseEnrollments(): Promise<CourseEnrollment[]> {
   const rows = await pageThrough<CourseEnrollment>(() =>
     db.from("course_enrollments").select("*").order("created_at", { ascending: false }).order("id", { ascending: true }),
   );
-  const archived = await archivedPhoneSet();
-  return rows.filter((e) => !archived.has(e.phone));
+  return excludeArchivedRows(rows);
 }
 
 export async function updateCourseEnrollment(id: string, patch: Partial<CourseEnrollment>): Promise<CourseEnrollment | null> {

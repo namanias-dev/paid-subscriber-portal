@@ -901,8 +901,11 @@ function RemoveStudentModal({
     enrollments: { title: string; batch: string | null }[];
     paymentCount: number;
     proofCount: number;
+    alreadyArchived?: boolean;
   } | null>(null);
   const [phone, setPhone] = useState("");
+  const [deleteWord, setDeleteWord] = useState("");
+  const [showPurge, setShowPurge] = useState(false);
   const [busy, setBusy] = useState(false);
   useEffect(() => {
     void (async () => {
@@ -910,11 +913,34 @@ function RemoveStudentModal({
       const j = await res.json();
       if (!j.ok) { toast(j.error || "Could not load removal preview", "error"); onClose(); return; }
       setPreview(j.preview);
+      if (j.preview?.alreadyArchived) setShowPurge(true);
     })();
   }, [studentId]);
   const expect = expectedPhone.replace(/\D/g, "").slice(-10);
   const typed = phone.replace(/\D/g, "").slice(-10);
   const match = typed.length === 10 && typed === expect;
+  const purgeReady = match && deleteWord.trim() === "DELETE";
+  async function post(forceHardDelete: boolean) {
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/admin/students/${studentId}/remove`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          confirmPhone: typed,
+          forceHardDelete,
+          confirmWord: forceHardDelete ? deleteWord.trim() : undefined,
+        }),
+      });
+      const j = await res.json();
+      if (!j.ok) { toast(j.error || "Remove failed", "error"); return; }
+      onDone(j.path);
+    } catch {
+      toast("Network error", "error");
+    } finally {
+      setBusy(false);
+    }
+  }
   return (
     <Modal open onClose={onClose} title="Remove student">
       {!preview ? (
@@ -934,33 +960,44 @@ function RemoveStudentModal({
             <span className="mb-1 block text-xs font-semibold text-ink2">Type the 10-digit phone number to confirm</span>
             <input className={inputCls} inputMode="numeric" autoComplete="off" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="10-digit mobile" />
           </label>
-          <div className="flex justify-end gap-2 pt-2">
-            <button type="button" className="btn btn-secondary text-sm" onClick={onClose}>Cancel</button>
-            <button
-              type="button"
-              disabled={!match || busy}
-              className="inline-flex min-h-[44px] items-center rounded-xl bg-red-700 px-4 text-sm font-semibold text-white disabled:opacity-40"
-              onClick={async () => {
-                setBusy(true);
-                try {
-                  const res = await fetch(`/api/admin/students/${studentId}/remove`, {
-                    method: "POST",
-                    headers: { "content-type": "application/json" },
-                    body: JSON.stringify({ confirmPhone: typed }),
-                  });
-                  const j = await res.json();
-                  if (!j.ok) { toast(j.error || "Remove failed", "error"); return; }
-                  onDone(j.path);
-                } catch {
-                  toast("Network error", "error");
-                } finally {
-                  setBusy(false);
-                }
-              }}
-            >
-              {preview.path === "archive" ? "Archive student" : "Permanently delete"}
-            </button>
-          </div>
+          {!preview.alreadyArchived && (
+            <div className="flex justify-end gap-2 pt-2">
+              <button type="button" className="btn btn-secondary text-sm" onClick={onClose}>Cancel</button>
+              <button
+                type="button"
+                disabled={!match || busy}
+                className="inline-flex min-h-[44px] items-center rounded-xl bg-red-700 px-4 text-sm font-semibold text-white disabled:opacity-40"
+                onClick={() => void post(false)}
+              >
+                {preview.path === "archive" ? "Archive student" : "Permanently delete"}
+              </button>
+            </div>
+          )}
+          {(preview.path === "archive" || preview.alreadyArchived) && (
+            <div className="border-t border-line pt-3">
+              {!showPurge ? (
+                <button type="button" className="text-xs font-semibold text-red-800 underline" onClick={() => setShowPurge(true)}>
+                  Permanently delete, including payment records
+                </button>
+              ) : (
+                <div className="space-y-2">
+                  <p className="text-xs font-medium text-red-900">This erases payments, receipts, proofs, and R2 files. Type DELETE.</p>
+                  <input className={inputCls} autoComplete="off" value={deleteWord} onChange={(e) => setDeleteWord(e.target.value)} placeholder="DELETE" />
+                  <div className="flex justify-end gap-2">
+                    <button type="button" className="btn btn-secondary text-sm" onClick={onClose}>Cancel</button>
+                    <button
+                      type="button"
+                      disabled={!purgeReady || busy}
+                      className="inline-flex min-h-[44px] items-center rounded-xl bg-red-900 px-4 text-sm font-semibold text-white disabled:opacity-40"
+                      onClick={() => void post(true)}
+                    >
+                      Permanently delete, including payment records
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
     </Modal>

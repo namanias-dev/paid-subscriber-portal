@@ -33,7 +33,9 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   if (!auth.ok) return json({ ok: false, error: auth.status === 401 ? "Unauthorized" : "Forbidden" }, auth.status);
   const body = await req.json().catch(() => ({}));
   const confirmPhone = String(body.confirmPhone || "");
-  const result = await executeStudentRemoval({ studentId: params.id, confirmPhone });
+  const forceHardDelete = !!body.forceHardDelete;
+  const confirmWord = String(body.confirmWord || "");
+  const result = await executeStudentRemoval({ studentId: params.id, confirmPhone, forceHardDelete, confirmWord });
   if (!result.ok) return json({ ok: false, error: result.error }, result.status);
   const actor = await getActionActor();
   const p = result.preview;
