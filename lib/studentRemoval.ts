@@ -175,10 +175,14 @@ export async function executeStudentRemoval(opts: {
     const { data: en } = await supabase.from("course_enrollments").select("course_id").eq("phone", phone);
     const archived = await archivedPhoneSet();
     archived.add(phone);
-    await recalcSeatsLeft(
-      [...new Set((en || []).map((e) => String((e as { course_id: string }).course_id)))],
-      archived,
-    );
+    try {
+      await recalcSeatsLeft(
+        [...new Set((en || []).map((e) => String((e as { course_id: string }).course_id)))],
+        archived,
+      );
+    } catch {
+      /* seats_left recalc is best-effort; never block removal */
+    }
   }
 
   await bumpBuyerSessionVersion(phone);
@@ -197,7 +201,7 @@ export async function executeStudentRemoval(opts: {
     if (supabase) {
       await supabase.from("buyers").update({ archived_at: stamp, updated_at: stamp }).eq("phone", phone);
     }
-    revalidatePublicCourses();
+    try { revalidatePublicCourses(); } catch { /* outside Next request */ }
     return { ok: true, path: "archive", preview };
   }
 
@@ -236,6 +240,6 @@ export async function executeStudentRemoval(opts: {
   await del("course_enrollments", "phone", phone);
   await del("buyers", "phone", phone);
   await del("students", "id", student.id);
-  revalidatePublicCourses();
+  try { revalidatePublicCourses(); } catch { /* outside Next request */ }
   return { ok: true, path: "hard_delete", preview };
 }
