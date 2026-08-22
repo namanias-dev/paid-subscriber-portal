@@ -45,9 +45,11 @@ export default function QuestionsAdmin() {
     <div>
       <PageHeader
         title="Question Bank"
-        subtitle={`${filtered.length} questions`}
+        subtitle={`${filtered.length} live bank questions (not quiz snapshots). Exports include correct answers — admin only.`}
         action={
           <div className="flex flex-wrap gap-2">
+            <a href="/api/admin/questions/export?format=csv" className="btn btn-secondary text-sm">Export CSV (live bank)</a>
+            <a href="/api/admin/questions/export?format=json" className="btn btn-secondary text-sm">Export JSON (live bank)</a>
             <button onClick={() => setBulkOpen(true)} className="btn btn-secondary text-sm">⬆ Bulk Import</button>
             <Link href="/admin/questions/new" className="btn btn-primary text-sm">+ New Question</Link>
           </div>
