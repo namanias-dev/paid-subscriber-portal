@@ -4827,6 +4827,8 @@ export interface EnrollStudentInCourseInput {
   bookSeat?: boolean;
   seatAmount?: number | null;
   installmentCount?: number | null;
+  /** Optional in schema. Required here when the course actually has batches. */
+  batchId?: string | null;
 }
 
 /**
@@ -4856,11 +4858,21 @@ export async function enrollStudentInCourse(
   const attemptToReuse = courseEnrollments.find(isAttemptEnrollment) || null;
 
   const now = new Date().toISOString();
+  const batches = course.batches || [];
+  const batchId = (input.batchId || "").trim() || null;
+  const batch = batchId ? batches.find((b) => b.id === batchId) : undefined;
+  if (batches.length > 0 && !batch) {
+    return { ok: false, error: "Select a batch for this course." };
+  }
+  const batchFields = batch
+    ? { batch_id: batch.id, batch_label: batch.label || null, batch_id_source: "admin_enroll" as const }
+    : { batch_id: null, batch_label: null, batch_id_source: null };
 
   if (input.plan === "complimentary") {
     if (attemptToReuse) {
       // Convert the abandoned attempt into the single comp enrollment.
       const enrollment = await updateCourseEnrollment(attemptToReuse.id, {
+        ...batchFields,
         plan_type: "full",
         total_fee: 0,
         amount_paid: 0,
@@ -4878,7 +4890,7 @@ export async function enrollStudentInCourse(
       course_id: course.id,
       course_slug: course.slug,
       course_title: course.title,
-      batch_label: null,
+      ...batchFields,
       plan_type: "full",
       total_fee: 0,
       amount_paid: 0,
@@ -4896,6 +4908,7 @@ export async function enrollStudentInCourse(
     bookSeat: !!input.bookSeat,
     seatAmount: input.seatAmount ?? null,
     installmentCount: input.installmentCount ?? null,
+    batchId: batch?.id ?? null,
   });
   if (!planned.ok) return { ok: false, error: planned.error };
 
@@ -4903,6 +4916,7 @@ export async function enrollStudentInCourse(
     // Re-plan the abandoned attempt to the new selection (no duplicate row). It
     // stays an attempt (₹0, undated schedule) until a payment is recorded.
     const enrollment = await updateCourseEnrollment(attemptToReuse.id, {
+      ...batchFields,
       batch_label: planned.plan.batchLabel,
       plan_type: planned.plan.planType,
       total_fee: planned.plan.totalFee,
@@ -4922,7 +4936,8 @@ export async function enrollStudentInCourse(
     course_id: course.id,
     course_slug: course.slug,
     course_title: course.title,
-    batch_label: planned.plan.batchLabel,
+    ...batchFields,
+    batch_label: planned.plan.batchLabel || batchFields.batch_label,
     plan_type: planned.plan.planType,
     total_fee: planned.plan.totalFee,
     amount_paid: 0,

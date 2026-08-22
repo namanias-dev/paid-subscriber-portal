@@ -16,6 +16,7 @@ interface CourseChoice {
   bookSeat: boolean;
   installmentCount: number | null;
   seatAmount: number | null;
+  batchId: string | null;
 }
 
 const METHODS = ["Cash", "Bank Transfer", "Offline UPI"];
@@ -91,7 +92,7 @@ export default function StudentForm() {
     setPicked((prev) => {
       const next = { ...prev };
       if (next[slug]) { delete next[slug]; if (payCourse === slug) setPayCourse(""); }
-      else next[slug] = { plan: "full", bookSeat: false, installmentCount: null, seatAmount: null };
+      else next[slug] = { plan: "full", bookSeat: false, installmentCount: null, seatAmount: null, batchId: (courses || []).find((c) => c.slug === slug)?.default_batch_id || null };
       return next;
     });
   }
@@ -108,6 +109,7 @@ export default function StudentForm() {
       bookSeat: choice.bookSeat,
       seatAmount: choice.seatAmount,
       installmentCount: choice.installmentCount,
+      batchId: choice.batchId,
     });
     return res.ok ? res.plan : null;
   }
@@ -117,12 +119,18 @@ export default function StudentForm() {
     if (!/^\d{10}$/.test(phone)) return toast("Enter a valid 10-digit phone", "error");
     if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return toast("Enter a valid email or leave blank", "error");
 
+    if (Object.entries(picked).some(([slug, c]) => {
+      const course = (courses || []).find((x) => x.slug === slug);
+      return (course?.batches?.length || 0) > 0 && !c.batchId;
+    })) return toast("Select a batch for each enrolled course", "error");
+
     const courseList = Object.entries(picked).map(([courseSlug, c]) => ({
       courseSlug,
       plan: c.plan,
       bookSeat: c.bookSeat,
       seatAmount: c.seatAmount,
       installmentCount: c.installmentCount,
+      batchId: c.batchId,
     }));
     const webinarList = Object.entries(webPicked).filter(([, v]) => v).map(([id]) => id);
 
@@ -258,12 +266,27 @@ export default function StudentForm() {
                             {(["full", "emi", "complimentary"] as CtxPlan[]).map((p) => {
                               const disabled = p === "emi" && !cfg.enabled;
                               return (
-                                <button key={p} type="button" disabled={disabled} onClick={() => setChoice(c.slug, { plan: p, bookSeat: false, installmentCount: p === "emi" ? cfg.installmentCounts[0] : null })} className={`rounded-lg border px-3 py-1.5 text-xs font-semibold capitalize transition disabled:opacity-40 ${choice.plan === p ? "border-primary bg-primary/10 text-primary" : "border-line hover:border-primary"}`}>
+                                <button key={p} type="button" disabled={disabled} onClick={() => setChoice(c.slug, { plan: p, bookSeat: false, installmentCount: p === "emi" ? cfg.installmentCounts[0] : null, seatAmount: null })} className={`rounded-lg border px-3 py-1.5 text-xs font-semibold capitalize transition disabled:opacity-40 ${choice.plan === p ? "border-primary bg-primary/10 text-primary" : "border-line hover:border-primary"}`}>
                                   {p === "full" ? "Pay in full" : p === "emi" ? "EMI / Installments" : "Complimentary"}
                                 </button>
                               );
                             })}
                           </div>
+
+                          {(c.batches || []).length > 0 && (
+                            <Field label="Batch">
+                              <select
+                                value={choice.batchId || ""}
+                                onChange={(e) => setChoice(c.slug, { batchId: e.target.value || null })}
+                                className={inputCls}
+                              >
+                                <option value="">Select batch</option>
+                                {(c.batches || []).map((b) => (
+                                  <option key={b.id} value={b.id}>{b.label || b.id}</option>
+                                ))}
+                              </select>
+                            </Field>
+                          )}
 
                           {choice.plan === "emi" && (
                             <div className="flex flex-wrap items-center gap-2">

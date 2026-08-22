@@ -880,24 +880,34 @@ function EnrollModal({ catalog, enrolledCourseTitles, busy, onClose, onSave }: {
   const [plan, setPlan] = useState<"full" | "emi" | "complimentary">("full");
   const [bookSeat, setBookSeat] = useState(false);
   const [count, setCount] = useState<number | null>(null);
+  const [batchId, setBatchId] = useState("");
   const course = (catalog?.courses || []).find((c) => c.slug === slug);
   const cfg = course ? resolveEmiConfig(course) : null;
   const seatConfigured = !!cfg && cfg.enabled && (cfg.seatAmount != null || cfg.allowCustomSeat);
   const planned = course && plan !== "complimentary"
-    ? planCourseEnrollment({ course, plan, bookSeat, installmentCount: plan === "emi" ? (count ?? cfg?.installmentCounts[0] ?? null) : null })
+    ? planCourseEnrollment({ course, plan, bookSeat, installmentCount: plan === "emi" ? (count ?? cfg?.installmentCounts[0] ?? null) : null, batchId: batchId || null })
     : null;
+  const needsBatch = (course?.batches?.length || 0) > 0;
   return (
     <Modal open onClose={onClose} title="Enroll into a course">
       {!catalog ? <LoadingBlock /> : (
         <div className="space-y-3">
           <label className="block"><span className="mb-1 block text-xs font-medium text-muted">Course</span>
-            <select value={slug} onChange={(e) => { setSlug(e.target.value); setPlan("full"); setBookSeat(false); setCount(null); }} className={inputCls}>
+            <select value={slug} onChange={(e) => { const next = (catalog?.courses || []).find((c) => c.slug === e.target.value); setSlug(e.target.value); setPlan("full"); setBookSeat(false); setCount(null); setBatchId(next?.default_batch_id || ""); }} className={inputCls}>
               <option value="">Select a course…</option>
               {catalog.courses.map((c) => <option key={c.id} value={c.slug} disabled={enrolledCourseTitles.includes(c.title)}>{c.title}{enrolledCourseTitles.includes(c.title) ? " (enrolled)" : ""}</option>)}
             </select>
           </label>
           {course && (
             <>
+              {needsBatch && (
+                <label className="block"><span className="mb-1 block text-xs font-medium text-muted">Batch</span>
+                  <select value={batchId} onChange={(e) => setBatchId(e.target.value)} className={inputCls}>
+                    <option value="">Select batch</option>
+                    {(course.batches || []).map((b) => <option key={b.id} value={b.id}>{b.label || b.id}</option>)}
+                  </select>
+                </label>
+              )}
               <div className="flex flex-wrap gap-2">
                 {(["full", "emi", "complimentary"] as const).map((p) => (
                   <button key={p} type="button" disabled={p === "emi" && !cfg?.enabled} onClick={() => { setPlan(p); setCount(p === "emi" ? cfg?.installmentCounts[0] ?? null : null); }} className={`rounded-lg border px-3 py-1.5 text-xs font-semibold transition disabled:opacity-40 ${plan === p ? "border-primary bg-primary/10 text-primary" : "border-line"}`}>
@@ -916,7 +926,7 @@ function EnrollModal({ catalog, enrolledCourseTitles, busy, onClose, onSave }: {
           )}
           <div className="flex justify-end gap-2 pt-1">
             <button onClick={onClose} className="btn btn-secondary text-sm">Cancel</button>
-            <button disabled={busy || !course} onClick={() => onSave({ courseSlug: slug, plan, bookSeat, installmentCount: count })} className="btn btn-primary text-sm">Enroll</button>
+            <button disabled={busy || !course || (needsBatch && !batchId)} onClick={() => onSave({ courseSlug: slug, plan, bookSeat, installmentCount: count, batchId: batchId || null })} className="btn btn-primary text-sm">Enroll</button>
           </div>
         </div>
       )}

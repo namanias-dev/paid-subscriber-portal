@@ -23,6 +23,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       bookSeat: !!body.bookSeat,
       seatAmount: body.seatAmount != null ? Number(body.seatAmount) : null,
       installmentCount: body.installmentCount != null ? Number(body.installmentCount) : null,
+      batchId: body.batchId ? String(body.batchId) : null,
     });
     if (!res.ok) return NextResponse.json({ ok: false, error: res.error }, { status: 400 });
 

@@ -71,6 +71,7 @@ interface CourseSelection {
   bookSeat?: boolean;
   seatAmount?: number | null;
   installmentCount?: number | null;
+  batchId?: string | null;
 }
 
 export async function GET() {
@@ -286,6 +287,7 @@ export async function POST(req: Request) {
         bookSeat: !!c.bookSeat,
         seatAmount: c.seatAmount ?? null,
         installmentCount: c.installmentCount ?? null,
+        batchId: c.batchId ?? null,
       });
       if (!res.ok) warnings.push(`${c.courseSlug}: ${res.error}`);
     }
