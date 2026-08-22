@@ -82,18 +82,14 @@ export default function PublicNav({
   const hasLogo = !!logoSrc;
   const h = Math.min(96, Math.max(28, Number(logoHeight) || 48));
 
-  // Layout no longer reads cookies (keeps marketing/CA pages ISR-able). Hydrate
-  // login chrome client-side only when a session cookie is present.
+  // Layout never reads cookies (keeps marketing/CA pages ISR-able). SSR always
+  // paints the logged-out chrome; hydrate from /api/session/state. Session
+  // tokens are httpOnly so document.cookie cannot detect them — always fetch.
   useEffect(() => {
-    try {
-      if (!/(?:^|;\s*)(naman_buyer_token|naman_student_token|naman_admin_token)=/.test(document.cookie)) return;
-    } catch {
-      return;
-    }
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch("/api/session/state", { cache: "no-store" });
+        const res = await fetch("/api/session/state", { cache: "no-store", credentials: "same-origin" });
         if (!res.ok || cancelled) return;
         const data = (await res.json()) as {
           authenticated?: boolean;
@@ -101,18 +97,22 @@ export default function PublicNav({
           buyer?: boolean;
           name?: string | null;
         };
-        if (!data.authenticated) return;
+        if (cancelled) return;
+        if (!data.authenticated) {
+          setAuth({ isLoggedIn: false, portalLoggedIn: false, userName: null });
+          return;
+        }
         setAuth({
           isLoggedIn: !!data.student,
           portalLoggedIn: !!data.buyer && !data.student,
           userName: data.name || null,
         });
       } catch {
-        /* ignore */
+        /* ignore — leave the logged-out shell */
       }
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [pathname]);
 
   const isActive = (href: string) => pathname === href || pathname.startsWith(href + "/");
 
@@ -231,8 +231,8 @@ export default function PublicNav({
           })}
         </nav>
 
-        {/* Desktop CTAs */}
-        <div className="hidden items-center gap-2 lg:flex">
+        {/* Desktop CTAs — fixed slot so Login → name does not shift the nav. */}
+        <div className="hidden min-h-10 min-w-[220px] items-center justify-end gap-2 lg:flex">
           {loggedIn ? (
             <>
               <Link
