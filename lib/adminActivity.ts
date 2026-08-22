@@ -18,7 +18,9 @@ export type AdminActivityAction =
   | "telegram_broadcast_sent"
   | "telegram_direct_send"
   | "telegram_automation_updated"
-  | "course_batch_zoom_updated";
+  | "course_batch_zoom_updated"
+  | "student_archived"
+  | "student_hard_deleted";
 
 export const ADMIN_ACTIVITY_LABELS: Record<AdminActivityAction, string> = {
   payment_proof_uploaded: "Payment proof uploaded",
@@ -34,6 +36,8 @@ export const ADMIN_ACTIVITY_LABELS: Record<AdminActivityAction, string> = {
   telegram_direct_send: "Telegram direct send",
   telegram_automation_updated: "Telegram automation updated",
   course_batch_zoom_updated: "Course batch Zoom link updated",
+  student_archived: "Student archived",
+  student_hard_deleted: "Student permanently deleted",
 };
 
 export interface AdminActivityRow {

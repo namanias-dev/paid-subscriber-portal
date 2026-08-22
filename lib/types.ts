@@ -50,6 +50,8 @@ export interface Student {
   /** Optional internal admin notes (never shown to the student). */
   notes?: string | null;
   created_at: string;
+  /** Set when the student is archived (payment history retained, excluded from counts). */
+  archived_at?: string | null;
 }
 
 export interface ContentItem {
@@ -227,6 +229,7 @@ export interface Buyer {
   session_version?: number;
   created_at: string;
   updated_at?: string;
+  archived_at?: string | null;
 }
 
 export interface BuyerSessionPayload {

@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import {
   updateStudent,
-  deleteStudent,
   getStudentById,
   getCourseEnrollmentsByPhone,
   getEnrollments,
@@ -594,14 +593,8 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
 }
 
 export async function DELETE(_req: Request, { params }: { params: { id: string } }) {
-  try {
-    if (!(await requirePermission("manage_students_leads"))) {
-      return NextResponse.json({ ok: false, error: "Forbidden" }, { status: 403 });
-    }
-    const ok = await deleteStudent(params.id);
-    if (!ok) return NextResponse.json({ ok: false, error: "Not found" }, { status: 404 });
-    return NextResponse.json({ ok: true });
-  } catch {
-    return NextResponse.json({ ok: false, error: "Failed to delete student." }, { status: 500 });
-  }
+  return NextResponse.json(
+    { ok: false, error: "Use POST /api/admin/students/:id/remove with confirmPhone." },
+    { status: 405, headers: { "Cache-Control": "no-store" } },
+  );
 }

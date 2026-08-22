@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
   Copy,
@@ -28,6 +29,7 @@ import {
   Ban,
   XCircle,
   TicketPercent,
+  Trash2,
 } from "lucide-react";
 import { LoadingBlock } from "@/components/admin/ui";
 import JourneyTimeline from "@/components/admin/JourneyTimeline";
@@ -201,6 +203,7 @@ function Empty({ children }: { children: React.ReactNode }) {
 // ---------------------------------------------------------------- page
 export default function StudentProfilePage({ params }: { params: { id: string } }) {
   const { toast } = useToast();
+  const router = useRouter();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -213,6 +216,7 @@ export default function StudentProfilePage({ params }: { params: { id: string } 
   const [catalog, setCatalog] = useState<{ courses: Course[]; webinars: Webinar[] } | null>(null);
 
   const [highlightEnrollment, setHighlightEnrollment] = useState<string | null>(null);
+  const [removeOpen, setRemoveOpen] = useState(false);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -410,6 +414,16 @@ export default function StudentProfilePage({ params }: { params: { id: string } 
             <Link href={`/admin/students/${s.id}/performance`} className="btn btn-secondary text-sm">
               <Activity size={15} /> Overall Performance
             </Link>
+            <div className="mt-3 w-full border-t border-line pt-3">
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => setRemoveOpen(true)}
+                className="inline-flex min-h-[44px] w-full items-center justify-center gap-2 rounded-xl border border-red-300 bg-red-50 px-3 py-2 text-sm font-semibold text-red-800 hover:bg-red-100"
+              >
+                <Trash2 size={15} /> Remove student
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -813,6 +827,18 @@ export default function StudentProfilePage({ params }: { params: { id: string } 
       </Card>
 
       {modal === "edit" && <EditModal student={s} busy={busy} onClose={() => setModal(null)} onSave={(body) => { act(body, "Profile updated"); setModal(null); }} />}
+      {removeOpen && (
+        <RemoveStudentModal
+          studentId={s.id}
+          expectedPhone={s.phone}
+          onClose={() => setRemoveOpen(false)}
+          onDone={(path) => {
+            setRemoveOpen(false);
+            toast(path === "archive" ? "Student archived" : "Student deleted", "success");
+            router.push("/admin/students");
+          }}
+        />
+      )}
       {modal === "enroll" && <EnrollModal catalog={catalog} enrolledCourseTitles={profile.courses.map((c) => c.title)} busy={busy} onClose={() => setModal(null)} onSave={(body) => postAction("/enroll", body, "Enrolled")} />}
       {modal === "webinar" && <WebinarModal catalog={catalog} busy={busy} onClose={() => setModal(null)} onSave={(body) => postAction("/webinar", body, "Webinar registered")} />}
       {modal === "pay" && payCourse && <PayModal course={payCourse} busy={busy} onClose={() => setModal(null)} onSave={(body) => postAction("/payment", body, "Payment recorded")} />}
@@ -854,6 +880,93 @@ export default function StudentProfilePage({ params }: { params: { id: string } 
 }
 
 // ---------------------------------------------------------------- modals
+function RemoveStudentModal({
+  studentId,
+  expectedPhone,
+  onClose,
+  onDone,
+}: {
+  studentId: string;
+  expectedPhone: string;
+  onClose: () => void;
+  onDone: (path: "archive" | "hard_delete") => void;
+}) {
+  const { toast } = useToast();
+  const [preview, setPreview] = useState<{
+    path: "archive" | "hard_delete";
+    warning: string;
+    name: string;
+    phone: string;
+    loginCode: string | null;
+    enrollments: { title: string; batch: string | null }[];
+    paymentCount: number;
+    proofCount: number;
+  } | null>(null);
+  const [phone, setPhone] = useState("");
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    void (async () => {
+      const res = await fetch(`/api/admin/students/${studentId}/remove`, { cache: "no-store" });
+      const j = await res.json();
+      if (!j.ok) { toast(j.error || "Could not load removal preview", "error"); onClose(); return; }
+      setPreview(j.preview);
+    })();
+  }, [studentId]);
+  const expect = expectedPhone.replace(/\D/g, "").slice(-10);
+  const typed = phone.replace(/\D/g, "").slice(-10);
+  const match = typed.length === 10 && typed === expect;
+  return (
+    <Modal title="Remove student" onClose={onClose}>
+      {!preview ? (
+        <p className="text-sm text-muted">Loading…</p>
+      ) : (
+        <div className="space-y-3 text-sm">
+          <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 font-medium text-red-900">{preview.warning}.</p>
+          <ul className="space-y-1 text-ink2">
+            <li><span className="text-muted">Name</span> · {preview.name}</li>
+            <li><span className="text-muted">Phone</span> · {preview.phone}</li>
+            <li><span className="text-muted">Login code</span> · {preview.loginCode || "—"}</li>
+            <li><span className="text-muted">Enrolments</span> · {preview.enrollments.length ? preview.enrollments.map((e) => `${e.title}${e.batch ? ` (${e.batch})` : ""}`).join("; ") : "none"}</li>
+            <li><span className="text-muted">Payment rows</span> · {preview.paymentCount}</li>
+            <li><span className="text-muted">Proofs</span> · {preview.proofCount}</li>
+          </ul>
+          <label className="block">
+            <span className="mb-1 block text-xs font-semibold text-ink2">Type the 10-digit phone number to confirm</span>
+            <input className={inputCls} inputMode="numeric" autoComplete="off" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="10-digit mobile" />
+          </label>
+          <div className="flex justify-end gap-2 pt-2">
+            <button type="button" className="btn btn-secondary text-sm" onClick={onClose}>Cancel</button>
+            <button
+              type="button"
+              disabled={!match || busy}
+              className="inline-flex min-h-[44px] items-center rounded-xl bg-red-700 px-4 text-sm font-semibold text-white disabled:opacity-40"
+              onClick={async () => {
+                setBusy(true);
+                try {
+                  const res = await fetch(`/api/admin/students/${studentId}/remove`, {
+                    method: "POST",
+                    headers: { "content-type": "application/json" },
+                    body: JSON.stringify({ confirmPhone: typed }),
+                  });
+                  const j = await res.json();
+                  if (!j.ok) { toast(j.error || "Remove failed", "error"); return; }
+                  onDone(j.path);
+                } catch {
+                  toast("Network error", "error");
+                } finally {
+                  setBusy(false);
+                }
+              }}
+            >
+              {preview.path === "archive" ? "Archive student" : "Permanently delete"}
+            </button>
+          </div>
+        </div>
+      )}
+    </Modal>
+  );
+}
+
 function EditModal({ student, busy, onClose, onSave }: { student: Student; busy: boolean; onClose: () => void; onSave: (b: Record<string, unknown>) => void }) {
   const [name, setName] = useState(student.name);
   const [email, setEmail] = useState(student.email || "");

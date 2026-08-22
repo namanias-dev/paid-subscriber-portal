@@ -1,6 +1,7 @@
 import { cache } from "react";
 import { unstable_cache } from "next/cache";
 import { getSupabaseAdmin, getSupabasePublic, getSupabaseDataCache } from "./supabase";
+import { archivedPhoneSet, isArchivedStudent } from "./archivedStudents";
 import {
   PUBLIC_CACHE_TAGS,
   revalidatePublicCa,
@@ -255,7 +256,10 @@ export async function getStudents(): Promise<Student[]> {
   // cannot be searched for or opened, which reads to staff as "no profile".
   return pageThrough<Student>(() =>
     db.from("students").select("*").order("created_at", { ascending: false }).order("id", { ascending: true }),
-  );
+  ).then(async (rows) => {
+    const archived = await archivedPhoneSet();
+    return rows.filter((s) => !archived.has(s.phone) && !isArchivedStudent(s));
+  });
 }
 
 export async function getStudentById(id: string): Promise<Student | null> {
@@ -3018,7 +3022,9 @@ export async function getPayments(): Promise<Payment[]> {
       .order("created_at", { ascending: false })
       .order("id", { ascending: true }),
   );
-  return rows.length ? rows : demoPayments().filter((p) => !p.deleted_at);
+  const live = rows.length ? rows : demoPayments().filter((p) => !p.deleted_at);
+  const archived = await archivedPhoneSet();
+  return live.filter((p) => !archived.has(p.phone));
 }
 
 /** Soft-deleted payments only — powers the super-admin recoverable Trash view. */
@@ -4488,6 +4494,8 @@ export async function ensureStudentForCustomer(
 export async function findBuyerByLogin(phone: string, code: string): Promise<Buyer | null> {
   const buyer = await getBuyerByPhone(phone);
   if (!buyer) return null;
+  if (buyer.archived_at) return null;
+  if ((await archivedPhoneSet()).has((phone || "").trim())) return null;
   return buyer.login_code.toUpperCase() === code.toUpperCase() ? buyer : null;
 }
 
@@ -4567,9 +4575,11 @@ export async function getAllCourseEnrollments(): Promise<CourseEnrollment[]> {
   if (!db) return [...demoEnrollments()];
   // 312 rows today, but this is the enrolment source of truth — page it so it
   // does not start silently truncating the day it crosses 1000.
-  return pageThrough<CourseEnrollment>(() =>
+  const rows = await pageThrough<CourseEnrollment>(() =>
     db.from("course_enrollments").select("*").order("created_at", { ascending: false }).order("id", { ascending: true }),
   );
+  const archived = await archivedPhoneSet();
+  return rows.filter((e) => !archived.has(e.phone));
 }
 
 export async function updateCourseEnrollment(id: string, patch: Partial<CourseEnrollment>): Promise<CourseEnrollment | null> {
