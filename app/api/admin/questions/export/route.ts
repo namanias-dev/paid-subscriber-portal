@@ -54,7 +54,7 @@ export async function GET(req: Request) {
     ];
     const lines = [headers.join(",")];
     for (const q of questions) {
-      const opts = (q.options || {}) as Record<string, string | null>;
+      const opts = (q.options || {}) as unknown as Record<string, string | null>;
       lines.push(
         [
           q.id,
