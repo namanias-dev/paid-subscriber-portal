@@ -7,6 +7,7 @@ import {
   getProofById,
   listProofsForEnrollment,
   INSTALLMENT_PROOF_MAX_FILES,
+  signedProofFileUrl,
 } from "@/lib/installmentPaymentProofs";
 import { studentPopupEnabledForPhone } from "@/lib/installmentProofFlags";
 
@@ -75,6 +76,15 @@ export async function GET(req: Request) {
     const proof = await getProofById(id);
     if (!proof || proof.phone.replace(/\D/g, "").slice(-10) !== session.phone.replace(/\D/g, "").slice(-10)) {
       return NextResponse.json({ ok: false, error: "Not found." }, { status: 404 });
+    }
+    const filePath = url.searchParams.get("file");
+    if (filePath) {
+      if (!proof.files.some((f) => f.path === filePath)) {
+        return NextResponse.json({ ok: false, error: "Not found." }, { status: 404 });
+      }
+      const signed = await signedProofFileUrl(filePath);
+      if (!signed) return NextResponse.json({ ok: false, error: "Could not sign URL" }, { status: 503 });
+      return NextResponse.json({ ok: true, url: signed, expiresIn: 300 });
     }
     return NextResponse.json({ ok: true, proof });
   }

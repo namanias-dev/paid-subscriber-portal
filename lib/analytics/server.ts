@@ -214,7 +214,11 @@ export async function recordPaymentStatusChanged(p: Payment, toStatus: string, s
  * Meta Purchase. Safe to call from callback / verify / cron / proof-accept /
  * free / offline; the dedupe_key guarantees once.
  */
-export async function recordPaymentPaid(p: Payment, source = "system"): Promise<void> {
+export async function recordPaymentPaid(
+  p: Payment,
+  source = "system",
+  opts?: { silentNotify?: boolean },
+): Promise<void> {
   const ref = p.reference_no || p.id;
   const phone = normPhone(p.phone);
   const buyerId = await resolveBuyerId(phone);
@@ -235,11 +239,16 @@ export async function recordPaymentPaid(p: Payment, source = "system"): Promise<
     // Meta Purchase — fired ONCE from this verified-PAID chokepoint, carrying the
     // SAME reconciled rupee amount. Matched via the buyer's stored fbc/fbp (no PII
     // unless G1 is enabled). Inert until CAPI keys are set. Never blocks the flow.
-    await sendMetaPurchase(p, await lookupMetaMatch(phone)).catch(() => {});
+    if (!opts?.silentNotify) {
+      await sendMetaPurchase(p, await lookupMetaMatch(phone)).catch(() => {});
+    }
     // Paid wins: flag the other open unpaid attempts for this same student+item+
     // purpose as superseded so a PAID group is never mislabelled "needs action".
     // Idempotent; touches only this group; logged to payment_action_log.
     void supersedeUnpaidSiblings(p).catch(() => {});
+    if (opts?.silentNotify) {
+      return;
+    }
     // Auto-SMS (disabled by default) — fired ONLY from this verified-PAID
     // chokepoint, once per payment (dedupe_key), never off a click/intent.
     fireAutoSms({ trigger: TRIGGERS.payment_success, phone: p.phone, name: p.student_name, vars: { item_short: p.item, payment_status: "PAID", amount: p.amount }, entity: smsEntityForPayment(p), entityId: ref });

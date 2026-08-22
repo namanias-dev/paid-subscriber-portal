@@ -24,6 +24,10 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       seatAmount: body.seatAmount != null ? Number(body.seatAmount) : null,
       installmentCount: body.installmentCount != null ? Number(body.installmentCount) : null,
       batchId: body.batchId ? String(body.batchId) : null,
+      negotiatedTotal: body.negotiatedTotal != null ? Number(body.negotiatedTotal) : null,
+      confirmAboveCatalogue: !!body.confirmAboveCatalogue,
+      changedBy: actor,
+      scheduleOverrides: Array.isArray(body.scheduleOverrides) ? body.scheduleOverrides : null,
     });
     if (!res.ok) return NextResponse.json({ ok: false, error: res.error }, { status: 400 });
 

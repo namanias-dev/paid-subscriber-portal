@@ -9,6 +9,8 @@ import {
   approveInstallmentProof,
   rejectInstallmentProof,
   signedProofFileUrl,
+  uploadInstallmentProofFile,
+  attachAdminOfflineProof,
 } from "@/lib/installmentPaymentProofs";
 import {
   approveAndRecordInstallmentProof,
@@ -65,6 +67,44 @@ export async function GET(req: Request) {
   }
   const pending = await listPendingProofs();
   return NextResponse.json({ ok: true, pending, count: pending.length });
+}
+
+/** Admin upload of an offline proof screenshot (same R2 prefix as student proofs). */
+export async function PUT(req: Request) {
+  const session = await getAdminSession();
+  if (!session || !(await requireAnyPermission([...PERMS]))) {
+    return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+  }
+  const form = await req.formData().catch(() => null);
+  if (!form) return NextResponse.json({ ok: false, error: "Invalid form." }, { status: 400 });
+  const file = form.get("file");
+  const enrollmentId = String(form.get("enrollmentId") || "");
+  const installmentNo = Number(form.get("installmentNo"));
+  const phone = String(form.get("phone") || "").replace(/\D/g, "").slice(-10);
+  if (!(file instanceof File) || !enrollmentId || !Number.isFinite(installmentNo) || !phone) {
+    return NextResponse.json({ ok: false, error: "file, enrollmentId, installmentNo, phone required." }, { status: 400 });
+  }
+  const buf = Buffer.from(await file.arrayBuffer());
+  const up = await uploadInstallmentProofFile({
+    phone,
+    studentId: null,
+    installmentNo,
+    originalName: file.name || "upload",
+    buffer: buf,
+  });
+  if (!up.ok) return NextResponse.json({ ok: false, error: up.error }, { status: 400 });
+  const attached = await attachAdminOfflineProof({
+    phone,
+    enrollmentId,
+    installmentNo,
+    files: [up.file],
+    actor: session.username || "admin",
+    claimedAmount: form.get("amount") ? Number(form.get("amount")) : null,
+    claimedPaidDate: form.get("paidDate") ? String(form.get("paidDate")).slice(0, 10) : null,
+    referenceNote: form.get("note") ? String(form.get("note")) : null,
+  });
+  if (!attached.ok) return NextResponse.json({ ok: false, error: attached.error }, { status: 400 });
+  return NextResponse.json({ ok: true, proof: attached.proof });
 }
 
 export async function POST(req: Request) {

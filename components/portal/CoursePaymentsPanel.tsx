@@ -24,16 +24,45 @@ const STATUS_LABEL: Record<string, string> = {
   cancelled: "Cancelled",
 };
 
+function friendlyMethod(method: string | null | undefined, gateway: string | null | undefined): string {
+  const m = (method || "").trim();
+  if (/cash/i.test(m)) return "cash";
+  if (/upi/i.test(m)) return "UPI";
+  if (/bank/i.test(m)) return "bank transfer";
+  if (m && !/offline|gateway|razor|icici|eazypay/i.test(m)) return m;
+  if (gateway === "offline") return "offline";
+  return "online";
+}
+
+function paidLabel(
+  item: { no: number; kind: string; paid_at?: string | null; reference_no?: string | null },
+  payments: { installment_no: number | null; payment_kind: string | null; method: string | null; gateway: string | null; paid_at: string }[],
+  receipts: PaymentReceipt[],
+  receiptByRef: Map<string, PaymentReceipt>,
+): string {
+  const pay =
+    payments.find((p) => p.installment_no === item.no) ||
+    payments.find((p) => p.payment_kind === item.kind);
+  const receipt = item.reference_no ? receiptByRef.get(item.reference_no) : receipts.find((r) => r.payment_kind === item.kind);
+  const method = friendlyMethod(pay?.method || receipt?.method, pay?.gateway);
+  const when = item.paid_at || pay?.paid_at;
+  return `Paid — ${method}${when ? `, ${formatISTDate(when)}` : ""}`;
+}
+
 export default function CoursePaymentsPanel({
   enrollment,
   receipts,
   classHubHref,
   initialInstallmentNo,
+  payments = [],
+  proofs = [],
 }: {
   enrollment: CourseEnrollment;
   receipts: PaymentReceipt[];
   classHubHref: string | null;
   initialInstallmentNo?: number | null;
+  payments?: { installment_no: number | null; payment_kind: string | null; method: string | null; gateway: string | null; paid_at: string }[];
+  proofs?: { id: string; installment_no: number; files: { path: string; original_name: string }[] }[];
 }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -196,7 +225,7 @@ export default function CoursePaymentsPanel({
                   </div>
                   <p className="mt-0.5 pl-6 text-xs text-[var(--ca-slate-700)]">
                     {item.paid
-                      ? `Paid${item.paid_at ? ` · ${formatISTDate(item.paid_at)}` : ""}`
+                      ? paidLabel(item, payments, receipts, receiptByRef)
                       : partial
                         ? `${formatINR(allocated)} received · ${formatINR(remaining)} remaining`
                         : waived
@@ -225,6 +254,11 @@ export default function CoursePaymentsPanel({
                       {busy === `i${item.no}` ? "…" : "Pay now"}
                     </button>
                   ) : null}
+                  {proofs.filter((p) => p.installment_no === item.no).flatMap((p) =>
+                    p.files.map((f) => (
+                      <ProofLink key={f.path} proofId={p.id} path={f.path} name={f.original_name} />
+                    )),
+                  )}
                 </div>
               </div>
             );
@@ -275,4 +309,24 @@ function StatusIcon({ st }: { st: string }) {
   if (st === "partially_paid") return <Clock size={16} className="text-amber-600" />;
   if (st === "overdue") return <AlertTriangle size={16} className="text-red-600" />;
   return <Clock size={16} className="text-[var(--ca-slate-400)]" />;
+}
+
+function ProofLink({ proofId, path, name }: { proofId: string; path: string; name: string }) {
+  const [busy, setBusy] = useState(false);
+  async function open() {
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/portal/installment-proofs?id=${encodeURIComponent(proofId)}&file=${encodeURIComponent(path)}`);
+      const json = await res.json();
+      if (json.ok && json.url) window.open(json.url, "_blank", "noopener,noreferrer");
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <button type="button" onClick={open} disabled={busy} className="ca-focus inline-flex items-center gap-1 rounded-lg border border-[var(--ca-slate-300)] px-2 py-1 text-xs font-semibold text-[var(--ca-navy-600)] hover:bg-[var(--ca-slate-50)] disabled:opacity-60">
+      {busy ? "…" : "Proof"}
+      <span className="sr-only">{name}</span>
+    </button>
+  );
 }

@@ -22,6 +22,10 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       method: String(body.method || "Cash"),
       dateISO: body.dateISO ? istInputToISO(`${body.dateISO}T12:00`) : undefined,
       note: body.note || null,
+      amountOverride: body.amount != null ? Number(body.amount) : null,
+      recordedBy: actor,
+      paymentSource: "admin_offline",
+      proofId: body.proofId ? String(body.proofId) : null,
     });
     if (!res.ok) return NextResponse.json({ ok: false, error: res.error }, { status: 400 });
 

@@ -647,6 +647,54 @@ export async function supersedeProofsOnPaid(input: {
   return rows.length;
 }
 
+/** Admin-recorded screenshot for an already-paid line. No student popup, no sales Telegram, no 7-day grant. */
+export async function attachAdminOfflineProof(input: {
+  phone: string;
+  enrollmentId: string;
+  installmentNo: number;
+  files: InstallmentProofFileMeta[];
+  actor: string;
+  claimedAmount?: number | null;
+  claimedPaidDate?: string | null;
+  referenceNote?: string | null;
+}): Promise<{ ok: true; proof: InstallmentProofRow } | { ok: false; error: string }> {
+  const db = getSupabaseAdmin();
+  if (!db) return { ok: false, error: "Database unavailable." };
+  const e = await getCourseEnrollmentById(input.enrollmentId);
+  if (!e || e.phone.replace(/\D/g, "").slice(-10) !== input.phone.replace(/\D/g, "").slice(-10)) {
+    return { ok: false, error: "Enrollment not found." };
+  }
+  if (!input.files.length) return { ok: false, error: "Attach a proof file." };
+  const student = await findStudentByPhone(input.phone);
+  const now = new Date().toISOString();
+  const { data, error } = await db
+    .from("installment_payment_proofs")
+    .insert({
+      student_id: student?.id ?? null,
+      phone: e.phone.replace(/\D/g, "").slice(-10),
+      course_id: e.course_id,
+      course_enrollment_id: e.id,
+      installment_no: input.installmentNo,
+      claimed_amount: input.claimedAmount ?? null,
+      claimed_paid_date: input.claimedPaidDate || null,
+      reference_utr: input.referenceNote?.trim() || null,
+      student_comment: "Recorded by admissions (offline)",
+      expected_amount: (e.schedule || []).find((s) => s.no === input.installmentNo)?.amount ?? null,
+      expected_installment_no: input.installmentNo,
+      files: input.files,
+      status: "approved_recorded",
+      submitted_at: now,
+      reviewed_by: input.actor,
+      reviewed_at: now,
+      review_reason: "Admin recorded offline payment with proof",
+      updated_at: now,
+    })
+    .select("*")
+    .maybeSingle();
+  if (error || !data) return { ok: false, error: error?.message || "Could not save proof." };
+  return { ok: true, proof: mapRow(data as Record<string, unknown>) };
+}
+
 export async function signedProofFileUrl(path: string): Promise<string | null> {
   if (!path.startsWith("installment-proofs/")) return null;
   // Reject legacy phone-shaped prefixes; canonical is installment-proofs/{students.id}/…

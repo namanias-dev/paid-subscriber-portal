@@ -72,6 +72,17 @@ interface CourseSelection {
   seatAmount?: number | null;
   installmentCount?: number | null;
   batchId?: string | null;
+  negotiatedTotal?: number | null;
+  confirmAboveCatalogue?: boolean;
+  scheduleOverrides?: { no: number; amount: number; due?: string | null }[] | null;
+  recordedPayments?: {
+    kind: "seat" | "installment" | "full";
+    installmentNo?: number | null;
+    amount?: number | null;
+    method?: string;
+    dateISO?: string;
+    note?: string | null;
+  }[];
 }
 
 export async function GET() {
@@ -257,6 +268,10 @@ export async function POST(req: Request) {
       if (updated) student.expiry_date = updated.expiry_date;
     }
 
+    const warnings: string[] = [];
+    const createdEnrollments: { id: string; courseSlug: string }[] = [];
+    const courses: CourseSelection[] = Array.isArray(body.courses) ? body.courses : [];
+
     await logAccess(student.id, `admin:create student (by ${actor})`);
     void import("@/lib/adminActivity").then(async ({ logAdminActivity }) => {
       const { getActionActor } = await import("@/lib/adminGuard");
@@ -275,8 +290,6 @@ export async function POST(req: Request) {
     }).catch(() => null);
 
     // ---- Enroll into courses (same model as online) ----
-    const warnings: string[] = [];
-    const courses: CourseSelection[] = Array.isArray(body.courses) ? body.courses : [];
     for (const c of courses) {
       const res = await enrollStudentInCourse({
         phone,
@@ -288,8 +301,32 @@ export async function POST(req: Request) {
         seatAmount: c.seatAmount ?? null,
         installmentCount: c.installmentCount ?? null,
         batchId: c.batchId ?? null,
+        negotiatedTotal: c.negotiatedTotal ?? null,
+        confirmAboveCatalogue: !!c.confirmAboveCatalogue,
+        changedBy: actor,
+        scheduleOverrides: c.scheduleOverrides ?? null,
       });
       if (!res.ok) warnings.push(`${c.courseSlug}: ${res.error}`);
+      else {
+        createdEnrollments.push({ id: res.enrollment.id, courseSlug: c.courseSlug });
+        if (c.plan !== "complimentary" && Array.isArray(c.recordedPayments)) {
+        for (const rp of c.recordedPayments) {
+          const pay = await recordOfflineCoursePayment({
+            enrollmentId: res.enrollment.id,
+            kind: rp.kind,
+            installmentNo: rp.installmentNo ?? null,
+            method: String(rp.method || "Cash"),
+            dateISO: rp.dateISO ? istInputToISO(`${String(rp.dateISO).slice(0, 10)}T12:00`) : undefined,
+            note: rp.note || null,
+            amountOverride: rp.amount != null ? Number(rp.amount) : null,
+            recordedBy: actor,
+            paymentSource: "admin_offline",
+            suppressNotifications: true,
+          });
+          if (!pay.ok) warnings.push(`${c.courseSlug} payment: ${pay.error}`);
+        }
+        }
+      }
     }
 
     // ---- Register for webinars ----
@@ -351,6 +388,7 @@ export async function POST(req: Request) {
       emailSent,
       receiptNo,
       warnings,
+      enrollments: createdEnrollments,
     });
   } catch {
     return NextResponse.json({ ok: false, error: "Failed to add student." }, { status: 500 });

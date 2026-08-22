@@ -3,7 +3,8 @@ import Link from "next/link";
 import type { Metadata } from "next";
 import { ArrowLeft } from "lucide-react";
 import { getBuyerSession } from "@/lib/session";
-import { getCourseEnrollmentById, getReceiptsByPhone } from "@/lib/dataProvider";
+import { getCourseEnrollmentById, getReceiptsByPhone, getPaymentsByEnrollmentId } from "@/lib/dataProvider";
+import { listProofsForEnrollment } from "@/lib/installmentPaymentProofs";
 import CoursePaymentsPanel from "@/components/portal/CoursePaymentsPanel";
 
 export const dynamic = "force-dynamic";
@@ -35,6 +36,10 @@ export default async function PortalCoursePage({
 
   const allReceipts = await getReceiptsByPhone(session.phone);
   const receipts = allReceipts.filter((r) => r.enrollment_id === enrollment.id);
+  const payments = (await getPaymentsByEnrollmentId(enrollment.id)).filter((p) => p.phone.trim() === session.phone.trim());
+  const proofs = (await listProofsForEnrollment(enrollment.id)).filter(
+    (p) => p.phone.replace(/\D/g, "").slice(-10) === session.phone.replace(/\D/g, "").slice(-10),
+  );
   const classHubHref = enrollment.amount_paid > 0 ? `/portal/class/${enrollment.course_id}` : null;
   const installmentParam = searchParams?.installment;
   const initialInstallmentNo =
@@ -49,6 +54,18 @@ export default async function PortalCoursePage({
         <CoursePaymentsPanel
           enrollment={enrollment}
           receipts={receipts}
+          payments={payments.map((p) => ({
+            installment_no: p.installment_no ?? null,
+            payment_kind: p.payment_kind ?? null,
+            method: p.payment_mode || p.mode || null,
+            gateway: p.gateway ?? null,
+            paid_at: p.transaction_date || p.created_at,
+          }))}
+          proofs={proofs.map((p) => ({
+            id: p.id,
+            installment_no: p.installment_no,
+            files: p.files.map((f) => ({ path: f.path, original_name: f.original_name })),
+          }))}
           classHubHref={classHubHref}
           initialInstallmentNo={initialInstallmentNo}
         />

@@ -11,12 +11,24 @@ import { resolveEmiConfig, payInFullTotal, planCourseEnrollment } from "@/lib/in
 import type { Course, Webinar } from "@/lib/types";
 
 type CtxPlan = "full" | "emi" | "complimentary";
+interface LineEdit {
+  amount: string;
+  due: string;
+  recordPaid: boolean;
+  method: string;
+  paidDate: string;
+  note: string;
+  proof?: File | null;
+}
 interface CourseChoice {
   plan: CtxPlan;
   bookSeat: boolean;
   installmentCount: number | null;
   seatAmount: number | null;
   batchId: string | null;
+  negotiatedTotal: string;
+  confirmAboveCatalogue: boolean;
+  lines: Record<number, LineEdit>;
 }
 
 const METHODS = ["Cash", "Bank Transfer", "Offline UPI"];
@@ -92,7 +104,7 @@ export default function StudentForm() {
     setPicked((prev) => {
       const next = { ...prev };
       if (next[slug]) { delete next[slug]; if (payCourse === slug) setPayCourse(""); }
-      else next[slug] = { plan: "full", bookSeat: false, installmentCount: null, seatAmount: null, batchId: (courses || []).find((c) => c.slug === slug)?.default_batch_id || null };
+      else next[slug] = { plan: "full", bookSeat: false, installmentCount: null, seatAmount: null, batchId: (courses || []).find((c) => c.slug === slug)?.default_batch_id || null, negotiatedTotal: "", confirmAboveCatalogue: false, lines: {} };
       return next;
     });
   }
@@ -103,7 +115,7 @@ export default function StudentForm() {
   /** Compute the first payable line for a chosen course (mirrors online checkout). */
   function plannedFor(course: Course, choice: CourseChoice) {
     if (choice.plan === "complimentary") return null;
-    const res = planCourseEnrollment({
+    const base = planCourseEnrollment({
       course,
       plan: choice.plan,
       bookSeat: choice.bookSeat,
@@ -111,7 +123,21 @@ export default function StudentForm() {
       installmentCount: choice.installmentCount,
       batchId: choice.batchId,
     });
-    return res.ok ? res.plan : null;
+    if (!base.ok) return null;
+    const catalogue = base.plan.originalTotalFee;
+    const negotiated = choice.negotiatedTotal.trim() === "" ? catalogue : Math.round(Number(choice.negotiatedTotal));
+    if (!Number.isFinite(negotiated) || negotiated <= 0) return base.plan;
+    const discountRupees = Math.max(0, catalogue - negotiated);
+    const withFee = planCourseEnrollment({
+      course,
+      plan: choice.plan,
+      bookSeat: choice.bookSeat,
+      seatAmount: choice.seatAmount,
+      installmentCount: choice.installmentCount,
+      batchId: choice.batchId,
+      discountRupees,
+    });
+    return withFee.ok ? withFee.plan : base.plan;
   }
 
   async function submit() {
@@ -124,14 +150,63 @@ export default function StudentForm() {
       return (course?.batches?.length || 0) > 0 && !c.batchId;
     })) return toast("Select a batch for each enrolled course", "error");
 
-    const courseList = Object.entries(picked).map(([courseSlug, c]) => ({
-      courseSlug,
-      plan: c.plan,
-      bookSeat: c.bookSeat,
-      seatAmount: c.seatAmount,
-      installmentCount: c.installmentCount,
-      batchId: c.batchId,
-    }));
+    for (const [slug, c] of Object.entries(picked)) {
+      if (c.plan === "complimentary") continue;
+      const course = (courses || []).find((x) => x.slug === slug);
+      if (!course) continue;
+      const planned = plannedFor(course, c);
+      if (!planned) continue;
+      const fee = c.negotiatedTotal.trim() === "" ? planned.totalFee : Math.round(Number(c.negotiatedTotal));
+      const sum = planned.schedule.reduce((a, s) => a + (c.lines[s.no]?.amount ? Number(c.lines[s.no].amount) : s.amount), 0);
+      if (Number.isFinite(fee) && Math.round(sum) !== fee) {
+        return toast(`Instalment amounts must equal ${formatINR(fee)} for ${course.title}`, "error");
+      }
+      if (c.negotiatedTotal && Number(c.negotiatedTotal) > planned.originalTotalFee && !c.confirmAboveCatalogue) {
+        return toast("Confirm the total above catalogue price", "error");
+      }
+    }
+
+    const courseList = Object.entries(picked).map(([courseSlug, c]) => {
+      const course = (courses || []).find((x) => x.slug === courseSlug);
+      const planned = course && c.plan !== "complimentary" ? plannedFor(course, c) : null;
+      const catalogue = planned?.originalTotalFee ?? 0;
+      const negotiatedRaw = c.negotiatedTotal.trim() === "" ? null : Math.round(Number(c.negotiatedTotal));
+      const scheduleOverrides = planned
+        ? planned.schedule.map((s) => {
+            const edit = c.lines[s.no];
+            const due = edit?.due || (s.due ? String(s.due).slice(0, 10) : "");
+            const amount = edit?.amount ? Math.round(Number(edit.amount)) : s.amount;
+            return { no: s.no, amount, due: due || s.due };
+          })
+        : null;
+      const recordedPayments = planned
+        ? planned.schedule
+            .filter((s) => c.lines[s.no]?.recordPaid)
+            .map((s) => {
+              const edit = c.lines[s.no];
+              return {
+                kind: s.kind as "seat" | "installment" | "full",
+                installmentNo: s.kind === "installment" ? s.no : null,
+                amount: edit?.amount ? Math.round(Number(edit.amount)) : s.amount,
+                method: edit?.method || "Cash",
+                dateISO: edit?.paidDate || undefined,
+                note: edit?.note || null,
+              };
+            })
+        : [];
+      return {
+        courseSlug,
+        plan: c.plan,
+        bookSeat: c.bookSeat,
+        seatAmount: c.seatAmount,
+        installmentCount: c.installmentCount,
+        batchId: c.batchId,
+        negotiatedTotal: negotiatedRaw,
+        confirmAboveCatalogue: !!c.confirmAboveCatalogue || (negotiatedRaw != null && negotiatedRaw > catalogue),
+        scheduleOverrides: c.plan === "complimentary" ? null : scheduleOverrides,
+        recordedPayments,
+      };
+    });
     const webinarList = Object.entries(webPicked).filter(([, v]) => v).map(([id]) => id);
 
     let initialPayment: Record<string, unknown> | undefined;
@@ -164,6 +239,23 @@ export default function StudentForm() {
       });
       const data = await res.json();
       if (!data.ok) { toast(data.error || "Failed to add student", "error"); setSaving(false); return; }
+      const enrollments = Array.isArray(data.enrollments) ? data.enrollments as { id: string; courseSlug: string }[] : [];
+      for (const [slug, choice] of Object.entries(picked)) {
+        const enr = enrollments.find((e) => e.courseSlug === slug);
+        if (!enr) continue;
+        for (const [noStr, line] of Object.entries(choice.lines)) {
+          if (!line.proof || !line.recordPaid) continue;
+          const fd = new FormData();
+          fd.append("file", line.proof);
+          fd.append("enrollmentId", enr.id);
+          fd.append("installmentNo", noStr);
+          fd.append("phone", phone);
+          if (line.amount) fd.append("amount", line.amount);
+          if (line.paidDate) fd.append("paidDate", line.paidDate);
+          if (line.note) fd.append("note", line.note);
+          await fetch("/api/admin/installment-proofs", { method: "PUT", body: fd }).catch(() => null);
+        }
+      }
       if (data.warnings?.length) toast(`Saved with notes: ${data.warnings.join("; ")}`, "info");
       else toast("Student created", "success");
       setDone({
@@ -305,6 +397,61 @@ export default function StudentForm() {
                           )}
                           {choice.plan !== "complimentary" && choice.bookSeat && cfg.allowCustomSeat && (
                             <Field label="Seat amount (₹)"><input type="number" value={choice.seatAmount ?? ""} onChange={(e) => setChoice(c.slug, { seatAmount: e.target.value ? Number(e.target.value) : null })} className={inputCls} placeholder={`min ${cfg.minSeatAmount ?? 1}`} /></Field>
+                          )}
+
+                          {choice.plan !== "complimentary" && planned && (
+                            <div className="space-y-3 rounded-lg border border-line bg-surface2/60 p-3">
+                              <Field label="Negotiated total fee" hint={`Catalogue ${formatINR(planned.originalTotalFee)}. Leave blank to keep this.`}>
+                                <input
+                                  type="number"
+                                  value={choice.negotiatedTotal}
+                                  onChange={(e) => setChoice(c.slug, { negotiatedTotal: e.target.value })}
+                                  className={inputCls}
+                                  placeholder={String(planned.originalTotalFee)}
+                                />
+                              </Field>
+                              {choice.negotiatedTotal && Number(choice.negotiatedTotal) > planned.originalTotalFee && (
+                                <label className="flex items-center gap-2 text-xs text-ink2">
+                                  <input type="checkbox" checked={choice.confirmAboveCatalogue} onChange={(e) => setChoice(c.slug, { confirmAboveCatalogue: e.target.checked })} className="h-4 w-4 accent-[var(--primary)]" />
+                                  Confirm total above catalogue price
+                                </label>
+                              )}
+                              <p className="text-xs text-muted">
+                                Running total of lines {formatINR(planned.schedule.reduce((a, s) => a + (choice.lines[s.no]?.amount ? Number(choice.lines[s.no].amount) : s.amount), 0))}
+                                {" "}vs fee {formatINR(choice.negotiatedTotal.trim() === "" ? planned.totalFee : Number(choice.negotiatedTotal) || planned.totalFee)}
+                              </p>
+                              {planned.schedule.map((s) => {
+                                const edit = choice.lines[s.no] || { amount: String(s.amount), due: s.due ? String(s.due).slice(0, 10) : "", recordPaid: false, method: "Cash", paidDate: "", note: "", proof: null };
+                                return (
+                                  <div key={s.no} className="rounded-md border border-line bg-surface p-2 space-y-2">
+                                    <p className="text-xs font-semibold">{s.label}</p>
+                                    <div className="grid gap-2 sm:grid-cols-2">
+                                      <Field label="Amount (₹)"><input type="number" className={inputCls} value={edit.amount} onChange={(e) => setChoice(c.slug, { lines: { ...choice.lines, [s.no]: { ...edit, amount: e.target.value } } })} /></Field>
+                                      {s.kind === "installment" && (
+                                        <Field label="Due date"><input type="date" className={inputCls} value={edit.due} onChange={(e) => setChoice(c.slug, { lines: { ...choice.lines, [s.no]: { ...edit, due: e.target.value } } })} /></Field>
+                                      )}
+                                    </div>
+                                    <label className="flex items-center gap-2 text-xs">
+                                      <input type="checkbox" checked={edit.recordPaid} onChange={(e) => setChoice(c.slug, { lines: { ...choice.lines, [s.no]: { ...edit, recordPaid: e.target.checked } } })} className="h-4 w-4 accent-[var(--primary)]" />
+                                      Already paid (cash / UPI / bank)
+                                    </label>
+                                    {edit.recordPaid && (
+                                      <div className="grid gap-2 sm:grid-cols-2">
+                                        <Field label="Method">
+                                          <select className={inputCls} value={edit.method} onChange={(e) => setChoice(c.slug, { lines: { ...choice.lines, [s.no]: { ...edit, method: e.target.value } } })}>
+                                            {METHODS.map((m) => <option key={m}>{m}</option>)}
+                                            <option>Other</option>
+                                          </select>
+                                        </Field>
+                                        <Field label="Date paid"><input type="date" className={inputCls} value={edit.paidDate} onChange={(e) => setChoice(c.slug, { lines: { ...choice.lines, [s.no]: { ...edit, paidDate: e.target.value } } })} /></Field>
+                                        <Field label="Reference note"><input className={inputCls} value={edit.note} onChange={(e) => setChoice(c.slug, { lines: { ...choice.lines, [s.no]: { ...edit, note: e.target.value } } })} /></Field>
+                                        <Field label="Proof screenshot"><input type="file" accept="image/*,.pdf" onChange={(e) => setChoice(c.slug, { lines: { ...choice.lines, [s.no]: { ...edit, proof: e.target.files?.[0] || null } } })} /></Field>
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
                           )}
 
                           <p className="text-xs text-muted">

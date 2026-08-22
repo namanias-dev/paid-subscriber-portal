@@ -104,7 +104,7 @@ import type {
   InstallmentItem,
   Announcement,
 } from "./types";
-import { deriveEnrollment, enrollmentStatusFromSchedule, installmentsSummary, planCourseEnrollment, resolveEmiConfig, isLineCancelledOrWaived, isLineOutstanding, isActiveEnrollment, isAttemptEnrollment } from "./installments";
+import { deriveEnrollment, enrollmentStatusFromSchedule, installmentsSummary, planCourseEnrollment, resolveEmiConfig, isLineCancelledOrWaived, isLineOutstanding, isActiveEnrollment, isAttemptEnrollment, effectiveCourseForBatch, payInFullTotal, buildSchedule, buildInstallmentOnlySchedule, buildFullSchedule, buildFullWithSeatSchedule } from "./installments";
 import { findOldestOutstandingIndex } from "./installmentAllocation";
 import { scheduleAsCheckoutIntent } from "./enrollmentScope";
 import { materializeScheduleDues, needsDueMaterialization } from "./scheduleDues";
@@ -3428,13 +3428,16 @@ export async function maybeReconcilePendingPayments(minIntervalMs = 60_000): Pro
 export type CreatePaymentInput = Omit<Payment, "id" | "created_at"> & {
   id?: string;
   created_at?: string;
+  /** Skip SMS/Telegram/Meta/journey on PAID insert (backdated offline recording). Not a DB column. */
+  silentPaidNotify?: boolean;
 };
 
 export async function createPayment(input: CreatePaymentInput): Promise<Payment> {
+  const { silentPaidNotify, ...persist } = input;
   const row: Payment = {
-    ...input,
-    id: input.id ?? uuid(),
-    created_at: input.created_at ?? new Date().toISOString(),
+    ...persist,
+    id: persist.id ?? uuid(),
+    created_at: persist.created_at ?? new Date().toISOString(),
   } as Payment;
   if (demoMode()) {
     demoPayments().unshift(row);
@@ -3462,7 +3465,9 @@ export async function createPayment(input: CreatePaymentInput): Promise<Payment>
     // Analytics (best-effort, idempotent, never throws): a brand-new PAID row is a
     // completed purchase; a PENDING row is an initiated checkout.
     if (isPaidStatus(saved.status)) {
-      void recordPaymentPaid(saved, "checkout").catch(() => {});
+      void recordPaymentPaid(saved, silentPaidNotify ? "offline" : "checkout", {
+        silentNotify: !!silentPaidNotify,
+      }).catch(() => {});
       // Paid webinar created as PAID (offline/cash) → behaviour ladder.
       if (saved.item_type === "webinar") scheduleBehaviourStatusApply(saved.phone);
     } else if (saved.status === "INITIATED" || saved.status === "PENDING" || saved.status === "UNCONFIRMED") {
@@ -4829,6 +4834,12 @@ export interface EnrollStudentInCourseInput {
   installmentCount?: number | null;
   /** Optional in schema. Required here when the course actually has batches. */
   batchId?: string | null;
+  /** Stored in total_fee. Null/omit = catalogue price (identical to today). */
+  negotiatedTotal?: number | null;
+  confirmAboveCatalogue?: boolean;
+  changedBy?: string | null;
+  /** Overlay amounts/due dates on the planned schedule (must still sum to total_fee). */
+  scheduleOverrides?: { no: number; amount: number; due?: string | null }[] | null;
 }
 
 /**
@@ -4902,6 +4913,20 @@ export async function enrollStudentInCourse(
     return { ok: true, enrollment };
   }
 
+  const priced = effectiveCourseForBatch(course, batch?.id ?? null);
+  const catalogue =
+    input.plan === "emi" ? Math.max(0, Math.round(priced.price || 0)) : payInFullTotal(priced);
+  const negotiatedProvided =
+    input.negotiatedTotal != null && Number.isFinite(Number(input.negotiatedTotal));
+  const negotiated = negotiatedProvided ? Math.round(Number(input.negotiatedTotal)) : catalogue;
+  if (negotiatedProvided && negotiated <= 0) {
+    return { ok: false, error: "Negotiated total must be a positive amount." };
+  }
+  if (negotiated > catalogue && !input.confirmAboveCatalogue) {
+    return { ok: false, error: "Negotiated total is above the catalogue price. Confirm to continue." };
+  }
+
+  const discountRupees = negotiated > catalogue ? 0 : Math.max(0, catalogue - negotiated);
   const planned = planCourseEnrollment({
     course,
     plan: input.plan,
@@ -4909,8 +4934,78 @@ export async function enrollStudentInCourse(
     seatAmount: input.seatAmount ?? null,
     installmentCount: input.installmentCount ?? null,
     batchId: batch?.id ?? null,
+    discountRupees,
   });
   if (!planned.ok) return { ok: false, error: planned.error };
+
+  let schedule = planned.plan.schedule;
+  let totalFee = planned.plan.totalFee;
+  const cfg = resolveEmiConfig(priced);
+  const bookingISO = now;
+
+  if (negotiated > catalogue) {
+    totalFee = negotiated;
+    const seatLine = schedule.find((s) => s.kind === "seat");
+    const seatAmt = seatLine ? seatLine.amount : 0;
+    if (input.plan === "emi" && seatLine) {
+      schedule = buildSchedule({
+        total: totalFee,
+        seatAmount: seatAmt,
+        count: planned.plan.installmentCount,
+        bookingISO,
+        firstIntervalDays: cfg.firstIntervalDays,
+        intervalMonths: cfg.intervalMonths,
+        batchStartISO: priced.batch_start,
+      });
+    } else if (input.plan === "emi") {
+      schedule = buildInstallmentOnlySchedule({
+        total: totalFee,
+        count: planned.plan.installmentCount,
+        bookingISO,
+        intervalMonths: cfg.intervalMonths,
+      });
+    } else if (seatLine) {
+      schedule = buildFullWithSeatSchedule({
+        payInFull: totalFee,
+        seatAmount: seatAmt,
+        bookingISO,
+        firstIntervalDays: cfg.firstIntervalDays,
+        batchStartISO: priced.batch_start,
+      });
+    } else {
+      schedule = buildFullSchedule(totalFee);
+    }
+  }
+
+  if (input.scheduleOverrides?.length) {
+    const byNo = new Map(input.scheduleOverrides.map((o) => [o.no, o]));
+    schedule = schedule.map((s) => {
+      const o = byNo.get(s.no);
+      if (!o) return s;
+      const amount = Math.round(Number(o.amount));
+      if (!Number.isFinite(amount) || amount < 0) return s;
+      return { ...s, amount, due: o.due !== undefined ? o.due : s.due };
+    });
+  }
+
+  const sum = schedule.reduce((a, s) => a + (Number(s.amount) || 0), 0);
+  if (sum !== totalFee) {
+    return { ok: false, error: `Instalment amounts (₹${sum}) must equal the total fee ₹${totalFee}.` };
+  }
+
+  const customised = negotiatedProvided || !!input.scheduleOverrides?.length;
+  const persistSchedule = customised ? schedule : scheduleAsCheckoutIntent(planned.plan.schedule);
+  const persistTotal = customised ? totalFee : planned.plan.totalFee;
+  const feeAudit =
+    customised && persistTotal !== catalogue
+      ? {
+          original_total_fee: catalogue,
+          discount_amount: Math.max(0, catalogue - persistTotal),
+          discount_reason: `Negotiated at enrolment (catalogue ₹${catalogue.toLocaleString("en-IN")})`,
+          discount_applied_by: input.changedBy || null,
+          discount_applied_at: now,
+        }
+      : {};
 
   if (attemptToReuse) {
     // Re-plan the abandoned attempt to the new selection (no duplicate row). It
@@ -4919,11 +5014,12 @@ export async function enrollStudentInCourse(
       ...batchFields,
       batch_label: planned.plan.batchLabel,
       plan_type: planned.plan.planType,
-      total_fee: planned.plan.totalFee,
+      total_fee: persistTotal,
       amount_paid: 0,
       installment_count: planned.plan.installmentCount,
       status: "checkout_intent",
-      schedule: scheduleAsCheckoutIntent(planned.plan.schedule),
+      schedule: persistSchedule,
+      ...feeAudit,
     });
     await ensureBuyer(phone, input.name).catch(() => null);
     return { ok: true, enrollment: enrollment || attemptToReuse };
@@ -4939,11 +5035,12 @@ export async function enrollStudentInCourse(
     ...batchFields,
     batch_label: planned.plan.batchLabel || batchFields.batch_label,
     plan_type: planned.plan.planType,
-    total_fee: planned.plan.totalFee,
+    total_fee: persistTotal,
     amount_paid: 0,
     installment_count: planned.plan.installmentCount,
     status: "checkout_intent",
-    schedule: scheduleAsCheckoutIntent(planned.plan.schedule),
+    schedule: persistSchedule,
+    ...feeAudit,
   });
   await ensureBuyer(phone, input.name).catch(() => null);
   return { ok: true, enrollment };
@@ -4972,6 +5069,8 @@ export interface OfflineCoursePaymentInput {
   paymentSource?: string | null;
   recordedBy?: string | null;
   financeVerified?: boolean;
+  /** Skip SMS/Telegram/Meta for backdated or admissions-recorded cash. */
+  suppressNotifications?: boolean;
 }
 
 /**
@@ -5050,6 +5149,10 @@ export async function recordOfflineCoursePayment(
   }
 
   const dateISO = input.dateISO || new Date().toISOString();
+  const paidMs = Date.parse(dateISO);
+  const backdated =
+    Number.isFinite(paidMs) && Date.now() - paidMs > 12 * 60 * 60 * 1000;
+  const silentPaidNotify = input.suppressNotifications === true || (input.suppressNotifications !== false && backdated);
   const itemLabel =
     kind === "full"
       ? `${enrollment.course_title} — Remaining balance`
@@ -5077,9 +5180,10 @@ export async function recordOfflineCoursePayment(
     payment_kind: kind,
     installment_no: installmentNo,
     proof_id: input.proofId || null,
-    payment_source: input.paymentSource || null,
+    payment_source: input.paymentSource || (input.recordedBy ? "admin_offline" : null),
     recorded_by: input.recordedBy || null,
     finance_verified: input.financeVerified ?? false,
+    silentPaidNotify,
   } as CreatePaymentInput);
 
   // Tag columns — ensure via direct update after create.
@@ -5091,7 +5195,7 @@ export async function recordOfflineCoursePayment(
           .from("payments")
           .update({
             proof_id: input.proofId || null,
-            payment_source: input.paymentSource || null,
+            payment_source: input.paymentSource || (input.recordedBy ? "admin_offline" : null),
             recorded_by: input.recordedBy || null,
             finance_verified: input.financeVerified ?? false,
           })
