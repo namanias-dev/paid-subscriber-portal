@@ -8,6 +8,7 @@ import {
   getAccessOverridesByPhone,
   getActiveStaffCourseIds,
   getActiveStaffCourseIdsByPhone,
+  isFoundationCourse,
 } from "./dataProvider";
 import { studentBlockReason } from "./studentAccess";
 import { isActiveEnrollment, isLineOutstanding } from "./installments";
@@ -74,8 +75,11 @@ export async function learnerCourseIds(phone: string, studentId?: string | null)
   const ids = new Set<string>();
 
   for (const e of enrollments) {
-    if (e.status === "cancelled") continue;
-    if (!(e.amount_paid > 0 || e.status === "fully_paid")) continue;
+    if (e.status === "cancelled" || e.status === "transferred_out") continue;
+    // Canonical fee-state (not a payment-row / amount_paid proxy). ₹0 comps
+    // with outstanding 0 count as paid the same way a collected full fee does.
+    const fee = enrollmentFeeStateFromEnrollment(e);
+    if (!(fee.isFullyPaid || e.amount_paid > 0)) continue;
     if (!courseAccessValid(byId.get(e.course_id), e.created_at)) continue;
     ids.add(e.course_id);
   }
@@ -161,7 +165,11 @@ export async function resolveLearner(): Promise<Learner | null> {
 export function quizUnlockCourseIds(quiz: Pick<Quiz, "id" | "access_rules">, courses: Course[]): string[] {
   const fromQuiz = quiz.access_rules?.allowed_course_ids || [];
   const fromCourses = courses.filter((c) => (c.entitlements?.quiz_ids || []).includes(quiz.id)).map((c) => c.id);
-  return [...new Set([...fromQuiz, ...fromCourses])];
+  // Live Safalta/Saarthi UUIDs (applyFoundationQuizAccess exists but only runs on
+  // quiz write). Stale lists still hold demo ids like `co-safalta`. Union here so
+  // the gate matches the course the student actually enrolled in.
+  const fromFoundation = courses.filter(isFoundationCourse).map((c) => c.id);
+  return [...new Set([...fromQuiz, ...fromCourses, ...fromFoundation])];
 }
 
 /** A quiz is "paid" when requires_payment is set. Course unlock lists only apply while paid. */
