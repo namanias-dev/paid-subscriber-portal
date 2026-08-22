@@ -14,15 +14,15 @@ export async function archivedPhoneSet(): Promise<Set<string>> {
   const out = new Set<string>();
   if (!supabase) return out;
   try {
-    const { data, error } = await supabase.from("students").select("phone,archived_at,notes");
-    const rows = error
-      ? ((await supabase.from("students").select("phone,notes")).data || [])
-      : (data || []);
-    for (const r of rows) {
+    const { data } = await supabase
+      .from("students")
+      .select("phone,notes,archived_at")
+      .eq("is_active", false);
+    for (const r of data || []) {
       if (isArchivedStudent(r)) out.add(String((r as { phone: string }).phone));
     }
   } catch {
-    /* empty */
+    /* optional */
   }
   return out;
 }

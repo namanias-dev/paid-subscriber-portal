@@ -4495,6 +4495,8 @@ export async function findBuyerByLogin(phone: string, code: string): Promise<Buy
   const buyer = await getBuyerByPhone(phone);
   if (!buyer) return null;
   if (buyer.archived_at) return null;
+  const student = await findStudentByPhone((phone || "").trim());
+  if (student && isArchivedStudent(student)) return null;
   if ((await archivedPhoneSet()).has((phone || "").trim())) return null;
   return buyer.login_code.toUpperCase() === code.toUpperCase() ? buyer : null;
 }
