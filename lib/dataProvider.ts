@@ -295,7 +295,7 @@ export interface NewStudentInput {
   name: string;
   phone: string;
   email?: string | null;
-  plan: PlanId;
+  plan: PlanId | null;
   months: number | null;
   amount_paid?: number | null;
   start_date?: string;

@@ -16,13 +16,15 @@ import {
   getLeadsForPillMap,
   isPaidStatus,
   logAccess,
+  ensureBuyer,
+  getBuyerByPhone,
 } from "@/lib/dataProvider";
 import { buildLeadAttrByPhone, pruneEmptyChannels } from "@/lib/marketing/leadAttrByPhone";
 import { lookupLegacyLeadsByPhones } from "@/lib/marketing/legacyLeadMatch";
 import { getAdminSession } from "@/lib/session";
 import { requirePermission } from "@/lib/adminGuard";
 import { getPlan } from "@/lib/config";
-import { buildWelcomeMessage, buildWhatsAppLink } from "@/lib/whatsapp";
+import { portalLoginWhatsAppLink, renderPortalLoginCodeMessage } from "@/lib/portalLoginMessage";
 import { sendAccessCodeEmail } from "@/lib/email";
 import { formatDate, formatINR, istInputToISO } from "@/lib/dates";
 import { deriveEnrollment, deriveCollections, isActiveEnrollment, paymentProgressLabel } from "@/lib/installments";
@@ -223,13 +225,14 @@ export async function POST(req: Request) {
     const body = await req.json().catch(() => ({}));
     const name = String(body.name || "").trim();
     const phone = String(body.phone || "").trim();
-    const planId = String(body.plan || "") as PlanId;
+    const planIdRaw = String(body.plan || "").trim();
+    const wantsLms = !!planIdRaw;
 
     if (!name || !/^\d{10}$/.test(phone)) {
       return NextResponse.json({ ok: false, error: "Valid name and 10-digit mobile required." }, { status: 400 });
     }
-    const plan = getPlan(planId);
-    if (!plan) {
+    const plan = wantsLms ? getPlan(planIdRaw as PlanId) : null;
+    if (wantsLms && !plan) {
       return NextResponse.json({ ok: false, error: "Invalid plan." }, { status: 400 });
     }
 
@@ -237,10 +240,10 @@ export async function POST(req: Request) {
       name,
       phone,
       email: body.email ? String(body.email).trim() : null,
-      plan: planId,
-      months: plan.months,
+      plan: wantsLms ? (planIdRaw as PlanId) : null,
+      months: plan?.months ?? null,
       amount_paid:
-        body.amount_paid != null && body.amount_paid !== "" ? Number(body.amount_paid) : plan.price,
+        body.amount_paid != null && body.amount_paid !== "" ? Number(body.amount_paid) : (plan?.price ?? null),
       start_date: body.start_date ? new Date(body.start_date).toISOString() : undefined,
       target_year: body.target_year ? Number(body.target_year) : null,
       optional_subject: body.optional_subject ? String(body.optional_subject).trim() : null,
@@ -317,28 +320,36 @@ export async function POST(req: Request) {
       }
     }
 
-    const message = buildWelcomeMessage({
-      name: student.name,
-      code: student.access_code,
-      phone: student.phone,
-      planName: plan.name,
-      expiry: student.expiry_date,
-    });
-    const whatsappLink = buildWhatsAppLink(student.phone, message);
+    const buyer = (await ensureBuyer(phone, name).catch(() => null)) || (await getBuyerByPhone(phone));
+    const portalLoginCode = buyer?.login_code || null;
+    const { text: message } = portalLoginCode
+      ? renderPortalLoginCodeMessage({ name: student.name, loginCode: portalLoginCode })
+      : { text: "" };
+    const whatsappLink = portalLoginCode ? portalLoginWhatsAppLink(student.phone, student.name, portalLoginCode) : null;
 
     let emailSent = false;
-    if (student.email) {
+    if (student.email && portalLoginCode) {
       const r = await sendAccessCodeEmail({
         to: student.email,
         name: student.name,
-        code: student.access_code,
-        planName: plan.name,
+        code: portalLoginCode,
+        planName: plan?.name || "Course portal",
         expiry: formatDate(student.expiry_date),
       });
       emailSent = r.sent;
     }
 
-    return NextResponse.json({ ok: true, student, whatsappLink, message, emailSent, receiptNo, warnings });
+    return NextResponse.json({
+      ok: true,
+      student,
+      portalLoginCode,
+      lmsAccessCode: student.access_code,
+      whatsappLink,
+      message,
+      emailSent,
+      receiptNo,
+      warnings,
+    });
   } catch {
     return NextResponse.json({ ok: false, error: "Failed to add student." }, { status: 500 });
   }

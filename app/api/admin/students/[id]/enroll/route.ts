@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getStudentById, enrollStudentInCourse, logAccess } from "@/lib/dataProvider";
+import { getStudentById, enrollStudentInCourse, logAccess, getBuyerByPhone } from "@/lib/dataProvider";
 import { getAdminSession } from "@/lib/session";
 import { requirePermission } from "@/lib/adminGuard";
 
@@ -27,7 +27,8 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     if (!res.ok) return NextResponse.json({ ok: false, error: res.error }, { status: 400 });
 
     await logAccess(params.id, `admin:enroll ${res.enrollment.course_title} (by ${actor})`);
-    return NextResponse.json({ ok: true, enrollment: res.enrollment });
+    const buyer = await getBuyerByPhone(student.phone);
+    return NextResponse.json({ ok: true, enrollment: res.enrollment, portalLoginCode: buyer?.login_code || null });
   } catch {
     return NextResponse.json({ ok: false, error: "Failed to enroll." }, { status: 500 });
   }

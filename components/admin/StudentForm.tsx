@@ -50,15 +50,15 @@ export default function StudentForm() {
   const [courses, setCourses] = useState<Course[] | null>(null);
   const [webinars, setWebinars] = useState<Webinar[] | null>(null);
   const [saving, setSaving] = useState(false);
-  const [done, setDone] = useState<{ code: string; portalCode?: string | null; whatsappLink: string | null; id: string } | null>(null);
+  const [done, setDone] = useState<{ code: string; lmsCode?: string | null; whatsappLink: string | null; id: string } | null>(null);
 
   // Profile
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
   const [targetYear, setTargetYear] = useState("");
-  const [plan, setPlan] = useState("3m");
-  const [validityMode, setValidityMode] = useState<"plan" | "custom">("plan");
+  const [plan, setPlan] = useState("");
+  const [validityMode, setValidityMode] = useState<"none" | "plan" | "custom">("none");
   const [validTill, setValidTill] = useState("");
   const [notes, setNotes] = useState("");
 
@@ -145,7 +145,7 @@ export default function StudentForm() {
           name: name.trim(),
           phone,
           email: email.trim() || null,
-          plan,
+          plan: validityMode === "plan" ? plan : null,
           valid_till: validityMode === "custom" && validTill ? validTill : undefined,
           target_year: targetYear || null,
           notes: notes.trim() || null,
@@ -158,7 +158,12 @@ export default function StudentForm() {
       if (!data.ok) { toast(data.error || "Failed to add student", "error"); setSaving(false); return; }
       if (data.warnings?.length) toast(`Saved with notes: ${data.warnings.join("; ")}`, "info");
       else toast("Student created", "success");
-      setDone({ code: data.student.access_code, whatsappLink: data.whatsappLink, id: data.student.id });
+      setDone({
+        code: data.portalLoginCode || data.student.access_code,
+        lmsCode: data.lmsAccessCode || data.student.access_code,
+        whatsappLink: data.whatsappLink,
+        id: data.student.id,
+      });
     } catch {
       toast("Network error", "error");
       setSaving(false);
@@ -173,11 +178,15 @@ export default function StudentForm() {
         <div className="card p-6 text-center">
           <div className="mx-auto mb-3 grid h-14 w-14 place-items-center rounded-full bg-success/10 text-success"><Check size={28} /></div>
           <h1 className="font-heading text-xl font-bold">Student created</h1>
-          <p className="mt-1 text-sm text-muted">Share the login code so they can sign in.</p>
-          <div className="mt-4 flex items-center justify-center gap-2">
+          <p className="mt-1 text-sm text-muted">Share the portal login code so they can sign in at namanias.com/login.</p>
+          <p className="mt-4 text-xs font-semibold uppercase tracking-wide text-muted">Portal login code</p>
+          <div className="mt-1 flex items-center justify-center gap-2">
             <span className="rounded-lg border border-line bg-surface2 px-4 py-2 font-mono text-lg font-bold text-primary">{done.code}</span>
             <button onClick={() => { navigator.clipboard.writeText(done.code); toast("Copied", "success"); }} className="btn btn-secondary text-sm"><Copy size={14} /> Copy</button>
           </div>
+          {done.lmsCode && done.lmsCode !== done.code && (
+            <p className="mt-3 text-xs text-muted">LMS (legacy): <span className="font-mono">{done.lmsCode}</span> — not used for Class Hub.</p>
+          )}
           <div className="mt-5 flex flex-wrap justify-center gap-2">
             {done.whatsappLink && <a href={done.whatsappLink} target="_blank" rel="noreferrer" className="btn btn-secondary text-sm"><MessageCircle size={15} /> Send on WhatsApp</a>}
             <Link href={`/admin/students/${done.id}`} className="btn btn-primary text-sm">Open profile →</Link>
@@ -206,6 +215,9 @@ export default function StudentForm() {
         <div className="mt-4">
           <span className="mb-1 block text-xs font-medium text-muted">Access validity</span>
           <div className="flex flex-wrap gap-2">
+            <button type="button" onClick={() => { setPlan(""); setValidityMode("none"); }} className={`rounded-lg border px-3 py-1.5 text-xs font-semibold transition ${validityMode === "none" ? "border-primary bg-primary/10 text-primary" : "border-line hover:border-primary"}`}>
+              None (course only)
+            </button>
             {PLANS.map((p) => (
               <button key={p.id} type="button" onClick={() => { setPlan(p.id); setValidityMode("plan"); }} className={`rounded-lg border px-3 py-1.5 text-xs font-semibold transition ${plan === p.id && validityMode === "plan" ? "border-primary bg-primary/10 text-primary" : "border-line hover:border-primary"}`}>
                 {p.id === "lifetime" ? "Lifetime ∞" : p.name}

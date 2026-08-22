@@ -261,7 +261,13 @@ export default function StudentProfilePage({ params }: { params: { id: string } 
         body: JSON.stringify(body),
       });
       const data = await res.json();
-      if (data.ok) { toast(okMsg, "success"); setModal(null); load(); return true; }
+      if (data.ok) {
+        const extra = data.portalLoginCode ? ` Portal login code ${data.portalLoginCode}` : "";
+        toast(`${okMsg}${extra}`, "success");
+        setModal(null);
+        load();
+        return true;
+      }
       toast(data.error || "Failed", "error");
       return false;
     } catch { toast("Network error", "error"); return false; }
@@ -351,8 +357,32 @@ export default function StudentProfilePage({ params }: { params: { id: string } 
             )}
             <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
               <span className="inline-flex items-center gap-1.5 text-muted"><KeyRound size={13} /> Access</span>
-              <CopyChip value={s.access_code} label="access code" />
-              {profile.buyerCode && (<><span className="text-muted">Portal</span><CopyChip value={profile.buyerCode} label="portal login code" /></>)}
+              {profile.buyerCode && (
+                <>
+                  <span className="text-muted">Portal login code</span>
+                  <CopyChip value={profile.buyerCode} label="portal login code" />
+                  <button
+                    type="button"
+                    className="btn btn-secondary text-xs"
+                    onClick={async () => {
+                      setBusy(true);
+                      try {
+                        const res = await fetch(`/api/admin/students/${s.id}/resend-portal-code`, { method: "POST" });
+                        const data = await res.json();
+                        if (!data.ok) { toast(data.error || "Failed", "error"); return; }
+                        if (data.whatsappLink) window.open(data.whatsappLink, "_blank", "noopener,noreferrer");
+                        toast("WhatsApp draft opened with portal login code", "success");
+                      } catch { toast("Network error", "error"); }
+                      finally { setBusy(false); }
+                    }}
+                  >
+                    Resend portal code
+                  </button>
+                </>
+              )}
+              {s.access_code && s.access_code !== profile.buyerCode && (
+                <><span className="text-muted">LMS (legacy)</span><CopyChip value={s.access_code} label="LMS access code" /></>
+              )}
             </div>
             <p className="mt-3 text-sm">
               <span className="text-muted">Valid till: </span>
