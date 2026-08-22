@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { FileText, Loader2, AlertTriangle } from "lucide-react";
+import { FileText, Loader2, AlertTriangle, RotateCcw, RotateCw } from "lucide-react";
 
 /**
  * Premium mobile-first HTML5 lecture player. Streams DIRECTLY from a short-lived
@@ -13,6 +13,9 @@ import { FileText, Loader2, AlertTriangle } from "lucide-react";
  */
 const SPEEDS = [1, 1.25, 1.5, 2];
 const SAVE_EVERY_MS = 90_000;
+const SKIP_SECONDS = 10;
+const SKIP_LONG_SECONDS = 60;
+const SEEK_SAVE_DEBOUNCE_MS = 400;
 
 export default function LecturePlayer({
   recordingId,
@@ -44,6 +47,8 @@ export default function LecturePlayer({
   const resumed = useRef(false);
   const lastSavedAt = useRef(0);
   const lastSavedPosition = useRef(-1);
+  const seekSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastTap = useRef<{ t: number; x: number } | null>(null);
 
   // Anti-piracy watermark: student identity + live IST clock, repositioned every
   // few seconds so it can't be cropped out and so a DevTools delete is re-applied
@@ -132,6 +137,46 @@ export default function LecturePlayer({
     if (videoRef.current) videoRef.current.playbackRate = r;
   };
 
+  const skipBy = useCallback((delta: number) => {
+    const v = videoRef.current;
+    if (!v || !Number.isFinite(v.duration) || v.duration <= 0) return;
+    const next = Math.min(Math.max(0, (v.currentTime || 0) + delta), v.duration - 0.05);
+    v.currentTime = next;
+  }, []);
+
+  const onSeekedDebounced = useCallback(() => {
+    if (seekSaveTimer.current) clearTimeout(seekSaveTimer.current);
+    seekSaveTimer.current = setTimeout(() => save(false, true), SEEK_SAVE_DEBOUNCE_MS);
+  }, [save]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement | null)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || (e.target as HTMLElement | null)?.isContentEditable) return;
+      if (e.key === "ArrowRight") {
+        e.preventDefault();
+        skipBy(e.shiftKey ? SKIP_LONG_SECONDS : SKIP_SECONDS);
+      } else if (e.key === "ArrowLeft") {
+        e.preventDefault();
+        skipBy(e.shiftKey ? -SKIP_LONG_SECONDS : -SKIP_SECONDS);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [skipBy]);
+
+  const onVideoPointer = (e: React.PointerEvent<HTMLVideoElement>) => {
+    if (e.pointerType !== "touch") return;
+    const rect = (e.currentTarget as HTMLVideoElement).getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const now = Date.now();
+    const prev = lastTap.current;
+    lastTap.current = { t: now, x };
+    if (!prev || now - prev.t > 280) return;
+    e.preventDefault();
+    skipBy(x < rect.width / 2 ? -SKIP_SECONDS : SKIP_SECONDS);
+  };
+
   return (
     <div className="mt-4">
       <div className="overflow-hidden rounded-2xl border border-line bg-black">
@@ -159,8 +204,9 @@ export default function LecturePlayer({
                 onContextMenu={(e) => e.preventDefault()}
                 onLoadedMetadata={onLoadedMeta}
                 onPause={() => save(false, true)}
-                onSeeked={() => save(false, true)}
+                onSeeked={onSeekedDebounced}
                 onEnded={() => save(true, true)}
+                onPointerUp={onVideoPointer}
               />
               {watermark && (
                 <div
@@ -193,6 +239,12 @@ export default function LecturePlayer({
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center gap-1 rounded-full border border-line bg-surface p-1">
+            <button type="button" aria-label={`Back ${SKIP_LONG_SECONDS} seconds`} onClick={() => skipBy(-SKIP_LONG_SECONDS)} className="min-h-[36px] rounded-full px-2 text-xs font-bold text-ink2 hover:text-ink">−{SKIP_LONG_SECONDS}s</button>
+            <button type="button" aria-label={`Back ${SKIP_SECONDS} seconds`} onClick={() => skipBy(-SKIP_SECONDS)} className="min-h-[36px] rounded-full px-2 text-xs font-bold text-ink2 hover:text-ink"><RotateCcw size={14} className="inline" /> {SKIP_SECONDS}s</button>
+            <button type="button" aria-label={`Forward ${SKIP_SECONDS} seconds`} onClick={() => skipBy(SKIP_SECONDS)} className="min-h-[36px] rounded-full px-2 text-xs font-bold text-ink2 hover:text-ink">{SKIP_SECONDS}s <RotateCw size={14} className="inline" /></button>
+            <button type="button" aria-label={`Forward ${SKIP_LONG_SECONDS} seconds`} onClick={() => skipBy(SKIP_LONG_SECONDS)} className="min-h-[36px] rounded-full px-2 text-xs font-bold text-ink2 hover:text-ink">+{SKIP_LONG_SECONDS}s</button>
+          </div>
           <div className="flex items-center gap-1 rounded-full border border-line bg-surface p-1">
             {SPEEDS.map((r) => (
               <button
