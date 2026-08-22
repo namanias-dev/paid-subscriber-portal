@@ -49,6 +49,8 @@ export default function LecturePlayer({
   const lastSavedPosition = useRef(-1);
   const seekSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastTap = useRef<{ t: number; x: number } | null>(null);
+  const ttlSec = useRef(1800);
+  const pendingRestore = useRef<{ time: number; paused: boolean; rate: number } | null>(null);
 
   // Anti-piracy watermark: student identity + live IST clock, repositioned every
   // few seconds so it can't be cropped out and so a DevTools delete is re-applied
@@ -69,21 +71,35 @@ export default function LecturePlayer({
     return () => clearInterval(id);
   }, [watermark]);
 
-  // Fetch the signed URL on mount (access re-checked server-side).
+  // Fetch the signed URL on mount (access re-checked server-side). Renew before
+  // the 1800s signature expires so a long lecture does not die mid-watch.
   useEffect(() => {
     let alive = true;
-    (async () => {
+    const load = async (renew: boolean) => {
       try {
         const res = await fetch(`/api/lectures/${recordingId}/play`);
         const data = await res.json();
         if (!alive) return;
-        if (!res.ok || !data.ok) { setError(data?.access?.reason === "login" ? "Please log in to watch." : "This lecture isn't available right now."); return; }
+        if (!res.ok || !data.ok) {
+          if (!renew) setError(data?.access?.reason === "login" ? "Please log in to watch." : "This lecture isn't available right now.");
+          return;
+        }
+        if (typeof data.ttl === "number" && data.ttl > 60) ttlSec.current = data.ttl;
+        const v = videoRef.current;
+        if (renew && v) {
+          pendingRestore.current = { time: v.currentTime || 0, paused: v.paused, rate: v.playbackRate || 1 };
+        }
         setUrl(data.url);
       } catch {
-        if (alive) setError("Network error — please retry.");
+        if (alive && !renew) setError("Network error — please retry.");
       }
-    })();
-    return () => { alive = false; };
+    };
+    load(false);
+    const id = setInterval(() => load(true), Math.max(60_000, (ttlSec.current - 120) * 1000));
+    return () => {
+      alive = false;
+      clearInterval(id);
+    };
   }, [recordingId]);
 
   const save = useCallback((completed = false, force = false) => {
@@ -127,7 +143,16 @@ export default function LecturePlayer({
 
   const onLoadedMeta = () => {
     const v = videoRef.current;
-    if (!v || resumed.current) return;
+    if (!v) return;
+    const restore = pendingRestore.current;
+    if (restore) {
+      pendingRestore.current = null;
+      v.currentTime = restore.time;
+      v.playbackRate = restore.rate;
+      if (!restore.paused) v.play().catch(() => {});
+      return;
+    }
+    if (resumed.current) return;
     resumed.current = true;
     if (initialPosition > 5 && (!v.duration || initialPosition < v.duration - 5)) v.currentTime = initialPosition;
   };
