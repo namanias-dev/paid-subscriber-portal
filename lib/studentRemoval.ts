@@ -127,7 +127,7 @@ async function recalcSeatsLeft(courseIds: string[], skipPhones: Set<string>): Pr
   const supabase = db();
   if (!supabase) return;
   const { data: enrs } = await supabase.from("course_enrollments").select("course_id,batch_id,phone,status,amount_paid");
-  const live = (enrs || []).filter((e) => !skipPhones.has(String(e.phone)) && countsTowardCapacity(e as { status: string; amount_paid: number }));
+  const live = (enrs || []).filter((e) => !skipPhones.has(String(e.phone)) && countsTowardCapacity(e as Pick<CourseEnrollment, "status" | "amount_paid">));
   for (const cid of [...new Set(courseIds)]) {
     const course = courses.find((c) => c.id === cid);
     if (!course?.batches?.length) continue;
