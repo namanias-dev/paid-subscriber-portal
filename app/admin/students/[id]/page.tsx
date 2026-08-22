@@ -916,7 +916,7 @@ function RemoveStudentModal({
   const typed = phone.replace(/\D/g, "").slice(-10);
   const match = typed.length === 10 && typed === expect;
   return (
-    <Modal title="Remove student" onClose={onClose}>
+    <Modal open onClose={onClose} title="Remove student">
       {!preview ? (
         <p className="text-sm text-muted">Loading…</p>
       ) : (
