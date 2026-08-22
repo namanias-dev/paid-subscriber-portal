@@ -1,10 +1,9 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { ArrowLeft, Lock, ShieldCheck } from "lucide-react";
-import { getEnrollments, getAllCourses, getLibraryDocsByIds, getOrientationVideosForTarget, getCourseEnrollmentsByPhone, getAccessOverridesByPhone } from "@/lib/dataProvider";
-import { hasCourseAccess } from "@/lib/courseAccess";
+import { getAllCourses, getLibraryDocsByIds, getOrientationVideosForTarget, getCourseEnrollmentsByPhone, getAccessOverridesByPhone } from "@/lib/dataProvider";
 import { resolveLearner } from "@/lib/entitlements";
-import { computeCoursePlaybackAccess } from "@/lib/coursePlaybackAccess";
+import { classHubHardLocked, computeCoursePlaybackAccess } from "@/lib/coursePlaybackAccess";
 import { nextUnpaidDatedLine } from "@/lib/accessAtRisk";
 import { getClassHubSectionsForCourse, getClassHubPerformance } from "@/lib/classHubServer";
 import { resolveEnrollmentBatchId, resolveLiveClass } from "@/lib/courseZoom";
@@ -24,25 +23,6 @@ export default async function ClassHubPage({ params }: { params: { courseId: str
   }
 
   const isStaff = learner.kind === "staff";
-  let access: boolean;
-  if (isStaff) {
-    access = learner.courseIds.includes(course.id);
-  } else if (learner.kind === "student" && learner.studentId) {
-    const enrollments = await getEnrollments(learner.studentId);
-    access = hasCourseAccess(course.id, { enrollments }) || learner.courseIds.includes(course.id);
-  } else {
-    access = learner.courseIds.includes(course.id);
-  }
-  if (!access) {
-    return (
-      <LockedOrMissing
-        title="Class Hub is locked"
-        subtitle={`Enroll in "${course.title}" to unlock live classes, orientation videos and study material.`}
-        cta={{ href: `/courses/${course.slug}`, label: "View course" }}
-      />
-    );
-  }
-
   const courseEnrollments = isStaff ? [] : await getCourseEnrollmentsByPhone(learner.phone);
   const overrides = isStaff ? [] : await getAccessOverridesByPhone(learner.phone);
   const enrollment = courseEnrollments.find((e) => e.course_id === course.id && e.status !== "cancelled") || null;
@@ -51,6 +31,27 @@ export default async function ClassHubPage({ params }: { params: { courseId: str
   const playback = isStaff
     ? { allowed: true as const }
     : computeCoursePlaybackAccess(course, enrollment || undefined, override);
+  if (!isStaff && classHubHardLocked({ entitledCourseIds: learner.courseIds, playbackAllowed: playback.allowed })) {
+    return (
+      <LockedOrMissing
+        title="Class Hub is locked"
+        subtitle={`Enroll in "${course.title}" to unlock live classes, orientation videos and study material.`}
+        cta={{ href: `/courses/${course.slug}`, label: "View course" }}
+      />
+    );
+  }
+  if (!isStaff && !learner.courseIds.includes(course.id) && !enrollment && learner.courseIds.length > 0) {
+    redirect(`/dashboard/class/${learner.courseIds[0]}`);
+  }
+  if (isStaff && !learner.courseIds.includes(course.id)) {
+    return (
+      <LockedOrMissing
+        title="Class Hub is locked"
+        subtitle={`Enroll in "${course.title}" to unlock live classes, orientation videos and study material.`}
+        cta={{ href: `/courses/${course.slug}`, label: "View course" }}
+      />
+    );
+  }
   const playbackLocked = !playback.allowed;
   const unpaid = enrollment ? nextUnpaidDatedLine(enrollment.schedule) : null;
   const lockPayHref = enrollment ? `/portal/course/${enrollment.id}` : "/portal";

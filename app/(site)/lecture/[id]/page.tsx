@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { ArrowLeft, Lock, LogIn } from "lucide-react";
 import { getContentById, getLectureProgress } from "@/lib/dataProvider";
 import { resolveLectureAccess } from "@/lib/entitlements";
+import { pickEntitledRecordingCourseId } from "@/lib/coursePlaybackAccess";
 import { getPrimaryAccessAwarenessForPhone } from "@/lib/accessAwarenessServer";
 import { r2Configured, signGetUrl } from "@/lib/r2";
 import { formatISTDate, formatINR } from "@/lib/dates";
@@ -21,7 +22,7 @@ export default async function LecturePage({ params }: { params: { id: string } }
   // Route back to the SAME hub the learner came from. Buyers use /portal (no
   // student cookie), students use /dashboard — sending a buyer to /dashboard
   // trips the student-only middleware guard and bounces them to login.
-  const courseId = (rec.course_ids && rec.course_ids[0]) || rec.course_id || "";
+  const courseId = pickEntitledRecordingCourseId(rec, learner?.courseIds ?? []);
   const isBuyer = learner?.kind === "buyer";
   const hubHome = !learner ? "/" : isBuyer ? "/portal" : "/dashboard/my-courses";
   const backHref = courseId

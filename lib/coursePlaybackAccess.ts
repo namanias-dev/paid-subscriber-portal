@@ -23,6 +23,33 @@ export interface CoursePlaybackSnapshot {
   access: LectureAccess;
 }
 
+/**
+ * Course id for "Back to Class Hub". Prefer an id the learner is entitled to
+ * among the recording's assigned courses — `course_ids[0]` is often a stale
+ * demo slug (`co-safalta`) while playback was granted on a live UUID.
+ */
+export function pickEntitledRecordingCourseId(
+  rec: { course_ids?: string[] | null; course_id?: string | null },
+  entitledCourseIds: string[],
+): string {
+  const ids =
+    rec.course_ids && rec.course_ids.length
+      ? rec.course_ids
+      : rec.course_id
+        ? [rec.course_id]
+        : [];
+  const hit = ids.find((id) => entitledCourseIds.includes(id));
+  return hit || ids[0] || "";
+}
+
+/** Whole-hub Enroll lock only when the learner has no entitled course at all. */
+export function classHubHardLocked(opts: {
+  entitledCourseIds: string[];
+  playbackAllowed: boolean;
+}): boolean {
+  return !opts.playbackAllowed && opts.entitledCourseIds.length === 0;
+}
+
 export function computeCoursePlaybackAccess(
   course: Course | undefined,
   enrollment: CourseEnrollment | undefined,

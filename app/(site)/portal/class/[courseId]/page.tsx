@@ -3,10 +3,9 @@ import { redirect } from "next/navigation";
 import type { Metadata } from "next";
 import { ArrowLeft, Lock } from "lucide-react";
 import { getBuyerSession } from "@/lib/session";
-import { getAllCourses, getLibraryDocsByIds, paidCourseIdsForPhone, getOrientationVideosForTarget, getCourseEnrollmentsByPhone, getAccessOverridesByPhone } from "@/lib/dataProvider";
-import { hasCourseAccess } from "@/lib/courseAccess";
+import { getAllCourses, getLibraryDocsByIds, getOrientationVideosForTarget, getCourseEnrollmentsByPhone, getAccessOverridesByPhone } from "@/lib/dataProvider";
 import { resolveLearner } from "@/lib/entitlements";
-import { computeCoursePlaybackAccess } from "@/lib/coursePlaybackAccess";
+import { classHubHardLocked, computeCoursePlaybackAccess } from "@/lib/coursePlaybackAccess";
 import { nextUnpaidDatedLine } from "@/lib/accessAtRisk";
 import { getClassHubSectionsForCourse, getClassHubPerformance } from "@/lib/classHubServer";
 import { buildPerformanceData } from "@/lib/performance";
@@ -27,11 +26,11 @@ export default async function PortalClassHubPage({
   const session = await getBuyerSession();
   if (!session) redirect(`/portal/login?next=${encodeURIComponent(`/portal/class/${params.courseId}`)}`);
 
-  const [courses, paidCourseIds, courseEnrollments, overrides] = await Promise.all([
+  const [courses, courseEnrollments, overrides, learner] = await Promise.all([
     getAllCourses(),
-    paidCourseIdsForPhone(session.phone),
     getCourseEnrollmentsByPhone(session.phone),
     getAccessOverridesByPhone(session.phone),
+    resolveLearner(),
   ]);
   const course = courses.find((c) => c.id === params.courseId);
 
@@ -39,8 +38,12 @@ export default async function PortalClassHubPage({
     return <Locked title="Course not found" subtitle="This course is no longer available." />;
   }
 
-  const access = hasCourseAccess(course.id, { paidCourseIds });
-  if (!access) {
+  const enrollment = courseEnrollments.find((e) => e.course_id === course.id && e.status !== "cancelled") || null;
+  const override = overrides.find((o) => o.course_id === course.id);
+  // SoT — same lectureAccessForCourse path as the lecture route / pinned bar.
+  const playback = computeCoursePlaybackAccess(course, enrollment || undefined, override);
+  const entitledCourseIds = learner?.courseIds ?? [];
+  if (classHubHardLocked({ entitledCourseIds, playbackAllowed: playback.allowed })) {
     return (
       <Locked
         title="Class Hub is locked"
@@ -49,11 +52,11 @@ export default async function PortalClassHubPage({
       />
     );
   }
-
-  const enrollment = courseEnrollments.find((e) => e.course_id === course.id && e.status !== "cancelled") || null;
-  const override = overrides.find((o) => o.course_id === course.id);
-  // SoT — same lectureAccessForCourse path as the pinned access bar.
-  const playback = computeCoursePlaybackAccess(course, enrollment || undefined, override);
+  // Stale demo id on a recording (co-safalta) with no enrolment row — open the
+  // course the student can actually stream, do not Enroll-lock the whole hub.
+  if (!entitledCourseIds.includes(course.id) && !enrollment && entitledCourseIds.length > 0) {
+    redirect(`/portal/class/${entitledCourseIds[0]}`);
+  }
   const playbackLocked = !playback.allowed;
   const unpaid = enrollment ? nextUnpaidDatedLine(enrollment.schedule) : null;
   const lockPayHref = enrollment ? `/portal/course/${enrollment.id}` : "/portal";
@@ -67,10 +70,9 @@ export default async function PortalClassHubPage({
     : live;
 
   const ar = course.after_registration || {};
-  const [docs, orientationVideos, learner] = await Promise.all([
+  const [docs, orientationVideos] = await Promise.all([
     getLibraryDocsByIds([...(ar.doc_ids || []), ...(course.brochure_ids || [])]),
     getOrientationVideosForTarget("course", course.id, { publishedOnly: true }),
-    resolveLearner(),
   ]);
 
   // When playback locked, do not pass downloadable file URLs into the client tree.
@@ -78,7 +80,7 @@ export default async function PortalClassHubPage({
     ? docs.map((d) => ({ ...d, file_url: "" }))
     : docs;
 
-  const accessExpired = !!learner && !learner.courseIds.includes(course.id);
+  const accessExpired = !!learner && !entitledCourseIds.includes(course.id) && !enrollment;
   const [sections, performance] = accessExpired
     ? [[], buildPerformanceData({ attempts: [], quizById: new Map(), available: [], attemptStatus: {}, views: [], courseId: course.id })]
     : await Promise.all([
