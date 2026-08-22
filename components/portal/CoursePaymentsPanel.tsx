@@ -38,7 +38,7 @@ function paidLabel(
   item: { no: number; kind: string; paid_at?: string | null; reference_no?: string | null },
   payments: { installment_no: number | null; payment_kind: string | null; method: string | null; gateway: string | null; paid_at: string }[],
   receipts: PaymentReceipt[],
-  receiptByRef: Map<string, PaymentReceipt>,
+  receiptByRef: Map<string | null, PaymentReceipt>,
 ): string {
   const pay =
     payments.find((p) => p.installment_no === item.no) ||
