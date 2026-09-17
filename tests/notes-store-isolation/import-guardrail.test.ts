@@ -52,12 +52,34 @@ describe("store domain isolation guardrail", () => {
     assert.equal(v[0].kind, "forbidden-symbol");
   });
 
-  test("catches a write to an academy money or identity table", () => {
+  test("catches any touch of an academy money or identity table", () => {
     for (const table of ["payments", "students", "buyers", "course_enrollments"]) {
-      const v = scan("lib/store/x.ts", `await db.from("${table}").insert({});`);
-      assert.equal(v.length, 1, table);
-      assert.equal(v[0].kind, "forbidden-table");
+      const write = scan("lib/store/x.ts", `await db.from("${table}").insert({});`);
+      assert.equal(write.length, 1, table);
+      assert.equal(write[0].kind, "forbidden-table-write");
+
+      const read = scan("lib/store/x.ts", `await db.from("${table}").select("id");`);
+      assert.equal(read.length, 1, table);
+      assert.equal(read[0].kind, "forbidden-table");
     }
+  });
+
+  test("a write to an academy table is reported as a write, from anywhere", () => {
+    for (const verb of ["insert", "update", "upsert", "delete"]) {
+      const v = scan("lib/store/x.ts", `await db.from("payments").${verb}({});`);
+      assert.equal(v.length, 1, verb);
+      assert.equal(v[0].kind, "forbidden-table-write");
+    }
+    // Including the one file allowed to read that table.
+    const v = scan("lib/store/payments/misrouteProbe.ts", `await db.from("payments").update({});`);
+    assert.equal(v.length, 1);
+    assert.equal(v[0].kind, "forbidden-table-write");
+  });
+
+  test("the misroute probe may count payments rows, and only that file may", () => {
+    const countQuery = `await db.from("payments").select("*", { count: "exact", head: true });`;
+    assert.deepEqual(scan("lib/store/payments/misrouteProbe.ts", countQuery), []);
+    assert.equal(scan("lib/store/payments/verify.ts", countQuery).length, 1);
   });
 
   test("allows the store's own tables and the shared infrastructure tables", () => {

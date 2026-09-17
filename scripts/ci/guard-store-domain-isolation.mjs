@@ -30,6 +30,7 @@ export const STORE_DIRS = [
   "app/api/notes",
   "app/admin/notes",
   "app/api/admin/notes",
+  "app/api/cron/notes-store-verify",
   "components/notes",
 ];
 
@@ -91,6 +92,25 @@ const ALLOWED_TABLES = new Set([
   "analytics_events",
   "auth_attempts",
 ]);
+
+/**
+ * Files permitted a READ of an academy table, and nothing more.
+ *
+ * There is exactly one, and it exists because a detector has to be able to look
+ * at the thing it is protecting: misrouteProbe counts rows in public.payments
+ * carrying a store reference, so an isolation breach pages ops instead of
+ * surfacing weeks later in a revenue reconciliation.
+ *
+ * The allowance is narrow in three ways, all enforced below: only these files,
+ * only these tables, and only if the file contains no mutation verb at all. A
+ * write to an academy table fails the build from anywhere, allowlisted or not.
+ */
+const READ_ONLY_PROBE_ALLOWLIST = new Map([
+  ["lib/store/payments/misrouteProbe.ts", new Set(["payments"])],
+]);
+
+/** A mutation verb chained onto .from(...) — the part that is never allowed. */
+const MUTATION_AFTER_FROM = /^\s*(?:\/\/[^\n]*\n\s*)*\.\s*(insert|update|upsert|delete)\b/;
 
 const IMPORT_RE = /(?:import|export)[\s\S]*?from\s*["']([^"']+)["']/g;
 const DYNAMIC_IMPORT_RE = /import\s*\(\s*["']([^"']+)["']\s*\)/g;
@@ -162,21 +182,30 @@ export function scanSource(rel, src) {
     }
   }
 
+  const probeTables = READ_ONLY_PROBE_ALLOWLIST.get(rel);
+
   FROM_TABLE_RE.lastIndex = 0;
   let t;
   while ((t = FROM_TABLE_RE.exec(src)) !== null) {
     const table = t[1];
     if (ALLOWED_TABLES.has(table)) continue;
     if (table.startsWith("store_")) continue;
-    if (FORBIDDEN_TABLES.includes(table)) {
-      violations.push({
-        rel,
-        line: lineOf(src, t.index),
-        kind: "forbidden-table",
-        detail: table,
-        why: "academy money / identity table — the only link is phone_key, read-time",
-      });
-    }
+    if (!FORBIDDEN_TABLES.includes(table)) continue;
+
+    // A write is never allowed, from anywhere, allowlisted or not.
+    const rest = src.slice(t.index + t[0].length);
+    const isWrite = MUTATION_AFTER_FROM.test(rest);
+    if (!isWrite && probeTables?.has(table)) continue;
+
+    violations.push({
+      rel,
+      line: lineOf(src, t.index),
+      kind: isWrite ? "forbidden-table-write" : "forbidden-table",
+      detail: table,
+      why: isWrite
+        ? "writing an academy money / identity table — never permitted from store code"
+        : "academy money / identity table — the only link is phone_key, read-time",
+    });
   }
 
   return violations;
