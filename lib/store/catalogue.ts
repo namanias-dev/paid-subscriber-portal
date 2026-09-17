@@ -1,0 +1,225 @@
+/**
+ * Store catalogue reads. ISR pages call these; nothing session-derived is
+ * returned, so a cached product page cannot leak a cart count or a name.
+ */
+import { storeDb } from "./db";
+import { publicCdnUrl } from "@/lib/r2";
+import { unstable_cache } from "next/cache";
+
+export const STORE_CACHE_TAG = "notes-store";
+
+export interface StoreCategory {
+  id: string;
+  slug: string;
+  name: string;
+  nav_label: string | null;
+  short_description: string | null;
+  cover_image_key: string | null;
+  position: number;
+}
+
+export interface StoreProductCard {
+  id: string;
+  sku: string;
+  slug: string;
+  kind: "single" | "bundle";
+  name: string;
+  short_name: string | null;
+  subject: string | null;
+  stage: string | null;
+  language: string;
+  edition: string | null;
+  page_count: number | null;
+  mrp_paise: number;
+  selling_price_paise: number;
+  cover_image_key: string | null;
+  cover_url: string | null;
+  is_featured: boolean;
+  is_bestseller: boolean;
+  dispatch_days: number;
+  sellable: number;
+  category_slug: string | null;
+  category_name: string | null;
+  max_quantity_per_order: number;
+}
+
+export interface StoreProductMedia {
+  id: string;
+  kind: "photo" | "sample_page";
+  r2_key: string;
+  url: string | null;
+  alt: string | null;
+  source_page_no: number | null;
+  position: number;
+  width: number | null;
+  height: number | null;
+}
+
+export interface StoreProductDetail extends StoreProductCard {
+  description_md: string | null;
+  short_description: string | null;
+  weight_grams: number | null;
+  binding_type: string | null;
+  printing_type: string | null;
+  hsn_code: string | null;
+  tax_treatment: string;
+  tax_rate_bps: number;
+  seo_title: string | null;
+  seo_description: string | null;
+  photos: StoreProductMedia[];
+  samples: StoreProductMedia[];
+}
+
+function coverUrl(key: string | null | undefined): string | null {
+  if (!key) return null;
+  if (key.startsWith("store-private/")) return null;
+  return publicCdnUrl(key);
+}
+
+function toCard(row: Record<string, unknown>, category?: { slug: string; name: string } | null): StoreProductCard {
+  const onHand = Number(row.on_hand || 0);
+  const reserved = Number(row.reserved || 0);
+  return {
+    id: String(row.id),
+    sku: String(row.sku),
+    slug: String(row.slug),
+    kind: row.kind === "bundle" ? "bundle" : "single",
+    name: String(row.name),
+    short_name: (row.short_name as string) || null,
+    subject: (row.subject as string) || null,
+    stage: (row.stage as string) || null,
+    language: String(row.language || "english"),
+    edition: (row.edition as string) || null,
+    page_count: row.page_count == null ? null : Number(row.page_count),
+    mrp_paise: Number(row.mrp_paise || 0),
+    selling_price_paise: Number(row.selling_price_paise || 0),
+    cover_image_key: (row.cover_image_key as string) || null,
+    cover_url: coverUrl((row.cover_image_key as string) || null),
+    is_featured: !!row.is_featured,
+    is_bestseller: !!row.is_bestseller,
+    dispatch_days: Number(row.dispatch_days || 2),
+    sellable: Math.max(0, onHand - reserved),
+    category_slug: category?.slug ?? null,
+    category_name: category?.name ?? null,
+    max_quantity_per_order: Number(row.max_quantity_per_order || 5),
+  };
+}
+
+async function listActiveCategoriesUncached(): Promise<StoreCategory[]> {
+  const db = storeDb();
+  if (!db) return [];
+  const { data } = await db
+    .from("store_categories")
+    .select("id,slug,name,nav_label,short_description,cover_image_key,position")
+    .eq("is_active", true)
+    .order("position", { ascending: true });
+  return (data || []) as StoreCategory[];
+}
+
+export const listActiveCategories = unstable_cache(listActiveCategoriesUncached, ["store-categories"], {
+  tags: [STORE_CACHE_TAG],
+  revalidate: 600,
+});
+
+export async function getCategoryBySlug(slug: string): Promise<StoreCategory | null> {
+  const db = storeDb();
+  if (!db) return null;
+  const { data } = await db
+    .from("store_categories")
+    .select("id,slug,name,nav_label,short_description,cover_image_key,position")
+    .eq("slug", slug)
+    .eq("is_active", true)
+    .maybeSingle();
+  return (data as StoreCategory) || null;
+}
+
+const PRODUCT_LIST_COLS =
+  "id,sku,slug,kind,name,short_name,subject,stage,language,edition,page_count,mrp_paise,selling_price_paise,cover_image_key,is_featured,is_bestseller,dispatch_days,on_hand,reserved,max_quantity_per_order,category_id,position";
+
+export async function listActiveProducts(opts?: {
+  categoryId?: string;
+  bestsellers?: boolean;
+  featured?: boolean;
+  kind?: "single" | "bundle";
+  limit?: number;
+}): Promise<StoreProductCard[]> {
+  const db = storeDb();
+  if (!db) return [];
+  let q = db.from("store_products").select(PRODUCT_LIST_COLS).eq("is_active", true);
+  if (opts?.categoryId) q = q.eq("category_id", opts.categoryId);
+  if (opts?.bestsellers) q = q.eq("is_bestseller", true);
+  if (opts?.featured) q = q.eq("is_featured", true);
+  if (opts?.kind) q = q.eq("kind", opts.kind);
+  q = q.order("position", { ascending: true }).order("name", { ascending: true });
+  if (opts?.limit) q = q.limit(opts.limit);
+  const { data } = await q;
+  const rows = data || [];
+  const catIds = [...new Set(rows.map((r) => r.category_id).filter(Boolean))] as string[];
+  const cats = new Map<string, { slug: string; name: string }>();
+  if (catIds.length) {
+    const { data: cdata } = await db.from("store_categories").select("id,slug,name").in("id", catIds);
+    for (const c of cdata || []) cats.set(c.id, { slug: c.slug, name: c.name });
+  }
+  return rows.map((r) => toCard(r as Record<string, unknown>, r.category_id ? cats.get(r.category_id) || null : null));
+}
+
+export async function getProductBySlug(slug: string): Promise<StoreProductDetail | null> {
+  const db = storeDb();
+  if (!db) return null;
+  const { data } = await db
+    .from("store_products")
+    .select("*, store_categories(slug,name)")
+    .eq("slug", slug)
+    .eq("is_active", true)
+    .maybeSingle();
+  if (!data) return null;
+  const cat = (data as { store_categories?: { slug: string; name: string } | null }).store_categories || null;
+  const card = toCard(data as Record<string, unknown>, cat);
+  const { data: media } = await db
+    .from("store_product_media")
+    .select("id,kind,r2_key,alt,source_page_no,position,width,height")
+    .eq("product_id", data.id)
+    .order("position", { ascending: true });
+
+  const photos: StoreProductMedia[] = [];
+  const samples: StoreProductMedia[] = [];
+  for (const m of media || []) {
+    const item: StoreProductMedia = {
+      id: m.id,
+      kind: m.kind,
+      r2_key: m.r2_key,
+      url: m.kind === "photo" ? coverUrl(m.r2_key) : `/api/notes/sample/${m.id}`,
+      alt: m.alt,
+      source_page_no: m.source_page_no,
+      position: m.position,
+      width: m.width,
+      height: m.height,
+    };
+    if (m.kind === "sample_page") samples.push(item);
+    else photos.push(item);
+  }
+
+  return {
+    ...card,
+    description_md: data.description_md,
+    short_description: data.short_description,
+    weight_grams: data.weight_grams,
+    binding_type: data.binding_type,
+    printing_type: data.printing_type,
+    hsn_code: data.hsn_code,
+    tax_treatment: data.tax_treatment,
+    tax_rate_bps: data.tax_rate_bps,
+    seo_title: data.seo_title,
+    seo_description: data.seo_description,
+    photos,
+    samples,
+  };
+}
+
+export async function getProductById(id: string): Promise<StoreProductCard | null> {
+  const db = storeDb();
+  if (!db) return null;
+  const { data } = await db.from("store_products").select(PRODUCT_LIST_COLS).eq("id", id).maybeSingle();
+  if (!data) return null;
+  return toCard(data as Record<string, unknown>);
+}
