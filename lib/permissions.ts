@@ -50,7 +50,12 @@ export type PermissionKey =
   | "journey_pause"
   | "journey_manage_templates"
   | "journey_manage_execution"
-  | "journey_manage_killswitch";
+  | "journey_manage_killswitch"
+  // Notes Store. Restrictive by default — only Super Admin / Admin hold these
+  // until explicitly granted. Catalogue is content; orders carry customer PII
+  // and money, so they are a separate key.
+  | "store_manage_catalogue"
+  | "store_manage_orders";
 
 export interface PermissionMeta {
   key: PermissionKey;
@@ -98,6 +103,9 @@ export const PERMISSIONS: PermissionMeta[] = [
   { key: "journey_manage_templates", label: "Manage Journey Automation templates", group: "Communications" },
   { key: "journey_manage_execution", label: "Enable Journey Automation execution (simulate/live/canary)", group: "Communications" },
   { key: "journey_manage_killswitch", label: "Manage Journey Automation kill switch", group: "Communications" },
+
+  { key: "store_manage_catalogue", label: "Manage Notes Store catalogue (products, samples, inventory)", group: "Notes Store" },
+  { key: "store_manage_orders", label: "Manage Notes Store orders (queue, pick list, mark shipped)", group: "Notes Store" },
 ];
 
 export const PERMISSION_KEYS: PermissionKey[] = PERMISSIONS.map((p) => p.key);

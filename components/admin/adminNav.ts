@@ -93,6 +93,9 @@ export const ADMIN_NAV: AdminNavItem[] = [
     match: ["/admin/course-payments/at-risk", "/admin/access-risk"],
   },
   { href: "/admin/payments", label: "Payments", icon: "payments", group: "Admissions & Payments", perm: "view_revenue" },
+  { href: "/admin/notes", label: "Notes orders", icon: "payments", group: "Notes Store", perm: "store_manage_orders" },
+  { href: "/admin/notes/products", label: "Notes catalogue", icon: "content", group: "Notes Store", perm: "store_manage_catalogue" },
+  { href: "/admin/notes/pick-list", label: "Notes pick list", icon: "reports", group: "Notes Store", perm: "store_manage_orders" },
   { href: "/admin/payments/proof-finance", label: "Proof finance queue", icon: "payments", group: "Admissions & Payments", perm: "view_revenue" },
 
   // ── TEAM & SYSTEM ──────────────────────────────────────────────────────
