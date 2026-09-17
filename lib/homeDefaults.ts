@@ -1,6 +1,6 @@
 import type { SiteSettings, HeroConfig, PopupConfig, HomeContent, BrandConfig, Topper, NavConfig, AboutContent } from "./types";
 import { normalizeLeaderboardSettings, DEFAULT_LEADERBOARD_SETTINGS } from "./leaderboardConfig";
-import { ACADEMY, SUPPORT } from "./config";
+import { ACADEMY } from "./config";
 
 /**
  * Default home/site content. The public site renders DB settings merged OVER
@@ -83,10 +83,10 @@ export const DEFAULT_BRAND: Required<BrandConfig> = {
   name: ACADEMY.name,
   short_name: ACADEMY.shortName,
   tagline: ACADEMY.tagline,
-  address: ACADEMY.address,
-  support_phone: SUPPORT.phone,
-  support_email: SUPPORT.email,
-  whatsapp: SUPPORT.phone,
+  address: "SCO 173–174, Sector 17C, Chandigarh",
+  support_phone: "+91 84376 86541",
+  support_email: "namanstudycircle@gmail.com",
+  whatsapp: "8437686541",
   maps_url: "",
   maps_embed_url: "",
   instagram: ACADEMY.instagram,

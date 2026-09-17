@@ -13,7 +13,6 @@ export const DEFAULT_NAV_TABS: NavTab[] = [
   { href: "/resources", label: "Resources" },
   { href: "/results", label: "Results" },
   { href: "/webinars", label: "Webinars" },
-  { href: "/free-resources", label: "Free Resources" },
   { href: "/about", label: "About" },
   { href: "/contact", label: "Contact" },
 ];
