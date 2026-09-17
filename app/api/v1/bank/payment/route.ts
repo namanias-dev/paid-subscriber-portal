@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { verifyResponseSignature, signStatusParams, type EazypayResponseFields } from "@/lib/eazypay";
 import { applyCallbackAdvisory } from "@/lib/paymentOutcome";
+import { maybeDispatchNotesStoreCallback } from "@/lib/store/payments/callbackDispatch";
 
 export const dynamic = "force-dynamic";
 
@@ -51,6 +52,17 @@ function statusBaseUrl(req: Request): string {
  * and enqueues Verify (sole authority for terminals).
  */
 async function handle(req: Request) {
+  // ─── Notes Store dispatcher shim — ADDITIVE ONLY ────────────────────────────
+  // ICICI will not issue a second return URL, so store callbacks arrive here too.
+  // This claims them by reference prefix (^NIASN-N-) and returns before any
+  // course code runs. A course callback is unaffected: the dispatcher reads
+  // req.clone(), so readParams(req) below still sees every field, and a
+  // non-store reference returns null without a database call or a module load.
+  // Nothing below this block was changed. See docs/notes-store-spec.md §3.
+  const notesStoreResponse = await maybeDispatchNotesStoreCallback(req);
+  if (notesStoreResponse) return notesStoreResponse;
+  // ─── end shim ───────────────────────────────────────────────────────────────
+
   const params = await readParams(req);
   const referenceNo = get(params, "ReferenceNo");
   const responseCode = get(params, "Response Code");
