@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { formatPaise } from "@/lib/store/money";
 
 interface CartJson {
   item_count: number;
@@ -44,7 +45,9 @@ export default function CheckoutForm() {
       return;
     }
     setForm((f) => ({ ...f, city: f.city || json.city || "", state: f.state || json.state || "" }));
-    setPinInfo(`Delivered by ${json.promised_label}`);
+    const ship =
+      typeof json.shipping_paise === "number" ? ` Shipping ${formatPaise(json.shipping_paise)}.` : "";
+    setPinInfo(`Delivered by ${json.promised_label}.${ship}`);
   }
 
   async function onSubmit(e: React.FormEvent) {

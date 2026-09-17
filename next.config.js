@@ -58,6 +58,16 @@ const nextConfig = {
     contentDispositionType: "attachment",
     contentSecurityPolicy: "default-src 'self'; script-src 'none'; sandbox;",
   },
+  async headers() {
+    const noStore = [{ key: "Cache-Control", value: "no-store, max-age=0, must-revalidate" }];
+    return [
+      { source: "/notes/cart", headers: noStore },
+      { source: "/notes/checkout", headers: noStore },
+      { source: "/notes/order/:path*", headers: noStore },
+      { source: "/notes/track", headers: noStore },
+      { source: "/admin/notes/:path*", headers: noStore },
+    ];
+  },
   async redirects() {
     // Expired / inactive webinar slugs still linked from Instagram/ManyChat ads.
     // Destination is the webinars index — never shadows a live upcoming slug.

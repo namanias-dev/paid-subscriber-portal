@@ -12,6 +12,9 @@
  *
  * Reads are memoised for 20 seconds. That bounds the database load of checking a
  * flag on every request while keeping the switch effectively immediate.
+ *
+ * Preview can enable the storefront via `NOTES_STORE_PREVIEW_ENABLE=1` without
+ * flipping the shared database flag. Production never honours that env var.
  */
 import { getSupabaseAdmin } from "@/lib/supabase";
 
@@ -78,11 +81,34 @@ function live(row: FlagRow): boolean {
 }
 
 /**
+ * Preview-only override. Production (`VERCEL_ENV === "production"`) never honours
+ * this, even if the env var is accidentally set there. Preview and local can
+ * open the storefront without flipping the shared `notes_store` database flag,
+ * which would otherwise light production too.
+ *
+ * `kill_switch = true` still wins everywhere, including preview.
+ */
+export function storePreviewOverrideAllowed(env: NodeJS.ProcessEnv = process.env): boolean {
+  if ((env.VERCEL_ENV || "") === "production") return false;
+  const v = (env.NOTES_STORE_PREVIEW_ENABLE || "").trim().toLowerCase();
+  return v === "1" || v === "true" || v === "yes";
+}
+
+export function evaluateStoreEnabled(
+  row: { enabled: boolean; killSwitch: boolean; scope: string },
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  if (row.killSwitch) return false;
+  if (row.enabled && row.scope !== "off") return true;
+  return storePreviewOverrideAllowed(env);
+}
+
+/**
  * Is the store open at all? Every customer-facing store route and every store
  * write path calls this first. A false answer means the store does not exist.
  */
 export async function storeEnabled(): Promise<boolean> {
-  return live(await flagRow(STORE_MASTER_FLAG));
+  return evaluateStoreEnabled(await flagRow(STORE_MASTER_FLAG));
 }
 
 /** A sub-feature is live only if the master switch is also live. */

@@ -17,6 +17,7 @@
  */
 import { storeDb } from "@/lib/store/db";
 import { storeOpsAlert } from "@/lib/store/alerts";
+import { holdReservationsUntilShip, releaseReservations } from "@/lib/store/inventory";
 import { isStoreReference, STORE_REFERENCE_SQL_LIKE } from "@/lib/store/references";
 import { storeEazypayVerify, paiseToGatewayAmount } from "./eazypay";
 import {
@@ -58,6 +59,7 @@ export async function applyStoreVerify(
 
   if (!row) return { outcome: "not_found", status: null, changed: false };
   if (!STORE_OPEN_STATUSES.includes(row.status)) {
+    if (row.status === "CAPTURED") await holdReservationsUntilShip(row.order_id);
     return { outcome: "already_terminal", status: row.status, changed: false };
   }
 
@@ -196,6 +198,7 @@ async function applyOrderTerminal(
         payload_json: { reference_no: referenceNo, amount_paise: amountPaise },
       });
     }
+    await holdReservationsUntilShip(orderId);
     return orderNo;
   }
 
@@ -216,6 +219,7 @@ async function applyOrderTerminal(
       payload_json: { reference_no: referenceNo, outcome },
     });
   }
+  await releaseReservations({ orderId });
   return data?.[0]?.order_no ?? null;
 }
 

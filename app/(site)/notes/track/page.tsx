@@ -3,6 +3,7 @@ import { unstable_noStore as noStore } from "next/cache";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
+export const fetchCache = "force-no-store";
 export const metadata = { title: "Track order — Naman IAS Notes" };
 
 export default function TrackPage() {

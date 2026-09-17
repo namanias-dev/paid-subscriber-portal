@@ -22,7 +22,7 @@ export default function PinChecker({ dispatchDays = 2 }: { dispatchDays?: number
         setErr("We don't currently deliver to this PIN.");
         return;
       }
-      const ship = json.shipping_paise ? ` Shipping ${formatPaise(json.shipping_paise)}.` : "";
+      const ship = typeof json.shipping_paise === "number" ? ` Shipping ${formatPaise(json.shipping_paise)}.` : "";
       const where = [json.city, json.state].filter(Boolean).join(", ");
       setResult(`Delivered by ${json.promised_label}${where ? ` to ${where}` : ""}.${ship}`);
     } catch (e2) {

@@ -13,6 +13,8 @@ export interface PublicOrder {
   awb: string | null;
   courier: string | null;
   steps: ReturnType<typeof trackingSteps>;
+  /** True while EazyPGVerify has not yet written a terminal. */
+  confirming: boolean;
 }
 
 export async function getPublicOrder(orderNo: string): Promise<PublicOrder | null> {
@@ -48,5 +50,6 @@ export async function getPublicOrder(orderNo: string): Promise<PublicOrder | nul
     awb: hasAwb ? ship!.awb : null,
     courier: hasAwb ? ship!.courier_name : null,
     steps: trackingSteps(stage, hasAwb),
+    confirming: stage === "pending",
   };
 }

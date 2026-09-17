@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
+import { readFileSync } from "node:fs";
 import sharp from "sharp";
 import {
   renderSamplePageDerivative,
@@ -89,5 +90,14 @@ describe("sample page derivative", () => {
     }
     assert.notEqual(original, derivative);
     assert.match(derivative, /\.webp$/);
+  });
+});
+
+describe("sample page HTTP route", () => {
+  test("never reads original_key, so a guessed UUID cannot fetch the scan", () => {
+    const src = readFileSync(new URL("../../app/api/notes/sample/[id]/route.ts", import.meta.url), "utf8");
+    assert.match(src, /store-private\/sample-pages\//);
+    assert.doesNotMatch(src, /\.select\([^)]*original_key/);
+    assert.match(src, /\.select\("id,kind,r2_key,is_public"\)/);
   });
 });

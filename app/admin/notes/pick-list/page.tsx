@@ -4,6 +4,7 @@ import { storeDb } from "@/lib/store/db";
 import PrintButton from "@/components/notes/admin/PrintButton";
 
 export const dynamic = "force-dynamic";
+export const fetchCache = "force-no-store";
 export const metadata = { title: "Notes pick list" };
 
 export default async function PickListPage() {

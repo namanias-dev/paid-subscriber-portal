@@ -34,3 +34,23 @@ export async function commitReservations(orderId: string) {
   const { data } = await db.rpc("store_commit_reservations", { p_order_id: orderId });
   return Number(data || 0);
 }
+
+/**
+ * Paid orders must keep their reservation until ship. Checkout reservations
+ * otherwise expire with the 15-minute quote TTL, which would release stock on a
+ * paid order and let a second customer buy the last copy.
+ */
+const PAID_HOLD_EXPIRES_AT = "2099-12-31T00:00:00.000Z";
+
+export async function holdReservationsUntilShip(orderId: string): Promise<number> {
+  const db = storeDb();
+  if (!db) return 0;
+  const { data } = await db
+    .from("store_inventory_reservations")
+    .update({ expires_at: PAID_HOLD_EXPIRES_AT })
+    .eq("order_id", orderId)
+    .is("released_at", null)
+    .is("committed_at", null)
+    .select("id");
+  return (data || []).length;
+}
