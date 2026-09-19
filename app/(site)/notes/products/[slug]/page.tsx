@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import AddToCartButton from "@/components/notes/AddToCartButton";
 import PinChecker from "@/components/notes/PinChecker";
 import ProductDescription from "@/components/notes/ProductDescription";
+import TrackView from "@/components/notes/TrackView";
 import { getProductBySlug } from "@/lib/store/catalogue";
 import { discountPercent, formatPaise } from "@/lib/store/money";
 import { SITE_URL } from "@/lib/config";
@@ -82,6 +83,10 @@ export default async function ProductPage({ params }: { params: { slug: string }
 
   return (
     <div className="container-wide py-10 pb-28">
+      <TrackView
+        event={p.kind === "bundle" ? "notes_bundle_viewed" : "notes_product_viewed"}
+        props={{ product_id: p.id, slug: p.slug, subject: p.subject, kind: p.kind, price_paise: p.selling_price_paise }}
+      />
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }} />
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumb) }} />
       <nav className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--ca-gold-dark)]">
@@ -171,6 +176,33 @@ export default async function ProductPage({ params }: { params: { slug: string }
             )}
           </div>
           {p.short_description && <p className="mt-4 text-sm leading-relaxed text-[var(--ca-navy)]/70">{p.short_description}</p>}
+
+          {p.kind === "bundle" && p.bundle_items.length > 0 && (
+            <div className="mt-5 rounded-2xl border border-[var(--ca-navy)]/10 bg-white p-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--ca-gold-dark)]">Included notes</p>
+              <ul className="mt-3 divide-y divide-[var(--ca-navy)]/10">
+                {p.bundle_items.map((b) => (
+                  <li key={b.product_id} className="flex items-center justify-between gap-3 py-2 text-sm">
+                    <Link href={`/notes/products/${b.slug}`} className="ca-focus min-w-0 truncate font-medium text-[var(--ca-navy)] hover:underline">
+                      {b.name}
+                      {b.qty > 1 ? ` × ${b.qty}` : ""}
+                    </Link>
+                    <span className="shrink-0 tabular-nums text-[var(--ca-navy)]/55">{formatPaise(b.selling_price_paise * b.qty)}</span>
+                  </li>
+                ))}
+              </ul>
+              {p.components_total_paise > p.selling_price_paise && (
+                <div className="mt-3 flex items-center justify-between border-t border-[var(--ca-navy)]/10 pt-3 text-sm">
+                  <span className="text-[var(--ca-navy)]/60">
+                    Individual total <span className="tabular-nums line-through">{formatPaise(p.components_total_paise)}</span>
+                  </span>
+                  <span className="font-semibold text-[var(--ca-gold-dark)]">
+                    You save {formatPaise(p.components_total_paise - p.selling_price_paise)}
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
 
           <div className="mt-4">
             <span

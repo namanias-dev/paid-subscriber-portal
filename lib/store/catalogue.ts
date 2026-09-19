@@ -81,6 +81,21 @@ export interface StoreProductDetail extends StoreProductCard {
   seo_description: string | null;
   photos: StoreProductMedia[];
   samples: StoreProductMedia[];
+  /** For kind === "bundle": the included component products, in order. */
+  bundle_items: StoreBundleItem[];
+  /** Sum of component selling prices (for a bundle) — the "individual total". */
+  components_total_paise: number;
+}
+
+export interface StoreBundleItem {
+  product_id: string;
+  slug: string;
+  name: string;
+  subject: string | null;
+  qty: number;
+  selling_price_paise: number;
+  cover_url: string | null;
+  availability: AvailabilityView;
 }
 
 function coverUrl(key: string | null | undefined): string | null {
@@ -223,6 +238,38 @@ export async function getProductBySlug(slug: string): Promise<StoreProductDetail
     else photos.push(item);
   }
 
+  // Bundle components (only for kind === "bundle").
+  const bundleItems: StoreBundleItem[] = [];
+  let componentsTotal = 0;
+  if (data.kind === "bundle") {
+    const { data: comps } = await db
+      .from("store_bundle_items")
+      .select("component_id,qty,position")
+      .eq("bundle_id", data.id)
+      .order("position", { ascending: true });
+    const compIds = (comps || []).map((c) => c.component_id);
+    if (compIds.length) {
+      const { data: compProducts } = await db.from("store_products").select(PRODUCT_LIST_COLS).in("id", compIds);
+      const byId = new Map((compProducts || []).map((cp) => [cp.id, toCard(cp as Record<string, unknown>)]));
+      for (const c of comps || []) {
+        const cp = byId.get(c.component_id);
+        if (!cp) continue;
+        const qty = Number(c.qty || 1);
+        componentsTotal += cp.selling_price_paise * qty;
+        bundleItems.push({
+          product_id: cp.id,
+          slug: cp.slug,
+          name: cp.name,
+          subject: cp.subject,
+          qty,
+          selling_price_paise: cp.selling_price_paise,
+          cover_url: cp.cover_url,
+          availability: cp.availability,
+        });
+      }
+    }
+  }
+
   return {
     ...card,
     description_md: data.description_md,
@@ -242,6 +289,8 @@ export async function getProductBySlug(slug: string): Promise<StoreProductDetail
     seo_description: data.seo_description,
     photos,
     samples,
+    bundle_items: bundleItems,
+    components_total_paise: componentsTotal,
   };
 }
 

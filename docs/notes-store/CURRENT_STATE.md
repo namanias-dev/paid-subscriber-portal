@@ -89,6 +89,10 @@ Automated-verified only (tsc + isolation guard + 53/53 store tests + `next build
 | PDP richer content (subtitle, author, booklets, what's-included, who-it's-for, disclaimers) | BUILT AND AUTOMATED-VERIFIED | Admin-editable via product API; PDP renders when present |
 | Admin order management (search, buckets, copy address/phone/block, exceptions) | BUILT (compile/tests; needs DB for runtime) | `/api/admin/notes/orders` + `/orders/[id]/note` + rebuilt `OrderQueue` |
 | Admin overview (action-required dashboard) | BUILT (compile/tests; needs DB for runtime) | `/admin/notes/overview` + `/api/admin/notes/overview` |
+| Bundles (admin components + storefront detail with savings) | BUILT (compile/tests; live demo bundle seeded) | `/api/admin/notes/bundles` + `BundleComponents`; PDP shows included notes, individual total, savings; demand flows through components |
+| Notes commerce analytics events | BUILT AND AUTOMATED-VERIFIED (compile) | Reuses `/api/track` + `trackClient`; PII-free `notes_*` events allow-listed in `lib/analytics/events.ts` |
+| Availability migration applied to Academy DB | DONE | `notes_store_availability` applied + verified on project `xqwdfyzerzsllqiyzxem`; 6 cols + index; existing rows default ready_stock |
+| Demo catalogue seeded (all modes + bundle) | DONE | TEST-labelled: ready_stock, on_demand, coming_soon, unavailable + GS Starter bundle |
 | Store test suite | 60 pass / 0 fail | +7 availability/preparation tests (`tests/notes-store-availability`) |
 
 Baseline re-confirmed green after each commit. Production flag still disabled; no real Eazypay run.

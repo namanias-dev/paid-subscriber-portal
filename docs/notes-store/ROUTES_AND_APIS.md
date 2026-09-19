@@ -36,6 +36,7 @@
 | GET/POST/PATCH/DELETE | `/api/admin/notes/media` | `store_manage_catalogue` — upload/reorder/cover/delete product photos + watermarked sample pages (Cloudflare R2) |
 | GET | `/api/admin/notes/preparation` | `store_manage_orders` — copies-to-prepare (paid, not-yet-dispatched; bundles exploded) |
 | GET | `/api/admin/notes/overview` | `store_manage_orders` — action-required counts + prepare/low-stock lists |
+| GET/POST/PATCH/DELETE | `/api/admin/notes/bundles` | `store_manage_catalogue` — manage bundle components (add/remove/reorder/qty) |
 
 ## Admin pages
 

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { PageHeader } from "@/components/admin/ui";
 import { formatPaise } from "@/lib/store/money";
 import MediaManager from "@/components/notes/admin/MediaManager";
+import BundleComponents from "@/components/notes/admin/BundleComponents";
 
 type AvailabilityMode = "ready_stock" | "on_demand" | "coming_soon" | "unavailable";
 
@@ -20,6 +21,7 @@ interface Row {
   slug: string;
   name: string;
   subject: string | null;
+  kind: "single" | "bundle";
   mrp_paise: number;
   selling_price_paise: number;
   on_hand: number;
@@ -44,6 +46,7 @@ export default function NotesProductAdmin() {
     slug: "",
     name: "",
     subject: "",
+    kind: "single" as "single" | "bundle",
     mrp_paise: "100",
     selling_price_paise: "100",
     on_hand: "1",
@@ -53,6 +56,7 @@ export default function NotesProductAdmin() {
   const [msg, setMsg] = useState<string | null>(null);
   const [edits, setEdits] = useState<Record<string, RowEdit>>({});
   const [mediaOpen, setMediaOpen] = useState<string | null>(null);
+  const [bundleOpen, setBundleOpen] = useState<string | null>(null);
 
   async function load() {
     const res = await fetch("/api/admin/notes/products", { cache: "no-store" });
@@ -134,6 +138,17 @@ export default function NotesProductAdmin() {
         <label className="text-sm">
           Subject
           <input value={form.subject} onChange={(e) => setForm({ ...form, subject: e.target.value })} placeholder="e.g. Indian Polity" className="mt-1 w-full rounded border px-2 py-1" />
+        </label>
+        <label className="text-sm">
+          Type
+          <select
+            value={form.kind}
+            onChange={(e) => setForm({ ...form, kind: e.target.value as "single" | "bundle" })}
+            className="mt-1 w-full rounded border px-2 py-1"
+          >
+            <option value="single">Subject notes</option>
+            <option value="bundle">Bundle</option>
+          </select>
         </label>
         <label className="text-sm">
           Availability
@@ -255,6 +270,15 @@ export default function NotesProductAdmin() {
                     >
                       {mediaOpen === r.id ? "Close media" : "Media"}
                     </button>
+                    {r.kind === "bundle" && (
+                      <button
+                        type="button"
+                        className="rounded border border-slate-300 px-3 py-1 text-slate-700"
+                        onClick={() => setBundleOpen((cur) => (cur === r.id ? null : r.id))}
+                      >
+                        {bundleOpen === r.id ? "Close bundle" : "Bundle"}
+                      </button>
+                    )}
                   </div>
                 </td>
               </tr>
@@ -262,15 +286,26 @@ export default function NotesProductAdmin() {
           })
             .flatMap((rowEl, i) => {
               const r = rows[i];
-              if (mediaOpen !== r.id) return [rowEl];
-              return [
-                rowEl,
-                <tr key={`${r.id}-media`} className="border-t bg-slate-50/60">
-                  <td colSpan={7} className="p-2">
-                    <MediaManager productId={r.id} />
-                  </td>
-                </tr>,
-              ];
+              const extra: React.ReactNode[] = [rowEl];
+              if (mediaOpen === r.id) {
+                extra.push(
+                  <tr key={`${r.id}-media`} className="border-t bg-slate-50/60">
+                    <td colSpan={7} className="p-2">
+                      <MediaManager productId={r.id} />
+                    </td>
+                  </tr>,
+                );
+              }
+              if (bundleOpen === r.id && r.kind === "bundle") {
+                extra.push(
+                  <tr key={`${r.id}-bundle`} className="border-t bg-slate-50/60">
+                    <td colSpan={7} className="p-2">
+                      <BundleComponents bundleId={r.id} bundlePricePaise={r.selling_price_paise} />
+                    </td>
+                  </tr>,
+                );
+              }
+              return extra;
             })}
         </tbody>
       </table>
