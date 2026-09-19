@@ -24,6 +24,12 @@ Store must not call `finalizeCoursePaymentByReference`, `enrollStudentInCourse`,
 
 Do not modify `lib/eazypay.ts` for store work — reuse only `encrypt` / `verifyResponseSignature` via `lib/store/payments/eazypay.ts`.
 
+## Notes Store privacy + money
+
+- Public order reads and order-page Verify require the raw access token (httpOnly cookie or `?t=` / POST body) whose hash matches `tracking_token_hash`. Never persist or log the raw token. Sequential `NIAS-N-` numbers must not enumerate PII or trigger Verify.
+- Attribution freeze at checkout writes `store_orders.attribution_*` from `nsa_attr` only — never into academy `payments`/`leads`.
+- Reservation hold-until-ship runs only after CAPTURED via `applyStoreVerify` (not the advisory callback).
+
 ## Hard stops
 
 - Fix that requires breaking academy ledger isolation → stop and report

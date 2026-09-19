@@ -60,11 +60,17 @@ const nextConfig = {
   },
   async headers() {
     const noStore = [{ key: "Cache-Control", value: "no-store, max-age=0, must-revalidate" }];
+    const orderHeaders = [
+      ...noStore,
+      // Access capability must not leak via Referer to third-party origins.
+      { key: "Referrer-Policy", value: "no-referrer" },
+      { key: "X-Robots-Tag", value: "noindex, nofollow" },
+    ];
     return [
       { source: "/notes/cart", headers: noStore },
       { source: "/notes/checkout", headers: noStore },
-      { source: "/notes/order/:path*", headers: noStore },
-      { source: "/notes/track", headers: noStore },
+      { source: "/notes/order/:path*", headers: orderHeaders },
+      { source: "/notes/track", headers: [...noStore, { key: "Referrer-Policy", value: "no-referrer" }, { key: "X-Robots-Tag", value: "noindex, nofollow" }] },
       { source: "/admin/notes/:path*", headers: noStore },
     ];
   },

@@ -31,6 +31,8 @@ This repository is the production Next.js application for **Naman Sharma IAS Aca
 - APIs: `app/api/notes/**`, `app/api/admin/notes/**`, `app/api/cron/notes-store-verify`
 - Callback shim: `app/api/v1/bank/payment/route.ts` (additive only)
 - Schema: `supabase/migrations/2026-09-16-notes-store-*.sql`, `2026-09-17-notes-store-*.sql`
+- Order confirmation: `/notes/order/[orderNumber]` authorised by httpOnly cookie (set at checkout) or optional `?t=` — only `tracking_token_hash` is stored; `order_no` alone must not load or Verify; phone+order via `/notes/track` mints a fresh token
+- Isolation dirs (CI): `lib/store`, `app/(site)/notes`, `app/api/notes`, `app/admin/notes`, `app/api/admin/notes`, `app/api/cron/notes-store-verify`, `components/notes`
 
 ## Commands
 

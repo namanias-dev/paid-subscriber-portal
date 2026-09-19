@@ -1,7 +1,15 @@
+import { cookies } from "next/headers";
 import { storeDb } from "@/lib/store/db";
 import { noStoreJson, requireLiveStore } from "@/lib/store/http";
-import { projectCustomerStage, customerStageLabel, trackingSteps } from "@/lib/store/projection";
-import { formatPaise } from "@/lib/store/money";
+import { getPublicOrder } from "@/lib/store/orders";
+import {
+  STORE_ORDER_ACCESS_COOKIE,
+  encodeOrderAccessCookie,
+  hashStoreAccessToken,
+  mintStoreAccessToken,
+  storeOrderAccessCookieOptions,
+} from "@/lib/store/accessToken";
+import { clientIp, storeRateLimited } from "@/lib/store/rateLimit";
 
 export const dynamic = "force-dynamic";
 
@@ -9,51 +17,54 @@ function digits10(phone: string): string {
   return (phone || "").replace(/\D/g, "").slice(-10);
 }
 
+const LOOKUP_FAIL = { ok: false, error: "No order matches that number and phone" } as const;
+
+/**
+ * Phone + order_no proof of possession. Mints a fresh access token (hash only in
+ * DB), sets the httpOnly cookie, and returns PublicOrder with the raw token once
+ * for client Verify polling.
+ */
 export async function POST(req: Request) {
   const dark = await requireLiveStore();
   if (dark) return dark;
+  if (await storeRateLimited(`notes-track:${clientIp(req)}`, 20, 600)) {
+    return noStoreJson({ ok: false, error: "Too many attempts. Please wait a few minutes." }, 429);
+  }
   const db = storeDb();
   if (!db) return noStoreJson({ ok: false, error: "unavailable" }, 503);
   const body = (await req.json()) as { order_no?: string; phone?: string };
   const orderNo = (body.order_no || "").trim().toUpperCase();
   const phone = digits10(body.phone || "");
   if (!orderNo || phone.length !== 10) {
-    return noStoreJson({ ok: false, error: "Order number and 10-digit phone are required" }, 400);
+    return noStoreJson(LOOKUP_FAIL, 404);
   }
   const { data: order } = await db
     .from("store_orders")
-    .select("id,order_no,status,customer_name,placed_at,promised_delivery_date,total_paise,phone_key")
+    .select("id,order_no,phone_key")
     .eq("order_no", orderNo)
     .maybeSingle();
   if (!order || order.phone_key !== phone) {
-    return noStoreJson({ ok: false, error: "No order matches that number and phone" }, 404);
+    return noStoreJson(LOOKUP_FAIL, 404);
   }
-  const { data: items } = await db
-    .from("store_order_items")
-    .select("name_snapshot,qty,line_total_paise")
-    .eq("order_id", order.id);
-  const { data: ship } = await db
-    .from("store_shipments")
-    .select("awb,courier_name,status")
-    .eq("order_id", order.id)
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  const hasAwb = !!(ship?.awb);
-  const stage = projectCustomerStage(order.status, hasAwb);
-  return noStoreJson({
-    ok: true,
-    order: {
-      order_no: order.order_no,
-      stage,
-      stage_label: customerStageLabel(stage),
-      placed_at: order.placed_at,
-      promised_delivery_date: order.promised_delivery_date,
-      total_label: formatPaise(order.total_paise),
-      items: (items || []).map((i) => ({ name: i.name_snapshot, qty: i.qty, total: formatPaise(i.line_total_paise) })),
-      awb: hasAwb ? ship?.awb : null,
-      courier: hasAwb ? ship?.courier_name : null,
-      steps: trackingSteps(stage, hasAwb),
-    },
-  });
+
+  const raw = mintStoreAccessToken();
+  const { error: hashErr } = await db
+    .from("store_orders")
+    .update({
+      tracking_token_hash: hashStoreAccessToken(raw),
+      tracking_token: null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", order.id);
+  if (hashErr) return noStoreJson({ ok: false, error: "unavailable" }, 503);
+
+  cookies().set(
+    STORE_ORDER_ACCESS_COOKIE,
+    encodeOrderAccessCookie(order.order_no, raw),
+    storeOrderAccessCookieOptions(),
+  );
+
+  const publicOrder = await getPublicOrder(order.order_no, { trackingToken: raw });
+  if (!publicOrder) return noStoreJson(LOOKUP_FAIL, 404);
+  return noStoreJson({ ok: true, order: publicOrder });
 }

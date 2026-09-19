@@ -3,50 +3,78 @@
 import { useEffect, useState } from "react";
 import type { PublicOrder } from "@/lib/store/orders";
 
+/** ~90s of confirmation polling with gentle backoff. Cron remains recovery. */
+const MAX_MS = 90_000;
+const GAPS_MS = [2000, 2500, 3000, 4000, 5000, 6000, 8000];
+
 export default function OrderStatus({ order }: { order: PublicOrder }) {
   const [current, setCurrent] = useState(order);
+  const [stillWaiting, setStillWaiting] = useState(false);
 
   useEffect(() => {
     setCurrent(order);
+    setStillWaiting(false);
   }, [order]);
 
   useEffect(() => {
     if (!current.confirming) return;
+    const token = current.access_token;
+    if (!token) return;
     let cancelled = false;
-    let ticks = 0;
+    const started = Date.now();
+    let gapIdx = 0;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
     const run = async () => {
       try {
         const res = await fetch(`/api/notes/order/${encodeURIComponent(current.order_no)}/verify`, {
           method: "POST",
           cache: "no-store",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ t: token }),
         });
         const json = await res.json();
-        if (!cancelled && json.ok && json.order) setCurrent(json.order);
+        if (!cancelled && json.ok && json.order) {
+          setCurrent(json.order);
+          if (!json.order.confirming) return;
+        }
       } catch {
         /* next tick retries */
       }
-    };
-    void run();
-    const id = setInterval(() => {
-      ticks += 1;
-      if (ticks > 40) {
-        clearInterval(id);
+      if (cancelled) return;
+      const elapsed = Date.now() - started;
+      if (elapsed >= MAX_MS) {
+        setStillWaiting(true);
         return;
       }
-      void run();
-    }, 3000);
+      const gap = GAPS_MS[Math.min(gapIdx, GAPS_MS.length - 1)];
+      gapIdx += 1;
+      timer = setTimeout(() => {
+        void run();
+      }, gap);
+    };
+    void run();
     return () => {
       cancelled = true;
-      clearInterval(id);
+      if (timer) clearTimeout(timer);
     };
-  }, [current.confirming, current.order_no]);
+  }, [current.confirming, current.order_no, current.access_token]);
 
   return (
     <div className="mx-auto max-w-xl">
       <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--ca-gold-dark,#9a7b2f)]">{current.order_no}</p>
-      <h1 className="mt-2 font-heading text-3xl font-bold text-[var(--ca-navy)]">{current.stage_label}</h1>
+      <h1 className="mt-2 font-heading text-3xl font-bold text-[var(--ca-navy)]">
+        {current.confirming ? "Payment received — confirming your order" : current.stage_label}
+      </h1>
       {current.confirming && (
-        <p className="mt-2 text-sm text-[var(--ca-navy)]/60">Waiting for ICICI to confirm the payment. This page does not mark the order paid itself.</p>
+        <p className="mt-2 text-sm text-[var(--ca-navy)]/60">
+          Waiting for ICICI to confirm the payment. This page does not mark the order paid itself.
+        </p>
+      )}
+      {stillWaiting && current.confirming && (
+        <p className="mt-3 rounded-xl border border-[var(--ca-navy)]/10 bg-[var(--ca-navy)]/[0.03] p-3 text-sm text-[var(--ca-navy)]/75">
+          Confirmation is taking a little longer than usual. You can leave this page — we will keep checking in the background, and you can track the order anytime with your phone number.
+        </p>
       )}
       {current.promised_delivery_date && (
         <p className="mt-2 text-sm text-[var(--ca-navy)]/60">Promised by {current.promised_delivery_date}</p>

@@ -1,6 +1,7 @@
 import { storeDb } from "./db";
 import { projectCustomerStage, customerStageLabel, trackingSteps, type CustomerStage } from "./projection";
 import { formatPaise } from "./money";
+import { verifyRawTokenAgainstHash } from "./accessToken";
 
 export interface PublicOrder {
   order_no: string;
@@ -15,17 +16,32 @@ export interface PublicOrder {
   steps: ReturnType<typeof trackingSteps>;
   /** True while EazyPGVerify has not yet written a terminal. */
   confirming: boolean;
+  /**
+   * Echo of the caller-provided raw access token so the client can poll Verify.
+   * Never loaded from the database (only the hash is stored).
+   */
+  access_token?: string;
 }
 
-export async function getPublicOrder(orderNo: string): Promise<PublicOrder | null> {
+/**
+ * Public order projection. Requires the raw access token whose hash matches
+ * store_orders.tracking_token_hash so sequential NIAS-N- numbers cannot enumerate.
+ */
+export async function getPublicOrder(
+  orderNo: string,
+  opts: { trackingToken: string },
+): Promise<PublicOrder | null> {
+  const token = (opts.trackingToken || "").trim();
+  if (!token) return null;
   const db = storeDb();
   if (!db) return null;
   const { data: order } = await db
     .from("store_orders")
-    .select("id,order_no,status,placed_at,promised_delivery_date,total_paise")
-    .eq("order_no", orderNo)
+    .select("id,order_no,status,placed_at,promised_delivery_date,total_paise,tracking_token_hash")
+    .eq("order_no", orderNo.trim().toUpperCase())
     .maybeSingle();
-  if (!order) return null;
+  if (!order || !verifyRawTokenAgainstHash(token, order.tracking_token_hash)) return null;
+
   const { data: items } = await db
     .from("store_order_items")
     .select("name_snapshot,qty,line_total_paise")
@@ -51,5 +67,6 @@ export async function getPublicOrder(orderNo: string): Promise<PublicOrder | nul
     courier: hasAwb ? ship!.courier_name : null,
     steps: trackingSteps(stage, hasAwb),
     confirming: stage === "pending",
+    access_token: token,
   };
 }

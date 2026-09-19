@@ -12,6 +12,10 @@
  *     recorded twice is a conflict rather than a second effect.
  *  2. The advisory update is conditional on the row still being open, so a
  *     duplicate arriving after Verify has captured the payment changes nothing.
+ *
+ * Redirect never includes the access token in the URL — the paying browser
+ * already holds an httpOnly cookie from checkout (SameSite=Lax survives the
+ * top-level return navigation). Phone track mints a fresh token when needed.
  */
 import { storeDb } from "@/lib/store/db";
 import { alertStoreMisroute } from "@/lib/store/alerts";
@@ -41,7 +45,11 @@ const FIELD_KEYS: (keyof EazypayResponseFields)[] = [
 function redirect(url: string): Response {
   return new Response(null, {
     status: 302,
-    headers: { Location: url, "Cache-Control": "no-store" },
+    headers: {
+      Location: url,
+      "Cache-Control": "no-store, max-age=0",
+      "Referrer-Policy": "no-referrer",
+    },
   });
 }
 
@@ -172,17 +180,16 @@ export async function handleStoreCallback(
     `[store/callback] ref=${referenceNo} code=${responseCode} signature=${signatureValid} duplicate=${duplicate} (terminal deferred to Verify)`,
   );
 
-  // 4. Send the customer to their order. The page says "Payment received —
-  //    confirming your order" and resolves to confirmed once Verify answers.
+  // 4. Send the customer to their order page WITHOUT putting the access token
+  //    in the URL (referrer / analytics leak). Cookie from checkout authorises.
   const { data: order } = await db
     .from("store_orders")
     .select("order_no")
     .eq("id", payment.order_id)
     .maybeSingle();
 
-  return redirect(
-    order?.order_no
-      ? `${origin}/notes/order/${encodeURIComponent(order.order_no)}`
-      : `${origin}/notes/track?ref=${encodeURIComponent(referenceNo)}`,
-  );
+  if (order?.order_no) {
+    return redirect(`${origin}/notes/order/${encodeURIComponent(order.order_no)}`);
+  }
+  return redirect(`${origin}/notes/track?ref=${encodeURIComponent(referenceNo)}`);
 }

@@ -5,13 +5,14 @@
  * session, no entitlement. The academy buyer/student link is derived at read
  * time by phone_key and is never stored here, so it cannot drift.
  */
-import { randomBytes } from "node:crypto";
 import { storeDb } from "./db";
 import { makeStoreReference } from "./references";
 import { buildStorePaymentUrl, storeSubMerchantId } from "./payments/eazypay";
 import { lockQuote, QUOTE_TTL_SECONDS, type FrozenQuote } from "./quote";
 import { reserveStock } from "./inventory";
 import type { CartView } from "./cart";
+import { requestLeadAttribution } from "@/lib/marketing/requestAttribution";
+import { hashStoreAccessToken, mintStoreAccessToken } from "./accessToken";
 
 export interface CheckoutAddress {
   name: string;
@@ -31,15 +32,13 @@ export interface CheckoutResult {
   payment_url: string;
   promised_delivery_date: string;
   total_paise: number;
+  /** Raw access token — set once as httpOnly cookie; never persist. */
+  access_token: string;
 }
 
 function digits10(phone: string): string {
   const d = (phone || "").replace(/\D/g, "");
   return d.slice(-10);
-}
-
-function trackingToken(): string {
-  return randomBytes(18).toString("base64url");
 }
 
 export async function placeCheckout(cart: CartView, address: CheckoutAddress): Promise<CheckoutResult> {
@@ -105,6 +104,11 @@ export async function placeCheckout(cart: CartView, address: CheckoutAddress): P
   const orderNo = String(orderNoRow || "");
   if (!orderNo.startsWith("NIAS-N-")) throw new Error("could not allocate an order number");
 
+  const orderToken = mintStoreAccessToken();
+  const orderTokenHash = hashStoreAccessToken(orderToken);
+  // Freeze first-party nsa_attr at checkout — same cookie as academy leads, store tables only.
+  const attr = requestLeadAttribution();
+  const touch = attr.attribution?.first_touch || attr.attribution?.last_touch || null;
   const { data: order, error: orderErr } = await db
     .from("store_orders")
     .insert({
@@ -124,7 +128,15 @@ export async function placeCheckout(cart: CartView, address: CheckoutAddress): P
       total_paise: quote.total_paise,
       quote_json: quote,
       promised_delivery_date: quote.promised_delivery_date,
-      tracking_token: trackingToken(),
+      tracking_token: null,
+      tracking_token_hash: orderTokenHash,
+      attribution_json: attr.attribution,
+      attribution_source: attr.channel || attr.utm_source,
+      attribution_campaign: attr.utm_campaign,
+      attribution_campaign_id: touch?.campaign_id || null,
+      attribution_adset_id: touch?.adset_id || null,
+      attribution_ad_id: touch?.ad_id || null,
+      attribution_platform: attr.channel,
     })
     .select("id,order_no")
     .single();
@@ -192,6 +204,7 @@ export async function placeCheckout(cart: CartView, address: CheckoutAddress): P
     payment_url: paymentUrl,
     promised_delivery_date: quote.promised_delivery_date,
     total_paise: quote.total_paise,
+    access_token: orderToken,
   };
 }
 
