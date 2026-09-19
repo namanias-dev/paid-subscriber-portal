@@ -2,8 +2,6 @@
   "asOf": "2026-09-19",
   "branch": "notes-store-release-hardening",
   "handoffTag": "notes-store-handoff-2026-09-19",
-  "headCommit": "PENDING_FINAL_HANDOFF_COMMIT",
-  "treeHash": "PENDING_FINAL_HANDOFF_COMMIT",
   "priorCommits": {
     "preDocsHead": "f249569ba83b815fd842bc5a5a47a98f9fc351e6",
     "paymentCritical": "77230d83456021b4ef20efbe7d80acb6974e453b",
@@ -29,7 +27,10 @@
     "reservedBaseline": 0
   },
   "testSummary": {
-    "notesStoreIsolationAndMedia": { "passed": 53, "failed": 0 },
+    "notesStoreIsolationAndMedia": {
+      "passed": 53,
+      "failed": 0
+    },
     "domainIsolationGuard": "OK",
     "tscNoEmit": "clean",
     "playwright": "absent",
@@ -50,5 +51,7 @@
     "dlt_submit_when_ops_ready_keep_sms_flag_off"
   ],
   "canonicalSpec": "docs/notes-store-spec.md",
-  "docsIndex": "docs/notes-store/README.md"
+  "docsIndex": "docs/notes-store/README.md",
+  "headCommit": "6b668752af8e2cba48f1d9f853a327f493099f8a",
+  "treeHash": "81ae2decb80a3ad6f619dd29df48fa0adc03fc69"
 }
