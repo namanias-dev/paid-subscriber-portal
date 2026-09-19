@@ -1,10 +1,22 @@
 import { notFound } from "next/navigation";
 import AddToCartButton from "@/components/notes/AddToCartButton";
 import PinChecker from "@/components/notes/PinChecker";
+import ProductDescription from "@/components/notes/ProductDescription";
 import { getProductBySlug } from "@/lib/store/catalogue";
 import { discountPercent, formatPaise } from "@/lib/store/money";
+import { SITE_URL } from "@/lib/config";
 import Link from "next/link";
 import Image from "next/image";
+
+/** Prelims / Mains / Both → a phrase a customer understands at a glance. */
+function stageLabel(stage: string | null): string | null {
+  if (!stage) return null;
+  const s = stage.trim().toLowerCase();
+  if (s === "prelims") return "For Prelims";
+  if (s === "mains") return "For Mains";
+  if (s === "both" || s === "prelims_mains" || s === "prelims-mains") return "Prelims + Mains";
+  return stage;
+}
 
 export const revalidate = 600;
 
@@ -27,6 +39,7 @@ export default async function ProductPage({ params }: { params: { slug: string }
     .filter(Boolean)
     .join(" · ");
   const hero = p.cover_url || p.photos[0]?.url || null;
+  const stage = stageLabel(p.stage);
   const jsonLd = {
     "@context": "https://schema.org",
     "@type": "Product",
@@ -40,12 +53,30 @@ export default async function ProductPage({ params }: { params: { slug: string }
       priceCurrency: "INR",
       price: (p.selling_price_paise / 100).toFixed(2),
       availability: oos ? "https://schema.org/OutOfStock" : "https://schema.org/InStock",
+      url: `${SITE_URL}/notes/products/${p.slug}`,
     },
+  };
+  const breadcrumb = {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    itemListElement: [
+      { "@type": "ListItem", position: 1, name: "Notes", item: `${SITE_URL}/notes` },
+      ...(p.category_slug && p.category_name
+        ? [{ "@type": "ListItem", position: 2, name: p.category_name, item: `${SITE_URL}/notes/${p.category_slug}` }]
+        : []),
+      {
+        "@type": "ListItem",
+        position: p.category_slug && p.category_name ? 3 : 2,
+        name: p.name,
+        item: `${SITE_URL}/notes/products/${p.slug}`,
+      },
+    ],
   };
 
   return (
     <div className="container-wide py-10 pb-28">
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }} />
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumb) }} />
       <nav className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--ca-gold-dark)]">
         <Link href="/notes" className="ca-focus hover:underline">
           Notes
@@ -106,6 +137,20 @@ export default async function ProductPage({ params }: { params: { slug: string }
 
         <div>
           <h1 className="font-heading text-3xl font-bold leading-tight text-[var(--ca-navy)] sm:text-4xl">{p.name}</h1>
+          {(p.subject || stage) && (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {p.subject && (
+                <span className="inline-flex items-center rounded-full bg-[var(--ca-navy)]/5 px-3 py-1 text-xs font-semibold text-[var(--ca-navy)]">
+                  {p.subject}
+                </span>
+              )}
+              {stage && (
+                <span className="inline-flex items-center rounded-full bg-[rgba(212,175,55,0.15)] px-3 py-1 text-xs font-semibold text-[var(--ca-gold-dark)]">
+                  {stage}
+                </span>
+              )}
+            </div>
+          )}
           {meta && <p className="mt-2 text-sm text-[var(--ca-navy)]/55">{meta}</p>}
           <div className="mt-5 flex flex-wrap items-baseline gap-3">
             <span className="text-3xl font-semibold tabular-nums text-[var(--ca-navy)]">{formatPaise(p.selling_price_paise)}</span>
@@ -139,6 +184,12 @@ export default async function ProductPage({ params }: { params: { slug: string }
           </div>
         </div>
       </div>
+
+      {p.description_md && (
+        <div className="mt-2 max-w-3xl">
+          <ProductDescription markdown={p.description_md} />
+        </div>
+      )}
 
       <div className="fixed inset-x-0 bottom-0 z-30 border-t border-[var(--ca-navy)]/10 bg-white/95 p-3 backdrop-blur sm:hidden">
         <div className="flex gap-2">
