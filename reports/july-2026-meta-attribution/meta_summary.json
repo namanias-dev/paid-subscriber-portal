@@ -1,0 +1,26 @@
+{
+  "spend_ok": true,
+  "raw_spend": 204195.159994,
+  "agg_spend": 204195.15999399996,
+  "zero_days": [
+    "2026-07-06",
+    "2026-07-11",
+    "2026-07-12",
+    "2026-07-13",
+    "2026-07-14",
+    "2026-07-15",
+    "2026-07-23",
+    "2026-07-24",
+    "2026-07-25",
+    "2026-07-26"
+  ],
+  "result_indicators": [
+    "",
+    "actions:leadgen.other",
+    "actions:link_click",
+    "actions:omni_landing_page_view"
+  ],
+  "overlaps": [],
+  "roas_collected": 3.090416051088295,
+  "roas_contracted": 12.12075741693743
+}
