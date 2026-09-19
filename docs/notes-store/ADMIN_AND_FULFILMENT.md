@@ -53,6 +53,16 @@ prepare — bundles counted as their components.
 3. Enter courier + AWB → ship endpoint creates/updates `store_shipments`.  
 4. Customer sees shipped only once AWB exists.
 
+## Order management
+
+`/admin/notes` supports status buckets (New / Preparing / Packed / Shipped /
+Delivered / Problem / Cancelled), free-text search (order no, name, phone, email,
+AWB), one-tap **Copy address / Copy phone / Copy full shipping block** for the
+courier portal, inline advance + courier/AWB ship, and an internal-note /
+**exception** recorder (damaged, wrong item, missing item, lost in transit,
+duplicate order) that appends to `internal_notes` and the order audit trail — no
+DB edits. No general returns are offered to customers; these are ops-only records.
+
 ## Limitations
 
 - Manual shipping only — no Shiprocket.  

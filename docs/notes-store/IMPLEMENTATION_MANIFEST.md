@@ -48,6 +48,8 @@ Exhaustive paths from Git (handoff era). Prefer `git ls-files` to refresh.
 - `app/api/notes/order/[orderNumber]/verify/route.ts`
 - `app/api/admin/notes/orders/route.ts`
 - `app/api/admin/notes/orders/[id]/advance/route.ts`
+- `app/api/admin/notes/orders/[id]/note/route.ts`
+- `app/api/admin/notes/preparation/route.ts`
 - `app/api/admin/notes/orders/[id]/ship/route.ts`
 - `app/api/admin/notes/products/route.ts`
 - `app/api/admin/notes/media/route.ts`
