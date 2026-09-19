@@ -1,0 +1,21 @@
+---
+description: Verification gate — compile is not done; prove journeys and regressions
+alwaysApply: true
+---
+
+# Verification
+
+Significant work is incomplete when it only typechecks.
+
+Before claiming done, consider:
+
+- `npx tsc --noEmit` · lint · relevant `npm test` suites · build if risky
+- Browser: happy path, error, loading, empty
+- Mobile widths 375–430
+- Console + network for failed API calls
+- Auth/permission boundaries for admin routes
+- For Notes Store: kill switch behaviour, `NIASN-N-` refs, no academy table writes, Cache-Control on cart/checkout/order
+
+Report failures honestly. Do not weaken tests to pass.
+
+Notes isolation regression: `node scripts/ci/guard-store-domain-isolation.mjs` and `tests/notes-store-isolation/`.

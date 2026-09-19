@@ -5,7 +5,7 @@ import { storeEnabled } from "@/lib/store/flags";
 export default async function NotesLayout({ children }: { children: React.ReactNode }) {
   if (!(await storeEnabled())) notFound();
   return (
-    <div className="bg-[var(--ca-slate-50,#f4f1ea)]">
+    <div className="bg-[var(--ca-surface)]">
       <StoreSubnav />
       {children}
     </div>

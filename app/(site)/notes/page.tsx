@@ -62,7 +62,7 @@ export default async function NotesLanding() {
         </div>
       </header>
 
-      <div className="relative z-10 -mt-8 rounded-t-[2rem] bg-[var(--ca-slate-50)] pb-20">
+      <div className="relative z-10 -mt-8 rounded-t-[2rem] bg-[var(--ca-surface)] pb-20">
         <section id="catalogue" className="container-wide pt-12">
           <h2 className="font-heading text-2xl font-bold text-[var(--ca-navy)]">Shop by subject</h2>
           <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
@@ -70,22 +70,28 @@ export default async function NotesLanding() {
               <Link
                 key={c.slug}
                 href={`/notes/${c.slug}`}
-                className="rounded-2xl border border-[var(--ca-navy)]/10 bg-white p-5 transition duration-200 hover:-translate-y-0.5 hover:shadow-md motion-reduce:transform-none"
+                className="ca-focus rounded-2xl border border-[var(--ca-navy)]/10 bg-white p-5 transition duration-200 hover:-translate-y-0.5 hover:shadow-md motion-reduce:transform-none"
               >
                 <p className="font-heading text-base font-semibold text-[var(--ca-navy)]">{c.nav_label || c.name}</p>
                 {c.short_description && <p className="mt-1 text-xs text-[var(--ca-navy)]/55">{c.short_description}</p>}
               </Link>
             ))}
-            {categories.length === 0 && <p className="col-span-full text-sm text-[var(--ca-navy)]/50">Catalogue opening shortly.</p>}
+            {categories.length === 0 && (
+              <p className="col-span-full rounded-2xl border border-dashed border-[var(--ca-navy)]/15 bg-white p-8 text-sm text-[var(--ca-navy)]/50">
+                Catalogue opening shortly. Subjects will appear here once products are activated.
+              </p>
+            )}
           </div>
         </section>
 
         <section className="container-wide mt-16">
           <h2 className="font-heading text-2xl font-bold text-[var(--ca-navy)]">Best sellers</h2>
           <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            {(bestsellers.length ? bestsellers : products).map((p) => (
-              <ProductCard key={p.id} product={p} />
-            ))}
+            {(bestsellers.length ? bestsellers : products).length === 0 ? (
+              <p className="col-span-full text-sm text-[var(--ca-navy)]/50">No live titles yet.</p>
+            ) : (
+              (bestsellers.length ? bestsellers : products).map((p) => <ProductCard key={p.id} product={p} />)
+            )}
           </div>
         </section>
 

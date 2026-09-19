@@ -1,7 +1,9 @@
 import { notFound } from "next/navigation";
 import ProductCard from "@/components/notes/ProductCard";
+import CaPageHeader from "@/components/public/ca/CaPageHeader";
 import { getCategoryBySlug, listActiveProducts } from "@/lib/store/catalogue";
 import Link from "next/link";
+import { BookOpen } from "lucide-react";
 
 export const revalidate = 600;
 
@@ -21,28 +23,45 @@ export default async function SubjectPage({ params }: { params: { subject: strin
   const cat = await getCategoryBySlug(params.subject);
   if (!cat) notFound();
   const products = await listActiveProducts({ categoryId: cat.id });
+  const title = cat.nav_label || cat.name;
+
   return (
-    <div className="container-wide py-12">
-      <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--ca-gold-dark,#9a7b2f)]">
-        <Link href="/notes">Notes</Link> · {cat.nav_label || cat.name}
-      </p>
-      <h1 className="mt-3 font-heading text-4xl font-bold text-[var(--ca-navy)]">{cat.nav_label || cat.name}</h1>
-      {cat.short_description && <p className="mt-3 max-w-2xl text-[var(--ca-navy)]/65">{cat.short_description}</p>}
-      {params.subject === "current-affairs" && (
-        <p className="mt-3 text-sm text-[var(--ca-navy)]/55">
-          Looking for daily articles instead? See the academy's{" "}
-          <Link href="/current-affairs" className="underline">
-            Current Affairs
-          </Link>{" "}
-          desk — this page is the printed compilations.
-        </p>
-      )}
-      <div className="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {products.map((p) => (
-          <ProductCard key={p.id} product={p} />
-        ))}
-        {products.length === 0 && <p className="text-sm text-[var(--ca-navy)]/50">Nothing listed in this subject yet.</p>}
+    <>
+      <CaPageHeader
+        eyebrow="Printed notes"
+        title={title}
+        subtitle={cat.short_description || undefined}
+        icon={BookOpen}
+        crumbs={[
+          { label: "Notes", href: "/notes" },
+          { label: title },
+        ]}
+      />
+      <div className="container-wide py-10 pb-16">
+        {params.subject === "current-affairs" && (
+          <p className="mb-8 text-sm text-[var(--ca-navy)]/55">
+            Looking for daily articles instead? See the academy&apos;s{" "}
+            <Link href="/current-affairs" className="font-semibold text-[var(--ca-navy)] underline">
+              Current Affairs
+            </Link>{" "}
+            desk — this page is the printed compilations.
+          </p>
+        )}
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {products.map((p) => (
+            <ProductCard key={p.id} product={p} />
+          ))}
+          {products.length === 0 && (
+            <p className="col-span-full rounded-2xl border border-dashed border-[var(--ca-navy)]/15 bg-white p-10 text-center text-sm text-[var(--ca-navy)]/50">
+              Nothing listed in this subject yet. Check back soon, or{" "}
+              <Link href="/notes" className="underline">
+                browse all notes
+              </Link>
+              .
+            </p>
+          )}
+        </div>
       </div>
-    </div>
+    </>
   );
 }

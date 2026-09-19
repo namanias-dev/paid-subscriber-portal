@@ -1,0 +1,25 @@
+---
+description: Academy UI — reuse gold standards, tokens, and composition rules
+globs: "{app,components}/**/*.{tsx,ts,css}"
+alwaysApply: false
+---
+
+# Academy UI
+
+Before any frontend change:
+
+1. Read `.cursor/skills/academy-design/SKILL.md` and its `references/`.
+2. Inspect the listed gold-standard files — copy patterns, not invent.
+3. Prefer existing primitives (`ca-*`, `container-wide`, `font-heading`, `CourseCard`, `CaPageHeader`, admin `PageHeader`).
+4. Use design tokens (`--ca-navy-*`, `--ca-gold*`, `--ca-slate-*`, `--ink`, `--primary`). Never invent one-off hex when a token exists.
+5. Preserve visual continuity with CA / courses / home-v2 — not a generic ecommerce template.
+6. Validate 375 / 390 / 430 and desktop. Sticky mobile CTAs must not cover content without `pb-*`.
+7. Motion: restrained; respect `prefers-reduced-motion` / `motion-reduce:`.
+
+## Forbidden looks
+
+Purple SaaS gradients · cream+#terracotta AI cluster · newspaper broadsheet · glow spam · cards-in-cards · fake urgency · stock Shopify chrome · default unmodified shadcn aesthetic as brand.
+
+## Premium means
+
+Restraint, hierarchy, spacing, typography, polish, trustworthy CTAs, intentional empty/loading/error states.

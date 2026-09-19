@@ -219,7 +219,12 @@ export async function getProductBySlug(slug: string): Promise<StoreProductDetail
 export async function getProductById(id: string): Promise<StoreProductCard | null> {
   const db = storeDb();
   if (!db) return null;
-  const { data } = await db.from("store_products").select(PRODUCT_LIST_COLS).eq("id", id).maybeSingle();
+  const { data } = await db
+    .from("store_products")
+    .select(PRODUCT_LIST_COLS)
+    .eq("id", id)
+    .eq("is_active", true)
+    .maybeSingle();
   if (!data) return null;
   return toCard(data as Record<string, unknown>);
 }

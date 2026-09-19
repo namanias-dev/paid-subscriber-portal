@@ -1,0 +1,46 @@
+---
+description: Core Academy product, architecture, and change discipline for every agent
+alwaysApply: true
+---
+
+# Naman IAS Academy — Core
+
+Premium UPSC/IAS education platform (portal + public site + admin) for Naman Sharma IAS Academy. Users: aspirants, enrolled students, parents, admins, ops.
+
+## Canonical layout
+
+- `app/(site)/` — public marketing (ISR-first; layout must not read cookies/DB)
+- `app/(portal)/` / `app/portal/` — buyer/student portal
+- `app/admin/` — staff admin
+- `app/api/` — route handlers
+- `lib/` — domain logic (`dataProvider`, entitlements, payments, store, sms, telegram, analytics)
+- `components/public/` — public UI; `components/admin/` — admin UI
+- `supabase/migrations/` — schema source of truth
+- `docs/notes-store-spec.md` — Notes Store requirements (authoritative)
+
+## Architecture facts
+
+- Next.js 14 App Router, Supabase (service role server-side), ICICI Eazypay for money
+- Design: Sora (heading) + Inter (body); tokens in `app/globals.css` + `tailwind.config.ts`
+- Public chrome: `PublicNav` hydrates auth via `/api/session/state` — do not break ISR by reading sessions in `(site)/layout`
+
+## Before changing code
+
+1. Inspect existing consumers and data flow.
+2. Reuse Academy patterns; do not invent parallel systems.
+3. Prefer smallest fix over rewrite.
+4. Never expose/commit secrets.
+
+## Sensitive — inspect first, change rarely
+
+Auth/sessions · `payments` / fee-state / entitlements · lecture access · quiz gates · Eazypay (`lib/eazypay.ts`) · Telegram event types/`*/2` · DLT SMS · Notes Store isolation (`store_*`, `NIASN-N-`) · PublicNav session hydration · LecturePlayer
+
+## Notes Store (summary)
+
+Physical printed notes, guest checkout, store-owned Eazypay Verify, kill switch `notes_store`. Never write academy `payments`/`students`/`buyers`/`leads`. Spec: `docs/notes-store-spec.md`. Isolation guard: `scripts/ci/guard-store-domain-isolation.mjs`.
+
+## Skills
+
+For UI work → read `.cursor/skills/academy-design/SKILL.md`.  
+For features → `.cursor/skills/academy-feature-builder/SKILL.md`.  
+Before "done" → `.cursor/skills/academy-release-check/SKILL.md`.

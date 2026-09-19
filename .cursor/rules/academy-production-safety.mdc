@@ -1,0 +1,32 @@
+---
+description: Production safety for auth, money, DB, entitlements, store isolation
+globs: "{lib,app/api,supabase}/**/*.{ts,tsx,sql,mjs}"
+alwaysApply: false
+---
+
+# Production safety
+
+Before changing auth, DB, entitlements, checkout, payments, orders, admin perms, uploads, email/SMS/WhatsApp, analytics, or env usage:
+
+1. Trace current consumers and write paths.
+2. Prefer additive, backwards-compatible changes.
+3. Never delete production data or run irreversible migrations casually.
+4. Never print or commit secrets / `.env*`.
+
+## Money domains (do not merge)
+
+| Domain | Tables | Reference | Terminal authority |
+|--------|--------|-----------|-------------------|
+| Academy | `payments`, enrollments | `NAMAN-` / `OFF-` / `LEGACY-` / `SAARTHI-` | course Verify + `paymentOutcome` |
+| Notes Store | `store_*` only | `NIASN-N-` | `lib/store/payments/verify.ts` |
+
+Store must not call `finalizeCoursePaymentByReference`, `enrollStudentInCourse`, fee-state, or write `students`/`buyers`/`leads`/`payments`.
+
+Do not modify `lib/eazypay.ts` for store work — reuse only `encrypt` / `verifyResponseSignature` via `lib/store/payments/eazypay.ts`.
+
+## Hard stops
+
+- Fix that requires breaking academy ledger isolation → stop and report
+- Store payment entering `payments` → stop
+- Guest checkout creating identity rows → stop
+- Destructive schema without rollback plan → stop

@@ -118,7 +118,10 @@ export default function CheckoutForm() {
         >
           {busy ? "Redirecting to ICICI…" : "Pay securely"}
         </button>
-        <p className="mt-3 text-xs text-[var(--ca-navy)]/50">Full-page redirect to ICICI Eazypay. We never mark an order paid from this page.</p>
+        <p className="mt-3 text-xs text-[var(--ca-navy)]/50">
+          Full-page redirect to ICICI Eazypay. We never mark an order paid from this page — ICICI confirmation does.
+        </p>
+        <p className="mt-2 text-xs text-[var(--ca-navy)]/45">Prepaid only · Pan-India shipping · Guest checkout (no account)</p>
       </aside>
     </form>
   );

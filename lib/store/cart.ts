@@ -138,7 +138,20 @@ export async function setCartQty(itemId: string, qty: number): Promise<CartView 
   if (qty <= 0) {
     await db.from("store_cart_items").delete().eq("id", itemId).eq("cart_id", cartId);
   } else {
-    await db.from("store_cart_items").update({ qty, updated_at: new Date().toISOString() }).eq("id", itemId).eq("cart_id", cartId);
+    const { data: row } = await db
+      .from("store_cart_items")
+      .select("product_id")
+      .eq("id", itemId)
+      .eq("cart_id", cartId)
+      .maybeSingle();
+    if (!row) return getCartView(cartId);
+    const product = await loadProduct(row.product_id);
+    if (!product) {
+      await db.from("store_cart_items").delete().eq("id", itemId).eq("cart_id", cartId);
+      return getCartView(cartId);
+    }
+    const next = Math.min(Math.max(1, Math.round(qty)), product.max_quantity_per_order, Math.max(1, product.sellable));
+    await db.from("store_cart_items").update({ qty: next, updated_at: new Date().toISOString() }).eq("id", itemId);
   }
   return getCartView(cartId);
 }
