@@ -18,8 +18,25 @@ All `force-dynamic` / no-store.
 | POST | `/api/admin/notes/orders/[id]/advance` | advance one step |
 | POST | `/api/admin/notes/orders/[id]/ship` | courier + AWB |
 | GET/POST/PATCH | `/api/admin/notes/products` | `store_manage_catalogue` |
+| GET/POST/PATCH/DELETE | `/api/admin/notes/media` | `store_manage_catalogue` |
 
 Exact permission keys live in `lib/permissions.ts` / `requirePermission` call sites — verify before changing RBAC.
+
+## Product media management (Cloudflare R2)
+
+`components/notes/admin/MediaManager.tsx` (embedded per product row in the
+catalogue admin) lets staff upload **product photos** and **sample pages**,
+set the cover, and delete — no code or SQL. Backed by `lib/store/media/upload.ts`
++ `/api/admin/notes/media`, reusing the existing `lib/r2` client:
+
+- **Sample pages** → `renderSamplePageDerivative` watermarks + downscales + strips
+  EXIF; the untouched original is stored under the private `store-private/sample-originals/`
+  prefix (never served/URL'd) and only the derivative (`store-private/sample-pages/`)
+  is reachable, via `/api/notes/sample/[id]`. The DB constraint keeps sample media private.
+- **Photos** → `renderProductPhoto` (no watermark) under the public `media/store/products/`
+  prefix, served by the CDN; first photo auto-becomes the cover.
+- Uploads are permission-gated (`store_manage_catalogue`), size-capped (12 MB) and
+  type-checked (JPG/PNG/WebP). PDF sample ingestion is a documented follow-up (needs a rasteriser).
 
 ## Operator workflow (Phase 1)
 

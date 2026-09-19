@@ -9,7 +9,7 @@
 | `http.ts` | no-store JSON + requireLiveStore |
 | `catalogue.ts` | Active-only product/category reads |
 | `cart.ts` | Cookie cart id; qty clamp |
-| `quote.ts` | Frozen quote + TTL |
+| `quote.ts` | `buildFrozenQuote` (authoritative compute, no persist) → `lockQuote` (persist) + TTL; preview reuses `buildFrozenQuote` |
 | `checkout.ts` | Guest place order + attribution freeze |
 | `orders.ts` | Public projection (token hash verify) |
 | `accessToken.ts` | Mint/hash/cookie/redact |

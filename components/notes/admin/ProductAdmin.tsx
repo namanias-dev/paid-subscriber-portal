@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { PageHeader } from "@/components/admin/ui";
 import { formatPaise } from "@/lib/store/money";
+import MediaManager from "@/components/notes/admin/MediaManager";
 
 interface Row {
   id: string;
@@ -29,6 +30,7 @@ export default function NotesProductAdmin() {
   });
   const [msg, setMsg] = useState<string | null>(null);
   const [edits, setEdits] = useState<Record<string, { selling_price_paise: string; mrp_paise: string; on_hand: string; is_active: boolean }>>({});
+  const [mediaOpen, setMediaOpen] = useState<string | null>(null);
 
   async function load() {
     const res = await fetch("/api/admin/notes/products", { cache: "no-store" });
@@ -179,13 +181,34 @@ export default function NotesProductAdmin() {
                   </label>
                 </td>
                 <td className="p-2">
-                  <button type="button" className="rounded bg-slate-900 px-3 py-1 text-white" onClick={() => saveRow(r.id)}>
-                    Save
-                  </button>
+                  <div className="flex flex-wrap gap-1">
+                    <button type="button" className="rounded bg-slate-900 px-3 py-1 text-white" onClick={() => saveRow(r.id)}>
+                      Save
+                    </button>
+                    <button
+                      type="button"
+                      className="rounded border border-slate-300 px-3 py-1 text-slate-700"
+                      onClick={() => setMediaOpen((cur) => (cur === r.id ? null : r.id))}
+                    >
+                      {mediaOpen === r.id ? "Close media" : "Media"}
+                    </button>
+                  </div>
                 </td>
               </tr>
             );
-          })}
+          })
+            .flatMap((rowEl, i) => {
+              const r = rows[i];
+              if (mediaOpen !== r.id) return [rowEl];
+              return [
+                rowEl,
+                <tr key={`${r.id}-media`} className="border-t bg-slate-50/60">
+                  <td colSpan={6} className="p-2">
+                    <MediaManager productId={r.id} />
+                  </td>
+                </tr>,
+              ];
+            })}
         </tbody>
       </table>
     </div>
