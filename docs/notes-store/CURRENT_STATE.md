@@ -83,6 +83,7 @@ Automated-verified only (tsc + isolation guard + 53/53 store tests + `next build
 | PDP renders full `description_md` + subject/stage chips | BUILT AND AUTOMATED-VERIFIED | New server component `components/notes/ProductDescription.tsx` (react-markdown, no raw HTML) |
 | PDP `BreadcrumbList` JSON-LD | BUILT AND AUTOMATED-VERIFIED | Beside existing Product/Offer; `SITE_URL` from `lib/config` |
 | Checkout shows server-authoritative shipping + tax + total | BUILT AND AUTOMATED-VERIFIED | `buildFrozenQuote()` extracted from `lockQuote()`; `/api/notes/pin` returns `quote`; no client-side total |
+| Admin product media upload (photos + watermarked samples) to R2 | BUILT (AUTOMATED-VERIFIED compile/guard; needs R2+DB for runtime) | `lib/store/media/upload.ts` + `/api/admin/notes/media` + `MediaManager`; reuses `lib/r2` + watermark pipeline (previously unused) |
 
 Baseline re-confirmed green after each commit. Production flag still disabled; no real Eazypay run.
 

@@ -32,6 +32,7 @@
 | POST | `/api/admin/notes/orders/[id]/advance` | staff |
 | POST | `/api/admin/notes/orders/[id]/ship` | staff |
 | GET/POST/PATCH | `/api/admin/notes/products` | `store_manage_catalogue` |
+| GET/POST/PATCH/DELETE | `/api/admin/notes/media` | `store_manage_catalogue` — upload/reorder/cover/delete product photos + watermarked sample pages (Cloudflare R2) |
 
 ## Cron
 
