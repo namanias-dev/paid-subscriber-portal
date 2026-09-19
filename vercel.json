@@ -20,7 +20,7 @@
     },
     {
       "path": "/api/cron/notes-store-verify",
-      "schedule": "5 3 * * *"
+      "schedule": "*/15 * * * *"
     },
     {
       "path": "/api/cron/analytics-rollup",

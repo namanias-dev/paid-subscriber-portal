@@ -26,7 +26,7 @@ const ROOT = join(import.meta.dirname, "../..");
 /** Every directory where store code is allowed to live. */
 export const STORE_DIRS = [
   "lib/store",
-  "app/(notes)",
+  "app/(site)/notes",
   "app/api/notes",
   "app/admin/notes",
   "app/api/admin/notes",
