@@ -36,6 +36,7 @@ Exhaustive paths from Git (handoff era). Prefer `git ls-files` to refresh.
 - `app/admin/notes/products/page.tsx`
 - `app/admin/notes/pick-list/page.tsx`
 - `app/admin/notes/preparation/page.tsx`
+- `app/admin/notes/overview/page.tsx`
 
 ## APIs
 
@@ -54,6 +55,7 @@ Exhaustive paths from Git (handoff era). Prefer `git ls-files` to refresh.
 - `app/api/admin/notes/products/route.ts`
 - `app/api/admin/notes/media/route.ts`
 - `app/api/admin/notes/preparation/route.ts`
+- `app/api/admin/notes/overview/route.ts`
 - `app/api/cron/notes-store-verify/route.ts`
 
 ## Components

@@ -87,6 +87,8 @@ Automated-verified only (tsc + isolation guard + 53/53 store tests + `next build
 | Availability model (ready_stock / on_demand / coming_soon / unavailable) | BUILT AND AUTOMATED-VERIFIED (unit tests; needs DB for e2e) | `lib/store/availability.ts`; wired through catalogue, cart, quote, checkout, ProductCard, PDP, admin editor; additive migration |
 | Preparation-demand queue (paid-unfulfilled, bundles exploded) | BUILT AND AUTOMATED-VERIFIED (unit tests; needs DB for e2e) | `lib/store/preparation.ts` + `/api/admin/notes/preparation` + `/admin/notes/preparation` |
 | PDP richer content (subtitle, author, booklets, what's-included, who-it's-for, disclaimers) | BUILT AND AUTOMATED-VERIFIED | Admin-editable via product API; PDP renders when present |
+| Admin order management (search, buckets, copy address/phone/block, exceptions) | BUILT (compile/tests; needs DB for runtime) | `/api/admin/notes/orders` + `/orders/[id]/note` + rebuilt `OrderQueue` |
+| Admin overview (action-required dashboard) | BUILT (compile/tests; needs DB for runtime) | `/admin/notes/overview` + `/api/admin/notes/overview` |
 | Store test suite | 60 pass / 0 fail | +7 availability/preparation tests (`tests/notes-store-availability`) |
 
 Baseline re-confirmed green after each commit. Production flag still disabled; no real Eazypay run.

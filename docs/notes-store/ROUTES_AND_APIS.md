@@ -35,11 +35,13 @@
 | GET/POST/PATCH | `/api/admin/notes/products` | `store_manage_catalogue` |
 | GET/POST/PATCH/DELETE | `/api/admin/notes/media` | `store_manage_catalogue` — upload/reorder/cover/delete product photos + watermarked sample pages (Cloudflare R2) |
 | GET | `/api/admin/notes/preparation` | `store_manage_orders` — copies-to-prepare (paid, not-yet-dispatched; bundles exploded) |
+| GET | `/api/admin/notes/overview` | `store_manage_orders` — action-required counts + prepare/low-stock lists |
 
 ## Admin pages
 
 | Path | Perm |
 |------|------|
+| `/admin/notes/overview` | `store_manage_orders` — action-required dashboard |
 | `/admin/notes` | `store_manage_orders` — order queue |
 | `/admin/notes/preparation` | `store_manage_orders` — preparation demand |
 | `/admin/notes/products` | `store_manage_catalogue` — catalogue + availability + media |
