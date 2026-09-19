@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { trackClient } from "@/lib/analytics/client";
 import type { PublicOrder } from "@/lib/store/orders";
 
 /** ~90s of confirmation polling with gentle backoff. Cron remains recovery. */
@@ -10,11 +11,23 @@ const GAPS_MS = [2000, 2500, 3000, 4000, 5000, 6000, 8000];
 export default function OrderStatus({ order }: { order: PublicOrder }) {
   const [current, setCurrent] = useState(order);
   const [stillWaiting, setStillWaiting] = useState(false);
+  const completedFired = useRef(false);
 
   useEffect(() => {
     setCurrent(order);
     setStillWaiting(false);
   }, [order]);
+
+  // Fire the completion funnel event once, when the order is confirmed (not
+  // confirming and at least the "Order confirmed" step is done — never on a
+  // failure). PII-free: order_no only.
+  useEffect(() => {
+    if (completedFired.current) return;
+    if (!current.confirming && current.steps.some((s) => s.done)) {
+      completedFired.current = true;
+      trackClient("notes_order_completed", { order_no: current.order_no });
+    }
+  }, [current]);
 
   useEffect(() => {
     if (!current.confirming) return;

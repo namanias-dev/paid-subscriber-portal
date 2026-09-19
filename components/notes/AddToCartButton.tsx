@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { trackClient } from "@/lib/analytics/client";
 
 export default function AddToCartButton({
   productId,
@@ -32,6 +33,7 @@ export default function AddToCartButton({
       });
       const json = await res.json();
       if (!res.ok || !json.ok) throw new Error(json.error || "Could not add to cart");
+      trackClient("notes_added_to_cart", { product_id: productId, buy_now: buyNow });
       if (buyNow) {
         router.push("/notes/checkout");
         return;

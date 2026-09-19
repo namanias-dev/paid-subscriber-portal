@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { trackClient } from "@/lib/analytics/client";
 
 interface Item {
   id: string;
@@ -46,6 +47,7 @@ export default function CartClient() {
       });
       const json = await res.json();
       if (!res.ok || json.ok === false) throw new Error(json.error || "Could not update cart");
+      if (qty <= 0) trackClient("notes_removed_from_cart", { item_id: id });
       setItems(json.cart?.items || []);
       setSubtotal(json.cart?.subtotal_label || "");
     } catch (e) {

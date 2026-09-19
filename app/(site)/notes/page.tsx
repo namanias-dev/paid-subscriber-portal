@@ -1,5 +1,6 @@
 import Link from "next/link";
 import ProductCard from "@/components/notes/ProductCard";
+import TrackView from "@/components/notes/TrackView";
 import { listActiveCategories, listActiveProducts } from "@/lib/store/catalogue";
 
 export const revalidate = 600;
@@ -41,6 +42,7 @@ export default async function NotesLanding() {
 
   return (
     <>
+      <TrackView event="notes_store_viewed" />
       <header className="ca-dark ca-grain relative overflow-hidden">
         <div className="ca-orb" style={{ width: 320, height: 320, top: -130, right: -70, background: "rgba(212,175,55,0.16)" }} />
         <div className="container-wide relative py-16 sm:py-24">

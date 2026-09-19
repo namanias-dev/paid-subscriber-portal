@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { trackClient } from "@/lib/analytics/client";
 
 interface CartJson {
   item_count: number;
@@ -63,6 +64,7 @@ export default function CheckoutForm() {
     e.preventDefault();
     setBusy(true);
     setErr(null);
+    trackClient("notes_checkout_started", { item_count: cart?.item_count ?? 0 });
     try {
       const res = await fetch("/api/notes/checkout", {
         method: "POST",
@@ -75,6 +77,7 @@ export default function CheckoutForm() {
       if (!json.ok) throw new Error(json.error || "Checkout failed");
       window.location.href = json.payment_url;
     } catch (e2) {
+      trackClient("notes_payment_failed", { stage: "checkout_submit" });
       setErr((e2 as Error).message);
       setBusy(false);
     }
