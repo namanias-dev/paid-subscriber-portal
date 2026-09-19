@@ -8,6 +8,7 @@
 4. `supabase/migrations/2026-09-17-notes-store-1b-inventory.sql` — reservation RPCs
 5. `supabase/migrations/2026-09-17-notes-store-1c-verify-fixtures.sql`
 6. `supabase/migrations/2026-09-19-notes-store-tracking-token-hash.sql` — `tracking_token_hash`, clear plaintext
+7. `supabase/migrations/2026-09-19-notes-store-availability.sql` — **additive**: `store_products.availability_mode` (`ready_stock`|`on_demand`|`coming_soon`|`unavailable`, default `ready_stock`), plus `subtitle`, `author`, `booklets`, `highlights_json`, `ideal_for_json`; index `store_orders_status_idx` for the preparation-demand scan. Existing rows default to `ready_stock` (behaviour preserved).
 
 ## Tables (`store_*`) — 20
 

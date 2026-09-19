@@ -5,6 +5,12 @@
 import { storeDb } from "./db";
 import { publicCdnUrl } from "@/lib/r2";
 import { unstable_cache } from "next/cache";
+import {
+  normalizeAvailabilityMode,
+  resolveAvailability,
+  type AvailabilityMode,
+  type AvailabilityView,
+} from "./availability";
 
 export const STORE_CACHE_TAG = "notes-store";
 
@@ -41,6 +47,8 @@ export interface StoreProductCard {
   category_slug: string | null;
   category_name: string | null;
   max_quantity_per_order: number;
+  availability_mode: AvailabilityMode;
+  availability: AvailabilityView;
 }
 
 export interface StoreProductMedia {
@@ -58,6 +66,11 @@ export interface StoreProductMedia {
 export interface StoreProductDetail extends StoreProductCard {
   description_md: string | null;
   short_description: string | null;
+  subtitle: string | null;
+  author: string | null;
+  booklets: number | null;
+  highlights: string[];
+  ideal_for: string[];
   weight_grams: number | null;
   binding_type: string | null;
   printing_type: string | null;
@@ -79,6 +92,10 @@ function coverUrl(key: string | null | undefined): string | null {
 function toCard(row: Record<string, unknown>, category?: { slug: string; name: string } | null): StoreProductCard {
   const onHand = Number(row.on_hand || 0);
   const reserved = Number(row.reserved || 0);
+  const sellable = Math.max(0, onHand - reserved);
+  const availabilityMode = normalizeAvailabilityMode(row.availability_mode);
+  const isActive = !!row.is_active;
+  const lowStockThreshold = Number(row.low_stock_threshold ?? 5);
   return {
     id: String(row.id),
     sku: String(row.sku),
@@ -98,11 +115,18 @@ function toCard(row: Record<string, unknown>, category?: { slug: string; name: s
     is_featured: !!row.is_featured,
     is_bestseller: !!row.is_bestseller,
     dispatch_days: Number(row.dispatch_days || 2),
-    sellable: Math.max(0, onHand - reserved),
+    sellable,
     category_slug: category?.slug ?? null,
     category_name: category?.name ?? null,
     max_quantity_per_order: Number(row.max_quantity_per_order || 5),
+    availability_mode: availabilityMode,
+    availability: resolveAvailability(availabilityMode, sellable, lowStockThreshold, isActive),
   };
+}
+
+function toStringArray(v: unknown): string[] {
+  if (!Array.isArray(v)) return [];
+  return v.map((x) => String(x || "").trim()).filter(Boolean);
 }
 
 async function listActiveCategoriesUncached(): Promise<StoreCategory[]> {
@@ -134,7 +158,7 @@ export async function getCategoryBySlug(slug: string): Promise<StoreCategory | n
 }
 
 const PRODUCT_LIST_COLS =
-  "id,sku,slug,kind,name,short_name,subject,stage,language,edition,page_count,mrp_paise,selling_price_paise,cover_image_key,is_featured,is_bestseller,dispatch_days,on_hand,reserved,max_quantity_per_order,category_id,position";
+  "id,sku,slug,kind,name,short_name,subject,stage,language,edition,page_count,mrp_paise,selling_price_paise,cover_image_key,is_featured,is_bestseller,dispatch_days,on_hand,reserved,low_stock_threshold,availability_mode,is_active,max_quantity_per_order,category_id,position";
 
 export async function listActiveProducts(opts?: {
   categoryId?: string;
@@ -203,6 +227,11 @@ export async function getProductBySlug(slug: string): Promise<StoreProductDetail
     ...card,
     description_md: data.description_md,
     short_description: data.short_description,
+    subtitle: data.subtitle ?? null,
+    author: data.author ?? null,
+    booklets: data.booklets == null ? null : Number(data.booklets),
+    highlights: toStringArray(data.highlights_json),
+    ideal_for: toStringArray(data.ideal_for_json),
     weight_grams: data.weight_grams,
     binding_type: data.binding_type,
     printing_type: data.printing_type,

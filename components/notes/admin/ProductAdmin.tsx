@@ -5,17 +5,37 @@ import { PageHeader } from "@/components/admin/ui";
 import { formatPaise } from "@/lib/store/money";
 import MediaManager from "@/components/notes/admin/MediaManager";
 
+type AvailabilityMode = "ready_stock" | "on_demand" | "coming_soon" | "unavailable";
+
+const AVAILABILITY_OPTIONS: { value: AvailabilityMode; label: string }[] = [
+  { value: "ready_stock", label: "Ready Stock" },
+  { value: "on_demand", label: "On Demand" },
+  { value: "coming_soon", label: "Coming Soon" },
+  { value: "unavailable", label: "Unavailable" },
+];
+
 interface Row {
   id: string;
   sku: string;
   slug: string;
   name: string;
+  subject: string | null;
   mrp_paise: number;
   selling_price_paise: number;
   on_hand: number;
   reserved: number;
+  low_stock_threshold: number;
+  availability_mode: AvailabilityMode;
   is_active: boolean;
 }
+
+type RowEdit = {
+  selling_price_paise: string;
+  mrp_paise: string;
+  on_hand: string;
+  availability_mode: AvailabilityMode;
+  is_active: boolean;
+};
 
 export default function NotesProductAdmin() {
   const [rows, setRows] = useState<Row[]>([]);
@@ -23,13 +43,15 @@ export default function NotesProductAdmin() {
     sku: "",
     slug: "",
     name: "",
+    subject: "",
     mrp_paise: "100",
     selling_price_paise: "100",
     on_hand: "1",
+    availability_mode: "ready_stock" as AvailabilityMode,
     is_active: false,
   });
   const [msg, setMsg] = useState<string | null>(null);
-  const [edits, setEdits] = useState<Record<string, { selling_price_paise: string; mrp_paise: string; on_hand: string; is_active: boolean }>>({});
+  const [edits, setEdits] = useState<Record<string, RowEdit>>({});
   const [mediaOpen, setMediaOpen] = useState<string | null>(null);
 
   async function load() {
@@ -37,12 +59,13 @@ export default function NotesProductAdmin() {
     const json = await res.json();
     const products: Row[] = json.products || [];
     setRows(products);
-    const next: typeof edits = {};
+    const next: Record<string, RowEdit> = {};
     for (const r of products) {
       next[r.id] = {
         selling_price_paise: String(r.selling_price_paise),
         mrp_paise: String(r.mrp_paise),
         on_hand: String(r.on_hand),
+        availability_mode: r.availability_mode || "ready_stock",
         is_active: r.is_active,
       };
     }
@@ -82,6 +105,7 @@ export default function NotesProductAdmin() {
         mrp_paise: Number(edit.mrp_paise),
         selling_price_paise: Number(edit.selling_price_paise),
         on_hand: Number(edit.on_hand),
+        availability_mode: edit.availability_mode,
         is_active: edit.is_active,
       }),
     });
@@ -107,6 +131,24 @@ export default function NotesProductAdmin() {
             <input required value={form[k]} onChange={(e) => setForm({ ...form, [k]: e.target.value })} className="mt-1 w-full rounded border px-2 py-1" />
           </label>
         ))}
+        <label className="text-sm">
+          Subject
+          <input value={form.subject} onChange={(e) => setForm({ ...form, subject: e.target.value })} placeholder="e.g. Indian Polity" className="mt-1 w-full rounded border px-2 py-1" />
+        </label>
+        <label className="text-sm">
+          Availability
+          <select
+            value={form.availability_mode}
+            onChange={(e) => setForm({ ...form, availability_mode: e.target.value as AvailabilityMode })}
+            className="mt-1 w-full rounded border px-2 py-1"
+          >
+            {AVAILABILITY_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </label>
         <label className="text-sm">
           MRP paise (₹1 = 100)
           <input value={form.mrp_paise} onChange={(e) => setForm({ ...form, mrp_paise: e.target.value })} className="mt-1 w-full rounded border px-2 py-1" />
@@ -134,6 +176,7 @@ export default function NotesProductAdmin() {
             <th className="p-2">SKU</th>
             <th className="p-2">Name</th>
             <th className="p-2">Selling / MRP paise</th>
+            <th className="p-2">Availability</th>
             <th className="p-2">Stock</th>
             <th className="p-2">Live</th>
             <th className="p-2" />
@@ -145,7 +188,10 @@ export default function NotesProductAdmin() {
             return (
               <tr key={r.id} className="border-t">
                 <td className="p-2 font-mono text-xs">{r.sku}</td>
-                <td className="p-2">{r.name}</td>
+                <td className="p-2">
+                  {r.name}
+                  {r.subject && <p className="text-xs text-slate-500">{r.subject}</p>}
+                </td>
                 <td className="p-2">
                   <div className="flex items-center gap-1">
                     <input
@@ -163,9 +209,26 @@ export default function NotesProductAdmin() {
                   <p className="mt-1 text-xs text-slate-500">{formatPaise(r.selling_price_paise)}</p>
                 </td>
                 <td className="p-2">
+                  <select
+                    className="rounded border px-1 py-0.5 text-xs"
+                    value={edit?.availability_mode ?? "ready_stock"}
+                    onChange={(e) =>
+                      setEdits((s) => ({ ...s, [r.id]: { ...s[r.id], availability_mode: e.target.value as AvailabilityMode } }))
+                    }
+                  >
+                    {AVAILABILITY_OPTIONS.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                </td>
+                <td className="p-2">
                   <input
-                    className="w-16 rounded border px-1 py-0.5"
+                    className="w-16 rounded border px-1 py-0.5 disabled:bg-slate-100 disabled:text-slate-400"
                     value={edit?.on_hand ?? ""}
+                    disabled={edit?.availability_mode !== "ready_stock"}
+                    title={edit?.availability_mode !== "ready_stock" ? "Stock only applies to Ready Stock" : undefined}
                     onChange={(e) => setEdits((s) => ({ ...s, [r.id]: { ...s[r.id], on_hand: e.target.value } }))}
                   />
                   <p className="mt-1 text-xs text-slate-500">reserved {r.reserved}</p>
@@ -203,7 +266,7 @@ export default function NotesProductAdmin() {
               return [
                 rowEl,
                 <tr key={`${r.id}-media`} className="border-t bg-slate-50/60">
-                  <td colSpan={6} className="p-2">
+                  <td colSpan={7} className="p-2">
                     <MediaManager productId={r.id} />
                   </td>
                 </tr>,

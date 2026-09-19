@@ -84,6 +84,10 @@ Automated-verified only (tsc + isolation guard + 53/53 store tests + `next build
 | PDP `BreadcrumbList` JSON-LD | BUILT AND AUTOMATED-VERIFIED | Beside existing Product/Offer; `SITE_URL` from `lib/config` |
 | Checkout shows server-authoritative shipping + tax + total | BUILT AND AUTOMATED-VERIFIED | `buildFrozenQuote()` extracted from `lockQuote()`; `/api/notes/pin` returns `quote`; no client-side total |
 | Admin product media upload (photos + watermarked samples) to R2 | BUILT (AUTOMATED-VERIFIED compile/guard; needs R2+DB for runtime) | `lib/store/media/upload.ts` + `/api/admin/notes/media` + `MediaManager`; reuses `lib/r2` + watermark pipeline (previously unused) |
+| Availability model (ready_stock / on_demand / coming_soon / unavailable) | BUILT AND AUTOMATED-VERIFIED (unit tests; needs DB for e2e) | `lib/store/availability.ts`; wired through catalogue, cart, quote, checkout, ProductCard, PDP, admin editor; additive migration |
+| Preparation-demand queue (paid-unfulfilled, bundles exploded) | BUILT AND AUTOMATED-VERIFIED (unit tests; needs DB for e2e) | `lib/store/preparation.ts` + `/api/admin/notes/preparation` + `/admin/notes/preparation` |
+| PDP richer content (subtitle, author, booklets, what's-included, who-it's-for, disclaimers) | BUILT AND AUTOMATED-VERIFIED | Admin-editable via product API; PDP renders when present |
+| Store test suite | 60 pass / 0 fail | +7 availability/preparation tests (`tests/notes-store-availability`) |
 
 Baseline re-confirmed green after each commit. Production flag still disabled; no real Eazypay run.
 

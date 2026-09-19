@@ -38,6 +38,14 @@ set the cover, and delete — no code or SQL. Backed by `lib/store/media/upload.
 - Uploads are permission-gated (`store_manage_catalogue`), size-capped (12 MB) and
   type-checked (JPG/PNG/WebP). PDF sample ingestion is a documented follow-up (needs a rasteriser).
 
+## Availability & preparation
+
+Each product's `availability_mode` (Ready Stock / On Demand / Coming Soon / Unavailable)
+is set in the catalogue admin. Ready Stock exposes the stock field; the other modes
+disable it (no fake numbers). The **Preparation Queue** (`/admin/notes/preparation`)
+shows, per subject, paid-unfulfilled demand vs ready stock and the additional copies to
+prepare — bundles counted as their components.
+
 ## Operator workflow (Phase 1)
 
 1. Paid order appears in queue with **customer, address, line items, amount, payment status**.  

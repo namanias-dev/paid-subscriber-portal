@@ -7,8 +7,18 @@ import type { StoreProductCard } from "@/lib/store/catalogue";
 /** Notes catalogue card — mirrors CourseCard depth/gold language without course-specific fields. */
 export default function ProductCard({ product }: { product: StoreProductCard }) {
   const pct = discountPercent(product.mrp_paise, product.selling_price_paise);
-  const oos = product.sellable < 1;
+  const av = product.availability;
   const category = product.category_name || product.subject || "Notes";
+  // One badge only, most important first: unavailable state → low stock → discount → made-to-order.
+  const statusBadge = !av.purchasable
+    ? { text: av.label, tone: "muted" as const }
+    : av.lowStock
+      ? { text: av.label, tone: "warn" as const }
+      : pct > 0
+        ? { text: `${pct}% OFF`, tone: "gold" as const }
+        : av.mode === "on_demand"
+          ? { text: "Made to order", tone: "muted" as const }
+          : null;
 
   return (
     <Link href={`/notes/products/${product.slug}`} className="ca-focus group block h-full">
@@ -34,15 +44,19 @@ export default function ProductCard({ product }: { product: StoreProductCard }) 
               <span className="inline-flex items-center rounded-full bg-white/90 px-2.5 py-1 text-[11px] font-bold text-[var(--ca-navy-900)] shadow-sm backdrop-blur-sm">
                 {category}
               </span>
-              {oos ? (
-                <span className="inline-flex items-center rounded-full bg-white/90 px-2.5 py-1 text-[11px] font-bold text-[var(--ca-slate-700)] shadow-sm">
-                  Out of stock
+              {statusBadge && (
+                <span
+                  className={
+                    statusBadge.tone === "gold"
+                      ? "inline-flex items-center rounded-full bg-[rgba(212,175,55,0.95)] px-2.5 py-1 text-[11px] font-extrabold text-[#1a1304] shadow-sm"
+                      : statusBadge.tone === "warn"
+                        ? "inline-flex items-center rounded-full bg-amber-100 px-2.5 py-1 text-[11px] font-bold text-amber-900 shadow-sm"
+                        : "inline-flex items-center rounded-full bg-white/90 px-2.5 py-1 text-[11px] font-bold text-[var(--ca-slate-700)] shadow-sm"
+                  }
+                >
+                  {statusBadge.text}
                 </span>
-              ) : pct > 0 ? (
-                <span className="inline-flex items-center rounded-full bg-[rgba(212,175,55,0.95)] px-2.5 py-1 text-[11px] font-extrabold text-[#1a1304] shadow-sm">
-                  {pct}% OFF
-                </span>
-              ) : null}
+              )}
             </div>
           </div>
           <div className="flex flex-1 flex-col p-4">

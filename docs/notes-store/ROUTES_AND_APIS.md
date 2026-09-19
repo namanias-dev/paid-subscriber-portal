@@ -33,6 +33,16 @@
 | POST | `/api/admin/notes/orders/[id]/ship` | staff |
 | GET/POST/PATCH | `/api/admin/notes/products` | `store_manage_catalogue` |
 | GET/POST/PATCH/DELETE | `/api/admin/notes/media` | `store_manage_catalogue` — upload/reorder/cover/delete product photos + watermarked sample pages (Cloudflare R2) |
+| GET | `/api/admin/notes/preparation` | `store_manage_orders` — copies-to-prepare (paid, not-yet-dispatched; bundles exploded) |
+
+## Admin pages
+
+| Path | Perm |
+|------|------|
+| `/admin/notes` | `store_manage_orders` — order queue |
+| `/admin/notes/preparation` | `store_manage_orders` — preparation demand |
+| `/admin/notes/products` | `store_manage_catalogue` — catalogue + availability + media |
+| `/admin/notes/pick-list` | `store_manage_orders` |
 
 ## Cron
 
