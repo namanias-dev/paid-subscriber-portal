@@ -73,3 +73,20 @@
 - Isolation + media + access-token suites: **53 pass / 0 fail** (see `TESTING_AND_VERIFICATION.md`)
 - `guard-store-domain-isolation.mjs`: **OK**
 - `tsc --noEmit`: **clean** (handoff day)
+
+## Continuation — branch `notes-store-continuation-2026-09-19` (from handoff tag)
+
+Automated-verified only (tsc + isolation guard + 53/53 store tests + `next build` with preview enable). **Not** browser/DB-verified on the continuation machine (no env pulled).
+
+| Change | Status | Notes |
+|--------|--------|-------|
+| PDP renders full `description_md` + subject/stage chips | BUILT AND AUTOMATED-VERIFIED | New server component `components/notes/ProductDescription.tsx` (react-markdown, no raw HTML) |
+| PDP `BreadcrumbList` JSON-LD | BUILT AND AUTOMATED-VERIFIED | Beside existing Product/Offer; `SITE_URL` from `lib/config` |
+| Checkout shows server-authoritative shipping + tax + total | BUILT AND AUTOMATED-VERIFIED | `buildFrozenQuote()` extracted from `lockQuote()`; `/api/notes/pin` returns `quote`; no client-side total |
+
+Baseline re-confirmed green after each commit. Production flag still disabled; no real Eazypay run.
+
+### Noted handoff discrepancies (unchanged, for owner)
+
+1. `notes-store-release-hardening` has **no common git history with `main`** (disjoint). Deployment runbook names `master` as production track; `main` is the GitHub default branch.
+2. `handoff-state.json` `headCommit`/`treeHash` self-reference earlier commits (documented as expected); the annotated tag `notes-store-handoff-2026-09-19` is authoritative and verified (commit `2c1a440`, tree `6f970eb`).
