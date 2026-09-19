@@ -1,0 +1,28 @@
+---
+description: Notes Store isolation, Eazypay rules, and handoff doc requirements
+globs: "{lib/store,app/(site)/notes,app/api/notes,app/admin/notes,app/api/admin/notes,app/api/cron/notes-store-verify,components/notes,docs/notes-store,tests/notes-store-isolation,tests/notes-store-media}/**/*"
+alwaysApply: false
+---
+
+# Notes Store
+
+Before editing store code, read:
+
+1. `docs/notes-store/README.md`
+2. `docs/notes-store/CURRENT_STATE.md`
+3. `docs/notes-store/DECISION_LOG.md`
+4. `.cursor/skills/notes-store/SKILL.md`
+5. Task doc: payments → `PAYMENTS_EAZYPAY.md`; security → `SECURITY_AND_PRIVACY.md`; etc.
+
+## Hard rules
+
+- Eazypay only — **same merchant and registered return URL** as Academy. No Razorpay. No COD. No second return URL.
+- Payment refs **`NIASN-N-`**; store ledger only (`store_*`). Callback advisory; **`applyStoreVerify` terminal**.
+- Guest checkout must **not** write Academy `payments` / `students` / `buyers` / `leads` / fee-state / entitlements.
+- Do not import course paymentOutcome / dataProvider money paths; use `lib/store/**`.
+- Do not modify `lib/eazypay.ts` for store features — use `lib/store/payments/eazypay.ts`.
+- Server-authoritative quotes/totals. No fake reviews/scarcity.
+- Production `notes_store` flag stays **off** unless owner explicitly enables.
+- Owner **deferred** real Eazypay verification — do not claim payment validation passed; do not nag for ₹1 payment.
+- After meaningful changes: update `CURRENT_STATE.md` / `handoff-state.json` and run store isolation + guard tests.
+- Never commit secrets, tokens, or customer PII.

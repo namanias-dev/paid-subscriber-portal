@@ -1,0 +1,54 @@
+{
+  "asOf": "2026-09-19",
+  "branch": "notes-store-release-hardening",
+  "handoffTag": "notes-store-handoff-2026-09-19",
+  "headCommit": "PENDING_FINAL_HANDOFF_COMMIT",
+  "treeHash": "PENDING_FINAL_HANDOFF_COMMIT",
+  "priorCommits": {
+    "preDocsHead": "f249569ba83b815fd842bc5a5a47a98f9fc351e6",
+    "paymentCritical": "77230d83456021b4ef20efbe7d80acb6974e453b",
+    "cursorIntelligence": "9cdba05ed3e032309057838c0e94154328c0f68e"
+  },
+  "productionStoreEnabled": false,
+  "realPaymentVerified": false,
+  "realPaymentStatus": "deferred_by_owner",
+  "paymentGateway": "ICICI_EAZYPAY",
+  "sharedReturnUrl": true,
+  "referencePrefix": "NIASN-N-",
+  "orderNumberPrefix": "NIAS-N-",
+  "codSupported": false,
+  "shippingMode": "manual_phase_1",
+  "dltStatus": "drafted_not_submitted",
+  "previewEnableEnv": "NOTES_STORE_PREVIEW_ENABLE",
+  "testSku": {
+    "id": "a1dcaa29-bc07-49ae-b810-2854e24d8d59",
+    "sku": "TEST-NOTES-POLITY-001",
+    "slug": "test-only-polity-notes",
+    "sellingPricePaise": 100,
+    "onHandBaseline": 2,
+    "reservedBaseline": 0
+  },
+  "testSummary": {
+    "notesStoreIsolationAndMedia": { "passed": 53, "failed": 0 },
+    "domainIsolationGuard": "OK",
+    "tscNoEmit": "clean",
+    "playwright": "absent",
+    "lighthouseStorePages": "unverified_sso_blocked",
+    "realEazypay": "deferred_by_owner"
+  },
+  "knownExternalBlockers": [
+    "owner_deferred_real_eazypay_transaction",
+    "dlt_templates_not_submitted",
+    "shiprocket_not_in_phase_1",
+    "vercel_deployment_protection_blocks_unauthenticated_browser_lighthouse"
+  ],
+  "nextUnblockedTasks": [
+    "authenticated_preview_browser_qa_to_payment_page",
+    "test_sku_labelled_media_upload",
+    "admin_fulfilment_ui_dry_run",
+    "local_lighthouse_against_next_start",
+    "dlt_submit_when_ops_ready_keep_sms_flag_off"
+  ],
+  "canonicalSpec": "docs/notes-store-spec.md",
+  "docsIndex": "docs/notes-store/README.md"
+}
