@@ -13,6 +13,8 @@
 | `availability.ts` | Pure availability model: `resolveAvailability` (state/label/purchasable), `maxPurchasableQty`, `PREPARATION_STATUSES` |
 | `preparation.ts` | `aggregatePreparation` (pure, explodes bundles → component demand, nets ready stock) + `computePreparationDemand` (DB) |
 | `media/upload.ts` | Admin R2 uploads: watermarked sample pages (private original) + product photos (public); delete/reorder/cover/list |
+| `shipping/*` | Pluggable `ShippingProvider` interface; `manual` (always available, production-ready) + `shiprocket` (honest boundary, off until creds); `selectShippingProvider()` |
+| `notifications.ts` | Gated SMS boundary (order_confirmed / order_shipped) — double-gated on `notes_store_sms` flag + approved DLT template id; safe no-op until both exist |
 | `checkout.ts` | Guest place order + attribution freeze |
 | `orders.ts` | Public projection (token hash verify) |
 | `accessToken.ts` | Mint/hash/cookie/redact |

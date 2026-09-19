@@ -65,7 +65,7 @@ Exhaustive paths from Git (handoff era). Prefer `git ls-files` to refresh.
 
 ## Store libraries
 
-- `lib/store/**` (db, flags, http, catalogue, cart, checkout, quote, orders, accessToken, inventory, serviceability, projection, money, productPrice, references, rateLimit, alerts, media/watermark, payments/*)
+- `lib/store/**` (db, flags, http, catalogue, cart, checkout, quote, orders, accessToken, inventory, serviceability, projection, money, productPrice, references, rateLimit, alerts, availability, preparation, notifications, media/watermark, media/upload, shipping/*, payments/*)
 
 ## Database migrations
 

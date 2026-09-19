@@ -93,7 +93,15 @@ Automated-verified only (tsc + isolation guard + 53/53 store tests + `next build
 | Notes commerce analytics events | BUILT AND AUTOMATED-VERIFIED (compile) | Reuses `/api/track` + `trackClient`; PII-free `notes_*` events allow-listed in `lib/analytics/events.ts` |
 | Availability migration applied to Academy DB | DONE | `notes_store_availability` applied + verified on project `xqwdfyzerzsllqiyzxem`; 6 cols + index; existing rows default ready_stock |
 | Demo catalogue seeded (all modes + bundle) | DONE | TEST-labelled: ready_stock, on_demand, coming_soon, unavailable + GS Starter bundle |
+| Shipping-provider abstraction (manual + Shiprocket boundary) | BUILT AND AUTOMATED-VERIFIED (compile) | `lib/store/shipping/**`; ship route uses `selectShippingProvider()`; manual always available |
+| Customer notification boundary (order confirmed/shipped SMS) | BUILT — inert (double-gated) | `lib/store/notifications.ts`; wired into capture + ship; sends nothing until `notes_store_sms` + approved DLT template ids |
 | Store test suite | 60 pass / 0 fail | +7 availability/preparation tests (`tests/notes-store-availability`) |
+
+## External blockers preventing a browsable-by-owner preview (owner action)
+
+1. **Vercel Deployment Protection (SSO)** — preview `/notes` 302-redirects to `vercel.com/sso-api`; unauthenticated browser QA/Lighthouse impossible. Owner must open it while logged into Vercel, add a Protection Bypass token, or relax protection for previews.
+2. **`NOTES_STORE_PREVIEW_ENABLE=1` on the Vercel Preview environment** — required for `/notes` to open in preview. Cannot be set from here (no Vercel CLI; Vercel MCP unauthenticated). Must NOT enable the shared DB `notes_store` flag (that would light production).
+3. **Cloudflare R2 + `SUPABASE_SERVICE_ROLE_KEY`** are only in Vercel envs, so the app cannot be fully run locally here to render the store either.
 
 Baseline re-confirmed green after each commit. Production flag still disabled; no real Eazypay run.
 

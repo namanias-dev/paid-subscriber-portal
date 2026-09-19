@@ -2,6 +2,27 @@
 
 Prioritized honest queue. **Do not repeatedly ask for real payment** — it is owner-deferred; checklist remains for later.
 
+## Delivered in the 2026-09-19 continuation (moved OUT of the roadmap)
+
+PDP content completeness · server-authoritative checkout total · Cloudflare R2 admin
+media upload · availability model (Ready Stock / On Demand / Coming Soon / Unavailable)
+· preparation-demand queue · operational order management (search/buckets/copy/exceptions)
+· admin overview · **bundles (admin components + storefront detail + savings)** ·
+**Notes commerce analytics events** · **shipping-provider abstraction (manual + Shiprocket boundary)**
+· **notification boundary (order confirmed/shipped, gated)**. Availability migration
+applied + demo catalogue seeded on the Academy DB.
+
+## Blocked ONLY by owner-side external access (not code)
+
+| Item | Exact blocker |
+|------|---------------|
+| Browser QA / Lighthouse on preview | Vercel Deployment Protection (SSO) on preview URLs |
+| Preview `/notes` opens | `NOTES_STORE_PREVIEW_ENABLE=1` on Vercel Preview env (no Vercel auth here) |
+| Runtime R2 upload round-trip | R2 creds live only in Vercel env |
+| Order-confirmed / shipped SMS | DLT templates not yet approved (no template ids) |
+| Real ₹1 Eazypay | Owner-deferred |
+| Shiprocket automation | Shiprocket account/creds not provisioned (boundary ready) |
+
 ## P0 (blocked or safety)
 
 | Item | State | Acceptance |
@@ -23,9 +44,8 @@ Prioritized honest queue. **Do not repeatedly ask for real payment** — it is o
 
 | Item | Notes |
 |------|-------|
-| Bundle merchandising UX | Schema exists |
-| Store analytics event parity | view/add/checkout/purchase |
-| Playwright safe journey to payment URL | Add only if team wants dependency |
+| Playwright safe journey to payment URL | Not added: no runnable preview/DB target in the agent env (SSO + secrets), so e2e can't execute here; pure logic is unit-tested. Add when a reachable preview exists |
+| Landing cinematic/3D hero pass | Optional premium polish; current landing is on-brand and fast |
 
 ## P3 / polish
 
