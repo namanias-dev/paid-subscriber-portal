@@ -52,6 +52,7 @@
   ],
   "canonicalSpec": "docs/notes-store-spec.md",
   "docsIndex": "docs/notes-store/README.md",
-  "headCommit": "23eb8fbec2fff1696f1d52e6f889c6c51bfe0074",
-  "treeHash": "3b7cf467e368ec58bc297da608625ca1db0af269"
+  "headCommit": "4f191b71da2ff7e203c588a150029ab892d9d41c",
+  "treeHash": "41a6b636cd41dc75c7a62c6796294098268e3221",
+  "preferGitTag": true
 }
