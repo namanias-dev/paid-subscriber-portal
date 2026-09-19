@@ -1,6 +1,8 @@
 import { checkPincode } from "@/lib/store/serviceability";
 import { getCartView } from "@/lib/store/cart";
+import { buildFrozenQuote } from "@/lib/store/quote";
 import { noStoreJson, requireLiveStore } from "@/lib/store/http";
+import { formatPaise } from "@/lib/store/money";
 
 export const dynamic = "force-dynamic";
 
@@ -11,6 +13,40 @@ export async function GET(req: Request) {
   const cart = await getCartView();
   const result = await checkPincode(pin, cart?.max_dispatch_days ?? 2);
   if ("error" in result) return noStoreJson({ ok: false, error: result.error }, 400);
+
+  // When there is a live cart and we can deliver, compute the authoritative
+  // order total (subtotal + tax + shipping) exactly as checkout will freeze it,
+  // so the customer sees the real amount before the gateway — never a client
+  // guess. Best-effort: a stock/pricing change just omits the breakdown and the
+  // shipping line still shows.
+  let quote: {
+    subtotal_paise: number;
+    shipping_paise: number;
+    tax_paise: number;
+    total_paise: number;
+    subtotal_label: string;
+    shipping_label: string;
+    tax_label: string;
+    total_label: string;
+  } | null = null;
+  if (cart && cart.items.length && result.serviceable) {
+    try {
+      const q = await buildFrozenQuote(cart, result);
+      quote = {
+        subtotal_paise: q.subtotal_paise,
+        shipping_paise: q.shipping_paise,
+        tax_paise: q.tax_paise,
+        total_paise: q.total_paise,
+        subtotal_label: formatPaise(q.subtotal_paise),
+        shipping_label: formatPaise(q.shipping_paise),
+        tax_label: formatPaise(q.tax_paise),
+        total_label: formatPaise(q.total_paise),
+      };
+    } catch {
+      /* leave quote null — shipping_paise below is still accurate */
+    }
+  }
+
   return noStoreJson({
     ok: true,
     pincode: result.pincode,
@@ -20,5 +56,6 @@ export async function GET(req: Request) {
     promised_date: result.promised_date,
     promised_label: result.promised_label,
     shipping_paise: result.zone.shipping_paise,
+    quote,
   });
 }

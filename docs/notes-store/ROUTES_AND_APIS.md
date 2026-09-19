@@ -19,7 +19,7 @@
 | GET | `/api/notes/status` | none | — | `{ok, enabled}` for nav |
 | GET/POST/PATCH/DELETE | `/api/notes/cart` | cart cookie | — | |
 | POST | `/api/notes/checkout` | cart + body | yes | sets access cookie; strips token from JSON |
-| GET | `/api/notes/pin` | none | — | serviceability |
+| GET | `/api/notes/pin` | none | — | serviceability + promised date; returns `quote` (authoritative subtotal/shipping/tax/total via `buildFrozenQuote`) when a live cart is serviceable |
 | GET | `/api/notes/sample/[id]` | none | — | watermarked only |
 | POST | `/api/notes/track` | phone+order | yes | mints token |
 | POST | `/api/notes/order/[orderNumber]/verify` | access token | yes | triggers Verify |

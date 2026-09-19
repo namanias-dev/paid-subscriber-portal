@@ -31,9 +31,20 @@
 | `admin/ProductAdmin.tsx` | Catalogue CRUD | client |
 | `admin/PrintButton.tsx` | Print | client |
 
+## Checkout totals
+
+`CheckoutForm` shows subtotal always; on PIN blur it reads `/api/notes/pin`,
+which returns the authoritative `quote` (subtotal + shipping + tax + total from
+`buildFrozenQuote`, i.e. exactly what capture freezes). The summary then shows
+Shipping, Tax (only when > 0) and Total, and the pay button reads
+"Pay ₹<total> securely". No total is ever computed client-side, so the displayed
+amount cannot drift from the charge. Before a valid PIN, shipping/total show a
+prompt, not a guess.
+
 ## States to preserve
 
 - Empty cart, sold-out CTA disabled, max qty clamp, PIN unserviceable, checkout errors, confirming payment, calm pending after ~90s, track miss (non-enumerable).
+- Checkout: total shown only after a serviceable PIN (server-authoritative); "Enter PIN" / "—" placeholders before that.
 
 ## Product detail content (PDP)
 

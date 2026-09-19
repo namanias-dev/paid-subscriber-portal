@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { formatPaise } from "@/lib/store/money";
 
 interface CartJson {
   item_count: number;
@@ -9,11 +8,20 @@ interface CartJson {
   items: { name: string; qty: number; line_label: string }[];
 }
 
+interface QuoteJson {
+  subtotal_label: string;
+  shipping_label: string;
+  tax_paise: number;
+  tax_label: string;
+  total_label: string;
+}
+
 export default function CheckoutForm() {
   const [cart, setCart] = useState<CartJson | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [pinInfo, setPinInfo] = useState<string | null>(null);
+  const [quote, setQuote] = useState<QuoteJson | null>(null);
   const [form, setForm] = useState({
     name: "",
     phone: "",
@@ -38,16 +46,17 @@ export default function CheckoutForm() {
     const json = await res.json();
     if (!json.ok) {
       setPinInfo(json.error);
+      setQuote(null);
       return;
     }
     if (!json.serviceable) {
       setPinInfo("We don't currently deliver to this PIN.");
+      setQuote(null);
       return;
     }
     setForm((f) => ({ ...f, city: f.city || json.city || "", state: f.state || json.state || "" }));
-    const ship =
-      typeof json.shipping_paise === "number" ? ` Shipping ${formatPaise(json.shipping_paise)}.` : "";
-    setPinInfo(`Delivered by ${json.promised_label}.${ship}`);
+    setQuote(json.quote || null);
+    setPinInfo(`Delivered by ${json.promised_label}.`);
   }
 
   async function onSubmit(e: React.FormEvent) {
@@ -105,18 +114,38 @@ export default function CheckoutForm() {
             </li>
           ))}
         </ul>
-        <p className="mt-4 flex justify-between text-sm">
-          <span>Subtotal</span>
-          <span className="font-semibold">{cart?.subtotal_label}</span>
-        </p>
-        <p className="mt-1 text-xs text-[var(--ca-navy)]/50">Shipping is calculated from your PIN and frozen before you pay.</p>
+        <div className="mt-4 space-y-1.5 border-t border-[var(--ca-navy)]/10 pt-3 text-sm">
+          <p className="flex justify-between">
+            <span className="text-[var(--ca-navy)]/70">Subtotal</span>
+            <span className="tabular-nums font-medium">{quote?.subtotal_label ?? cart?.subtotal_label}</span>
+          </p>
+          <p className="flex justify-between">
+            <span className="text-[var(--ca-navy)]/70">Shipping</span>
+            <span className="tabular-nums font-medium">
+              {quote ? quote.shipping_label : <span className="text-[var(--ca-navy)]/45">Enter PIN</span>}
+            </span>
+          </p>
+          {quote && quote.tax_paise > 0 && (
+            <p className="flex justify-between">
+              <span className="text-[var(--ca-navy)]/70">Tax</span>
+              <span className="tabular-nums font-medium">{quote.tax_label}</span>
+            </p>
+          )}
+          <p className="flex justify-between border-t border-[var(--ca-navy)]/10 pt-2 text-base font-semibold">
+            <span>Total</span>
+            <span className="tabular-nums">{quote ? quote.total_label : "—"}</span>
+          </p>
+        </div>
+        {!quote && (
+          <p className="mt-2 text-xs text-[var(--ca-navy)]/50">Shipping and total are calculated from your PIN and frozen before you pay.</p>
+        )}
         {err && <p className="mt-3 text-sm text-red-700">{err}</p>}
         <button
           type="submit"
           disabled={busy || !cart?.item_count}
           className="mt-5 inline-flex min-h-12 w-full items-center justify-center rounded-full bg-[var(--ca-navy)] text-sm font-semibold text-white disabled:opacity-50"
         >
-          {busy ? "Redirecting to ICICI…" : "Pay securely"}
+          {busy ? "Redirecting to ICICI…" : quote ? `Pay ${quote.total_label} securely` : "Pay securely"}
         </button>
         <p className="mt-3 text-xs text-[var(--ca-navy)]/50">
           Full-page redirect to ICICI Eazypay. We never mark an order paid from this page — ICICI confirmation does.

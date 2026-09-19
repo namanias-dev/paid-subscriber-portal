@@ -8,7 +8,7 @@
  */
 import { storeDb } from "./db";
 import { lineTaxPaise } from "./money";
-import { checkPincode } from "./serviceability";
+import { checkPincode, type PinCheckResult } from "./serviceability";
 import type { CartView } from "./cart";
 
 export const QUOTE_TTL_SECONDS = 15 * 60;
@@ -47,10 +47,16 @@ export interface FrozenQuote {
   expires_at: string;
 }
 
-export async function lockQuote(cart: CartView, pincode: string): Promise<FrozenQuote> {
+/**
+ * Compute the authoritative quote numbers from a cart and an already-resolved,
+ * serviceable PIN — reading live product prices, stock and tax so the result is
+ * exactly what capture will validate against. Does NOT persist. Both the real
+ * checkout lock (`lockQuote`) and the read-only checkout preview (the PIN
+ * endpoint) build on this, so the total a customer sees before paying is the
+ * total we charge, to the paisa. Throws if a line is no longer buyable.
+ */
+export async function buildFrozenQuote(cart: CartView, pin: PinCheckResult): Promise<FrozenQuote> {
   if (!cart.items.length) throw new Error("Your cart is empty");
-  const pin = await checkPincode(pincode, cart.max_dispatch_days);
-  if ("error" in pin) throw new Error(pin.error);
   if (!pin.serviceable) throw new Error("We don't currently deliver to this PIN code");
 
   const db = storeDb();
@@ -90,7 +96,7 @@ export async function lockQuote(cart: CartView, pincode: string): Promise<Frozen
   const tax = items.reduce((s, i) => s + i.tax_paise, 0);
   const shipping = pin.zone.shipping_paise;
   const now = new Date();
-  const quote: FrozenQuote = {
+  return {
     cart_id: cart.id,
     items,
     subtotal_paise: subtotal,
@@ -107,6 +113,18 @@ export async function lockQuote(cart: CartView, pincode: string): Promise<Frozen
     locked_at: now.toISOString(),
     expires_at: new Date(now.getTime() + QUOTE_TTL_SECONDS * 1000).toISOString(),
   };
+}
+
+export async function lockQuote(cart: CartView, pincode: string): Promise<FrozenQuote> {
+  if (!cart.items.length) throw new Error("Your cart is empty");
+  const pin = await checkPincode(pincode, cart.max_dispatch_days);
+  if ("error" in pin) throw new Error(pin.error);
+  if (!pin.serviceable) throw new Error("We don't currently deliver to this PIN code");
+
+  const db = storeDb();
+  if (!db) throw new Error("store unavailable");
+
+  const quote = await buildFrozenQuote(cart, pin);
 
   await db
     .from("store_carts")
