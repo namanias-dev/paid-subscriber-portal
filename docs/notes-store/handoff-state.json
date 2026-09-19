@@ -52,7 +52,8 @@
   ],
   "canonicalSpec": "docs/notes-store-spec.md",
   "docsIndex": "docs/notes-store/README.md",
-  "headCommit": "4f191b71da2ff7e203c588a150029ab892d9d41c",
-  "treeHash": "41a6b636cd41dc75c7a62c6796294098268e3221",
-  "preferGitTag": true
+  "headCommit": "79d4e67d1d7a601e563a51b3b1da7b2929ecdd34",
+  "treeHash": "0a635752db7b3ad02383d4aba6cb281f4299b817",
+  "preferGitTag": true,
+  "handoffTagCommitHint": "git rev-parse notes-store-handoff-2026-09-19"
 }
