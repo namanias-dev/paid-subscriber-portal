@@ -55,5 +55,7 @@
   "headCommit": "79d4e67d1d7a601e563a51b3b1da7b2929ecdd34",
   "treeHash": "0a635752db7b3ad02383d4aba6cb281f4299b817",
   "preferGitTag": true,
-  "handoffTagCommitHint": "git rev-parse notes-store-handoff-2026-09-19"
+  "handoffTagCommitHint": "git rev-parse notes-store-handoff-2026-09-19",
+  "recordedAtCommit": "a188036eca33a9c978979460a66c2f867809eeba",
+  "treeHashAtRecord": "2a6811d2f588b3e8d8597e4259e33bd4292fb74a"
 }
