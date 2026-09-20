@@ -84,7 +84,7 @@ export default function TeachingVideoCard({
               muted
               loop
               playsInline
-              preload="metadata"
+              preload="none"
               poster={video.posterSrc}
               aria-hidden="true"
             />

@@ -9,9 +9,16 @@ import {
 } from "../../lib/store/teachingVideos.ts";
 
 describe("teaching video catalogue", () => {
-  test("disabled clips do not render on the landing page", () => {
-    assert.equal(listEnabledTeachingVideos().length, 0);
-    assert.ok(TEACHING_VIDEOS.every((video) => video.posterSrc && video.previewSrc && video.fullSrc));
+  test("enabled clips render as a three-video carousel", () => {
+    const enabled = listEnabledTeachingVideos();
+    assert.equal(enabled.length, 3);
+    assert.deepEqual(enabled.map((video) => video.id), [
+      "naman-sir-teaches-01",
+      "naman-sir-teaches-02",
+      "naman-sir-teaches-03",
+    ]);
+    assert.ok(TEACHING_VIDEOS.every((video) => video.posterSrc && video.previewSrc && video.fullSrc && video.enabled));
+    assert.ok(TEACHING_VIDEOS.every((video) => video.height > video.width));
   });
 
   test("keeps native portrait ratio and does not invent extra view counts", () => {

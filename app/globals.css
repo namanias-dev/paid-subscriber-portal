@@ -1196,12 +1196,12 @@ a {
     justify-content: flex-end;
   }
   .ns-teach-rail {
-    width: min(28rem, 34vw);
-    padding-inline: 0;
+    width: min(32rem, 38vw);
+    padding-inline: 2.2rem;
   }
   .ns-teach-rail--single .ns-teach-slide,
   .ns-teach-slide {
-    width: min(22rem, 30vw);
+    width: min(20rem, 26vw);
   }
   .ns-teach-title {
     font-size: 2.7rem;

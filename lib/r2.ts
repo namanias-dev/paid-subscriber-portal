@@ -158,9 +158,23 @@ export function contentNotesKey(contentId: string, ext: string): string {
 
 /** HEAD an object and return its size in bytes, or null if missing/inaccessible. */
 export async function headObjectSize(key: string): Promise<number | null> {
+  const head = await headObject(key);
+  return head?.contentLength ?? null;
+}
+
+/** Metadata-only HEAD. Does not download object bytes. */
+export async function headObject(key: string): Promise<{
+  contentType?: string;
+  contentLength?: number;
+  etag?: string;
+} | null> {
   try {
     const out = await r2().send(new HeadObjectCommand({ Bucket: bucket(), Key: key }));
-    return typeof out.ContentLength === "number" ? out.ContentLength : null;
+    return {
+      contentType: out.ContentType,
+      contentLength: typeof out.ContentLength === "number" ? out.ContentLength : undefined,
+      etag: out.ETag,
+    };
   } catch {
     return null;
   }
@@ -169,14 +183,18 @@ export async function headObjectSize(key: string): Promise<number | null> {
 /** Stream an object for public serving (no presign). Returns null if missing. */
 export async function getObject(
   key: string,
+  opts?: { range?: string },
 ): Promise<{
   body: { transformToWebStream: () => ReadableStream };
   contentType?: string;
   contentLength?: number;
+  contentRange?: string;
   etag?: string;
+  status: 200 | 206;
 } | null> {
   try {
-    const out = await r2().send(new GetObjectCommand({ Bucket: bucket(), Key: key }));
+    const range = (opts?.range || "").trim() || undefined;
+    const out = await r2().send(new GetObjectCommand({ Bucket: bucket(), Key: key, Range: range }));
     if (!out.Body || typeof (out.Body as { transformToWebStream?: unknown }).transformToWebStream !== "function") {
       return null;
     }
@@ -184,7 +202,9 @@ export async function getObject(
       body: out.Body as { transformToWebStream: () => ReadableStream },
       contentType: out.ContentType,
       contentLength: typeof out.ContentLength === "number" ? out.ContentLength : undefined,
+      contentRange: out.ContentRange,
       etag: out.ETag,
+      status: range && out.ContentRange ? 206 : 200,
     };
   } catch {
     return null;
