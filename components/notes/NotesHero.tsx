@@ -2,56 +2,95 @@
 
 import Link from "next/link";
 import { motion, useReducedMotion } from "framer-motion";
-import NotebookStack from "./NotebookStack";
+import HeroNotebook from "./HeroNotebook";
 
-export default function NotesHero({
-  coverUrl,
-  title,
-  subject,
-}: {
-  coverUrl?: string | null;
-  title?: string | null;
-  subject?: string | null;
-}) {
+const TRUST = [
+  { t: "Handwritten", d: "by Naman Sir" },
+  { t: "Exam-focused", d: "& concise" },
+  { t: "Diagrams &", d: "flowcharts" },
+  { t: "Premium", d: "hard copies" },
+  { t: "Pan-India", d: "delivery" },
+];
+
+export default function NotesHero() {
   const reduce = useReducedMotion();
-  const enter = reduce ? {} : { initial: { opacity: 0, y: 18 }, animate: { opacity: 1, y: 0 } };
+  const enter = (delay: number) =>
+    reduce ? {} : { initial: { opacity: 0, y: 14 }, animate: { opacity: 1, y: 0 }, transition: { duration: 0.48, delay, ease: [0.22, 1, 0.36, 1] as const } };
 
   return (
-    <header className="ca-dark ca-grain relative overflow-hidden">
-      <div className="ca-orb" style={{ width: 320, height: 320, top: -130, right: -70, background: "rgba(212,175,55,0.16)" }} />
-      <div className="container-wide relative grid items-center gap-10 py-12 sm:py-16 lg:grid-cols-[1.05fr_0.95fr] lg:py-20">
-        <div>
-          <motion.p className="ca-eyebrow" {...enter} transition={{ duration: 0.4 }}>
-            UPSC Notes by Naman Sir
+    <header className="ns-hero-light">
+      <div className="container-wide relative grid items-center gap-8 py-10 sm:py-14 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)] lg:gap-6 lg:py-16">
+        <div className="order-1 text-center lg:text-left">
+          <motion.p className="ca-eyebrow text-[var(--ca-gold-dark)]" {...enter(0)}>
+            Handwritten by Naman Sir
           </motion.p>
           <motion.h1
-            className="ca-hero-title mt-3 max-w-xl font-heading text-3xl font-extrabold leading-[1.12] tracking-tight sm:text-5xl"
-            {...enter}
-            transition={{ duration: 0.5, delay: reduce ? 0 : 0.08 }}
+            className="mt-3 font-heading text-[2rem] font-extrabold leading-[1.08] tracking-tight text-[var(--ca-navy)] sm:text-5xl lg:max-w-xl lg:text-[3.35rem]"
+            {...enter(0.08)}
           >
-            Physical notes for serious UPSC preparation.
+            <span className="lg:hidden">
+              Naman Sir&apos;s
+              <br />
+              handwritten
+              <br />
+              UPSC notes
+            </span>
+            <span className="hidden lg:inline">
+              Notes that
+              <br />
+              create officers.
+            </span>
           </motion.h1>
           <motion.p
-            className="mt-4 max-w-md text-sm leading-relaxed text-[var(--ca-slate-300)] sm:text-base"
-            {...enter}
-            transition={{ duration: 0.45, delay: reduce ? 0 : 0.16 }}
+            className="mx-auto mt-4 max-w-md text-sm leading-relaxed text-[var(--ca-navy)]/62 sm:text-base lg:mx-0"
+            {...enter(0.16)}
           >
-            Handwritten / structured classroom notes. Hard copies, PAN-India delivery, actual sample pages on live titles.
+            Naman Sir&apos;s handwritten UPSC notes — professionally printed and delivered to your doorstep.
           </motion.p>
-          <motion.div className="mt-7 flex flex-wrap gap-3" {...enter} transition={{ duration: 0.45, delay: reduce ? 0 : 0.24 }}>
-            <Link href="#catalogue" className="ca-btn ca-btn-gold rounded-full px-6">
-              Explore Notes
+          <motion.div
+            className="mt-6 hidden flex-wrap items-center justify-center gap-3 lg:flex lg:justify-start"
+            {...enter(0.24)}
+          >
+            <Link href="#catalogue" className="ca-btn ca-btn-gold ca-focus ns-press group rounded-full px-6">
+              Shop notes
+              <span aria-hidden="true" className="inline-block transition-transform duration-200 group-hover:translate-x-1">
+                →
+              </span>
             </Link>
-            <Link href="#bundles" className="ca-btn ca-btn-glass rounded-full px-6">
-              View Complete Bundles
+            <Link href="#bundles" className="ca-btn ca-btn-outline ca-focus ns-press rounded-full px-6">
+              Explore bundles
             </Link>
           </motion.div>
-          <p className="mt-5 text-[11px] font-semibold uppercase tracking-[0.16em] text-white/45">
-            Prepared by Naman Sir · Physical Notes · Trackable Delivery
-          </p>
         </div>
-        <motion.div {...enter} transition={{ duration: 0.55, delay: reduce ? 0 : 0.12 }} className="px-6 sm:px-10">
-          <NotebookStack coverUrl={coverUrl} title={title} subject={subject} />
+
+        <div className="order-2 lg:order-2">
+          <HeroNotebook />
+        </div>
+
+        <motion.div className="order-3 flex flex-col items-center gap-5 lg:col-span-2 lg:items-stretch" {...enter(0.28)}>
+          <div className="flex w-full flex-wrap items-center justify-center gap-3 lg:hidden">
+            <Link href="#catalogue" className="ca-btn ca-btn-gold ca-focus ns-press group min-w-[11.5rem] rounded-full px-6">
+              Shop notes
+              <span aria-hidden="true" className="inline-block transition-transform duration-200 group-hover:translate-x-1">
+                →
+              </span>
+            </Link>
+            <Link href="#bundles" className="ca-btn ca-btn-outline ca-focus ns-press rounded-full px-6">
+              Explore bundles
+            </Link>
+          </div>
+          <ul className="grid w-full grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
+            {TRUST.map((item, i) => (
+              <motion.li
+                key={item.t}
+                className="rounded-2xl border border-[var(--ca-navy)]/8 bg-white/80 px-3 py-2.5 text-left ns-elev-1"
+                {...(reduce ? {} : { initial: { opacity: 0, y: 8 }, animate: { opacity: 1, y: 0 }, transition: { duration: 0.4, delay: 0.32 + i * 0.05 } })}
+              >
+                <p className="text-[11px] font-extrabold uppercase tracking-[0.12em] text-[var(--ca-navy)]">{item.t}</p>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.1em] text-[var(--ca-navy)]/50">{item.d}</p>
+              </motion.li>
+            ))}
+          </ul>
         </motion.div>
       </div>
     </header>

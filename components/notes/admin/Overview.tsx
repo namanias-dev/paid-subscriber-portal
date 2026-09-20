@@ -39,6 +39,13 @@ interface InterestRow {
   total: number;
 }
 
+interface PreferenceRow {
+  id: string;
+  name: string;
+  raw_count: number;
+  available: boolean;
+}
+
 const CARD_DEFS: Array<{ key: keyof Cards; label: string; href?: string; tone?: "warn" | "danger" }> = [
   { key: "orders_today", label: "Orders today" },
   { key: "awaiting_preparation", label: "Awaiting preparation", href: "/admin/notes?bucket=preparing", tone: "warn" },
@@ -55,6 +62,7 @@ export default function NotesOverview() {
   const [prep, setPrep] = useState<PrepRow[]>([]);
   const [low, setLow] = useState<LowRow[]>([]);
   const [interest, setInterest] = useState<InterestRow[]>([]);
+  const [preferences, setPreferences] = useState<PreferenceRow[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -66,6 +74,7 @@ export default function NotesOverview() {
         setPrep(json.prepare_top || []);
         setLow(json.low_stock || []);
         setInterest(json.interest_top || []);
+        setPreferences(json.preference_top || []);
       }
       setLoading(false);
     })();
@@ -163,13 +172,26 @@ export default function NotesOverview() {
             <div className="flex items-center justify-between">
               <h3 className="font-heading text-base font-bold text-ink">Most requested upcoming notes</h3>
               <Link href="/admin/notes/interest" className="text-xs font-semibold text-[var(--primary)]">
-                Student interest →
+                Notes demand →
               </Link>
             </div>
             <p className="mt-1 text-xs text-muted">Potential demand only. Paid preparation sits in the queue above.</p>
-            {interest.length === 0 ? (
-              <p className="mt-3 text-sm text-muted">No upcoming interest yet.</p>
-            ) : (
+            {preferences.length > 0 && (
+              <ul className="mt-3 space-y-1.5">
+                {preferences.map((r) => (
+                  <li key={r.id} className="flex items-center justify-between gap-2 text-sm">
+                    <span className="min-w-0 truncate">
+                      {r.name}
+                      <span className="text-muted"> · {r.available ? "available" : "not yet"}</span>
+                    </span>
+                    <span className="shrink-0 font-semibold tabular-nums">{r.raw_count}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {interest.length === 0 && preferences.length === 0 ? (
+              <p className="mt-3 text-sm text-muted">No student preference or upcoming interest yet.</p>
+            ) : interest.length > 0 ? (
               <ul className="mt-3 space-y-1.5">
                 {interest.map((r) => (
                   <li key={r.product_id} className="flex items-center justify-between gap-2 text-sm">
@@ -181,7 +203,7 @@ export default function NotesOverview() {
                   </li>
                 ))}
               </ul>
-            )}
+            ) : null}
           </section>
         </>
       )}

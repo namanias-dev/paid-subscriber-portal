@@ -3,6 +3,7 @@ import { requirePermission } from "@/lib/adminGuard";
 import { storeDb } from "@/lib/store/db";
 import { computePreparationDemand } from "@/lib/store/preparation";
 import { listInterestAggregates } from "@/lib/store/interest";
+import { listPreferenceIntelligence } from "@/lib/store/preferences";
 
 export const dynamic = "force-dynamic";
 
@@ -71,6 +72,11 @@ export async function GET() {
     low_stock: lowStock.slice(0, 6),
     interest_top: (await listInterestAggregates("most"))
       .filter((r) => r.availability_mode === "coming_soon" || r.availability_mode === "unavailable")
+      .slice(0, 5),
+    preference_top: (await listPreferenceIntelligence()).subjects
+      .slice()
+      .sort((a, b) => b.raw_count - a.raw_count)
+      .filter((s) => s.raw_count > 0)
       .slice(0, 5),
   });
 }

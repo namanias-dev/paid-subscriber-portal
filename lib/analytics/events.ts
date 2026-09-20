@@ -85,7 +85,14 @@ export type EventName =
   | "notes_coupon_applied"
   | "notes_payment_failed"
   | "notes_order_completed"
-  | "notes_interest_submitted";
+  | "notes_interest_submitted"
+  | "notes_interest_section_viewed"
+  | "subject_interest_selected"
+  | "subject_interest_removed"
+  | "subject_interest_saved"
+  | "available_note_clicked_from_interest"
+  | "waitlist_interest_saved"
+  | "interest_preferences_updated";
 
 /**
  * Events the CLIENT beacon (/api/track) is allowed to emit. Anything that
@@ -159,6 +166,13 @@ export const CLIENT_ALLOWED_EVENTS: ReadonlySet<EventName> = new Set<EventName>(
   "notes_payment_failed",
   "notes_order_completed",
   "notes_interest_submitted",
+  "notes_interest_section_viewed",
+  "subject_interest_selected",
+  "subject_interest_removed",
+  "subject_interest_saved",
+  "available_note_clicked_from_interest",
+  "waitlist_interest_saved",
+  "interest_preferences_updated",
 ]);
 
 /** High-volume traffic events that the retention job may prune after 90 days. */

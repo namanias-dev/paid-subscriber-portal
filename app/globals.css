@@ -520,6 +520,116 @@ a {
     transform: none;
     transition: none;
   }
+  .ns-notebook-sweep,
+  .ns-notebook-float,
+  .ns-demand-fill {
+    animation: none !important;
+  }
+}
+
+.ns-hero-light {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  background:
+    radial-gradient(ellipse 55% 50% at 78% 38%, rgba(212, 175, 55, 0.16), transparent 62%),
+    radial-gradient(ellipse 70% 60% at 72% 42%, rgba(30, 58, 138, 0.07), transparent 68%),
+    linear-gradient(180deg, #ffffff 0%, #fbf8f2 58%, var(--ca-surface) 100%);
+}
+
+.ns-notebook-stage {
+  position: relative;
+  perspective: 1400px;
+}
+
+.ns-notebook-shadow-contact,
+.ns-notebook-shadow-depth,
+.ns-notebook-shadow-warm {
+  position: absolute;
+  left: 18%;
+  right: 16%;
+  pointer-events: none;
+}
+
+.ns-notebook-shadow-contact {
+  bottom: 4%;
+  height: 7%;
+  border-radius: 50%;
+  background: rgba(10, 26, 63, 0.28);
+  filter: blur(10px);
+}
+
+.ns-notebook-shadow-depth {
+  bottom: 1%;
+  height: 12%;
+  border-radius: 50%;
+  background: rgba(10, 26, 63, 0.12);
+  filter: blur(22px);
+}
+
+.ns-notebook-shadow-warm {
+  bottom: -1%;
+  height: 16%;
+  left: 14%;
+  right: 12%;
+  border-radius: 50%;
+  background: rgba(212, 175, 55, 0.1);
+  filter: blur(28px);
+}
+
+.ns-notebook-sweep {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    105deg,
+    transparent 36%,
+    rgba(255, 255, 255, 0.0) 42%,
+    rgba(255, 252, 240, 0.22) 50%,
+    rgba(212, 175, 55, 0.08) 54%,
+    transparent 62%
+  );
+  mix-blend-mode: soft-light;
+  animation: ns-sweep 9.5s ease-in-out 1.4s infinite;
+}
+
+.ns-notebook-float {
+  animation: ns-float 9s ease-in-out infinite;
+}
+
+@keyframes ns-sweep {
+  0%, 72% { transform: translateX(-18%) opacity: 0; }
+  78% { opacity: 1; }
+  92% { transform: translateX(18%); opacity: 0.35; }
+  100% { transform: translateX(22%); opacity: 0; }
+}
+
+@keyframes ns-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-5px); }
+}
+
+.ns-demand-track {
+  height: 3px;
+  border-radius: 999px;
+  background: rgba(10, 26, 63, 0.08);
+  overflow: hidden;
+}
+
+.ns-demand-fill {
+  height: 100%;
+  border-radius: inherit;
+  transform-origin: left center;
+  background: linear-gradient(90deg, var(--ca-navy-900), var(--ca-navy-600) 58%, var(--ca-gold));
+  box-shadow: 1px 0 6px -1px rgba(212, 175, 55, 0.55);
+}
+
+.ns-voices-row {
+  min-height: 64px;
+}
+
+.ns-voices-tray {
+  padding-bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
 }
 
 /* Dark hero / band background with corner gold glow */

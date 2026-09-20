@@ -5,12 +5,14 @@ import NotesLandingMotion from "@/components/notes/NotesLandingMotion";
 import NotesReveal from "@/components/notes/NotesReveal";
 import { BenefitTicker, ResultsTicker } from "@/components/notes/NotesTicker";
 import SubjectRail from "@/components/notes/SubjectRail";
+import StudentVoices from "@/components/notes/StudentVoices";
 import FeaturedNotes from "@/components/notes/FeaturedNotes";
 import BundleShowcase from "@/components/notes/BundleShowcase";
 import SampleStory from "@/components/notes/SampleStory";
 import ShippingStory from "@/components/notes/ShippingStory";
 import NotesClosingCta from "@/components/notes/NotesClosingCta";
 import { getProductBySlug, listActiveCategories, listActiveProducts } from "@/lib/store/catalogue";
+import { listPreferenceSubjects } from "@/lib/store/preferences";
 
 export const revalidate = 600;
 export const metadata = {
@@ -34,15 +36,15 @@ const FAQS = [
 ];
 
 export default async function NotesLanding() {
-  const [categories, featured, bestsellers, bundles, products] = await Promise.all([
+  const [categories, featured, bestsellers, bundles, products, voiceSubjects] = await Promise.all([
     listActiveCategories(),
     listActiveProducts({ featured: true, limit: 5 }),
     listActiveProducts({ bestsellers: true, limit: 8 }),
     listActiveProducts({ kind: "bundle", limit: 4 }),
     listActiveProducts({ limit: 16 }),
+    listPreferenceSubjects(),
   ]);
   const merch = featured.length ? featured : bestsellers.length ? bestsellers : products.filter((p) => p.kind === "single");
-  const heroProduct = products.find((p) => p.cover_url) || products[0] || null;
   const sampleSource = products.find((p) => p.kind === "single") || products[0] || null;
   const sampleDetail = sampleSource ? await getProductBySlug(sampleSource.slug) : null;
   const bundleDetails = await Promise.all(bundles.map((b) => getProductBySlug(b.slug)));
@@ -52,11 +54,7 @@ export default async function NotesLanding() {
     <>
       <TrackView event="notes_store_viewed" />
       <NotesLandingMotion />
-      <NotesHero
-        coverUrl={heroProduct?.cover_url}
-        title={heroProduct?.short_name || heroProduct?.name}
-        subject={heroProduct?.subject || heroProduct?.category_name}
-      />
+      <NotesHero />
       <ResultsTicker />
       <BenefitTicker />
 
@@ -70,6 +68,10 @@ export default async function NotesLanding() {
               <SubjectRail categories={categories} products={products} />
             </div>
           </div>
+        </NotesReveal>
+
+        <NotesReveal className="container-wide mt-14">
+          <StudentVoices subjects={voiceSubjects} />
         </NotesReveal>
 
         {upcoming.length > 0 && (
