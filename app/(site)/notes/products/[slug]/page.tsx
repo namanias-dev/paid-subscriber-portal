@@ -8,6 +8,7 @@ import { discountPercent, formatPaise } from "@/lib/store/money";
 import { SITE_URL } from "@/lib/config";
 import Link from "next/link";
 import Image from "next/image";
+import { BookOpen } from "lucide-react";
 
 /** Prelims / Mains / Both → a phrase a customer understands at a glance. */
 function stageLabel(stage: string | null): string | null {
@@ -105,12 +106,20 @@ export default async function ProductPage({ params }: { params: { slug: string }
 
       <div className="mt-6 grid gap-10 lg:grid-cols-[1.1fr_0.9fr]">
         <div>
-          <div className="relative aspect-[4/3] overflow-hidden rounded-3xl bg-[var(--ca-slate-100)]">
+          <div className="relative aspect-[4/3] overflow-hidden rounded-3xl bg-gradient-to-br from-[var(--ca-navy-900)] to-[var(--ca-navy-600)]">
             {hero ? (
               <Image src={hero} alt={p.name} fill sizes="(max-width: 1024px) 100vw, 55vw" className="object-cover" priority />
             ) : (
-              <div className="flex h-full items-end p-8 font-heading text-3xl font-bold text-[var(--ca-navy)]/30">{p.name}</div>
+              <div className="flex h-full w-full flex-col items-center justify-center gap-3 px-8 text-center">
+                <BookOpen size={40} strokeWidth={1.5} className="text-[var(--ca-gold-bright)] opacity-90" aria-hidden="true" />
+                {p.subject && (
+                  <span className="text-xs font-bold uppercase tracking-[0.18em] text-[var(--ca-gold-bright)]/80">{p.subject}</span>
+                )}
+                <p className="font-heading text-2xl font-bold leading-tight text-white/95 sm:text-3xl">{p.name}</p>
+                <span className="text-sm font-medium text-white/60">Handwritten UPSC notes · printed &amp; delivered</span>
+              </div>
             )}
+            <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/40 via-black/0 to-black/5" aria-hidden="true" />
           </div>
           {p.photos.length > 1 && (
             <div className="mt-3 grid grid-cols-4 gap-2">
