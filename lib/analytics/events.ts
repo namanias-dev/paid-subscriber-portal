@@ -84,7 +84,8 @@ export type EventName =
   | "notes_checkout_started"
   | "notes_coupon_applied"
   | "notes_payment_failed"
-  | "notes_order_completed";
+  | "notes_order_completed"
+  | "notes_interest_submitted";
 
 /**
  * Events the CLIENT beacon (/api/track) is allowed to emit. Anything that
@@ -157,6 +158,7 @@ export const CLIENT_ALLOWED_EVENTS: ReadonlySet<EventName> = new Set<EventName>(
   "notes_coupon_applied",
   "notes_payment_failed",
   "notes_order_completed",
+  "notes_interest_submitted",
 ]);
 
 /** High-volume traffic events that the retention job may prune after 90 days. */

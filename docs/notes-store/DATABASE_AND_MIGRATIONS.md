@@ -9,8 +9,10 @@
 5. `supabase/migrations/2026-09-17-notes-store-1c-verify-fixtures.sql`
 6. `supabase/migrations/2026-09-19-notes-store-tracking-token-hash.sql` — `tracking_token_hash`, clear plaintext
 7. `supabase/migrations/2026-09-19-notes-store-availability.sql` — **additive**: `store_products.availability_mode` (`ready_stock`|`on_demand`|`coming_soon`|`unavailable`, default `ready_stock`), plus `subtitle`, `author`, `booklets`, `highlights_json`, `ideal_for_json`; index `store_orders_status_idx` for the preparation-demand scan. Existing rows default to `ready_stock` (behaviour preserved).
+8. `supabase/migrations/2026-09-20-notes-store-admin-content.sql` — product editor content fields
+9. `supabase/migrations/2026-09-20-notes-store-subject-interest.sql` — **additive**: `store_subject_interest` (product_id, voter_hash, source, created_at). Demand signal only; no money/inventory/order changes.
 
-## Tables (`store_*`) — 20
+## Tables (`store_*`) — 21
 
 | Table | Purpose |
 |-------|---------|
@@ -30,6 +32,7 @@
 | `store_shipments` / `store_shipment_events` | Manual courier/AWB |
 | `store_zones` / `store_pincode_cache` | Serviceability |
 | `store_reviews` | Schema present; feature flag off |
+| `store_subject_interest` | Anonymous “I want these notes” demand signals |
 
 **No FKs** from these tables into Academy `payments` / `students` / `buyers` / `leads` / enrollments.
 

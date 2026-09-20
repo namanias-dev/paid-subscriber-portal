@@ -1,7 +1,16 @@
-import Link from "next/link";
 import ProductCard from "@/components/notes/ProductCard";
 import TrackView from "@/components/notes/TrackView";
-import { listActiveCategories, listActiveProducts } from "@/lib/store/catalogue";
+import NotesHero from "@/components/notes/NotesHero";
+import NotesLandingMotion from "@/components/notes/NotesLandingMotion";
+import NotesReveal from "@/components/notes/NotesReveal";
+import { BenefitTicker, ResultsTicker } from "@/components/notes/NotesTicker";
+import SubjectRail from "@/components/notes/SubjectRail";
+import FeaturedNotes from "@/components/notes/FeaturedNotes";
+import BundleShowcase from "@/components/notes/BundleShowcase";
+import SampleStory from "@/components/notes/SampleStory";
+import ShippingStory from "@/components/notes/ShippingStory";
+import NotesClosingCta from "@/components/notes/NotesClosingCta";
+import { getProductBySlug, listActiveCategories, listActiveProducts } from "@/lib/store/catalogue";
 
 export const revalidate = 600;
 export const metadata = {
@@ -9,13 +18,6 @@ export const metadata = {
   description:
     "Premium printed hard copies of Naman Sir's handwritten UPSC notes. Exam-focused, revision-ready, delivered pan-India from Chandigarh.",
 };
-
-const HOW = [
-  { n: "1", t: "Choose your notes", d: "Subject-wise singles or the Complete GS set." },
-  { n: "2", t: "Order prepaid", d: "Guest checkout. UPI, cards and net banking via ICICI." },
-  { n: "3", t: "We print & pack", d: "Print-on-demand from Chandigarh. Packed for a courier, not a bookshelf." },
-  { n: "4", t: "Delivered", d: "A date you can hold us to, not a range." },
-];
 
 const WHY = [
   { t: "Curation, not page count", d: "Less material, better organised, written for the paper in front of you." },
@@ -28,144 +30,108 @@ const FAQS = [
   { q: "Do you deliver all over India?", a: "Yes, prepaid, from Chandigarh. Enter your PIN on a product page for a concrete delivery date." },
   { q: "Is cash on delivery available?", a: "No. Every order is prepaid. It keeps the price down and the dispatch queue honest." },
   { q: "Can I get a PDF instead?", a: "This store sells printed hard copies only. Sample pages on each product show the real inside pages." },
+  { q: "What if my shipment arrives damaged or incomplete?", a: "There are no general returns on printed notes. If a parcel arrives damaged, wrong, missing pages, or is lost in transit, contact support with your order number and we will make it right." },
 ];
 
 export default async function NotesLanding() {
-  const [categories, bestsellers, bundles, products] = await Promise.all([
+  const [categories, featured, bestsellers, bundles, products] = await Promise.all([
     listActiveCategories(),
+    listActiveProducts({ featured: true, limit: 5 }),
     listActiveProducts({ bestsellers: true, limit: 8 }),
     listActiveProducts({ kind: "bundle", limit: 4 }),
-    listActiveProducts({ limit: 8 }),
+    listActiveProducts({ limit: 16 }),
   ]);
-  const gs = bundles[0] || null;
-  const samplesFrom = products.find((p) => p.cover_url) || products[0];
+  const merch = featured.length ? featured : bestsellers.length ? bestsellers : products.filter((p) => p.kind === "single");
+  const heroProduct = products.find((p) => p.cover_url) || products[0] || null;
+  const sampleSource = products.find((p) => p.kind === "single") || products[0] || null;
+  const sampleDetail = sampleSource ? await getProductBySlug(sampleSource.slug) : null;
+  const bundleDetails = await Promise.all(bundles.map((b) => getProductBySlug(b.slug)));
+  const upcoming = products.filter((p) => p.availability.state === "coming_soon" || p.availability.state === "unavailable");
 
   return (
     <>
       <TrackView event="notes_store_viewed" />
-      <header className="ca-dark ca-grain relative overflow-hidden">
-        <div className="ca-orb" style={{ width: 320, height: 320, top: -130, right: -70, background: "rgba(212,175,55,0.16)" }} />
-        <div className="container-wide relative py-16 sm:py-24">
-          <p className="ca-eyebrow">Printed notes · from Chandigarh</p>
-          <h1 className="ca-hero-title mt-3 max-w-3xl font-heading text-4xl font-extrabold leading-[1.1] tracking-tight sm:text-5xl">
-            Naman Sir's Handwritten UPSC Notes — Delivered to Your Doorstep.
-          </h1>
-          <p className="mt-4 max-w-xl text-[var(--ca-slate-300)]">
-            Premium printed hard copies. Exam-focused, revision-ready, delivered pan-India. You get a delivery date, not a range.
-          </p>
-          <div className="mt-8 flex flex-wrap gap-3">
-            <Link href="#catalogue" className="inline-flex min-h-12 items-center rounded-full bg-[var(--ca-gold,#d4af37)] px-6 text-sm font-semibold text-[var(--ca-navy)]">
-              Shop notes
-            </Link>
-            <Link href="#bundles" className="inline-flex min-h-12 items-center rounded-full border border-white/25 px-6 text-sm font-semibold text-white">
-              Explore bundles
-            </Link>
-          </div>
-        </div>
-      </header>
+      <NotesLandingMotion />
+      <NotesHero
+        coverUrl={heroProduct?.cover_url}
+        title={heroProduct?.short_name || heroProduct?.name}
+        subject={heroProduct?.subject || heroProduct?.category_name}
+      />
+      <ResultsTicker />
+      <BenefitTicker />
 
-      <div className="relative z-10 -mt-8 rounded-t-[2rem] bg-[var(--ca-surface)] pb-20">
-        <section id="catalogue" className="container-wide pt-12">
-          <h2 className="font-heading text-2xl font-bold text-[var(--ca-navy)]">Shop by subject</h2>
-          <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-            {categories.map((c) => (
-              <Link
-                key={c.slug}
-                href={`/notes/${c.slug}`}
-                className="ca-focus rounded-2xl border border-[var(--ca-navy)]/10 bg-white p-5 transition duration-200 hover:-translate-y-0.5 hover:shadow-md motion-reduce:transform-none"
-              >
-                <p className="font-heading text-base font-semibold text-[var(--ca-navy)]">{c.nav_label || c.name}</p>
-                {c.short_description && <p className="mt-1 text-xs text-[var(--ca-navy)]/55">{c.short_description}</p>}
-              </Link>
-            ))}
-            {categories.length === 0 && (
-              <p className="col-span-full rounded-2xl border border-dashed border-[var(--ca-navy)]/15 bg-white p-8 text-sm text-[var(--ca-navy)]/50">
-                Catalogue opening shortly. Subjects will appear here once products are activated.
-              </p>
-            )}
+      <div className="relative z-10 bg-[var(--ca-surface)] pb-6">
+        <NotesReveal className="container-wide pt-12" >
+          <div id="catalogue">
+            <p className="ca-eyebrow text-[var(--ca-gold-dark)]">Catalogue</p>
+            <h2 className="mt-2 font-heading text-3xl font-bold text-[var(--ca-navy)]">Shop by subject</h2>
+            <p className="mt-2 max-w-xl text-sm text-[var(--ca-navy)]/55">Each subject is a physical notes identity — not a generic tile.</p>
+            <div className="mt-6">
+              <SubjectRail categories={categories} products={products} />
+            </div>
           </div>
-        </section>
+        </NotesReveal>
 
-        <section className="container-wide mt-16">
-          <h2 className="font-heading text-2xl font-bold text-[var(--ca-navy)]">Best sellers</h2>
-          <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            {(bestsellers.length ? bestsellers : products).length === 0 ? (
-              <p className="col-span-full text-sm text-[var(--ca-navy)]/50">No live titles yet.</p>
-            ) : (
-              (bestsellers.length ? bestsellers : products).map((p) => <ProductCard key={p.id} product={p} />)
-            )}
-          </div>
-        </section>
-
-        <section id="bundles" className="container-wide mt-16">
-          <div className="rounded-3xl bg-[var(--ca-navy)] px-6 py-10 text-white sm:px-10">
-            <p className="ca-eyebrow text-[var(--ca-gold,#d4af37)]">Complete GS</p>
-            <h2 className="mt-2 font-heading text-3xl font-bold">One set. The notes you'd otherwise buy one by one.</h2>
-            <p className="mt-3 max-w-xl text-white/70">
-              {gs
-                ? `${gs.name} — printed, packed and sent as a single dispatch.`
-                : "The Complete GS bundle will appear here once it is listed. Until then, shop by subject."}
+        {upcoming.length > 0 && (
+          <NotesReveal className="container-wide mt-16">
+            <p className="ca-eyebrow text-[var(--ca-gold-dark)]">Upcoming</p>
+            <h2 className="mt-2 font-heading text-3xl font-bold text-[var(--ca-navy)]">Tell us what you want next</h2>
+            <p className="mt-2 max-w-xl text-sm text-[var(--ca-navy)]/55">
+              This is a demand signal, not an order. We use it to decide what to prepare next.
             </p>
-            {gs && (
-              <Link href={`/notes/products/${gs.slug}`} className="mt-6 inline-flex min-h-12 items-center rounded-full bg-white px-6 text-sm font-semibold text-[var(--ca-navy)]">
-                View the GS bundle
-              </Link>
-            )}
-          </div>
-        </section>
+            <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {upcoming.map((p) => (
+                <ProductCard key={p.id} product={p} interestSource="landing" />
+              ))}
+            </div>
+          </NotesReveal>
+        )}
+      </div>
 
-        <section className="container-wide mt-16 grid gap-6 md:grid-cols-3">
+      <section className="ca-dark py-4">
+        <div className="container-wide py-8 text-center">
+          <p className="text-sm text-white/70">Physical hard copies · Prepaid ICICI checkout · Trackable courier dispatch</p>
+        </div>
+      </section>
+
+      <div className="bg-[var(--ca-surface)] py-16">
+        <NotesReveal className="container-wide">
+          <p className="ca-eyebrow text-[var(--ca-gold-dark)]">Featured</p>
+          <h2 className="mt-2 font-heading text-3xl font-bold text-[var(--ca-navy)]">Notes worth starting with</h2>
+          <div className="mt-6">
+            <FeaturedNotes products={merch} />
+          </div>
+        </NotesReveal>
+      </div>
+
+      <section id="bundles" className="bg-[linear-gradient(180deg,#f4ecd4_0%,#f7f5f1_100%)] py-16">
+        <NotesReveal className="container-wide">
+          <p className="ca-eyebrow text-[var(--ca-gold-dark)]">Bundles</p>
+          <h2 className="mt-2 font-heading text-3xl font-bold text-[var(--ca-navy)]">Higher-value sets, when listed</h2>
+          <div className="mt-6">
+            <BundleShowcase bundles={bundles} details={bundleDetails.filter(Boolean) as NonNullable<(typeof bundleDetails)[number]>[]} />
+          </div>
+        </NotesReveal>
+      </section>
+
+      <div className="bg-[var(--ca-surface)] py-16">
+        <NotesReveal>
+          <SampleStory product={sampleDetail} />
+        </NotesReveal>
+        <NotesReveal className="container-wide mt-16 grid gap-6 md:grid-cols-3">
           {WHY.map((w) => (
-            <div key={w.t} className="rounded-2xl border border-[var(--ca-navy)]/10 bg-white p-6">
+            <div key={w.t} className="rounded-3xl bg-white p-6 ns-elev-1">
               <h3 className="font-heading text-lg font-semibold text-[var(--ca-navy)]">{w.t}</h3>
               <p className="mt-2 text-sm leading-relaxed text-[var(--ca-navy)]/65">{w.d}</p>
             </div>
           ))}
-        </section>
-
-        <section className="container-wide mt-16">
-          <h2 className="font-heading text-2xl font-bold text-[var(--ca-navy)]">See the pages before you buy</h2>
-          <p className="mt-2 max-w-2xl text-sm text-[var(--ca-navy)]/60">
-            Every product carries 4–6 non-contiguous sample pages. The watermark is in the pixels — these are the real notes, at a resolution that is comfortable on a phone and useless on a printer.
-          </p>
-          {samplesFrom && (
-            <Link href={`/notes/products/${samplesFrom.slug}`} className="mt-4 inline-flex text-sm font-semibold text-[var(--ca-navy)] underline">
-              Open a product to preview samples
-            </Link>
-          )}
-        </section>
-
-        <section className="container-wide mt-16 grid gap-8 lg:grid-cols-2">
-          <div className="rounded-2xl border border-[var(--ca-navy)]/10 bg-white p-6">
-            <h2 className="font-heading text-xl font-bold text-[var(--ca-navy)]">Faculty</h2>
-            <p className="mt-3 text-sm leading-relaxed text-[var(--ca-navy)]/70">
-              Written and taught by Naman Sir at Naman IAS Academy, Chandigarh. These are class notes, not a rebranded compilation. What you receive is what is taught.
-            </p>
-          </div>
-          <div className="rounded-2xl border border-[var(--ca-navy)]/10 bg-white p-6">
-            <h2 className="font-heading text-xl font-bold text-[var(--ca-navy)]">Packed to travel</h2>
-            <p className="mt-3 text-sm leading-relaxed text-[var(--ca-navy)]/70">
-              Printed and packed in Chandigarh. Corner-protected, courier-ready. We quote a delivery date with a buffer built in — if we miss it in launch week, that is on us.
-            </p>
-          </div>
-        </section>
-
-        <section className="container-wide mt-16">
-          <h2 className="font-heading text-2xl font-bold text-[var(--ca-navy)]">How it arrives</h2>
-          <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            {HOW.map((h) => (
-              <div key={h.n} className="rounded-2xl bg-white p-5">
-                <p className="font-heading text-3xl font-bold text-[var(--ca-gold,#d4af37)]">{h.n}</p>
-                <p className="mt-2 font-semibold text-[var(--ca-navy)]">{h.t}</p>
-                <p className="mt-1 text-sm text-[var(--ca-navy)]/60">{h.d}</p>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        <section className="container-wide mt-16">
+        </NotesReveal>
+        <NotesReveal className="container-wide mt-16">
+          <ShippingStory />
+        </NotesReveal>
+        <NotesReveal className="container-wide mt-16">
           <h2 className="font-heading text-2xl font-bold text-[var(--ca-navy)]">Questions</h2>
-          <div className="mt-6 divide-y divide-[var(--ca-navy)]/10 rounded-2xl border border-[var(--ca-navy)]/10 bg-white">
+          <div className="mt-6 divide-y divide-[var(--ca-navy)]/10 rounded-3xl bg-white ns-elev-1">
             {FAQS.map((f) => (
               <details key={f.q} className="px-5 py-4">
                 <summary className="cursor-pointer font-semibold text-[var(--ca-navy)]">{f.q}</summary>
@@ -173,16 +139,10 @@ export default async function NotesLanding() {
               </details>
             ))}
           </div>
-        </section>
-
-        <section className="container-wide mt-16 text-center">
-          <h2 className="font-heading text-3xl font-bold text-[var(--ca-navy)]">Ready when you are.</h2>
-          <p className="mx-auto mt-3 max-w-lg text-sm text-[var(--ca-navy)]/60">Prepaid, printed, packed, a date on the box. Guest checkout — no account required.</p>
-          <Link href="#catalogue" className="mt-6 inline-flex min-h-12 items-center rounded-full bg-[var(--ca-navy)] px-6 text-sm font-semibold text-white">
-            Shop notes
-          </Link>
-        </section>
+        </NotesReveal>
       </div>
+
+      <NotesClosingCta />
     </>
   );
 }

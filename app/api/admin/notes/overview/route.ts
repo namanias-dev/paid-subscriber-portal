@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requirePermission } from "@/lib/adminGuard";
 import { storeDb } from "@/lib/store/db";
 import { computePreparationDemand } from "@/lib/store/preparation";
+import { listInterestAggregates } from "@/lib/store/interest";
 
 export const dynamic = "force-dynamic";
 
@@ -68,5 +69,8 @@ export async function GET() {
     },
     prepare_top: prep.filter((r) => r.additional_required > 0).slice(0, 6),
     low_stock: lowStock.slice(0, 6),
+    interest_top: (await listInterestAggregates("most"))
+      .filter((r) => r.availability_mode === "coming_soon" || r.availability_mode === "unavailable")
+      .slice(0, 5),
   });
 }

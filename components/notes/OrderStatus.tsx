@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { motion, useReducedMotion } from "framer-motion";
 import { trackClient } from "@/lib/analytics/client";
 import type { PublicOrder } from "@/lib/store/orders";
 
@@ -12,15 +13,13 @@ export default function OrderStatus({ order }: { order: PublicOrder }) {
   const [current, setCurrent] = useState(order);
   const [stillWaiting, setStillWaiting] = useState(false);
   const completedFired = useRef(false);
+  const reduce = useReducedMotion();
 
   useEffect(() => {
     setCurrent(order);
     setStillWaiting(false);
   }, [order]);
 
-  // Fire the completion funnel event once, when the order is confirmed (not
-  // confirming and at least the "Order confirmed" step is done — never on a
-  // failure). PII-free: order_no only.
   useEffect(() => {
     if (completedFired.current) return;
     if (!current.confirming && current.steps.some((s) => s.done)) {
@@ -73,9 +72,20 @@ export default function OrderStatus({ order }: { order: PublicOrder }) {
     };
   }, [current.confirming, current.order_no, current.access_token]);
 
+  const confirmed = !current.confirming && current.stage !== "failed";
+
   return (
     <div className="mx-auto max-w-xl">
-      <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--ca-gold-dark,#9a7b2f)]">{current.order_no}</p>
+      {confirmed && (
+        <motion.p
+          className="ca-eyebrow"
+          initial={reduce ? false : { opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+        >
+          Order confirmed
+        </motion.p>
+      )}
+      <p className="mt-2 text-xs font-semibold uppercase tracking-[0.14em] text-[var(--ca-gold-dark,#9a7b2f)]">{current.order_no}</p>
       <h1 className="mt-2 font-heading text-3xl font-bold text-[var(--ca-navy)]">
         {current.confirming ? "Payment received — confirming your order" : current.stage_label}
       </h1>
@@ -92,26 +102,36 @@ export default function OrderStatus({ order }: { order: PublicOrder }) {
       {current.promised_delivery_date && (
         <p className="mt-2 text-sm text-[var(--ca-navy)]/60">Promised by {current.promised_delivery_date}</p>
       )}
-      <ol className="mt-8 space-y-3">
-        {current.steps.map((s) => (
-          <li key={s.id} className="flex items-center gap-3">
-            <span className={`h-2.5 w-2.5 rounded-full ${s.done ? "bg-[var(--ca-gold,#d4af37)]" : "bg-[var(--ca-navy)]/20"}`} />
-            <span className={s.done ? "font-medium text-[var(--ca-navy)]" : "text-[var(--ca-navy)]/40"}>{s.label}</span>
+      {current.ship_to && (
+        <p className="mt-2 text-sm text-[var(--ca-navy)]/65">
+          <span className="font-semibold text-[var(--ca-navy)]">Delivering to</span> {current.ship_to}
+        </p>
+      )}
+      <ol className="mt-8 space-y-0">
+        {current.steps.map((s, i) => (
+          <li key={s.id} className="flex gap-3">
+            <div className="flex flex-col items-center">
+              <span className={`mt-1 h-3 w-3 rounded-full ${s.done ? "bg-[var(--ca-gold,#d4af37)]" : "bg-[var(--ca-navy)]/20"}`} />
+              {i < current.steps.length - 1 && <span className={`w-px flex-1 ${s.done ? "bg-[var(--ca-gold)]/50" : "bg-[var(--ca-navy)]/10"}`} />}
+            </div>
+            <div className="pb-5">
+              <p className={s.done ? "font-semibold text-[var(--ca-navy)]" : "text-[var(--ca-navy)]/40"}>{s.label}</p>
+            </div>
           </li>
         ))}
       </ol>
-      <ul className="mt-8 divide-y rounded-2xl border border-[var(--ca-navy)]/10 bg-white">
+      <ul className="mt-2 divide-y rounded-3xl bg-white ns-elev-1">
         {current.items.map((it, i) => (
           <li key={i} className="flex justify-between p-4 text-sm">
             <span>
               {it.name} × {it.qty}
             </span>
-            <span>{it.total}</span>
+            <span className="tabular-nums">{it.total}</span>
           </li>
         ))}
         <li className="flex justify-between p-4 font-semibold">
           <span>Total</span>
-          <span>{current.total_label}</span>
+          <span className="tabular-nums">{current.total_label}</span>
         </li>
       </ul>
       {current.awb && (
@@ -119,6 +139,16 @@ export default function OrderStatus({ order }: { order: PublicOrder }) {
           {current.courier} · AWB {current.awb}
         </p>
       )}
+      <div className="mt-6 rounded-3xl bg-white p-4 text-sm text-[var(--ca-navy)]/70 ns-elev-1">
+        <p className="font-semibold text-[var(--ca-navy)]">What happens next</p>
+        <p className="mt-1">
+          {current.stage === "delivered"
+            ? "Your notes have been delivered. If anything arrived damaged, wrong, or incomplete, contact support with this order number."
+            : current.stage === "shipped" || current.stage === "out_for_delivery"
+              ? "The parcel is with the courier. Use the AWB above if it is available."
+              : "The Academy prepares and packs your notes in Chandigarh, then hands them to the courier. You can track this order with your phone number anytime."}
+        </p>
+      </div>
     </div>
   );
 }

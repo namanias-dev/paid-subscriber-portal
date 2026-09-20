@@ -35,7 +35,7 @@ export default function TrackForm() {
 
   return (
     <div className="mt-8 max-w-xl">
-      <form onSubmit={onSubmit} className="space-y-3 rounded-2xl border border-[var(--ca-navy)]/10 bg-white p-5">
+      <form onSubmit={onSubmit} className="space-y-3 rounded-3xl bg-white p-5 ns-elev-1">
         <label className="block text-sm">
           <span className="mb-1 block font-medium">Order number</span>
           <input value={orderNo} onChange={(e) => setOrderNo(e.target.value.toUpperCase())} required className="min-h-11 w-full rounded-xl border px-3 font-mono" placeholder="NIAS-N-2026-001284" />

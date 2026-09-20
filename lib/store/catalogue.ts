@@ -190,6 +190,7 @@ export async function listActiveProducts(opts?: {
   bestsellers?: boolean;
   featured?: boolean;
   kind?: "single" | "bundle";
+  availabilityMode?: AvailabilityMode;
   limit?: number;
 }): Promise<StoreProductCard[]> {
   const db = storeDb();
@@ -199,6 +200,7 @@ export async function listActiveProducts(opts?: {
   if (opts?.bestsellers) q = q.eq("is_bestseller", true);
   if (opts?.featured) q = q.eq("is_featured", true);
   if (opts?.kind) q = q.eq("kind", opts.kind);
+  if (opts?.availabilityMode) q = q.eq("availability_mode", opts.availabilityMode);
   q = q.order("position", { ascending: true }).order("name", { ascending: true });
   if (opts?.limit) q = q.limit(opts.limit);
   const { data } = await q;
