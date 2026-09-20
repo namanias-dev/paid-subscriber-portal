@@ -57,7 +57,7 @@
 
 | Name | Purpose |
 |------|---------|
-| `CLOUDFLARE_R2_*` | Object storage for product/sample media |
+| `CLOUDFLARE_R2_*` | Object storage for product/sample media and teaching-video derivatives (`media/store/videos/`) |
 
 ## SMS / DLT
 

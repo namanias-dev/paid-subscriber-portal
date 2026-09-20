@@ -92,7 +92,17 @@ export type EventName =
   | "subject_interest_saved"
   | "available_note_clicked_from_interest"
   | "waitlist_interest_saved"
-  | "interest_preferences_updated";
+  | "interest_preferences_updated"
+  | "notes_teaching_section_viewed"
+  | "notes_teaching_preview_started"
+  | "notes_teaching_video_opened"
+  | "notes_teaching_sound_enabled"
+  | "notes_teaching_video_25"
+  | "notes_teaching_video_50"
+  | "notes_teaching_video_75"
+  | "notes_teaching_video_completed"
+  | "notes_teaching_video_changed"
+  | "notes_shop_after_teaching_clicked";
 
 /**
  * Events the CLIENT beacon (/api/track) is allowed to emit. Anything that
@@ -173,6 +183,16 @@ export const CLIENT_ALLOWED_EVENTS: ReadonlySet<EventName> = new Set<EventName>(
   "available_note_clicked_from_interest",
   "waitlist_interest_saved",
   "interest_preferences_updated",
+  "notes_teaching_section_viewed",
+  "notes_teaching_preview_started",
+  "notes_teaching_video_opened",
+  "notes_teaching_sound_enabled",
+  "notes_teaching_video_25",
+  "notes_teaching_video_50",
+  "notes_teaching_video_75",
+  "notes_teaching_video_completed",
+  "notes_teaching_video_changed",
+  "notes_shop_after_teaching_clicked",
 ]);
 
 /** High-volume traffic events that the retention job may prune after 90 days. */

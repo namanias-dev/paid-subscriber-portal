@@ -11,6 +11,7 @@ import BundleShowcase from "@/components/notes/BundleShowcase";
 import SampleStory from "@/components/notes/SampleStory";
 import ShippingStory from "@/components/notes/ShippingStory";
 import NotesClosingCta from "@/components/notes/NotesClosingCta";
+import NotesTeachingShowcase from "@/components/notes/NotesTeachingShowcase";
 import { getProductBySlug, listActiveCategories, listActiveProducts } from "@/lib/store/catalogue";
 import { listPreferenceSubjects } from "@/lib/store/preferences";
 
@@ -57,6 +58,7 @@ export default async function NotesLanding() {
       <NotesHero />
       <ResultsTicker />
       <BenefitTicker />
+      <NotesTeachingShowcase />
 
       <div className="relative z-10 bg-[var(--ca-surface)] pb-6">
         <NotesReveal className="container-wide pt-12" >
