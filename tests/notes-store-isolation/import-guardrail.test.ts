@@ -18,6 +18,7 @@ describe("store domain isolation guardrail", () => {
   test("it guards every directory store code may live in", () => {
     assert.ok((STORE_DIRS as string[]).includes("lib/store"));
     assert.ok((STORE_DIRS as string[]).includes("app/api/notes"));
+    assert.ok((STORE_DIRS as string[]).includes("app/(site)/notes"));
   });
 
   test("catches the academy data layer under any specifier shape", () => {

@@ -23,6 +23,11 @@ const nextConfig = {
     outputFileTracingIncludes: {
       "/api/admin/help": ["./docs/staff/**/*.md"],
     },
+    // mupdf ships a WebAssembly runtime; if webpack bundles it into the serverless
+    // function the mangled WASM loader throws at runtime ("e is not a function").
+    // Keep it external so it is required as a real node module (and its .wasm is
+    // traced into the function). Used only by the admin PDF sample pipeline.
+    serverComponentsExternalPackages: ["mupdf"],
   },
   images: {
     // Keep optimized variants ≥31d so stable public media URLs stay HITs.
@@ -60,11 +65,17 @@ const nextConfig = {
   },
   async headers() {
     const noStore = [{ key: "Cache-Control", value: "no-store, max-age=0, must-revalidate" }];
+    const orderHeaders = [
+      ...noStore,
+      // Access capability must not leak via Referer to third-party origins.
+      { key: "Referrer-Policy", value: "no-referrer" },
+      { key: "X-Robots-Tag", value: "noindex, nofollow" },
+    ];
     return [
       { source: "/notes/cart", headers: noStore },
       { source: "/notes/checkout", headers: noStore },
-      { source: "/notes/order/:path*", headers: noStore },
-      { source: "/notes/track", headers: noStore },
+      { source: "/notes/order/:path*", headers: orderHeaders },
+      { source: "/notes/track", headers: [...noStore, { key: "Referrer-Policy", value: "no-referrer" }, { key: "X-Robots-Tag", value: "noindex, nofollow" }] },
       { source: "/admin/notes/:path*", headers: noStore },
     ];
   },

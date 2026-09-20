@@ -464,15 +464,20 @@ a {
   --ca-navy-900: #0a1a3f;
   --ca-navy-800: #0f2557;
   --ca-navy-600: #1e3a8a;
+  /* Storefront aliases — Notes Store and shared public UI rely on these names. */
+  --ca-navy: #0a1a3f;
   --ca-gold: #d4af37;
   --ca-gold-bright: #f2c94c;
   --ca-gold-soft: #fce9a8;
+  --ca-gold-dark: #9a7b2f;
   --ca-slate-50: #f8fafc;
+  --ca-slate-100: #eef1f6;
   --ca-slate-200: #e2e8f0;
   --ca-slate-300: #cbd5e1;
   --ca-slate-400: #94a3b8;
   --ca-slate-700: #334155;
   --ca-slate-800: #1e293b;
+  --ca-surface: #f7f5f1;
 }
 
 /* Dark hero / band background with corner gold glow */

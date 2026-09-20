@@ -6,7 +6,7 @@ import Image from "next/image";
 import { usePathname } from "next/navigation";
 import {
   Menu, X, ArrowRight, LogOut, LogIn, LayoutDashboard, UserCircle,
-  BookOpen, Newspaper, ListChecks, Trophy, Video, Gift, Info, Phone, Sparkles, GraduationCap,
+  BookOpen, Newspaper, ListChecks, Trophy, Video, Gift, Info, Phone, Sparkles, GraduationCap, NotebookPen,
   type LucideIcon,
 } from "lucide-react";
 import Logo from "@/components/ui/Logo";
@@ -24,6 +24,7 @@ function doPortalLogout() { requestLogout("/api/portal/logout", "/"); }
 /** Lucide icon per route for the premium nav (desktop hover + mobile drawer rows). */
 const NAV_ICONS: Record<string, LucideIcon> = {
   "/courses": BookOpen,
+  "/notes": NotebookPen,
   "/current-affairs": Newspaper,
   "/quizzes": ListChecks,
   "/resources": GraduationCap,
@@ -76,8 +77,17 @@ export default function PublicNav({
   const [open, setOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
   const [auth, setAuth] = useState({ isLoggedIn, portalLoggedIn, userName });
+  const [notesLive, setNotesLive] = useState(false);
   const headerRef = useRef<HTMLElement>(null);
-  const LINKS = links;
+  const LINKS = notesLive
+    ? (() => {
+        const notesTab = { href: "/notes", label: "Notes" };
+        if (links.some((l) => l.href === "/notes")) return links;
+        const i = links.findIndex((l) => l.href === "/courses");
+        if (i < 0) return [...links, notesTab];
+        return [...links.slice(0, i + 1), notesTab, ...links.slice(i + 1)];
+      })()
+    : links.filter((l) => l.href !== "/notes");
   const logoSrc = toPublicImageSrc(logoUrl);
   const hasLogo = !!logoSrc;
   const h = Math.min(96, Math.max(28, Number(logoHeight) || 48));
@@ -113,6 +123,25 @@ export default function PublicNav({
     })();
     return () => { cancelled = true; };
   }, [pathname]);
+
+  // Notes Store discoverability: only show /notes when the kill switch / preview gate is live.
+  // Separate from session hydration — do not fold into the auth effect above.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/notes/status", { cache: "no-store" });
+        if (!res.ok || cancelled) return;
+        const data = (await res.json()) as { enabled?: boolean };
+        if (!cancelled) setNotesLive(!!data.enabled);
+      } catch {
+        if (!cancelled) setNotesLive(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const isActive = (href: string) => pathname === href || pathname.startsWith(href + "/");
 
