@@ -3,7 +3,7 @@
  * Recover a true-alpha product cutout from the attached notebook PNG.
  * The source is RGB with a baked Photoshop-style checkerboard (no alpha).
  */
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, unlinkSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import sharp from "sharp";
@@ -13,100 +13,46 @@ const SRC =
   "/home/ubuntu/.cursor/projects/workspace/assets/de9e5a81-d389-43fc-9ea6-1a1d07d79475.png";
 const OUT_DIR = process.argv[3] || join(dirname(fileURLToPath(import.meta.url)), "../../public/notes");
 
-function detectTile(data, w, h, channels) {
-  const scores = [];
-  for (const tile of [8, 10, 12, 16, 20, 24]) {
-    let err = 0;
-    let n = 0;
-    for (let y = 0; y < Math.min(h, 120); y++) {
-      for (let x = 0; x < Math.min(w, 120); x++) {
-        const i = (y * w + x) * channels;
-        const v = (data[i] + data[i + 1] + data[i + 2]) / 3;
-        const cell = ((Math.floor(x / tile) + Math.floor(y / tile)) & 1) === 0;
-        const expect = cell ? 193 : 128;
-        err += Math.abs(v - expect);
-        n += 1;
-      }
-    }
-    scores.push({ tile, err: err / n });
-  }
-  scores.sort((a, b) => a.err - b.err);
-  return scores[0].tile;
+function isBackground(r, g, b) {
+  const mx = Math.max(r, g, b);
+  const mn = Math.min(r, g, b);
+  const chroma = mx - mn;
+  const l = (r + g + b) / 3;
+  if (chroma > 26) return false;
+  if (l > 234) return false;
+  if (l < 48) return false;
+  return l >= 90 && l <= 220 && chroma < 20;
 }
 
-function checkerMeans(data, w, h, channels, tile) {
-  let light = 0;
-  let dark = 0;
-  let ln = 0;
-  let dn = 0;
-  for (let y = 0; y < Math.min(h, 80); y++) {
-    for (let x = 0; x < Math.min(w, 80); x++) {
-      const i = (y * w + x) * channels;
-      const v = (data[i] + data[i + 1] + data[i + 2]) / 3;
-      const chroma = Math.max(data[i], data[i + 1], data[i + 2]) - Math.min(data[i], data[i + 1], data[i + 2]);
-      if (chroma > 18) continue;
-      if (((Math.floor(x / tile) + Math.floor(y / tile)) & 1) === 0) {
-        light += v;
-        ln += 1;
-      } else {
-        dark += v;
-        dn += 1;
-      }
-    }
-  }
-  return { light: ln ? light / ln : 193, dark: dn ? dark / dn : 128 };
+function isProduct(r, g, b) {
+  const mx = Math.max(r, g, b);
+  const mn = Math.min(r, g, b);
+  const chroma = mx - mn;
+  const l = (r + g + b) / 3;
+  if (l > 234 && chroma < 30) return true;
+  if (l < 52) return true;
+  if (b > r + 10 && l < 120) return true;
+  return false;
 }
 
 async function main() {
   const img = sharp(SRC);
   const { data, info } = await img.raw().toBuffer({ resolveWithObject: true });
   const { width: w, height: h, channels: c } = info;
-  const tile = detectTile(data, w, h, c);
-  const means = checkerMeans(data, w, h, c, tile);
-  const alpha = Buffer.alloc(w * h);
-
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      const i = (y * w + x) * c;
-      const r = data[i];
-      const g = data[i + 1];
-      const b = data[i + 2];
-      const chroma = Math.max(r, g, b) - Math.min(r, g, b);
-      const v = (r + g + b) / 3;
-      const cell = ((Math.floor(x / tile) + Math.floor(y / tile)) & 1) === 0;
-      const expect = cell ? means.light : means.dark;
-      const checkerDist = Math.abs(v - expect);
-      const nearChecker =
-        chroma < 22 &&
-        checkerDist < 28 &&
-        v < 220 &&
-        v > 90 &&
-        Math.abs(r - g) < 16 &&
-        Math.abs(g - b) < 16;
-
-      // Product: paper whites, navy ink, spiral blacks, line-art trees.
-      const isPaper = v > 228 && chroma < 28;
-      const isInk = (b > r + 12 && v < 90) || (v < 48 && chroma < 30);
-      const isLine = chroma < 20 && v < 80;
-
-      let a = 255;
-      if (nearChecker && !isPaper && !isInk && !isLine) a = 0;
-      else if (nearChecker && isPaper) a = 220;
-      else if (checkerDist < 14 && chroma < 14 && v < 210) a = 0;
-      alpha[y * w + x] = a;
-    }
-  }
-
-  // Flood-fill background from the border so interior paper stays opaque.
+  const bg = new Uint8Array(w * h);
   const seen = new Uint8Array(w * h);
   const stack = [];
+
   const push = (x, y) => {
     if (x < 0 || y < 0 || x >= w || y >= h) return;
     const idx = y * w + x;
     if (seen[idx]) return;
+    const i = idx * c;
+    if (!isBackground(data[i], data[i + 1], data[i + 2])) return;
     seen[idx] = 1;
     stack.push(idx);
   };
+
   for (let x = 0; x < w; x++) {
     push(x, 0);
     push(x, h - 1);
@@ -115,10 +61,9 @@ async function main() {
     push(0, y);
     push(w - 1, y);
   }
-  const bg = new Uint8Array(w * h);
+
   while (stack.length) {
     const idx = stack.pop();
-    if (alpha[idx] > 40) continue;
     bg[idx] = 1;
     const x = idx % w;
     const y = (idx - x) / w;
@@ -128,32 +73,41 @@ async function main() {
     push(x, y - 1);
   }
 
-  for (let i = 0; i < alpha.length; i++) {
+  const alpha = Buffer.alloc(w * h);
+  for (let i = 0; i < w * h; i++) {
+    const p = i * c;
     if (bg[i]) alpha[i] = 0;
-    else if (alpha[i] < 180) alpha[i] = 255;
+    else if (isProduct(data[p], data[p + 1], data[p + 2])) alpha[i] = 255;
+    else alpha[i] = 255;
   }
 
-  // Feather the silhouette.
-  const feathered = Buffer.from(alpha);
-  const radius = 2;
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
+  // Contract one pixel of leftover checker fringe, then feather.
+  const contracted = Buffer.from(alpha);
+  for (let y = 1; y < h - 1; y++) {
+    for (let x = 1; x < w - 1; x++) {
       const idx = y * w + x;
-      if (alpha[idx] === 255) {
-        let min = 255;
-        for (let dy = -radius; dy <= radius; dy++) {
-          for (let dx = -radius; dx <= radius; dx++) {
-            const xx = x + dx;
-            const yy = y + dy;
-            if (xx < 0 || yy < 0 || xx >= w || yy >= h) {
-              min = 0;
-              continue;
-            }
-            min = Math.min(min, alpha[yy * w + xx]);
-          }
+      if (alpha[idx] === 0) continue;
+      let bgN = 0;
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          if (alpha[(y + dy) * w + (x + dx)] === 0) bgN += 1;
         }
-        if (min === 0) feathered[idx] = 210;
       }
+      const p = idx * c;
+      if (bgN >= 3 && isBackground(data[p], data[p + 1], data[p + 2])) contracted[idx] = 0;
+    }
+  }
+
+  const feathered = Buffer.from(contracted);
+  for (let y = 1; y < h - 1; y++) {
+    for (let x = 1; x < w - 1; x++) {
+      const idx = y * w + x;
+      if (contracted[idx] === 0) continue;
+      let min = 255;
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) min = Math.min(min, contracted[(y + dy) * w + (x + dx)]);
+      }
+      if (min === 0) feathered[idx] = 180;
     }
   }
 
@@ -170,35 +124,28 @@ async function main() {
   await sharp(rgba, { raw: { width: w, height: h, channels: 4 } })
     .png({ compressionLevel: 9, adaptiveFiltering: true })
     .toFile(fullPng);
+
   await sharp(fullPng)
     .resize({ width: 900, withoutEnlargement: true })
-    .webp({ quality: 88, alphaQuality: 90 })
+    .webp({ quality: 88, alphaQuality: 92 })
     .toFile(join(OUT_DIR, "hero-notebook.webp"));
   await sharp(fullPng)
     .resize({ width: 560, withoutEnlargement: true })
-    .webp({ quality: 84, alphaQuality: 88 })
+    .webp({ quality: 84, alphaQuality: 90 })
     .toFile(join(OUT_DIR, "hero-notebook-sm.webp"));
   await sharp(fullPng)
     .resize({ width: 900, withoutEnlargement: true })
-    .png({ compressionLevel: 9 })
+    .png({ compressionLevel: 9, palette: true, quality: 88, effort: 10 })
     .toFile(join(OUT_DIR, "hero-notebook.png"));
 
-  const meta = await sharp(join(OUT_DIR, "hero-notebook.png")).metadata();
-  writeFileSync(
-    join(OUT_DIR, "hero-notebook.json"),
-    JSON.stringify(
-      {
-        tile,
-        means,
-        width: meta.width,
-        height: meta.height,
-        hasAlpha: meta.hasAlpha,
-      },
-      null,
-      2,
-    ),
-  );
-  console.log("wrote", OUT_DIR, { tile, means, width: meta.width, height: meta.height, hasAlpha: meta.hasAlpha });
+  await sharp(join(OUT_DIR, "hero-notebook.webp"))
+    .flatten({ background: { r: 247, g: 245, b: 241 } })
+    .png()
+    .toFile(join(OUT_DIR, "hero-notebook-ivory-preview.png"));
+
+  unlinkSync(fullPng);
+  const meta = await sharp(join(OUT_DIR, "hero-notebook.webp")).metadata();
+  console.log("wrote", OUT_DIR, { width: meta.width, height: meta.height, hasAlpha: meta.hasAlpha });
 }
 
 main().catch((err) => {
