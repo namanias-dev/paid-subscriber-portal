@@ -22,6 +22,30 @@ All `force-dynamic` / no-store.
 
 Exact permission keys live in `lib/permissions.ts` / `requirePermission` call sites — verify before changing RBAC.
 
+## Notes product management (subject-oriented)
+
+`/admin/notes/products` is a **catalogue of cards** (subject, title, status LIVE/DRAFT/ARCHIVED,
+price, availability + stock/demand, sample-page count, order count, cover warning) — no raw
+table, SKU hidden under Advanced. "Manage notes" opens a dedicated editor at
+`/admin/notes/products/[id]` (`ProductEditor`) with sections: Basic info · Full description
+(markdown: description / how-to-use / prelims / mains / revision) · What's included · Who it's
+for · Topics covered (repeatable lists) · Physical product · Pricing (₹, live discount) ·
+Availability (mode cards; stock only for Ready Stock; on-demand shows live paid demand) ·
+Media & sample preview · Bundle contents (bundles) · Publishing. Sticky save bar with
+Saved / Unsaved / Saving / Save failed and an unsaved-changes guard; "View as student" opens
+the real PDP. Create via `POST /api/admin/notes/products` (auto SKU/slug), edit/lifecycle via
+`PATCH /api/admin/notes/products/[id]`, safe delete via `DELETE` (blocked with a clear message
+when order history exists → archive instead).
+
+## Sample preview: images + PDF (Cloudflare R2)
+
+Sample pages can be uploaded as images (JPG/PNG/WebP) or generated from a **PDF**: the original
+PDF is stored under the private `store-private/sample-pdf/` prefix (never served), its page count
+is read (mupdf, WASM — serverless-safe), the admin selects up to `MAX_SAMPLE_PAGES` (10), and the
+selected pages are rasterized → watermarked/downscaled/EXIF-stripped → stored as WebP derivatives
+reachable only via `/api/notes/sample/[id]`. Deleting a PDF-derived page keeps the shared source
+until the last page referencing it is removed.
+
 ## Product media management (Cloudflare R2)
 
 `components/notes/admin/MediaManager.tsx` (embedded per product row in the

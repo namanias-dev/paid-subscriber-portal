@@ -262,11 +262,27 @@ export default async function ProductPage({ params }: { params: { slug: string }
         </div>
       </div>
 
-      {p.description_md && (
-        <div className="mt-2 max-w-3xl">
-          <ProductDescription markdown={p.description_md} />
-        </div>
-      )}
+      <div className="mt-2 max-w-3xl">
+        {p.description_md && <ProductDescription markdown={p.description_md} />}
+
+        {p.topics.length > 0 && (
+          <div className="mt-8">
+            <h2 className="font-heading text-xl font-bold text-[var(--ca-navy)]">Topics covered</h2>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {p.topics.map((t, i) => (
+                <span key={i} className="rounded-full border border-[var(--ca-navy)]/12 bg-white px-3 py-1 text-sm text-[var(--ca-navy)]/75">
+                  {t}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {p.how_to_use_md && <ProductDescription markdown={p.how_to_use_md} title="How to use these notes" />}
+        {p.prelims_relevance_md && <ProductDescription markdown={p.prelims_relevance_md} title="Prelims relevance" />}
+        {p.mains_relevance_md && <ProductDescription markdown={p.mains_relevance_md} title="Mains relevance" />}
+        {p.revision_value_md && <ProductDescription markdown={p.revision_value_md} title="Revision value" />}
+      </div>
 
       <div className="mt-10 max-w-3xl rounded-2xl border border-[var(--ca-navy)]/10 bg-white p-5">
         <h2 className="font-heading text-base font-bold text-[var(--ca-navy)]">Good to know</h2>

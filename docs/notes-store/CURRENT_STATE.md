@@ -95,7 +95,11 @@ Automated-verified only (tsc + isolation guard + 53/53 store tests + `next build
 | Demo catalogue seeded (all modes + bundle) | DONE | TEST-labelled: ready_stock, on_demand, coming_soon, unavailable + GS Starter bundle |
 | Shipping-provider abstraction (manual + Shiprocket boundary) | BUILT AND AUTOMATED-VERIFIED (compile) | `lib/store/shipping/**`; ship route uses `selectShippingProvider()`; manual always available |
 | Customer notification boundary (order confirmed/shipped SMS) | BUILT — inert (double-gated) | `lib/store/notifications.ts`; wired into capture + ship; sends nothing until `notes_store_sms` + approved DLT template ids |
-| Store test suite | 60 pass / 0 fail | +7 availability/preparation tests (`tests/notes-store-availability`) |
+| Subject-oriented Notes admin (catalogue cards + dedicated editor) | BUILT (compile/tests; needs DB/R2 for runtime) | `/admin/notes/products` cards → `/admin/notes/products/[id]` `ProductEditor` (all content sections, repeatable lists, ₹ pricing, availability cards, publishing, save-state, view-as-student) |
+| PDF sample upload → page select → watermarked derivatives | BUILT AND AUTOMATED-VERIFIED (rasterize+watermark chain unit-tested) | mupdf WASM; private PDF original never served; `lib/store/media/pdf.ts` + media API |
+| Safe delete / archive with order-history integrity | BUILT | `DELETE`/`PATCH archive` on `/api/admin/notes/products/[id]` |
+| PDP renders admin content (topics, how-to-use, prelims/mains/revision) | BUILT | catalogue detail + PDP sections |
+| Store test suite | 64 pass / 0 fail | +7 availability/prep +4 PDF-pipeline tests |
 
 ## External blockers preventing a browsable-by-owner preview (owner action)
 

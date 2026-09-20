@@ -18,16 +18,28 @@
  */
 import { randomUUID } from "node:crypto";
 import { storeDb } from "../db";
-import { deleteObject, putObject } from "@/lib/r2";
+import { deleteObject, getObject, putObject } from "@/lib/r2";
 import {
   renderProductPhoto,
   renderSamplePageDerivative,
   samplePageDerivativeKey,
   samplePageOriginalKey,
 } from "./watermark";
+import { getPdfPageCount, normalizePageSelection, rasterizePdfPage } from "./pdf";
 
 export const MAX_MEDIA_BYTES = 12 * 1024 * 1024; // 12 MB — page scans can be large
+export const MAX_PDF_BYTES = 40 * 1024 * 1024; // 40 MB — full note PDFs
 export const ALLOWED_MEDIA_EXT = new Set(["jpg", "jpeg", "png", "webp"]);
+
+/** Private R2 key for an uploaded sample PDF original (never served). */
+export function samplePdfOriginalKey(productId: string, fileId: string): string {
+  return `store-private/sample-pdf/${productId}/${fileId}.pdf`;
+}
+
+/** True only for keys under this product's private sample-PDF prefix. */
+export function isOwnedSamplePdfKey(productId: string, key: string): boolean {
+  return typeof key === "string" && key.startsWith(`store-private/sample-pdf/${productId}/`) && key.endsWith(".pdf");
+}
 
 /** Public R2 key for a product photo (served via the CDN like other media). */
 export function productPhotoKey(productId: string, fileId: string): string {
@@ -163,6 +175,84 @@ export async function uploadProductPhoto(
   return data as StoreMediaRow;
 }
 
+/**
+ * Store an uploaded sample PDF privately and report its page count. No customer
+ * derivative is created yet — the admin then picks which pages to expose.
+ */
+export async function uploadSamplePdf(
+  productId: string,
+  pdf: Buffer,
+): Promise<{ pdf_key: string; page_count: number }> {
+  const pageCount = await getPdfPageCount(pdf); // throws on a non-PDF
+  const fileId = randomUUID();
+  const key = samplePdfOriginalKey(productId, fileId);
+  await putObject(key, pdf, "application/pdf");
+  return { pdf_key: key, page_count: pageCount };
+}
+
+/**
+ * Generate watermarked sample-page derivatives from selected pages of a
+ * previously-uploaded private PDF. The original PDF is fetched from R2 by its
+ * private key (validated to belong to this product), rasterized page-by-page,
+ * watermarked/downscaled, and inserted as sample_page media. Returns created rows.
+ */
+export async function generateSamplesFromPdf(
+  productId: string,
+  pdfKey: string,
+  pages: number[],
+): Promise<StoreMediaRow[]> {
+  const db = storeDb();
+  if (!db) throw new Error("store unavailable");
+  if (!isOwnedSamplePdfKey(productId, pdfKey)) throw new Error("invalid PDF reference");
+
+  const obj = await getObject(pdfKey);
+  if (!obj) throw new Error("uploaded PDF not found");
+  const chunks: Uint8Array[] = [];
+  const reader = obj.body.transformToWebStream().getReader();
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (value) chunks.push(value);
+  }
+  const pdf = Buffer.concat(chunks.map((c) => Buffer.from(c)));
+
+  const pageCount = await getPdfPageCount(pdf);
+  const selected = normalizePageSelection(pages, pageCount);
+  if (!selected.length) throw new Error("Select at least one page");
+
+  const created: StoreMediaRow[] = [];
+  let position = await nextPosition(productId, "sample_page");
+  for (const pageNo of selected) {
+    const png = await rasterizePdfPage(pdf, pageNo);
+    const derivative = await renderSamplePageDerivative(png);
+    const fileId = randomUUID();
+    const derivativeKey = samplePageDerivativeKey(productId, fileId);
+    await putObject(derivativeKey, derivative.buffer, "image/webp");
+    const { data, error } = await db
+      .from("store_product_media")
+      .insert({
+        product_id: productId,
+        kind: "sample_page",
+        r2_key: derivativeKey,
+        original_key: pdfKey, // the private source PDF (never served)
+        width: derivative.width,
+        height: derivative.height,
+        bytes: derivative.bytes,
+        source_page_no: pageNo,
+        is_public: false,
+        position: position++,
+      })
+      .select("*")
+      .single();
+    if (error) {
+      await deleteObject(derivativeKey);
+      throw new Error(error.message);
+    }
+    created.push(data as StoreMediaRow);
+  }
+  return created;
+}
+
 /** Delete a media row and its R2 object(s); clears cover if it pointed here. */
 export async function deleteProductMedia(id: string): Promise<{ product_id: string } | null> {
   const db = storeDb();
@@ -176,7 +266,16 @@ export async function deleteProductMedia(id: string): Promise<{ product_id: stri
 
   await db.from("store_product_media").delete().eq("id", id);
   if (row.r2_key) await deleteObject(row.r2_key);
-  if (row.original_key) await deleteObject(row.original_key);
+  // Delete the private original only if no other media row still references it
+  // (a PDF source is shared across the sample pages generated from it).
+  if (row.original_key) {
+    const { data: others } = await db
+      .from("store_product_media")
+      .select("id")
+      .eq("original_key", row.original_key)
+      .limit(1);
+    if (!others?.length) await deleteObject(row.original_key);
+  }
 
   const { data: prod } = await db
     .from("store_products")

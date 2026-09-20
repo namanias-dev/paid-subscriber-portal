@@ -5,14 +5,18 @@ import { STORE_CACHE_TAG } from "@/lib/store/catalogue";
 import {
   ALLOWED_MEDIA_EXT,
   MAX_MEDIA_BYTES,
+  MAX_PDF_BYTES,
   deleteProductMedia,
+  generateSamplesFromPdf,
   listProductMedia,
   normalizeExt,
   reorderProductMedia,
   setProductCover,
   uploadProductPhoto,
   uploadSamplePage,
+  uploadSamplePdf,
 } from "@/lib/store/media/upload";
+import { MAX_SAMPLE_PAGES } from "@/lib/store/media/pdf";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -47,16 +51,28 @@ export async function POST(req: Request) {
   const kind = String(form.get("kind") || "").trim();
   const file = form.get("file");
   if (!productId) return noStore({ ok: false, error: "product_id required" }, 400);
-  if (kind !== "photo" && kind !== "sample") return noStore({ ok: false, error: "kind must be photo or sample" }, 400);
-  if (!(file instanceof File)) return noStore({ ok: false, error: "file required" }, 400);
-  if (file.size > MAX_MEDIA_BYTES) return noStore({ ok: false, error: "File too large (max 12 MB)." }, 413);
-
-  const ext = normalizeExt(file.name);
-  if (!ALLOWED_MEDIA_EXT.has(ext)) {
-    return noStore({ ok: false, error: "Only JPG, PNG or WebP images are accepted." }, 415);
+  if (kind !== "photo" && kind !== "sample" && kind !== "sample_pdf") {
+    return noStore({ ok: false, error: "kind must be photo, sample or sample_pdf" }, 400);
   }
+  if (!(file instanceof File)) return noStore({ ok: false, error: "file required" }, 400);
 
   try {
+    // PDF sample source: store privately, return page count for page selection.
+    if (kind === "sample_pdf") {
+      if (file.size > MAX_PDF_BYTES) return noStore({ ok: false, error: "PDF too large (max 40 MB)." }, 413);
+      if (normalizeExt(file.name) !== "pdf" && file.type !== "application/pdf") {
+        return noStore({ ok: false, error: "Upload a PDF file." }, 415);
+      }
+      const buffer = Buffer.from(await file.arrayBuffer());
+      const res = await uploadSamplePdf(productId, buffer);
+      return noStore({ ok: true, ...res, max_pages: MAX_SAMPLE_PAGES });
+    }
+
+    if (file.size > MAX_MEDIA_BYTES) return noStore({ ok: false, error: "File too large (max 12 MB)." }, 413);
+    const ext = normalizeExt(file.name);
+    if (!ALLOWED_MEDIA_EXT.has(ext)) {
+      return noStore({ ok: false, error: "Only JPG, PNG or WebP images are accepted." }, 415);
+    }
     const buffer = Buffer.from(await file.arrayBuffer());
     const row =
       kind === "sample"
@@ -86,6 +102,11 @@ export async function PATCH(req: Request) {
       await reorderProductMedia(productId, kind, (body.order || []).map(String));
     } else if (body.action === "set_cover") {
       await setProductCover(productId, body.media_id ? String(body.media_id) : null);
+    } else if (body.action === "generate_pdf_samples") {
+      const pages = Array.isArray(body.pages) ? body.pages.map(Number) : [];
+      const media = await generateSamplesFromPdf(productId, String(body.pdf_key || ""), pages);
+      revalidateTag(STORE_CACHE_TAG);
+      return noStore({ ok: true, created: media.length, media });
     } else {
       return noStore({ ok: false, error: "unknown action" }, 400);
     }

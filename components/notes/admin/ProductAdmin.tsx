@@ -1,19 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { PageHeader } from "@/components/admin/ui";
 import { formatPaise } from "@/lib/store/money";
-import MediaManager from "@/components/notes/admin/MediaManager";
-import BundleComponents from "@/components/notes/admin/BundleComponents";
 
 type AvailabilityMode = "ready_stock" | "on_demand" | "coming_soon" | "unavailable";
-
-const AVAILABILITY_OPTIONS: { value: AvailabilityMode; label: string }[] = [
-  { value: "ready_stock", label: "Ready Stock" },
-  { value: "on_demand", label: "On Demand" },
-  { value: "coming_soon", label: "Coming Soon" },
-  { value: "unavailable", label: "Unavailable" },
-];
 
 interface Row {
   id: string;
@@ -24,291 +17,183 @@ interface Row {
   kind: "single" | "bundle";
   mrp_paise: number;
   selling_price_paise: number;
-  on_hand: number;
-  reserved: number;
-  low_stock_threshold: number;
+  sellable: number;
   availability_mode: AvailabilityMode;
   is_active: boolean;
+  archived: boolean;
+  has_cover: boolean;
+  sample_count: number;
+  order_count: number;
 }
 
-type RowEdit = {
-  selling_price_paise: string;
-  mrp_paise: string;
-  on_hand: string;
-  availability_mode: AvailabilityMode;
-  is_active: boolean;
+const AVAILABILITY_LABEL: Record<AvailabilityMode, string> = {
+  ready_stock: "Ready Stock",
+  on_demand: "On Demand",
+  coming_soon: "Coming Soon",
+  unavailable: "Unavailable",
 };
 
+function statusPill(r: Row): { text: string; cls: string } {
+  if (r.archived) return { text: "ARCHIVED", cls: "bg-slate-200 text-slate-700" };
+  if (r.is_active) return { text: "LIVE", cls: "bg-emerald-100 text-emerald-800" };
+  return { text: "DRAFT", cls: "bg-amber-100 text-amber-900" };
+}
+
 export default function NotesProductAdmin() {
+  const router = useRouter();
   const [rows, setRows] = useState<Row[]>([]);
-  const [form, setForm] = useState({
-    sku: "",
-    slug: "",
-    name: "",
-    subject: "",
-    kind: "single" as "single" | "bundle",
-    mrp_paise: "100",
-    selling_price_paise: "100",
-    on_hand: "1",
-    availability_mode: "ready_stock" as AvailabilityMode,
-    is_active: false,
-  });
+  const [loading, setLoading] = useState(true);
+  const [showArchived, setShowArchived] = useState(false);
+  const [creating, setCreating] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
-  const [edits, setEdits] = useState<Record<string, RowEdit>>({});
-  const [mediaOpen, setMediaOpen] = useState<string | null>(null);
-  const [bundleOpen, setBundleOpen] = useState<string | null>(null);
+  const [form, setForm] = useState({ name: "", subject: "", sku: "", slug: "", kind: "single" as "single" | "bundle" });
 
   async function load() {
-    const res = await fetch("/api/admin/notes/products", { cache: "no-store" });
+    setLoading(true);
+    const res = await fetch(`/api/admin/notes/products${showArchived ? "?include_archived=1" : ""}`, { cache: "no-store" });
     const json = await res.json();
-    const products: Row[] = json.products || [];
-    setRows(products);
-    const next: Record<string, RowEdit> = {};
-    for (const r of products) {
-      next[r.id] = {
-        selling_price_paise: String(r.selling_price_paise),
-        mrp_paise: String(r.mrp_paise),
-        on_hand: String(r.on_hand),
-        availability_mode: r.availability_mode || "ready_stock",
-        is_active: r.is_active,
-      };
-    }
-    setEdits(next);
+    setRows(json.products || []);
+    setLoading(false);
   }
   useEffect(() => {
-    load();
-  }, []);
+    void load();
+  }, [showArchived]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  function slugify(s: string) {
+    return s.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  }
 
   async function create(e: React.FormEvent) {
     e.preventDefault();
+    setMsg(null);
+    const name = form.name.trim();
+    if (!name) return;
+    const slug = form.slug.trim() || slugify(name);
+    const sku = form.sku.trim() || `NSA-${slug.toUpperCase().slice(0, 20)}`;
     const res = await fetch("/api/admin/notes/products", {
       method: "POST",
-      cache: "no-store",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        ...form,
-        mrp_paise: Number(form.mrp_paise),
-        selling_price_paise: Number(form.selling_price_paise),
-        on_hand: Number(form.on_hand),
+        name,
+        subject: form.subject.trim() || null,
+        sku,
+        slug,
+        kind: form.kind,
+        mrp_paise: 0,
+        selling_price_paise: 0,
+        on_hand: 0,
+        is_active: false,
       }),
     });
     const json = await res.json();
-    setMsg(json.ok ? "Saved" : json.error);
-    await load();
-  }
-
-  async function saveRow(id: string) {
-    const edit = edits[id];
-    if (!edit) return;
-    const res = await fetch("/api/admin/notes/products", {
-      method: "PATCH",
-      cache: "no-store",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        id,
-        mrp_paise: Number(edit.mrp_paise),
-        selling_price_paise: Number(edit.selling_price_paise),
-        on_hand: Number(edit.on_hand),
-        availability_mode: edit.availability_mode,
-        is_active: edit.is_active,
-      }),
-    });
-    const json = await res.json();
-    setMsg(json.ok ? "Updated" : json.error);
-    await load();
+    if (json.ok && json.id) {
+      router.push(`/admin/notes/products/${json.id}`);
+    } else {
+      setMsg(json.error || "Could not create");
+    }
   }
 
   return (
     <div>
       <PageHeader
         title="Notes catalogue"
-        subtitle="Prices are paise. ₹1 = 100. MRP is raised to selling if you leave it lower. Nothing is live until Active is checked."
+        subtitle="Manage subject notes and bundles. Tap a card to edit content, media, pricing and availability."
       />
-      <p className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950">
-        ₹1 Eazypay test SKU: name containing <strong>TEST</strong>, selling 100, MRP 100, on hand ≥ 1, then Active.
-        Checkout PIN <strong>160099</strong> is zero-shipping so the gateway charge stays ₹1.
-      </p>
-      <form onSubmit={create} className="mb-8 grid gap-3 rounded-xl border bg-white p-4 md:grid-cols-3">
-        {(["sku", "slug", "name"] as const).map((k) => (
-          <label key={k} className="text-sm">
-            {k}
-            <input required value={form[k]} onChange={(e) => setForm({ ...form, [k]: e.target.value })} className="mt-1 w-full rounded border px-2 py-1" />
-          </label>
-        ))}
-        <label className="text-sm">
-          Subject
-          <input value={form.subject} onChange={(e) => setForm({ ...form, subject: e.target.value })} placeholder="e.g. Indian Polity" className="mt-1 w-full rounded border px-2 py-1" />
+
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+        <label className="flex items-center gap-2 text-sm text-ink2">
+          <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} />
+          Show archived
         </label>
-        <label className="text-sm">
-          Type
-          <select
-            value={form.kind}
-            onChange={(e) => setForm({ ...form, kind: e.target.value as "single" | "bundle" })}
-            className="mt-1 w-full rounded border px-2 py-1"
-          >
-            <option value="single">Subject notes</option>
-            <option value="bundle">Bundle</option>
-          </select>
-        </label>
-        <label className="text-sm">
-          Availability
-          <select
-            value={form.availability_mode}
-            onChange={(e) => setForm({ ...form, availability_mode: e.target.value as AvailabilityMode })}
-            className="mt-1 w-full rounded border px-2 py-1"
-          >
-            {AVAILABILITY_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="text-sm">
-          MRP paise (₹1 = 100)
-          <input value={form.mrp_paise} onChange={(e) => setForm({ ...form, mrp_paise: e.target.value })} className="mt-1 w-full rounded border px-2 py-1" />
-        </label>
-        <label className="text-sm">
-          Selling paise (₹1 = 100)
-          <input value={form.selling_price_paise} onChange={(e) => setForm({ ...form, selling_price_paise: e.target.value })} className="mt-1 w-full rounded border px-2 py-1" />
-        </label>
-        <label className="text-sm">
-          On hand
-          <input value={form.on_hand} onChange={(e) => setForm({ ...form, on_hand: e.target.value })} className="mt-1 w-full rounded border px-2 py-1" />
-        </label>
-        <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" checked={form.is_active} onChange={(e) => setForm({ ...form, is_active: e.target.checked })} />
-          Active
-        </label>
-        <button type="submit" className="h-10 rounded bg-slate-900 text-white">
-          Create
+        <button type="button" onClick={() => setCreating((v) => !v)} className="h-9 rounded-full bg-[var(--primary)] px-4 text-sm font-semibold text-white">
+          {creating ? "Close" : "+ New notes product"}
         </button>
-        {msg && <p className="text-sm">{msg}</p>}
-      </form>
-      <table className="w-full border bg-white text-sm">
-        <thead>
-          <tr className="bg-slate-50 text-left">
-            <th className="p-2">SKU</th>
-            <th className="p-2">Name</th>
-            <th className="p-2">Selling / MRP paise</th>
-            <th className="p-2">Availability</th>
-            <th className="p-2">Stock</th>
-            <th className="p-2">Live</th>
-            <th className="p-2" />
-          </tr>
-        </thead>
-        <tbody>
+      </div>
+
+      {creating && (
+        <form onSubmit={create} className="mb-5 grid gap-3 rounded-xl border border-line bg-white p-4 sm:grid-cols-2">
+          <label className="text-sm">
+            <span className="mb-1 block font-medium text-ink2">Product title</span>
+            <input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="min-h-10 w-full rounded-lg border border-line px-3 text-sm" placeholder="e.g. Indian Polity Notes" />
+          </label>
+          <label className="text-sm">
+            <span className="mb-1 block font-medium text-ink2">Subject</span>
+            <input value={form.subject} onChange={(e) => setForm({ ...form, subject: e.target.value })} className="min-h-10 w-full rounded-lg border border-line px-3 text-sm" placeholder="e.g. Indian Polity" />
+          </label>
+          <label className="text-sm">
+            <span className="mb-1 block font-medium text-ink2">Type</span>
+            <select value={form.kind} onChange={(e) => setForm({ ...form, kind: e.target.value as "single" | "bundle" })} className="min-h-10 w-full rounded-lg border border-line px-3 text-sm">
+              <option value="single">Subject notes</option>
+              <option value="bundle">Bundle</option>
+            </select>
+          </label>
+          <details className="text-sm">
+            <summary className="cursor-pointer font-medium text-ink2">Advanced (SKU / slug)</summary>
+            <div className="mt-2 grid gap-2">
+              <input value={form.sku} onChange={(e) => setForm({ ...form, sku: e.target.value })} className="min-h-10 w-full rounded-lg border border-line px-3 text-sm" placeholder="SKU (auto if blank)" />
+              <input value={form.slug} onChange={(e) => setForm({ ...form, slug: e.target.value })} className="min-h-10 w-full rounded-lg border border-line px-3 text-sm" placeholder="slug (auto if blank)" />
+            </div>
+          </details>
+          <div className="sm:col-span-2">
+            <button type="submit" className="h-10 rounded-full bg-ink px-5 text-sm font-semibold text-white">
+              Create & edit
+            </button>
+            {msg && <span className="ml-3 text-sm text-red-700">{msg}</span>}
+          </div>
+        </form>
+      )}
+
+      {loading ? (
+        <p className="text-sm text-muted">Loading…</p>
+      ) : rows.length === 0 ? (
+        <p className="rounded-xl border border-dashed border-line bg-white p-8 text-center text-sm text-muted">
+          No notes products yet. Create your first one above.
+        </p>
+      ) : (
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {rows.map((r) => {
-            const edit = edits[r.id];
+            const pill = statusPill(r);
             return (
-              <tr key={r.id} className="border-t">
-                <td className="p-2 font-mono text-xs">{r.sku}</td>
-                <td className="p-2">
-                  {r.name}
-                  {r.subject && <p className="text-xs text-slate-500">{r.subject}</p>}
-                </td>
-                <td className="p-2">
-                  <div className="flex items-center gap-1">
-                    <input
-                      className="w-20 rounded border px-1 py-0.5"
-                      value={edit?.selling_price_paise ?? ""}
-                      onChange={(e) => setEdits((s) => ({ ...s, [r.id]: { ...s[r.id], selling_price_paise: e.target.value } }))}
-                    />
-                    <span>/</span>
-                    <input
-                      className="w-20 rounded border px-1 py-0.5"
-                      value={edit?.mrp_paise ?? ""}
-                      onChange={(e) => setEdits((s) => ({ ...s, [r.id]: { ...s[r.id], mrp_paise: e.target.value } }))}
-                    />
+              <Link
+                key={r.id}
+                href={`/admin/notes/products/${r.id}`}
+                className="flex flex-col rounded-2xl border border-line bg-white p-4 transition hover:-translate-y-0.5 hover:shadow-soft"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">{r.subject || (r.kind === "bundle" ? "Bundle" : "Notes")}</p>
+                    <h3 className="mt-0.5 truncate font-heading text-base font-bold text-ink">{r.name}</h3>
                   </div>
-                  <p className="mt-1 text-xs text-slate-500">{formatPaise(r.selling_price_paise)}</p>
-                </td>
-                <td className="p-2">
-                  <select
-                    className="rounded border px-1 py-0.5 text-xs"
-                    value={edit?.availability_mode ?? "ready_stock"}
-                    onChange={(e) =>
-                      setEdits((s) => ({ ...s, [r.id]: { ...s[r.id], availability_mode: e.target.value as AvailabilityMode } }))
-                    }
-                  >
-                    {AVAILABILITY_OPTIONS.map((o) => (
-                      <option key={o.value} value={o.value}>
-                        {o.label}
-                      </option>
-                    ))}
-                  </select>
-                </td>
-                <td className="p-2">
-                  <input
-                    className="w-16 rounded border px-1 py-0.5 disabled:bg-slate-100 disabled:text-slate-400"
-                    value={edit?.on_hand ?? ""}
-                    disabled={edit?.availability_mode !== "ready_stock"}
-                    title={edit?.availability_mode !== "ready_stock" ? "Stock only applies to Ready Stock" : undefined}
-                    onChange={(e) => setEdits((s) => ({ ...s, [r.id]: { ...s[r.id], on_hand: e.target.value } }))}
-                  />
-                  <p className="mt-1 text-xs text-slate-500">reserved {r.reserved}</p>
-                </td>
-                <td className="p-2">
-                  <label className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={!!edit?.is_active}
-                      onChange={(e) => setEdits((s) => ({ ...s, [r.id]: { ...s[r.id], is_active: e.target.checked } }))}
-                    />
-                    {edit?.is_active ? "yes" : "no"}
-                  </label>
-                </td>
-                <td className="p-2">
-                  <div className="flex flex-wrap gap-1">
-                    <button type="button" className="rounded bg-slate-900 px-3 py-1 text-white" onClick={() => saveRow(r.id)}>
-                      Save
-                    </button>
-                    <button
-                      type="button"
-                      className="rounded border border-slate-300 px-3 py-1 text-slate-700"
-                      onClick={() => setMediaOpen((cur) => (cur === r.id ? null : r.id))}
-                    >
-                      {mediaOpen === r.id ? "Close media" : "Media"}
-                    </button>
-                    {r.kind === "bundle" && (
-                      <button
-                        type="button"
-                        className="rounded border border-slate-300 px-3 py-1 text-slate-700"
-                        onClick={() => setBundleOpen((cur) => (cur === r.id ? null : r.id))}
-                      >
-                        {bundleOpen === r.id ? "Close bundle" : "Bundle"}
-                      </button>
-                    )}
-                  </div>
-                </td>
-              </tr>
+                  <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold ${pill.cls}`}>{pill.text}</span>
+                </div>
+
+                <div className="mt-3 flex items-baseline gap-2">
+                  <span className="text-lg font-semibold tabular-nums text-ink">{formatPaise(r.selling_price_paise)}</span>
+                  {r.mrp_paise > r.selling_price_paise && (
+                    <span className="text-sm tabular-nums text-muted line-through">{formatPaise(r.mrp_paise)}</span>
+                  )}
+                </div>
+
+                <div className="mt-2 text-sm text-ink2">
+                  {r.availability_mode === "ready_stock" ? (
+                    <span>{AVAILABILITY_LABEL.ready_stock} · {r.sellable} available</span>
+                  ) : (
+                    <span>{AVAILABILITY_LABEL[r.availability_mode]}</span>
+                  )}
+                </div>
+
+                <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted">
+                  <span>{r.sample_count ? `${r.sample_count} sample page${r.sample_count === 1 ? "" : "s"}` : "No preview yet"}</span>
+                  <span>{r.order_count} order{r.order_count === 1 ? "" : "s"}</span>
+                  {!r.has_cover && <span className="text-amber-700">No cover</span>}
+                </div>
+
+                <span className="mt-4 inline-flex text-sm font-semibold text-[var(--primary)]">Manage notes →</span>
+              </Link>
             );
-          })
-            .flatMap((rowEl, i) => {
-              const r = rows[i];
-              const extra: React.ReactNode[] = [rowEl];
-              if (mediaOpen === r.id) {
-                extra.push(
-                  <tr key={`${r.id}-media`} className="border-t bg-slate-50/60">
-                    <td colSpan={7} className="p-2">
-                      <MediaManager productId={r.id} />
-                    </td>
-                  </tr>,
-                );
-              }
-              if (bundleOpen === r.id && r.kind === "bundle") {
-                extra.push(
-                  <tr key={`${r.id}-bundle`} className="border-t bg-slate-50/60">
-                    <td colSpan={7} className="p-2">
-                      <BundleComponents bundleId={r.id} bundlePricePaise={r.selling_price_paise} />
-                    </td>
-                  </tr>,
-                );
-              }
-              return extra;
-            })}
-        </tbody>
-      </table>
+          })}
+        </div>
+      )}
     </div>
   );
 }

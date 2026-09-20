@@ -69,8 +69,14 @@ export interface StoreProductDetail extends StoreProductCard {
   subtitle: string | null;
   author: string | null;
   booklets: number | null;
+  physical_format: string | null;
   highlights: string[];
   ideal_for: string[];
+  topics: string[];
+  how_to_use_md: string | null;
+  prelims_relevance_md: string | null;
+  mains_relevance_md: string | null;
+  revision_value_md: string | null;
   weight_grams: number | null;
   binding_type: string | null;
   printing_type: string | null;
@@ -277,8 +283,14 @@ export async function getProductBySlug(slug: string): Promise<StoreProductDetail
     subtitle: data.subtitle ?? null,
     author: data.author ?? null,
     booklets: data.booklets == null ? null : Number(data.booklets),
+    physical_format: data.physical_format ?? null,
     highlights: toStringArray(data.highlights_json),
     ideal_for: toStringArray(data.ideal_for_json),
+    topics: toStringArray(data.topics_json),
+    how_to_use_md: data.how_to_use_md ?? null,
+    prelims_relevance_md: data.prelims_relevance_md ?? null,
+    mains_relevance_md: data.mains_relevance_md ?? null,
+    revision_value_md: data.revision_value_md ?? null,
     weight_grams: data.weight_grams,
     binding_type: data.binding_type,
     printing_type: data.printing_type,

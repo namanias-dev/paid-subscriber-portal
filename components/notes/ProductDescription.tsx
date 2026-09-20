@@ -28,12 +28,12 @@ const components = {
   hr: () => <hr className="my-5 border-[var(--ca-navy)]/10" />,
 };
 
-export default function ProductDescription({ markdown }: { markdown: string }) {
+export default function ProductDescription({ markdown, title = "About these notes" }: { markdown: string; title?: string }) {
   const value = (markdown || "").trim();
   if (!value) return null;
   return (
-    <div className="mt-10">
-      <h2 className="font-heading text-xl font-bold text-[var(--ca-navy)]">About these notes</h2>
+    <div className="mt-8">
+      <h2 className="font-heading text-xl font-bold text-[var(--ca-navy)]">{title}</h2>
       <div className="mt-3">
         <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
           {value}

@@ -4,7 +4,7 @@ import { storeDb } from "@/lib/store/db";
 import { revalidateTag } from "next/cache";
 import { STORE_CACHE_TAG } from "@/lib/store/catalogue";
 import { assertActiveSellingPrice, normalizeStoreProductPrices } from "@/lib/store/productPrice";
-import { isAvailabilityMode } from "@/lib/store/availability";
+import { applyProductContentFields } from "@/lib/store/productAdmin";
 
 export const dynamic = "force-dynamic";
 
@@ -12,50 +12,50 @@ function noStore(body: unknown, status = 200) {
   return NextResponse.json(body, { status, headers: { "Cache-Control": "no-store" } });
 }
 
-/** Clean a JSON array of short bullet strings (What's included / Ideal for). */
-function cleanStringArray(v: unknown): string[] | null {
-  if (v == null) return null;
-  const arr = Array.isArray(v) ? v : String(v).split("\n");
-  const out = arr.map((x) => String(x || "").trim()).filter(Boolean).slice(0, 20);
-  return out;
-}
-
-const STAGES = new Set(["prelims", "mains", "both"]);
-
-/** Apply the optional content fields shared by create + edit. */
-function applyContentFields(patch: Record<string, unknown>, body: Record<string, unknown>): void {
-  if (body.subtitle != null) patch.subtitle = String(body.subtitle).trim() || null;
-  if (body.author != null) patch.author = String(body.author).trim() || null;
-  if (body.subject != null) patch.subject = String(body.subject).trim() || null;
-  if (body.language != null) patch.language = String(body.language).trim() || "english";
-  if (body.edition != null) patch.edition = String(body.edition).trim() || null;
-  if (body.short_description != null) patch.short_description = String(body.short_description).trim() || null;
-  if (body.description_md != null) patch.description_md = String(body.description_md) || null;
-  if (body.stage != null) patch.stage = STAGES.has(String(body.stage)) ? String(body.stage) : null;
-  if (body.page_count != null && body.page_count !== "") patch.page_count = Math.max(0, Math.round(Number(body.page_count)));
-  if (body.booklets != null && body.booklets !== "") patch.booklets = Math.max(0, Math.round(Number(body.booklets)));
-  if (body.low_stock_threshold != null && body.low_stock_threshold !== "")
-    patch.low_stock_threshold = Math.max(0, Math.round(Number(body.low_stock_threshold)));
-  if (body.availability_mode != null) {
-    if (!isAvailabilityMode(body.availability_mode)) throw new Error("invalid availability mode");
-    patch.availability_mode = body.availability_mode;
-  }
-  if (body.highlights != null) patch.highlights_json = cleanStringArray(body.highlights);
-  if (body.ideal_for != null) patch.ideal_for_json = cleanStringArray(body.ideal_for);
-  if (body.category_id !== undefined) patch.category_id = body.category_id || null;
-}
-
-export async function GET() {
+export async function GET(req: Request) {
   if (!(await requirePermission("store_manage_catalogue"))) {
     return noStore({ ok: false, error: "Forbidden" }, 403);
   }
   const db = storeDb();
   if (!db) return noStore({ ok: false, error: "unavailable" }, 503);
-  const { data } = await db
+  const includeArchived = new URL(req.url).searchParams.get("include_archived") === "1";
+
+  let q = db
     .from("store_products")
-    .select("id,sku,slug,name,subject,mrp_paise,selling_price_paise,on_hand,reserved,low_stock_threshold,availability_mode,is_active,kind")
+    .select(
+      "id,sku,slug,name,subject,mrp_paise,selling_price_paise,on_hand,reserved,low_stock_threshold,availability_mode,is_active,kind,cover_image_key,archived_at",
+    )
     .order("position", { ascending: true });
-  return noStore({ ok: true, products: data || [] });
+  if (!includeArchived) q = q.is("archived_at", null);
+  const { data } = await q;
+  const products = data || [];
+  const ids = products.map((p) => p.id);
+
+  // Sample-page counts and order counts for the catalogue cards.
+  const sampleCount = new Map<string, number>();
+  const orderCount = new Map<string, number>();
+  if (ids.length) {
+    const { data: media } = await db
+      .from("store_product_media")
+      .select("product_id")
+      .in("product_id", ids)
+      .eq("kind", "sample_page");
+    for (const m of media || []) sampleCount.set(m.product_id, (sampleCount.get(m.product_id) || 0) + 1);
+    const { data: items } = await db.from("store_order_items").select("product_id").in("product_id", ids);
+    for (const it of items || []) orderCount.set(it.product_id, (orderCount.get(it.product_id) || 0) + 1);
+  }
+
+  return noStore({
+    ok: true,
+    products: products.map((p) => ({
+      ...p,
+      sellable: Math.max(0, Number(p.on_hand || 0) - Number(p.reserved || 0)),
+      has_cover: !!p.cover_image_key,
+      sample_count: sampleCount.get(p.id) || 0,
+      order_count: orderCount.get(p.id) || 0,
+      archived: !!p.archived_at,
+    })),
+  });
 }
 
 export async function POST(req: Request) {
@@ -82,7 +82,7 @@ export async function POST(req: Request) {
       short_description: body.short_description || null,
       is_active: isActive,
     };
-    applyContentFields(insert, body);
+    applyProductContentFields(insert, body);
     const { data, error } = await db.from("store_products").insert(insert).select("id").single();
     if (error) return noStore({ ok: false, error: error.message }, 400);
     revalidateTag(STORE_CACHE_TAG);
@@ -126,7 +126,7 @@ export async function PATCH(req: Request) {
       patch.on_hand = onHand;
     }
     if (typeof body.is_active === "boolean") patch.is_active = body.is_active;
-    applyContentFields(patch, body);
+    applyProductContentFields(patch, body);
     const selling = Number(patch.selling_price_paise ?? current.selling_price_paise);
     const active = typeof patch.is_active === "boolean" ? patch.is_active : current.is_active;
     assertActiveSellingPrice(selling, !!active);
