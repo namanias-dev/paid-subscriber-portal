@@ -107,7 +107,11 @@ export interface StoreBundleItem {
 function coverUrl(key: string | null | undefined): string | null {
   if (!key) return null;
   if (key.startsWith("store-private/")) return null;
-  return publicCdnUrl(key);
+  // Public CDN when configured; otherwise the stable same-origin `/media/[...]`
+  // stream route (keys already live under `media/`). Without this fallback,
+  // uploaded covers/photos resolve to null and never render when no R2 public
+  // base URL is set on the environment.
+  return publicCdnUrl(key) ?? (key.startsWith("media/") ? `/${key}` : null);
 }
 
 function toCard(row: Record<string, unknown>, category?: { slug: string; name: string } | null): StoreProductCard {

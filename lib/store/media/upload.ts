@@ -348,8 +348,12 @@ export async function listProductMedia(productId: string): Promise<
     .order("kind", { ascending: true })
     .order("position", { ascending: true });
   const { publicCdnUrl } = await import("@/lib/r2");
+  // Public photos: CDN when configured, else the same-origin `/media/[...]`
+  // stream route (keys are under `media/`). Samples: protected derivative route.
+  const photoUrl = (key: string): string | null =>
+    publicCdnUrl(key) ?? (key.startsWith("media/") ? `/${key}` : null);
   return (data || []).map((m) => ({
     ...(m as StoreMediaRow),
-    url: m.kind === "photo" ? publicCdnUrl(m.r2_key) : `/api/notes/sample/${m.id}`,
+    url: m.kind === "photo" ? photoUrl(m.r2_key) : `/api/notes/sample/${m.id}`,
   }));
 }
