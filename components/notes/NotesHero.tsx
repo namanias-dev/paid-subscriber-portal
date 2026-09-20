@@ -84,7 +84,7 @@ export default function NotesHero() {
             className="ns-hero-benefit mx-auto mt-2 px-1 lg:mx-0 lg:px-0"
             {...enter(0.14)}
           >
-            Handwritten. Exam-focused. Made for revision.
+            Handwritten Hard Copies for Serious IAS Aspirants.
           </motion.p>
           <motion.div className="mt-3.5 lg:mt-5" {...enter(0.2)}>
             <ShopCtas />

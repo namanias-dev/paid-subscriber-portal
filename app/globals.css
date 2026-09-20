@@ -585,11 +585,25 @@ a {
 }
 
 .ns-hero-benefit {
-  font-size: clamp(1.05rem, 3.6vw, 1.1875rem);
+  max-width: 21.75rem;
+  font-size: clamp(1rem, 0.9rem + 0.55vw, 1.25rem);
   font-weight: 500;
-  line-height: 1.35;
+  line-height: 1.4;
   color: var(--ca-navy);
-  opacity: 0.62;
+  opacity: 0.66;
+  text-wrap: balance;
+}
+
+@media (min-width: 640px) {
+  .ns-hero-benefit {
+    max-width: 24rem;
+  }
+}
+
+@media (min-width: 1024px) {
+  .ns-hero-benefit {
+    max-width: 26rem;
+  }
 }
 
 .ns-hero-cta-secondary {
