@@ -34,7 +34,10 @@ Exhaustive paths from Git (handoff era). Prefer `git ls-files` to refresh.
 
 - `app/admin/notes/page.tsx`
 - `app/admin/notes/products/page.tsx`
+- `app/admin/notes/products/[id]/page.tsx`
 - `app/admin/notes/pick-list/page.tsx`
+- `app/admin/notes/preparation/page.tsx`
+- `app/admin/notes/overview/page.tsx`
 
 ## APIs
 
@@ -47,8 +50,15 @@ Exhaustive paths from Git (handoff era). Prefer `git ls-files` to refresh.
 - `app/api/notes/order/[orderNumber]/verify/route.ts`
 - `app/api/admin/notes/orders/route.ts`
 - `app/api/admin/notes/orders/[id]/advance/route.ts`
+- `app/api/admin/notes/orders/[id]/note/route.ts`
+- `app/api/admin/notes/preparation/route.ts`
 - `app/api/admin/notes/orders/[id]/ship/route.ts`
 - `app/api/admin/notes/products/route.ts`
+- `app/api/admin/notes/products/[id]/route.ts`
+- `app/api/admin/notes/bundles/route.ts`
+- `app/api/admin/notes/media/route.ts`
+- `app/api/admin/notes/preparation/route.ts`
+- `app/api/admin/notes/overview/route.ts`
 - `app/api/cron/notes-store-verify/route.ts`
 
 ## Components
@@ -58,7 +68,7 @@ Exhaustive paths from Git (handoff era). Prefer `git ls-files` to refresh.
 
 ## Store libraries
 
-- `lib/store/**` (db, flags, http, catalogue, cart, checkout, quote, orders, accessToken, inventory, serviceability, projection, money, productPrice, references, rateLimit, alerts, media/watermark, payments/*)
+- `lib/store/**` (db, flags, http, catalogue, cart, checkout, quote, orders, accessToken, inventory, serviceability, projection, money, productPrice, references, rateLimit, alerts, availability, preparation, notifications, media/watermark, media/upload, shipping/*, payments/*)
 
 ## Database migrations
 

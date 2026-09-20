@@ -72,7 +72,27 @@ export type EventName =
   | "scroll_depth_25"
   | "scroll_depth_50"
   | "scroll_depth_75"
-  | "scroll_depth_100";
+  | "scroll_depth_100"
+  // Notes Store commerce funnel — PII-free (product/subject/price/qty only; never
+  // name, phone, address, order token or payment payloads).
+  | "notes_store_viewed"
+  | "notes_product_viewed"
+  | "notes_bundle_viewed"
+  | "notes_sample_opened"
+  | "notes_added_to_cart"
+  | "notes_removed_from_cart"
+  | "notes_checkout_started"
+  | "notes_coupon_applied"
+  | "notes_payment_failed"
+  | "notes_order_completed"
+  | "notes_interest_submitted"
+  | "notes_interest_section_viewed"
+  | "subject_interest_selected"
+  | "subject_interest_removed"
+  | "subject_interest_saved"
+  | "available_note_clicked_from_interest"
+  | "waitlist_interest_saved"
+  | "interest_preferences_updated";
 
 /**
  * Events the CLIENT beacon (/api/track) is allowed to emit. Anything that
@@ -132,6 +152,27 @@ export const CLIENT_ALLOWED_EVENTS: ReadonlySet<EventName> = new Set<EventName>(
   "scroll_depth_50",
   "scroll_depth_75",
   "scroll_depth_100",
+  // Notes Store commerce funnel — view/click/cart signals, no PII, no access or
+  // money semantics (order completion is confirmed server-side; this is a funnel
+  // signal only). Same classification as the course/AI funnel events above.
+  "notes_store_viewed",
+  "notes_product_viewed",
+  "notes_bundle_viewed",
+  "notes_sample_opened",
+  "notes_added_to_cart",
+  "notes_removed_from_cart",
+  "notes_checkout_started",
+  "notes_coupon_applied",
+  "notes_payment_failed",
+  "notes_order_completed",
+  "notes_interest_submitted",
+  "notes_interest_section_viewed",
+  "subject_interest_selected",
+  "subject_interest_removed",
+  "subject_interest_saved",
+  "available_note_clicked_from_interest",
+  "waitlist_interest_saved",
+  "interest_preferences_updated",
 ]);
 
 /** High-volume traffic events that the retention job may prune after 90 days. */

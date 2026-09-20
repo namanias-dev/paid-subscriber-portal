@@ -5,6 +5,7 @@
 import { cookies } from "next/headers";
 import { storeDb } from "./db";
 import { lineTaxPaise } from "./money";
+import { maxPurchasableQty } from "./availability";
 import type { StoreProductCard } from "./catalogue";
 
 export const CART_COOKIE = "nias_notes_cart";
@@ -107,8 +108,17 @@ export async function addToCart(productId: string, qty: number): Promise<CartVie
   if (!db) throw new Error("store unavailable");
   const product = await loadProduct(productId);
   if (!product) throw new Error("That product is no longer available");
-  const want = Math.max(1, Math.min(qty, product.max_quantity_per_order));
-  if (product.sellable < 1) throw new Error("This title is currently out of stock");
+  if (!product.availability.purchasable) {
+    throw new Error(
+      product.availability.state === "coming_soon"
+        ? "This title is coming soon"
+        : product.availability.state === "out_of_stock"
+          ? "This title is currently out of stock"
+          : "This title is currently unavailable",
+    );
+  }
+  const cap = maxPurchasableQty(product.availability_mode, product.sellable, product.max_quantity_per_order);
+  const want = Math.max(1, Math.min(qty, cap));
   const cartId = await getOrCreateCart();
   const { data: existing } = await db
     .from("store_cart_items")
@@ -117,13 +127,13 @@ export async function addToCart(productId: string, qty: number): Promise<CartVie
     .eq("product_id", productId)
     .maybeSingle();
   if (existing) {
-    const next = Math.min(existing.qty + want, product.max_quantity_per_order, Math.max(1, product.sellable));
+    const next = Math.min(existing.qty + want, cap);
     await db.from("store_cart_items").update({ qty: next, updated_at: new Date().toISOString() }).eq("id", existing.id);
   } else {
     await db.from("store_cart_items").insert({
       cart_id: cartId,
       product_id: productId,
-      qty: Math.min(want, Math.max(1, product.sellable)),
+      qty: Math.min(want, cap),
     });
   }
   const view = await getCartView(cartId);
@@ -146,11 +156,12 @@ export async function setCartQty(itemId: string, qty: number): Promise<CartView 
       .maybeSingle();
     if (!row) return getCartView(cartId);
     const product = await loadProduct(row.product_id);
-    if (!product) {
+    if (!product || !product.availability.purchasable) {
       await db.from("store_cart_items").delete().eq("id", itemId).eq("cart_id", cartId);
       return getCartView(cartId);
     }
-    const next = Math.min(Math.max(1, Math.round(qty)), product.max_quantity_per_order, Math.max(1, product.sellable));
+    const cap = maxPurchasableQty(product.availability_mode, product.sellable, product.max_quantity_per_order);
+    const next = Math.min(Math.max(1, Math.round(qty)), cap);
     await db.from("store_cart_items").update({ qty: next, updated_at: new Date().toISOString() }).eq("id", itemId);
   }
   return getCartView(cartId);

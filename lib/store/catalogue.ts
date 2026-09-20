@@ -5,6 +5,12 @@
 import { storeDb } from "./db";
 import { publicCdnUrl } from "@/lib/r2";
 import { unstable_cache } from "next/cache";
+import {
+  normalizeAvailabilityMode,
+  resolveAvailability,
+  type AvailabilityMode,
+  type AvailabilityView,
+} from "./availability";
 
 export const STORE_CACHE_TAG = "notes-store";
 
@@ -41,6 +47,8 @@ export interface StoreProductCard {
   category_slug: string | null;
   category_name: string | null;
   max_quantity_per_order: number;
+  availability_mode: AvailabilityMode;
+  availability: AvailabilityView;
 }
 
 export interface StoreProductMedia {
@@ -58,6 +66,17 @@ export interface StoreProductMedia {
 export interface StoreProductDetail extends StoreProductCard {
   description_md: string | null;
   short_description: string | null;
+  subtitle: string | null;
+  author: string | null;
+  booklets: number | null;
+  physical_format: string | null;
+  highlights: string[];
+  ideal_for: string[];
+  topics: string[];
+  how_to_use_md: string | null;
+  prelims_relevance_md: string | null;
+  mains_relevance_md: string | null;
+  revision_value_md: string | null;
   weight_grams: number | null;
   binding_type: string | null;
   printing_type: string | null;
@@ -68,17 +87,40 @@ export interface StoreProductDetail extends StoreProductCard {
   seo_description: string | null;
   photos: StoreProductMedia[];
   samples: StoreProductMedia[];
+  /** For kind === "bundle": the included component products, in order. */
+  bundle_items: StoreBundleItem[];
+  /** Sum of component selling prices (for a bundle) — the "individual total". */
+  components_total_paise: number;
+}
+
+export interface StoreBundleItem {
+  product_id: string;
+  slug: string;
+  name: string;
+  subject: string | null;
+  qty: number;
+  selling_price_paise: number;
+  cover_url: string | null;
+  availability: AvailabilityView;
 }
 
 function coverUrl(key: string | null | undefined): string | null {
   if (!key) return null;
   if (key.startsWith("store-private/")) return null;
-  return publicCdnUrl(key);
+  // Public CDN when configured; otherwise the stable same-origin `/media/[...]`
+  // stream route (keys already live under `media/`). Without this fallback,
+  // uploaded covers/photos resolve to null and never render when no R2 public
+  // base URL is set on the environment.
+  return publicCdnUrl(key) ?? (key.startsWith("media/") ? `/${key}` : null);
 }
 
 function toCard(row: Record<string, unknown>, category?: { slug: string; name: string } | null): StoreProductCard {
   const onHand = Number(row.on_hand || 0);
   const reserved = Number(row.reserved || 0);
+  const sellable = Math.max(0, onHand - reserved);
+  const availabilityMode = normalizeAvailabilityMode(row.availability_mode);
+  const isActive = !!row.is_active;
+  const lowStockThreshold = Number(row.low_stock_threshold ?? 5);
   return {
     id: String(row.id),
     sku: String(row.sku),
@@ -98,11 +140,18 @@ function toCard(row: Record<string, unknown>, category?: { slug: string; name: s
     is_featured: !!row.is_featured,
     is_bestseller: !!row.is_bestseller,
     dispatch_days: Number(row.dispatch_days || 2),
-    sellable: Math.max(0, onHand - reserved),
+    sellable,
     category_slug: category?.slug ?? null,
     category_name: category?.name ?? null,
     max_quantity_per_order: Number(row.max_quantity_per_order || 5),
+    availability_mode: availabilityMode,
+    availability: resolveAvailability(availabilityMode, sellable, lowStockThreshold, isActive),
   };
+}
+
+function toStringArray(v: unknown): string[] {
+  if (!Array.isArray(v)) return [];
+  return v.map((x) => String(x || "").trim()).filter(Boolean);
 }
 
 async function listActiveCategoriesUncached(): Promise<StoreCategory[]> {
@@ -134,13 +183,14 @@ export async function getCategoryBySlug(slug: string): Promise<StoreCategory | n
 }
 
 const PRODUCT_LIST_COLS =
-  "id,sku,slug,kind,name,short_name,subject,stage,language,edition,page_count,mrp_paise,selling_price_paise,cover_image_key,is_featured,is_bestseller,dispatch_days,on_hand,reserved,max_quantity_per_order,category_id,position";
+  "id,sku,slug,kind,name,short_name,subject,stage,language,edition,page_count,mrp_paise,selling_price_paise,cover_image_key,is_featured,is_bestseller,dispatch_days,on_hand,reserved,low_stock_threshold,availability_mode,is_active,max_quantity_per_order,category_id,position";
 
 export async function listActiveProducts(opts?: {
   categoryId?: string;
   bestsellers?: boolean;
   featured?: boolean;
   kind?: "single" | "bundle";
+  availabilityMode?: AvailabilityMode;
   limit?: number;
 }): Promise<StoreProductCard[]> {
   const db = storeDb();
@@ -150,6 +200,7 @@ export async function listActiveProducts(opts?: {
   if (opts?.bestsellers) q = q.eq("is_bestseller", true);
   if (opts?.featured) q = q.eq("is_featured", true);
   if (opts?.kind) q = q.eq("kind", opts.kind);
+  if (opts?.availabilityMode) q = q.eq("availability_mode", opts.availabilityMode);
   q = q.order("position", { ascending: true }).order("name", { ascending: true });
   if (opts?.limit) q = q.limit(opts.limit);
   const { data } = await q;
@@ -199,10 +250,53 @@ export async function getProductBySlug(slug: string): Promise<StoreProductDetail
     else photos.push(item);
   }
 
+  // Bundle components (only for kind === "bundle").
+  const bundleItems: StoreBundleItem[] = [];
+  let componentsTotal = 0;
+  if (data.kind === "bundle") {
+    const { data: comps } = await db
+      .from("store_bundle_items")
+      .select("component_id,qty,position")
+      .eq("bundle_id", data.id)
+      .order("position", { ascending: true });
+    const compIds = (comps || []).map((c) => c.component_id);
+    if (compIds.length) {
+      const { data: compProducts } = await db.from("store_products").select(PRODUCT_LIST_COLS).in("id", compIds);
+      const byId = new Map((compProducts || []).map((cp) => [cp.id, toCard(cp as Record<string, unknown>)]));
+      for (const c of comps || []) {
+        const cp = byId.get(c.component_id);
+        if (!cp) continue;
+        const qty = Number(c.qty || 1);
+        componentsTotal += cp.selling_price_paise * qty;
+        bundleItems.push({
+          product_id: cp.id,
+          slug: cp.slug,
+          name: cp.name,
+          subject: cp.subject,
+          qty,
+          selling_price_paise: cp.selling_price_paise,
+          cover_url: cp.cover_url,
+          availability: cp.availability,
+        });
+      }
+    }
+  }
+
   return {
     ...card,
     description_md: data.description_md,
     short_description: data.short_description,
+    subtitle: data.subtitle ?? null,
+    author: data.author ?? null,
+    booklets: data.booklets == null ? null : Number(data.booklets),
+    physical_format: data.physical_format ?? null,
+    highlights: toStringArray(data.highlights_json),
+    ideal_for: toStringArray(data.ideal_for_json),
+    topics: toStringArray(data.topics_json),
+    how_to_use_md: data.how_to_use_md ?? null,
+    prelims_relevance_md: data.prelims_relevance_md ?? null,
+    mains_relevance_md: data.mains_relevance_md ?? null,
+    revision_value_md: data.revision_value_md ?? null,
     weight_grams: data.weight_grams,
     binding_type: data.binding_type,
     printing_type: data.printing_type,
@@ -213,6 +307,8 @@ export async function getProductBySlug(slug: string): Promise<StoreProductDetail
     seo_description: data.seo_description,
     photos,
     samples,
+    bundle_items: bundleItems,
+    components_total_paise: componentsTotal,
   };
 }
 

@@ -49,16 +49,18 @@ export default async function SubjectPage({ params }: { params: { subject: strin
         )}
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {products.map((p) => (
-            <ProductCard key={p.id} product={p} />
+            <ProductCard key={p.id} product={p} interestSource="subject" />
           ))}
           {products.length === 0 && (
-            <p className="col-span-full rounded-2xl border border-dashed border-[var(--ca-navy)]/15 bg-white p-10 text-center text-sm text-[var(--ca-navy)]/50">
-              Nothing listed in this subject yet. Check back soon, or{" "}
-              <Link href="/notes" className="underline">
-                browse all notes
+            <div className="col-span-full rounded-3xl border border-dashed border-[var(--ca-navy)]/15 bg-white p-10 text-center">
+              <p className="font-heading text-lg font-semibold text-[var(--ca-navy)]">No notes listed in this subject yet</p>
+              <p className="mx-auto mt-2 max-w-md text-sm text-[var(--ca-navy)]/55">
+                When a title is coming soon, you will be able to record interest from this page. Until then, browse other subjects.
+              </p>
+              <Link href="/notes" className="mt-5 inline-flex min-h-11 items-center rounded-full bg-[var(--ca-navy)] px-5 text-sm font-semibold text-white">
+                Browse all notes
               </Link>
-              .
-            </p>
+            </div>
           )}
         </div>
       </div>

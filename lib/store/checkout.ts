@@ -159,14 +159,22 @@ export async function placeCheckout(cart: CartView, address: CheckoutAddress): P
   const { error: itemsErr } = await db.from("store_order_items").insert(itemRows);
   if (itemsErr) throw new Error(itemsErr.message);
 
-  const reserved = await reserveStock(
-    quote.items.map((i) => ({ product_id: i.product_id, qty: i.qty })),
-    { cartId: cart.id, orderId: order.id, ttlSeconds: QUOTE_TTL_SECONDS },
-  );
-  if (!reserved.ok) {
-    await db.from("store_orders").update({ status: "PAYMENT_FAILED", updated_at: new Date().toISOString() }).eq("id", order.id);
-    const names = (reserved.shortfalls || []).map((s) => s.name).filter(Boolean).join(", ");
-    throw new Error(names ? `Just sold out: ${names}` : "One of these titles just sold out. Refresh and try again.");
+  // Only ready_stock lines reserve/decrement inventory. on_demand titles are
+  // printed per order and carry no stock counter, so they never reserve.
+  const reservableItems = quote.items
+    .filter((i) => i.availability_mode === "ready_stock")
+    .map((i) => ({ product_id: i.product_id, qty: i.qty }));
+  if (reservableItems.length) {
+    const reserved = await reserveStock(reservableItems, {
+      cartId: cart.id,
+      orderId: order.id,
+      ttlSeconds: QUOTE_TTL_SECONDS,
+    });
+    if (!reserved.ok) {
+      await db.from("store_orders").update({ status: "PAYMENT_FAILED", updated_at: new Date().toISOString() }).eq("id", order.id);
+      const names = (reserved.shortfalls || []).map((s) => s.name).filter(Boolean).join(", ");
+      throw new Error(names ? `Just sold out: ${names}` : "One of these titles just sold out. Refresh and try again.");
+    }
   }
 
   const referenceNo = makeStoreReference();

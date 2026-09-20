@@ -24,5 +24,8 @@ Dated accepted decisions. Do not silently reverse.
 | 2026-09 | Hash-only tracking tokens + cookie capability | Enumeration / leak resistance |
 | 2026-09-19 | **Real Eazypay transaction deferred by owner** | Explicit; do not re-ask routinely |
 | 2026-09-19 | Handoff docs under `docs/notes-store/` | Durable continuity across machines |
+| 2026-09-19 | **Explicit `availability_mode`** (ready_stock/on_demand/coming_soon/unavailable), orthogonal to `is_active` | Staff never fake a stock number for print-on-demand titles (spec §5); on_demand skips reservation |
+| 2026-09-19 | **Preparation demand** computed from paid-unfulfilled orders, bundles exploded to components | Real ops tool vs manipulating SKU counts (spec §21); never double-counts bundles |
+| 2026-09-19 | Store media upload reuses Cloudflare R2 (never Supabase storage); samples watermarked, originals private | Spec §6/§28 |
 
 Canonical product requirements remain in `docs/notes-store-spec.md`.

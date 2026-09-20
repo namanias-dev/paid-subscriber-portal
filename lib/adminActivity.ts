@@ -20,7 +20,8 @@ export type AdminActivityAction =
   | "telegram_automation_updated"
   | "course_batch_zoom_updated"
   | "student_archived"
-  | "student_hard_deleted";
+  | "student_hard_deleted"
+  | "notes_store_toggled";
 
 export const ADMIN_ACTIVITY_LABELS: Record<AdminActivityAction, string> = {
   payment_proof_uploaded: "Payment proof uploaded",
@@ -38,6 +39,7 @@ export const ADMIN_ACTIVITY_LABELS: Record<AdminActivityAction, string> = {
   course_batch_zoom_updated: "Course batch Zoom link updated",
   student_archived: "Student archived",
   student_hard_deleted: "Student permanently deleted",
+  notes_store_toggled: "Notes Store taken live / offline",
 };
 
 export interface AdminActivityRow {

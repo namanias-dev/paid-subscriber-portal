@@ -197,6 +197,10 @@ async function applyOrderTerminal(
         actor_type: "gateway",
         payload_json: { reference_no: referenceNo, amount_paise: amountPaise },
       });
+      // Fire-and-forget order-confirmed notification (no-op until DLT approved +
+      // flag on). Must never affect the capture result.
+      const { notifyOrderConfirmed } = await import("../notifications");
+      void notifyOrderConfirmed({ orderId, orderNo }).catch(() => {});
     }
     await holdReservationsUntilShip(orderId);
     return orderNo;

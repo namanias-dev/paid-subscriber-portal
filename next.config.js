@@ -23,6 +23,11 @@ const nextConfig = {
     outputFileTracingIncludes: {
       "/api/admin/help": ["./docs/staff/**/*.md"],
     },
+    // mupdf ships a WebAssembly runtime; if webpack bundles it into the serverless
+    // function the mangled WASM loader throws at runtime ("e is not a function").
+    // Keep it external so it is required as a real node module (and its .wasm is
+    // traced into the function). Used only by the admin PDF sample pipeline.
+    serverComponentsExternalPackages: ["mupdf"],
   },
   images: {
     // Keep optimized variants ≥31d so stable public media URLs stay HITs.

@@ -73,3 +73,45 @@
 - Isolation + media + access-token suites: **53 pass / 0 fail** (see `TESTING_AND_VERIFICATION.md`)
 - `guard-store-domain-isolation.mjs`: **OK**
 - `tsc --noEmit`: **clean** (handoff day)
+
+## Continuation — branch `notes-store-continuation-2026-09-19` (from handoff tag)
+
+Automated-verified only (tsc + isolation guard + 53/53 store tests + `next build` with preview enable). **Not** browser/DB-verified on the continuation machine (no env pulled).
+
+| Change | Status | Notes |
+|--------|--------|-------|
+| PDP renders full `description_md` + subject/stage chips | BUILT AND AUTOMATED-VERIFIED | New server component `components/notes/ProductDescription.tsx` (react-markdown, no raw HTML) |
+| PDP `BreadcrumbList` JSON-LD | BUILT AND AUTOMATED-VERIFIED | Beside existing Product/Offer; `SITE_URL` from `lib/config` |
+| Checkout shows server-authoritative shipping + tax + total | BUILT AND AUTOMATED-VERIFIED | `buildFrozenQuote()` extracted from `lockQuote()`; `/api/notes/pin` returns `quote`; no client-side total |
+| Admin product media upload (photos + watermarked samples) to R2 | BUILT (AUTOMATED-VERIFIED compile/guard; needs R2+DB for runtime) | `lib/store/media/upload.ts` + `/api/admin/notes/media` + `MediaManager`; reuses `lib/r2` + watermark pipeline (previously unused) |
+| Availability model (ready_stock / on_demand / coming_soon / unavailable) | BUILT AND AUTOMATED-VERIFIED (unit tests; needs DB for e2e) | `lib/store/availability.ts`; wired through catalogue, cart, quote, checkout, ProductCard, PDP, admin editor; additive migration |
+| Preparation-demand queue (paid-unfulfilled, bundles exploded) | BUILT AND AUTOMATED-VERIFIED (unit tests; needs DB for e2e) | `lib/store/preparation.ts` + `/api/admin/notes/preparation` + `/admin/notes/preparation` |
+| PDP richer content (subtitle, author, booklets, what's-included, who-it's-for, disclaimers) | BUILT AND AUTOMATED-VERIFIED | Admin-editable via product API; PDP renders when present |
+| Admin order management (search, buckets, copy address/phone/block, exceptions) | BUILT (compile/tests; needs DB for runtime) | `/api/admin/notes/orders` + `/orders/[id]/note` + rebuilt `OrderQueue` |
+| Admin overview (action-required dashboard) | BUILT (compile/tests; needs DB for runtime) | `/admin/notes/overview` + `/api/admin/notes/overview` |
+| Bundles (admin components + storefront detail with savings) | BUILT (compile/tests; live demo bundle seeded) | `/api/admin/notes/bundles` + `BundleComponents`; PDP shows included notes, individual total, savings; demand flows through components |
+| Notes commerce analytics events | BUILT AND AUTOMATED-VERIFIED (compile) | Reuses `/api/track` + `trackClient`; PII-free `notes_*` events allow-listed in `lib/analytics/events.ts` |
+| Availability migration applied to Academy DB | DONE | `notes_store_availability` applied + verified on project `xqwdfyzerzsllqiyzxem`; 6 cols + index; existing rows default ready_stock |
+| Demo catalogue seeded (all modes + bundle) | DONE | TEST-labelled: ready_stock, on_demand, coming_soon, unavailable + GS Starter bundle |
+| Shipping-provider abstraction (manual + Shiprocket boundary) | BUILT AND AUTOMATED-VERIFIED (compile) | `lib/store/shipping/**`; ship route uses `selectShippingProvider()`; manual always available |
+| Customer notification boundary (order confirmed/shipped SMS) | BUILT — inert (double-gated) | `lib/store/notifications.ts`; wired into capture + ship; sends nothing until `notes_store_sms` + approved DLT template ids |
+| Subject-oriented Notes admin (catalogue cards + dedicated editor) | BUILT (compile/tests; needs DB/R2 for runtime) | `/admin/notes/products` cards → `/admin/notes/products/[id]` `ProductEditor` (all content sections, repeatable lists, ₹ pricing, availability cards, publishing, save-state, view-as-student) |
+| PDF sample upload → page select → watermarked derivatives | BUILT AND AUTOMATED-VERIFIED (rasterize+watermark chain unit-tested) | mupdf WASM; private PDF original never served; `lib/store/media/pdf.ts` + media API |
+| Safe delete / archive with order-history integrity | BUILT | `DELETE`/`PATCH archive` on `/api/admin/notes/products/[id]` |
+| PDP renders admin content (topics, how-to-use, prelims/mains/revision) | BUILT | catalogue detail + PDP sections |
+| Store test suite | 64 pass / 0 fail | +7 availability/prep +4 PDF-pipeline tests |
+| Premium storefront redesign + subject interest | BUILT AND AUTOMATED-VERIFIED | Elevation tokens, landing/PDP/cart/checkout/track polish, `store_subject_interest`, admin interest dashboard |
+| Cinematic notebook hero + Student Voices | BUILT AND AUTOMATED-VERIFIED | Real product PNG hero; compact preference-set poll after Shop by Subject; admin Notes Demand / co-selection |
+
+## External blockers preventing a browsable-by-owner preview (owner action)
+
+1. **Vercel Deployment Protection (SSO)** — preview `/notes` 302-redirects to `vercel.com/sso-api`; unauthenticated browser QA/Lighthouse impossible. Owner must open it while logged into Vercel, add a Protection Bypass token, or relax protection for previews.
+2. **`NOTES_STORE_PREVIEW_ENABLE=1` on the Vercel Preview environment** — required for `/notes` to open in preview. Cannot be set from here (no Vercel CLI; Vercel MCP unauthenticated). Must NOT enable the shared DB `notes_store` flag (that would light production).
+3. **Cloudflare R2 + `SUPABASE_SERVICE_ROLE_KEY`** are only in Vercel envs, so the app cannot be fully run locally here to render the store either.
+
+Baseline re-confirmed green after each commit. Production flag still disabled; no real Eazypay run.
+
+### Noted handoff discrepancies (unchanged, for owner)
+
+1. `notes-store-release-hardening` has **no common git history with `main`** (disjoint). Deployment runbook names `master` as production track; `main` is the GitHub default branch.
+2. `handoff-state.json` `headCommit`/`treeHash` self-reference earlier commits (documented as expected); the annotated tag `notes-store-handoff-2026-09-19` is authoritative and verified (commit `2c1a440`, tree `6f970eb`).
