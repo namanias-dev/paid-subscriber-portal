@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import Link from "next/link";
 import { AnimatePresence, motion, useInView, useReducedMotion } from "framer-motion";
 import {
@@ -54,6 +55,7 @@ export default function StudentVoices({ subjects }: { subjects: PreferenceSubjec
   const reduce = useReducedMotion();
   const sectionRef = useRef<HTMLElement>(null);
   const viewed = useRef(false);
+  const [mounted, setMounted] = useState(false);
   const [rows, setRows] = useState(subjects);
   const [selected, setSelected] = useState<string[]>([]);
   const [saved, setSaved] = useState(false);
@@ -62,6 +64,10 @@ export default function StudentVoices({ subjects }: { subjects: PreferenceSubjec
   const [error, setError] = useState<string | null>(null);
   const [available, setAvailable] = useState<PreferenceSubject[]>([]);
   const [waitlist, setWaitlist] = useState<PreferenceSubject[]>([]);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -329,40 +335,44 @@ export default function StudentVoices({ subjects }: { subjects: PreferenceSubjec
 
       {!saved && selected.length > 0 && <div className="h-28 lg:hidden" aria-hidden="true" />}
 
-      <AnimatePresence>
-        {!saved && selected.length > 0 && (
-          <motion.div
-            initial={reduce ? false : { opacity: 0, y: 16 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={reduce ? undefined : { opacity: 0, y: 16 }}
-            className="ns-voices-tray fixed inset-x-0 bottom-0 z-40 border-t border-[var(--ca-navy)]/10 bg-white/96 px-4 pt-3 shadow-[0_-12px_32px_-18px_rgba(10,26,63,0.35)] backdrop-blur-md lg:hidden"
-          >
-            <p className="text-xs font-semibold text-[var(--ca-navy)]">
-              {selected.length} subject{selected.length === 1 ? "" : "s"} selected
-            </p>
-            <div className="mt-2 flex gap-2 overflow-x-auto ns-hide-scrollbar">
-              {selectedRows.map((s) => (
+      {mounted &&
+        createPortal(
+          <AnimatePresence>
+            {!saved && selected.length > 0 && (
+              <motion.div
+                initial={reduce ? false : { opacity: 0, y: 16 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={reduce ? undefined : { opacity: 0, y: 16 }}
+                className="ns-voices-tray fixed inset-x-0 bottom-0 z-40 border-t border-[var(--ca-navy)]/10 bg-white/96 px-4 pt-3 shadow-[0_-12px_32px_-18px_rgba(10,26,63,0.35)] backdrop-blur-md lg:hidden"
+              >
+                <p className="text-xs font-semibold text-[var(--ca-navy)]">
+                  {selected.length} subject{selected.length === 1 ? "" : "s"} selected
+                </p>
+                <div className="mt-2 flex gap-2 overflow-x-auto ns-hide-scrollbar">
+                  {selectedRows.map((s) => (
+                    <button
+                      key={s.id}
+                      type="button"
+                      onClick={() => toggle(s.id)}
+                      className="ca-focus shrink-0 rounded-full border border-[var(--ca-navy)]/12 bg-[var(--ca-surface)] px-3 py-1 text-xs font-semibold text-[var(--ca-navy)]"
+                    >
+                      {s.name} ×
+                    </button>
+                  ))}
+                </div>
                 <button
-                  key={s.id}
                   type="button"
-                  onClick={() => toggle(s.id)}
-                  className="ca-focus shrink-0 rounded-full border border-[var(--ca-navy)]/12 bg-[var(--ca-surface)] px-3 py-1 text-xs font-semibold text-[var(--ca-navy)]"
+                  onClick={save}
+                  disabled={saving}
+                  className="ca-btn ca-btn-gold ca-focus ns-press mt-3 w-full rounded-full disabled:opacity-50"
                 >
-                  {s.name} ×
+                  {saving ? "Saving…" : "Save my interests →"}
                 </button>
-              ))}
-            </div>
-            <button
-              type="button"
-              onClick={save}
-              disabled={saving}
-              className="ca-btn ca-btn-gold ca-focus ns-press mt-3 w-full rounded-full disabled:opacity-50"
-            >
-              {saving ? "Saving…" : "Save my interests →"}
-            </button>
-          </motion.div>
+              </motion.div>
+            )}
+          </AnimatePresence>,
+          document.body,
         )}
-      </AnimatePresence>
     </section>
   );
 }
