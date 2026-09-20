@@ -32,6 +32,13 @@ interface LowRow {
   sellable: number;
 }
 
+interface InterestRow {
+  product_id: string;
+  name: string;
+  subject: string | null;
+  total: number;
+}
+
 const CARD_DEFS: Array<{ key: keyof Cards; label: string; href?: string; tone?: "warn" | "danger" }> = [
   { key: "orders_today", label: "Orders today" },
   { key: "awaiting_preparation", label: "Awaiting preparation", href: "/admin/notes?bucket=preparing", tone: "warn" },
@@ -47,6 +54,7 @@ export default function NotesOverview() {
   const [cards, setCards] = useState<Cards | null>(null);
   const [prep, setPrep] = useState<PrepRow[]>([]);
   const [low, setLow] = useState<LowRow[]>([]);
+  const [interest, setInterest] = useState<InterestRow[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -57,6 +65,7 @@ export default function NotesOverview() {
         setCards(json.cards);
         setPrep(json.prepare_top || []);
         setLow(json.low_stock || []);
+        setInterest(json.interest_top || []);
       }
       setLoading(false);
     })();
@@ -83,7 +92,7 @@ export default function NotesOverview() {
                     ? "text-amber-700"
                     : "text-ink";
               const inner = (
-                <div className="rounded-xl border border-line bg-white p-3">
+                <div className="rounded-xl border border-line bg-white p-3.5 shadow-sm">
                   <p className="text-xs text-muted">{c.label}</p>
                   <p className={`font-heading text-2xl font-bold tabular-nums ${toneCls}`}>{value}</p>
                 </div>
@@ -149,6 +158,31 @@ export default function NotesOverview() {
               )}
             </section>
           </div>
+
+          <section className="mt-4 rounded-xl border border-line bg-white p-4 shadow-sm">
+            <div className="flex items-center justify-between">
+              <h3 className="font-heading text-base font-bold text-ink">Most requested upcoming notes</h3>
+              <Link href="/admin/notes/interest" className="text-xs font-semibold text-[var(--primary)]">
+                Student interest →
+              </Link>
+            </div>
+            <p className="mt-1 text-xs text-muted">Potential demand only. Paid preparation sits in the queue above.</p>
+            {interest.length === 0 ? (
+              <p className="mt-3 text-sm text-muted">No upcoming interest yet.</p>
+            ) : (
+              <ul className="mt-3 space-y-1.5">
+                {interest.map((r) => (
+                  <li key={r.product_id} className="flex items-center justify-between gap-2 text-sm">
+                    <span className="min-w-0 truncate">
+                      {r.subject || r.name}
+                      {r.subject ? <span className="text-muted"> · {r.name}</span> : null}
+                    </span>
+                    <span className="shrink-0 font-semibold tabular-nums">{r.total} interested</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
         </>
       )}
     </div>

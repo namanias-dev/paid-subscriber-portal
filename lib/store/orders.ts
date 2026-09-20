@@ -11,6 +11,7 @@ export interface PublicOrder {
   promised_delivery_date: string | null;
   total_label: string;
   items: { name: string; qty: number; total: string }[];
+  ship_to: string | null;
   awb: string | null;
   courier: string | null;
   steps: ReturnType<typeof trackingSteps>;
@@ -37,7 +38,7 @@ export async function getPublicOrder(
   if (!db) return null;
   const { data: order } = await db
     .from("store_orders")
-    .select("id,order_no,status,placed_at,promised_delivery_date,total_paise,tracking_token_hash")
+    .select("id,order_no,status,placed_at,promised_delivery_date,total_paise,tracking_token_hash,shipping_address_id")
     .eq("order_no", orderNo.trim().toUpperCase())
     .maybeSingle();
   if (!order || !verifyRawTokenAgainstHash(token, order.tracking_token_hash)) return null;
@@ -53,6 +54,17 @@ export async function getPublicOrder(
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
+  let shipTo: string | null = null;
+  if (order.shipping_address_id) {
+    const { data: addr } = await db
+      .from("store_addresses")
+      .select("line1,city,state,pincode")
+      .eq("id", order.shipping_address_id)
+      .maybeSingle();
+    if (addr) {
+      shipTo = [addr.line1, addr.city, addr.state, addr.pincode].filter(Boolean).join(", ");
+    }
+  }
   const hasAwb = !!(ship?.awb);
   const stage = projectCustomerStage(order.status, hasAwb);
   return {
@@ -63,6 +75,7 @@ export async function getPublicOrder(
     promised_delivery_date: order.promised_delivery_date,
     total_label: formatPaise(order.total_paise),
     items: (items || []).map((i) => ({ name: i.name_snapshot, qty: i.qty, total: formatPaise(i.line_total_paise) })),
+    ship_to: shipTo,
     awb: hasAwb ? ship!.awb : null,
     courier: hasAwb ? ship!.courier_name : null,
     steps: trackingSteps(stage, hasAwb),

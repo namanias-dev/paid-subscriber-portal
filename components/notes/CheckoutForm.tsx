@@ -41,9 +41,9 @@ export default function CheckoutForm() {
       .then((j) => setCart(j.cart));
   }, []);
 
-  async function onPinBlur() {
-    if (form.pincode.length !== 6) return;
-    const res = await fetch(`/api/notes/pin?pin=${form.pincode}`, { cache: "no-store" });
+  async function lookupPin(pin: string) {
+    if (pin.length !== 6) return;
+    const res = await fetch(`/api/notes/pin?pin=${pin}`, { cache: "no-store" });
     const json = await res.json();
     if (!json.ok) {
       setPinInfo(json.error);
@@ -60,6 +60,19 @@ export default function CheckoutForm() {
     setPinInfo(`Delivered by ${json.promised_label}.`);
   }
 
+  async function onPinBlur() {
+    await lookupPin(form.pincode);
+  }
+
+  function onLine1Paste(e: React.ClipboardEvent<HTMLInputElement>) {
+    const text = e.clipboardData.getData("text") || "";
+    const pin = text.match(/\b[1-9][0-9]{5}\b/);
+    if (pin) {
+      setForm((f) => ({ ...f, pincode: pin[0] }));
+      void lookupPin(pin[0]);
+    }
+  }
+
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setBusy(true);
@@ -74,7 +87,7 @@ export default function CheckoutForm() {
         body: JSON.stringify(form),
       });
       const json = await res.json();
-      if (!json.ok) throw new Error(json.error || "Checkout failed");
+      if (!json.ok) throw new Error(json.error || "Payment could not be started.");
       window.location.href = json.payment_url;
     } catch (e2) {
       trackClient("notes_payment_failed", { stage: "checkout_submit" });
@@ -88,11 +101,12 @@ export default function CheckoutForm() {
 
   return (
     <form onSubmit={onSubmit} className="mt-8 grid gap-8 lg:grid-cols-[1.2fr_0.8fr]">
-      <div className="space-y-3 rounded-2xl border border-[var(--ca-navy)]/10 bg-white p-5">
+      <div className="space-y-3 rounded-3xl bg-white p-5 ns-elev-1">
+        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--ca-gold-dark)]">1 · Address</p>
         <Field label="Full name" autoComplete="name" value={form.name} onChange={set("name")} required />
         <Field label="Mobile" autoComplete="tel" inputMode="numeric" pattern="[0-9]{10}" maxLength={10} value={form.phone} onChange={set("phone")} required />
         <Field label="Email (optional)" autoComplete="email" type="email" value={form.email} onChange={set("email")} />
-        <Field label="Address line 1" autoComplete="address-line1" value={form.line1} onChange={set("line1")} required />
+        <Field label="Address line 1" autoComplete="address-line1" value={form.line1} onChange={set("line1")} onPaste={onLine1Paste} required />
         <Field label="Apartment / landmark (optional)" autoComplete="address-line2" value={form.line2} onChange={set("line2")} />
         <Field label="PIN code" autoComplete="postal-code" inputMode="numeric" maxLength={6} value={form.pincode} onChange={set("pincode")} onBlur={onPinBlur} required />
         {pinInfo && <p className="text-sm text-[var(--ca-navy)]/70">{pinInfo}</p>}
@@ -105,8 +119,9 @@ export default function CheckoutForm() {
           <textarea value={form.delivery_instructions} onChange={set("delivery_instructions")} rows={2} className="w-full rounded-xl border border-[var(--ca-navy)]/15 px-3 py-2" />
         </label>
       </div>
-      <aside className="h-fit rounded-2xl border border-[var(--ca-navy)]/10 bg-white p-5">
-        <h2 className="font-heading text-lg font-semibold text-[var(--ca-navy)]">Order</h2>
+      <aside className="h-fit rounded-3xl bg-white p-5 ns-elev-2">
+        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--ca-gold-dark)]">2 · Pay securely</p>
+        <h2 className="mt-2 font-heading text-lg font-semibold text-[var(--ca-navy)]">Order</h2>
         <ul className="mt-3 space-y-2 text-sm">
           {(cart?.items || []).map((it, i) => (
             <li key={i} className="flex justify-between gap-3">
@@ -134,26 +149,30 @@ export default function CheckoutForm() {
               <span className="tabular-nums font-medium">{quote.tax_label}</span>
             </p>
           )}
-          <p className="flex justify-between border-t border-[var(--ca-navy)]/10 pt-2 text-base font-semibold">
+          <p className="flex justify-between border-t border-[var(--ca-navy)]/10 pt-2 text-lg font-semibold">
             <span>Total</span>
             <span className="tabular-nums">{quote ? quote.total_label : "—"}</span>
           </p>
         </div>
+        <p className="mt-3 text-xs text-[var(--ca-navy)]/55">Physical notes, packed in Chandigarh. Prepaid only — UPI, cards, net banking via ICICI Eazypay.</p>
         {!quote && (
           <p className="mt-2 text-xs text-[var(--ca-navy)]/50">Shipping and total are calculated from your PIN and frozen before you pay.</p>
         )}
-        {err && <p className="mt-3 text-sm text-red-700">{err}</p>}
+        {err && (
+          <p className="mt-3 text-sm text-red-700" role="alert">
+            {err}
+          </p>
+        )}
         <button
           type="submit"
           disabled={busy || !cart?.item_count}
-          className="mt-5 inline-flex min-h-12 w-full items-center justify-center rounded-full bg-[var(--ca-navy)] text-sm font-semibold text-white disabled:opacity-50"
+          className="ca-focus ns-press mt-5 inline-flex min-h-12 w-full items-center justify-center rounded-full bg-[var(--ca-navy)] text-sm font-semibold text-white disabled:opacity-50"
         >
           {busy ? "Redirecting to ICICI…" : quote ? `Pay ${quote.total_label} securely` : "Pay securely"}
         </button>
         <p className="mt-3 text-xs text-[var(--ca-navy)]/50">
           Full-page redirect to ICICI Eazypay. We never mark an order paid from this page — ICICI confirmation does.
         </p>
-        <p className="mt-2 text-xs text-[var(--ca-navy)]/45">Prepaid only · Pan-India shipping · Guest checkout (no account)</p>
       </aside>
     </form>
   );

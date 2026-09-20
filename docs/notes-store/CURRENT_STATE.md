@@ -100,6 +100,7 @@ Automated-verified only (tsc + isolation guard + 53/53 store tests + `next build
 | Safe delete / archive with order-history integrity | BUILT | `DELETE`/`PATCH archive` on `/api/admin/notes/products/[id]` |
 | PDP renders admin content (topics, how-to-use, prelims/mains/revision) | BUILT | catalogue detail + PDP sections |
 | Store test suite | 64 pass / 0 fail | +7 availability/prep +4 PDF-pipeline tests |
+| Premium storefront redesign + subject interest | BUILT AND AUTOMATED-VERIFIED | Elevation tokens, landing/PDP/cart/checkout/track polish, `store_subject_interest`, admin interest dashboard |
 
 ## External blockers preventing a browsable-by-owner preview (owner action)
 
