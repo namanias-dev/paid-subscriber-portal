@@ -81,7 +81,7 @@ export default function NotesHero() {
             <span className="block whitespace-nowrap">Delivered to Your Door.</span>
           </motion.h1>
           <motion.p
-            className="ns-hero-benefit mx-auto mt-2 max-w-[22rem] sm:max-w-none lg:mx-0"
+            className="ns-hero-benefit mx-auto mt-2 px-1 lg:mx-0 lg:px-0"
             {...enter(0.14)}
           >
             Handwritten. Exam-focused. Made for revision.
