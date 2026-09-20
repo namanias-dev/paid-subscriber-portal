@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireAnyPermission } from "@/lib/adminGuard";
 import { listInterestAggregates, type InterestSort } from "@/lib/store/interest";
+import { listPreferenceIntelligence } from "@/lib/store/preferences";
 
 export const dynamic = "force-dynamic";
 
@@ -15,11 +16,12 @@ export async function GET(req: Request) {
   const url = new URL(req.url);
   const sortRaw = url.searchParams.get("sort") || "most";
   const sort: InterestSort = sortRaw === "recent" || sortRaw === "coming_soon" ? sortRaw : "most";
-  const rows = await listInterestAggregates(sort);
+  const [rows, preferences] = await Promise.all([listInterestAggregates(sort), listPreferenceIntelligence()]);
   return noStore({
     ok: true,
     sort,
     rows,
     upcoming: rows.filter((r) => r.availability_mode === "coming_soon").slice(0, 6),
+    preferences,
   });
 }

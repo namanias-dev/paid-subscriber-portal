@@ -11,8 +11,9 @@
 7. `supabase/migrations/2026-09-19-notes-store-availability.sql` — **additive**: `store_products.availability_mode` (`ready_stock`|`on_demand`|`coming_soon`|`unavailable`, default `ready_stock`), plus `subtitle`, `author`, `booklets`, `highlights_json`, `ideal_for_json`; index `store_orders_status_idx` for the preparation-demand scan. Existing rows default to `ready_stock` (behaviour preserved).
 8. `supabase/migrations/2026-09-20-notes-store-admin-content.sql` — product editor content fields
 9. `supabase/migrations/2026-09-20-notes-store-subject-interest.sql` — **additive**: `store_subject_interest` (product_id, voter_hash, source, created_at). Demand signal only; no money/inventory/order changes.
+10. `supabase/migrations/2026-09-20-notes-store-preference-submissions.sql` — **additive**: `store_interest_submissions` + `store_interest_submission_subjects`. One preference SET per voter hash (update-in-place). Not marketing consent.
 
-## Tables (`store_*`) — 21
+## Tables (`store_*`) — 23
 
 | Table | Purpose |
 |-------|---------|
@@ -32,7 +33,9 @@
 | `store_shipments` / `store_shipment_events` | Manual courier/AWB |
 | `store_zones` / `store_pincode_cache` | Serviceability |
 | `store_reviews` | Schema present; feature flag off |
-| `store_subject_interest` | Anonymous “I want these notes” demand signals |
+| `store_subject_interest` | Anonymous per-product “I want these notes” votes |
+| `store_interest_submissions` | One Student Voices preference SET per voter hash |
+| `store_interest_submission_subjects` | Selected `store_categories` for a submission |
 
 **No FKs** from these tables into Academy `payments` / `students` / `buyers` / `leads` / enrollments.
 

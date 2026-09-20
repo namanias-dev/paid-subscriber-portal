@@ -101,6 +101,7 @@ Automated-verified only (tsc + isolation guard + 53/53 store tests + `next build
 | PDP renders admin content (topics, how-to-use, prelims/mains/revision) | BUILT | catalogue detail + PDP sections |
 | Store test suite | 64 pass / 0 fail | +7 availability/prep +4 PDF-pipeline tests |
 | Premium storefront redesign + subject interest | BUILT AND AUTOMATED-VERIFIED | Elevation tokens, landing/PDP/cart/checkout/track polish, `store_subject_interest`, admin interest dashboard |
+| Cinematic notebook hero + Student Voices | BUILT AND AUTOMATED-VERIFIED | Real product PNG hero; compact preference-set poll after Shop by Subject; admin Notes Demand / co-selection |
 
 ## External blockers preventing a browsable-by-owner preview (owner action)
 

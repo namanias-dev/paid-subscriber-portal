@@ -33,6 +33,10 @@ Purposeful transitions only; respect `prefers-reduced-motion`. Do not add glow/g
 - Reviews table/flag exist but must stay off until verified buyers.  
 - TEST SKUs must stay clearly labelled.
 
+## Landing hero
+
+`/notes` uses a light ivory cinematic hero. The spiral notebook is a recovered-alpha product cutout in `public/notes/hero-notebook*.webp|png`, not a CSS booklet stack. Atmosphere, layered shadows and restrained Motion parallax are CSS/Framer only — no extra 3D stack. Shop by Subject stays the buy surface; Student Voices after it is demand, not a second catalogue.
+
 ## Design debt
 
 - Some admin tables still utilitarian.  

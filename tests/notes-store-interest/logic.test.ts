@@ -10,6 +10,14 @@ import {
   sortInterestRows,
 } from "../../lib/store/interest.ts";
 import { computeBundleOffer } from "../../lib/store/bundleOffer.ts";
+import {
+  PUBLIC_DEMAND_MIN,
+  buildPreferenceSubjects,
+  combinations,
+  computeCoSelections,
+  publicDemandView,
+  sanitizePreferenceSource,
+} from "../../lib/store/preferenceLogic.ts";
 
 test("interest is eligible only for coming soon and unavailable live titles", () => {
   assert.equal(isInterestEligible(resolveAvailability("coming_soon", 0, 5, true)), true);
@@ -76,6 +84,65 @@ test("sort: most requested, recently requested, coming soon first", () => {
   assert.equal(sortInterestRows(rows, "most")[0].product_id, "a");
   assert.equal(sortInterestRows(rows, "recent")[0].product_id, "b");
   assert.equal(sortInterestRows(rows, "coming_soon")[0].product_id, "b");
+});
+
+test("preference source sanitizes to the closed set", () => {
+  assert.equal(sanitizePreferenceSource("voices"), "voices");
+  assert.equal(sanitizePreferenceSource("landing"), "landing");
+  assert.equal(sanitizePreferenceSource("admin"), "unknown");
+});
+
+test("public demand never invents counts below the real-data threshold", () => {
+  assert.deepEqual(publicDemandView(0, 10), { share: 0, count: null, label: null });
+  assert.equal(publicDemandView(1, 10).label, "Growing interest");
+  assert.equal(publicDemandView(1, 10).count, null);
+  assert.equal(publicDemandView(PUBLIC_DEMAND_MIN, PUBLIC_DEMAND_MIN).count, PUBLIC_DEMAND_MIN);
+  assert.equal(publicDemandView(PUBLIC_DEMAND_MIN, PUBLIC_DEMAND_MIN).label, null);
+  assert.equal(publicDemandView(8, 16).share, 0.5);
+});
+
+test("preference subjects take availability and relative demand from live catalogue data", () => {
+  const rows = buildPreferenceSubjects(
+    [
+      { id: "polity", slug: "polity", name: "Polity", nav_label: "Polity", short_description: "GS II" },
+      { id: "history", slug: "modern-history", name: "Modern History", nav_label: "Modern History", short_description: "GS I" },
+    ],
+    new Map([
+      ["polity", true],
+      ["history", false],
+    ]),
+    new Map([
+      ["polity", 12],
+      ["history", 3],
+    ]),
+    new Map([
+      ["polity", "GS II"],
+      ["history", "GS I"],
+    ]),
+  );
+  assert.equal(rows[0].available, true);
+  assert.equal(rows[0].href, "/notes/polity");
+  assert.equal(rows[0].demand_count, 12);
+  assert.equal(rows[1].available, false);
+  assert.equal(rows[1].demand_count, null);
+  assert.equal(rows[1].demand_label, "Growing interest");
+  assert.equal(rows[1].demand_share, 3 / 12);
+});
+
+test("co-selection counts pairs and trios from a preference SET, not independent votes", () => {
+  const co = computeCoSelections([
+    ["polity", "history", "geography"],
+    ["polity", "history"],
+    ["polity", "economy"],
+  ]);
+  const polityHistory = co.pairs.find((p) => p.a === "history" && p.b === "polity") || co.pairs.find((p) => p.a === "polity" && p.b === "history");
+  assert.ok(polityHistory);
+  assert.equal(polityHistory!.count, 2);
+  assert.equal(polityHistory!.pct_of_a === 67 || polityHistory!.pct_of_b === 67 || polityHistory!.pct_of_a === 100, true);
+  assert.equal(co.trios[0].count, 1);
+  assert.deepEqual(co.trios[0].ids, ["geography", "history", "polity"]);
+  assert.equal(co.also_selected.polity[0].id, "history");
+  assert.equal(combinations(["a", "b", "c"], 2).length, 3);
 });
 
 test("bundle offer only fires when the cart already covers every component and would save money", () => {
