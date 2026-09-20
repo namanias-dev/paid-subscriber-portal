@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { PageHeader } from "@/components/admin/ui";
+import StoreStatusControl from "@/components/notes/admin/StoreStatusControl";
 
 interface Cards {
   orders_today: number;
@@ -64,6 +65,8 @@ export default function NotesOverview() {
   return (
     <div>
       <PageHeader title="Notes Store" subtitle="What needs attention today. Tap a card to jump straight to the work." />
+
+      <StoreStatusControl />
 
       {loading || !cards ? (
         <p className="text-sm text-muted">Loading…</p>
