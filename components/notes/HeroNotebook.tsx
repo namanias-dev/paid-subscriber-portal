@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { motion, useMotionValue, useReducedMotion, useScroll, useSpring, useTransform } from "framer-motion";
+import HeroCallouts from "./HeroCallouts";
 
 const WIDTH = 900;
 const HEIGHT = 1105;
@@ -50,7 +51,7 @@ export default function HeroNotebook() {
   }, [mx, my, reduce]);
 
   return (
-    <div ref={stageRef} className="ns-notebook-stage mx-auto w-[min(88vw,420px)] sm:w-[min(70vw,460px)] lg:w-[min(46vw,520px)]">
+    <div ref={stageRef} className="ns-notebook-stage mx-auto w-[min(82vw,360px)] sm:w-[min(66vw,430px)] lg:w-[min(46vw,520px)]">
       <motion.div
         className="relative"
         style={
@@ -69,29 +70,33 @@ export default function HeroNotebook() {
         animate={reduce ? undefined : { opacity: 1, y: 0, scale: 1, rotateZ: 0 }}
         transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
       >
-        <div className="ns-notebook-shadow-warm" aria-hidden="true" />
-        <div className="ns-notebook-shadow-depth" aria-hidden="true" />
-        <div className="ns-notebook-shadow-contact" aria-hidden="true" />
-        <div className={`relative ${reduce ? "" : "max-lg:ns-notebook-float"}`}>
-          <picture>
-            <source media="(max-width: 640px)" srcSet="/notes/hero-notebook-sm.webp" type="image/webp" />
-            <source srcSet="/notes/hero-notebook.webp" type="image/webp" />
-            <img
-              src="/notes/hero-notebook.png"
-              alt="Naman Sir's spiral-bound handwritten UPSC notes"
-              width={WIDTH}
-              height={HEIGHT}
-              decoding="async"
-              fetchPriority="high"
-              className="relative z-[1] h-auto w-full select-none"
-              draggable={false}
+        <div className="ns-notebook-frame">
+          <div className="ns-notebook-shadow-warm" aria-hidden="true" />
+          <div className="ns-notebook-shadow-depth" aria-hidden="true" />
+          <div className="ns-notebook-shadow-contact" aria-hidden="true" />
+          <div className={`relative ${reduce ? "" : "max-lg:ns-notebook-float"}`}>
+            <picture>
+              <source media="(max-width: 640px)" srcSet="/notes/hero-notebook-sm.webp" type="image/webp" />
+              <source srcSet="/notes/hero-notebook.webp" type="image/webp" />
+              <img
+                src="/notes/hero-notebook.png"
+                alt="Naman Sir's spiral-bound handwritten UPSC notes"
+                width={WIDTH}
+                height={HEIGHT}
+                decoding="async"
+                fetchPriority="high"
+                className="relative z-[1] h-auto w-full select-none"
+                draggable={false}
+              />
+            </picture>
+            <div className="ns-notebook-sweep z-[2] rounded-[2px]" aria-hidden="true" />
+            <div
+              className="pointer-events-none absolute inset-[8%] z-[2] rounded-[40%_12%_18%_30%] bg-[radial-gradient(ellipse_at_30%_20%,rgba(255,255,255,0.22),transparent_46%)]"
+              aria-hidden="true"
             />
-          </picture>
-          <div className="ns-notebook-sweep z-[2] rounded-[2px]" aria-hidden="true" />
-          <div
-            className="pointer-events-none absolute inset-[8%] z-[2] rounded-[40%_12%_18%_30%] bg-[radial-gradient(ellipse_at_30%_20%,rgba(255,255,255,0.22),transparent_46%)]"
-            aria-hidden="true"
-          />
+            <div className="ns-notebook-rim" aria-hidden="true" />
+          </div>
+          <HeroCallouts />
         </div>
       </motion.div>
     </div>
