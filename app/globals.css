@@ -598,7 +598,7 @@ a {
 }
 
 @keyframes ns-sweep {
-  0%, 72% { transform: translateX(-18%) opacity: 0; }
+  0%, 72% { transform: translateX(-18%); opacity: 0; }
   78% { opacity: 1; }
   92% { transform: translateX(18%); opacity: 0.35; }
   100% { transform: translateX(22%); opacity: 0; }
