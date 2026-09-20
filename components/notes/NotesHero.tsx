@@ -34,24 +34,21 @@ function TrustMark() {
           />
         </svg>
       </span>
-      <span className="min-w-0 text-left">
-        <span className="ns-trust-mark-title">Trusted by UPSC toppers</span>
-        <span className="ns-trust-mark-sub">Proven UPSC results</span>
-      </span>
+      <span className="ns-trust-mark-title">Trusted by UPSC toppers</span>
     </div>
   );
 }
 
-function ShopCtas({ className = "" }: { className?: string }) {
+function ShopCtas() {
   return (
-    <div className={`flex flex-wrap items-center justify-center gap-3 lg:justify-start ${className}`}>
+    <div className="flex flex-wrap items-center justify-center gap-2.5 lg:justify-start">
       <Link href="#catalogue" className="ca-btn ca-btn-gold ca-focus ns-press group rounded-full px-6">
         Shop UPSC Notes
         <span aria-hidden="true" className="inline-block transition-transform duration-200 group-hover:translate-x-1">
           →
         </span>
       </Link>
-      <Link href="#bundles" className="ca-btn ca-btn-outline ca-focus ns-press rounded-full px-6">
+      <Link href="#bundles" className="ca-btn ca-focus ns-press ns-hero-cta-secondary rounded-full px-6">
         Explore bundles
       </Link>
     </div>
@@ -71,27 +68,25 @@ export default function NotesHero() {
 
   return (
     <header className="ns-hero-light">
-      <div className="container-wide relative grid items-center gap-5 py-7 sm:gap-7 sm:py-12 lg:grid-cols-[minmax(0,1.02fr)_minmax(0,0.98fr)] lg:gap-8 lg:py-16">
+      <div className="container-wide relative grid items-center gap-3 py-5 sm:gap-5 sm:py-10 lg:grid-cols-[minmax(0,1.02fr)_minmax(0,0.98fr)] lg:gap-8 lg:py-16">
         <div className="order-1 text-center lg:text-left">
           <motion.div className="flex justify-center lg:justify-start" {...enter(0)}>
             <TrustMark />
           </motion.div>
           <motion.h1
-            className="mt-3.5 font-heading text-[clamp(1.5rem,6.1vw,2.15rem)] font-extrabold leading-[1.12] tracking-tight text-[var(--ca-navy)] sm:text-4xl lg:max-w-xl lg:text-[3.15rem] lg:leading-[1.08]"
+            className="mt-2.5 font-heading text-[clamp(1.5rem,6.1vw,2.15rem)] font-extrabold leading-[1.12] tracking-tight text-[var(--ca-navy)] sm:text-4xl lg:mt-3.5 lg:max-w-xl lg:text-[3.15rem] lg:leading-[1.08]"
             {...enter(0.07)}
           >
-            <span className="block whitespace-nowrap">Naman Sir&apos;s UPSC Notes.</span>
+            <span className="block whitespace-nowrap">Naman Sir&rsquo;s UPSC Notes.</span>
             <span className="block whitespace-nowrap">Delivered to Your Door.</span>
           </motion.h1>
-          <motion.div className="mx-auto mt-3 max-w-md lg:mx-0" {...enter(0.14)}>
-            <p className="text-[0.95rem] font-semibold leading-snug text-[var(--ca-navy)]/78 sm:text-base">
-              Handwritten by Naman Sir. Professionally printed. Built for UPSC.
-            </p>
-            <p className="mt-1.5 text-[0.8rem] leading-relaxed text-[var(--ca-navy)]/50 sm:text-sm">
-              Exam-focused hard copies for smarter study and faster revision, delivered across India.
-            </p>
-          </motion.div>
-          <motion.div className="mt-5" {...enter(0.2)}>
+          <motion.p
+            className="ns-hero-benefit mx-auto mt-2 max-w-[22rem] sm:max-w-none lg:mx-0"
+            {...enter(0.14)}
+          >
+            Handwritten. Exam-focused. Made for revision.
+          </motion.p>
+          <motion.div className="mt-3.5 lg:mt-5" {...enter(0.2)}>
             <ShopCtas />
           </motion.div>
         </div>

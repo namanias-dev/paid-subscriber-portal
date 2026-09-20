@@ -542,9 +542,9 @@ a {
 .ns-trust-mark {
   display: inline-flex;
   align-items: center;
-  gap: 0.62rem;
+  gap: 0.48rem;
   max-width: 100%;
-  padding: 0.32rem 0.72rem 0.32rem 0.34rem;
+  padding: 0.22rem 0.7rem 0.22rem 0.28rem;
   border: 1px solid rgba(196, 162, 78, 0.42);
   border-radius: 999px;
   background:
@@ -559,8 +559,8 @@ a {
   position: relative;
   display: grid;
   place-items: center;
-  width: 1.7rem;
-  height: 1.7rem;
+  width: 1.45rem;
+  height: 1.45rem;
   flex: 0 0 auto;
   color: var(--ca-gold-dark);
 }
@@ -574,27 +574,35 @@ a {
   animation: ns-trust-shimmer 1.15s ease-out 0.25s 1 both;
 }
 
-.ns-trust-mark-title,
-.ns-trust-mark-sub {
-  display: block;
-  line-height: 1.2;
-  text-transform: uppercase;
-}
-
 .ns-trust-mark-title {
+  display: block;
+  line-height: 1;
   font-size: 0.62rem;
   font-weight: 800;
   letter-spacing: 0.15em;
+  text-transform: uppercase;
   color: var(--ca-navy);
 }
 
-.ns-trust-mark-sub {
-  margin-top: 0.08rem;
-  font-size: 0.52rem;
-  font-weight: 700;
-  letter-spacing: 0.14em;
+.ns-hero-benefit {
+  font-size: clamp(1.05rem, 3.6vw, 1.1875rem);
+  font-weight: 500;
+  line-height: 1.35;
   color: var(--ca-navy);
-  opacity: 0.42;
+  opacity: 0.62;
+}
+
+.ns-hero-cta-secondary {
+  background: transparent;
+  border: 1px solid rgba(10, 26, 63, 0.14);
+  color: var(--ca-navy);
+  box-shadow: none;
+}
+
+.ns-hero-cta-secondary:hover {
+  border-color: rgba(212, 175, 55, 0.45);
+  background: rgba(255, 255, 255, 0.55);
+  transform: none;
 }
 
 @keyframes ns-trust-shimmer {
@@ -610,7 +618,7 @@ a {
 
 .ns-notebook-frame {
   position: relative;
-  padding: 1.85rem 0 0.55rem;
+  padding: 0.85rem 0 0.4rem;
 }
 
 .ns-notebook-art {

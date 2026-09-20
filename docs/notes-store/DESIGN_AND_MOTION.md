@@ -35,7 +35,7 @@ Purposeful transitions only; respect `prefers-reduced-motion`. Do not add glow/g
 
 ## Landing hero
 
-`/notes` uses a light ivory cinematic hero. The spiral notebook is a recovered-alpha product cutout in `public/notes/hero-notebook*.webp|png`, not a CSS booklet stack. Atmosphere, layered shadows and restrained Motion parallax are CSS/Framer only — no extra 3D stack. Hero copy is layered: a compact “Trusted by UPSC toppers” mark, “Naman Sir's UPSC Notes. Delivered to Your Door.”, then printed-hard-copy support. Three product callouts sit on the notebook wrapper (printed / handwritten / now delivering) so they stay attached to the object. Shop by Subject stays the buy surface; Student Voices after it is demand, not a second catalogue. Results stay on the existing ticker — do not invent extra AIR claims in the hero.
+`/notes` uses a light ivory cinematic hero. The spiral notebook is a recovered-alpha product cutout in `public/notes/hero-notebook*.webp|png`, not a CSS booklet stack. Atmosphere, layered shadows and restrained Motion parallax are CSS/Framer only — no extra 3D stack. Hero copy stays short: a one-line “Trusted by UPSC toppers” mark, “Naman Sir’s UPSC Notes. Delivered to Your Door.”, then “Handwritten. Exam-focused. Made for revision.” Product proof lives on the notebook callouts (printed / handwritten / now delivering). Shop by Subject stays the buy surface; Student Voices after it is demand, not a second catalogue. Results stay on the existing ticker — do not invent extra AIR claims in the hero.
 
 ## Design debt
 
