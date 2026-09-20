@@ -51,7 +51,7 @@ export default function HeroNotebook() {
   }, [mx, my, reduce]);
 
   return (
-    <div ref={stageRef} className="ns-notebook-stage mx-auto w-[min(82vw,360px)] sm:w-[min(66vw,430px)] lg:w-[min(46vw,520px)]">
+    <div ref={stageRef} className="ns-notebook-stage mx-auto w-[min(94vw,420px)] sm:w-[min(80vw,520px)] lg:w-[min(54vw,620px)]">
       <motion.div
         className="relative"
         style={
@@ -71,10 +71,10 @@ export default function HeroNotebook() {
         transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
       >
         <div className="ns-notebook-frame">
-          <div className="ns-notebook-shadow-warm" aria-hidden="true" />
-          <div className="ns-notebook-shadow-depth" aria-hidden="true" />
-          <div className="ns-notebook-shadow-contact" aria-hidden="true" />
-          <div className={`relative ${reduce ? "" : "max-lg:ns-notebook-float"}`}>
+          <div className={`ns-notebook-art relative ${reduce ? "" : "max-lg:ns-notebook-float"}`}>
+            <div className="ns-notebook-shadow-warm" aria-hidden="true" />
+            <div className="ns-notebook-shadow-depth" aria-hidden="true" />
+            <div className="ns-notebook-shadow-contact" aria-hidden="true" />
             <picture>
               <source media="(max-width: 640px)" srcSet="/notes/hero-notebook-sm.webp" type="image/webp" />
               <source srcSet="/notes/hero-notebook.webp" type="image/webp" />

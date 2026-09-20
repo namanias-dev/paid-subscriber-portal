@@ -610,12 +610,20 @@ a {
 
 .ns-notebook-frame {
   position: relative;
-  padding: 1.55rem 0.2rem 0.7rem;
+  padding: 1.85rem 0 0.55rem;
+}
+
+.ns-notebook-art {
+  width: 72%;
+  margin: 0 auto;
 }
 
 @media (min-width: 1024px) {
   .ns-notebook-frame {
-    padding: 2.1rem 0.4rem 1rem;
+    padding: 2.4rem 0 0.8rem;
+  }
+  .ns-notebook-art {
+    width: 78%;
   }
 }
 
@@ -746,8 +754,8 @@ a {
 .ns-callout-leader {
   display: flex;
   align-items: center;
-  flex: 1 1 auto;
-  min-width: 1.35rem;
+  width: 1.85rem;
+  flex: 0 0 auto;
 }
 
 .ns-callout-stem {
@@ -780,7 +788,7 @@ a {
 
 .ns-callout--print {
   left: 0;
-  bottom: 16%;
+  bottom: 14%;
   flex-direction: row;
 }
 
@@ -794,7 +802,7 @@ a {
 }
 
 .ns-callout--auth {
-  top: 5%;
+  top: 0.15rem;
   right: 0;
   flex-direction: row-reverse;
 }
@@ -808,8 +816,8 @@ a {
 }
 
 .ns-callout--deliver {
+  top: 44%;
   right: 0;
-  bottom: 31%;
   flex-direction: row-reverse;
 }
 
@@ -852,19 +860,19 @@ a {
     letter-spacing: 0.14em;
   }
   .ns-callout-leader {
-    min-width: 2.4rem;
+    width: 2.65rem;
   }
   .ns-callout--print {
     left: 0;
-    bottom: 18%;
+    bottom: 16%;
   }
   .ns-callout--auth {
-    top: 8%;
-    right: 2%;
+    top: 0.4rem;
+    right: 0;
   }
   .ns-callout--deliver {
+    top: 46%;
     right: 0;
-    bottom: 36%;
   }
 }
 
