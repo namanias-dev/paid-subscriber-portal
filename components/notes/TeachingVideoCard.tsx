@@ -90,7 +90,7 @@ export default function TeachingVideoCard({
       return;
     }
 
-    attachTeachingSource(node, video.fullSrc, "metadata");
+    attachTeachingSource(node, video.fullSrc, "auto");
     if (!userActivated.current) {
       node.muted = true;
       node.defaultMuted = true;
@@ -264,7 +264,7 @@ export default function TeachingVideoCard({
         window.clearTimeout(hoverTimer.current);
         hoverTimer.current = window.setTimeout(() => {
           const node = fullRef.current;
-          if (node) attachTeachingSource(node, video.fullSrc, "metadata");
+          if (node) attachTeachingSource(node, video.fullSrc, "auto");
           void warmTeachingSource(video.fullSrc);
         }, TEACHING_HOVER_WARM_MS);
       }}
@@ -293,7 +293,7 @@ export default function TeachingVideoCard({
             ref={fullRef}
             className={`ns-teach-full ${fullReady && (phase === "playing" || phase === "paused" || phase === "starting") ? "is-ready" : ""}`}
             playsInline
-            preload={active && near && !saveData ? "metadata" : "none"}
+            preload={active && near && !saveData ? "auto" : "none"}
             controls={active && userPlayback}
             poster={video.posterSrc}
             aria-label={video.ariaLabel}

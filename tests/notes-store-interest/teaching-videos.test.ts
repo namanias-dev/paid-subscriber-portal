@@ -83,7 +83,7 @@ describe("teaching video catalogue", () => {
     assert.match(player, /webkit-playsinline/);
     assert.match(card, /controls=\{active && userPlayback\}/);
     assert.match(card, /prepareTeachingPlayback/);
-    assert.match(card, /preload=\{active && near && !saveData \? "metadata" : "none"\}/);
+    assert.match(card, /preload=\{active && near && !saveData \? "auto" : "none"\}/);
     assert.match(card, /notes_teaching_inline_play/);
     assert.match(card, /onPlaying/);
     assert.doesNotMatch(card, /nofullscreen/);
