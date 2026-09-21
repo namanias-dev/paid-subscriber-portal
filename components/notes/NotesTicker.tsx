@@ -19,7 +19,7 @@ function Track({ items, label }: { items: string[]; label: string }) {
   if (!items.length) return null;
   const loop = [...items, ...items];
   return (
-    <div className="overflow-hidden border-y border-white/10" aria-label={label}>
+    <div className="overflow-x-clip overflow-y-hidden border-y border-white/10" aria-label={label}>
       <div className="flex w-max animate-marquee gap-10 py-3 pr-10 motion-reduce:animate-none">
         {loop.map((item, i) => (
           <span key={`${item}-${i}`} className="text-[12px] font-semibold uppercase tracking-[0.16em] text-white/70">

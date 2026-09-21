@@ -171,8 +171,7 @@ export default function StudentVoices({ subjects }: { subjects: PreferenceSubjec
       className="relative overflow-hidden rounded-[28px] border border-[var(--ca-navy)]/8 bg-[linear-gradient(180deg,#ffffff_0%,#fbf8f2_100%)] px-4 py-8 ns-elev-1 sm:px-6 sm:py-10"
     >
       <div className="pointer-events-none absolute -right-10 top-0 h-40 w-40 rounded-full bg-[radial-gradient(circle,rgba(212,175,55,0.14),transparent_68%)]" aria-hidden="true" />
-      <div className="lg:grid lg:grid-cols-[minmax(0,1.15fr)_minmax(16rem,0.85fr)] lg:items-start lg:gap-10">
-        <div>
+      <div>
           <p className="ca-eyebrow text-[var(--ca-gold-dark)]">Student voices</p>
           <h2 id="voices-title" className="mt-2 font-heading text-2xl font-bold text-[var(--ca-navy)] sm:text-3xl">
             Tell Us What You Want Next
@@ -316,22 +315,6 @@ export default function StudentVoices({ subjects }: { subjects: PreferenceSubjec
               </motion.div>
             )}
           </AnimatePresence>
-        </div>
-
-        <aside className="mt-8 rounded-2xl border border-[var(--ca-navy)]/8 bg-white/80 p-5 lg:mt-10">
-          <p className="text-[11px] font-extrabold uppercase tracking-[0.16em] text-[var(--ca-gold-dark)]">Why we ask</p>
-          <p className="mt-2 text-sm leading-relaxed text-[var(--ca-navy)]/62">
-            Your choices help us understand which handwritten notes matter most and which subject combinations make sense together.
-          </p>
-          <ul className="mt-4 space-y-2 text-sm font-semibold text-[var(--ca-navy)]">
-            <li>Future notes</li>
-            <li>Better bundles</li>
-            <li>Availability planning</li>
-          </ul>
-          <p className="mt-4 text-xs leading-relaxed text-[var(--ca-navy)]/45">
-            Saving interest is a demand signal, not an order and not a marketing subscription.
-          </p>
-        </aside>
       </div>
 
       {!saved && selected.length > 0 && <div className="h-28 lg:hidden" aria-hidden="true" />}

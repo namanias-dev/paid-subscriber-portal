@@ -222,7 +222,11 @@ export async function listStoreOffers(): Promise<Array<StoreOfferRow & { status:
   const db = storeDb();
   if (!db) return [];
   await releaseExpiredOfferHolds();
-  const { data } = await db.from("store_offers").select(OFFER_COLS).order("created_at", { ascending: false });
+  const { data, error } = await db.from("store_offers").select(OFFER_COLS).order("created_at", { ascending: false });
+  if (error) {
+    console.error("[store/offers] list failed", error.message);
+    return [];
+  }
   const rows = (data || []).map((r) => toRow(r as Record<string, unknown>));
   const heldByOffer = new Map<string, number>();
   if (rows.length) {
@@ -262,11 +266,11 @@ export async function getActiveStoreOffer(): Promise<StoreOfferRow | null> {
   if (!db) return null;
   await releaseExpiredOfferHolds();
   const now = new Date();
-  const { data } = await db
-    .from("store_offers")
-    .select(OFFER_COLS)
-    .eq("enabled", true)
-    .order("starts_at", { ascending: false, nullsFirst: false });
+  const { data, error } = await db.from("store_offers").select(OFFER_COLS).eq("enabled", true).order("created_at", { ascending: false });
+  if (error) {
+    console.error("[store/offers] active lookup failed", error.message);
+    return null;
+  }
   const rows = (data || []).map((r) => toRow(r as Record<string, unknown>));
   if (!rows.length) return null;
 

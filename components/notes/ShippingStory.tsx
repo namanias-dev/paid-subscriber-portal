@@ -29,7 +29,7 @@ const STEPS = [
 
 export default function ShippingStory({ compact = false }: { compact?: boolean }) {
   return (
-    <div className={compact ? "" : "rounded-[28px] border border-[var(--ca-navy)]/8 bg-[linear-gradient(180deg,#ffffff_0%,#fbf8f2_100%)] px-5 py-7 sm:px-7"}>
+    <div id={compact ? undefined : "delivery"} className={compact ? "" : "rounded-[28px] border border-[var(--ca-navy)]/8 bg-[linear-gradient(180deg,#ffffff_0%,#fbf8f2_100%)] px-5 py-7 sm:px-7"}>
       <p className="ca-eyebrow text-[var(--ca-gold-dark)]">Physical delivery</p>
       <h2 className={`${compact ? "mt-2 text-xl" : "mt-2 text-2xl"} font-heading font-bold text-[var(--ca-navy)]`}>
         From Order to Your Door
