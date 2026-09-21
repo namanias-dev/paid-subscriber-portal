@@ -182,7 +182,8 @@ export default function NotesTeachingShowcase() {
                 <TeachingVideoCard
                   key={video.id}
                   video={video}
-                  active={i === index && inView}
+                  active={i === index}
+                  near={inView}
                   saveData={saveData}
                   onSelect={() => go(i)}
                   onPlaybackChange={(next) => {

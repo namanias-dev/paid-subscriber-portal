@@ -17,12 +17,14 @@ function markInline(node: HTMLVideoElement) {
 export default function TeachingVideoCard({
   video,
   active,
+  near,
   saveData,
   onSelect,
   onPlaybackChange,
 }: {
   video: TeachingVideo;
   active: boolean;
+  near: boolean;
   saveData: boolean;
   onSelect: () => void;
   onPlaybackChange: (playing: boolean) => void;
@@ -65,7 +67,7 @@ export default function TeachingVideoCard({
 
   useEffect(() => {
     const node = previewRef.current;
-    const allowPreview = active && mode !== "playing" && !saveData && !reduce;
+    const allowPreview = active && near && mode !== "playing" && !saveData && !reduce;
     if (!node) return;
     markInline(node);
     if (!allowPreview) {
@@ -100,7 +102,7 @@ export default function TeachingVideoCard({
     return () => {
       node.pause();
     };
-  }, [active, mode, reduce, saveData, video.id, video.previewSrc]);
+  }, [active, mode, near, reduce, saveData, video.id, video.previewSrc]);
 
   useEffect(() => {
     const node = fullRef.current;
@@ -192,7 +194,7 @@ export default function TeachingVideoCard({
         <span className="ns-teach-bevel" aria-hidden="true" />
         <div className="ns-teach-media">
           <img src={video.posterSrc} alt="" width={video.width} height={video.height} />
-          {active && !fullReady && !saveData && !reduce ? (
+          {active && near && !fullReady && !saveData && !reduce ? (
             <video
               ref={previewRef}
               className={previewReady ? "is-ready" : ""}
