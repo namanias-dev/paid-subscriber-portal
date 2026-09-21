@@ -1332,6 +1332,12 @@ a {
   overflow: hidden;
 }
 
+.ns-teach-viewport[data-locked="true"] {
+  overflow-x: hidden;
+  touch-action: pan-y;
+  scroll-snap-type: none;
+}
+
 .ns-teach-track {
   display: flex;
   align-items: flex-start;
@@ -1423,6 +1429,16 @@ a {
   opacity: 1;
 }
 
+.ns-teach-frame.is-playing .ns-teach-media video.ns-teach-full {
+  z-index: 2;
+}
+
+.ns-teach-frame.is-playing .ns-teach-badge,
+.ns-teach-frame.is-playing .ns-teach-bevel {
+  pointer-events: none;
+  z-index: 1;
+}
+
 .ns-teach-badge {
   position: absolute;
   top: -0.35rem;
@@ -1456,6 +1472,7 @@ a {
 }
 
 .ns-teach-playbtn i {
+  position: relative;
   display: grid;
   place-items: center;
   width: clamp(3.5rem, 15vw, 4.5rem);
@@ -1468,6 +1485,50 @@ a {
     0 12px 24px -12px rgba(10, 26, 63, 0.7),
     inset 0 1px 0 rgba(255, 252, 240, 0.24);
   transition: transform 160ms ease, box-shadow 160ms ease;
+}
+
+.ns-teach-playbtn[data-loading="true"] i::after {
+  content: "";
+  position: absolute;
+  inset: 0.32rem;
+  border-radius: 999px;
+  border: 1.5px solid rgba(251, 248, 242, 0.2);
+  border-top-color: rgba(212, 175, 55, 0.95);
+  animation: ns-teach-spin 0.7s linear infinite;
+  pointer-events: none;
+}
+
+.ns-teach-error {
+  max-width: 12.5rem;
+  padding: 0.55rem 0.7rem;
+  border-radius: 0.7rem;
+  background: rgba(7, 18, 46, 0.78);
+  color: #fbf8f2;
+  font-size: 0.72rem;
+  font-weight: 600;
+  line-height: 1.35;
+  letter-spacing: 0.01em;
+}
+
+.ns-teach-wait {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  z-index: 4;
+  width: 1.15rem;
+  height: 1.15rem;
+  margin: -0.575rem 0 0 -0.575rem;
+  border-radius: 999px;
+  border: 1.5px solid rgba(251, 248, 242, 0.18);
+  border-top-color: rgba(212, 175, 55, 0.95);
+  animation: ns-teach-spin 0.7s linear infinite;
+  pointer-events: none;
+}
+
+@keyframes ns-teach-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .ns-teach-playbtn i svg {
@@ -1714,6 +1775,10 @@ a {
   }
   .ns-teach-media video {
     transition: none;
+  }
+  .ns-teach-playbtn[data-loading="true"] i::after,
+  .ns-teach-wait {
+    animation: none;
   }
 }
 

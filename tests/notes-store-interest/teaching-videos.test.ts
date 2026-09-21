@@ -11,6 +11,8 @@ import {
 
 const showcase = readFileSync(new URL("../../components/notes/NotesTeachingShowcase.tsx", import.meta.url), "utf8");
 const card = readFileSync(new URL("../../components/notes/TeachingVideoCard.tsx", import.meta.url), "utf8");
+const player = readFileSync(new URL("../../lib/store/teachingPlayer.ts", import.meta.url), "utf8");
+const mediaRoute = readFileSync(new URL("../../app/media/[...path]/route.ts", import.meta.url), "utf8");
 const css = readFileSync(new URL("../../app/globals.css", import.meta.url), "utf8");
 const counselor = readFileSync(new URL("../../components/ai-agent/AiCounselorWidget.tsx", import.meta.url), "utf8");
 
@@ -75,16 +77,39 @@ describe("teaching video catalogue", () => {
     assert.match(css, /\.ns-teach-viewport\s*\{[^}]*overflow-x:\s*auto/s);
   });
 
-  test("active card is a true inline player with playsInline and deferred native controls", () => {
+  test("active card is a true inline player with playsInline and native controls after user play", () => {
     assert.match(card, /Play teaching video/);
     assert.match(card, /playsInline/);
-    assert.match(card, /webkit-playsinline/);
-    assert.match(card, /controls=\{playing && fullReady\}/);
-    assert.doesNotMatch(card, /webkitEnterFullscreen/);
+    assert.match(player, /webkit-playsinline/);
+    assert.match(card, /controls=\{active && userPlayback\}/);
+    assert.match(card, /prepareTeachingPlayback/);
+    assert.match(card, /preload=\{active && near && !saveData \? "metadata" : "none"\}/);
     assert.match(card, /notes_teaching_inline_play/);
+    assert.match(card, /onPlaying/);
+    assert.doesNotMatch(card, /nofullscreen/);
+    assert.doesNotMatch(card, /controlsList/);
     assert.match(showcase, /Naman Sir · UPSC Faculty/);
     assert.equal(showcase.split("Naman Sir · UPSC Faculty").length - 1, 1);
     assert.doesNotMatch(showcase, /Tap to watch with sound/);
+  });
+
+  test("only the active near card warms the full source and inactive cards pause", () => {
+    assert.match(card, /allowFull = active && near && !saveData/);
+    assert.match(card, /stopTeachingBuffering/);
+    assert.match(card, /showPreview = active && near && !saveData && !reduce/);
+    assert.match(card, /warmTeachingSource/);
+    assert.match(showcase, /near=\{nearView\}/);
+    assert.match(showcase, /data-locked=\{playing \? "true" : undefined\}/);
+    assert.match(css, /data-locked="true"/);
+  });
+
+  test("media route streams Range responses and never buffers the whole object", () => {
+    assert.match(mediaRoute, /transformToWebStream/);
+    assert.match(mediaRoute, /req\.headers\.get\("range"\)/);
+    assert.doesNotMatch(mediaRoute, /arrayBuffer\(/);
+    assert.doesNotMatch(mediaRoute, /Buffer\.concat/);
+    assert.match(mediaRoute, /mediaResponseHeaders/);
+    assert.match(player, /webkitEnterFullscreen/);
   });
 
   test("counsellor launcher dodges the teaching player on /notes", () => {

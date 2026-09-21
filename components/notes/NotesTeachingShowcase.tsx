@@ -27,6 +27,7 @@ export default function NotesTeachingShowcase() {
   const sectionRef = useRef<HTMLElement>(null);
   const railRef = useRef<HTMLDivElement>(null);
   const inView = useInView(sectionRef, { once: true, margin: "-18% 0px" });
+  const nearView = useInView(sectionRef, { amount: 0.12, margin: "20% 0px" });
   const [index, setIndex] = useState(0);
   const [saveData, setSaveData] = useState(false);
   const [playing, setPlaying] = useState(false);
@@ -167,12 +168,13 @@ export default function NotesTeachingShowcase() {
           <div
             ref={railRef}
             className={`ns-teach-viewport ns-hide-scrollbar ${multi ? "" : "ns-teach-viewport--single"}`}
+            data-locked={playing ? "true" : undefined}
             role={multi ? "region" : undefined}
             aria-roledescription={multi ? "carousel" : undefined}
             aria-label="Naman Sir teaching clips"
             tabIndex={multi ? 0 : undefined}
             onKeyDown={(e) => {
-              if (!multi) return;
+              if (!multi || playing) return;
               if (e.key === "ArrowRight") go(index + 1);
               if (e.key === "ArrowLeft") go(index - 1);
             }}
@@ -183,7 +185,7 @@ export default function NotesTeachingShowcase() {
                   key={video.id}
                   video={video}
                   active={i === index}
-                  near={inView}
+                  near={nearView}
                   saveData={saveData}
                   onSelect={() => go(i)}
                   onPlaybackChange={(next) => {
