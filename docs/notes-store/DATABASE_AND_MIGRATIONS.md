@@ -12,6 +12,7 @@
 8. `supabase/migrations/2026-09-20-notes-store-admin-content.sql` — product editor content fields
 9. `supabase/migrations/2026-09-20-notes-store-subject-interest.sql` — **additive**: `store_subject_interest` (product_id, voter_hash, source, created_at). Demand signal only; no money/inventory/order changes.
 10. `supabase/migrations/2026-09-20-notes-store-preference-submissions.sql` — **additive**: `store_interest_submissions` + `store_interest_submission_subjects`. One preference SET per voter hash (update-in-place). Not marketing consent.
+11. `supabase/migrations/2026-09-21-notes-store-offers.sql` — **additive**: `store_offers` + `store_offer_holds`, hold/consume/release RPCs, `store_orders.offer_id`, merchandised singles → ₹2,999, `notes_store_bundles` flag (off), seed Launch Offer (20% / first 100 / 7-day window, all admin-editable).
 
 ## Tables (`store_*`) — 23
 
@@ -36,6 +37,8 @@
 | `store_subject_interest` | Anonymous per-product “I want these notes” votes |
 | `store_interest_submissions` | One Student Voices preference SET per voter hash |
 | `store_interest_submission_subjects` | Selected `store_categories` for a submission |
+| `store_offers` | Admin-controlled limited-time campaigns |
+| `store_offer_holds` | Checkout-time offer capacity reservation |
 
 **No FKs** from these tables into Academy `payments` / `students` / `buyers` / `leads` / enrollments.
 

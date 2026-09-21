@@ -21,26 +21,38 @@ export async function GET(req: Request) {
   // shipping line still shows.
   let quote: {
     subtotal_paise: number;
+    discount_paise: number;
     shipping_paise: number;
     tax_paise: number;
     total_paise: number;
     subtotal_label: string;
+    discount_label: string | null;
     shipping_label: string;
     tax_label: string;
     total_label: string;
+    offer_name: string | null;
+    offer_id: string | null;
+    discount_value: number | null;
+    discount_type: string | null;
   } | null = null;
   if (cart && cart.items.length && result.serviceable) {
     try {
       const q = await buildFrozenQuote(cart, result);
       quote = {
         subtotal_paise: q.subtotal_paise,
+        discount_paise: q.discount_paise,
         shipping_paise: q.shipping_paise,
         tax_paise: q.tax_paise,
         total_paise: q.total_paise,
         subtotal_label: formatPaise(q.subtotal_paise),
+        discount_label: q.discount_paise > 0 ? formatPaise(q.discount_paise) : null,
         shipping_label: formatPaise(q.shipping_paise),
         tax_label: formatPaise(q.tax_paise),
         total_label: formatPaise(q.total_paise),
+        offer_name: q.offer_name,
+        offer_id: q.offer_id,
+        discount_value: q.discount_value,
+        discount_type: q.discount_type,
       };
     } catch {
       /* leave quote null — shipping_paise below is still accurate */

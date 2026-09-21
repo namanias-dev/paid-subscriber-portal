@@ -175,11 +175,12 @@ export default function StudentVoices({ subjects }: { subjects: PreferenceSubjec
         <div>
           <p className="ca-eyebrow text-[var(--ca-gold-dark)]">Student voices</p>
           <h2 id="voices-title" className="mt-2 font-heading text-2xl font-bold text-[var(--ca-navy)] sm:text-3xl">
-            Which subjects&apos; notes do you want?
+            Tell Us What You Want Next
           </h2>
           <p className="mt-2 max-w-xl text-sm leading-relaxed text-[var(--ca-navy)]/58">
-            Choose as many as you&apos;d like. Your choices help us understand what aspirants actually need.
+            Your choices help us decide which handwritten notes to prepare next.
           </p>
+          <p className="mt-1 text-[11px] text-[var(--ca-navy)]/40">This is an interest signal, not an order.</p>
 
           <AnimatePresence mode="wait">
             {saved ? (

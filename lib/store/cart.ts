@@ -7,6 +7,8 @@ import { storeDb } from "./db";
 import { lineTaxPaise } from "./money";
 import { maxPurchasableQty } from "./availability";
 import type { StoreProductCard } from "./catalogue";
+import { calculateCartPricing, type StoreOfferDiscountType } from "./pricing";
+import { getActiveStoreOffer, toPricingOffer } from "./offers";
 
 export const CART_COOKIE = "nias_notes_cart";
 const CART_TTL_DAYS = 30;
@@ -17,6 +19,8 @@ export interface CartItemView {
   qty: number;
   product: StoreProductCard;
   line_total_paise: number;
+  line_discount_paise: number;
+  regular_line_paise: number;
 }
 
 export interface CartView {
@@ -24,8 +28,14 @@ export interface CartView {
   items: CartItemView[];
   item_count: number;
   subtotal_paise: number;
+  discount_paise: number;
   tax_paise: number;
   max_dispatch_days: number;
+  offer_id: string | null;
+  offer_name: string | null;
+  offer_slug: string | null;
+  discount_type: StoreOfferDiscountType | null;
+  discount_value: number | null;
 }
 
 function cookieOpts() {
@@ -76,30 +86,53 @@ export async function getCartView(cartId?: string | null): Promise<CartView | nu
     .select("id,product_id,qty")
     .eq("cart_id", id)
     .order("created_at", { ascending: true });
-  const views: CartItemView[] = [];
+  const raw: Array<{ id: string; product_id: string; qty: number; product: StoreProductCard }> = [];
   for (const it of items || []) {
     const product = await loadProduct(it.product_id);
     if (!product) continue;
-    views.push({
-      id: it.id,
-      product_id: it.product_id,
-      qty: it.qty,
-      product,
-      line_total_paise: product.selling_price_paise * it.qty,
-    });
+    raw.push({ id: it.id, product_id: it.product_id, qty: it.qty, product });
   }
-  const subtotal = views.reduce((s, v) => s + v.line_total_paise, 0);
-  const tax = views.reduce(
-    (s, v) => s + lineTaxPaise(v.line_total_paise, "exempt", 0),
-    0,
+  const activeOfferRow = await getActiveStoreOffer();
+  const offer = activeOfferRow ? toPricingOffer(activeOfferRow) : null;
+  const priced = calculateCartPricing(
+    raw.map((r) => ({
+      product: {
+        id: r.product.id,
+        kind: r.product.kind,
+        category_id: r.product.category_id,
+        selling_price_paise: r.product.selling_price_paise,
+      },
+      qty: r.qty,
+    })),
+    offer,
   );
+  const byProduct = new Map(priced.lines.map((l) => [l.product_id, l]));
+  const views: CartItemView[] = raw.map((r) => {
+    const line = byProduct.get(r.product_id);
+    return {
+      id: r.id,
+      product_id: r.product_id,
+      qty: r.qty,
+      product: r.product,
+      regular_line_paise: line?.base_paise ?? r.product.selling_price_paise * r.qty,
+      line_discount_paise: line?.discount_paise ?? 0,
+      line_total_paise: line?.final_paise ?? r.product.selling_price_paise * r.qty,
+    };
+  });
+  const tax = views.reduce((s, v) => s + lineTaxPaise(v.line_total_paise, "exempt", 0), 0);
   return {
     id,
     items: views,
     item_count: views.reduce((s, v) => s + v.qty, 0),
-    subtotal_paise: subtotal,
+    subtotal_paise: priced.subtotal_paise,
+    discount_paise: priced.discount_paise,
     tax_paise: tax,
     max_dispatch_days: views.reduce((m, v) => Math.max(m, v.product.dispatch_days), 0) || 2,
+    offer_id: priced.offer_id,
+    offer_name: priced.offer_name,
+    offer_slug: priced.offer_slug,
+    discount_type: priced.discount_type,
+    discount_value: priced.discount_value,
   };
 }
 

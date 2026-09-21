@@ -24,6 +24,14 @@ interface Row {
   phone: string;
   email: string | null;
   total_paise: number;
+  discount_paise?: number;
+  promo_code?: string | null;
+  discount_trace_json?: {
+    offer_name?: string;
+    discount_type?: string;
+    discount_value?: number;
+    discount_amount?: number;
+  } | null;
   payment_status: string | null;
   promised_delivery_date: string | null;
   placed_at: string;
@@ -220,6 +228,16 @@ export default function NotesOrderQueue() {
                 </div>
                 <div className="text-right">
                   <p className="font-heading text-lg font-bold tabular-nums">{formatPaise(o.total_paise)}</p>
+                  {(o.discount_paise || 0) > 0 && (
+                    <p className="mt-1 text-[11px] text-ink2">
+                      Promotion: {o.discount_trace_json?.offer_name || o.promo_code || "Offer"}
+                      {o.discount_trace_json?.discount_type === "percentage" && o.discount_trace_json.discount_value
+                        ? ` · ${o.discount_trace_json.discount_value}%`
+                        : ""}
+                      <br />
+                      Discount: {formatPaise(o.discount_paise || o.discount_trace_json?.discount_amount || 0)}
+                    </p>
+                  )}
                   <p className="mt-1 inline-flex rounded-full bg-surface px-2.5 py-0.5 text-xs font-semibold uppercase tracking-wide text-ink2">
                     {o.status.replaceAll("_", " ")}
                   </p>

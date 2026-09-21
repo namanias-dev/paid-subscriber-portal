@@ -10,6 +10,7 @@ export interface PublicOrder {
   placed_at: string;
   promised_delivery_date: string | null;
   total_label: string;
+  offer_id: string | null;
   items: { name: string; qty: number; total: string }[];
   ship_to: string | null;
   awb: string | null;
@@ -38,7 +39,7 @@ export async function getPublicOrder(
   if (!db) return null;
   const { data: order } = await db
     .from("store_orders")
-    .select("id,order_no,status,placed_at,promised_delivery_date,total_paise,tracking_token_hash,shipping_address_id")
+    .select("id,order_no,status,placed_at,promised_delivery_date,total_paise,tracking_token_hash,shipping_address_id,offer_id")
     .eq("order_no", orderNo.trim().toUpperCase())
     .maybeSingle();
   if (!order || !verifyRawTokenAgainstHash(token, order.tracking_token_hash)) return null;
@@ -74,6 +75,7 @@ export async function getPublicOrder(
     placed_at: order.placed_at,
     promised_delivery_date: order.promised_delivery_date,
     total_label: formatPaise(order.total_paise),
+    offer_id: order.offer_id || null,
     items: (items || []).map((i) => ({ name: i.name_snapshot, qty: i.qty, total: formatPaise(i.line_total_paise) })),
     ship_to: shipTo,
     awb: hasAwb ? ship!.awb : null,

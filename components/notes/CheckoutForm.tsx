@@ -11,10 +11,13 @@ interface CartJson {
 
 interface QuoteJson {
   subtotal_label: string;
+  discount_label?: string | null;
   shipping_label: string;
   tax_paise: number;
   tax_label: string;
   total_label: string;
+  offer_name?: string | null;
+  offer_id?: string | null;
 }
 
 export default function CheckoutForm() {
@@ -78,6 +81,9 @@ export default function CheckoutForm() {
     setBusy(true);
     setErr(null);
     trackClient("notes_checkout_started", { item_count: cart?.item_count ?? 0 });
+    if (quote?.offer_id) {
+      trackClient("notes_offer_checkout_started", { offer_id: quote.offer_id });
+    }
     try {
       const res = await fetch("/api/notes/checkout", {
         method: "POST",
@@ -137,6 +143,14 @@ export default function CheckoutForm() {
             <span className="text-[var(--ca-navy)]/70">Subtotal</span>
             <span className="tabular-nums font-medium">{quote?.subtotal_label ?? cart?.subtotal_label}</span>
           </p>
+          {quote?.discount_label && (
+            <p className="flex justify-between">
+              <span className="text-[var(--ca-navy)]/70">
+                {quote.offer_name ? `Offer applied: ${quote.offer_name}` : "Offer"}
+              </span>
+              <span className="tabular-nums font-medium">−{quote.discount_label}</span>
+            </p>
+          )}
           <p className="flex justify-between">
             <span className="text-[var(--ca-navy)]/70">Shipping</span>
             <span className="tabular-nums font-medium">

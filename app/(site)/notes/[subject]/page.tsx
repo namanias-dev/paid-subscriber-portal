@@ -2,10 +2,12 @@ import { notFound } from "next/navigation";
 import ProductCard from "@/components/notes/ProductCard";
 import CaPageHeader from "@/components/public/ca/CaPageHeader";
 import { getCategoryBySlug, listActiveProducts } from "@/lib/store/catalogue";
+import { getActiveStoreOffer, toPricingOffer } from "@/lib/store/offers";
 import Link from "next/link";
 import { BookOpen } from "lucide-react";
 
-export const revalidate = 600;
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 export async function generateMetadata({ params }: { params: { subject: string } }) {
   const cat = await getCategoryBySlug(params.subject);
@@ -22,7 +24,11 @@ export default async function SubjectPage({ params }: { params: { subject: strin
   if (RESERVED.has(params.subject)) notFound();
   const cat = await getCategoryBySlug(params.subject);
   if (!cat) notFound();
-  const products = await listActiveProducts({ categoryId: cat.id });
+  const [products, offerRow] = await Promise.all([
+    listActiveProducts({ categoryId: cat.id }),
+    getActiveStoreOffer(),
+  ]);
+  const offer = offerRow ? toPricingOffer(offerRow) : null;
   const title = cat.nav_label || cat.name;
 
   return (
@@ -49,7 +55,7 @@ export default async function SubjectPage({ params }: { params: { subject: strin
         )}
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {products.map((p) => (
-            <ProductCard key={p.id} product={p} interestSource="subject" />
+            <ProductCard key={p.id} product={p} offer={offer} />
           ))}
           {products.length === 0 && (
             <div className="col-span-full rounded-3xl border border-dashed border-[var(--ca-navy)]/15 bg-white p-10 text-center">

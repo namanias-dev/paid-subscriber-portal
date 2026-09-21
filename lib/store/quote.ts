@@ -11,6 +11,8 @@ import { lineTaxPaise } from "./money";
 import { checkPincode, type PinCheckResult } from "./serviceability";
 import { normalizeAvailabilityMode, type AvailabilityMode } from "./availability";
 import type { CartView } from "./cart";
+import { calculateStorePrice, type StoreOfferDiscountType } from "./pricing";
+import { getActiveStoreOffer, toPricingOffer } from "./offers";
 
 export const QUOTE_TTL_SECONDS = 15 * 60;
 
@@ -21,6 +23,7 @@ export interface QuoteLine {
   qty: number;
   unit_price_paise: number;
   mrp_paise: number;
+  line_discount_paise: number;
   line_total_paise: number;
   tax_paise: number;
   tax_treatment: string;
@@ -39,6 +42,11 @@ export interface FrozenQuote {
   shipping_paise: number;
   tax_paise: number;
   total_paise: number;
+  offer_id: string | null;
+  offer_name: string | null;
+  offer_slug: string | null;
+  discount_type: StoreOfferDiscountType | null;
+  discount_value: number | null;
   pincode: string;
   city: string | null;
   state: string | null;
@@ -64,11 +72,14 @@ export async function buildFrozenQuote(cart: CartView, pin: PinCheckResult): Pro
   const db = storeDb();
   if (!db) throw new Error("store unavailable");
 
+  const activeOfferRow = await getActiveStoreOffer();
+  const offer = activeOfferRow ? toPricingOffer(activeOfferRow) : null;
+
   const items: QuoteLine[] = [];
   for (const it of cart.items) {
     const { data: live } = await db
       .from("store_products")
-      .select("id,sku,name,selling_price_paise,mrp_paise,on_hand,reserved,is_active,availability_mode,tax_treatment,tax_rate_bps,weight_grams,dispatch_days,hsn_code,max_quantity_per_order")
+      .select("id,sku,name,kind,category_id,selling_price_paise,mrp_paise,on_hand,reserved,is_active,availability_mode,tax_treatment,tax_rate_bps,weight_grams,dispatch_days,hsn_code,max_quantity_per_order")
       .eq("id", it.product_id)
       .maybeSingle();
     if (!live || !live.is_active) throw new Error(`${it.product.name} is no longer available`);
@@ -81,17 +92,26 @@ export async function buildFrozenQuote(cart: CartView, pin: PinCheckResult): Pro
       const sellable = Math.max(0, Number(live.on_hand) - Number(live.reserved));
       if (sellable < it.qty) throw new Error(`${live.name} has only ${sellable} left`);
     }
-    const unit = Number(live.selling_price_paise);
-    const line = unit * it.qty;
-    const tax = lineTaxPaise(line, live.tax_treatment, live.tax_rate_bps);
+    const priced = calculateStorePrice(
+      {
+        id: live.id,
+        kind: live.kind === "bundle" ? "bundle" : "single",
+        category_id: live.category_id || null,
+        selling_price_paise: Number(live.selling_price_paise),
+      },
+      it.qty,
+      offer,
+    );
+    const tax = lineTaxPaise(priced.final_paise, live.tax_treatment, live.tax_rate_bps);
     items.push({
       product_id: live.id,
       sku: live.sku,
       name: live.name,
       qty: it.qty,
-      unit_price_paise: unit,
+      unit_price_paise: priced.base_unit_paise,
       mrp_paise: Number(live.mrp_paise),
-      line_total_paise: line,
+      line_discount_paise: priced.discount_paise,
+      line_total_paise: priced.final_paise,
       tax_paise: tax,
       tax_treatment: live.tax_treatment,
       tax_rate_bps: live.tax_rate_bps,
@@ -102,18 +122,25 @@ export async function buildFrozenQuote(cart: CartView, pin: PinCheckResult): Pro
     });
   }
 
-  const subtotal = items.reduce((s, i) => s + i.line_total_paise, 0);
+  const subtotal = items.reduce((s, i) => s + i.unit_price_paise * i.qty, 0);
+  const discount = items.reduce((s, i) => s + i.line_discount_paise, 0);
   const tax = items.reduce((s, i) => s + i.tax_paise, 0);
   const shipping = pin.zone.shipping_paise;
+  const applied = items.find((i) => i.line_discount_paise > 0);
   const now = new Date();
   return {
     cart_id: cart.id,
     items,
     subtotal_paise: subtotal,
-    discount_paise: 0,
+    discount_paise: discount,
     shipping_paise: shipping,
     tax_paise: tax,
-    total_paise: subtotal + tax + shipping,
+    total_paise: subtotal - discount + tax + shipping,
+    offer_id: applied && offer ? offer.id : null,
+    offer_name: applied && offer ? offer.name : null,
+    offer_slug: applied && offer ? offer.slug : null,
+    discount_type: applied && offer ? offer.discount_type : null,
+    discount_value: applied && offer ? offer.discount_value : null,
     pincode: pin.pincode,
     city: pin.city,
     state: pin.state,
@@ -159,5 +186,15 @@ export async function readLockedQuote(cartId: string): Promise<FrozenQuote | nul
     .maybeSingle();
   if (!data?.quote_json) return null;
   if (data.quote_expires_at && new Date(data.quote_expires_at).getTime() < Date.now()) return null;
-  return data.quote_json as FrozenQuote;
+  const q = data.quote_json as FrozenQuote;
+  return {
+    ...q,
+    discount_paise: q.discount_paise || 0,
+    offer_id: q.offer_id ?? null,
+    offer_name: q.offer_name ?? null,
+    offer_slug: q.offer_slug ?? null,
+    discount_type: q.discount_type ?? null,
+    discount_value: q.discount_value ?? null,
+    items: (q.items || []).map((i) => ({ ...i, line_discount_paise: i.line_discount_paise || 0 })),
+  };
 }

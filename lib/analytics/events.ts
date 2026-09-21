@@ -105,7 +105,13 @@ export type EventName =
   | "notes_teaching_inline_play"
   | "notes_teaching_inline_pause"
   | "notes_teaching_fullscreen_entered"
-  | "notes_shop_after_teaching_clicked";
+  | "notes_shop_after_teaching_clicked"
+  | "notes_offer_impression"
+  | "notes_offer_cta_clicked"
+  | "notes_offer_product_view"
+  | "notes_offer_cart_applied"
+  | "notes_offer_checkout_started"
+  | "notes_offer_order_completed";
 
 /**
  * Events the CLIENT beacon (/api/track) is allowed to emit. Anything that
@@ -199,6 +205,12 @@ export const CLIENT_ALLOWED_EVENTS: ReadonlySet<EventName> = new Set<EventName>(
   "notes_teaching_inline_pause",
   "notes_teaching_fullscreen_entered",
   "notes_shop_after_teaching_clicked",
+  "notes_offer_impression",
+  "notes_offer_cta_clicked",
+  "notes_offer_product_view",
+  "notes_offer_cart_applied",
+  "notes_offer_checkout_started",
+  "notes_offer_order_completed",
 ]);
 
 /** High-volume traffic events that the retention job may prune after 90 days. */

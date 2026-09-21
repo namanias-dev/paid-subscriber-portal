@@ -102,6 +102,7 @@ Automated-verified only (tsc + isolation guard + 53/53 store tests + `next build
 | Store test suite | 64 pass / 0 fail | +7 availability/prep +4 PDF-pipeline tests |
 | Premium storefront redesign + subject interest | BUILT AND AUTOMATED-VERIFIED | Elevation tokens, landing/PDP/cart/checkout/track polish, `store_subject_interest`, admin interest dashboard |
 | Cinematic notebook hero + Student Voices | BUILT AND AUTOMATED-VERIFIED | Real product PNG hero; compact preference-set poll after Shop by Subject; admin Notes Demand / co-selection |
+| Commerce upgrade: premium subject cards, ₹2,999 base, admin-controlled Launch Offer | BUILT | `store_offers` + hold/consume RPCs; `calculateStorePrice` is the quote/cart/checkout/Eazypay source of truth; bundles merchandising hidden via `notes_store_bundles` |
 
 ## External blockers preventing a browsable-by-owner preview (owner action)
 

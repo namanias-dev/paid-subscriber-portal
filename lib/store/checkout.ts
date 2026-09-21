@@ -13,6 +13,7 @@ import { reserveStock } from "./inventory";
 import type { CartView } from "./cart";
 import { requestLeadAttribution } from "@/lib/marketing/requestAttribution";
 import { hashStoreAccessToken, mintStoreAccessToken } from "./accessToken";
+import { holdStoreOffer, offerTraceFromQuote } from "./offers";
 
 export interface CheckoutAddress {
   name: string;
@@ -126,6 +127,9 @@ export async function placeCheckout(cart: CartView, address: CheckoutAddress): P
       shipping_paise: quote.shipping_paise,
       tax_paise: quote.tax_paise,
       total_paise: quote.total_paise,
+      promo_code: quote.offer_slug || null,
+      offer_id: quote.offer_id || null,
+      discount_trace_json: offerTraceFromQuote(quote),
       quote_json: quote,
       promised_delivery_date: quote.promised_delivery_date,
       tracking_token: null,
@@ -149,6 +153,7 @@ export async function placeCheckout(cart: CartView, address: CheckoutAddress): P
     sku_snapshot: i.sku,
     qty: i.qty,
     unit_price_paise: i.unit_price_paise,
+    line_discount_paise: i.line_discount_paise || 0,
     line_total_paise: i.line_total_paise,
     tax_treatment_snapshot: i.tax_treatment,
     tax_rate_bps_snapshot: i.tax_rate_bps,
@@ -158,6 +163,18 @@ export async function placeCheckout(cart: CartView, address: CheckoutAddress): P
   }));
   const { error: itemsErr } = await db.from("store_order_items").insert(itemRows);
   if (itemsErr) throw new Error(itemsErr.message);
+
+  if (quote.offer_id && quote.discount_paise > 0) {
+    const held = await holdStoreOffer({
+      offerId: quote.offer_id,
+      orderId: order.id,
+      ttlSeconds: QUOTE_TTL_SECONDS,
+    });
+    if (!held.ok) {
+      await db.from("store_orders").update({ status: "PAYMENT_FAILED", updated_at: new Date().toISOString() }).eq("id", order.id);
+      throw new Error("This offer is no longer available. Please review the updated price and try again.");
+    }
+  }
 
   // Only ready_stock lines reserve/decrement inventory. on_demand titles are
   // printed per order and carry no stock counter, so they never reserve.

@@ -70,7 +70,7 @@ export async function GET(req: Request) {
   let query = db
     .from("store_orders")
     .select(
-      "id,order_no,status,customer_name,phone,email,total_paise,amount_paid_paise,promised_delivery_date,placed_at,paid_at,shipped_at,delivered_at,internal_notes,shipping_address_id",
+      "id,order_no,status,customer_name,phone,email,total_paise,discount_paise,subtotal_paise,promo_code,discount_trace_json,promised_delivery_date,placed_at,paid_at,shipped_at,delivered_at,internal_notes,shipping_address_id",
       { count: "exact" },
     )
     .in("status", statuses);

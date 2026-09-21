@@ -27,6 +27,9 @@ interface BundleOffer {
 export default function CartClient() {
   const [items, setItems] = useState<Item[] | null>(null);
   const [subtotal, setSubtotal] = useState("");
+  const [discount, setDiscount] = useState("");
+  const [total, setTotal] = useState("");
+  const [promo, setPromo] = useState<{ id: string; name: string; label: string } | null>(null);
   const [offer, setOffer] = useState<BundleOffer | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -37,7 +40,13 @@ export default function CartClient() {
     if (!res.ok || json.ok === false) throw new Error(json.error || "Unable to load your cart right now.");
     setItems(json.cart?.items || []);
     setSubtotal(json.cart?.subtotal_label || "");
+    setDiscount(json.cart?.discount_label || "");
+    setTotal(json.cart?.total_label || json.cart?.subtotal_label || "");
+    setPromo(json.cart?.offer || null);
     setOffer(json.cart?.bundle_offer || null);
+    if (json.cart?.offer?.id) {
+      trackClient("notes_offer_cart_applied", { offer_id: json.cart.offer.id });
+    }
   }
 
   useEffect(() => {
@@ -60,6 +69,9 @@ export default function CartClient() {
       if (qty <= 0) trackClient("notes_removed_from_cart", { item_id: id });
       setItems(json.cart?.items || []);
       setSubtotal(json.cart?.subtotal_label || "");
+      setDiscount(json.cart?.discount_label || "");
+      setTotal(json.cart?.total_label || json.cart?.subtotal_label || "");
+      setPromo(json.cart?.offer || null);
       setOffer(json.cart?.bundle_offer || null);
       window.dispatchEvent(new CustomEvent("notes-cart-updated", { detail: { count: json.cart?.item_count } }));
     } catch (e) {
@@ -157,6 +169,16 @@ export default function CartClient() {
         <div>
           <p className="text-sm text-[var(--ca-navy)]/60">
             Subtotal <span className="font-semibold text-[var(--ca-navy)]">{subtotal}</span>
+          </p>
+          {promo && discount && (
+            <p className="text-sm text-[var(--ca-navy)]/60">
+              {promo.name}
+              {promo.label ? ` (${promo.label})` : ""}{" "}
+              <span className="font-semibold text-[var(--ca-navy)]">−{discount}</span>
+            </p>
+          )}
+          <p className="text-sm font-semibold text-[var(--ca-navy)]">
+            Total <span className="tabular-nums">{total}</span>
           </p>
           <p className="text-xs text-[var(--ca-navy)]/45">Shipping is calculated from your PIN at checkout.</p>
         </div>

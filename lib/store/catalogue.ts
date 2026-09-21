@@ -44,6 +44,7 @@ export interface StoreProductCard {
   is_bestseller: boolean;
   dispatch_days: number;
   sellable: number;
+  category_id: string | null;
   category_slug: string | null;
   category_name: string | null;
   max_quantity_per_order: number;
@@ -141,6 +142,7 @@ function toCard(row: Record<string, unknown>, category?: { slug: string; name: s
     is_bestseller: !!row.is_bestseller,
     dispatch_days: Number(row.dispatch_days || 2),
     sellable,
+    category_id: (row.category_id as string) || null,
     category_slug: category?.slug ?? null,
     category_name: category?.name ?? null,
     max_quantity_per_order: Number(row.max_quantity_per_order || 5),

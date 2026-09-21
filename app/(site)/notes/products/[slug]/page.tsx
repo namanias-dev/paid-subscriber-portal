@@ -10,7 +10,9 @@ import ShippingStory from "@/components/notes/ShippingStory";
 import InterestButton from "@/components/notes/InterestButton";
 import ProductCard from "@/components/notes/ProductCard";
 import { getProductBySlug, listActiveProducts } from "@/lib/store/catalogue";
-import { discountPercent, formatPaise } from "@/lib/store/money";
+import { formatPaise } from "@/lib/store/money";
+import { calculateStorePrice, offerDiscountLabel } from "@/lib/store/pricing";
+import { getActiveStoreOffer, getPublicActiveOffer, toPricingOffer } from "@/lib/store/offers";
 import { SITE_URL } from "@/lib/config";
 import Link from "next/link";
 
@@ -24,7 +26,8 @@ function stageLabel(stage: string | null): string | null {
   return stage;
 }
 
-export const revalidate = 600;
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 export async function generateMetadata({ params }: { params: { slug: string } }) {
   const p = await getProductBySlug(params.slug);
@@ -40,7 +43,18 @@ export async function generateMetadata({ params }: { params: { slug: string } })
 export default async function ProductPage({ params }: { params: { slug: string } }) {
   const p = await getProductBySlug(params.slug);
   if (!p) notFound();
-  const pct = discountPercent(p.mrp_paise, p.selling_price_paise);
+  const [offerRow, publicOffer] = await Promise.all([getActiveStoreOffer(), getPublicActiveOffer()]);
+  const offer = offerRow ? toPricingOffer(offerRow) : null;
+  const priced = calculateStorePrice(
+    {
+      id: p.id,
+      kind: p.kind,
+      category_id: p.category_id,
+      selling_price_paise: p.selling_price_paise,
+    },
+    1,
+    offer,
+  );
   const av = p.availability;
   const purchasable = av.purchasable;
   const showInterest = av.state === "coming_soon" || av.state === "unavailable";
@@ -69,7 +83,10 @@ export default async function ProductPage({ params }: { params: { slug: string }
     offers: {
       "@type": "Offer",
       priceCurrency: "INR",
-      price: (p.selling_price_paise / 100).toFixed(2),
+      price: ((purchasable ? priced.final_paise : p.selling_price_paise) / 100).toFixed(2),
+      ...(purchasable && priced.discount_paise > 0 && publicOffer?.ends_at
+        ? { priceValidUntil: publicOffer.ends_at.slice(0, 10) }
+        : {}),
       availability: purchasable ? "https://schema.org/InStock" : "https://schema.org/OutOfStock",
       url: `${SITE_URL}/notes/products/${p.slug}`,
     },
@@ -95,8 +112,21 @@ export default async function ProductPage({ params }: { params: { slug: string }
     <div className="container-wide py-8 pb-32">
       <TrackView
         event={p.kind === "bundle" ? "notes_bundle_viewed" : "notes_product_viewed"}
-        props={{ product_id: p.id, slug: p.slug, subject: p.subject, kind: p.kind, price_paise: p.selling_price_paise }}
+        props={{
+          product_id: p.id,
+          slug: p.slug,
+          subject: p.subject,
+          kind: p.kind,
+          price_paise: priced.final_paise,
+          offer_id: priced.offer_id,
+        }}
       />
+      {priced.offer_id && (
+        <TrackView
+          event="notes_offer_product_view"
+          props={{ offer_id: priced.offer_id, product_id: p.id, category: p.category_slug }}
+        />
+      )}
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }} />
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumb) }} />
       <nav className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--ca-gold-dark)]">
@@ -139,13 +169,17 @@ export default async function ProductPage({ params }: { params: { slug: string }
           )}
           {meta && <p className="mt-2 text-sm text-[var(--ca-navy)]/55">{meta}</p>}
           <div className="mt-5 flex flex-wrap items-baseline gap-3">
-            <span className="text-3xl font-semibold tabular-nums text-[var(--ca-navy)]">{formatPaise(p.selling_price_paise)}</span>
-            {pct > 0 && (
+            <span className="text-3xl font-semibold tabular-nums text-[var(--ca-navy)]">{formatPaise(priced.final_paise)}</span>
+            {priced.discount_paise > 0 && (
               <>
-                <span className="text-base tabular-nums text-[var(--ca-navy)]/40 line-through">{formatPaise(p.mrp_paise)}</span>
-                <span className="text-sm font-semibold text-[var(--ca-gold-dark)]">{pct}% off</span>
+                <span className="text-base tabular-nums text-[var(--ca-navy)]/40 line-through">{formatPaise(priced.base_paise)}</span>
+                <span className="sr-only">regular price</span>
+                <span className="text-sm font-semibold text-[var(--ca-gold-dark)]">
+                  {offer ? offerDiscountLabel(offer) : "Offer"}
+                </span>
               </>
             )}
+            <span className="text-sm text-[var(--ca-navy)]/45">incl. GST</span>
           </div>
           <div className="mt-3">
             <span
@@ -274,7 +308,7 @@ export default async function ProductPage({ params }: { params: { slug: string }
           <h2 className="font-heading text-xl font-bold text-[var(--ca-navy)]">Related notes</h2>
           <div className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {related.map((r) => (
-              <ProductCard key={r.id} product={r} interestSource="pdp" />
+              <ProductCard key={r.id} product={r} offer={offer} />
             ))}
           </div>
         </div>
@@ -284,7 +318,7 @@ export default async function ProductPage({ params }: { params: { slug: string }
         <div className="fixed inset-x-0 bottom-0 z-30 border-t border-[var(--ca-navy)]/10 bg-white/95 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur ns-elev-4 sm:hidden">
           <div className="flex items-center gap-3">
             <div className="shrink-0">
-              <p className="text-sm font-semibold tabular-nums text-[var(--ca-navy)]">{formatPaise(p.selling_price_paise)}</p>
+              <p className="text-sm font-semibold tabular-nums text-[var(--ca-navy)]">{formatPaise(priced.final_paise)}</p>
               <p className="text-[11px] text-[var(--ca-navy)]/50">{av.label}</p>
             </div>
             <div className="flex flex-1 gap-2">

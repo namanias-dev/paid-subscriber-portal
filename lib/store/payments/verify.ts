@@ -18,6 +18,7 @@
 import { storeDb } from "@/lib/store/db";
 import { storeOpsAlert } from "@/lib/store/alerts";
 import { holdReservationsUntilShip, releaseReservations } from "@/lib/store/inventory";
+import { consumeStoreOfferHold, releaseStoreOfferHold } from "@/lib/store/offers";
 import { isStoreReference, STORE_REFERENCE_SQL_LIKE } from "@/lib/store/references";
 import { storeEazypayVerify, paiseToGatewayAmount } from "./eazypay";
 import {
@@ -202,6 +203,9 @@ async function applyOrderTerminal(
       const { notifyOrderConfirmed } = await import("../notifications");
       void notifyOrderConfirmed({ orderId, orderNo }).catch(() => {});
     }
+    if (data?.length) {
+      await consumeStoreOfferHold(orderId);
+    }
     await holdReservationsUntilShip(orderId);
     return orderNo;
   }
@@ -222,6 +226,9 @@ async function applyOrderTerminal(
       actor_type: "gateway",
       payload_json: { reference_no: referenceNo, outcome },
     });
+  }
+  if (data?.length) {
+    await releaseStoreOfferHold(orderId);
   }
   await releaseReservations({ orderId });
   return data?.[0]?.order_no ?? null;

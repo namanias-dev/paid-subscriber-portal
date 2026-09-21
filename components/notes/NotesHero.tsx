@@ -39,17 +39,14 @@ function TrustMark() {
   );
 }
 
-function ShopCtas() {
+function ShopCta() {
   return (
-    <div className="flex flex-wrap items-center justify-center gap-2.5 lg:justify-start">
-      <Link href="#catalogue" className="ca-btn ca-btn-gold ca-focus ns-press group rounded-full px-6">
+    <div className="flex items-center justify-center lg:justify-start">
+      <Link href="#catalogue" className="ca-btn ca-btn-gold ca-focus ns-press ns-hero-cta-primary group rounded-full">
         Shop UPSC Notes
         <span aria-hidden="true" className="inline-block transition-transform duration-200 group-hover:translate-x-1">
           →
         </span>
-      </Link>
-      <Link href="#bundles" className="ca-btn ca-focus ns-press ns-hero-cta-secondary rounded-full px-6">
-        Explore bundles
       </Link>
     </div>
   );
@@ -68,26 +65,23 @@ export default function NotesHero() {
 
   return (
     <header className="ns-hero-light">
-      <div className="container-wide relative grid items-center gap-3 py-5 sm:gap-5 sm:py-10 lg:grid-cols-[minmax(0,1.02fr)_minmax(0,0.98fr)] lg:gap-8 lg:py-16">
+      <div className="container-wide relative grid items-center gap-4 py-6 sm:gap-6 sm:py-11 lg:grid-cols-[minmax(0,1.02fr)_minmax(0,0.98fr)] lg:gap-8 lg:py-16">
         <div className="order-1 text-center lg:text-left">
           <motion.div className="flex justify-center lg:justify-start" {...enter(0)}>
             <TrustMark />
           </motion.div>
           <motion.h1
-            className="mt-2.5 font-heading text-[clamp(1.5rem,6.1vw,2.15rem)] font-extrabold leading-[1.12] tracking-tight text-[var(--ca-navy)] sm:text-4xl lg:mt-3.5 lg:max-w-xl lg:text-[3.15rem] lg:leading-[1.08]"
+            className="mt-4 font-heading text-[clamp(1.45rem,5.8vw,2.1rem)] font-extrabold leading-[1.16] tracking-tight text-[var(--ca-navy)] sm:text-4xl lg:mt-5 lg:max-w-xl lg:text-[3.15rem] lg:leading-[1.08]"
             {...enter(0.07)}
           >
             <span className="block whitespace-nowrap">Naman Sir&rsquo;s UPSC Notes.</span>
             <span className="block whitespace-nowrap">Delivered to Your Door.</span>
           </motion.h1>
-          <motion.p
-            className="ns-hero-benefit mx-auto mt-2 px-1 lg:mx-0 lg:px-0"
-            {...enter(0.14)}
-          >
+          <motion.p className="ns-hero-benefit mx-auto mt-3.5 px-1 lg:mx-0 lg:px-0" {...enter(0.14)}>
             Handwritten Hard Copies for Serious IAS Aspirants.
           </motion.p>
-          <motion.div className="mt-3.5 lg:mt-5" {...enter(0.2)}>
-            <ShopCtas />
+          <motion.div className="mt-5 lg:mt-6" {...enter(0.2)}>
+            <ShopCta />
           </motion.div>
         </div>
 

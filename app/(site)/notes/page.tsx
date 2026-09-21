@@ -1,21 +1,21 @@
-import ProductCard from "@/components/notes/ProductCard";
-import TrackView from "@/components/notes/TrackView";
 import NotesHero from "@/components/notes/NotesHero";
 import NotesLandingMotion from "@/components/notes/NotesLandingMotion";
 import NotesReveal from "@/components/notes/NotesReveal";
 import { BenefitTicker, ResultsTicker } from "@/components/notes/NotesTicker";
 import SubjectRail from "@/components/notes/SubjectRail";
 import StudentVoices from "@/components/notes/StudentVoices";
-import FeaturedNotes from "@/components/notes/FeaturedNotes";
-import BundleShowcase from "@/components/notes/BundleShowcase";
 import SampleStory from "@/components/notes/SampleStory";
 import ShippingStory from "@/components/notes/ShippingStory";
 import NotesClosingCta from "@/components/notes/NotesClosingCta";
 import NotesTeachingShowcase from "@/components/notes/NotesTeachingShowcase";
+import OfferBanner from "@/components/notes/OfferBanner";
+import TrackView from "@/components/notes/TrackView";
 import { getProductBySlug, listActiveCategories, listActiveProducts } from "@/lib/store/catalogue";
 import { listPreferenceSubjects } from "@/lib/store/preferences";
+import { getPublicActiveOffer } from "@/lib/store/offers";
 
-export const revalidate = 600;
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 export const metadata = {
   title: "Naman Sir's Handwritten UPSC Notes — Delivered to Your Doorstep",
   description:
@@ -37,37 +37,34 @@ const FAQS = [
 ];
 
 export default async function NotesLanding() {
-  const [categories, featured, bestsellers, bundles, products, voiceSubjects] = await Promise.all([
+  const [categories, products, voiceSubjects, publicOffer] = await Promise.all([
     listActiveCategories(),
-    listActiveProducts({ featured: true, limit: 5 }),
-    listActiveProducts({ bestsellers: true, limit: 8 }),
-    listActiveProducts({ kind: "bundle", limit: 4 }),
-    listActiveProducts({ limit: 16 }),
+    listActiveProducts({ limit: 24 }),
     listPreferenceSubjects(),
+    getPublicActiveOffer(),
   ]);
-  const merch = featured.length ? featured : bestsellers.length ? bestsellers : products.filter((p) => p.kind === "single");
   const sampleSource = products.find((p) => p.kind === "single") || products[0] || null;
   const sampleDetail = sampleSource ? await getProductBySlug(sampleSource.slug) : null;
-  const bundleDetails = await Promise.all(bundles.map((b) => getProductBySlug(b.slug)));
-  const upcoming = products.filter((p) => p.availability.state === "coming_soon" || p.availability.state === "unavailable");
+  const pricingOffer = publicOffer;
 
   return (
     <>
       <TrackView event="notes_store_viewed" />
       <NotesLandingMotion />
       <NotesHero />
+      <OfferBanner initial={publicOffer} />
       <ResultsTicker />
       <BenefitTicker />
       <NotesTeachingShowcase />
 
       <div className="relative z-10 bg-[var(--ca-surface)] pb-6">
-        <NotesReveal className="container-wide pt-12" >
+        <NotesReveal className="container-wide pt-12">
           <div id="catalogue">
             <p className="ca-eyebrow text-[var(--ca-gold-dark)]">Catalogue</p>
             <h2 className="mt-2 font-heading text-3xl font-bold text-[var(--ca-navy)]">Shop by subject</h2>
             <p className="mt-2 max-w-xl text-sm text-[var(--ca-navy)]/55">Each subject is a physical notes identity — not a generic tile.</p>
             <div className="mt-6">
-              <SubjectRail categories={categories} products={products} />
+              <SubjectRail categories={categories} products={products} offer={pricingOffer} />
             </div>
           </div>
         </NotesReveal>
@@ -75,48 +72,7 @@ export default async function NotesLanding() {
         <NotesReveal className="container-wide mt-14">
           <StudentVoices subjects={voiceSubjects} />
         </NotesReveal>
-
-        {upcoming.length > 0 && (
-          <NotesReveal className="container-wide mt-16">
-            <p className="ca-eyebrow text-[var(--ca-gold-dark)]">Upcoming</p>
-            <h2 className="mt-2 font-heading text-3xl font-bold text-[var(--ca-navy)]">Tell us what you want next</h2>
-            <p className="mt-2 max-w-xl text-sm text-[var(--ca-navy)]/55">
-              This is a demand signal, not an order. We use it to decide what to prepare next.
-            </p>
-            <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {upcoming.map((p) => (
-                <ProductCard key={p.id} product={p} interestSource="landing" />
-              ))}
-            </div>
-          </NotesReveal>
-        )}
       </div>
-
-      <section className="ca-dark py-4">
-        <div className="container-wide py-8 text-center">
-          <p className="text-sm text-white/70">Physical hard copies · Prepaid ICICI checkout · Trackable courier dispatch</p>
-        </div>
-      </section>
-
-      <div className="bg-[var(--ca-surface)] py-16">
-        <NotesReveal className="container-wide">
-          <p className="ca-eyebrow text-[var(--ca-gold-dark)]">Featured</p>
-          <h2 className="mt-2 font-heading text-3xl font-bold text-[var(--ca-navy)]">Notes worth starting with</h2>
-          <div className="mt-6">
-            <FeaturedNotes products={merch} />
-          </div>
-        </NotesReveal>
-      </div>
-
-      <section id="bundles" className="bg-[linear-gradient(180deg,#f4ecd4_0%,#f7f5f1_100%)] py-16">
-        <NotesReveal className="container-wide">
-          <p className="ca-eyebrow text-[var(--ca-gold-dark)]">Bundles</p>
-          <h2 className="mt-2 font-heading text-3xl font-bold text-[var(--ca-navy)]">Higher-value sets, when listed</h2>
-          <div className="mt-6">
-            <BundleShowcase bundles={bundles} details={bundleDetails.filter(Boolean) as NonNullable<(typeof bundleDetails)[number]>[]} />
-          </div>
-        </NotesReveal>
-      </section>
 
       <div className="bg-[var(--ca-surface)] py-16">
         <NotesReveal>

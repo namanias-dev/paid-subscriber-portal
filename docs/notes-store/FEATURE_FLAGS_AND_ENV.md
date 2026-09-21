@@ -14,6 +14,7 @@
 | `notes_store_sms` | DLT SMS send | off |
 | `notes_store_qr_bonuses` | QR bonuses | off |
 | `notes_store_preorders` | Preorders | off |
+| `notes_store_bundles` | Storefront bundle merchandising (hero CTA, #bundles, cart bundle suggestion) | **off** — schema and admin remain |
 
 `kill_switch=true` wins over `enabled` everywhere, including preview.
 

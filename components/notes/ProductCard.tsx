@@ -1,37 +1,46 @@
 import Link from "next/link";
 import Image from "next/image";
 import { BookOpen } from "lucide-react";
-import { formatPaise, discountPercent } from "@/lib/store/money";
+import { formatPaise } from "@/lib/store/money";
+import { calculateStorePrice, offerDiscountLabel, type OfferForPricing } from "@/lib/store/pricing";
 import type { StoreProductCard } from "@/lib/store/catalogue";
-import InterestButton from "./InterestButton";
 
 /** Canonical Notes catalogue card — one language for landing, subjects, related. */
 export default function ProductCard({
   product,
   featured = false,
-  interestSource = "landing",
+  offer = null,
 }: {
   product: StoreProductCard;
   featured?: boolean;
-  interestSource?: "landing" | "subject" | "pdp";
+  offer?: OfferForPricing | null;
 }) {
-  const pct = discountPercent(product.mrp_paise, product.selling_price_paise);
   const av = product.availability;
   const category = product.category_name || product.subject || "Notes";
-  const statusBadge = !av.purchasable
-    ? { text: av.label, tone: "muted" as const }
-    : av.lowStock
-      ? { text: av.label, tone: "warn" as const }
-      : pct > 0
-        ? { text: `${pct}% OFF`, tone: "gold" as const }
-        : av.mode === "on_demand"
-          ? { text: "Made to order", tone: "muted" as const }
+  const priced = av.purchasable
+    ? calculateStorePrice(
+        {
+          id: product.id,
+          kind: product.kind,
+          category_id: product.category_id,
+          selling_price_paise: product.selling_price_paise,
+        },
+        1,
+        offer,
+      )
+    : null;
+  const badge =
+    priced && priced.discount_paise > 0 && offer
+      ? offer.badge_text || offerDiscountLabel(offer)
+      : av.lowStock
+        ? av.label
+        : av.mode === "on_demand" && av.purchasable
+          ? "Made to order"
           : null;
-  const showInterest = av.state === "coming_soon" || av.state === "unavailable";
 
   return (
-    <article className={`group relative h-full overflow-hidden rounded-3xl bg-white ns-elev-2 ${featured ? "lg:min-h-full" : ""}`}>
-      <Link href={`/notes/products/${product.slug}`} className="ca-focus ns-lift block h-full">
+    <article className={`ns-product-card ${featured ? "lg:min-h-full" : ""}`}>
+      <Link href={`/notes/products/${product.slug}`} className="ca-focus ns-product-card-link group block h-full">
         <div className={`relative overflow-hidden bg-gradient-to-br from-[var(--ca-navy-900)] to-[var(--ca-navy-600)] ${featured ? "aspect-[16/10] lg:aspect-[4/3]" : "aspect-[4/3]"}`}>
           {product.cover_url ? (
             <Image
@@ -52,37 +61,41 @@ export default function ProductCard({
             <span className="inline-flex items-center rounded-full bg-white/90 px-2.5 py-1 text-[11px] font-bold text-[var(--ca-navy-900)]">
               {category}
             </span>
-            {statusBadge && (
-              <span
-                className={
-                  statusBadge.tone === "gold"
-                    ? "inline-flex items-center rounded-full bg-[rgba(212,175,55,0.95)] px-2.5 py-1 text-[11px] font-extrabold text-[#1a1304]"
-                    : statusBadge.tone === "warn"
-                      ? "inline-flex items-center rounded-full bg-amber-100 px-2.5 py-1 text-[11px] font-bold text-amber-900"
-                      : "inline-flex items-center rounded-full bg-white/90 px-2.5 py-1 text-[11px] font-bold text-[var(--ca-slate-700)]"
-                }
-              >
-                {statusBadge.text}
-              </span>
-            )}
+            {badge && <span className="ns-product-offer-badge">{badge}</span>}
           </div>
         </div>
-        <div className="flex flex-1 flex-col p-4">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--ca-gold-dark)]">{product.kind === "bundle" ? "Bundle" : "Notes"}</p>
+        <div className="p-4">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--ca-gold-dark)]">
+            {product.kind === "bundle" ? "Bundle" : "Notes"}
+          </p>
           <h3 className={`mt-1 font-heading font-semibold leading-snug text-[var(--ca-navy)] ${featured ? "text-xl" : "line-clamp-2 text-base"}`}>
             {product.name}
           </h3>
-          <div className="mt-auto flex items-baseline gap-2 pt-3">
-            <span className="text-lg font-semibold tabular-nums text-[var(--ca-navy)]">{formatPaise(product.selling_price_paise)}</span>
-            {pct > 0 && <span className="text-sm tabular-nums text-[var(--ca-navy)]/40 line-through">{formatPaise(product.mrp_paise)}</span>}
-          </div>
+          {av.purchasable && priced ? (
+            <div className="mt-3">
+              <p className="font-heading text-[1.5rem] font-extrabold leading-none tabular-nums text-[var(--ca-navy)]">
+                {formatPaise(priced.final_paise)}
+              </p>
+              {priced.discount_paise > 0 ? (
+                <p className="mt-1 text-[12px] text-[var(--ca-navy)]/45">
+                  <span className="tabular-nums line-through">{formatPaise(priced.base_paise)}</span>
+                  <span className="sr-only"> regular price </span>
+                  <span aria-hidden="true"> · </span>
+                  incl. GST
+                </p>
+              ) : (
+                <p className="mt-1 text-[12px] text-[var(--ca-navy)]/45">incl. GST</p>
+              )}
+              <p className="mt-3 text-[13px] font-bold text-[var(--ca-navy)]">View Notes →</p>
+            </div>
+          ) : (
+            <div className="mt-3 flex items-end justify-between gap-3">
+              <p className="text-[13px] font-semibold text-[var(--ca-navy)]/50">Currently unavailable</p>
+              <p className="text-[13px] font-bold text-[var(--ca-navy)]">View →</p>
+            </div>
+          )}
         </div>
       </Link>
-      {showInterest && (
-        <div className="border-t border-[var(--ca-navy)]/8 px-4 py-3">
-          <InterestButton productId={product.id} source={interestSource} compact />
-        </div>
-      )}
     </article>
   );
 }

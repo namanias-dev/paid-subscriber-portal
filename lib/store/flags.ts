@@ -28,7 +28,8 @@ export type StoreFlagKey =
   | "notes_store_shiprocket"
   | "notes_store_sms"
   | "notes_store_qr_bonuses"
-  | "notes_store_preorders";
+  | "notes_store_preorders"
+  | "notes_store_bundles";
 
 interface FlagRow {
   enabled: boolean;

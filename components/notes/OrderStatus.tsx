@@ -25,6 +25,9 @@ export default function OrderStatus({ order }: { order: PublicOrder }) {
     if (!current.confirming && current.steps.some((s) => s.done)) {
       completedFired.current = true;
       trackClient("notes_order_completed", { order_no: current.order_no });
+      if (current.offer_id) {
+        trackClient("notes_offer_order_completed", { offer_id: current.offer_id, order_no: current.order_no });
+      }
     }
   }, [current]);
 
