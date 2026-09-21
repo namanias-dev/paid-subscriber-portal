@@ -16,12 +16,10 @@ export const STORE_ACCESS_TOKEN_BYTES = 24;
 const COOKIE_MAX_AGE_SEC = 60 * 60 * 24 * 14; // 14 days — covers dispatch window
 
 function pepper(): string {
-  // Prefer a dedicated pepper; fall back to JWT_SECRET; never empty.
-  return (
-    (process.env.STORE_ACCESS_TOKEN_PEPPER || "").trim() ||
-    (process.env.JWT_SECRET || "").trim() ||
-    "nsa-store-access-v1"
-  );
+  // Dedicated pepper only. Do not fall back to JWT_SECRET: rotating session
+  // keys must not invalidate existing Notes Store order links. The historical
+  // default matches every order hashed before a dedicated pepper was set.
+  return (process.env.STORE_ACCESS_TOKEN_PEPPER || "").trim() || "nsa-store-access-v1";
 }
 
 /** Cryptographically secure opaque token (≥128 bits). */

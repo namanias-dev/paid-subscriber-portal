@@ -13,10 +13,9 @@ export const EMAIL_ENABLED = !!process.env.RESEND_API_KEY;
 // ICICI Eazypay is "live" once the backend AES key is configured.
 export const EAZYPAY_ENABLED = !!process.env.ICICI_EAZYPAY_AES_KEY;
 
-// ⚠️ Dev fallbacks are only safe in demo mode. Set strong secrets in production.
-export const JWT_SECRET = process.env.JWT_SECRET || "demo-dev-secret-change-me";
-export const ADMIN_JWT_SECRET =
-  process.env.ADMIN_JWT_SECRET || "demo-admin-secret-change-me";
+// Session signing keys live in lib/auth.ts. They are read at runtime and, once
+// Supabase is configured, refuse the public demo fallbacks. Do not re-export
+// those fallbacks from this module — client components import it.
 
 export const PORTAL_URL =
   process.env.NEXT_PUBLIC_PORTAL_URL || "https://portal.example.com";

@@ -6,7 +6,7 @@
 |----------|----------------|
 | Entropy | `randomBytes(24)` → 192 bits (`lib/store/accessToken.ts`) |
 | DB storage | **Hash only** — `store_orders.tracking_token_hash` (SHA-256 of peppered token) |
-| Pepper source | `STORE_ACCESS_TOKEN_PEPPER` or `JWT_SECRET` (names only; never commit values) |
+| Pepper source | `STORE_ACCESS_TOKEN_PEPPER`, otherwise the historical default (names only; never commit values). Not `JWT_SECRET`. |
 | Raw token | httpOnly cookie `nsa_store_order_access` = `ORDER_NO.token` and/or optional `?t=` |
 | Compare | `timingSafeEqual` on hash hex strings |
 | Checkout JSON | Must **not** return `access_token` (cookie only) |

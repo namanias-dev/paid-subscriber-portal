@@ -37,8 +37,7 @@
 
 | Name | Purpose |
 |------|---------|
-| `STORE_ACCESS_TOKEN_PEPPER` | Preferred pepper for token hash |
-| `JWT_SECRET` | Fallback pepper if store pepper unset |
+| `STORE_ACCESS_TOKEN_PEPPER` | Pepper for token hash. Unset keeps the historical default so existing order links stay valid. Session `JWT_SECRET` is not used. |
 
 ## Supabase
 
