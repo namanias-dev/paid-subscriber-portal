@@ -111,7 +111,7 @@ export default function CartClient() {
             You can save {offer.save_label} with the {offer.name}.
           </p>
           <p className="mt-1 text-xs text-[var(--ca-navy)]/60">Optional — we will not replace your cart. You stay in control.</p>
-          <Link href={`/notes/products/${offer.slug}`} className="mt-3 inline-flex text-sm font-semibold text-[var(--ca-navy)] underline">
+          <Link href={`/notes/${offer.slug}`} className="mt-3 inline-flex text-sm font-semibold text-[var(--ca-navy)] underline">
             View bundle
           </Link>
         </div>
@@ -127,7 +127,7 @@ export default function CartClient() {
             </div>
             <div className="min-w-0 flex-1">
               {it.subject && <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--ca-gold-dark)]">{it.subject}</p>}
-              <Link href={`/notes/products/${it.slug}`} className="font-semibold text-[var(--ca-navy)] hover:underline">
+              <Link href={`/notes/${it.slug}`} className="font-semibold text-[var(--ca-navy)] hover:underline">
                 {it.name}
               </Link>
               <p className="text-sm text-[var(--ca-navy)]/55">

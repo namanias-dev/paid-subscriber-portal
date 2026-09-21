@@ -1,8 +1,12 @@
-import { notFound } from "next/navigation";
-import ProductCard from "@/components/notes/ProductCard";
+import { notFound, redirect } from "next/navigation";
+import NotesPdp from "@/components/notes/NotesPdp";
 import CaPageHeader from "@/components/public/ca/CaPageHeader";
-import { getCategoryBySlug, listActiveProducts } from "@/lib/store/catalogue";
-import { getActiveStoreOffer, toPricingOffer } from "@/lib/store/offers";
+import ProductCard from "@/components/notes/ProductCard";
+import { getCategoryBySlug, getProductBySlug, listActiveProducts } from "@/lib/store/catalogue";
+import { getActiveStoreOffer, getPublicActiveOffer, toPricingOffer } from "@/lib/store/offers";
+import { getNotesCurriculum } from "@/lib/store/notesCurriculum";
+import { isNotesReservedSlug, notesProductPath, resolveNotesProductSlug } from "@/lib/store/paths";
+import { SITE_URL } from "@/lib/config";
 import Link from "next/link";
 import { BookOpen } from "lucide-react";
 
@@ -10,6 +14,16 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 export async function generateMetadata({ params }: { params: { subject: string } }) {
+  const slug = resolveNotesProductSlug(params.subject);
+  const product = await getProductBySlug(slug);
+  if (product) {
+    const story = getNotesCurriculum(product.slug);
+    return {
+      title: product.seo_title || story?.seoTitle || `${product.name} for UPSC | Naman Sir`,
+      description: product.seo_description || story?.seoDescription || product.short_description || `Printed ${product.name}, delivered from Chandigarh.`,
+      alternates: { canonical: `${SITE_URL}${notesProductPath(product.slug)}` },
+    };
+  }
   const cat = await getCategoryBySlug(params.subject);
   if (!cat) return { title: "Notes" };
   return {
@@ -18,16 +32,31 @@ export async function generateMetadata({ params }: { params: { subject: string }
   };
 }
 
-const RESERVED = new Set(["cart", "checkout", "products", "order", "track", "faqs", "bundles"]);
+export default async function NotesSubjectOrProductPage({ params }: { params: { subject: string } }) {
+  if (isNotesReservedSlug(params.subject)) notFound();
 
-export default async function SubjectPage({ params }: { params: { subject: string } }) {
-  if (RESERVED.has(params.subject)) notFound();
+  const canonicalSlug = resolveNotesProductSlug(params.subject);
+  if (canonicalSlug !== params.subject) {
+    redirect(notesProductPath(canonicalSlug));
+  }
+
+  const product = await getProductBySlug(canonicalSlug);
+  if (product) {
+    const [offerRow, publicOffer] = await Promise.all([getActiveStoreOffer(), getPublicActiveOffer()]);
+    return <NotesPdp p={product} offer={offerRow ? toPricingOffer(offerRow) : null} publicOffer={publicOffer} />;
+  }
+
   const cat = await getCategoryBySlug(params.subject);
   if (!cat) notFound();
   const [products, offerRow] = await Promise.all([
     listActiveProducts({ categoryId: cat.id }),
     getActiveStoreOffer(),
   ]);
+  const singles = products.filter((p) => p.kind === "single");
+  if (singles.length === 1) {
+    redirect(notesProductPath(singles[0].slug));
+  }
+
   const offer = offerRow ? toPricingOffer(offerRow) : null;
   const title = cat.nav_label || cat.name;
 
@@ -61,9 +90,9 @@ export default async function SubjectPage({ params }: { params: { subject: strin
             <div className="col-span-full rounded-3xl border border-dashed border-[var(--ca-navy)]/15 bg-white p-10 text-center">
               <p className="font-heading text-lg font-semibold text-[var(--ca-navy)]">No notes listed in this subject yet</p>
               <p className="mx-auto mt-2 max-w-md text-sm text-[var(--ca-navy)]/55">
-                When a title is coming soon, you will be able to record interest from this page. Until then, browse other subjects.
+                Tell us what you want next in Student Voices on the Notes store.
               </p>
-              <Link href="/notes" className="mt-5 inline-flex min-h-11 items-center rounded-full bg-[var(--ca-navy)] px-5 text-sm font-semibold text-white">
+              <Link href="/notes#student-voices" className="mt-5 inline-flex min-h-11 items-center rounded-full bg-[var(--ca-navy)] px-5 text-sm font-semibold text-white">
                 Browse all notes
               </Link>
             </div>

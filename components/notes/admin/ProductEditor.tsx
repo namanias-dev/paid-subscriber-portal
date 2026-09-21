@@ -200,7 +200,7 @@ export default function ProductEditor({ id }: { id: string }) {
           ← Catalogue
         </Link>
         <span className="text-muted">·</span>
-        <a href={`/notes/products/${p.slug}`} target="_blank" rel="noreferrer" className="text-sm font-medium text-[var(--primary)]">
+        <a href={`/notes/${p.slug}`} target="_blank" rel="noreferrer" className="text-sm font-medium text-[var(--primary)]">
           View as student ↗
         </a>
         {p.archived && <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-900">Archived</span>}

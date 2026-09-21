@@ -158,14 +158,24 @@ export function calculateCartPricing(
   };
 }
 
-export function offerDiscountLabel(offer: Pick<OfferForPricing, "discount_type" | "discount_value">): string {
+export function offerDiscountParts(offer: Pick<OfferForPricing, "discount_type" | "discount_value">): {
+  value: string;
+  suffix: string;
+  label: string;
+} {
   if (offer.discount_type === "fixed_amount") {
     const rupees = Math.round(offer.discount_value) / 100;
     const whole = offer.discount_value % 100 === 0;
-    return `₹${rupees.toLocaleString("en-IN", {
+    const value = `₹${rupees.toLocaleString("en-IN", {
       minimumFractionDigits: whole ? 0 : 2,
       maximumFractionDigits: whole ? 0 : 2,
-    })} OFF`;
+    })}`;
+    return { value, suffix: "OFF", label: `${value} OFF` };
   }
-  return `${Math.round(offer.discount_value)}% OFF`;
+  const value = `${Math.round(offer.discount_value)}%`;
+  return { value, suffix: "OFF", label: `${value} OFF` };
+}
+
+export function offerDiscountLabel(offer: Pick<OfferForPricing, "discount_type" | "discount_value">): string {
+  return offerDiscountParts(offer).label;
 }

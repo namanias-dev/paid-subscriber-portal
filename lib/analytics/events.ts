@@ -77,6 +77,7 @@ export type EventName =
   // name, phone, address, order token or payment payloads).
   | "notes_store_viewed"
   | "notes_product_viewed"
+  | "notes_product_clicked"
   | "notes_bundle_viewed"
   | "notes_sample_opened"
   | "notes_added_to_cart"
@@ -176,6 +177,7 @@ export const CLIENT_ALLOWED_EVENTS: ReadonlySet<EventName> = new Set<EventName>(
   // signal only). Same classification as the course/AI funnel events above.
   "notes_store_viewed",
   "notes_product_viewed",
+  "notes_product_clicked",
   "notes_bundle_viewed",
   "notes_sample_opened",
   "notes_added_to_cart",

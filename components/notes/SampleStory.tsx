@@ -32,7 +32,7 @@ export default function SampleStory({ product }: { product: StoreProductDetail |
       )}
       {product && (
         <div className="mt-8 text-center">
-          <Link href={`/notes/products/${product.slug}`} className="ca-btn ca-btn-outline rounded-full px-6">
+          <Link href={`/notes/${product.slug}`} className="ca-btn ca-btn-outline rounded-full px-6">
             View notes sample
           </Link>
         </div>

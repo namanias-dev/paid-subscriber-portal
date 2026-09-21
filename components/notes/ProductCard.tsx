@@ -4,6 +4,7 @@ import { BookOpen } from "lucide-react";
 import { formatPaise } from "@/lib/store/money";
 import { calculateStorePrice, offerDiscountLabel, type OfferForPricing } from "@/lib/store/pricing";
 import type { StoreProductCard } from "@/lib/store/catalogue";
+import { notesProductPath } from "@/lib/store/paths";
 
 /** Canonical Notes catalogue card — one language for landing, subjects, related. */
 export default function ProductCard({
@@ -40,7 +41,7 @@ export default function ProductCard({
 
   return (
     <article className={`ns-product-card ${featured ? "lg:min-h-full" : ""}`}>
-      <Link href={`/notes/products/${product.slug}`} className="ca-focus ns-product-card-link group block h-full">
+      <Link href={notesProductPath(product.slug)} className="ca-focus ns-product-card-link group block h-full">
         <div className={`relative overflow-hidden bg-gradient-to-br from-[var(--ca-navy-900)] to-[var(--ca-navy-600)] ${featured ? "aspect-[16/10] lg:aspect-[4/3]" : "aspect-[4/3]"}`}>
           {product.cover_url ? (
             <Image

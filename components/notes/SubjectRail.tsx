@@ -1,19 +1,26 @@
+"use client";
+
 import Link from "next/link";
-import type { StoreCategory, StoreProductCard } from "@/lib/store/catalogue";
+import type { StoreProductCard } from "@/lib/store/catalogue";
 import { formatPaise } from "@/lib/store/money";
 import { calculateStorePrice, offerDiscountLabel, type OfferForPricing } from "@/lib/store/pricing";
+import { notesProductPath } from "@/lib/store/paths";
+import { trackClient } from "@/lib/analytics/client";
 import NotebookStack from "./NotebookStack";
 
+function cardTitle(product: StoreProductCard): string {
+  return product.short_name || product.category_name || product.subject || product.name;
+}
+
 export default function SubjectRail({
-  categories,
   products,
   offer = null,
 }: {
-  categories: StoreCategory[];
   products: StoreProductCard[];
   offer?: OfferForPricing | null;
 }) {
-  if (!categories.length) {
+  const items = products.filter((p) => p.kind === "single");
+  if (!items.length) {
     return (
       <div className="rounded-3xl border border-dashed border-[var(--ca-navy)]/15 bg-white px-6 py-12 text-center">
         <p className="font-heading text-lg font-semibold text-[var(--ca-navy)]">Subjects opening shortly</p>
@@ -24,57 +31,54 @@ export default function SubjectRail({
     );
   }
 
-  const byCategory = new Map<string, StoreProductCard[]>();
-  for (const p of products) {
-    if (!p.category_slug) continue;
-    const list = byCategory.get(p.category_slug) || [];
-    list.push(p);
-    byCategory.set(p.category_slug, list);
-  }
-
   return (
     <div className="relative">
-      <div className="flex snap-x snap-mandatory gap-3 overflow-x-auto pb-3 ns-hide-scrollbar sm:grid sm:grid-cols-2 sm:overflow-visible lg:grid-cols-4">
-        {categories.map((c) => {
-          const list = byCategory.get(c.slug) || [];
-          const featured = list.find((p) => p.availability.purchasable) || list[0] || null;
-          const available = !!featured?.availability.purchasable;
-          const priced =
-            featured && available
-              ? calculateStorePrice(
-                  {
-                    id: featured.id,
-                    kind: featured.kind,
-                    category_id: featured.category_id,
-                    selling_price_paise: featured.selling_price_paise,
-                  },
-                  1,
-                  offer,
-                )
-              : null;
+      <div className="flex snap-x snap-mandatory gap-3 overflow-x-auto pb-3 ns-hide-scrollbar sm:grid sm:grid-cols-2 sm:overflow-visible lg:grid-cols-3">
+        {items.map((product) => {
+          const available = product.availability.purchasable;
+          const priced = available
+            ? calculateStorePrice(
+                {
+                  id: product.id,
+                  kind: product.kind,
+                  category_id: product.category_id,
+                  selling_price_paise: product.selling_price_paise,
+                },
+                1,
+                offer,
+              )
+            : null;
           const badge = priced && priced.discount_paise > 0 && offer ? offer.badge_text || offerDiscountLabel(offer) : null;
+          const href = notesProductPath(product.slug);
+          const title = cardTitle(product);
 
           return (
-            <article key={c.slug} className="ns-product-card w-[82vw] max-w-[300px] shrink-0 snap-center sm:w-auto sm:max-w-none">
-              <Link href={`/notes/${c.slug}`} className="ca-focus ns-product-card-link group block">
+            <article key={product.id} className="ns-product-card w-[82vw] max-w-[300px] shrink-0 snap-center sm:w-auto sm:max-w-none">
+              <Link
+                href={href}
+                className="ca-focus ns-product-card-link group block"
+                onClick={() =>
+                  trackClient("notes_product_clicked", {
+                    product_id: product.id,
+                    subject: product.category_slug || product.slug,
+                    offer_id: priced?.offer_id,
+                  })
+                }
+              >
                 <div className="flex items-start justify-between gap-3 px-4 pt-4">
                   <p className="ca-eyebrow text-[10px] text-[var(--ca-gold-dark)]">Subject</p>
                   {badge && <span className="ns-product-offer-badge">{badge}</span>}
                 </div>
                 <div className="px-4 pt-1">
-                  <h3 className="font-heading text-[1.35rem] font-bold leading-tight text-[var(--ca-navy)]">
-                    {c.nav_label || c.name}
-                  </h3>
-                  {c.short_description && (
-                    <p className="mt-1 line-clamp-2 text-[13px] leading-snug text-[var(--ca-navy)]/55">{c.short_description}</p>
-                  )}
+                  <h3 className="font-heading text-[1.35rem] font-bold leading-tight text-[var(--ca-navy)]">{title}</h3>
+                  {product.short_description ? (
+                    <p className="mt-1 line-clamp-2 text-[13px] leading-snug text-[var(--ca-navy)]/55">
+                      {product.short_description}
+                    </p>
+                  ) : null}
                 </div>
                 <div className="pointer-events-none px-7 py-4">
-                  <NotebookStack
-                    coverUrl={featured?.cover_url}
-                    title={featured?.short_name || featured?.name}
-                    subject={c.nav_label || c.name}
-                  />
+                  <NotebookStack title={title} subject={title} />
                 </div>
                 <div className="px-4 pb-4">
                   {available && priced ? (
@@ -106,9 +110,11 @@ export default function SubjectRail({
           );
         })}
       </div>
-      <p className="mt-2 text-center text-[10px] font-medium uppercase tracking-[0.16em] text-[var(--ca-navy)]/32 sm:hidden">
-        Swipe for more subjects
-      </p>
+      {items.length > 1 && (
+        <p className="mt-2 text-center text-[10px] font-medium uppercase tracking-[0.16em] text-[var(--ca-navy)]/32 sm:hidden">
+          Swipe for more subjects
+        </p>
+      )}
     </div>
   );
 }

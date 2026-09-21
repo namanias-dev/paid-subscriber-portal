@@ -8,9 +8,9 @@ import SampleStory from "@/components/notes/SampleStory";
 import ShippingStory from "@/components/notes/ShippingStory";
 import NotesClosingCta from "@/components/notes/NotesClosingCta";
 import NotesTeachingShowcase from "@/components/notes/NotesTeachingShowcase";
-import OfferBanner from "@/components/notes/OfferBanner";
+import OfferLaunch from "@/components/notes/OfferLaunch";
 import TrackView from "@/components/notes/TrackView";
-import { getProductBySlug, listActiveCategories, listActiveProducts } from "@/lib/store/catalogue";
+import { getProductBySlug, listStorefrontProducts } from "@/lib/store/catalogue";
 import { listPreferenceSubjects } from "@/lib/store/preferences";
 import { getPublicActiveOffer } from "@/lib/store/offers";
 
@@ -37,22 +37,22 @@ const FAQS = [
 ];
 
 export default async function NotesLanding() {
-  const [categories, products, voiceSubjects, publicOffer] = await Promise.all([
-    listActiveCategories(),
-    listActiveProducts({ limit: 24 }),
+  const [products, voiceSubjects, publicOffer] = await Promise.all([
+    listStorefrontProducts(),
     listPreferenceSubjects(),
     getPublicActiveOffer(),
   ]);
-  const sampleSource = products.find((p) => p.kind === "single") || products[0] || null;
+  const sampleSource = products[0] || null;
   const sampleDetail = sampleSource ? await getProductBySlug(sampleSource.slug) : null;
   const pricingOffer = publicOffer;
+  const qualifier = products.map((p) => p.short_name || p.category_name || p.subject).filter(Boolean).join(" · ");
 
   return (
     <>
       <TrackView event="notes_store_viewed" />
       <NotesLandingMotion />
       <NotesHero />
-      <OfferBanner initial={publicOffer} />
+      <OfferLaunch initial={publicOffer} qualifier={qualifier || null} />
       <ResultsTicker />
       <BenefitTicker />
       <NotesTeachingShowcase />
@@ -64,7 +64,7 @@ export default async function NotesLanding() {
             <h2 className="mt-2 font-heading text-3xl font-bold text-[var(--ca-navy)]">Shop by subject</h2>
             <p className="mt-2 max-w-xl text-sm text-[var(--ca-navy)]/55">Each subject is a physical notes identity — not a generic tile.</p>
             <div className="mt-6">
-              <SubjectRail categories={categories} products={products} offer={pricingOffer} />
+              <SubjectRail products={products} offer={pricingOffer} />
             </div>
           </div>
         </NotesReveal>

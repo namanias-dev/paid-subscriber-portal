@@ -96,6 +96,13 @@ const nextConfig = {
         destination: "/webinars",
         permanent: false,
       })),
+      { source: "/notes/products/test-polity-notes", destination: "/notes/polity", permanent: true },
+      { source: "/notes/products/test-only-polity-notes", destination: "/notes/polity", permanent: true },
+      { source: "/notes/products/test-economy-notes", destination: "/notes/economy", permanent: true },
+      { source: "/notes/products/test-geography-notes", destination: "/notes", permanent: true },
+      { source: "/notes/products/test-ethics-notes", destination: "/notes", permanent: true },
+      { source: "/notes/products/test-gs-starter-bundle", destination: "/notes", permanent: true },
+      { source: "/notes/products/:slug", destination: "/notes/:slug", permanent: true },
     ];
   },
 };
