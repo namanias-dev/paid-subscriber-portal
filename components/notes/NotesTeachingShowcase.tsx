@@ -27,7 +27,7 @@ export default function NotesTeachingShowcase() {
   const sectionRef = useRef<HTMLElement>(null);
   const railRef = useRef<HTMLDivElement>(null);
   const inView = useInView(sectionRef, { once: true, margin: "-18% 0px" });
-  const nearView = useInView(sectionRef, { amount: 0.12, margin: "20% 0px" });
+  const nearView = useInView(sectionRef, { margin: "28% 0px" });
   const [index, setIndex] = useState(0);
   const [saveData, setSaveData] = useState(false);
   const [playing, setPlaying] = useState(false);
