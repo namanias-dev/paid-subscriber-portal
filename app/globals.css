@@ -1363,10 +1363,16 @@ a {
   }
 }
 
-@media (max-width: 1023px) {
+.ai-counselor-launcher[data-notes-dodge="true"] {
+  top: 5.75rem;
+  bottom: auto !important;
+}
+@media (min-width: 1024px) {
   .ai-counselor-launcher[data-notes-dodge="true"] {
-    top: 5.75rem;
-    bottom: auto !important;
+    top: auto;
+    bottom: 5rem !important;
+    left: 1.25rem;
+    right: auto;
   }
 }
 
