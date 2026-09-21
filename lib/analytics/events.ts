@@ -102,6 +102,9 @@ export type EventName =
   | "notes_teaching_video_75"
   | "notes_teaching_video_completed"
   | "notes_teaching_video_changed"
+  | "notes_teaching_inline_play"
+  | "notes_teaching_inline_pause"
+  | "notes_teaching_fullscreen_entered"
   | "notes_shop_after_teaching_clicked";
 
 /**
@@ -192,6 +195,9 @@ export const CLIENT_ALLOWED_EVENTS: ReadonlySet<EventName> = new Set<EventName>(
   "notes_teaching_video_75",
   "notes_teaching_video_completed",
   "notes_teaching_video_changed",
+  "notes_teaching_inline_play",
+  "notes_teaching_inline_pause",
+  "notes_teaching_fullscreen_entered",
   "notes_shop_after_teaching_clicked",
 ]);
 

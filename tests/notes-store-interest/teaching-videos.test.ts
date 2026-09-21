@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { describe, test } from "node:test";
 import { CLIENT_ALLOWED_EVENTS } from "../../lib/analytics/events.ts";
 import {
@@ -7,6 +8,11 @@ import {
   teachingAspectRatio,
   teachingVideoObjectKey,
 } from "../../lib/store/teachingVideos.ts";
+
+const showcase = readFileSync(new URL("../../components/notes/NotesTeachingShowcase.tsx", import.meta.url), "utf8");
+const card = readFileSync(new URL("../../components/notes/TeachingVideoCard.tsx", import.meta.url), "utf8");
+const css = readFileSync(new URL("../../app/globals.css", import.meta.url), "utf8");
+const counselor = readFileSync(new URL("../../components/ai-agent/AiCounselorWidget.tsx", import.meta.url), "utf8");
 
 describe("teaching video catalogue", () => {
   test("enabled clips render as a three-video carousel", () => {
@@ -49,9 +55,41 @@ describe("teaching video catalogue", () => {
       "notes_teaching_video_75",
       "notes_teaching_video_completed",
       "notes_teaching_video_changed",
+      "notes_teaching_inline_play",
+      "notes_teaching_inline_pause",
+      "notes_teaching_fullscreen_entered",
       "notes_shop_after_teaching_clicked",
     ] as const) {
       assert.ok(CLIENT_ALLOWED_EVENTS.has(name), name);
     }
+  });
+
+  test("carousel stays inside its viewport and never scrollIntoViews the page", () => {
+    assert.match(showcase, /ns-teach-viewport/);
+    assert.match(showcase, /ns-teach-track/);
+    assert.match(showcase, /centerSlide/);
+    assert.doesNotMatch(showcase, /scrollIntoView/);
+    assert.doesNotMatch(showcase, /TeachingVideoLightbox/);
+    assert.match(css, /overflow-x:\s*clip/);
+    assert.match(css, /\.ns-teach-grid\s*\{[^}]*min-width:\s*0/);
+    assert.match(css, /\.ns-teach-viewport\s*\{[^}]*overflow-x:\s*auto/s);
+  });
+
+  test("active card is a true inline player with playsInline and deferred native controls", () => {
+    assert.match(card, /Play teaching video/);
+    assert.match(card, /playsInline/);
+    assert.match(card, /webkit-playsinline/);
+    assert.match(card, /controls=\{playing && fullReady\}/);
+    assert.doesNotMatch(card, /webkitEnterFullscreen/);
+    assert.match(card, /notes_teaching_inline_play/);
+    assert.match(showcase, /Naman Sir · UPSC Faculty/);
+    assert.equal(showcase.split("Naman Sir · UPSC Faculty").length - 1, 1);
+    assert.doesNotMatch(showcase, /Tap to watch with sound/);
+  });
+
+  test("counsellor launcher dodges the teaching player on /notes", () => {
+    assert.match(counselor, /data-notes-dodge/);
+    assert.match(counselor, /naman-sir-teaches/);
+    assert.match(css, /ai-counselor-launcher\[data-notes-dodge="true"\]/);
   });
 });
