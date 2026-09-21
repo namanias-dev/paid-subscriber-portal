@@ -5,6 +5,7 @@ import { getPrimaryAccessAwarenessForPhone } from "@/lib/accessAwarenessServer";
 import { studentPopupEnabledForPhone } from "@/lib/installmentProofFlags";
 import PaymentPlanNoticeModal, { type PlanChangeNotice } from "@/components/portal/PaymentPlanNoticeModal";
 import PortalAccessChrome from "@/components/portal/PortalAccessChrome";
+import PortalActivityBeacon from "@/components/portal/PortalActivityBeacon";
 import AccessAwarenessBanner from "@/components/access/AccessAwarenessBanner";
 import type { AccessAwarenessBanner as AccessBannerData } from "@/lib/accessAwareness";
 
@@ -15,8 +16,10 @@ import type { AccessAwarenessBanner as AccessBannerData } from "@/lib/accessAwar
 export default async function PortalLayout({ children }: { children: React.ReactNode }) {
   let notice: PlanChangeNotice | null = null;
   let accessBanner: AccessBannerData | null = null;
+  let signedIn = false;
   try {
     const session = await getBuyerSession();
+    signedIn = !!session;
     if (session?.phone) {
       const flagOn = await studentPopupEnabledForPhone(session.phone);
       const [pending, banner] = await Promise.all([
@@ -49,6 +52,7 @@ export default async function PortalLayout({ children }: { children: React.React
         </div>
       )}
       {children}
+      {signedIn && <PortalActivityBeacon surface="portal" />}
       {notice && <PaymentPlanNoticeModal notice={notice} />}
     </>
   );

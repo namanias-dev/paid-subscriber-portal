@@ -13,6 +13,14 @@ export function dash(n: number | null | undefined): string {
   return String(Math.round(n));
 }
 
+/** Exact rupees for accounting lines. The ledger stores integer rupees, not paise. */
+export function inrExact(n: number | null | undefined): string {
+  if (n == null || !Number.isFinite(n)) return "—";
+  const rounded = Math.round(n);
+  const sign = rounded < 0 ? "-" : "";
+  return `${sign}₹${Math.abs(rounded).toLocaleString("en-IN")}`;
+}
+
 export function inr(n: number | null | undefined): string {
   if (n == null || !Number.isFinite(n)) return "—";
   if (Math.abs(n) >= 100_000) {

@@ -24,6 +24,9 @@ export type EventName =
   | "login"
   | "logout"
   | "identity_stitched"
+  // Once per authenticated student per IST day. Server-written only, after a
+  // real portal/dashboard session — never from the public beacon.
+  | "portal_active"
   // post-enrollment engagement
   | "enrolled_card_viewed"
   | "zoom_link_clicked"

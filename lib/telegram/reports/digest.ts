@@ -12,6 +12,14 @@ import {
 } from "../../dataProvider";
 import { istYMD, istTodayYMD } from "../../dates";
 import {
+  computeAdmissions,
+  computeCollections,
+  istDayWindow,
+  istMonthToDateWindow,
+} from "../../analytics/businessMetrics";
+import { loadPeopleMetrics, loadReportExclusions } from "../../analytics/loadBusinessMetrics";
+import { dailyBusinessLines } from "./businessFormat";
+import {
   batchModes,
   batchTimings,
   deriveCollections,
@@ -494,6 +502,8 @@ export async function buildDigest(opts?: {
   let webinar: Awaited<ReturnType<typeof pickUpcomingWebinar>> = null;
   let failedRows: Payment[] = [];
   let allPayments: Payment[] = [];
+  let paymentsOk = false;
+  let enrollmentsOk = false;
   let loginAvg: number | null = null;
   let loginAvg30: number | null = null;
   let loginsToday: number | null = null;
@@ -525,8 +535,12 @@ export async function buildDigest(opts?: {
     if (settled[0].status === "fulfilled") pulseToday = settled[0].value;
     if (settled[1].status === "fulfilled") pulseMtd = settled[1].value;
     if (settled[2].status === "fulfilled") courses = settled[2].value;
-    if (settled[3].status === "fulfilled") enrollments = settled[3].value;
+    if (settled[3].status === "fulfilled") {
+      enrollments = settled[3].value;
+      enrollmentsOk = true;
+    }
     if (settled[4].status === "fulfilled") {
+      paymentsOk = true;
       allPayments = settled[4].value;
       const today = istTodayYMD();
       failedRows = allPayments
@@ -582,10 +596,42 @@ export async function buildDigest(opts?: {
     metrics[`course:${c.title}:total`] = c.total;
   }
 
+  let businessLines: string[] = [];
+  if (paymentsOk || enrollmentsOk) {
+    try {
+      const todayYmd = istTodayYMD();
+      const exclusions = await withTimeout(
+        loadReportExclusions(),
+        4_000,
+        { staffPhones: new Set<string>(), leadPhones: new Set<string>() },
+      );
+      const people = await withTimeout(loadPeopleMetrics(istDayWindow(todayYmd), exclusions), 8_000, null);
+      businessLines = dailyBusinessLines({
+        people,
+        today: paymentsOk ? computeCollections(allPayments, istDayWindow(todayYmd), exclusions.staffPhones) : null,
+        todayAdmissions: enrollmentsOk
+          ? computeAdmissions(enrollments, istDayWindow(todayYmd), exclusions.staffPhones)
+          : null,
+        mtd: paymentsOk
+          ? computeCollections(allPayments, istMonthToDateWindow(todayYmd), exclusions.staffPhones)
+          : null,
+        mtdAdmissions: enrollmentsOk
+          ? computeAdmissions(enrollments, istMonthToDateWindow(todayYmd), exclusions.staffPhones)
+          : null,
+      });
+    } catch {
+      businessLines = [];
+    }
+  }
+
   const lines: string[] = [];
   const headerLabel = parts.label.replace(/\b(am|pm)\b/i, (m) => m.toUpperCase());
   lines.push(`📊 <b><u>NAMAN IAS</u> · ${escapeHtml(headerLabel)}</b>`);
   lines.push("");
+  if (businessLines.length) {
+    for (const row of businessLines) lines.push(row);
+    if (lines[lines.length - 1] !== "") lines.push("");
+  }
 
   // ── WEBINAR ──
   if (webinar && (webinar.registered > 0 || webinar.pendingCheckout > 0)) {
