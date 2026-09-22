@@ -55,32 +55,33 @@ export default async function NotesLanding() {
     <>
       <TrackView event="notes_store_viewed" />
       <NotesLandingMotion />
-      <NotesHero />
-      {products.length > 0 && (
-        <nav className="container-wide -mt-1 flex gap-2 overflow-x-auto pb-4 ns-hide-scrollbar" aria-label="Shop subjects">
-          {products.map((product) => {
-            const priced = product.availability.purchasable
-              ? calculateStorePrice(
-                  {
-                    id: product.id,
-                    kind: product.kind,
-                    category_id: product.category_id,
-                    selling_price_paise: product.selling_price_paise,
-                  },
-                  1,
-                  publicOffer,
-                )
-              : null;
-            const name = product.short_name || product.category_name || product.name;
-            return (
-              <Link key={product.id} href={notesProductPath(product.slug)} className="ca-focus ns-subject-chip shrink-0">
-                <span>{name}</span>
-                {priced ? <strong>{formatPaise(priced.final_paise)}</strong> : null}
-              </Link>
-            );
-          })}
-        </nav>
-      )}
+      <NotesHero>
+        {products.length > 0 ? (
+          <nav className="flex max-w-full gap-2 overflow-x-auto ns-hide-scrollbar" aria-label="Shop subjects">
+            {products.map((product) => {
+              const priced = product.availability.purchasable
+                ? calculateStorePrice(
+                    {
+                      id: product.id,
+                      kind: product.kind,
+                      category_id: product.category_id,
+                      selling_price_paise: product.selling_price_paise,
+                    },
+                    1,
+                    publicOffer,
+                  )
+                : null;
+              const name = product.short_name || product.category_name || product.name;
+              return (
+                <Link key={product.id} href={notesProductPath(product.slug)} className="ca-focus ns-subject-chip shrink-0">
+                  <span>{name}</span>
+                  {priced ? <strong>{formatPaise(priced.final_paise)}</strong> : null}
+                </Link>
+              );
+            })}
+          </nav>
+        ) : null}
+      </NotesHero>
       <OfferLaunch initial={publicOffer} qualifier={qualifier || null} />
       <ResultsTicker />
       <BenefitTicker />

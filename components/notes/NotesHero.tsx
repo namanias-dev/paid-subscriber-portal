@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import Link from "next/link";
 import { motion, useReducedMotion } from "framer-motion";
 import HeroNotebook from "./HeroNotebook";
@@ -52,7 +53,7 @@ function ShopCta() {
   );
 }
 
-export default function NotesHero() {
+export default function NotesHero({ children }: { children?: ReactNode }) {
   const reduce = useReducedMotion();
   const enter = (delay: number) =>
     reduce
@@ -83,6 +84,7 @@ export default function NotesHero() {
           <motion.div className="mt-5 lg:mt-6" {...enter(0.2)}>
             <ShopCta />
           </motion.div>
+          {children ? <div className="mt-4 flex justify-center lg:justify-start">{children}</div> : null}
         </div>
 
         <div className="order-2">
