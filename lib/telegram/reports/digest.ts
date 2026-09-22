@@ -1,6 +1,7 @@
 /**
  * Build + send Telegram CEO digests.
- * Metrics reuse getExecutivePulse where possible — no alternate revenue definitions.
+ * Cash collected is computeCollections on successful payments.amount.
+ * Executive pulse supplies non-cash morning context only (leads, seat counts).
  */
 import { SITE_URL } from "../../config";
 import { getExecutivePulse, type MetricDelta } from "../../analytics/executiveOverview";
@@ -10,12 +11,14 @@ import {
   getPayments,
   getWebinars,
 } from "../../dataProvider";
-import { istYMD, istTodayYMD } from "../../dates";
+import { istYMD, istTodayYMD, istYMDToMs } from "../../dates";
 import {
   computeAdmissions,
   computeCollections,
+  DAY_MS,
   istDayWindow,
   istMonthToDateWindow,
+  type CollectionMetrics,
 } from "../../analytics/businessMetrics";
 import { loadPeopleMetrics, loadReportExclusions } from "../../analytics/loadBusinessMetrics";
 import { dailyBusinessLines } from "./businessFormat";
@@ -36,7 +39,7 @@ import type { Course, CourseBatch, CourseEnrollment, LearningMode, Payment } fro
 import { normalizeIndianMobile } from "../../phone";
 import { buildKeyboard, sendMessage } from "../botApi";
 import { tgLog } from "../log";
-import { escapeHtml, formatIstShort, inr, istNowParts } from "./format";
+import { escapeHtml, formatIstShort, inr, inrExact, istNowParts } from "./format";
 import { resolveLoginAverages } from "./loginAvg";
 import {
   getReportSettings,
@@ -50,32 +53,14 @@ import {
 import { getPreviousSnapshot, getSnapshotBySlot, saveSnapshot, type SnapshotMetrics } from "./snapshots";
 import { assertReportsChannel } from "./channelGuard";
 
-function mVal(m: MetricDelta | null | undefined): number | null {
-  if (!m || m.value == null || !Number.isFinite(m.value)) return null;
-  return m.value;
-}
 function mPrev(m: MetricDelta | null | undefined): number | null {
   if (!m || m.prev == null || !Number.isFinite(m.prev)) return null;
   return m.prev;
 }
 
-/**
- * Meaningful period delta only when there is a real non-zero base.
- * Suppresses zero-vs-zero and 0→N “100%” noise.
- */
-function meaningfulDeltaPct(curr: number | null, prev: number | null): number | null {
-  if (curr == null || prev == null) return null;
-  if (!Number.isFinite(curr) || !Number.isFinite(prev)) return null;
-  if (prev === 0) return null;
-  return ((curr - prev) / prev) * 100;
-}
-
-function deltaLabel(curr: number | null, prev: number | null): string | null {
-  const pct = meaningfulDeltaPct(curr, prev);
-  if (pct == null) return null;
-  const abs = Math.abs(Math.round(pct));
-  if (abs === 0) return null;
-  return pct > 0 ? `▲ ${abs}%` : `▼ ${abs}%`;
+/** Previous IST calendar day as YYYY-MM-DD. */
+function previousIstYmd(ymd: string): string {
+  return istYMD(new Date(istYMDToMs(ymd) - 1)) || ymd;
 }
 
 type ModeBucket = "online" | "offline";
@@ -567,24 +552,57 @@ export async function buildDigest(opts?: {
   const courseBlocks = courseBreakdown(courses, enrollments);
   const collections = collectionsStats(enrollments);
 
-  const revenueToday = pulseToday
-    ? (mVal(pulseToday.pulse.courseRevenue) || 0) + (mVal(pulseToday.pulse.webinarRevenue) || 0)
-    : null;
-  const revenueMtd = pulseMtd
-    ? (mVal(pulseMtd.pulse.courseRevenue) || 0) + (mVal(pulseMtd.pulse.webinarRevenue) || 0)
-    : null;
-  const revenueYday = pulseToday
-    ? (mPrev(pulseToday.pulse.courseRevenue) || 0) + (mPrev(pulseToday.pulse.webinarRevenue) || 0)
-    : null;
+  let todayMoney: CollectionMetrics | null = null;
+  let ydayMoney: CollectionMetrics | null = null;
+  let mtdMoney: CollectionMetrics | null = null;
+  let weekMoney: CollectionMetrics | null = null;
+  const todayYmd = istTodayYMD();
+  const ydayYmd = previousIstYmd(todayYmd);
+
+  let businessLines: string[] = [];
+  if (paymentsOk || enrollmentsOk) {
+    try {
+      const exclusions = await withTimeout(
+        loadReportExclusions(),
+        4_000,
+        { staffPhones: new Set<string>(), leadPhones: new Set<string>() },
+      );
+      const people = await withTimeout(loadPeopleMetrics(istDayWindow(todayYmd), exclusions), 8_000, null);
+      if (paymentsOk) {
+        const staff = exclusions.staffPhones;
+        todayMoney = computeCollections(allPayments, istDayWindow(todayYmd), staff);
+        ydayMoney = computeCollections(allPayments, istDayWindow(ydayYmd), staff);
+        mtdMoney = computeCollections(allPayments, istMonthToDateWindow(todayYmd), staff);
+        if (isMorningSummary) {
+          weekMoney = computeCollections(
+            allPayments,
+            { fromMs: istYMDToMs(todayYmd) - 6 * DAY_MS, toMs: istDayWindow(todayYmd).toMs },
+            staff,
+          );
+        }
+      }
+      businessLines = dailyBusinessLines({
+        people,
+        today: todayMoney,
+        todayAdmissions: enrollmentsOk
+          ? computeAdmissions(enrollments, istDayWindow(todayYmd), exclusions.staffPhones)
+          : null,
+        yesterday: ydayMoney,
+        mtd: mtdMoney,
+      });
+    } catch {
+      businessLines = [];
+    }
+  }
 
   const metrics: SnapshotMetrics = {
     logins_today: loginsToday,
     logins_yday: loginsYday,
     logins_avg: loginAvg,
     logins_avg_30d: loginAvg30,
-    revenue_today: revenueToday,
-    revenue_mtd: revenueMtd,
-    revenue_yday: revenueYday,
+    revenue_today: todayMoney?.netCollection ?? null,
+    revenue_mtd: mtdMoney?.netCollection ?? null,
+    revenue_yday: ydayMoney?.netCollection ?? null,
     overdue_count: collections.overdueCount,
     overdue_amount: collections.overdueAmount,
     due_7d_amount: collections.due7dAmount,
@@ -595,38 +613,11 @@ export async function buildDigest(opts?: {
   for (const c of courseBlocks) {
     metrics[`course:${c.title}:total`] = c.total;
   }
-
-  let businessLines: string[] = [];
-  if (paymentsOk || enrollmentsOk) {
-    try {
-      const todayYmd = istTodayYMD();
-      const exclusions = await withTimeout(
-        loadReportExclusions(),
-        4_000,
-        { staffPhones: new Set<string>(), leadPhones: new Set<string>() },
-      );
-      const people = await withTimeout(loadPeopleMetrics(istDayWindow(todayYmd), exclusions), 8_000, null);
-      businessLines = dailyBusinessLines({
-        people,
-        today: paymentsOk ? computeCollections(allPayments, istDayWindow(todayYmd), exclusions.staffPhones) : null,
-        todayAdmissions: enrollmentsOk
-          ? computeAdmissions(enrollments, istDayWindow(todayYmd), exclusions.staffPhones)
-          : null,
-        mtd: paymentsOk
-          ? computeCollections(allPayments, istMonthToDateWindow(todayYmd), exclusions.staffPhones)
-          : null,
-        mtdAdmissions: enrollmentsOk
-          ? computeAdmissions(enrollments, istMonthToDateWindow(todayYmd), exclusions.staffPhones)
-          : null,
-      });
-    } catch {
-      businessLines = [];
-    }
-  }
+  void pulseMtd;
 
   const lines: string[] = [];
   const headerLabel = parts.label.replace(/\b(am|pm)\b/i, (m) => m.toUpperCase());
-  lines.push(`📊 <b><u>NAMAN IAS</u> · ${escapeHtml(headerLabel)}</b>`);
+  lines.push(`<b>NAMAN IAS — ${escapeHtml(headerLabel)}</b>`);
   lines.push("");
   if (businessLines.length) {
     for (const row of businessLines) lines.push(row);
@@ -638,15 +629,15 @@ export async function buildDigest(opts?: {
     const body: string[] = [
       `<b>${escapeHtml(webinar.title)}</b>`,
       webinar.dateLabel ? `<i>${escapeHtml(webinar.dateLabel)}</i>` : "",
-      `Registered <b>${webinar.registered}</b> (paid)`,
+      `Registered: <b>${webinar.registered}</b> paid`,
     ].filter(Boolean);
     if (webinar.pendingCheckout > 0) {
-      body.push(`Pending checkout <b>${webinar.pendingCheckout}</b>`);
+      body.push(`Pending checkout: <b>${webinar.pendingCheckout}</b>`);
     }
     if (webinar.attendedLastPct != null) {
-      body.push(`Last attendance <b>${webinar.attendedLastPct}%</b>`);
+      body.push(`Last attendance: <b>${webinar.attendedLastPct}%</b>`);
     }
-    pushSection(lines, `📣 <b>WEBINAR</b>`, body);
+    pushSection(lines, `<b>WEBINAR</b>`, body);
   }
 
   // ── ADMISSIONS (per course) ──
@@ -654,34 +645,33 @@ export async function buildDigest(opts?: {
     const body: string[] = [];
     const seats =
       c.capacity != null && c.capacity > 0
-        ? `Total <b>${c.total}</b> · Seats <b>${c.total}/${c.capacity}</b>`
-        : `Total <b>${c.total}</b>`;
+        ? `Total: <b>${c.total}</b> · Seats: <b>${c.total}/${c.capacity}</b>`
+        : `Total: <b>${c.total}</b>`;
     body.push(seats);
 
     if (c.modeOk) {
-      body.push(`Online <b>${c.online}</b> · Offline <b>${c.offline}</b>`);
+      body.push(`Online: <b>${c.online}</b> · Offline: <b>${c.offline}</b>`);
     } else if (!c.modeEmpty) {
       tgLog("digest_admissions_mode_render_fail", { course: c.title, online: c.online, offline: c.offline, total: c.total }, "error");
-      // Still show counted numbers when partial — never a fake ⚠ placeholder that hides real splits.
-      body.push(`Online <b>${c.online}</b> · Offline <b>${c.offline}</b> · Unmapped <b>${c.total - c.online - c.offline}</b>`);
+      body.push(`Online: <b>${c.online}</b> · Offline: <b>${c.offline}</b> · Unmapped: <b>${c.total - c.online - c.offline}</b>`);
     }
 
     if (c.timingOk) {
-      body.push(`Morning <b>${c.morning}</b> · Evening <b>${c.evening}</b>`);
+      body.push(`Morning: <b>${c.morning}</b> · Evening: <b>${c.evening}</b>`);
     } else if (!c.timingEmpty) {
       body.push(
-        `Morning <b>${c.morning}</b> · Evening <b>${c.evening}</b> · Unmapped <b>${c.total - c.morning - c.evening}</b>`,
+        `Morning: <b>${c.morning}</b> · Evening: <b>${c.evening}</b> · Unmapped: <b>${c.total - c.morning - c.evening}</b>`,
       );
     }
 
     const payBits = [
-      `Full paid <b>${c.fullPaid}</b>`,
-      `Partial <b>${c.partial}</b>`,
-      c.unpaid > 0 ? `Unpaid <b>${c.unpaid}</b>` : null,
+      `Full paid: <b>${c.fullPaid}</b>`,
+      `Partial: <b>${c.partial}</b>`,
+      c.unpaid > 0 ? `Unpaid: <b>${c.unpaid}</b>` : null,
     ].filter(Boolean);
     body.push(payBits.join(" · "));
 
-    pushSection(lines, `🎓 <b>ADMISSIONS — ${escapeHtml(c.title)}</b>`, body);
+    pushSection(lines, `<b>ADMISSIONS — ${escapeHtml(c.title)}</b>`, body);
   }
 
   // ── LOGINS ──
@@ -691,49 +681,34 @@ export async function buildDigest(opts?: {
     const hasAvg = loginAvg != null && loginAvg > 0;
     const has30 = loginAvg30 != null && loginAvg30 > 0;
     if ((hasToday && (loginsToday ?? 0) > 0) || (hasYday && (loginsYday ?? 0) > 0) || hasAvg || has30) {
-      const row1: string[] = [];
-      if (loginsToday != null) row1.push(`Today <b>${loginsToday}</b>`);
-      if (loginsYday != null) row1.push(`Yesterday <b>${loginsYday}</b>`);
-      const row2: string[] = [];
-      if (has30) row2.push(`30-day avg <b>${loginAvg30}</b>`);
-      if (hasAvg) row2.push(`All-time avg <b>${loginAvg}</b>`);
-      const body = [row1.join(" · "), row2.join(" · ")].filter(Boolean);
-      pushSection(lines, `👥 <b>LOGINS</b>`, body);
+      const body: string[] = [];
+      if (loginsToday != null) body.push(`Today: <b>${loginsToday}</b>`);
+      if (loginsYday != null) body.push(`Yesterday: <b>${loginsYday}</b>`);
+      if (has30) body.push(`30-day average: <b>${loginAvg30}</b>`);
+      if (hasAvg) body.push(`All-time average: <b>${loginAvg}</b>`);
+      pushSection(lines, `<b>LOGINS</b>`, body);
     }
   }
 
-  // ── REVENUE ──
-  if (revenueToday != null || revenueMtd != null || (revenueYday != null && revenueYday > 0)) {
-    const body: string[] = [
-      `Today <b>${inr(revenueToday)}</b> · MTD <b>${inr(revenueMtd)}</b>`,
-    ];
-    if (revenueYday != null && revenueYday > 0) {
-      body.push(`Yesterday <b>${inr(revenueYday)}</b>`);
-    }
-    const d = deltaLabel(revenueToday, revenueYday);
-    if (d) body.push(`<b>${d}</b>`);
-    pushSection(lines, `💰 <b>REVENUE</b>`, body);
-  }
-
-  // ── COLLECTIONS ──
+  // Receivables. Not collections — collections are cash already received.
   if (collections.overdueCount > 0 || collections.due7dAmount > 0) {
     const body: string[] = [];
     if (collections.overdueCount > 0) {
       body.push(
-        `<b>${inr(collections.overdueAmount)}</b> overdue · <b>${collections.overdueCount}</b> students`,
+        `Overdue: <b>${inr(collections.overdueAmount)}</b> · <b>${collections.overdueCount}</b> students`,
       );
     }
     if (collections.due7dAmount > 0) {
-      body.push(`Due this week <b>${inr(collections.due7dAmount)}</b>`);
+      body.push(`Due this week: <b>${inr(collections.due7dAmount)}</b>`);
     }
-    pushSection(lines, `⚠️ <b>COLLECTIONS</b>`, body);
+    pushSection(lines, `<b>OUTSTANDING FEES</b>`, body);
   }
 
   // ── FAILED PAYMENTS (named detail — spacious, no truncation) ──
   if (failedRows.length > 0) {
     if (lines.length && lines[lines.length - 1] !== "") lines.push("");
     lines.push(
-      `🚨 <b>${failedRows.length} payment${failedRows.length === 1 ? "" : "s"} failed today</b>`,
+      `<b>${failedRows.length} payment${failedRows.length === 1 ? "" : "s"} failed today</b>`,
     );
 
     failedRows.slice(0, 8).forEach((p, idx) => {
@@ -744,7 +719,7 @@ export async function buildDigest(opts?: {
       const when = escapeHtml(formatIstShort(p.created_at));
       const reason = failureReasonShort(p);
       const recovered = laterPaidSameItem(p, allPayments);
-      const status = recovered ? "✅ Later paid successfully" : "❌ Still failed — no later payment";
+      const status = recovered ? "Later paid successfully" : "Still failed — no later payment";
 
       lines.push("");
       lines.push(`<b>${idx + 1}. ${name}</b>`);
@@ -768,26 +743,23 @@ export async function buildDigest(opts?: {
     const yBody: string[] = [];
     const yLeads = mPrev(pulseToday.pulse.leadsToday);
     const yAdm = mPrev(pulseToday.pulse.seatBookingsToday);
-    const yRev =
-      (mPrev(pulseToday.pulse.courseRevenue) || 0) + (mPrev(pulseToday.pulse.webinarRevenue) || 0);
-    if (yLeads != null || yAdm != null || yRev) {
-      yBody.push(
-        `Leads ${yLeads ?? "—"} · Admissions ${yAdm ?? "—"} · Revenue ${inr(yRev || null)}`.replace(
-          / · —/g,
-          "",
-        ),
-      );
+    const yCollected = ydayMoney?.netCollection ?? null;
+    if (yLeads != null || yAdm != null || yCollected != null) {
+      const bits = [
+        yLeads != null ? `Leads ${yLeads}` : null,
+        yAdm != null ? `Admissions ${yAdm}` : null,
+        yCollected != null ? `Collected ${inrExact(yCollected)}` : null,
+      ].filter(Boolean);
+      if (bits.length) yBody.push(bits.join(" · "));
     }
-    if (yBody.length) pushSection(lines, `🗓 <b>YESTERDAY CLOSE</b>`, yBody);
+    if (yBody.length) pushSection(lines, `<b>YESTERDAY CLOSE</b>`, yBody);
 
     const leadSum = pulseToday.history.leads.slice(-7).reduce((s, p) => s + (p.value || 0), 0);
     const seatSum = pulseToday.history.seatBookings.slice(-7).reduce((s, p) => s + (p.value || 0), 0);
-    const revSum =
-      pulseToday.history.courseRevenue.slice(-7).reduce((s, p) => s + (p.value || 0), 0) +
-      pulseToday.history.webinarRevenue.slice(-7).reduce((s, p) => s + (p.value || 0), 0);
-    if (leadSum || seatSum || revSum) {
-      pushSection(lines, `📉 <b>7-DAY TREND</b>`, [
-        `Leads ${leadSum} · Admissions ${seatSum} · Revenue ${inr(revSum || null)}`,
+    const collectedSum = weekMoney?.netCollection ?? null;
+    if (leadSum || seatSum || collectedSum) {
+      pushSection(lines, `<b>7-DAY TREND</b>`, [
+        `Leads ${leadSum} · Admissions ${seatSum} · Collected ${inrExact(collectedSum)}`,
       ]);
     }
   }
@@ -905,7 +877,7 @@ export async function sendDigestNow(opts?: {
     silent: opts?.html ? false : silent,
     buttons: [
       { label: "Dashboard", url: `${base}/admin` },
-      { label: "Collections", url: `${base}/admin/at-risk` },
+      { label: "Outstanding fees", url: `${base}/admin/at-risk` },
       { label: "Admissions", url: `${base}/admin/course-payments` },
     ],
   });

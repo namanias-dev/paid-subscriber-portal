@@ -26,7 +26,7 @@ async function sendHtml(
   const base = SITE_URL.replace(/\/$/, "") || "https://www.namanias.com";
   const markup = buildKeyboard([
     { label: "Dashboard", url: `${base}/admin` },
-    { label: "Collections", url: `${base}/admin/at-risk` },
+    { label: "Outstanding fees", url: `${base}/admin/at-risk` },
     { label: "Admissions", url: `${base}/admin/course-payments` },
   ]);
   let lastErr = "send_failed";
