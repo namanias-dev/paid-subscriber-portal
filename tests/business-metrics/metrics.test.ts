@@ -182,14 +182,168 @@ describe("monthly schedule (IST)", () => {
   });
 });
 
+describe("accounting cases — collected is cash received, never the course fee", () => {
+  const none = new Set<string>();
+
+  test("A: ₹2,000 seat booking on a ₹75,000 course collects ₹2,000", () => {
+    const m = computeCollections(
+      [
+        pay({
+          id: "seat",
+          phone: "9000000101",
+          amount: 2000,
+          payment_kind: "seat",
+          total_amount: 75000,
+          item: "GS Foundation — Book Your Seat",
+        }),
+      ],
+      DAY,
+      none,
+    );
+    assert.equal(m.netCollection, 2000);
+    assert.equal(m.grossCollection, 2000);
+    assert.equal(m.successfulPayments, 1);
+    assert.equal(m.payingStudents, 1);
+    assert.equal(m.categories.find((c) => c.key === "seat")?.amount, 2000);
+    assert.equal(collectionsReconcile(m), true);
+  });
+
+  test("B: a later ₹10,000 installment adds ₹10,000 and leaves ₹63,000 uncollected", () => {
+    const m = computeCollections(
+      [
+        pay({ id: "seat", phone: "9000000101", amount: 2000, payment_kind: "seat" }),
+        pay({
+          id: "inst",
+          phone: "9000000101",
+          amount: 10000,
+          payment_kind: "installment",
+          installment_no: 1,
+        }),
+      ],
+      DAY,
+      none,
+    );
+    assert.equal(m.netCollection, 12000);
+    assert.equal(m.successfulPayments, 2);
+    assert.equal(m.payingStudents, 1);
+    assert.equal(m.categories.find((c) => c.key === "installment")?.amount, 10000);
+    assert.equal(collectionsReconcile(m), true);
+  });
+
+  test("C: a successful ₹40,000 full payment collects ₹40,000", () => {
+    const m = computeCollections(
+      [pay({ id: "full", phone: "9000000102", amount: 40000, payment_kind: "full" })],
+      DAY,
+      none,
+    );
+    assert.equal(m.netCollection, 40000);
+    assert.equal(m.categories.find((c) => c.key === "admission")?.amount, 40000);
+  });
+
+  test("D: a pending ₹30,000 checkout collects ₹0", () => {
+    const m = computeCollections(
+      [pay({ id: "pend", phone: "9000000103", amount: 30000, status: "PENDING" })],
+      DAY,
+      none,
+    );
+    assert.equal(m.netCollection, 0);
+    assert.equal(m.successfulPayments, 0);
+  });
+
+  test("E: a failed ₹20,000 attempt collects ₹0", () => {
+    const m = computeCollections(
+      [pay({ id: "fail", phone: "9000000104", amount: 20000, status: "FAILED" })],
+      DAY,
+      none,
+    );
+    assert.equal(m.netCollection, 0);
+    assert.equal(m.successfulPayments, 0);
+  });
+
+  test("F: the same ₹5,000 success delivered twice collects ₹5,000", () => {
+    const m = computeCollections(
+      [
+        pay({
+          id: "wh1",
+          phone: "9000000105",
+          amount: 5000,
+          payment_kind: "full",
+          reference_no: "NAMAN-WH",
+          razorpay_payment_id: "pay_same",
+        }),
+        pay({
+          id: "wh2",
+          phone: "9000000105",
+          amount: 5000,
+          payment_kind: "full",
+          reference_no: "NAMAN-WH-retry",
+          razorpay_payment_id: "pay_same",
+        }),
+      ],
+      DAY,
+      none,
+    );
+    assert.equal(m.netCollection, 5000);
+    assert.equal(m.successfulPayments, 1);
+    assert.equal(m.payingStudents, 1);
+  });
+
+  test("G: two successful payments by one student are two payments and one payer", () => {
+    const m = computeCollections(
+      [
+        pay({ id: "g1", phone: "9000000106", amount: 2000, payment_kind: "seat" }),
+        pay({
+          id: "g2",
+          phone: "9000000106",
+          amount: 5000,
+          payment_kind: "installment",
+          installment_no: 1,
+        }),
+      ],
+      DAY,
+      none,
+    );
+    assert.equal(m.netCollection, 7000);
+    assert.equal(m.successfulPayments, 2);
+    assert.equal(m.payingStudents, 1);
+    assert.equal(collectionsReconcile(m), true);
+  });
+
+  test("an offline cash installment is collected at the recorded amount", () => {
+    const m = computeCollections(
+      [
+        pay({
+          id: "cash",
+          phone: "9000000107",
+          amount: 10000,
+          payment_kind: "installment",
+          installment_no: 2,
+          gateway: "offline",
+          payment_source: "admin_offline",
+          payment_mode: "Cash",
+        }),
+      ],
+      DAY,
+      none,
+    );
+    assert.equal(m.netCollection, 10000);
+    assert.equal(m.categories.find((c) => c.key === "installment")?.amount, 10000);
+  });
+});
+
 describe("telegram formatting", () => {
-  test("daily block shows net collection and escapes course titles", () => {
+  test("daily block is text-only and separates cash from admissions", () => {
     const money = computeCollections(
       [
         pay({ id: "a", phone: "9000000001", amount: 2000, payment_kind: "seat" }),
         pay({ id: "b", phone: "9000000002", amount: 10000, payment_kind: "installment", installment_no: 1 }),
       ],
       DAY,
+      new Set(),
+    );
+    const yesterday = computeCollections(
+      [pay({ id: "y", phone: "9000000003", amount: 34500, payment_kind: "full", created_at: "2026-09-20T12:00:00.000Z" })],
+      istDayWindow("2026-09-20"),
       new Set(),
     );
     const lines = dailyBusinessLines({
@@ -200,20 +354,33 @@ describe("telegram formatting", () => {
       }),
       today: money,
       todayAdmissions: { admissions: 1, students: 1, byCourse: [{ title: "GS <Foundation>", admissions: 1 }] },
+      yesterday,
       mtd: money,
-      mtdAdmissions: { admissions: 1, students: 1, byCourse: [] },
     });
     const html = lines.join("\n");
-    assert.match(html, /New accounts <b>1<\/b>/);
-    assert.match(html, /Unique logins <b>1<\/b>/);
-    assert.match(html, /Net <b>₹12,000<\/b>/);
-    assert.match(html, /Seat bookings — <b>₹2,000<\/b>/);
-    assert.match(html, /Installments — <b>₹10,000<\/b>/);
+    assert.equal(/\p{Extended_Pictographic}/u.test(html), false);
+    assert.equal(html.includes("COLLECTIONS"), false);
+    assert.match(html, /New accounts: <b>1<\/b>/);
+    assert.match(html, /Unique logins: <b>1<\/b>/);
+    assert.match(html, /Login events: <b>1<\/b>/);
+    assert.match(html, /COLLECTED TODAY/);
+    assert.match(html, /Actual collected: <b>₹12,000<\/b>/);
+    assert.match(html, /Students who paid: <b>2<\/b>/);
+    assert.match(html, /Seat bookings: <b>₹2,000<\/b>/);
+    assert.match(html, /Installments: <b>₹10,000<\/b>/);
+    assert.match(html, /YESTERDAY/);
+    assert.match(html, /Collected: <b>₹34,500<\/b>/);
+    assert.match(html, /MONTH TO DATE/);
+    assert.match(html, /ADMISSIONS TODAY/);
     assert.match(html, /GS &lt;Foundation&gt;/);
     assert.equal(html.includes("<Foundation>"), false);
+    const seat = money.categories.find((c) => c.key === "seat")!.amount;
+    const inst = money.categories.find((c) => c.key === "installment")!.amount;
+    const full = money.categories.find((c) => c.key === "admission")!.amount;
+    assert.equal(seat + inst + full, money.grossCollection);
   });
 
-  test("monthly report states gross, refunds, and net", () => {
+  test("monthly report states actual collected, gross, and refunds without emoji", () => {
     const money = computeCollections(
       [
         pay({ id: "g", phone: "9000000007", amount: 5000 }),
@@ -234,9 +401,10 @@ describe("telegram formatting", () => {
       money,
       admissions: { admissions: 0, students: 0, byCourse: [] },
     });
+    assert.equal(/\p{Extended_Pictographic}/u.test(html), false);
     assert.match(html, /MONTHLY BUSINESS REPORT/);
-    assert.match(html, /Net collection <b>₹0<\/b>/);
-    assert.match(html, /Gross <b>₹5,000<\/b>/);
-    assert.match(html, /Refunds <b>₹5,000<\/b>/);
+    assert.match(html, /Actual collected: <b>₹0<\/b>/);
+    assert.match(html, /Gross collected: <b>₹5,000<\/b>/);
+    assert.match(html, /Refunds: <b>₹5,000<\/b>/);
   });
 });

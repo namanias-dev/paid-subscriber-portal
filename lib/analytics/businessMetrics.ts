@@ -41,7 +41,11 @@
  *   Count of those rows (one student can pay more than once).
  *
  * grossCollection
- *   Sum of deduped successful positive payments. Collected Today / Net starts here.
+ *   Sum of deduped successful positive `payments.amount` values — the rupees
+ *   actually recorded on that transaction (seat, installment, full payment,
+ *   webinar, plan, or offline/cash/UPI/bank entry). Never `course_enrollments.total_fee`,
+ *   `amount_paid`, remaining balance, or `payments.total_amount` (that column can
+ *   include a gateway surcharge). Collected Today / Net starts here.
  *
  * refundAmount
  *   Absolute rupees of dated reversal rows (negative PAID proof reversals) whose
@@ -54,7 +58,8 @@
  *   grossCollection − refundAmount.
  *
  * Payment categories (partition of gross, so they sum to grossCollection):
- *   admission — course payment_kind full / one_time / null (null is the legacy one-time fee)
+ *   admission — course payment_kind full / one_time / null (null is the legacy one-time fee).
+ *     Reported as "Full payments". This is cash received, not an admission count.
  *   installment — course payment_kind installment
  *   seat — course payment_kind seat
  *   webinar — item_type webinar
