@@ -153,6 +153,12 @@ export const SUBJECTS = [
   "Ethics",
   "CSAT",
   "Optional",
+  "Disaster Management",
+  "Social Justice",
+  "Society",
+  "Mapping",
+  "Internal Security",
+  "Current Affairs",
 ];
 
 export const COURSE_CATEGORIES = [
