@@ -1,14 +1,13 @@
-import AddToCartButton from "@/components/notes/AddToCartButton";
 import PinChecker from "@/components/notes/PinChecker";
 import TrackView from "@/components/notes/TrackView";
 import ProductGallery from "@/components/notes/ProductGallery";
 import SampleViewer from "@/components/notes/SampleViewer";
 import TrustRow from "@/components/notes/TrustRow";
 import ShippingStory from "@/components/notes/ShippingStory";
-import InterestButton from "@/components/notes/InterestButton";
 import ProductCard from "@/components/notes/ProductCard";
 import NotesSubjectStory from "@/components/notes/NotesSubjectStory";
 import PdpOfferChip from "@/components/notes/PdpOfferChip";
+import PurchaseDock from "@/components/notes/PurchaseDock";
 import { listStorefrontProducts, type StoreProductDetail } from "@/lib/store/catalogue";
 import { formatPaise } from "@/lib/store/money";
 import { calculateStorePrice } from "@/lib/store/pricing";
@@ -95,7 +94,7 @@ export default async function NotesPdp({
   };
 
   return (
-    <div className="container-wide py-8 pb-32">
+    <div className="container-wide py-8 pb-28">
       <TrackView
         event={p.kind === "bundle" ? "notes_bundle_viewed" : "notes_product_viewed"}
         props={{
@@ -127,7 +126,7 @@ export default async function NotesPdp({
         <div>
           <ProductGallery name={title} subject={p.subject} photos={p.photos} coverUrl={hero} />
           {p.samples.length > 0 && (
-            <div className="mt-10">
+            <div className="mt-10" id="notes-samples">
               <h2 className="font-heading text-xl font-bold text-[var(--ca-navy)]">Sample pages</h2>
               <p className="mt-1 text-sm text-[var(--ca-navy)]/55">
                 Real inside pages. The watermark is in the pixels — comfortable on a phone, useless on a printer.
@@ -157,47 +156,22 @@ export default async function NotesPdp({
             </div>
           )}
 
-          <div className="mt-5 flex flex-wrap items-baseline gap-3">
-            <span className="font-heading text-3xl font-extrabold tabular-nums text-[var(--ca-navy)]">
-              {formatPaise(priced.final_paise)}
-            </span>
-            {showSale && (
-              <>
-                <span className="text-base tabular-nums text-[var(--ca-navy)]/40 line-through">{formatPaise(priced.base_paise)}</span>
-                <span className="sr-only"> regular price </span>
-              </>
-            )}
-            <span className="text-sm text-[var(--ca-navy)]/45">incl. GST</span>
-          </div>
-          <div className="mt-3">
-            <span
-              className={
-                av.state === "in_stock" || av.state === "on_demand"
-                  ? "inline-flex items-center gap-2 rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-800"
-                  : av.state === "low_stock"
-                    ? "inline-flex items-center gap-2 rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-800"
-                    : "inline-flex items-center gap-2 rounded-full bg-[var(--ca-navy)]/5 px-3 py-1 text-xs font-semibold text-[var(--ca-navy)]/70"
-              }
-            >
-              {av.state === "on_demand" ? "Available to order · printed for you" : av.label}
-            </span>
-          </div>
           {intro && <p className="mt-4 text-sm leading-relaxed text-[var(--ca-navy)]/70">{intro}</p>}
           <div className="mt-5">
             <TrustRow hasSamples={p.samples.length > 0} />
           </div>
-
-          <div className="mt-6 hidden gap-3 sm:grid">
-            {showInterest ? (
-              <InterestButton productId={p.id} source="pdp" />
-            ) : (
-              <>
-                <AddToCartButton productId={p.id} buyNow disabled={!purchasable} label={purchasable ? "Buy now" : av.label} />
-                {purchasable && <AddToCartButton productId={p.id} />}
-              </>
-            )}
+          <div className="mt-5">
+            <PurchaseDock
+              productId={p.id}
+              price={formatPaise(priced.final_paise)}
+              compare={showSale ? formatPaise(priced.base_paise) : null}
+              save={showSale ? `Save ${formatPaise(priced.discount_paise)}` : null}
+              status={av.state === "on_demand" ? "Available to order · printed for you" : av.label}
+              purchasable={purchasable}
+              showInterest={showInterest}
+              hasSamples={p.samples.length > 0}
+            />
           </div>
-
           <div className="mt-6">
             <PinChecker dispatchDays={p.dispatch_days} />
           </div>
@@ -232,20 +206,6 @@ export default async function NotesPdp({
         </div>
       )}
 
-      {!showInterest && (
-        <div className="fixed inset-x-0 bottom-0 z-30 border-t border-[var(--ca-navy)]/10 bg-white/95 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur ns-elev-4 sm:hidden">
-          <div className="flex items-center gap-3">
-            <div className="shrink-0">
-              <p className="text-sm font-semibold tabular-nums text-[var(--ca-navy)]">{formatPaise(priced.final_paise)}</p>
-              <p className="text-[11px] text-[var(--ca-navy)]/50">{av.label}</p>
-            </div>
-            <div className="flex flex-1 gap-2">
-              {purchasable && <AddToCartButton productId={p.id} />}
-              <AddToCartButton productId={p.id} buyNow disabled={!purchasable} label={purchasable ? "Buy now" : av.label} />
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

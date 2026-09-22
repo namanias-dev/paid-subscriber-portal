@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import StoreSubnav from "@/components/notes/StoreSubnav";
+import CartAddedDrawer from "@/components/notes/CartAddedDrawer";
 import { storeEnabled } from "@/lib/store/flags";
 
 export default async function NotesLayout({ children }: { children: React.ReactNode }) {
@@ -8,6 +9,7 @@ export default async function NotesLayout({ children }: { children: React.ReactN
     <div className="max-w-full overflow-x-clip bg-[var(--ca-surface)]">
       <StoreSubnav />
       {children}
+      <CartAddedDrawer />
     </div>
   );
 }

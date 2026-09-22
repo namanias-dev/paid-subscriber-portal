@@ -87,16 +87,15 @@ export default function SubjectRail({
                         {formatPaise(priced.final_paise)}
                       </p>
                       {priced.discount_paise > 0 ? (
-                        <p className="mt-1 text-[12px] text-[var(--ca-navy)]/45">
+                        <p className="mt-1 text-[12px] text-[var(--ca-navy)]/55">
                           <span className="tabular-nums line-through">{formatPaise(priced.base_paise)}</span>
                           <span className="sr-only"> regular price </span>
-                          <span aria-hidden="true"> · </span>
-                          incl. GST
+                          <span className="ml-1 font-bold text-[var(--ca-gold-dark)]">Save {formatPaise(priced.discount_paise)}</span>
                         </p>
                       ) : (
                         <p className="mt-1 text-[12px] text-[var(--ca-navy)]/45">incl. GST</p>
                       )}
-                      <p className="mt-3 text-[13px] font-bold text-[var(--ca-navy)]">View Notes →</p>
+                      <span className="ns-card-cta mt-3">View notes</span>
                     </>
                   ) : (
                     <div className="flex items-end justify-between gap-3">

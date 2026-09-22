@@ -9,11 +9,13 @@ export default function AddToCartButton({
   label = "Add to cart",
   buyNow = false,
   disabled = false,
+  compact = false,
 }: {
   productId: string;
   label?: string;
   buyNow?: boolean;
   disabled?: boolean;
+  compact?: boolean;
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
@@ -38,11 +40,13 @@ export default function AddToCartButton({
       trackClient("notes_added_to_cart", { product_id: productId, buy_now: buyNow });
       window.dispatchEvent(new CustomEvent("notes-cart-updated", { detail: { count: json.cart?.item_count } }));
       if (buyNow) {
+        setMsg("Preparing checkout");
         router.push("/notes/checkout");
         return;
       }
+      window.dispatchEvent(new CustomEvent("notes-cart-added", { detail: { productId } }));
       setTone("ok");
-      setMsg("Added to cart");
+      setMsg("Added");
       setTimeout(() => {
         setMsg(null);
         setTone(null);
@@ -55,20 +59,24 @@ export default function AddToCartButton({
     }
   }
 
+  const height = compact ? "min-h-12" : buyNow ? "min-h-14" : "min-h-12";
+  const text = busy ? (buyNow ? "Preparing checkout…" : "Adding…") : msg && tone === "ok" && !buyNow ? "Added" : label;
+
   return (
-    <div>
+    <div className={compact ? "min-w-0 flex-1" : undefined}>
       <button
         type="button"
         onClick={onClick}
         disabled={busy || disabled}
         aria-disabled={busy || disabled}
+        aria-busy={busy}
         className={
           buyNow
-            ? "ca-focus ns-press inline-flex min-h-12 w-full items-center justify-center rounded-full bg-[var(--ca-navy)] px-5 text-sm font-semibold text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
-            : "ca-focus ns-press inline-flex min-h-12 w-full items-center justify-center rounded-full border border-[var(--ca-navy)]/20 bg-white px-5 text-sm font-semibold text-[var(--ca-navy)] transition hover:border-[var(--ca-gold)] disabled:cursor-not-allowed disabled:opacity-50"
+            ? `ca-focus ns-buy-now ns-press inline-flex ${height} w-full items-center justify-center rounded-full px-5 text-[15px] font-bold text-[var(--ca-navy)] disabled:cursor-not-allowed disabled:opacity-50`
+            : `ca-focus ns-press inline-flex ${height} w-full items-center justify-center rounded-full border border-[var(--ca-navy)]/18 bg-white px-5 text-sm font-semibold text-[var(--ca-navy)] transition hover:border-[var(--ca-gold)] disabled:cursor-not-allowed disabled:opacity-50`
         }
       >
-        {busy ? "Adding…" : msg && tone === "ok" && !buyNow ? msg : label}
+        {text}
       </button>
       <span className="sr-only" aria-live="polite">
         {msg || ""}

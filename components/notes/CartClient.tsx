@@ -182,8 +182,8 @@ export default function CartClient() {
           </p>
           <p className="text-xs text-[var(--ca-navy)]/45">Shipping is calculated from your PIN at checkout.</p>
         </div>
-        <Link href="/notes/checkout" className="ca-focus inline-flex min-h-12 items-center rounded-full bg-[var(--ca-navy)] px-6 text-sm font-semibold text-white">
-          Checkout
+        <Link href="/notes/checkout" className="ca-focus ns-buy-now inline-flex min-h-14 w-full items-center justify-center rounded-full px-6 text-[15px] font-bold text-[var(--ca-navy)] sm:w-auto sm:min-w-[14rem]">
+          Proceed to checkout
         </Link>
       </div>
     </>
