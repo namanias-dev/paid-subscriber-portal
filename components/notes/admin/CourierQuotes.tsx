@@ -43,6 +43,7 @@ export default function CourierQuotes({
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<RateResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
 
   const compare = async () => {
     setBusy(true);
@@ -63,6 +64,47 @@ export default function CourierQuotes({
       if (!json.ok) setError(json.error || "No quote available.");
     } catch {
       setError("Could not reach the quote service.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const packBody = () =>
+    JSON.stringify({
+      weight_grams: Number(weight),
+      length_cm: Number(length),
+      width_cm: Number(width),
+      height_cm: Number(height),
+    });
+
+  const savePack = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/admin/notes/orders/${orderId}/pack`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: packBody(),
+      });
+      const json = await res.json();
+      if (!json.ok) setError(json.error || "Could not save the packed size.");
+      else setSaved(true);
+    } catch {
+      setError("Could not save the packed size.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const createShipment = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/admin/notes/orders/${orderId}/dispatch`, { method: "POST" });
+      const json = await res.json();
+      if (!json.ok) setError(json.error || "Shipment was not created.");
+    } catch {
+      setError("Shipment was not created.");
     } finally {
       setBusy(false);
     }
@@ -119,8 +161,25 @@ export default function CourierQuotes({
         >
           {busy ? "Checking…" : "Compare"}
         </button>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => void savePack()}
+          className="h-9 rounded border border-line px-3 text-sm font-medium text-ink disabled:opacity-50"
+        >
+          Save packed size
+        </button>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => void createShipment()}
+          className="h-9 rounded border border-line px-3 text-sm font-medium text-ink disabled:opacity-50"
+        >
+          Create shipment
+        </button>
       </div>
       {error && <p className="mt-2 text-xs text-red-700">{error}</p>}
+      {saved && <p className="mt-2 text-xs text-emerald-800">Packed size saved. No courier was booked.</p>}
       {result?.providers?.map((provider) => (
         <div key={provider.provider} className="mt-3">
           <p className="text-xs font-semibold uppercase tracking-wide text-ink2">{provider.provider}</p>

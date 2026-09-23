@@ -4,6 +4,7 @@ import { describe, test } from "node:test";
 import { compareCourierRates } from "../../lib/store/shipping/compare";
 import { pickupPostcode, shippingWritesAuthorized } from "../../lib/store/shipping/config";
 import { parseDelhiveryCharge, parseDelhiveryPincode } from "../../lib/store/shipping/delhiveryApi";
+import { canRequestSupport, delhiveryCreateBody, dispatchBlocked, refundRequestPaise, shipmentAlreadyActive } from "../../lib/store/shipping/dispatch";
 import { rupeesToPaise } from "../../lib/store/shipping/quotes";
 import { parseShiprocketQuotes } from "../../lib/store/shipping/shiprocketApi";
 import { canAdvanceOrder, canAdvanceShipment, normalizeCourierStatus } from "../../lib/store/shipping/status";
@@ -114,6 +115,43 @@ describe("courier quotes", () => {
     );
     assert.equal(pickupPostcode({ NOTES_STORE_PICKUP_POSTCODE: "160017" }), "160017");
     assert.equal(pickupPostcode({ NOTES_STORE_PICKUP_POSTCODE: "016001" }), null);
+  });
+});
+
+describe("dispatch and support gates", () => {
+  test("booking stays off and an existing AWB blocks a second shipment", () => {
+    assert.equal(dispatchBlocked({}), "Shipment creation is switched off. No label, AWB, or pickup is sent to a courier. Enter the AWB manually after the parcel is handed over.");
+    assert.equal(
+      dispatchBlocked({
+        NOTES_STORE_SHIPPING_WRITES: "1",
+        NOTES_STORE_SHIPPING_WRITE_CONFIRM: "I_AUTHORIZE_BILLABLE_SHIPMENT",
+      }),
+      null,
+    );
+    assert.equal(shipmentAlreadyActive("in_transit", "AWB1"), true);
+    assert.equal(shipmentAlreadyActive("pending", null), false);
+    assert.equal(canRequestSupport("DELIVERED"), true);
+    assert.equal(canRequestSupport("PACKED"), false);
+    assert.deepEqual(refundRequestPaise(1000, 200, 900), { error: "Refund is larger than the amount still available." });
+    assert.deepEqual(refundRequestPaise(1000, 200, 800), { amount: 800 });
+    const body = delhiveryCreateBody({
+      pickupName: "Academy",
+      orderNo: "NIASN-N-1",
+      name: "A",
+      address: "Line",
+      pin: "110001",
+      city: "Delhi",
+      state: "Delhi",
+      phone: "9999999999",
+      product: "Polity",
+      amountRupees: 100,
+      weightGrams: 800,
+      lengthCm: 30,
+      widthCm: 22,
+      heightCm: 3,
+    });
+    assert.match(body, /^format=json&data=/);
+    assert.equal(body.includes("cmu/create"), false);
   });
 });
 

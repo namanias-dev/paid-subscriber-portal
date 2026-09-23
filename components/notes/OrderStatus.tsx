@@ -12,6 +12,9 @@ const GAPS_MS = [2000, 2500, 3000, 4000, 5000, 6000, 8000];
 export default function OrderStatus({ order }: { order: PublicOrder }) {
   const [current, setCurrent] = useState(order);
   const [stillWaiting, setStillWaiting] = useState(false);
+  const [reportReason, setReportReason] = useState("damaged");
+  const [reportText, setReportText] = useState("");
+  const [reportState, setReportState] = useState<string | null>(null);
   const completedFired = useRef(false);
   const reduce = useReducedMotion();
 
@@ -154,6 +157,50 @@ export default function OrderStatus({ order }: { order: PublicOrder }) {
                 : "The Academy prepares and packs your notes in Chandigarh, then hands them to the courier. You can track this order with your phone number anytime."}
         </p>
       </div>
+      {current.stage === "delivered" && current.access_token && (
+        <form
+          className="mt-4 rounded-3xl bg-white p-4 ns-elev-1"
+          onSubmit={async (e) => {
+            e.preventDefault();
+            setReportState(null);
+            const res = await fetch(`/api/notes/order/${encodeURIComponent(current.order_no)}/support`, {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ t: current.access_token, reason: reportReason, description: reportText }),
+            });
+            const json = await res.json();
+            setReportState(json.ok ? "Sent. The academy will review this order." : json.error || "Could not send the report.");
+          }}
+        >
+          <p className="text-sm font-semibold text-[var(--ca-navy)]">Report a problem</p>
+          <p className="mt-1 text-xs text-[var(--ca-navy)]/60">Damaged, wrong, missing, or incomplete notes. This does not start a return shipment by itself.</p>
+          <select
+            value={reportReason}
+            onChange={(e) => setReportReason(e.target.value)}
+            className="mt-3 h-11 w-full rounded-xl border border-[var(--ca-navy)]/15 px-3 text-sm"
+          >
+            <option value="damaged">Damaged notes</option>
+            <option value="wrong_subject">Wrong subject</option>
+            <option value="missing_item">Missing book</option>
+            <option value="incomplete_pages">Incomplete pages</option>
+            <option value="print_defect">Print defect</option>
+            <option value="delivery_problem">Delivery problem</option>
+          </select>
+          <textarea
+            value={reportText}
+            onChange={(e) => setReportText(e.target.value)}
+            required
+            minLength={8}
+            rows={3}
+            placeholder="What should the academy check?"
+            className="mt-2 w-full rounded-xl border border-[var(--ca-navy)]/15 px-3 py-2 text-sm"
+          />
+          <button type="submit" className="mt-2 h-11 rounded-full bg-[var(--ca-navy)] px-5 text-sm font-semibold text-white">
+            Send report
+          </button>
+          {reportState && <p className="mt-2 text-sm text-[var(--ca-navy)]/70">{reportState}</p>}
+        </form>
+      )}
     </div>
   );
 }

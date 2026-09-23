@@ -38,9 +38,12 @@ export function rupeesToPaise(rupees: number): number {
   return Math.round(rupees * 100);
 }
 
-export function assertRateRequest(input: RateRequest): string | null {
-  if (!/^[1-9][0-9]{5}$/.test(input.pickupPostcode)) return "Pickup PIN is not configured.";
-  if (!/^[1-9][0-9]{5}$/.test(input.deliveryPostcode)) return "Delivery PIN is invalid.";
+export function assertPackage(input: {
+  weightGrams: number;
+  lengthCm: number;
+  widthCm: number;
+  heightCm: number;
+}): string | null {
   if (!Number.isInteger(input.weightGrams) || input.weightGrams < 50 || input.weightGrams > 30000) {
     return "Weight must be between 50 g and 30 kg.";
   }
@@ -52,6 +55,12 @@ export function assertRateRequest(input: RateRequest): string | null {
     if (!Number.isFinite(n) || n < 0.5 || n > 200) return `${label} must be between 0.5 cm and 200 cm.`;
   }
   return null;
+}
+
+export function assertRateRequest(input: RateRequest): string | null {
+  if (!/^[1-9][0-9]{5}$/.test(input.pickupPostcode)) return "Pickup PIN is not configured.";
+  if (!/^[1-9][0-9]{5}$/.test(input.deliveryPostcode)) return "Delivery PIN is invalid.";
+  return assertPackage(input);
 }
 
 export function lowestQuote(results: ProviderRateResult[]): CourierQuote | null {
