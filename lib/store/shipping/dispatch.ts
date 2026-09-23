@@ -14,7 +14,7 @@ export function shipmentAlreadyActive(status: string | null | undefined, awb: st
 
 export function dispatchBlocked(env: NodeJS.ProcessEnv = process.env): string | null {
   if (shippingWritesAuthorized(env)) return null;
-  return "Shipment creation is switched off. No label, AWB, or pickup is sent to a courier. Enter the AWB manually after the parcel is handed over.";
+  return "Live shipping is not enabled yet. No label, AWB, or pickup is sent to a courier. Enter the AWB manually after the parcel is handed over.";
 }
 
 export interface DelhiveryShipmentDraft {

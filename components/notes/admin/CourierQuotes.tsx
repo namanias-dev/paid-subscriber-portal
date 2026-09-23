@@ -190,7 +190,7 @@ export default function CourierQuotes({
         </button>
       </div>
       <p className="mt-2 text-[11px] text-ink2">
-        Compare rates and save the packed size. Create shipment stays off until a live test is authorized.
+        Compare rates and save the packed size. Live shipping is not enabled yet.
       </p>
       {error && <p className="mt-2 text-xs text-red-700">{error}</p>}
       {saved && <p className="mt-2 text-xs text-emerald-800">Packed size saved. No courier was booked.</p>}

@@ -14,7 +14,7 @@ import { compareCourierRates } from "../../lib/store/shipping/compare";
 import { delhiveryPickupLocation, pickupPostcode, shippingWritesAuthorized, shiprocketPickupLocation } from "../../lib/store/shipping/config";
 import { delhiveryPackingSlipPath, parseDelhiveryCharge, parseDelhiveryPincode } from "../../lib/store/shipping/delhiveryApi";
 import { canRequestSupport, delhiveryCreateBody, dispatchBlocked, fulfilmentAttention, operationalActions, refundRequestPaise, shipmentAlreadyActive } from "../../lib/store/shipping/dispatch";
-import { projectCustomerStage } from "../../lib/store/projection";
+import { customerStageLabel, projectCustomerStage } from "../../lib/store/projection";
 import { rupeesToPaise } from "../../lib/store/shipping/quotes";
 import { classifyTrackingGap, shouldPollShipment } from "../../lib/store/shipping/reconcile";
 import { parseShiprocketQuotes, shiprocketAdhocDraft } from "../../lib/store/shipping/shiprocketApi";
@@ -131,7 +131,7 @@ describe("courier quotes", () => {
 
 describe("dispatch and support gates", () => {
   test("booking stays off and an existing AWB blocks a second shipment", () => {
-    assert.equal(dispatchBlocked({}), "Shipment creation is switched off. No label, AWB, or pickup is sent to a courier. Enter the AWB manually after the parcel is handed over.");
+    assert.equal(dispatchBlocked({}), "Live shipping is not enabled yet. No label, AWB, or pickup is sent to a courier. Enter the AWB manually after the parcel is handed over.");
     assert.equal(
       dispatchBlocked({
         NOTES_STORE_SHIPPING_WRITES: "1",
@@ -231,6 +231,18 @@ describe("courier tracking events", () => {
     assert.equal(projectCustomerStage("OUT_FOR_DELIVERY", true), "out_for_delivery");
     assert.equal(projectCustomerStage("DELIVERED", true), "delivered");
     assert.equal(projectCustomerStage("READY_FOR_PICKUP", true), "packed");
+    assert.deepEqual(
+      ["ORDER_CONFIRMED", "PROCESSING", "PACKED", "PICKED_UP", "IN_TRANSIT", "OUT_FOR_DELIVERY", "DELIVERED"].map((status) =>
+        customerStageLabel(projectCustomerStage(status, status === "PICKED_UP")),
+      ),
+      ["Order Confirmed", "Preparing Your Notes", "Packed", "Shipped", "In Transit", "Out for Delivery", "Delivered"],
+    );
+    const track = readFileSync(new URL("../../app/api/notes/track/route.ts", import.meta.url), "utf8");
+    assert.match(track, /phone_key !== phone/);
+    assert.equal(track.includes("line1"), false);
+    const publicOrder = readFileSync(new URL("../../lib/store/orders.ts", import.meta.url), "utf8");
+    assert.match(publicOrder, /if \(!token\) return null/);
+    assert.match(publicOrder, /verifyRawTokenAgainstHash/);
   });
 
   test("webhook shapes and the shared secret", () => {
