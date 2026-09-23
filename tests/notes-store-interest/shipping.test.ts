@@ -13,7 +13,8 @@ import {
 import { compareCourierRates } from "../../lib/store/shipping/compare";
 import { delhiveryPickupLocation, pickupPostcode, shippingWritesAuthorized, shiprocketPickupLocation } from "../../lib/store/shipping/config";
 import { delhiveryPackingSlipPath, parseDelhiveryCharge, parseDelhiveryPincode } from "../../lib/store/shipping/delhiveryApi";
-import { canRequestSupport, delhiveryCreateBody, dispatchBlocked, fulfilmentAttention, refundRequestPaise, shipmentAlreadyActive } from "../../lib/store/shipping/dispatch";
+import { canRequestSupport, delhiveryCreateBody, dispatchBlocked, fulfilmentAttention, operationalActions, refundRequestPaise, shipmentAlreadyActive } from "../../lib/store/shipping/dispatch";
+import { projectCustomerStage } from "../../lib/store/projection";
 import { rupeesToPaise } from "../../lib/store/shipping/quotes";
 import { classifyTrackingGap, shouldPollShipment } from "../../lib/store/shipping/reconcile";
 import { parseShiprocketQuotes, shiprocketAdhocDraft } from "../../lib/store/shipping/shiprocketApi";
@@ -217,6 +218,19 @@ describe("courier tracking events", () => {
     assert.equal(canAdvanceOrder("PAYMENT_PENDING", "IN_TRANSIT"), false);
     assert.equal(normalizeCourierStatus("IN TRANSIT"), "in_transit");
     assert.equal(normalizeCourierStatus("PICKED UP"), "picked_up");
+    assert.equal(normalizeCourierStatus("Manifested"), "manifested");
+    assert.equal(normalizeCourierStatus("Ready To Ship"), "manifested");
+    assert.equal(normalizeCourierStatus("Out for Delivery"), "out_for_delivery");
+    assert.equal(normalizeCourierStatus("Dispatched"), "out_for_delivery");
+    assert.equal(normalizeCourierStatus("Delivered"), "delivered");
+    assert.equal(normalizeCourierStatus("Failed Delivery"), "delivery_failed");
+    assert.equal(normalizeCourierStatus("RTO"), "rto");
+    assert.equal(normalizeCourierStatus("Lost"), "lost");
+    assert.equal(projectCustomerStage("PICKED_UP", true), "shipped");
+    assert.equal(projectCustomerStage("IN_TRANSIT", true), "in_transit");
+    assert.equal(projectCustomerStage("OUT_FOR_DELIVERY", true), "out_for_delivery");
+    assert.equal(projectCustomerStage("DELIVERED", true), "delivered");
+    assert.equal(projectCustomerStage("READY_FOR_PICKUP", true), "packed");
   });
 
   test("webhook shapes and the shared secret", () => {
@@ -260,6 +274,8 @@ describe("courier tracking events", () => {
     assert.equal(refund.includes("fetch("), false);
     assert.match(refund, /gateway: "not_called"/);
     assert.match(refund, /duplicate: true/);
+    assert.match(refund, /RECORD_MANUAL_REFUND/);
+    assert.match(refund, /gateway: "manual"/);
     const eazypay = readFileSync(new URL("../../lib/store/payments/eazypay.ts", import.meta.url), "utf8");
     assert.match(eazypay, /EazyPGVerify/);
     assert.equal(eazypay.toLowerCase().includes("refund"), false);
@@ -273,6 +289,7 @@ describe("courier tracking events", () => {
     assert.equal(tracking.includes("orders/create"), false);
     assert.equal(tracking.includes("cmu/create"), false);
     assert.equal(tracking.includes("delivered"), true);
+    assert.match(tracking, /errors \+= 1/);
     assert.equal(canAdvanceShipment("out_for_delivery", "in_transit"), false);
     assert.equal(normalizeCourierStatus("NDR"), "delivery_failed");
     assert.equal(normalizeCourierStatus("RTO Initiated"), "rto");
@@ -314,6 +331,34 @@ describe("courier tracking events", () => {
     );
     assert.equal(shouldPollShipment({ ...base, provider: "manual", status: "in_transit", lastSyncedAt: "2026-09-01T00:00:00.000Z" }), false);
     assert.equal(shouldPollShipment({ ...base, awb: "", status: "in_transit", lastSyncedAt: null }), false);
+    const events = ["PICKED UP", "IN TRANSIT", "OUT FOR DELIVERY", "Delivered", "Failed Delivery", "NDR", "RTO"];
+    for (const raw of events) {
+      const parsed = parseCourierWebhook({ awb: "SR9", current_status: raw, shipment_status: raw, current_timestamp: "2026-09-23 10:00:00" });
+      assert.ok(parsed?.mappedStatus, raw);
+      assert.equal(scanAlreadyRecorded([parsed!.dedupeKey], parsed!.dedupeKey), true);
+    }
+    assert.equal(canAdvanceShipment("delivered", "rto"), false);
+    assert.equal(canAdvanceOrder("DELIVERED", "IN_TRANSIT"), false);
+  });
+
+  test("overview actions stay inside the existing order queue", () => {
+    const now = "2026-09-23T00:00:00.000Z";
+    assert.deepEqual(operationalActions({ orderStatus: "PACKED", now }), ["awb_missing"]);
+    assert.deepEqual(operationalActions({ orderStatus: "REFUND_PENDING", now }), ["refund_manual"]);
+    assert.deepEqual(operationalActions({ orderStatus: "RETURN_REQUESTED", now }), ["return_waiting"]);
+    assert.ok(operationalActions({ orderStatus: "DELIVERY_FAILED", now, shipmentStatus: "delivery_failed" }).includes("ndr"));
+    assert.ok(
+      operationalActions({
+        orderStatus: "PICKUP_SCHEDULED",
+        now,
+        awb: "AWB1",
+        provider: "delhivery",
+        shipmentStatus: "manifested",
+        shipmentCreatedAt: "2026-09-20T00:00:00.000Z",
+        pickupScheduledAt: "2026-09-21T00:00:00.000Z",
+      }).includes("pickup_overdue"),
+    );
+    assert.deepEqual(operationalActions({ orderStatus: "DELIVERED", now, shipmentStatus: "delivered", awb: "AWB1" }), []);
   });
 });
 

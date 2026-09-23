@@ -46,6 +46,19 @@ interface PreferenceRow {
   available: boolean;
 }
 
+const ACTION_DEFS: Array<{ key: string; label: string; href: string }> = [
+  { key: "awb_missing", label: "AWB missing", href: "/admin/notes?bucket=packed" },
+  { key: "shipment_failed", label: "Shipment creation failed", href: "/admin/notes?bucket=packed" },
+  { key: "pickup_overdue", label: "Pickup overdue", href: "/admin/notes?bucket=packed" },
+  { key: "tracking_stale", label: "Tracking stale", href: "/admin/notes?bucket=shipped" },
+  { key: "delivery_delayed", label: "Delivery delayed", href: "/admin/notes?bucket=shipped" },
+  { key: "delivery_failed", label: "Delivery failed", href: "/admin/notes?bucket=problem" },
+  { key: "ndr", label: "NDR", href: "/admin/notes?bucket=problem" },
+  { key: "rto", label: "RTO", href: "/admin/notes?bucket=problem" },
+  { key: "return_waiting", label: "Return awaiting action", href: "/admin/notes?bucket=problem" },
+  { key: "refund_manual", label: "Refund awaiting manual gateway processing", href: "/admin/notes?bucket=problem" },
+];
+
 const CARD_DEFS: Array<{ key: keyof Cards; label: string; href?: string; tone?: "warn" | "danger" }> = [
   { key: "orders_today", label: "Orders today" },
   { key: "awaiting_preparation", label: "Awaiting preparation", href: "/admin/notes?bucket=preparing", tone: "warn" },
@@ -63,6 +76,7 @@ export default function NotesOverview() {
   const [low, setLow] = useState<LowRow[]>([]);
   const [interest, setInterest] = useState<InterestRow[]>([]);
   const [preferences, setPreferences] = useState<PreferenceRow[]>([]);
+  const [actions, setActions] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -75,6 +89,7 @@ export default function NotesOverview() {
         setLow(json.low_stock || []);
         setInterest(json.interest_top || []);
         setPreferences(json.preference_top || []);
+        setActions(json.action_required || {});
       }
       setLoading(false);
     })();
@@ -115,6 +130,24 @@ export default function NotesOverview() {
               );
             })}
           </div>
+
+          <section className="mt-6 rounded-xl border border-line bg-white p-4">
+            <h3 className="font-heading text-base font-bold text-ink">Action required</h3>
+            {ACTION_DEFS.every((item) => !(actions[item.key] > 0)) ? (
+              <p className="mt-3 text-sm text-muted">Nothing is waiting on a courier, return, or refund.</p>
+            ) : (
+              <ul className="mt-3 grid gap-2 sm:grid-cols-2">
+                {ACTION_DEFS.filter((item) => actions[item.key] > 0).map((item) => (
+                  <li key={item.key}>
+                    <Link href={item.href} className="flex items-center justify-between gap-3 rounded-lg bg-surface px-3 py-2 text-sm">
+                      <span>{item.label}</span>
+                      <span className="font-semibold tabular-nums text-amber-700">{actions[item.key]}</span>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
 
           <div className="mt-6 grid gap-4 lg:grid-cols-2">
             <section className="rounded-xl border border-line bg-white p-4">

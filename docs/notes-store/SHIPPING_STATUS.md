@@ -18,7 +18,7 @@ Guest checkout, Eazypay, order numbers (`NIASN-N-`), inventory reservation, admi
 - Delhivery production token: PIN `160017` is prepaid, COD, and pickup-capable. An 800 g prepaid quote from `160017` to `110001` returned Surface zone B at 8780 paise and Express zone B at 9016 paise. The charge API does not return an ETA. Staging rejected this token. Delhivery One shows one active pickup location whose Facility Name is `NAMAN SHARMA IAS ACADEMY`. Order creation must send that exact string as `pickup_location.name`.
 - Shiprocket external login with the panel email returns 403. The API user is `namanias.shipping@gmail.com`, status ACTIVE. Read-only login and serviceability from `160017` to `110001` at 800 g prepaid succeeded. The inactive API user was left inactive.
 - The panel pickup nickname is `work`, PIN `160017`. The panel webhook connection is ENABLED on `POST /api/notes/courier/events` with `x-api-key`. No label, AWB, or pickup was created.
-- Open shipments are reconciled by `GET /api/cron/notes-store-tracking` (`CRON_SECRET`, every two hours). Delivered, cancelled, lost, and damaged shipments are not polled. A recent webhook suppresses the next read.
+- Open shipments are reconciled by `GET /api/cron/notes-store-tracking` (`CRON_SECRET`, every two hours). Delivered, cancelled, lost, and damaged shipments are not polled. A recent webhook suppresses the next read. Delhivery's B2C developer document describes scan-push webhooks, and enabling one requires a form emailed to Delhivery rather than a switch in the warehouse screen. Until that is enabled, Delhivery tracking mode is API reconciliation.
 
 ## Gmail OTP helper
 

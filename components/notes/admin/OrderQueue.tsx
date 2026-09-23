@@ -108,6 +108,7 @@ export default function NotesOrderQueue() {
   const [exc, setExc] = useState<Record<string, string>>({});
   const [pickupDate, setPickupDate] = useState<Record<string, string>>({});
   const [refundPaise, setRefundPaise] = useState<Record<string, string>>({});
+  const [refundRef, setRefundRef] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
@@ -521,13 +522,51 @@ export default function NotesOrderQueue() {
                                   confirm: "REQUEST_REFUND",
                                 }),
                               }),
-                            "Refund recorded as pending. No money was moved.",
+                            "Refund pending manual payment-gateway processing.",
                           )
                         }
                         className="h-9 rounded border border-line px-3 text-sm font-medium text-ink disabled:opacity-50"
                       >
                         Request refund
                       </button>
+                    </div>
+                  )}
+                  {o.status === "REFUND_PENDING" && (
+                    <div className="space-y-2">
+                      <p className="text-sm text-ink">Refund pending manual payment-gateway processing.</p>
+                      <div className="flex flex-wrap items-end gap-2">
+                        <label className="text-xs text-ink2">
+                          Gateway reference
+                          <input
+                            value={refundRef[o.id] || ""}
+                            onChange={(e) => setRefundRef((m) => ({ ...m, [o.id]: e.target.value }))}
+                            className="mt-1 block h-9 w-48 rounded border border-line px-2 text-sm text-ink"
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          disabled={busyId === o.id || (refundRef[o.id] || "").trim().length < 4}
+                          onClick={() =>
+                            act(
+                              o.id,
+                              () =>
+                                fetch(`/api/admin/notes/orders/${o.id}/refund`, {
+                                  method: "POST",
+                                  headers: { "content-type": "application/json" },
+                                  body: JSON.stringify({
+                                    amount_paise: Number(refundPaise[o.id] || o.total_paise),
+                                    reference: refundRef[o.id],
+                                    confirm: "RECORD_MANUAL_REFUND",
+                                  }),
+                                }),
+                              "Gateway reference recorded. No new payment was sent.",
+                            )
+                          }
+                          className="h-9 rounded border border-line px-3 text-sm font-medium text-ink disabled:opacity-50"
+                        >
+                          Record gateway reference
+                        </button>
+                      </div>
                     </div>
                   )}
                 </div>

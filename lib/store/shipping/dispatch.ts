@@ -3,6 +3,7 @@
  * writes are explicitly authorized. Recording a packed size does not book one.
  */
 import { shippingWritesAuthorized } from "./config";
+import { classifyTrackingGap } from "./reconcile";
 
 const ACTIVE = new Set(["pending", "created", "manifested", "picked_up", "in_transit", "out_for_delivery", "delivered", "rto"]);
 
@@ -103,6 +104,65 @@ export function fulfilmentAttention(input: {
     reasons.push("label_missing");
   }
   return reasons;
+}
+
+export const OPERATIONAL_ACTIONS = [
+  "awb_missing",
+  "shipment_failed",
+  "pickup_overdue",
+  "tracking_stale",
+  "delivery_delayed",
+  "delivery_failed",
+  "ndr",
+  "rto",
+  "return_waiting",
+  "refund_manual",
+] as const;
+
+export type OperationalAction = (typeof OPERATIONAL_ACTIONS)[number];
+
+/** One order's open work. Counts are for the overview; nothing here calls a courier. */
+export function operationalActions(input: {
+  orderStatus: string;
+  now: string;
+  awb?: string | null;
+  provider?: string | null;
+  shipmentStatus?: string | null;
+  shipmentCreatedAt?: string | null;
+  pickupScheduledAt?: string | null;
+  pickedUpAt?: string | null;
+  lastSyncedAt?: string | null;
+  expectedDeliveryDate?: string | null;
+  promisedDeliveryDate?: string | null;
+}): OperationalAction[] {
+  const reasons = new Set<OperationalAction>();
+  const status = input.orderStatus;
+  if ((status === "PACKED" || status === "READY_FOR_PICKUP") && !input.awb) reasons.add("awb_missing");
+  if (input.shipmentStatus === "failed") reasons.add("shipment_failed");
+  if (status === "DELIVERY_FAILED") reasons.add("delivery_failed");
+  if (input.shipmentStatus === "delivery_failed" || status === "REATTEMPT_REQUESTED") reasons.add("ndr");
+  if (status.startsWith("RTO_") || input.shipmentStatus === "rto") reasons.add("rto");
+  if (status === "RETURN_REQUESTED") reasons.add("return_waiting");
+  if (status === "REFUND_PENDING") reasons.add("refund_manual");
+
+  const gap = classifyTrackingGap({
+    status: input.shipmentStatus || "pending",
+    provider: input.provider || "manual",
+    awb: input.awb || null,
+    createdAt: input.shipmentCreatedAt || input.now,
+    now: input.now,
+    pickupScheduledAt: input.pickupScheduledAt,
+    pickedUpAt: input.pickedUpAt,
+    lastSyncedAt: input.lastSyncedAt,
+    expectedDeliveryDate: input.expectedDeliveryDate || input.promisedDeliveryDate,
+  });
+  if (gap.includes("pickup_overdue")) reasons.add("pickup_overdue");
+  if (gap.includes("stale") || gap.includes("webhook_gap")) reasons.add("tracking_stale");
+  if (gap.includes("eta_exceeded")) reasons.add("delivery_delayed");
+  if (input.promisedDeliveryDate && input.promisedDeliveryDate.slice(0, 10) < input.now.slice(0, 10)) {
+    if (["PICKED_UP", "IN_TRANSIT", "OUT_FOR_DELIVERY", "DELIVERY_FAILED"].includes(status)) reasons.add("delivery_delayed");
+  }
+  return OPERATIONAL_ACTIONS.filter((key) => reasons.has(key));
 }
 
 export function refundRequestPaise(totalPaise: number, alreadyPaise: number, askedPaise: number): { amount: number } | { error: string } {

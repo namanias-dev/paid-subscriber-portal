@@ -17,12 +17,15 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   const actor = await getActionActor();
   const db = storeDb();
   if (!db) return NextResponse.json({ ok: false, error: "unavailable" }, { status: 503 });
-  const body = (await req.json().catch(() => null)) as { amount_paise?: number; reason?: string; confirm?: string } | null;
-  if (body?.confirm !== "REQUEST_REFUND") {
+  const body = (await req.json().catch(() => null)) as {
+    amount_paise?: number;
+    reason?: string;
+    confirm?: string;
+    reference?: string;
+  } | null;
+  if (body?.confirm !== "REQUEST_REFUND" && body?.confirm !== "RECORD_MANUAL_REFUND") {
     return NextResponse.json({ ok: false, error: "Refund was not confirmed." }, { status: 400 });
   }
-  const reason = String(body.reason || "").trim();
-  if (reason.length < 3) return NextResponse.json({ ok: false, error: "Enter a reason." }, { status: 400 });
 
   const { data: order } = await db
     .from("store_orders")
@@ -30,6 +33,53 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     .eq("id", params.id)
     .maybeSingle();
   if (!order) return NextResponse.json({ ok: false, error: "not found" }, { status: 404 });
+
+  if (body.confirm === "RECORD_MANUAL_REFUND") {
+    if (order.status === "REFUNDED" || order.status === "PARTIALLY_REFUNDED") {
+      return NextResponse.json(
+        { ok: true, status: order.status, gateway: "manual", duplicate: true },
+        { headers: { "Cache-Control": "no-store" } },
+      );
+    }
+    if (order.status !== "REFUND_PENDING") {
+      return NextResponse.json({ ok: false, error: "Record a refund request before the gateway reference." }, { status: 409 });
+    }
+    const reference = String(body.reference || "").trim();
+    if (reference.length < 4) return NextResponse.json({ ok: false, error: "Enter the gateway reference." }, { status: 400 });
+    const decision = refundRequestPaise(
+      Number(order.total_paise) || 0,
+      Number(order.amount_refunded_paise) || 0,
+      Number(body.amount_paise),
+    );
+    if ("error" in decision) return NextResponse.json({ ok: false, error: decision.error }, { status: 400 });
+    const nextStatus = decision.amount >= Number(order.total_paise) ? "REFUNDED" : "PARTIALLY_REFUNDED";
+    const now = new Date().toISOString();
+    await db
+      .from("store_orders")
+      .update({
+        status: nextStatus,
+        amount_refunded_paise: Number(order.amount_refunded_paise || 0) + decision.amount,
+        updated_at: now,
+      })
+      .eq("id", order.id);
+    await db.from("store_order_events").insert({
+      order_id: order.id,
+      event: "refund_recorded",
+      from_status: order.status,
+      to_status: nextStatus,
+      actor_type: "admin",
+      actor_id: actor?.id,
+      actor_name: actor?.name,
+      payload_json: { amount_paise: decision.amount, reference: reference.slice(0, 80), gateway: "manual" },
+    });
+    return NextResponse.json(
+      { ok: true, status: nextStatus, gateway: "manual" },
+      { headers: { "Cache-Control": "no-store" } },
+    );
+  }
+
+  const reason = String(body.reason || "").trim();
+  if (reason.length < 3) return NextResponse.json({ ok: false, error: "Enter a reason." }, { status: 400 });
   if (order.status === "REFUND_PENDING") {
     return NextResponse.json(
       { ok: true, status: "REFUND_PENDING", gateway: "not_called", duplicate: true },

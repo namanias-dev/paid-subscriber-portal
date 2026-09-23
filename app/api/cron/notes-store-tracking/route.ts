@@ -50,7 +50,9 @@ async function run(req: Request) {
   let considered = 0;
   let polled = 0;
   let advanced = 0;
+  let errors = 0;
   for (const row of rows || []) {
+    try {
     const snapshot: TrackingSnapshot = {
       status: row.status,
       provider: row.provider,
@@ -98,9 +100,12 @@ async function run(req: Request) {
         });
       }
     }
+    } catch {
+      errors += 1;
+    }
   }
 
-  return NextResponse.json({ ok: true, considered, polled, advanced, ts: Date.now() });
+  return NextResponse.json({ ok: true, considered, polled, advanced, errors, ts: Date.now() });
 }
 
 export async function GET(req: Request) {

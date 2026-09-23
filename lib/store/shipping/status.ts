@@ -85,13 +85,19 @@ export function normalizeCourierStatus(raw: string): ShipmentStatus | null {
   if (!s) return null;
   if (s.includes("rto") || s.includes("return to origin")) return "rto";
   if (s.includes("out for delivery") || s === "dispatched") return "out_for_delivery";
-  if (s.includes("undelivered") || s.includes("delivery failed") || s.includes("consignee unavailable") || s.includes("ndr")) {
+  if (
+    s.includes("undelivered") ||
+    s.includes("delivery failed") ||
+    s.includes("failed delivery") ||
+    s.includes("consignee unavailable") ||
+    s.includes("ndr")
+  ) {
     return "delivery_failed";
   }
   if (s.includes("delivered") && !s.includes("undelivered")) return "delivered";
   if (s.includes("picked up") || s.includes("pickup done") || s === "picked") return "picked_up";
   if (s.includes("in transit") || s.includes("reached") || s.includes("received at")) return "in_transit";
-  if (s.includes("manifest") || s.includes("awb assigned") || s.includes("shipment booked")) return "manifested";
+  if (s.includes("manifest") || s.includes("ready to ship") || s.includes("awb assigned") || s.includes("shipment booked")) return "manifested";
   if (s.includes("cancel")) return "cancelled";
   if (s.includes("lost")) return "lost";
   if (s.includes("damag")) return "damaged";
