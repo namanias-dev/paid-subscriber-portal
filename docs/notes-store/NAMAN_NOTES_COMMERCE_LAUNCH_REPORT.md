@@ -17,11 +17,11 @@ No secrets are included. No courier shipment, label, pickup, refund, or cancella
 | Carrier comparison | READY — live integer paise. Not stored as a rate card. |
 | Shiprocket webhook | READY — ENABLED, `x-api-key`, missing key returns 401. Provider test returned HTTP 200. |
 | Tracking reconciliation | READY — every two hours, open shipments only, fresh webhooks skipped, one provider error does not stop the next. |
-| Admin fulfilment code | READY — pack size, compare, and provider choice. Create shipment is refused on the server while writes are unset. Staff copy: “Live shipping is not enabled yet.” |
+| Admin fulfilment code | READY — signed-in staff session on production. Orders list, filters, and catalogue load. There are no store orders yet, so Compare was not clicked on a real order. Create shipment and pickup, called with that session, return 409 “Live shipping is not enabled yet” before any order is read. |
 | Returns | READY as a workflow — approve, reject, replacement. Reverse pickup is refused while writes are unset. No photo upload. |
 | Manual refunds | READY — request records `REFUND_PENDING` and does not say money moved. A later gateway reference can be recorded. ICICI is not called. |
 | Security gates | READY — anonymous dispatch 403, courier webhook without the key 401, tracking cron without its secret 403. An order number alone does not return an address. |
-| Action required | READY — Overview lists missing AWB, failed create, overdue pickup, stale tracking, delay, delivery failure, NDR, RTO, return waiting, and manual refund. No new tab. |
+| Action required | READY — signed-in Overview shows the section and “Nothing is waiting on a courier, return, or refund.” Counts are zero. No new tab. Desktop, laptop, tablet, and mobile widths did not overflow. |
 
 ## Ready, not live-executed
 
@@ -36,7 +36,7 @@ No secrets are included. No courier shipment, label, pickup, refund, or cancella
 | --- | --- |
 | Shipping Gmail | `namanias.shipping@gmail.com` exists and is the Shiprocket API identity. Interactive inbox device verification is deferred. Production shipping does not read that inbox. |
 | Delhivery push webhook | OPTIONAL ENHANCEMENT. Delhivery can push scans after their integration team onboards and tests the endpoint. Production tracking uses API reconciliation. |
-| Authenticated admin browser pass | Staff login is username and password against `admin_users`. No approved test password is in env, Vercel, or an existing browser session. The sign-in screen is open. Anonymous checks above still hold. |
+| Return, refund, and compare clicks | There is no production order to open. Those buttons were not clicked, and no paid order was invented. A refund call for a missing order returns 404 and does not say money moved. |
 
 ## Deployment
 
