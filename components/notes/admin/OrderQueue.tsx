@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { PageHeader } from "@/components/admin/ui";
+import CourierQuotes from "@/components/notes/admin/CourierQuotes";
 import { formatPaise } from "@/lib/store/money";
 
 interface Address {
@@ -281,6 +282,11 @@ export default function NotesOrderQueue() {
                 <pre className="mt-2 whitespace-pre-wrap rounded-lg bg-surface p-2 text-xs text-ink2">{o.internal_notes}</pre>
               )}
 
+              <CourierQuotes
+                orderId={o.id}
+                onUseCourier={(name) => setCourier((m) => ({ ...m, [o.id]: name }))}
+              />
+
               <div className="mt-4 flex flex-wrap items-center gap-2">
                 <button
                   type="button"
@@ -294,7 +300,7 @@ export default function NotesOrderQueue() {
                   value={courier[o.id] || ""}
                   onChange={(e) => setCourier((m) => ({ ...m, [o.id]: e.target.value }))}
                   placeholder="Courier"
-                  className="h-9 w-28 rounded border border-line px-2 text-sm"
+                  className="h-9 w-40 rounded border border-line px-2 text-sm"
                 />
                 <input
                   value={awb[o.id] || ""}

@@ -147,9 +147,11 @@ export default function OrderStatus({ order }: { order: PublicOrder }) {
         <p className="mt-1">
           {current.stage === "delivered"
             ? "Your notes have been delivered. If anything arrived damaged, wrong, or incomplete, contact support with this order number."
-            : current.stage === "shipped" || current.stage === "out_for_delivery"
+            : current.stage === "shipped" || current.stage === "in_transit" || current.stage === "out_for_delivery"
               ? "The parcel is with the courier. Use the AWB above if it is available."
-              : "The Academy prepares and packs your notes in Chandigarh, then hands them to the courier. You can track this order with your phone number anytime."}
+              : current.stage === "packed"
+                ? "Your notes are packed in Chandigarh. They ship when the courier picks the parcel up."
+                : "The Academy prepares and packs your notes in Chandigarh, then hands them to the courier. You can track this order with your phone number anytime."}
         </p>
       </div>
     </div>

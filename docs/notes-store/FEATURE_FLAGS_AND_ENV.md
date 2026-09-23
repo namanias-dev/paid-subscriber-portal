@@ -10,7 +10,7 @@
 | `notes_store_coupons` | Coupons | off |
 | `notes_store_free_shipping` | Free shipping rules | off |
 | `notes_store_reviews` | Reviews | off |
-| `notes_store_shiprocket` | Aggregator | off |
+| `notes_store_shiprocket` | Legacy aggregator flag. It does **not** switch fulfilment onto Shiprocket. | off |
 | `notes_store_sms` | DLT SMS send | off |
 | `notes_store_qr_bonuses` | QR bonuses | off |
 | `notes_store_preorders` | Preorders | off |
@@ -58,6 +58,22 @@
 | Name | Purpose |
 |------|---------|
 | `CLOUDFLARE_R2_*` | Object storage for product/sample media and teaching-video derivatives (`media/store/videos/`) |
+
+## Courier quotes (read-only)
+
+| Name | Purpose |
+|------|---------|
+| `NOTES_STORE_PICKUP_POSTCODE` | Chandigarh pickup PIN used for live quotes. 6 digits, no leading zero. |
+| `SHIPROCKET_EMAIL` | Shiprocket **API user** email. The panel login is not accepted by `/auth/login`. |
+| `SHIPROCKET_PASSWORD` | Shiprocket API user password. |
+| `SHIPROCKET_API_BASE_URL` | Optional. Default `https://apiv2.shiprocket.in/v1/external`. |
+| `DELHIVERY_API_TOKEN` | Delhivery One token. Sent as `Authorization: Token`. |
+| `DELHIVERY_API_BASE_URL` | Optional. Default `https://track.delhivery.com`. Staging host is `https://staging-express.delhivery.com` and uses a different token. |
+| `NOTES_STORE_COURIER_WEBHOOK_KEY` | Shared secret for `POST /api/notes/courier/events`, checked against `x-api-key`. The path deliberately avoids the words Shiprocket forbids in a webhook URL. |
+| `NOTES_STORE_SHIPPING_WRITES` | Must be `1` before any future billable call. No route creates a shipment today. |
+| `NOTES_STORE_SHIPPING_WRITE_CONFIRM` | Must be `I_AUTHORIZE_BILLABLE_SHIPMENT` together with the writes flag. Leave unset. |
+
+Do not commit values. Mark shipped still records a courier and AWB typed by staff.
 
 ## SMS / DLT
 

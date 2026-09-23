@@ -29,11 +29,14 @@ describe("delivery date buffer", () => {
   });
 });
 
-describe("customer projection hides Packed until an AWB exists", () => {
-  test("confirmed without AWB is preparing, not shipped", () => {
-    assert.equal(projectCustomerStage("PACKED", false), "preparing");
-    assert.equal(projectCustomerStage("PACKED", true), "shipped");
+describe("customer projection", () => {
+  test("packed stays packed until the courier has the parcel", () => {
+    assert.equal(projectCustomerStage("PACKED", false), "packed");
+    assert.equal(projectCustomerStage("PACKED", true), "packed");
+    assert.equal(projectCustomerStage("PICKED_UP", true), "shipped");
+    assert.equal(projectCustomerStage("IN_TRANSIT", true), "in_transit");
     assert.equal(projectCustomerStage("ORDER_CONFIRMED", false), "confirmed");
     assert.equal(projectCustomerStage("PAYMENT_PENDING", false), "pending");
+    assert.equal(projectCustomerStage("DELIVERED", true), "delivered");
   });
 });

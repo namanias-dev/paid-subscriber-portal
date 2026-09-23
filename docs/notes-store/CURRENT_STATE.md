@@ -35,10 +35,12 @@
 | Admin catalogue | BUILT BUT HUMAN/EXTERNAL VERIFICATION PENDING | CRUD API + UI; preview admin login needed |
 | Admin order queue/detail | BUILT BUT HUMAN/EXTERNAL VERIFICATION PENDING | Address + line items shown |
 | Manual status advance | BUILT BUT HUMAN/EXTERNAL VERIFICATION PENDING | `/advance` API |
-| Courier / AWB entry | BUILT BUT HUMAN/EXTERNAL VERIFICATION PENDING | Manual ship; no Shiprocket |
+| Courier / AWB entry | BUILT BUT HUMAN/EXTERNAL VERIFICATION PENDING | Manual ship. Does not buy a label. |
+| Courier rate quote | BUILT BUT HUMAN/EXTERNAL VERIFICATION PENDING | Admin compare. Delhivery read API verified. Shiprocket panel login is not an API user (403). |
+| Shipping aggregator writes | OUT OF CURRENT PHASE | Label, AWB creation, and pickup stay off. |
 | Real Eazypay transaction | **DEFERRED BY OWNER** | Checklist preserved; not executed |
 | Notifications / DLT send | OUT OF CURRENT PHASE | Templates drafted, **not submitted**; `notes_store_sms` off |
-| Shipping aggregator | OUT OF CURRENT PHASE | Manual Phase 1; `notes_store_shiprocket` off |
+| Shipping aggregator | OUT OF CURRENT PHASE | See courier rate quote. `notes_store_shiprocket` does not create shipments. |
 | Coupons | OUT OF CURRENT PHASE | Flag off; schema may allow later |
 | Bundles composition UI | OUT OF CURRENT PHASE | Schema `store_bundle_items`; limited Phase 1 UX |
 | Reviews | OUT OF CURRENT PHASE | Table exists; flag off; no fake social proof |
