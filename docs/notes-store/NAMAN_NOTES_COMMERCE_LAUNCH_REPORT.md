@@ -50,4 +50,4 @@ Documented forward scans map as Manifested and Ready to Ship to manifested, Pick
 
 ## Deployment
 
-Production was `434a1d8386c1` before this checkpoint's code. Shipping tests, the isolation guard, and `tsc` passed. `next lint` is not configured in this repo and was not given a new config. Write flags stay unset. The first real payment and the first real shipment are still waiting for an explicit authorization.
+Master and production are `6e536164c320`. Shipping tests, the isolation guard, and `tsc` passed. `next lint` is not configured in this repo and was not given a new config. Write flags stay unset. The first real payment and the first real shipment are still waiting for an explicit authorization.
