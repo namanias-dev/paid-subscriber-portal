@@ -31,6 +31,7 @@ export const STORE_DIRS = [
   "app/admin/notes",
   "app/api/admin/notes",
   "app/api/cron/notes-store-verify",
+  "app/api/cron/notes-store-tracking",
   "components/notes",
 ];
 

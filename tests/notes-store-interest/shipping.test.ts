@@ -15,6 +15,7 @@ import { delhiveryPickupLocation, pickupPostcode, shippingWritesAuthorized, ship
 import { delhiveryPackingSlipPath, parseDelhiveryCharge, parseDelhiveryPincode } from "../../lib/store/shipping/delhiveryApi";
 import { canRequestSupport, delhiveryCreateBody, dispatchBlocked, fulfilmentAttention, refundRequestPaise, shipmentAlreadyActive } from "../../lib/store/shipping/dispatch";
 import { rupeesToPaise } from "../../lib/store/shipping/quotes";
+import { classifyTrackingGap, shouldPollShipment } from "../../lib/store/shipping/reconcile";
 import { parseShiprocketQuotes, shiprocketAdhocDraft } from "../../lib/store/shipping/shiprocketApi";
 import { canAdvanceOrder, canAdvanceShipment, normalizeCourierStatus } from "../../lib/store/shipping/status";
 import { parseCourierWebhook, scanAlreadyRecorded, webhookAuthorized } from "../../lib/store/shipping/webhook";
@@ -258,12 +259,61 @@ describe("courier tracking events", () => {
     const refund = readFileSync(new URL("../../app/api/admin/notes/orders/[id]/refund/route.ts", import.meta.url), "utf8");
     assert.equal(refund.includes("fetch("), false);
     assert.match(refund, /gateway: "not_called"/);
+    assert.match(refund, /duplicate: true/);
+    const eazypay = readFileSync(new URL("../../lib/store/payments/eazypay.ts", import.meta.url), "utf8");
+    assert.match(eazypay, /EazyPGVerify/);
+    assert.equal(eazypay.toLowerCase().includes("refund"), false);
+    const support = readFileSync(new URL("../../app/api/admin/notes/orders/[id]/support-decision/route.ts", import.meta.url), "utf8");
+    assert.match(support, /dispatchBlocked/);
+    assert.match(support, /shipment: "not_created"/);
+    assert.equal(support.includes("EazyPG"), false);
+    const tracking = readFileSync(new URL("../../app/api/cron/notes-store-tracking/route.ts", import.meta.url), "utf8");
+    assert.match(tracking, /shouldPollShipment/);
+    assert.match(tracking, /CRON_SECRET/);
+    assert.equal(tracking.includes("orders/create"), false);
+    assert.equal(tracking.includes("cmu/create"), false);
+    assert.equal(tracking.includes("delivered"), true);
     assert.equal(canAdvanceShipment("out_for_delivery", "in_transit"), false);
     assert.equal(normalizeCourierStatus("NDR"), "delivery_failed");
     assert.equal(normalizeCourierStatus("RTO Initiated"), "rto");
     assert.equal(canAdvanceShipment("delivered", "rto"), false);
     assert.equal(scanAlreadyRecorded(["shiprocket:1:IN TRANSIT:"], "shiprocket:1:IN TRANSIT:"), true);
     assert.equal(scanAlreadyRecorded([], "shiprocket:1:IN TRANSIT:"), false);
+  });
+
+  test("reconciliation polls open shipments and leaves delivered alone", () => {
+    const base = {
+      provider: "shiprocket",
+      awb: "SR1",
+      createdAt: "2026-09-20T00:00:00.000Z",
+      now: "2026-09-23T00:00:00.000Z",
+    };
+    assert.deepEqual(classifyTrackingGap({ ...base, status: "delivered", lastSyncedAt: "2026-09-01T00:00:00.000Z" }), []);
+    assert.equal(shouldPollShipment({ ...base, status: "delivered", lastSyncedAt: "2026-09-01T00:00:00.000Z" }), false);
+    assert.equal(shouldPollShipment({ ...base, status: "in_transit", lastSyncedAt: "2026-09-22T20:00:00.000Z" }), false);
+    assert.equal(shouldPollShipment({ ...base, status: "in_transit", lastSyncedAt: "2026-09-21T00:00:00.000Z" }), true);
+    assert.ok(classifyTrackingGap({ ...base, status: "delivery_failed", lastSyncedAt: "2026-09-22T23:00:00.000Z" }).includes("ndr"));
+    assert.equal(shouldPollShipment({ ...base, status: "delivery_failed", lastSyncedAt: "2026-09-22T23:00:00.000Z" }), false);
+    assert.ok(classifyTrackingGap({ ...base, status: "rto", lastSyncedAt: "2026-09-22T23:00:00.000Z" }).includes("rto"));
+    assert.ok(
+      classifyTrackingGap({
+        ...base,
+        status: "manifested",
+        pickupScheduledAt: "2026-09-21T00:00:00.000Z",
+        lastSyncedAt: null,
+      }).includes("pickup_overdue"),
+    );
+    assert.ok(classifyTrackingGap({ ...base, status: "manifested", lastSyncedAt: null }).includes("no_first_scan"));
+    assert.ok(
+      classifyTrackingGap({
+        ...base,
+        status: "in_transit",
+        lastSyncedAt: "2026-09-22T12:00:00.000Z",
+        expectedDeliveryDate: "2026-09-22",
+      }).includes("eta_exceeded"),
+    );
+    assert.equal(shouldPollShipment({ ...base, provider: "manual", status: "in_transit", lastSyncedAt: "2026-09-01T00:00:00.000Z" }), false);
+    assert.equal(shouldPollShipment({ ...base, awb: "", status: "in_transit", lastSyncedAt: null }), false);
   });
 });
 

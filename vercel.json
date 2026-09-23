@@ -23,6 +23,10 @@
       "schedule": "*/15 * * * *"
     },
     {
+      "path": "/api/cron/notes-store-tracking",
+      "schedule": "25 */2 * * *"
+    },
+    {
       "path": "/api/cron/analytics-rollup",
       "schedule": "30 19 * * *"
     },

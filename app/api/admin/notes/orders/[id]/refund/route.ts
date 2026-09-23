@@ -6,7 +6,9 @@ import { refundRequestPaise } from "@/lib/store/shipping/dispatch";
 export const dynamic = "force-dynamic";
 
 /**
- * Record a refund request. Does not call ICICI or move money.
+ * Record a refund request. The store Eazypay client can initiate and verify a
+ * payment. It has no refund call, so this route does not contact ICICI.
+ * A second request for an order already waiting on a refund is a no-op.
  */
 export async function POST(req: Request, { params }: { params: { id: string } }) {
   if (!(await requirePermission("store_manage_orders"))) {
@@ -28,6 +30,12 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     .eq("id", params.id)
     .maybeSingle();
   if (!order) return NextResponse.json({ ok: false, error: "not found" }, { status: 404 });
+  if (order.status === "REFUND_PENDING") {
+    return NextResponse.json(
+      { ok: true, status: "REFUND_PENDING", gateway: "not_called", duplicate: true },
+      { headers: { "Cache-Control": "no-store" } },
+    );
+  }
   const decision = refundRequestPaise(Number(order.total_paise) || 0, Number(order.amount_refunded_paise) || 0, Number(body.amount_paise));
   if ("error" in decision) return NextResponse.json({ ok: false, error: decision.error }, { status: 400 });
   const refundable = new Set(["DELIVERED", "DELIVERY_FAILED", "RETURN_APPROVED", "RETURN_RECEIVED", "RTO_DELIVERED"]);
