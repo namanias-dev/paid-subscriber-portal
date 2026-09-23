@@ -332,17 +332,25 @@ describe("accounting cases — collected is cash received, never the course fee"
 });
 
 describe("telegram formatting", () => {
-  test("daily block is text-only and separates cash from admissions", () => {
+  test("daily brief bolds cash, escapes titles, and does not repeat a second today", () => {
     const money = computeCollections(
       [
-        pay({ id: "a", phone: "9000000001", amount: 2000, payment_kind: "seat" }),
-        pay({ id: "b", phone: "9000000002", amount: 10000, payment_kind: "installment", installment_no: 1 }),
+        pay({ id: "a", phone: "9000000001", amount: 2000, payment_kind: "seat", gateway: "ICICI_EAZYPAY" }),
+        pay({
+          id: "b",
+          phone: "9000000002",
+          amount: 10000,
+          payment_kind: "installment",
+          installment_no: 1,
+          gateway: "offline",
+          payment_source: "admin_offline",
+        }),
       ],
       DAY,
       new Set(),
     );
     const yesterday = computeCollections(
-      [pay({ id: "y", phone: "9000000003", amount: 34500, payment_kind: "full", created_at: "2026-09-20T12:00:00.000Z" })],
+      [pay({ id: "y", phone: "9000000003", amount: 34500, payment_kind: "full", created_at: "2026-09-20T12:00:00.000Z", gateway: "ICICI_EAZYPAY" })],
       istDayWindow("2026-09-20"),
       new Set(),
     );
@@ -358,32 +366,33 @@ describe("telegram formatting", () => {
       mtd: money,
     });
     const html = lines.join("\n");
-    assert.equal(/\p{Extended_Pictographic}/u.test(html), false);
-    assert.equal(html.includes("COLLECTIONS"), false);
-    assert.match(html, /New accounts: <b>1<\/b>/);
-    assert.match(html, /Unique logins: <b>1<\/b>/);
-    assert.match(html, /Login events: <b>1<\/b>/);
-    assert.match(html, /COLLECTED TODAY/);
-    assert.match(html, /Actual collected: <b>₹12,000<\/b>/);
-    assert.match(html, /Students who paid: <b>2<\/b>/);
-    assert.match(html, /Seat bookings: <b>₹2,000<\/b>/);
-    assert.match(html, /Installments: <b>₹10,000<\/b>/);
-    assert.match(html, /YESTERDAY/);
-    assert.match(html, /Collected: <b>₹34,500<\/b>/);
-    assert.match(html, /MONTH TO DATE/);
-    assert.match(html, /ADMISSIONS TODAY/);
+    assert.match(html, /💰 <b>COLLECTIONS<\/b>/);
+    assert.match(html, /👥 <b>STUDENTS &amp; ACTIVITY<\/b>/);
+    assert.match(html, /Unique logins  <b>1<\/b>/);
+    assert.match(html, /Today  <b>1<\/b>/);
+    assert.equal(html.includes("LOGINS"), false);
+    assert.equal(html.includes("All-time"), false);
+    assert.match(html, /<b>Today<\/b>  <b>₹12,000<\/b>/);
+    assert.match(html, /Online ₹2,000 · Staff recorded ₹10,000/);
+    assert.match(html, /2 payments · 2 students/);
+    assert.match(html, /Seat bookings  ₹2,000/);
+    assert.match(html, /Installments  ₹10,000/);
+    assert.match(html, /Yesterday<\/b>  ₹34,500/);
+    assert.match(html, /Month to date/);
+    assert.match(html, /🎓 <b>ADMISSIONS TODAY<\/b>/);
     assert.match(html, /GS &lt;Foundation&gt;/);
     assert.equal(html.includes("<Foundation>"), false);
+    assert.equal(html.includes("Manually triggered"), false);
     const seat = money.categories.find((c) => c.key === "seat")!.amount;
     const inst = money.categories.find((c) => c.key === "installment")!.amount;
     const full = money.categories.find((c) => c.key === "admission")!.amount;
     assert.equal(seat + inst + full, money.grossCollection);
   });
 
-  test("monthly report states actual collected, gross, and refunds without emoji", () => {
+  test("monthly report states collected, gross, and refunds", () => {
     const money = computeCollections(
       [
-        pay({ id: "g", phone: "9000000007", amount: 5000 }),
+        pay({ id: "g", phone: "9000000007", amount: 5000, gateway: "ICICI_EAZYPAY" }),
         pay({
           id: "g-rev",
           phone: "9000000007",
@@ -401,10 +410,8 @@ describe("telegram formatting", () => {
       money,
       admissions: { admissions: 0, students: 0, byCourse: [] },
     });
-    assert.equal(/\p{Extended_Pictographic}/u.test(html), false);
-    assert.match(html, /MONTHLY BUSINESS REPORT/);
-    assert.match(html, /Actual collected: <b>₹0<\/b>/);
-    assert.match(html, /Gross collected: <b>₹5,000<\/b>/);
-    assert.match(html, /Refunds: <b>₹5,000<\/b>/);
+    assert.match(html, /MONTHLY BRIEF/);
+    assert.match(html, /<b>Collected<\/b>  <b>₹0<\/b>/);
+    assert.match(html, /Gross ₹5,000 · Refunds ₹5,000/);
   });
 });

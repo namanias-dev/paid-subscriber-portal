@@ -1,58 +1,57 @@
 /**
  * Login averages for Telegram digests.
  *
- * Definition of a "login" for averages (matches Overview pulse `loginUsersToday`):
- * unique user per IST calendar day, keyed by buyer_id or normalized phone.
- * Multiple login events by the same user on the same day count as one.
+ * Same person as unique logins in the student section: phone-first key,
+ * staff and leads excluded, analytics login events plus access-log logins.
+ * Multiple sign-ins by one student on one day count once.
  *
- * All-time avg = sum(unique users on each ACTIVE day) / count(active days),
- * where an active day has ≥1 login. Pre-launch zero days are excluded.
+ * 30-day average = mean unique students over the last 30 complete IST days.
+ * A day with no logins counts as zero.
  *
- * 30-day avg = mean of unique-user counts over the last 30 IST calendar days
- * (zeros included — a dead day pulls the average down on purpose).
+ * Tracked-day average = mean unique students on complete days that had at
+ * least one genuine login, from the first tracked day through yesterday.
+ * Days before login tracking started are not treated as zeros. Today is open
+ * and is not included. This is not an all-time average of the academy's life.
  *
- * All-time aggregates are backfilled once into telegram_report_snapshots and
- * updated incrementally per completed IST day. Idempotent.
+ * Stored under login_avg_stats_v2 so the previous buyer-id counter is not
+ * incremented into the new sum.
  */
 import { getSupabaseAdmin } from "../../supabase";
-import { istYMD, istTodayYMD } from "../../dates";
-import { normalizeIndianMobile } from "../../phone";
+import { istYMD, istTodayYMD, istYMDToMs } from "../../dates";
+import { LEADERBOARD_EXCLUDED_STUDENT_IDS } from "../../leaderboardExclusions";
+import { loadActivityExclusions } from "../../analytics/loadBusinessMetrics";
+import {
+  emptyLoginExclusion,
+  meanDailyUniques,
+  uniqueLoginsByDay,
+  type LoginExclusion,
+  type LoginHit,
+} from "../../analytics/loginIdentity";
+import { DAY_MS } from "../../analytics/businessMetrics";
 import { getSnapshotBySlot, saveSnapshot } from "./snapshots";
 import { tgLog } from "../log";
 
-const SLOT = "login_avg_stats";
+const SLOT = "login_avg_stats_v2";
 const KIND = "login_avg";
+const DEFINITION = "v2_phone_staff_access";
 
 export interface LoginAvgStats {
-  /** Sum of per-active-day unique login users (all-time). */
   unique_sum: number;
-  /** Number of IST days with ≥1 login. */
   active_days: number;
   first_active_ymd: string | null;
-  /** Last IST day whose unique count has been folded into unique_sum. */
   last_applied_ymd: string | null;
+  definition: string;
 }
 
 export interface LoginAvgResult {
   allTimeAvg: number | null;
   rolling30Avg: number | null;
-  /** Unique login users today (IST) — same definition as averages. */
-  today: number;
-  /** Unique login users yesterday (IST). */
-  yesterday: number;
+  today: number | null;
+  yesterday: number | null;
   activeDays: number;
   uniqueSum: number;
   firstActiveYmd: string | null;
-  method: "active_days";
-}
-
-function loginUserKey(row: { buyer_id?: string | null; phone?: string | null }): string | null {
-  const bid = (row.buyer_id || "").trim();
-  if (bid) return `b:${bid}`;
-  const n = normalizeIndianMobile(row.phone);
-  if (n.ok && n.e164) return `p:${n.e164}`;
-  const raw = (row.phone || "").trim();
-  return raw ? `p:${raw}` : null;
+  method: "tracked_days";
 }
 
 function ymdPlus(ymd: string, days: number): string {
@@ -69,52 +68,125 @@ function ymdDaysAgoFrom(today: string, ago: number): string {
   return ymdPlus(today, -ago);
 }
 
-async function uniqueLoginsOnYmd(ymd: string): Promise<number> {
+async function exclusion(): Promise<LoginExclusion> {
+  try {
+    const loaded = await loadActivityExclusions();
+    return {
+      phones: loaded.phones,
+      buyerIds: loaded.buyerIds,
+      studentIds: new Set([...LEADERBOARD_EXCLUDED_STUDENT_IDS, ...loaded.studentIds]),
+    };
+  } catch {
+    return emptyLoginExclusion();
+  }
+}
+
+async function pageHits(
+  fromIso: string | null,
+  toIso: string | null,
+): Promise<LoginHit[] | null> {
   const db = getSupabaseAdmin();
-  if (!db) return 0;
-  // Fetch login events for that IST day via UTC window pad (±1 day), filter in JS.
-  const startPad = new Date(`${ymd}T00:00:00+05:30`);
-  startPad.setUTCDate(startPad.getUTCDate() - 1);
-  const endPad = new Date(`${ymd}T23:59:59.999+05:30`);
-  endPad.setUTCDate(endPad.getUTCDate() + 1);
-  const set = new Set<string>();
+  if (!db) return null;
+  const hits: LoginHit[] = [];
   let offset = 0;
   const page = 1000;
   for (;;) {
-    const { data, error } = await db
+    let q = db
       .from("analytics_events")
-      .select("buyer_id,phone,occurred_at")
+      .select("buyer_id,phone,props,occurred_at")
       .eq("event_name", "login")
-      .gte("occurred_at", startPad.toISOString())
-      .lte("occurred_at", endPad.toISOString())
       .order("occurred_at", { ascending: true })
       .range(offset, offset + page - 1);
+    if (fromIso) q = q.gte("occurred_at", fromIso);
+    if (toIso) q = q.lt("occurred_at", toIso);
+    const { data, error } = await q;
     if (error) {
-      tgLog("login_avg_day_query_failed", { ymd, error: error.message }, "warn");
-      break;
+      tgLog("login_avg_events_failed", { error: error.message }, "warn");
+      return null;
     }
     const rows = data || [];
     if (!rows.length) break;
-    for (const row of rows) {
-      if (istYMD((row as { occurred_at?: string }).occurred_at) !== ymd) continue;
-      const k = loginUserKey(row as { buyer_id?: string | null; phone?: string | null });
-      if (k) set.add(k);
+    for (const row of rows as {
+      buyer_id?: string | null;
+      phone?: string | null;
+      props?: { student_id?: string | null } | null;
+      occurred_at?: string;
+    }[]) {
+      if (!row.occurred_at) continue;
+      hits.push({
+        at: row.occurred_at,
+        phone: row.phone,
+        buyerId: row.buyer_id,
+        studentId: row.props?.student_id || null,
+      });
     }
     if (rows.length < page) break;
     offset += page;
   }
-  return set.size;
+
+  offset = 0;
+  const access: { student_id: string | null; timestamp: string }[] = [];
+  for (;;) {
+    let q = db
+      .from("access_logs")
+      .select("student_id,timestamp")
+      .eq("action", "login")
+      .order("timestamp", { ascending: true })
+      .range(offset, offset + page - 1);
+    if (fromIso) q = q.gte("timestamp", fromIso);
+    if (toIso) q = q.lt("timestamp", toIso);
+    const { data, error } = await q;
+    if (error) {
+      tgLog("login_avg_access_failed", { error: error.message }, "warn");
+      break;
+    }
+    const rows = (data || []) as { student_id: string | null; timestamp: string }[];
+    if (!rows.length) break;
+    access.push(...rows);
+    if (rows.length < page) break;
+    offset += page;
+  }
+
+  const ids = [...new Set(access.map((r) => r.student_id).filter(Boolean))] as string[];
+  const phones = new Map<string, string | null>();
+  if (ids.length) {
+    const { data, error } = await db.from("students").select("id,phone").in("id", ids.slice(0, 500));
+    if (error) {
+      tgLog("login_avg_student_phone_failed", { error: error.message }, "warn");
+    } else {
+      for (const row of (data || []) as { id: string; phone: string | null }[]) phones.set(row.id, row.phone);
+    }
+  }
+  for (const row of access) {
+    if (!row.timestamp || !row.student_id) continue;
+    hits.push({
+      at: row.timestamp,
+      phone: phones.get(row.student_id) || null,
+      studentId: row.student_id,
+    });
+  }
+  return hits;
+}
+
+function bounds(ymd: string): { fromIso: string; toIso: string } {
+  const fromMs = istYMDToMs(ymd);
+  return {
+    fromIso: new Date(fromMs).toISOString(),
+    toIso: new Date(fromMs + DAY_MS).toISOString(),
+  };
 }
 
 async function loadStored(): Promise<LoginAvgStats | null> {
   const snap = await getSnapshotBySlot(SLOT);
   if (!snap?.metrics) return null;
   const m = snap.metrics;
+  if (m.definition !== DEFINITION) return null;
   return {
     unique_sum: Number(m.unique_sum) || 0,
     active_days: Number(m.active_days) || 0,
     first_active_ymd: m.first_active_ymd != null ? String(m.first_active_ymd) : null,
     last_applied_ymd: m.last_applied_ymd != null ? String(m.last_applied_ymd) : null,
+    definition: DEFINITION,
   };
 }
 
@@ -127,239 +199,92 @@ async function saveStored(stats: LoginAvgStats): Promise<void> {
       active_days: stats.active_days,
       first_active_ymd: stats.first_active_ymd,
       last_applied_ymd: stats.last_applied_ymd,
+      definition: DEFINITION,
     },
   });
 }
 
-/**
- * Full historical backfill over active days only. Idempotent — re-running
- * recomputes from events and overwrites the snapshot.
- */
+function statsFromHits(hits: LoginHit[], excluded: LoginExclusion, today: string): LoginAvgStats {
+  const byDay = uniqueLoginsByDay(hits, excluded);
+  const yesterday = ymdDaysAgoFrom(today, 1);
+  const ymds = [...byDay.keys()].filter((y) => y <= yesterday).sort();
+  let uniqueSum = 0;
+  let activeDays = 0;
+  let first: string | null = null;
+  for (const y of ymds) {
+    const n = byDay.get(y)!.size;
+    if (n > 0) {
+      uniqueSum += n;
+      activeDays += 1;
+      if (!first) first = y;
+    }
+  }
+  return {
+    unique_sum: uniqueSum,
+    active_days: activeDays,
+    first_active_ymd: first,
+    last_applied_ymd: yesterday,
+    definition: DEFINITION,
+  };
+}
+
 export async function backfillLoginAvgStats(): Promise<LoginAvgStats> {
-  const db = getSupabaseAdmin();
   const empty: LoginAvgStats = {
     unique_sum: 0,
     active_days: 0,
     first_active_ymd: null,
     last_applied_ymd: null,
+    definition: DEFINITION,
   };
-  if (!db) return empty;
-
-  const byDay = new Map<string, Set<string>>();
-  let offset = 0;
-  const page = 1000;
-  for (;;) {
-    const { data, error } = await db
-      .from("analytics_events")
-      .select("buyer_id,phone,occurred_at")
-      .eq("event_name", "login")
-      .order("occurred_at", { ascending: true })
-      .range(offset, offset + page - 1);
-    if (error) {
-      tgLog("login_avg_backfill_failed", { error: error.message }, "error");
-      break;
-    }
-    const rows = data || [];
-    if (!rows.length) break;
-    for (const row of rows) {
-      const ymd = istYMD((row as { occurred_at?: string }).occurred_at);
-      if (!ymd) continue;
-      const k = loginUserKey(row as { buyer_id?: string | null; phone?: string | null });
-      if (!k) continue;
-      let set = byDay.get(ymd);
-      if (!set) {
-        set = new Set();
-        byDay.set(ymd, set);
-      }
-      set.add(k);
-    }
-    if (rows.length < page) break;
-    offset += page;
-  }
-
-  const ymds = [...byDay.keys()].sort();
-  let uniqueSum = 0;
-  for (const y of ymds) uniqueSum += byDay.get(y)!.size;
+  const [hits, excluded] = await Promise.all([pageHits(null, null), exclusion()]);
+  if (!hits) return empty;
   const today = istTodayYMD();
-  // Apply through yesterday only — today is still open.
-  const yesterday = ymdDaysAgoFrom(today, 1);
-  const applied = ymds.filter((y) => y <= yesterday);
-  let appliedSum = 0;
-  for (const y of applied) appliedSum += byDay.get(y)!.size;
-
-  const stats: LoginAvgStats = {
-    unique_sum: appliedSum,
-    active_days: applied.length,
-    first_active_ymd: ymds[0] || null,
-    last_applied_ymd: applied.length ? applied[applied.length - 1] : null,
-  };
+  const stats = statsFromHits(hits, excluded, today);
   await saveStored(stats);
   tgLog("login_avg_backfill_done", {
+    definition: DEFINITION,
     active_days: stats.active_days,
     unique_sum: stats.unique_sum,
     first: stats.first_active_ymd,
     last: stats.last_applied_ymd,
-    avg: stats.active_days ? Math.round(stats.unique_sum / stats.active_days) : null,
   });
   return stats;
 }
 
-/** Incrementally fold completed IST days since last_applied into the snapshot. */
-async function catchUpLoginAvg(stats: LoginAvgStats): Promise<LoginAvgStats> {
+export async function resolveLoginAverages(): Promise<LoginAvgResult> {
+  const excluded = await exclusion();
   const today = istTodayYMD();
   const yesterday = ymdDaysAgoFrom(today, 1);
-  let next = stats.last_applied_ymd
-    ? ymdPlus(stats.last_applied_ymd, 1)
-    : stats.first_active_ymd || yesterday;
-  if (!stats.last_applied_ymd && !stats.first_active_ymd) {
-    // Empty store — full backfill.
-    return backfillLoginAvgStats();
-  }
-
-  let uniqueSum = stats.unique_sum;
-  let activeDays = stats.active_days;
-  let first = stats.first_active_ymd;
-  let last = stats.last_applied_ymd;
-  let guard = 0;
-  while (next <= yesterday && guard < 400) {
-    guard++;
-    const n = await uniqueLoginsOnYmd(next);
-    if (n > 0) {
-      uniqueSum += n;
-      activeDays += 1;
-      if (!first || next < first) first = next;
-    }
-    last = next;
-    next = ymdPlus(next, 1);
-  }
-  const updated: LoginAvgStats = {
-    unique_sum: uniqueSum,
-    active_days: activeDays,
-    first_active_ymd: first,
-    last_applied_ymd: last,
-  };
-  if (
-    updated.unique_sum !== stats.unique_sum ||
-    updated.active_days !== stats.active_days ||
-    updated.last_applied_ymd !== stats.last_applied_ymd
-  ) {
-    await saveStored(updated);
-  }
-  return updated;
-}
-
-async function rolling30Avg(): Promise<number | null> {
-  const db = getSupabaseAdmin();
-  if (!db) return null;
-  const today = istTodayYMD();
-  const fromYmd = ymdDaysAgoFrom(today, 30);
-  const startPad = new Date(`${fromYmd}T00:00:00+05:30`);
-  startPad.setUTCDate(startPad.getUTCDate() - 1);
-  const endPad = new Date(`${today}T00:00:00+05:30`);
-  const byDay = new Map<string, Set<string>>();
-  for (let i = 1; i <= 30; i++) byDay.set(ymdDaysAgoFrom(today, i), new Set());
-
-  let offset = 0;
-  const page = 1000;
-  for (;;) {
-    const { data, error } = await db
-      .from("analytics_events")
-      .select("buyer_id,phone,occurred_at")
-      .eq("event_name", "login")
-      .gte("occurred_at", startPad.toISOString())
-      .lt("occurred_at", endPad.toISOString())
-      .order("occurred_at", { ascending: true })
-      .range(offset, offset + page - 1);
-    if (error) {
-      tgLog("login_avg_30d_failed", { error: error.message }, "warn");
-      return null;
-    }
-    const rows = data || [];
-    if (!rows.length) break;
-    for (const row of rows) {
-      const ymd = istYMD((row as { occurred_at?: string }).occurred_at);
-      if (!ymd || !byDay.has(ymd)) continue;
-      const k = loginUserKey(row as { buyer_id?: string | null; phone?: string | null });
-      if (k) byDay.get(ymd)!.add(k);
-    }
-    if (rows.length < page) break;
-    offset += page;
-  }
-  let sum = 0;
-  for (const set of byDay.values()) sum += set.size;
-  return Math.round(sum / 30);
-}
-
-/**
- * Resolve login averages for the digest. Backfills on first run, then
- * incrementally catches up. Returns nulls when no data.
- */
-export async function resolveLoginAverages(): Promise<LoginAvgResult> {
   let stored = await loadStored();
-  if (!stored || stored.active_days <= 0) {
-    stored = await backfillLoginAvgStats();
-  } else {
-    stored = await catchUpLoginAvg(stored);
+  const needsHistory = !stored || stored.definition !== DEFINITION || stored.last_applied_ymd !== yesterday;
+  const hits = needsHistory
+    ? await pageHits(null, null)
+    : await pageHits(bounds(ymdDaysAgoFrom(today, 30)).fromIso, bounds(ymdPlus(today, 1)).fromIso);
+
+  if (needsHistory && hits) {
+    stored = statsFromHits(hits, excluded, today);
+    await saveStored(stored);
   }
+  const stats = stored || {
+    unique_sum: 0,
+    active_days: 0,
+    first_active_ymd: null,
+    last_applied_ymd: null,
+    definition: DEFINITION,
+  };
 
-  const allTimeAvg =
-    stored.active_days > 0 ? Math.round(stored.unique_sum / stored.active_days) : null;
-  const rolling30 = await rolling30Avg();
-
-  if (
-    allTimeAvg != null &&
-    rolling30 != null &&
-    rolling30 > 0 &&
-    allTimeAvg * 10 < rolling30
-  ) {
-    tgLog(
-      "login_avg_sanity_fail",
-      {
-        allTimeAvg,
-        rolling30,
-        active_days: stored.active_days,
-        unique_sum: stored.unique_sum,
-        first: stored.first_active_ymd,
-      },
-      "error",
-    );
-    // Re-backfill once — denominator may be stale/corrupt.
-    stored = await backfillLoginAvgStats();
-  }
-
-  const finalAll =
-    stored.active_days > 0 ? Math.round(stored.unique_sum / stored.active_days) : null;
-
-  const todayYmd = istTodayYMD();
-  const yesterdayYmd = ymdDaysAgoFrom(todayYmd, 1);
-  const [todayN, yesterdayN] = await Promise.all([
-    uniqueLoginsOnYmd(todayYmd),
-    uniqueLoginsOnYmd(yesterdayYmd),
-  ]);
-
-  // Re-check sanity after possible re-backfill.
-  const rollingFinal = rolling30;
-  if (
-    finalAll != null &&
-    rollingFinal != null &&
-    rollingFinal > 0 &&
-    finalAll * 10 < rollingFinal
-  ) {
-    tgLog(
-      "login_avg_sanity_fail_after_backfill",
-      { allTimeAvg: finalAll, rolling30: rollingFinal, active_days: stored.active_days },
-      "error",
-    );
-  }
+  const byDay = hits ? uniqueLoginsByDay(hits, excluded) : null;
+  const rollingCounts: number[] = [];
+  for (let i = 30; i >= 1; i--) rollingCounts.push(byDay?.get(ymdDaysAgoFrom(today, i))?.size || 0);
 
   return {
-    allTimeAvg: finalAll,
-    rolling30Avg: rollingFinal,
-    today: todayN,
-    yesterday: yesterdayN,
-    activeDays: stored.active_days,
-    uniqueSum: stored.unique_sum,
-    firstActiveYmd: stored.first_active_ymd,
-    method: "active_days",
+    allTimeAvg: stats.active_days > 0 ? Math.round(stats.unique_sum / stats.active_days) : null,
+    rolling30Avg: byDay ? meanDailyUniques(rollingCounts) : null,
+    today: byDay ? byDay.get(today)?.size || 0 : null,
+    yesterday: byDay ? byDay.get(yesterday)?.size || 0 : null,
+    activeDays: stats.active_days,
+    uniqueSum: stats.unique_sum,
+    firstActiveYmd: stats.first_active_ymd,
+    method: "tracked_days",
   };
 }

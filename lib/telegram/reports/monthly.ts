@@ -9,7 +9,8 @@ import { computeAdmissions, computeCollections } from "../../analytics/businessM
 import { loadPeopleMetrics, loadReportExclusions } from "../../analytics/loadBusinessMetrics";
 import { buildKeyboard, sendMessage } from "../botApi";
 import { tgLog } from "../log";
-import { monthlyBusinessHtml } from "./businessFormat";
+import { monthlyBusinessHtml, packTelegramMessages } from "./businessFormat";
+import { loadSmsDelivery } from "../../analytics/loadSmsDelivery";
 import { assertReportsChannel } from "./channelGuard";
 import { resolveMonthlyReportSlot } from "./monthlySchedule";
 import { getSnapshotBySlot, saveSnapshot } from "./snapshots";
@@ -79,14 +80,23 @@ export async function maybeRunMonthlyBusinessReport(opts?: {
     ]);
     const money = computeCollections(payments, due.window, exclusions.staffPhones);
     const admissions = computeAdmissions(enrollments, due.window, exclusions.staffPhones);
-    const people = await loadPeopleMetrics(due.window, exclusions);
+    const [people, sms] = await Promise.all([
+      loadPeopleMetrics(due.window, exclusions),
+      loadSmsDelivery(due.window, exclusions.staffPhones),
+    ]);
     const html = monthlyBusinessHtml({
       label: due.label,
       people,
       money,
       admissions,
+      sms,
     });
-    const sent = await sendHtml(guarded.id, html);
+    const parts = packTelegramMessages(html.split("\n"));
+    let sent: { ok: boolean; error?: string; messageId?: number } = { ok: false, error: "empty" };
+    for (const part of parts) {
+      sent = await sendHtml(guarded.id, part);
+      if (!sent.ok) break;
+    }
     if (!sent.ok) {
       tgLog("monthly_report_send_failed", { slot: due.slotKey, error: sent.error || "send_failed" }, "error");
       return { ok: false, ran: false, reason: sent.error || "send_failed", slotKey: due.slotKey };

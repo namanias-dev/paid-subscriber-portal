@@ -316,3 +316,27 @@ export async function loadPeopleMetrics(
 
   return computePeople({ newAccountKeys, loginEventKeys, activityKeys });
 }
+
+/** Staff, leads, and internal students — the same exclusions as unique logins. */
+export async function loadActivityExclusions(): Promise<{
+  phones: Set<string>;
+  buyerIds: Set<string>;
+  studentIds: Set<string>;
+}> {
+  const base = await loadReportExclusions();
+  const phones = new Set<string>([...base.staffPhones, ...base.leadPhones]);
+  const buyerIds = new Set<string>();
+  const studentIds = new Set<string>(LEADERBOARD_EXCLUDED_STUDENT_IDS);
+  const db = getSupabaseAdmin();
+  if (!db) return { phones, buyerIds, studentIds };
+  const { data, error } = await db
+    .from("buyers")
+    .select("id,is_staff,is_lead")
+    .or("is_staff.eq.true,is_lead.eq.true");
+  if (!error && data) {
+    for (const row of data as { id: string; is_staff?: boolean | null; is_lead?: boolean | null }[]) {
+      if (row.is_staff || row.is_lead) buyerIds.add(row.id);
+    }
+  }
+  return { phones, buyerIds, studentIds };
+}

@@ -65,6 +65,14 @@
  *   webinar — item_type webinar
  *   plan — item_type plan
  *   other — anything else that still qualifies as collected
+ *
+ * Payment sources are a second partition of the same gross. They also sum to
+ * grossCollection. Do not add a source total to a purpose total.
+ *   online — ICICI Eazypay or Razorpay receipt (gateway name or razorpay id).
+ *   manual — staff-entered receipt: gateway offline, payment_source admin_offline,
+ *     or another offline source. Included when status is PAID. finance_verified
+ *     defaults to false on those rows, so it is not treated as a second settlement check.
+ *   other — paid money that matches neither signal.
  */
 import type { CourseEnrollment, Payment } from "../types";
 import { normPhone } from "../phone";
@@ -203,6 +211,16 @@ export interface CategoryLine {
   students: number;
 }
 
+export type CollectionSource = "online" | "manual" | "other";
+
+export interface SourceLine {
+  key: CollectionSource;
+  amount: number;
+  payments: number;
+  /** Phones on this source. The same student can appear on more than one source. */
+  students: number;
+}
+
 export interface CollectionMetrics {
   /**
    * Successful money received in the window before refunds.
@@ -216,7 +234,11 @@ export interface CollectionMetrics {
   netCollection: number;
   successfulPayments: number;
   payingStudents: number;
+  /** Paid rows with no mobile. Counted in the money, not in payingStudents. */
+  paymentsWithoutPhone: number;
   categories: CategoryLine[];
+  /** Second partition of grossCollection. Independent of categories. */
+  sources: SourceLine[];
 }
 
 export interface AdmissionMetrics {
@@ -235,6 +257,28 @@ const CATEGORY_ORDER: CollectionCategory[] = [
   "plan",
   "other",
 ];
+
+const SOURCE_ORDER: CollectionSource[] = ["online", "manual", "other"];
+
+/**
+ * Where the rupee was recorded. Gateway capture and a staff-entered receipt
+ * are different sources. A row is never both.
+ */
+export function collectionSource(
+  p: Pick<Payment, "gateway" | "payment_source" | "razorpay_payment_id" | "payment_mode" | "mode">,
+): CollectionSource {
+  const gw = (p.gateway || "").trim().toLowerCase();
+  const src = (p.payment_source || "").trim().toLowerCase();
+  if (gw === "offline" || src === "admin_offline" || src === "offline" || src === "staff") {
+    return "manual";
+  }
+  if (gw === "icici_eazypay" || gw === "razorpay" || !!(p.razorpay_payment_id || "").trim()) {
+    return "online";
+  }
+  const mode = `${p.payment_mode || ""} ${p.mode || ""}`.toLowerCase();
+  if (/\b(cash|upi|bank|cheque|neft|imps|rtgs)\b/.test(mode)) return "manual";
+  return "other";
+}
 
 export function collectionCategory(p: Pick<Payment, "item_type" | "payment_kind">): CollectionCategory {
   if (p.item_type === "webinar") return "webinar";
@@ -300,9 +344,12 @@ export function computeCollections(
 
   const buckets = new Map<CollectionCategory, { amount: number; rows: Payment[] }>();
   for (const key of CATEGORY_ORDER) buckets.set(key, { amount: 0, rows: [] });
+  const sourceBuckets = new Map<CollectionSource, { amount: number; rows: Payment[] }>();
+  for (const key of SOURCE_ORDER) sourceBuckets.set(key, { amount: 0, rows: [] });
 
   let gross = 0;
   const payers = new Set<string>();
+  let paymentsWithoutPhone = 0;
   for (const p of grossDeduped) {
     const amt = rupees(p.amount);
     gross += amt;
@@ -310,8 +357,13 @@ export function computeCollections(
     const b = buckets.get(key)!;
     b.amount += amt;
     b.rows.push(p);
+    const source = collectionSource(p);
+    const sb = sourceBuckets.get(source)!;
+    sb.amount += amt;
+    sb.rows.push(p);
     const ph = normPhone(p.phone);
     if (ph) payers.add(ph);
+    else paymentsWithoutPhone++;
   }
 
   let refundAmount = 0;
@@ -327,20 +379,39 @@ export function computeCollections(
     return { key, amount: b.amount, payments: b.rows.length, students: students.size };
   });
 
+  const sources: SourceLine[] = SOURCE_ORDER.map((key) => {
+    const b = sourceBuckets.get(key)!;
+    const students = new Set<string>();
+    for (const p of b.rows) {
+      const ph = normPhone(p.phone);
+      if (ph) students.add(ph);
+    }
+    return { key, amount: b.amount, payments: b.rows.length, students: students.size };
+  });
+
   return {
     grossCollection: gross,
     refundAmount,
     netCollection: gross - refundAmount,
     successfulPayments: grossDeduped.length,
     payingStudents: payers.size,
+    paymentsWithoutPhone,
     categories,
+    sources,
   };
 }
 
-/** Category amounts are a partition of gross. */
+/** Purpose totals and source totals are each a partition of gross. They are not added together. */
 export function collectionsReconcile(m: CollectionMetrics): boolean {
-  const sum = m.categories.reduce((a, c) => a + c.amount, 0);
-  return sum === m.grossCollection && m.netCollection === m.grossCollection - m.refundAmount;
+  const purposes = m.categories.reduce((a, c) => a + c.amount, 0);
+  const sources = (m.sources || []).reduce((a, c) => a + c.amount, 0);
+  const sourcePayments = (m.sources || []).reduce((a, c) => a + c.payments, 0);
+  return (
+    purposes === m.grossCollection &&
+    sources === m.grossCollection &&
+    sourcePayments === m.successfulPayments &&
+    m.netCollection === m.grossCollection - m.refundAmount
+  );
 }
 
 export function computeAdmissions(
