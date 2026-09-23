@@ -83,6 +83,17 @@ export type EventName =
   | "notes_product_clicked"
   | "notes_bundle_viewed"
   | "notes_sample_opened"
+  | "notes_sample_impression"
+  | "notes_sample_page_view"
+  | "notes_sample_completed"
+  | "notes_sample_buy_clicked"
+  | "notes_physical_video_impression"
+  | "notes_physical_video_play"
+  | "notes_physical_video_25"
+  | "notes_physical_video_50"
+  | "notes_physical_video_75"
+  | "notes_physical_video_completed"
+  | "notes_physical_video_buy_clicked"
   | "notes_added_to_cart"
   | "notes_removed_from_cart"
   | "notes_checkout_started"
@@ -183,6 +194,17 @@ export const CLIENT_ALLOWED_EVENTS: ReadonlySet<EventName> = new Set<EventName>(
   "notes_product_clicked",
   "notes_bundle_viewed",
   "notes_sample_opened",
+  "notes_sample_impression",
+  "notes_sample_page_view",
+  "notes_sample_completed",
+  "notes_sample_buy_clicked",
+  "notes_physical_video_impression",
+  "notes_physical_video_play",
+  "notes_physical_video_25",
+  "notes_physical_video_50",
+  "notes_physical_video_75",
+  "notes_physical_video_completed",
+  "notes_physical_video_buy_clicked",
   "notes_added_to_cart",
   "notes_removed_from_cart",
   "notes_checkout_started",

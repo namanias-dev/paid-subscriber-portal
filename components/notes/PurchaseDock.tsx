@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import AddToCartButton from "@/components/notes/AddToCartButton";
 import InterestButton from "@/components/notes/InterestButton";
+import { requestNotesSample } from "@/components/notes/notesProofBridge";
 
 export default function PurchaseDock({
   productId,
@@ -13,6 +14,7 @@ export default function PurchaseDock({
   purchasable,
   showInterest,
   hasSamples,
+  showProofPreview = false,
 }: {
   productId: string;
   price: string;
@@ -22,6 +24,7 @@ export default function PurchaseDock({
   purchasable: boolean;
   showInterest: boolean;
   hasSamples: boolean;
+  showProofPreview?: boolean;
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
   const [stuck, setStuck] = useState(false);
@@ -63,11 +66,6 @@ export default function PurchaseDock({
         <p className="mt-3 text-xs leading-relaxed text-[var(--ca-navy)]/55">
           Printed hard copy · prepaid · tracking after dispatch from Chandigarh
         </p>
-        {hasSamples && (
-          <button type="button" className="ca-focus mt-3 text-sm font-semibold text-[var(--ca-navy)] underline underline-offset-4" onClick={scrollToSamples}>
-            View sample pages
-          </button>
-        )}
         <div className="mt-5 grid gap-2.5">
           {showInterest ? (
             <InterestButton productId={productId} source="pdp" />
@@ -78,6 +76,20 @@ export default function PurchaseDock({
             </>
           )}
         </div>
+        {(showProofPreview || hasSamples) && (
+          <div className="mt-4 border-t border-[var(--ca-navy)]/10 pt-4">
+            <p className="text-sm text-[var(--ca-navy)]/60">Not sure yet? Preview actual pages before ordering.</p>
+            {showProofPreview ? (
+              <button type="button" className="ca-focus ns-proof-secondary mt-3" onClick={() => requestNotesSample()}>
+                Preview sample notes
+              </button>
+            ) : (
+              <button type="button" className="ca-focus ns-proof-secondary mt-3" onClick={scrollToSamples}>
+                View sample pages
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       {!showInterest && stuck && (

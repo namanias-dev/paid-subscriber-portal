@@ -4,14 +4,15 @@ import NotesReveal from "@/components/notes/NotesReveal";
 import { BenefitTicker, ResultsTicker } from "@/components/notes/NotesTicker";
 import SubjectRail from "@/components/notes/SubjectRail";
 import StudentVoices from "@/components/notes/StudentVoices";
-import SampleStory from "@/components/notes/SampleStory";
+import NotesProofSection from "@/components/notes/NotesProofSection";
+import { isNotesProofProduct, type NotesProofProduct } from "@/lib/store/notesProof";
 import ShippingStory from "@/components/notes/ShippingStory";
 import NotesClosingCta from "@/components/notes/NotesClosingCta";
 import NotesTeachingShowcase from "@/components/notes/NotesTeachingShowcase";
 import OfferLaunch from "@/components/notes/OfferLaunch";
 import TrackView from "@/components/notes/TrackView";
 import Link from "next/link";
-import { getProductBySlug, listStorefrontProducts } from "@/lib/store/catalogue";
+import { listStorefrontProducts } from "@/lib/store/catalogue";
 import { calculateStorePrice } from "@/lib/store/pricing";
 import { formatPaise } from "@/lib/store/money";
 import { notesProductPath } from "@/lib/store/paths";
@@ -36,7 +37,7 @@ const FAQS = [
   { q: "Are these the same notes taught in class?", a: "Yes. Printed from the current edition of Naman Sir's handwritten and curated notes. Editions are marked on each product." },
   { q: "Do you deliver all over India?", a: "Yes, prepaid, from Chandigarh. Enter your PIN on a product page for a concrete delivery date." },
   { q: "Is cash on delivery available?", a: "No. Every order is prepaid. It keeps the price down and the dispatch queue honest." },
-  { q: "Can I get a PDF instead?", a: "This store sells printed hard copies only. Sample pages on each product show the real inside pages." },
+  { q: "Can I get a PDF instead?", a: "This store sells printed hard copies only. You can preview real sample pages on this page before you order." },
   { q: "What if my shipment arrives damaged or incomplete?", a: "There are no general returns on printed notes. If a parcel arrives damaged, wrong, missing pages, or is lost in transit, contact support with your order number and we will make it right." },
 ];
 
@@ -46,8 +47,35 @@ export default async function NotesLanding() {
     listPreferenceSubjects(),
     getPublicActiveOffer(),
   ]);
-  const sampleSource = products[0] || null;
-  const sampleDetail = sampleSource ? await getProductBySlug(sampleSource.slug) : null;
+  const proofSource =
+    products.find((product) => isNotesProofProduct(product)) ||
+    products.find((product) => product.availability.purchasable) ||
+    products[0] ||
+    null;
+  const proofProduct: NotesProofProduct | null = proofSource
+    ? {
+        id: proofSource.id,
+        slug: proofSource.slug,
+        subject: proofSource.subject || proofSource.category_slug,
+        name: proofSource.short_name || proofSource.name,
+        priceLabel: formatPaise(
+          proofSource.availability.purchasable
+            ? calculateStorePrice(
+                {
+                  id: proofSource.id,
+                  kind: proofSource.kind,
+                  category_id: proofSource.category_id,
+                  selling_price_paise: proofSource.selling_price_paise,
+                },
+                1,
+                publicOffer,
+              ).final_paise
+            : proofSource.selling_price_paise,
+        ),
+        purchasable: proofSource.availability.purchasable,
+        statusLabel: proofSource.availability.label,
+      }
+    : null;
   const pricingOffer = publicOffer;
   const qualifier = products.map((p) => p.short_name || p.category_name || p.subject).filter(Boolean).join(" · ");
 
@@ -106,7 +134,7 @@ export default async function NotesLanding() {
 
       <div className="bg-[var(--ca-surface)] py-16">
         <NotesReveal>
-          <SampleStory product={sampleDetail} />
+          <NotesProofSection placement="landing" product={proofProduct} />
         </NotesReveal>
         <NotesReveal className="container-wide mt-16 grid gap-6 md:grid-cols-3">
           {WHY.map((w) => (

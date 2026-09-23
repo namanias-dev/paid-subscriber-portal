@@ -8,6 +8,8 @@ import ProductCard from "@/components/notes/ProductCard";
 import NotesSubjectStory from "@/components/notes/NotesSubjectStory";
 import PdpOfferChip from "@/components/notes/PdpOfferChip";
 import PurchaseDock from "@/components/notes/PurchaseDock";
+import NotesProofSection from "@/components/notes/NotesProofSection";
+import type { NotesProofProduct } from "@/lib/store/notesProof";
 import { listStorefrontProducts, type StoreProductDetail } from "@/lib/store/catalogue";
 import { formatPaise } from "@/lib/store/money";
 import { calculateStorePrice } from "@/lib/store/pricing";
@@ -170,6 +172,7 @@ export default async function NotesPdp({
               purchasable={purchasable}
               showInterest={showInterest}
               hasSamples={p.samples.length > 0}
+              showProofPreview
             />
           </div>
           <div className="mt-6">
@@ -180,6 +183,21 @@ export default async function NotesPdp({
 
       <div className="mt-12 max-w-3xl">
         {story ? <NotesSubjectStory story={story} /> : null}
+      </div>
+
+      <div className="mt-12">
+        <NotesProofSection
+          placement="pdp"
+          product={{
+            id: p.id,
+            slug: p.slug,
+            subject: p.subject || p.category_slug,
+            name: p.short_name || title,
+            priceLabel: formatPaise(priced.final_paise),
+            purchasable,
+            statusLabel: av.label,
+          } satisfies NotesProofProduct}
+        />
       </div>
 
       <div className="mt-10 max-w-3xl">

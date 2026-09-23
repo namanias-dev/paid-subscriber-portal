@@ -10,12 +10,14 @@ export default function AddToCartButton({
   buyNow = false,
   disabled = false,
   compact = false,
+  onIntent,
 }: {
   productId: string;
   label?: string;
   buyNow?: boolean;
   disabled?: boolean;
   compact?: boolean;
+  onIntent?: () => void;
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
@@ -24,6 +26,7 @@ export default function AddToCartButton({
 
   async function onClick() {
     if (busy || disabled) return;
+    onIntent?.();
     setBusy(true);
     setMsg(null);
     setTone(null);
