@@ -109,6 +109,24 @@ export function istNowParts(d = new Date()): {
   };
 }
 
+/** Date and clock for the executive brief, in Asia/Kolkata. */
+export function istBriefStamp(d = new Date()): { dateLabel: string; timeLabel: string } {
+  const dateLabel = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Kolkata",
+    day: "numeric",
+    month: "long",
+  }).format(d);
+  const timeLabel = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Kolkata",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  })
+    .format(d)
+    .replace(/\s*([ap])m\s*$/i, (_, ap) => ` ${String(ap).toUpperCase()}M`);
+  return { dateLabel, timeLabel };
+}
+
 export function formatIstShort(iso: string | Date): string {
   const d = typeof iso === "string" ? new Date(iso) : iso;
   if (!Number.isFinite(d.getTime())) return "—";
