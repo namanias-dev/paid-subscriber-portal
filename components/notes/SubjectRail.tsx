@@ -78,7 +78,7 @@ export default function SubjectRail({
                   ) : null}
                 </div>
                 <div className="pointer-events-none px-7 py-4">
-                  <NotebookStack title={title} subject={title} />
+                  <NotebookStack coverUrl={product.cover_url} title={title} subject={title} />
                 </div>
                 <div className="px-4 pb-4">
                   {available && priced ? (

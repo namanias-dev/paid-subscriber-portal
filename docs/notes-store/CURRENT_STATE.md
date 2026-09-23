@@ -104,6 +104,7 @@ Automated-verified only (tsc + isolation guard + 53/53 store tests + `next build
 | Cinematic notebook hero + Student Voices | BUILT AND AUTOMATED-VERIFIED | Real product PNG hero; compact preference-set poll after Shop by Subject; admin Notes Demand / co-selection |
 | Commerce upgrade: premium subject cards, ₹2,999 base, admin-controlled Launch Offer | BUILT | `store_offers` + hold/consume RPCs; `calculateStorePrice` is the quote/cart/checkout/Eazypay source of truth; bundles merchandising hidden via `notes_store_bundles` |
 | See before you buy (sample reader + physical-copy video) | BUILT | Config in `lib/store/notesProof.ts`. Pages are public WebP derivatives under `media/store/samples/`. Physical video is `media/store/videos/physical-notes/`. Admin sample upload is unchanged. |
+| Landing subject card uses the admin product cover | BUILT | `SubjectRail` passes `cover_url` into `NotebookStack`. Same `cover_image_key` as the PDP. No second upload. |
 
 ## External blockers preventing a browsable-by-owner preview (owner action)
 

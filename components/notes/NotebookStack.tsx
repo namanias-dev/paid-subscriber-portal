@@ -1,18 +1,29 @@
+"use client";
+
+import { useState } from "react";
 import Image from "next/image";
 
 /**
- * Physical notes composition for the landing hero. Real cover when present;
- * otherwise a premium stacked-booklet fallback. No WebGL.
+ * Physical notes composition. A real product cover sits inside the notebook
+ * face when `coverUrl` is present. The admin cover is 4:3, so it is contained
+ * (never stretched, never edge-cropped) on the 4:5 notebook. Missing or broken
+ * covers keep the navy booklet fallback.
  */
 export default function NotebookStack({
   coverUrl,
   title,
   subject,
+  eager = false,
 }: {
   coverUrl?: string | null;
   title?: string | null;
   subject?: string | null;
+  /** Above-the-fold callers may opt into eager loading. Landing cards stay lazy. */
+  eager?: boolean;
 }) {
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
+  const showCover = Boolean(coverUrl) && failedUrl !== coverUrl;
+
   return (
     <div className="relative mx-auto aspect-[4/5] w-full max-w-[280px] sm:max-w-[320px]" aria-hidden={false}>
       <div className="absolute inset-x-[18%] bottom-1 h-6 rounded-[50%] bg-[rgba(10,26,63,0.28)] blur-xl" aria-hidden="true" />
@@ -20,9 +31,21 @@ export default function NotebookStack({
       <div className="absolute left-[18%] top-[7%] h-[80%] w-[72%] rotate-[-4deg] rounded-[14px] bg-white ns-elev-2" aria-hidden="true">
         <div className="absolute inset-y-4 left-0 w-1.5 bg-gradient-to-b from-[var(--ca-gold-soft)] via-[var(--ca-gold)] to-[var(--ca-gold-dark)]" />
       </div>
-      <div className="relative h-full w-full overflow-hidden rounded-[18px] bg-gradient-to-br from-[var(--ca-navy-900)] to-[var(--ca-navy-600)] ns-elev-5">
-        {coverUrl ? (
-          <Image src={coverUrl} alt={title || "UPSC notes"} fill sizes="(max-width: 640px) 70vw, 320px" className="object-cover" priority />
+      <div
+        className={`relative h-full w-full overflow-hidden rounded-[18px] ns-elev-5 ${
+          showCover ? "bg-[#f4efe4]" : "bg-gradient-to-br from-[var(--ca-navy-900)] to-[var(--ca-navy-600)]"
+        }`}
+      >
+        {showCover && coverUrl ? (
+          <Image
+            src={coverUrl}
+            alt={title || "UPSC notes"}
+            fill
+            sizes="(max-width: 640px) 70vw, 320px"
+            className="object-contain"
+            priority={eager}
+            onError={() => setFailedUrl(coverUrl)}
+          />
         ) : (
           <div className="flex h-full flex-col justify-between p-6">
             <div>
@@ -36,9 +59,9 @@ export default function NotebookStack({
           </div>
         )}
         <div className="pointer-events-none absolute inset-y-0 left-0 w-2 bg-gradient-to-r from-[var(--ca-gold)] to-transparent opacity-80" aria-hidden="true" />
-        <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/35 via-transparent to-white/5" aria-hidden="true" />
+        {!showCover && <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/35 via-transparent to-white/5" aria-hidden="true" />}
       </div>
-      {subject && (
+      {subject && !showCover && (
         <span className="absolute -right-1 top-8 rounded-full bg-white px-3 py-1 text-[11px] font-bold text-[var(--ca-navy)] ns-elev-2">
           {subject}
         </span>
