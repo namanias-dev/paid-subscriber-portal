@@ -35,6 +35,10 @@ PROVIDERS = {
 
 RESET_RE = re.compile(r"password reset|reset your password|forgot password", re.I)
 ANY_SIX_RE = re.compile(r"(?<!\d)(\d{6})(?!\d)")
+LABELED_OTP_RE = re.compile(
+    r"(?:otp|verification code|login code|security code|one[- ]time(?: code| password)?)\s*(?:is|:)\s*(\d{6})",
+    re.I,
+)
 
 
 def parse_after(value: str) -> datetime:
@@ -55,6 +59,11 @@ def from_domain(from_header: str) -> str:
     if "@" not in addr:
         return ""
     return addr.rsplit("@", 1)[1].lower().strip()
+
+
+def domain_matches(domain: str, domains: set[str]) -> bool:
+    host = domain.lower().strip().rstrip(".")
+    return any(host == item or host.endswith("." + item) for item in domains)
 
 
 def auth_results_ok(headers: dict[str, str], domains: set[str]) -> bool:
@@ -86,6 +95,11 @@ def extract_otp(subject: str, body: str) -> str | None:
     if RESET_RE.search(hay):
         return None
     if not re.search(r"otp|verification|login code|security code|one[- ]time", hay, re.I):
+        return None
+    labeled = list(dict.fromkeys(LABELED_OTP_RE.findall(hay)))
+    if len(labeled) == 1:
+        return labeled[0]
+    if len(labeled) > 1:
         return None
     codes = list(dict.fromkeys(ANY_SIX_RE.findall(hay)))
     if len(codes) != 1:
@@ -160,7 +174,7 @@ def get_shipping_otp(*, provider: str, requested_after: datetime, service=None) 
         )
         headers = header_map(msg.get("payload") or {})
         domain = from_domain(headers.get("from", ""))
-        if domain not in domains:
+        if not domain_matches(domain, domains):
             continue
         if not auth_results_ok(headers, domains):
             continue
@@ -187,8 +201,8 @@ def get_shipping_otp(*, provider: str, requested_after: datetime, service=None) 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Find a shipping-login OTP without printing it.")
-    parser.add_argument("--provider", required=True, choices=sorted(PROVIDERS))
-    parser.add_argument("--after", required=True, help="ISO timestamp. Only newer mail is eligible.")
+    parser.add_argument("--provider", choices=sorted(PROVIDERS))
+    parser.add_argument("--after", help="ISO timestamp. Only newer mail is eligible.")
     parser.add_argument("--handoff", help="Write the code to this file (mode 600) for the login script. The file is not a log.")
     parser.add_argument("--check", action="store_true", help="Verify OAuth and print the mailbox address only.")
     args = parser.parse_args()
@@ -197,6 +211,8 @@ def main() -> int:
     if args.check:
         print(verify_profile(service) or "NO PROFILE")
         return 0
+    if not args.provider or not args.after:
+        parser.error("--provider and --after are required unless --check")
     result = get_shipping_otp(provider=args.provider, requested_after=parse_after(args.after), service=service)
     if not result["found"] or not result["otp"]:
         print("NO MATCHING AUTHENTICATION EMAIL")

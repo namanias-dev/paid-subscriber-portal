@@ -16,12 +16,12 @@ Guest checkout, Eazypay, order numbers (`NIASN-N-`), inventory reservation, admi
 ## Verified without creating a shipment
 
 - Delhivery production token: PIN `160017` is prepaid, COD, and pickup-capable. An 800 g prepaid quote from `160017` to `110001` returned Surface zone B at 8780 paise and Express zone B at 9016 paise. The charge API does not return an ETA. Staging rejected this token. Warehouse list URLs returned 404, so the Chandigarh warehouse id is not confirmed.
-- Shiprocket external `POST /auth/login` on `apiv2.shiprocket.in` returned 403 Access forbidden for the panel email. That login is not an API user. The panel (`apiv2.shiprocket.co`) requires email OTP. No API user, pickup id, or wallet figure was read.
-- No label, AWB, or pickup was created.
+- Shiprocket external `POST /auth/login` on `apiv2.shiprocket.in` returned 403 Access forbidden for the panel email. That login is not an API user. The panel has one API user on a different mailbox, and that user is inactive. New API users must use an email that is not the registered panel email.
+- The panel pickup nickname is `work`, id `117035417`, PIN `160017`, primary, and the return address uses the same id. The panel webhook is disabled. No label, AWB, or pickup was created.
 
 ## Gmail OTP helper
 
-`scripts/local/shipping-gmail-otp/` is a local read-only Gmail client (`gmail.readonly` only). It is not imported by the site. No Google OAuth client exists in this environment, so the helper is not authorized yet. Portal login is paused until that client is saved as `client_secret.json` and `auth_setup.py` completes.
+`scripts/local/shipping-gmail-otp/` is a local read-only Gmail client (`gmail.readonly` only). It is not imported by the site. The Desktop client and token stay in gitignored files on the machine that runs the helper. They are not deployed.
 
 ## Not built
 

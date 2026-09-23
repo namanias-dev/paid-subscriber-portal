@@ -1,13 +1,18 @@
 import unittest
 from datetime import datetime, timezone
 
-from otp_helper import auth_results_ok, extract_otp, from_domain, parse_after
+from otp_helper import auth_results_ok, domain_matches, extract_otp, from_domain, parse_after
 
 
 class ParseTests(unittest.TestCase):
     def test_from_domain_ignores_display_name(self):
         self.assertEqual(from_domain("Shiprocket <no-reply@shiprocket.com>"), "shiprocket.com")
         self.assertEqual(from_domain("Shiprocket <evil@example.com>"), "example.com")
+
+    def test_subdomain_of_provider_is_accepted(self):
+        domains = {"shiprocket.com", "shiprocket.in", "shiprocket.co"}
+        self.assertTrue(domain_matches("net.shiprocket.in", domains))
+        self.assertFalse(domain_matches("shiprocket.in.evil.com", domains))
 
     def test_auth_results_require_pass_and_domain(self):
         domains = {"shiprocket.com"}
@@ -19,6 +24,10 @@ class ParseTests(unittest.TestCase):
         self.assertEqual(extract_otp("Your OTP", "Your OTP is 123456"), "123456")
         self.assertIsNone(extract_otp("Reset your password", "code 123456"))
         self.assertIsNone(extract_otp("OTP", "123456 and 654321"))
+        self.assertEqual(
+            extract_otp("OTP for your Shiprocket account", "OTP : 123456 Gurugram, Haryana, 122001, India"),
+            "123456",
+        )
 
     def test_after_parses_zulu(self):
         when = parse_after("2026-09-23T17:40:00Z")

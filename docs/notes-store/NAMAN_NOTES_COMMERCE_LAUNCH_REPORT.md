@@ -1,41 +1,54 @@
 # Naman IAS Notes Store — commerce launch report
 
-No secrets are included.
+No secrets are included. No courier shipment, label, pickup, refund, or cancellation was created.
 
 ## Gmail
 
 | Item | Status |
 | --- | --- |
-| OAuth configured | BLOCKED |
-| Read-only scope in the helper | READY |
-| Helper tested | READY (parser only) |
-| Inbox untouched | READY |
-| Provider sender checks | READY in code, not verified against a live mailbox |
+| OAuth configured | READY (local helper only) |
+| Read-only scope | READY — `https://www.googleapis.com/auth/gmail.readonly` |
+| Mailbox check | READY — `namanstudycircle@gmail.com` |
+| Live Shiprocket OTP read | READY — one login code, not printed |
+| Inbox mutation | READY — messages were not marked read or changed |
 
-Google Cloud Console is open on the agent desktop at the Google sign-in page. There is no existing OAuth client on this machine. The helper at `scripts/local/shipping-gmail-otp/` is gitignored for `client_secret.json` and `token.json`. It was not authorized, and it has not read any mail.
+The Desktop client lives on Google Cloud project `namaniasacademy`. The app is External, Testing, with that mailbox as the only test user. `client_secret.json` and `token.json` stay next to `scripts/local/shipping-gmail-otp/` and are gitignored. They are not Vercel env vars.
+
+The helper accepts mail from `net.shiprocket.in` and reads the code next to the OTP label, so a pincode in the footer is not treated as the code.
 
 ## Shiprocket
 
 | Item | Status |
 | --- | --- |
-| Portal access | BLOCKED (email OTP; not retried) |
-| API authentication | BLOCKED (panel email returns 403 on the external API) |
-| Pickup location | BLOCKED |
-| Live rates | BLOCKED |
-| Shipment / label / pickup code | NOT BUILT as a live call |
-| Tracking webhook | PARTIAL (receiver exists; panel webhook not set) |
+| Portal access | READY — one login, session only in the agent browser |
+| API authentication | BLOCKED |
+| Pickup location | READY — nickname `work`, id `117035417`, PIN `160017`, primary, verified |
+| Return address | READY — same pickup id |
+| Live rates | BLOCKED until an active API user exists |
+| Shipment / label / pickup | NOT BUILT as a live call |
+| Tracking webhook | PARTIAL — receiver exists; panel webhook is DISABLED |
+
+Account facts from the panel, with no credentials:
+
+- Company id `11671821`, Lite plan, not expired, KYC completed, GST verified
+- Panel header wallet balance ₹1,000
+- Pickup: Sco 173-174, Second Floor, Sector 17 C, Chandigarh, Chandigarh, 160017
+- One API user exists, on a different Gmail address, and the panel shows it INACTIVE
+- A new API user must use an email that is not the registered panel email, so the academy Gmail cannot be the API login
+- External `/auth/login` with the panel email still returns 403 because that login is not an API user
+- Webhooks are disabled. No URL or token was saved
 
 ## Delhivery
 
 | Item | Status |
 | --- | --- |
 | API authentication | READY for read-only PIN and charge quotes |
-| Pickup warehouse id | BLOCKED (list endpoints returned 404) |
+| Pickup warehouse id | BLOCKED |
 | Live rates | READY as a quote, not a booked shipment |
 | Shipment / label / pickup call | NOT BUILT |
 | Tracking webhook | PARTIAL |
 
-One read-only quote from PIN 160017 to 110001 at 800 g returned Surface ₹87.80 and Express ₹90.16. That figure is not a rate card.
+Warehouse list URLs still return 404. The create-warehouse path answers 405 to GET and was not called. The Delhivery website was not opened. One earlier read-only quote from PIN 160017 to 110001 at 800 g returned Surface ₹87.80 and Express ₹90.16. That figure is not a rate card.
 
 ## Notes Store
 
@@ -57,13 +70,12 @@ Mark shipped still requires a courier and AWB typed by staff. An AWB is not trea
 ## Deployment
 
 - Branch `cursor/notes-store-shipping-d465`
-- Pull request https://github.com/namanias-dev/paid-subscriber-portal/pull/110
-- Previous production commit on master: `59317e7` before this continuation
+- Master before this Gmail continuation: `5eb1b3c`
 - Feature flags: `notes_store_shiprocket` does not book a courier. `NOTES_STORE_SHIPPING_WRITES` and `NOTES_STORE_SHIPPING_WRITE_CONFIRM` stay unset.
+- Production env names still required for live quotes: `DELHIVERY_API_TOKEN`, `NOTES_STORE_PICKUP_POSTCODE`. Later, an API-user email and password that are not the panel login, plus `SHIPROCKET_PICKUP_LOCATION` (`work`) and `DELHIVERY_PICKUP_LOCATION` once the warehouse name is known.
 
 ## Remaining blockers
 
-1. Google sign-in on the agent desktop, then the Desktop OAuth client, then one Shiprocket login.
-2. A Shiprocket API user. The panel email is not one.
-3. Delhivery warehouse name.
-4. Explicit authorization before any billable label or pickup.
+1. An active Shiprocket API user on an academy mailbox that is not `namanstudycircle@gmail.com`.
+2. Delhivery warehouse name.
+3. Explicit authorization before any billable label or pickup.
