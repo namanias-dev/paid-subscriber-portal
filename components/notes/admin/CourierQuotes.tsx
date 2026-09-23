@@ -10,6 +10,7 @@ interface Quote {
   ratePaise: number;
   etaText: string | null;
   etaDays: number | null;
+  codSupported?: boolean;
 }
 
 interface ProviderResult {
@@ -200,7 +201,8 @@ export default function CourierQuotes({
                     {quote.service && quote.service !== quote.courier ? ` · ${quote.service}` : ""}
                   </span>
                   <span className="tabular-nums">{formatPaise(quote.ratePaise)}</span>
-                  <span className="text-ink2">{quote.etaText || quote.etaDays != null ? quote.etaText || `${quote.etaDays} days` : "ETA not returned"}</span>
+                  <span className="text-ink2">{quote.etaText || (quote.etaDays != null ? `${quote.etaDays} days` : "ETA not returned")}</span>
+                  <span className="text-ink2">{quote.codSupported ? "COD available" : "Prepaid"}</span>
                   {lowest && <span className="rounded-full bg-surface px-2 py-0.5 text-[11px] font-semibold text-ink">Lowest quote</span>}
                   <button
                     type="button"

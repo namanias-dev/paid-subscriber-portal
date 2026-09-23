@@ -88,6 +88,52 @@ export function resetShiprocketTokenCache(): void {
   tokenCache = null;
 }
 
+/**
+ * Adhoc order body. The pickup field is the nickname (`work`), never the
+ * numeric pickup id. This object is not posted.
+ */
+export function shiprocketAdhocDraft(input: {
+  pickupLocation: string;
+  orderNumber: string;
+  name: string;
+  address: string;
+  pin: string;
+  city: string;
+  state: string;
+  phone: string;
+  product: string;
+  amountRupees: number;
+  weightKg: number;
+  lengthCm: number;
+  widthCm: number;
+  heightCm: number;
+}): Record<string, unknown> {
+  const pickup = input.pickupLocation.trim();
+  if (!pickup || /^\d+$/.test(pickup)) {
+    throw new Error("Shiprocket pickup_location must be the pickup nickname, not the numeric address id.");
+  }
+  return {
+    order_id: input.orderNumber,
+    order_date: "",
+    pickup_location: pickup,
+    billing_customer_name: input.name,
+    billing_address: input.address,
+    billing_city: input.city,
+    billing_pincode: input.pin,
+    billing_state: input.state,
+    billing_country: "India",
+    billing_phone: input.phone,
+    shipping_is_billing: true,
+    order_items: [{ name: input.product, sku: input.orderNumber, units: 1, selling_price: input.amountRupees }],
+    payment_method: "Prepaid",
+    sub_total: input.amountRupees,
+    length: input.lengthCm,
+    breadth: input.widthCm,
+    height: input.heightCm,
+    weight: input.weightKg,
+  };
+}
+
 export async function quoteShiprocket(
   input: RateRequest,
   opts: { fetchImpl?: FetchLike; env?: NodeJS.ProcessEnv } = {},

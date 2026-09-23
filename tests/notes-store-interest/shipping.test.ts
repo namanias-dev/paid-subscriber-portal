@@ -2,11 +2,11 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, test } from "node:test";
 import { compareCourierRates } from "../../lib/store/shipping/compare";
-import { pickupPostcode, shippingWritesAuthorized } from "../../lib/store/shipping/config";
-import { parseDelhiveryCharge, parseDelhiveryPincode } from "../../lib/store/shipping/delhiveryApi";
-import { canRequestSupport, delhiveryCreateBody, dispatchBlocked, refundRequestPaise, shipmentAlreadyActive } from "../../lib/store/shipping/dispatch";
+import { delhiveryPickupLocation, pickupPostcode, shippingWritesAuthorized, shiprocketPickupLocation } from "../../lib/store/shipping/config";
+import { delhiveryPackingSlipPath, parseDelhiveryCharge, parseDelhiveryPincode } from "../../lib/store/shipping/delhiveryApi";
+import { canRequestSupport, delhiveryCreateBody, dispatchBlocked, fulfilmentAttention, refundRequestPaise, shipmentAlreadyActive } from "../../lib/store/shipping/dispatch";
 import { rupeesToPaise } from "../../lib/store/shipping/quotes";
-import { parseShiprocketQuotes } from "../../lib/store/shipping/shiprocketApi";
+import { parseShiprocketQuotes, shiprocketAdhocDraft } from "../../lib/store/shipping/shiprocketApi";
 import { canAdvanceOrder, canAdvanceShipment, normalizeCourierStatus } from "../../lib/store/shipping/status";
 import { parseCourierWebhook, webhookAuthorized } from "../../lib/store/shipping/webhook";
 
@@ -135,7 +135,7 @@ describe("dispatch and support gates", () => {
     assert.deepEqual(refundRequestPaise(1000, 200, 900), { error: "Refund is larger than the amount still available." });
     assert.deepEqual(refundRequestPaise(1000, 200, 800), { amount: 800 });
     const body = delhiveryCreateBody({
-      pickupName: "Academy",
+      pickupName: "NAMAN SHARMA IAS ACADEMY",
       orderNo: "NIASN-N-1",
       name: "A",
       address: "Line",
@@ -151,7 +151,49 @@ describe("dispatch and support gates", () => {
       heightCm: 3,
     });
     assert.match(body, /^format=json&data=/);
+    assert.match(decodeURIComponent(body), /"name":"NAMAN SHARMA IAS ACADEMY"/);
     assert.equal(body.includes("cmu/create"), false);
+    assert.equal(delhiveryPackingSlipPath("AWB1").includes("cmu/create"), false);
+    assert.match(delhiveryPackingSlipPath("AWB1"), /packing_slip/);
+    assert.equal(delhiveryPickupLocation({ DELHIVERY_PICKUP_LOCATION: "NAMAN SHARMA IAS ACADEMY" }), "NAMAN SHARMA IAS ACADEMY");
+    assert.equal(shiprocketPickupLocation({ SHIPROCKET_PICKUP_LOCATION: "work" }), "work");
+    const draft = shiprocketAdhocDraft({
+      pickupLocation: "work",
+      orderNumber: "NIASN-N-1",
+      name: "A",
+      address: "Line",
+      pin: "110001",
+      city: "Delhi",
+      state: "Delhi",
+      phone: "9999999999",
+      product: "Polity",
+      amountRupees: 100,
+      weightKg: 0.8,
+      lengthCm: 30,
+      widthCm: 22,
+      heightCm: 3,
+    });
+    assert.equal(draft.pickup_location, "work");
+    assert.throws(() =>
+      shiprocketAdhocDraft({
+        pickupLocation: "117035417",
+        orderNumber: "NIASN-N-1",
+        name: "A",
+        address: "Line",
+        pin: "110001",
+        city: "Delhi",
+        state: "Delhi",
+        phone: "9999999999",
+        product: "Polity",
+        amountRupees: 100,
+        weightKg: 0.8,
+        lengthCm: 30,
+        widthCm: 22,
+        heightCm: 3,
+      }),
+    );
+    assert.deepEqual(fulfilmentAttention({ orderStatus: "READY_FOR_PICKUP", awb: "AWB1", hasLabel: false }), ["label_missing"]);
+    assert.deepEqual(fulfilmentAttention({ orderStatus: "PICKED_UP", awb: "AWB1", hasLabel: true }), []);
   });
 });
 

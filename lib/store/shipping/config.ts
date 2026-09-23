@@ -19,11 +19,31 @@ export function delhiveryBaseUrl(env: NodeJS.ProcessEnv = process.env): string {
   return (env.DELHIVERY_API_BASE_URL || "https://track.delhivery.com").replace(/\/+$/, "");
 }
 
+/**
+ * API-user login. Prefer `SHIPROCKET_API_EMAIL` / `SHIPROCKET_API_PASSWORD`.
+ * The panel mailbox cannot be this user. The older `SHIPROCKET_EMAIL` pair
+ * remains as a fallback for tests and hosts that already named it that way.
+ */
 export function shiprocketCredentials(env: NodeJS.ProcessEnv = process.env): { email: string; password: string } | null {
-  const email = (env.SHIPROCKET_EMAIL || "").trim();
-  const password = (env.SHIPROCKET_PASSWORD || "").trim();
+  const email = (env.SHIPROCKET_API_EMAIL || env.SHIPROCKET_EMAIL || "").trim();
+  const password = (env.SHIPROCKET_API_PASSWORD || env.SHIPROCKET_PASSWORD || "").trim();
   if (!email || !password) return null;
   return { email, password };
+}
+
+/** Shiprocket create-order field. This is the pickup nickname, not the numeric address id. */
+export function shiprocketPickupLocation(env: NodeJS.ProcessEnv = process.env): string | null {
+  const name = (env.SHIPROCKET_PICKUP_LOCATION || "").trim();
+  return name || null;
+}
+
+/**
+ * Delhivery `pickup_location.name`. Case-sensitive facility name from Delhivery One.
+ * A warehouse UUID is not accepted in that field.
+ */
+export function delhiveryPickupLocation(env: NodeJS.ProcessEnv = process.env): string | null {
+  const name = (env.DELHIVERY_PICKUP_LOCATION || "").trim();
+  return name || null;
 }
 
 export function delhiveryToken(env: NodeJS.ProcessEnv = process.env): string | null {

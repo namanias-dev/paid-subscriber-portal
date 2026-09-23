@@ -33,10 +33,15 @@ export interface DelhiveryShipmentDraft {
   heightCm: number;
 }
 
-/** Delhivery CMU body. Not sent unless dispatchBlocked() is null. */
+/**
+ * Delhivery CMU body. Not sent by any route.
+ * `pickup_location.name` must match the Facility Name in Delhivery One exactly.
+ */
 export function delhiveryCreateBody(draft: DelhiveryShipmentDraft): string {
+  const pickupName = draft.pickupName.trim();
+  if (!pickupName) throw new Error("Delhivery pickup location name is not set.");
   const payload = {
-    pickup_location: { name: draft.pickupName },
+    pickup_location: { name: pickupName },
     shipments: [
       {
         name: draft.name,
@@ -77,6 +82,25 @@ export function supportReasonAllowed(reason: string): boolean {
 
 export function canRequestSupport(status: string): boolean {
   return status === "DELIVERED" || status === "DELIVERY_FAILED";
+}
+
+/** Reasons an order needs a person. A generated AWB or label is not one of them. */
+export function fulfilmentAttention(input: {
+  orderStatus: string;
+  awb?: string | null;
+  hasLabel?: boolean;
+}): string[] {
+  const reasons: string[] = [];
+  const status = input.orderStatus;
+  if (status === "DELIVERY_FAILED") reasons.push("delivery_failed");
+  if (status === "RTO_INITIATED" || status === "RTO_IN_TRANSIT" || status === "RTO_DELIVERED") reasons.push("rto");
+  if (status.startsWith("RETURN_")) reasons.push("return");
+  if (status === "REFUND_PENDING") reasons.push("refund_pending");
+  if ((status === "PACKED" || status === "READY_FOR_PICKUP") && !input.awb) reasons.push("awb_missing");
+  if (input.awb && input.hasLabel === false && (status === "READY_FOR_PICKUP" || status === "PICKUP_SCHEDULED")) {
+    reasons.push("label_missing");
+  }
+  return reasons;
 }
 
 export function refundRequestPaise(totalPaise: number, alreadyPaise: number, askedPaise: number): { amount: number } | { error: string } {

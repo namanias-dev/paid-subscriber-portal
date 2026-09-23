@@ -64,6 +64,13 @@ async function getJson(fetchImpl: FetchLike, url: string, token: string): Promis
   return { ok: res.ok, status: res.status, body };
 }
 
+/** Packing slip for an AWB that already exists. This path does not create a shipment. */
+export function delhiveryPackingSlipPath(awb: string): string {
+  const code = awb.trim();
+  if (!/^[A-Za-z0-9]+$/.test(code)) throw new Error("AWB is missing.");
+  return `/api/p/packing_slip?wbns=${encodeURIComponent(code)}`;
+}
+
 export async function quoteDelhivery(
   input: RateRequest,
   opts: { fetchImpl?: FetchLike; env?: NodeJS.ProcessEnv } = {},

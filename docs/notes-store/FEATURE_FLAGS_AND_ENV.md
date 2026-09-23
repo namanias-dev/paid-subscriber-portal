@@ -64,10 +64,12 @@
 | Name | Purpose |
 |------|---------|
 | `NOTES_STORE_PICKUP_POSTCODE` | Chandigarh pickup PIN used for live quotes. 6 digits, no leading zero. |
-| `SHIPROCKET_EMAIL` | Shiprocket **API user** email. The panel login is not accepted by `/auth/login`. |
-| `SHIPROCKET_PASSWORD` | Shiprocket API user password. |
+| `SHIPROCKET_API_EMAIL` | Shiprocket API-user email. Must not be the panel login. `SHIPROCKET_EMAIL` is the fallback name. |
+| `SHIPROCKET_API_PASSWORD` | Shiprocket API-user password. `SHIPROCKET_PASSWORD` is the fallback name. |
+| `SHIPROCKET_PICKUP_LOCATION` | Pickup nickname sent as `pickup_location`. Verified nickname is `work`. Do not send the numeric id `117035417`. |
 | `SHIPROCKET_API_BASE_URL` | Optional. Default `https://apiv2.shiprocket.in/v1/external`. |
 | `DELHIVERY_API_TOKEN` | Delhivery One token. Sent as `Authorization: Token`. |
+| `DELHIVERY_PICKUP_LOCATION` | Case-sensitive Facility Name for `pickup_location.name`. Verified value is `NAMAN SHARMA IAS ACADEMY`. |
 | `DELHIVERY_API_BASE_URL` | Optional. Default `https://track.delhivery.com`. Staging host is `https://staging-express.delhivery.com` and uses a different token. |
 | `NOTES_STORE_COURIER_WEBHOOK_KEY` | Shared secret for `POST /api/notes/courier/events`, checked against `x-api-key`. The path deliberately avoids the words Shiprocket forbids in a webhook URL. |
 | `NOTES_STORE_SHIPPING_WRITES` | Must be `1` before any future billable call. No route creates a shipment today. |
