@@ -59,7 +59,7 @@ Production and preview now have `NOTES_STORE_PICKUP_POSTCODE`, `DELHIVERY_PICKUP
 - `NOTES_STORE_SHIPPING_WRITES` and `NOTES_STORE_SHIPPING_WRITE_CONFIRM` stay unset.
 - `SHIPROCKET_API_EMAIL` and `SHIPROCKET_API_PASSWORD` stay unset until the new API user exists and a read-only login succeeds.
 - A live Delhivery quote from `160017` to `110001` at 800 g prepaid returned two normalized rates (Surface and Express, zone B). The amounts are not a rate card. Shiprocket was not called.
-- Provider webhook panels were not enabled. The receiver rejects a missing key once this deploy is live.
+- A missing or wrong courier callback key returns 401 on production. Provider panels were not turned on.
 - The first real Polity checkout was not placed. Stop remains before any billable create-shipment.
 
 ## Remaining blocker
