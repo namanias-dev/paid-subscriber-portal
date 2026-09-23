@@ -40,4 +40,4 @@ No secrets are included. No courier shipment, label, pickup, refund, or cancella
 
 ## Deployment
 
-Master is `07f8744daafd`. The running production build is `6e536164c320` because the later commit is the launch report only. `NOTES_STORE_SHIPPING_WRITES` and `NOTES_STORE_SHIPPING_WRITE_CONFIRM` stay unset. The remaining production action is an explicit authorization for the first real shipment.
+Production build is `eab13e6ccd50`. `NOTES_STORE_SHIPPING_WRITES` and `NOTES_STORE_SHIPPING_WRITE_CONFIRM` stay unset. The remaining production action is an explicit authorization for the first real shipment.
