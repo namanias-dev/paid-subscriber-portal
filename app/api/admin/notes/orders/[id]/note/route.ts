@@ -7,7 +7,11 @@ export const dynamic = "force-dynamic";
 const EXCEPTION_TYPES = new Set([
   "damaged",
   "wrong_item",
+  "wrong_subject",
   "missing_item",
+  "incomplete_pages",
+  "print_defect",
+  "delivery_problem",
   "lost_in_transit",
   "duplicate_order",
 ]);

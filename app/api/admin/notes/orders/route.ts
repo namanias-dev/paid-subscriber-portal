@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requirePermission } from "@/lib/adminGuard";
 import { storeDb } from "@/lib/store/db";
+import { fulfilmentAttention } from "@/lib/store/shipping/dispatch";
 
 export const dynamic = "force-dynamic";
 
@@ -105,7 +106,18 @@ export async function GET(req: Request) {
   }
 
   const itemsByOrder = new Map<string, Array<{ name: string; qty: number; sku: string }>>();
-  const shipByOrder = new Map<string, { courier: string | null; awb: string | null; tracking_url: string | null }>();
+  const shipByOrder = new Map<
+    string,
+    {
+      courier: string | null;
+      awb: string | null;
+      tracking_url: string | null;
+      provider: string | null;
+      status: string | null;
+      has_label: boolean;
+      pickup_scheduled_at: string | null;
+    }
+  >();
   const payByOrder = new Map<string, string>();
   if (ids.length) {
     const { data: itemRows } = await db
@@ -119,12 +131,21 @@ export async function GET(req: Request) {
     }
     const { data: shipRows } = await db
       .from("store_shipments")
-      .select("order_id,courier_name,awb,tracking_url,created_at")
+      .select("order_id,courier_name,awb,tracking_url,provider,status,label_r2_key,provider_payload,pickup_scheduled_at,created_at")
       .in("order_id", ids)
       .order("created_at", { ascending: false });
     for (const s of shipRows || []) {
       if (!shipByOrder.has(s.order_id)) {
-        shipByOrder.set(s.order_id, { courier: s.courier_name, awb: s.awb, tracking_url: s.tracking_url });
+        const payload = (s.provider_payload && typeof s.provider_payload === "object" ? s.provider_payload : {}) as { label_url?: string };
+        shipByOrder.set(s.order_id, {
+          courier: s.courier_name,
+          awb: s.awb,
+          tracking_url: s.tracking_url,
+          provider: s.provider,
+          status: s.status,
+          has_label: Boolean(s.label_r2_key || payload.label_url),
+          pickup_scheduled_at: s.pickup_scheduled_at,
+        });
       }
     }
     const { data: payRows } = await db
@@ -148,6 +169,11 @@ export async function GET(req: Request) {
         address: o.shipping_address_id ? addrMap.get(o.shipping_address_id) || null : null,
         items: itemsByOrder.get(o.id) || [],
         shipment: shipByOrder.get(o.id) || null,
+        attention: fulfilmentAttention({
+          orderStatus: o.status,
+          awb: shipByOrder.get(o.id)?.awb,
+          hasLabel: shipByOrder.get(o.id)?.has_label,
+        }),
         payment_status: payByOrder.get(o.id) || null,
       })),
     },

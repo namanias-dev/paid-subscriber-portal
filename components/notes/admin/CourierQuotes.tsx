@@ -11,6 +11,7 @@ interface Quote {
   etaText: string | null;
   etaDays: number | null;
   codSupported?: boolean;
+  courierId?: string | null;
 }
 
 interface ProviderResult {
@@ -45,6 +46,7 @@ export default function CourierQuotes({
   const [result, setResult] = useState<RateResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  const [chosen, setChosen] = useState<Quote | null>(null);
 
   const compare = async () => {
     setBusy(true);
@@ -98,10 +100,18 @@ export default function CourierQuotes({
   };
 
   const createShipment = async () => {
+    if (!chosen) {
+      setError("Choose a courier quote first.");
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
-      const res = await fetch(`/api/admin/notes/orders/${orderId}/dispatch`, { method: "POST" });
+      const res = await fetch(`/api/admin/notes/orders/${orderId}/dispatch`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ provider: chosen.provider, courier_id: chosen.courierId || undefined }),
+      });
       const json = await res.json();
       if (!json.ok) setError(json.error || "Shipment was not created.");
     } catch {
@@ -172,7 +182,7 @@ export default function CourierQuotes({
         </button>
         <button
           type="button"
-          disabled={busy}
+          disabled={busy || !chosen}
           onClick={() => void createShipment()}
           className="h-9 rounded border border-line px-3 text-sm font-medium text-ink disabled:opacity-50"
         >
@@ -206,10 +216,15 @@ export default function CourierQuotes({
                   {lowest && <span className="rounded-full bg-surface px-2 py-0.5 text-[11px] font-semibold text-ink">Lowest quote</span>}
                   <button
                     type="button"
-                    onClick={() => onUseCourier(quote.courier)}
+                    onClick={() => {
+                      setChosen(quote);
+                      onUseCourier(quote.courier);
+                    }}
                     className="rounded border border-line px-2 py-0.5 text-xs font-medium text-ink"
                   >
-                    Use this courier
+                    {chosen?.provider === quote.provider && chosen.courier === quote.courier && chosen.service === quote.service
+                      ? "Selected"
+                      : "Use this courier"}
                   </button>
                 </li>
               );

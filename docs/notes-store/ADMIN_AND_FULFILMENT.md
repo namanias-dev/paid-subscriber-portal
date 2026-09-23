@@ -77,8 +77,8 @@ prepare — bundles counted as their components.
 1. Paid order appears in queue with **customer, address, line items, amount, payment status**.  
 2. Advance through internal statuses (printing/QC/packing as implemented).  
 3. Enter courier + AWB → ship endpoint creates/updates `store_shipments`.  
-4. Compare rates from the order card when pickup PIN and provider credentials are set. That button does not create a shipment.  
-5. Customer sees Packed while the parcel is still at the academy. Shipped starts at pickup, then In Transit.
+4. Save packed weight and dimensions, compare rates, then choose a courier. Create shipment and Schedule pickup stay refused until both write flags are set.  
+5. Customer sees Packed while the parcel is still at the academy, including after an AWB or a pickup request. Shipped starts when the carrier scans possession.
 
 ## Order management
 

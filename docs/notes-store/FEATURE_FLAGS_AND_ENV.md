@@ -72,7 +72,7 @@
 | `DELHIVERY_PICKUP_LOCATION` | Case-sensitive Facility Name for `pickup_location.name`. Verified value is `NAMAN SHARMA IAS ACADEMY`. |
 | `DELHIVERY_API_BASE_URL` | Optional. Default `https://track.delhivery.com`. Staging host is `https://staging-express.delhivery.com` and uses a different token. |
 | `NOTES_STORE_COURIER_WEBHOOK_KEY` | Shared secret for `POST /api/notes/courier/events`, checked against `x-api-key`. The path deliberately avoids the words Shiprocket forbids in a webhook URL. |
-| `NOTES_STORE_SHIPPING_WRITES` | Must be `1` before any future billable call. No route creates a shipment today. |
+| `NOTES_STORE_SHIPPING_WRITES` | Must be `1` before a billable call. Create, pickup, cancel, and reverse check this together with the confirmation value. Leave unset. |
 | `NOTES_STORE_SHIPPING_WRITE_CONFIRM` | Must be `I_AUTHORIZE_BILLABLE_SHIPMENT` together with the writes flag. Leave unset. |
 
 Do not commit values. Mark shipped still records a courier and AWB typed by staff.

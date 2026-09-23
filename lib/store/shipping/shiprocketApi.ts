@@ -53,6 +53,7 @@ export function parseShiprocketQuotes(body: unknown): CourierQuote[] {
       etaText,
       codSupported: num(c.cod) === 1 || c.cod === true,
       prepaid: true,
+      courierId: str(c.courier_company_id) || (num(c.courier_company_id) != null ? String(num(c.courier_company_id)) : null),
     });
   }
   return quotes;
@@ -132,6 +133,30 @@ export function shiprocketAdhocDraft(input: {
     height: input.heightCm,
     weight: input.weightKg,
   };
+}
+
+/** Tracking read. Does not assign an AWB or buy a label. */
+export async function trackShiprocketAwb(
+  awb: string,
+  opts: { fetchImpl?: FetchLike; env?: NodeJS.ProcessEnv } = {},
+): Promise<{ rawStatus: string | null }> {
+  const code = awb.trim();
+  if (!code) return { rawStatus: null };
+  const env = opts.env || process.env;
+  if (!shiprocketCredentials(env)) return { rawStatus: null };
+  try {
+    const token = await shiprocketToken(opts);
+    const fetchImpl = opts.fetchImpl || fetch;
+    const res = await fetchImpl(`${shiprocketBaseUrl(env)}/courier/track/awb/${encodeURIComponent(code)}`, {
+      headers: { Accept: "application/json", Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(12_000),
+    });
+    const body = record(await res.json().catch(() => null));
+    const tracking = record(body?.tracking_data);
+    return { rawStatus: str(tracking?.shipment_status) || str(body?.current_status) || null };
+  } catch {
+    return { rawStatus: null };
+  }
 }
 
 export async function quoteShiprocket(

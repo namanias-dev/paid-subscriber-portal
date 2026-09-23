@@ -64,6 +64,29 @@ async function getJson(fetchImpl: FetchLike, url: string, token: string): Promis
   return { ok: res.ok, status: res.status, body };
 }
 
+/** Tracking read for an AWB that already exists. This does not create a shipment. */
+export async function trackDelhiveryAwb(
+  awb: string,
+  opts: { fetchImpl?: FetchLike; env?: NodeJS.ProcessEnv } = {},
+): Promise<{ rawStatus: string | null }> {
+  const code = awb.trim();
+  if (!/^[A-Za-z0-9]+$/.test(code)) return { rawStatus: null };
+  const env = opts.env || process.env;
+  const token = delhiveryToken(env);
+  if (!token) return { rawStatus: null };
+  const fetchImpl = opts.fetchImpl || fetch;
+  const got = await getJson(
+    fetchImpl,
+    `${delhiveryBaseUrl(env)}/api/v1/packages/json/?waybill=${encodeURIComponent(code)}`,
+    token,
+  );
+  if (!got.ok) return { rawStatus: null };
+  const root = record(got.body);
+  const shipment = record(Array.isArray(root?.ShipmentData) ? record(root.ShipmentData[0])?.Shipment : null);
+  const status = record(shipment?.Status);
+  return { rawStatus: str(status?.Status) || null };
+}
+
 /** Packing slip for an AWB that already exists. This path does not create a shipment. */
 export function delhiveryPackingSlipPath(awb: string): string {
   const code = awb.trim();

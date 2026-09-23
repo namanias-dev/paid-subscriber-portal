@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { storeDb } from "@/lib/store/db";
 import { courierWebhookKey } from "@/lib/store/shipping/config";
 import { canAdvanceOrder, canAdvanceShipment, orderStatusFromShipment } from "@/lib/store/shipping/status";
-import { parseCourierWebhook, webhookAuthorized } from "@/lib/store/shipping/webhook";
+import { parseCourierWebhook, scanAlreadyRecorded, webhookAuthorized } from "@/lib/store/shipping/webhook";
 
 export const dynamic = "force-dynamic";
 
@@ -47,10 +47,13 @@ export async function POST(req: Request) {
     .eq("shipment_id", shipment.id)
     .order("created_at", { ascending: false })
     .limit(40);
-  const duplicate = (prior || []).some((row) => {
-    const payload = row.payload_json as { dedupe_key?: string } | null;
-    return payload?.dedupe_key === event.dedupeKey;
-  });
+  const duplicate = scanAlreadyRecorded(
+    (prior || []).map((row) => {
+      const payload = row.payload_json as { dedupe_key?: string } | null;
+      return payload?.dedupe_key || "";
+    }),
+    event.dedupeKey,
+  );
   if (duplicate) {
     return NextResponse.json({ ok: true, duplicate: true });
   }

@@ -12,6 +12,8 @@ export interface CourierQuote {
   etaText: string | null;
   codSupported: boolean;
   prepaid: boolean;
+  /** Shiprocket courier company id, when the quote returns one. */
+  courierId?: string | null;
 }
 
 export interface ProviderRateResult {

@@ -1,6 +1,6 @@
 # Notes Store shipping status
 
-Read-only courier quotes and tracking ingestion are in the app. Billable shipment creation is not.
+Courier quotes and tracking ingestion are in the app. Create, label, pickup, cancel, and Delhivery reverse exist behind the billable write gate. That gate is unset, so those calls are not made.
 
 ## Already in the store before this work
 
@@ -23,6 +23,10 @@ Guest checkout, Eazypay, order numbers (`NIASN-N-`), inventory reservation, admi
 
 `scripts/local/shipping-gmail-otp/` is a local read-only Gmail client (`gmail.readonly` only). It is not imported by the site. The Desktop client and token stay in gitignored files on the machine that runs the helper. They are not deployed.
 
+## Gated, not live
+
+Create shipment, AWB assignment, label, pickup, cancellation, and Delhivery reverse pickup are implemented and refused unless both write flags are set. A created AWB moves the order to ready for pickup. It does not mark it shipped. Customer reports can be approved, rejected, or recorded as a replacement without moving money. A refund request sets `REFUND_PENDING` and does not call ICICI.
+
 ## Not built
 
-Shipment create, label, pickup, customer returns portal, refund execution, and courier SMS. Manual AWB remains the fulfilment path.
+Photo evidence on returns, a Shiprocket reverse call, refund execution, and courier SMS. Manual AWB remains the emergency override.

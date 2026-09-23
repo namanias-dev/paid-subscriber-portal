@@ -1,6 +1,15 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, test } from "node:test";
+import {
+  cancelProviderShipment,
+  createProviderShipment,
+  fetchExistingLabel,
+  parseDelhiveryCreate,
+  parseShiprocketCreate,
+  requestProviderPickup,
+  requestReverseShipment,
+} from "../../lib/store/shipping/book";
 import { compareCourierRates } from "../../lib/store/shipping/compare";
 import { delhiveryPickupLocation, pickupPostcode, shippingWritesAuthorized, shiprocketPickupLocation } from "../../lib/store/shipping/config";
 import { delhiveryPackingSlipPath, parseDelhiveryCharge, parseDelhiveryPincode } from "../../lib/store/shipping/delhiveryApi";
@@ -8,7 +17,7 @@ import { canRequestSupport, delhiveryCreateBody, dispatchBlocked, fulfilmentAtte
 import { rupeesToPaise } from "../../lib/store/shipping/quotes";
 import { parseShiprocketQuotes, shiprocketAdhocDraft } from "../../lib/store/shipping/shiprocketApi";
 import { canAdvanceOrder, canAdvanceShipment, normalizeCourierStatus } from "../../lib/store/shipping/status";
-import { parseCourierWebhook, webhookAuthorized } from "../../lib/store/shipping/webhook";
+import { parseCourierWebhook, scanAlreadyRecorded, webhookAuthorized } from "../../lib/store/shipping/webhook";
 
 const env = {
   SHIPROCKET_EMAIL: "api-user@example.com",
@@ -234,5 +243,141 @@ describe("courier tracking events", () => {
     assert.match(src, /manualShippingProvider/);
     assert.equal(src.includes("orders/create"), false);
     assert.equal(src.includes("selectShippingProvider"), false);
+    const dispatch = readFileSync(new URL("../../app/api/admin/notes/orders/[id]/dispatch/route.ts", import.meta.url), "utf8");
+    assert.match(dispatch, /dispatchBlocked/);
+    assert.match(dispatch, /createProviderShipment/);
+    assert.equal(dispatch.includes("cmu/create"), false);
+    assert.equal(dispatch.includes("shipped_at"), false);
+    const label = readFileSync(new URL("../../app/api/admin/notes/orders/[id]/label/route.ts", import.meta.url), "utf8");
+    assert.equal(label.includes("orders/create"), false);
+    assert.equal(label.includes("cmu/create"), false);
+    const pickup = readFileSync(new URL("../../app/api/admin/notes/orders/[id]/pickup/route.ts", import.meta.url), "utf8");
+    assert.match(pickup, /dispatchBlocked/);
+    assert.equal(pickup.includes("PICKED_UP"), false);
+    assert.equal(pickup.includes("shipped_at"), false);
+    const refund = readFileSync(new URL("../../app/api/admin/notes/orders/[id]/refund/route.ts", import.meta.url), "utf8");
+    assert.equal(refund.includes("fetch("), false);
+    assert.match(refund, /gateway: "not_called"/);
+    assert.equal(canAdvanceShipment("out_for_delivery", "in_transit"), false);
+    assert.equal(normalizeCourierStatus("NDR"), "delivery_failed");
+    assert.equal(normalizeCourierStatus("RTO Initiated"), "rto");
+    assert.equal(canAdvanceShipment("delivered", "rto"), false);
+    assert.equal(scanAlreadyRecorded(["shiprocket:1:IN TRANSIT:"], "shiprocket:1:IN TRANSIT:"), true);
+    assert.equal(scanAlreadyRecorded([], "shiprocket:1:IN TRANSIT:"), false);
+  });
+});
+
+const party = {
+  orderNumber: "NIASN-N-1",
+  name: "A",
+  address: "Line",
+  pin: "110001",
+  city: "Delhi",
+  state: "Delhi",
+  phone: "9999999999",
+  product: "Polity",
+  amountRupees: 100,
+  weightGrams: 800,
+  lengthCm: 30,
+  widthCm: 22,
+  heightCm: 3,
+};
+
+const openEnv = {
+  ...env,
+  NOTES_STORE_SHIPPING_WRITES: "1",
+  NOTES_STORE_SHIPPING_WRITE_CONFIRM: "I_AUTHORIZE_BILLABLE_SHIPMENT",
+  DELHIVERY_PICKUP_LOCATION: "NAMAN SHARMA IAS ACADEMY",
+  SHIPROCKET_PICKUP_LOCATION: "work",
+} as NodeJS.ProcessEnv;
+
+describe("gated courier writes", () => {
+  test("a closed gate never calls a courier", async () => {
+    let called = false;
+    const fetchImpl = (() => {
+      called = true;
+      throw new Error("should not fetch");
+    }) as typeof fetch;
+    await assert.rejects(() => createProviderShipment({ ...party, provider: "delhivery" }, { env, fetchImpl }));
+    await assert.rejects(() => requestProviderPickup({ provider: "delhivery", date: "2026-09-24" }, { env, fetchImpl }));
+    await assert.rejects(() => cancelProviderShipment({ provider: "delhivery", awb: "AWB1" }, { env, fetchImpl }));
+    await assert.rejects(() => requestReverseShipment({ ...party, provider: "delhivery" }, { env, fetchImpl }));
+    assert.equal(called, false);
+  });
+
+  test("shiprocket create posts the nickname and skips pickup", async () => {
+    const calls: string[] = [];
+    const fetchImpl = (async (url: string | URL | Request, init?: RequestInit) => {
+      const href = String(url);
+      calls.push(`${init?.method || "GET"} ${href}`);
+      if (href.endsWith("/auth/login")) return jsonResponse({ token: "jwt" });
+      if (href.endsWith("/orders/create/adhoc")) {
+        const posted = JSON.parse(String(init?.body));
+        assert.equal(posted.pickup_location, "work");
+        return jsonResponse({ shipment_id: 55, order_id: 9, awb_code: "", courier_name: "" });
+      }
+      if (href.endsWith("/courier/assign/awb")) return jsonResponse({ response: { data: { awb_code: "SR1", courier_name: "Xpressbees" } } });
+      if (href.endsWith("/courier/generate/label")) return jsonResponse({ label_url: "https://labels.example/sr1.pdf" });
+      throw new Error(`unexpected ${href}`);
+    }) as typeof fetch;
+    const created = await createProviderShipment({ ...party, provider: "shiprocket", courierId: "12" }, { env: openEnv, fetchImpl });
+    assert.equal(created.awb, "SR1");
+    assert.equal(created.orderStatus, "READY_FOR_PICKUP");
+    assert.equal(created.labelUrl, "https://labels.example/sr1.pdf");
+    assert.equal(calls.some((u) => u.includes("generate/pickup") || u.includes("cmu/create")), false);
+    assert.equal(parseShiprocketCreate({ shipment_id: 1, awb_code: "" }).awb, null);
+  });
+
+  test("delhivery create sends the facility name and does not invent an AWB", async () => {
+    const calls: string[] = [];
+    const fetchImpl = (async (url: string | URL | Request, init?: RequestInit) => {
+      calls.push(String(url));
+      const raw = String(init?.body);
+      assert.match(decodeURIComponent(raw), /"name":"NAMAN SHARMA IAS ACADEMY"/);
+      assert.match(decodeURIComponent(raw), /"payment_mode":"Prepaid"/);
+      return jsonResponse({ packages: [{ waybill: "", remarks: ["ClientWarehouse matching query doesn't exist"] }] });
+    }) as typeof fetch;
+    await assert.rejects(() => createProviderShipment({ ...party, provider: "delhivery" }, { env: openEnv, fetchImpl }));
+    assert.equal(parseDelhiveryCreate({ packages: [] }).awb, null);
+    assert.equal(calls.length, 1);
+    assert.match(calls[0], /\/api\/cmu\/create\.json$/);
+  });
+
+  test("label reprint reads a stored slip and does not create a shipment", async () => {
+    let called = false;
+    const stored = await fetchExistingLabel(
+      { provider: "delhivery", awb: "AWB1", storedLabelUrl: "https://labels.example/a.pdf" },
+      {
+        env: openEnv,
+        fetchImpl: (() => {
+          called = true;
+          throw new Error("should not fetch");
+        }) as typeof fetch,
+      },
+    );
+    assert.equal(stored.url, "https://labels.example/a.pdf");
+    assert.equal(called, false);
+    const fetched = await fetchExistingLabel(
+      { provider: "delhivery", awb: "AWB1" },
+      {
+        env: openEnv,
+        fetchImpl: (async (url: string | URL | Request) => {
+          assert.match(String(url), /packing_slip/);
+          assert.equal(String(url).includes("cmu/create"), false);
+          return jsonResponse({ packages: [{ pdf_download_link: "https://labels.example/b.pdf" }] });
+        }) as typeof fetch,
+      },
+    );
+    assert.equal(fetched.url, "https://labels.example/b.pdf");
+  });
+
+  test("reverse pickup is gated and uses Delhivery Pickup mode", async () => {
+    const fetchImpl = (async (_url: string | URL | Request, init?: RequestInit) => {
+      assert.match(decodeURIComponent(String(init?.body)), /"payment_mode":"Pickup"/);
+      return jsonResponse({ packages: [{ waybill: "R1" }] });
+    }) as typeof fetch;
+    const reverse = await requestReverseShipment({ ...party, provider: "delhivery" }, { env: openEnv, fetchImpl });
+    assert.equal(reverse.awb, "R1");
+    await assert.rejects(() => requestReverseShipment({ ...party, provider: "shiprocket" }, { env: openEnv, fetchImpl: fetchImpl }));
   });
 });

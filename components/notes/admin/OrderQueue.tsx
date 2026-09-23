@@ -39,7 +39,16 @@ interface Row {
   internal_notes: string | null;
   address: Address | null;
   items: Array<{ name: string; qty: number; sku: string }>;
-  shipment: { courier: string | null; awb: string | null; tracking_url: string | null } | null;
+  shipment: {
+    courier: string | null;
+    awb: string | null;
+    tracking_url: string | null;
+    provider: string | null;
+    status: string | null;
+    has_label: boolean;
+    pickup_scheduled_at: string | null;
+  } | null;
+  attention?: string[];
 }
 
 const BUCKETS = [
@@ -54,12 +63,17 @@ const BUCKETS = [
 ];
 
 const EXCEPTIONS = [
-  { value: "damaged", label: "Damaged in transit" },
-  { value: "wrong_item", label: "Wrong item sent" },
-  { value: "missing_item", label: "Missing item" },
+  { value: "damaged", label: "Damaged notes" },
+  { value: "wrong_subject", label: "Wrong subject" },
+  { value: "missing_item", label: "Missing product" },
+  { value: "incomplete_pages", label: "Incomplete pages" },
+  { value: "print_defect", label: "Print defect" },
+  { value: "delivery_problem", label: "Delivery issue" },
   { value: "lost_in_transit", label: "Lost in transit" },
   { value: "duplicate_order", label: "Duplicate order" },
 ];
+
+const REFUNDABLE = new Set(["DELIVERED", "DELIVERY_FAILED", "RETURN_APPROVED", "RETURN_RECEIVED", "RTO_DELIVERED"]);
 
 function formatAddress(a: Address | null): string {
   if (!a) return "—";
@@ -92,6 +106,8 @@ export default function NotesOrderQueue() {
   const [noteOpen, setNoteOpen] = useState<string | null>(null);
   const [note, setNote] = useState<Record<string, string>>({});
   const [exc, setExc] = useState<Record<string, string>>({});
+  const [pickupDate, setPickupDate] = useState<Record<string, string>>({});
+  const [refundPaise, setRefundPaise] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
@@ -274,9 +290,53 @@ export default function NotesOrderQueue() {
 
               {o.shipment?.awb && (
                 <p className="mt-2 text-sm text-ink2">
-                  <span className="font-semibold text-ink">Shipped: </span>
-                  {o.shipment.courier || "Courier"} · AWB <span className="font-mono">{o.shipment.awb}</span>
+                  <span className="font-semibold text-ink">AWB on file: </span>
+                  {o.shipment.courier || "Courier"} · <span className="font-mono">{o.shipment.awb}</span>
+                  {o.shipment.pickup_scheduled_at ? " · pickup requested" : ""}
                 </p>
+              )}
+              {(o.attention || []).length > 0 && (
+                <p className="mt-2 text-xs text-ink2">Needs attention: {(o.attention || []).join(", ").replaceAll("_", " ")}</p>
+              )}
+              {o.shipment?.awb && (
+                <div className="mt-2 flex flex-wrap items-end gap-2">
+                  <a
+                    href={`/api/admin/notes/orders/${o.id}/label`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex h-9 items-center rounded border border-line px-3 text-sm font-medium text-ink"
+                  >
+                    Print label
+                  </a>
+                  <label className="text-xs text-ink2">
+                    Pickup date
+                    <input
+                      type="date"
+                      value={pickupDate[o.id] || ""}
+                      onChange={(e) => setPickupDate((m) => ({ ...m, [o.id]: e.target.value }))}
+                      className="mt-1 block h-9 rounded border border-line px-2 text-sm text-ink"
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    disabled={busyId === o.id || !pickupDate[o.id]}
+                    onClick={() =>
+                      act(
+                        o.id,
+                        () =>
+                          fetch(`/api/admin/notes/orders/${o.id}/pickup`, {
+                            method: "POST",
+                            headers: { "content-type": "application/json" },
+                            body: JSON.stringify({ date: pickupDate[o.id] }),
+                          }),
+                        "Pickup requested. The order stays packed until the courier scans it.",
+                      )
+                    }
+                    className="h-9 rounded border border-line px-3 text-sm font-medium text-ink disabled:opacity-50"
+                  >
+                    Schedule pickup
+                  </button>
+                </div>
               )}
               {o.internal_notes && (
                 <pre className="mt-2 whitespace-pre-wrap rounded-lg bg-surface p-2 text-xs text-ink2">{o.internal_notes}</pre>
@@ -354,6 +414,122 @@ export default function NotesOrderQueue() {
                   >
                     Save note
                   </button>
+                  {(o.status === "RETURN_REQUESTED" || o.status === "RETURN_APPROVED") && (
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        disabled={busyId === o.id}
+                        onClick={() =>
+                          act(
+                            o.id,
+                            () =>
+                              fetch(`/api/admin/notes/orders/${o.id}/support-decision`, {
+                                method: "POST",
+                                headers: { "content-type": "application/json" },
+                                body: JSON.stringify({ action: "approve", reason: note[o.id] || "Reviewed" }),
+                              }),
+                            "Return approved. No shipment was created.",
+                          )
+                        }
+                        className="h-9 rounded border border-line px-3 text-sm font-medium text-ink"
+                      >
+                        Approve
+                      </button>
+                      <button
+                        type="button"
+                        disabled={busyId === o.id || !(note[o.id] || "").trim()}
+                        onClick={() =>
+                          act(
+                            o.id,
+                            () =>
+                              fetch(`/api/admin/notes/orders/${o.id}/support-decision`, {
+                                method: "POST",
+                                headers: { "content-type": "application/json" },
+                                body: JSON.stringify({ action: "reject", reason: note[o.id] }),
+                              }),
+                            "Rejected. No refund was sent.",
+                          )
+                        }
+                        className="h-9 rounded border border-line px-3 text-sm font-medium text-ink disabled:opacity-50"
+                      >
+                        Reject
+                      </button>
+                      <button
+                        type="button"
+                        disabled={busyId === o.id || !(note[o.id] || "").trim()}
+                        onClick={() =>
+                          act(
+                            o.id,
+                            () =>
+                              fetch(`/api/admin/notes/orders/${o.id}/support-decision`, {
+                                method: "POST",
+                                headers: { "content-type": "application/json" },
+                                body: JSON.stringify({ action: "replace", reason: note[o.id] }),
+                              }),
+                            "Replacement recorded. No shipment was created.",
+                          )
+                        }
+                        className="h-9 rounded border border-line px-3 text-sm font-medium text-ink disabled:opacity-50"
+                      >
+                        Replace
+                      </button>
+                      <button
+                        type="button"
+                        disabled={busyId === o.id || !(note[o.id] || "").trim()}
+                        onClick={() =>
+                          act(
+                            o.id,
+                            () =>
+                              fetch(`/api/admin/notes/orders/${o.id}/support-decision`, {
+                                method: "POST",
+                                headers: { "content-type": "application/json" },
+                                body: JSON.stringify({ action: "reverse", reason: note[o.id] }),
+                              }),
+                            "Reverse pickup requested.",
+                          )
+                        }
+                        className="h-9 rounded border border-line px-3 text-sm font-medium text-ink disabled:opacity-50"
+                      >
+                        Reverse pickup
+                      </button>
+                    </div>
+                  )}
+                  {REFUNDABLE.has(o.status) && (
+                    <div className="flex flex-wrap items-end gap-2">
+                      <label className="text-xs text-ink2">
+                        Refund (paise)
+                        <input
+                          inputMode="numeric"
+                          value={refundPaise[o.id] || ""}
+                          onChange={(e) => setRefundPaise((m) => ({ ...m, [o.id]: e.target.value }))}
+                          className="mt-1 block h-9 w-28 rounded border border-line px-2 text-sm text-ink"
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        disabled={busyId === o.id || !(note[o.id] || "").trim()}
+                        onClick={() =>
+                          act(
+                            o.id,
+                            () =>
+                              fetch(`/api/admin/notes/orders/${o.id}/refund`, {
+                                method: "POST",
+                                headers: { "content-type": "application/json" },
+                                body: JSON.stringify({
+                                  amount_paise: Number(refundPaise[o.id] || o.total_paise),
+                                  reason: note[o.id],
+                                  confirm: "REQUEST_REFUND",
+                                }),
+                              }),
+                            "Refund recorded as pending. No money was moved.",
+                          )
+                        }
+                        className="h-9 rounded border border-line px-3 text-sm font-medium text-ink disabled:opacity-50"
+                      >
+                        Request refund
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
             </article>

@@ -20,6 +20,10 @@ function str(v: unknown): string {
   return typeof v === "string" || typeof v === "number" ? String(v).trim() : "";
 }
 
+export function scanAlreadyRecorded(existingKeys: string[], dedupeKey: string): boolean {
+  return existingKeys.includes(dedupeKey);
+}
+
 /** Constant-time check. Missing configuration or a length mismatch rejects. */
 export function webhookAuthorized(presented: string | null, expected: string | null): boolean {
   if (!expected || !presented) return false;

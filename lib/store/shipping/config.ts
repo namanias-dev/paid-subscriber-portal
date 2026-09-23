@@ -1,7 +1,7 @@
 /**
  * Shipping configuration. Names only — values live in the server environment.
- * Billable courier writes stay off unless both gates are set, and no route
- * calls a create-shipment API even then.
+ * Billable courier writes stay off unless both gates are set. Create, pickup,
+ * cancel, and reverse calls check that gate before any network request.
  */
 
 const PIN = /^[1-9][0-9]{5}$/;

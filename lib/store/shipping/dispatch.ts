@@ -31,6 +31,8 @@ export interface DelhiveryShipmentDraft {
   lengthCm: number;
   widthCm: number;
   heightCm: number;
+  /** Prepaid is a forward shipment. Pickup is a Delhivery reverse pickup. */
+  paymentMode?: "Prepaid" | "Pickup";
 }
 
 /**
@@ -52,7 +54,7 @@ export function delhiveryCreateBody(draft: DelhiveryShipmentDraft): string {
         country: "India",
         phone: draft.phone,
         order: draft.orderNo,
-        payment_mode: "Prepaid",
+        payment_mode: draft.paymentMode === "Pickup" ? "Pickup" : "Prepaid",
         products_desc: draft.product,
         cod_amount: "0",
         total_amount: String(draft.amountRupees),
