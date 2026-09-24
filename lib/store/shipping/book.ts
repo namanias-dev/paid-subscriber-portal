@@ -42,6 +42,13 @@ export interface CreatedShipment {
   shipmentStatus: "created";
   /** Set only when the provider actually returned an AWB. */
   orderStatus: "READY_FOR_PICKUP" | null;
+  storedPin?: string | null;
+  storedCity?: string | null;
+  storedState?: string | null;
+  storedAddress?: string | null;
+  phoneStored?: boolean;
+  addressMismatch?: boolean;
+  addressUnverified?: boolean;
 }
 
 function record(v: unknown): Record<string, unknown> | null {
@@ -243,6 +250,15 @@ async function createShiprocket(input: CreateProviderInput, env: NodeJS.ProcessE
     });
     if (labelRes.ok) labelUrl = parseShiprocketLabel(await readJson(labelRes));
   }
+  const stored = created.orderId
+    ? await readShiprocketOrder(base, token, created.orderId, fetchImpl)
+    : { pin: null, city: null, state: null, address: null, phoneStored: false, read: false };
+  const mismatch = stored.read
+    ? stored.pin !== input.pin.trim() ||
+      place(stored.city || "") !== place(input.city) ||
+      place(stored.state || "") !== place(input.state) ||
+      !stored.phoneStored
+    : false;
   return {
     provider: "shiprocket",
     providerShipmentId: created.shipmentId,
@@ -251,8 +267,55 @@ async function createShiprocket(input: CreateProviderInput, env: NodeJS.ProcessE
     courierName,
     labelUrl,
     shipmentStatus: "created",
-    orderStatus: awb ? "READY_FOR_PICKUP" : null,
+    orderStatus: awb && stored.read && !mismatch ? "READY_FOR_PICKUP" : null,
+    storedPin: stored.pin,
+    storedCity: stored.city,
+    storedState: stored.state,
+    storedAddress: stored.address,
+    phoneStored: stored.phoneStored,
+    addressMismatch: mismatch,
+    addressUnverified: !stored.read,
   };
+}
+
+function place(value: string): string {
+  return value.toLowerCase().replace(/[^a-z]/g, "");
+}
+
+async function readShiprocketOrder(
+  base: string,
+  token: string,
+  orderId: string,
+  fetchImpl: FetchLike,
+): Promise<{ pin: string | null; city: string | null; state: string | null; address: string | null; phoneStored: boolean; read: boolean }> {
+  try {
+    const res = await fetchImpl(`${base}/orders/show/${encodeURIComponent(orderId)}`, {
+      headers: { Accept: "application/json", Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(20_000),
+    });
+    if (!res.ok) return { pin: null, city: null, state: null, address: null, phoneStored: false, read: false };
+    return parseShiprocketOrderRecord(await readJson(res));
+  } catch {
+    return { pin: null, city: null, state: null, address: null, phoneStored: false, read: false };
+  }
+}
+
+export function parseShiprocketOrderRecord(body: unknown): {
+  pin: string | null;
+  city: string | null;
+  state: string | null;
+  address: string | null;
+  phoneStored: boolean;
+  read: boolean;
+} {
+  const root = record(body);
+  const data = record(root?.data) || root;
+  const pin = str(data?.billing_pincode) || str(data?.shipping_pincode) || str(data?.customer_pincode) || null;
+  const city = str(data?.billing_city) || str(data?.shipping_city) || str(data?.customer_city) || null;
+  const state = str(data?.billing_state) || str(data?.shipping_state) || str(data?.customer_state) || null;
+  const address = str(data?.billing_address) || str(data?.shipping_address) || str(data?.customer_address) || null;
+  const phone = str(data?.billing_phone) || str(data?.shipping_phone) || str(data?.customer_phone);
+  return { pin, city, state, address, phoneStored: phone.replace(/\D/g, "").length >= 10, read: Boolean(pin || city || state) };
 }
 
 export async function requestProviderPickup(

@@ -65,7 +65,7 @@ export const SHIPMENT_ADDRESS_MISMATCH = "SHIPMENT_ADDRESS_MISMATCH";
 /** Block label approval, pickup, and handoff when the courier record disagrees with the order. */
 export function shipmentHandoffBlocked(payload: Record<string, unknown> | null | undefined): boolean {
   if (!payload) return false;
-  if (payload.address_mismatch === true || payload.do_not_handoff === true) return true;
+  if (payload.address_mismatch === true || payload.address_unverified === true || payload.do_not_handoff === true) return true;
   const requestedPin = String(payload.requested_pin || "").trim();
   const storedPin = String(payload.provider_pin || "").trim();
   if (requestedPin && storedPin && requestedPin !== storedPin) return true;

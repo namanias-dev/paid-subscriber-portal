@@ -180,7 +180,7 @@ export async function GET(req: Request) {
           tracking_url: s.tracking_url,
           provider: s.provider,
           status: s.status,
-          has_label: Boolean(s.label_r2_key || payload.label_url || (s.provider === "delhivery" && s.awb)),
+          has_label: Boolean(s.label_r2_key || payload.label_url || ((s.provider === "delhivery" || s.provider === "shiprocket") && s.awb)),
           pickup_scheduled_at: s.pickup_scheduled_at,
           pickup_reference: payload.pickup_reference || null,
           pickup_time: payload.pickup_time || null,

@@ -427,6 +427,11 @@ describe("gated courier writes", () => {
       }
       if (href.endsWith("/courier/assign/awb")) return jsonResponse({ response: { data: { awb_code: "SR1", courier_name: "Xpressbees" } } });
       if (href.endsWith("/courier/generate/label")) return jsonResponse({ label_url: "https://labels.example/sr1.pdf" });
+      if (href.includes("/orders/show/")) {
+        return jsonResponse({
+          data: { billing_pincode: "110001", billing_city: "Delhi", billing_state: "Delhi", billing_address: "Line", billing_phone: "9999999999" },
+        });
+      }
       throw new Error(`unexpected ${href}`);
     }) as typeof fetch;
     const created = await createProviderShipment({ ...party, provider: "shiprocket", courierId: "12" }, { env: openEnv, fetchImpl });

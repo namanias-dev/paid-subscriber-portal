@@ -43,21 +43,21 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     return NextResponse.json({ ok: false, error: "Pack the order before creating a shipment." }, { status: 409 });
   }
 
-  const { data: shipment } = await db
+  const { data: shipmentRows } = await db
     .from("store_shipments")
     .select("id,status,awb,weight_grams,length_mm,width_mm,height_mm,courier_name")
     .eq("order_id", order.id)
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (shipment && shipmentAlreadyActive(shipment.status, shipment.awb)) {
+    .order("created_at", { ascending: false });
+  const active = (shipmentRows || []).find((row) => row.status !== "cancelled" && row.status !== "failed" && shipmentAlreadyActive(row.status, row.awb));
+  if (active) {
     return NextResponse.json({ ok: false, error: "This order already has an active shipment." }, { status: 409 });
   }
+  const packed = (shipmentRows || []).find((row) => row.weight_grams && row.length_mm && row.width_mm && row.height_mm) || null;
   const pack = {
-    weightGrams: Number(shipment?.weight_grams),
-    lengthCm: Number(shipment?.length_mm) / 10,
-    widthCm: Number(shipment?.width_mm) / 10,
-    heightCm: Number(shipment?.height_mm) / 10,
+    weightGrams: Number(packed?.weight_grams),
+    lengthCm: Number(packed?.length_mm) / 10,
+    widthCm: Number(packed?.width_mm) / 10,
+    heightCm: Number(packed?.height_mm) / 10,
   };
   const invalid = assertPackage(pack);
   if (invalid) return NextResponse.json({ ok: false, error: "Save the packed weight and dimensions first." }, { status: 400 });
@@ -91,7 +91,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       lengthCm: pack.lengthCm,
       widthCm: pack.widthCm,
       heightCm: pack.heightCm,
-      shippingMode: /surface/i.test(String(shipment?.courier_name || "")) ? "Surface" : "Express",
+      shippingMode: "Surface",
     });
   } catch (e) {
     const message = e instanceof Error ? e.message : "Shipment was not created.";
@@ -99,29 +99,41 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   }
 
   const now = new Date().toISOString();
+  const blockedHandoff = created.addressMismatch === true || created.addressUnverified === true;
   const row = {
     provider: created.provider,
     provider_shipment_id: created.providerShipmentId,
     courier_name: created.courierName,
     awb: created.awb,
     status: created.awb ? "created" : "pending",
-    provider_payload: { label_url: created.labelUrl, provider_order_id: created.providerOrderId },
+    provider_payload: {
+      label_url: created.labelUrl,
+      provider_order_id: created.providerOrderId,
+      courier_id: body?.courier_id || null,
+      requested_pin: address.pincode,
+      requested_city: address.city,
+      requested_state: address.state,
+      provider_pin: created.storedPin || null,
+      provider_city: created.storedCity || null,
+      provider_state: created.storedState || null,
+      phone_stored: created.phoneStored === true,
+      address_mismatch: created.addressMismatch === true,
+      address_unverified: created.addressUnverified === true,
+      do_not_handoff: blockedHandoff,
+    },
     updated_at: now,
   };
-  if (shipment) await db.from("store_shipments").update(row).eq("id", shipment.id);
-  else {
-    await db.from("store_shipments").insert({
-      ...row,
-      order_id: order.id,
-      weight_grams: pack.weightGrams,
-      length_mm: Math.round(pack.lengthCm * 10),
-      width_mm: Math.round(pack.widthCm * 10),
-      height_mm: Math.round(pack.heightCm * 10),
-    });
-  }
+  await db.from("store_shipments").insert({
+    ...row,
+    order_id: order.id,
+    weight_grams: pack.weightGrams,
+    length_mm: Math.round(pack.lengthCm * 10),
+    width_mm: Math.round(pack.widthCm * 10),
+    height_mm: Math.round(pack.heightCm * 10),
+  });
 
   let orderStatus = order.status;
-  if (created.orderStatus && canAdvanceOrder(order.status, created.orderStatus)) {
+  if (!blockedHandoff && created.orderStatus && canAdvanceOrder(order.status, created.orderStatus)) {
     orderStatus = created.orderStatus;
     await db.from("store_orders").update({ status: orderStatus, updated_at: now }).eq("id", order.id);
   }

@@ -75,7 +75,6 @@ export async function getPublicOrder(
   return {
     order_no: order.order_no,
     stage,
-    stage_label: customerStageLabel(stage),
     placed_at: order.placed_at,
     promised_delivery_date: order.promised_delivery_date,
     total_label: formatPaise(order.total_paise),
@@ -84,7 +83,10 @@ export async function getPublicOrder(
     ship_to: shipTo,
     awb: hasAwb ? ship!.awb : null,
     courier: hasAwb ? ship!.courier_name : null,
-    steps: trackingSteps(stage, hasAwb),
+    steps: trackingSteps(stage, hasAwb).map((step) =>
+      step.id === "packed" && order.status === "PICKUP_SCHEDULED" ? { ...step, label: "Pickup scheduled" } : step,
+    ),
+    stage_label: order.status === "PICKUP_SCHEDULED" ? "Pickup scheduled" : customerStageLabel(stage),
     confirming: stage === "pending",
     access_token: token,
   };
