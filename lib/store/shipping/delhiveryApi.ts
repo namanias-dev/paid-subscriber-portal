@@ -91,7 +91,7 @@ export async function trackDelhiveryAwb(
 export function delhiveryPackingSlipPath(awb: string): string {
   const code = awb.trim();
   if (!/^[A-Za-z0-9]+$/.test(code)) throw new Error("AWB is missing.");
-  return `/api/p/packing_slip?wbns=${encodeURIComponent(code)}`;
+  return `/api/p/packing_slip?wbns=${encodeURIComponent(code)}&pdf=true`;
 }
 
 export async function quoteDelhivery(
