@@ -25,7 +25,7 @@ export async function POST(req: Request) {
     cookies().set(
       STORE_ORDER_ACCESS_COOKIE,
       encodeOrderAccessCookie(result.order_no, result.access_token),
-      storeOrderAccessCookieOptions(),
+      storeOrderAccessCookieOptions(new URL(req.url).hostname),
     );
     // Never return the raw token in the JSON body (analytics/devtools). Cookie only.
     const { access_token: _omit, ...safe } = result;

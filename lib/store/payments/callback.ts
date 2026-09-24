@@ -42,6 +42,14 @@ const FIELD_KEYS: (keyof EazypayResponseFields)[] = [
   "TPS",
 ];
 
+/** Apex and www must land on the host that holds the checkout cookie. */
+export function notesCustomerOrigin(requestUrl: string): string {
+  const url = new URL(requestUrl);
+  const host = url.hostname.toLowerCase();
+  if (host === "namanias.com" || host === "www.namanias.com") return "https://www.namanias.com";
+  return url.origin;
+}
+
 function redirect(url: string): Response {
   return new Response(null, {
     status: 302,
@@ -58,7 +66,7 @@ export async function handleStoreCallback(
   params: Map<string, string>,
   referenceNo: string,
 ): Promise<Response> {
-  const origin = new URL(req.url).origin;
+  const origin = notesCustomerOrigin(req.url);
   const get = (k: string) => params.get(k) ?? "";
 
   // Defence in depth: the dispatcher already checked, and so do we. The store
@@ -179,6 +187,15 @@ export async function handleStoreCallback(
   console.info(
     `[store/callback] ref=${referenceNo} code=${responseCode} signature=${signatureValid} duplicate=${duplicate} (terminal deferred to Verify)`,
   );
+
+  // Verify before the browser is involved. A dropped cookie or a closed UPI
+  // app must not leave a captured payment sitting as PAYMENT_PENDING.
+  try {
+    const { applyStoreVerify } = await import("./verify");
+    await applyStoreVerify(referenceNo, { source: "callback" });
+  } catch (e) {
+    console.error(`[store/callback] verify failed ref=${referenceNo}:`, (e as Error).message);
+  }
 
   // 4. Send the customer to their order page WITHOUT putting the access token
   //    in the URL (referrer / analytics leak). Cookie from checkout authorises.

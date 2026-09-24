@@ -57,6 +57,7 @@ interface Row {
 
 const BUCKETS = [
   { key: "", label: "All" },
+  { key: "confirming", label: "Payment confirming" },
   { key: "new", label: "New" },
   { key: "preparing", label: "Preparing" },
   { key: "packed", label: "Packed" },
@@ -155,6 +156,13 @@ export default function NotesOrderQueue() {
       setBusyId(null);
     }
   }
+
+  const reconcile = (id: string) =>
+    act(
+      id,
+      () => fetch(`/api/admin/notes/orders/${id}/reconcile`, { method: "POST", cache: "no-store" }),
+      "Payment rechecked with the gateway",
+    );
 
   const advance = (id: string) =>
     act(id, () => fetch(`/api/admin/notes/orders/${id}/advance`, { method: "POST", cache: "no-store" }), "Status advanced");
@@ -269,8 +277,22 @@ export default function NotesOrderQueue() {
                   {o.payment_status && (
                     <p className="mt-1 text-[11px] font-medium text-emerald-700">{o.payment_status}</p>
                   )}
+                  {o.status === "PAYMENT_PENDING" && (
+                    <p className="mt-1 text-[11px] font-semibold text-amber-800">Payment confirming</p>
+                  )}
                 </div>
               </div>
+
+              {o.status === "PAYMENT_PENDING" && (
+                <button
+                  type="button"
+                  disabled={busyId === o.id}
+                  onClick={() => reconcile(o.id)}
+                  className="mt-3 h-9 rounded-lg bg-ink px-3 text-xs font-semibold text-white disabled:opacity-50"
+                >
+                  Reconcile payment
+                </button>
+              )}
 
               <div className="mt-3 rounded-lg bg-surface p-2 text-sm text-ink2">
                 <span className="font-semibold text-ink">Ship to: </span>

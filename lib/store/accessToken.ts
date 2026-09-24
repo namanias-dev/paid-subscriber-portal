@@ -70,11 +70,21 @@ export function parseOrderAccessCookie(
   return { orderNo, token };
 }
 
-export function storeOrderAccessCookieOptions() {
+/**
+ * Cookie that lets the paying browser reopen the order after ICICI.
+ * On namanias.com it must be SameSite=None and parent-domain scoped: the
+ * return is a cross-site POST, and UPI often takes longer than Chrome's
+ * two-minute Lax exemption. Local and preview hosts stay Lax.
+ */
+export function storeOrderAccessCookieOptions(host?: string | null) {
+  const secure = process.env.NODE_ENV === "production" || process.env.VERCEL === "1";
+  const bare = (host || "").split(":")[0].toLowerCase();
+  const onAcademy = bare === "namanias.com" || bare.endsWith(".namanias.com");
   return {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production" || process.env.VERCEL === "1",
-    sameSite: "lax" as const,
+    secure,
+    sameSite: (secure && onAcademy ? "none" : "lax") as "none" | "lax",
+    ...(onAcademy ? { domain: ".namanias.com" } : {}),
     path: "/",
     maxAge: COOKIE_MAX_AGE_SEC,
   };

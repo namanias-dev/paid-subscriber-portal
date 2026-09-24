@@ -8,6 +8,7 @@ export const dynamic = "force-dynamic";
 
 /** Customer-visible/admin status buckets → concrete statuses. */
 const BUCKETS: Record<string, string[]> = {
+  confirming: ["PAYMENT_PENDING"],
   new: ["PAYMENT_CONFIRMED", "ORDER_CONFIRMED"],
   preparing: ["PROCESSING", "PRINTING", "QUALITY_CHECK", "READY_TO_PACK"],
   packed: ["PACKED", "READY_FOR_PICKUP", "PICKUP_SCHEDULED"],
@@ -33,6 +34,7 @@ const BUCKETS: Record<string, string[]> = {
 
 /** Everything except the pre-payment pending state (which is not an order yet). */
 const ALL_STATUSES = [
+  ...BUCKETS.confirming,
   ...BUCKETS.new,
   ...BUCKETS.preparing,
   ...BUCKETS.packed,

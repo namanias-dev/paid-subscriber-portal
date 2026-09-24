@@ -4,8 +4,8 @@ import { useState } from "react";
 import OrderStatus from "./OrderStatus";
 import type { PublicOrder } from "@/lib/store/orders";
 
-export default function TrackForm() {
-  const [orderNo, setOrderNo] = useState("");
+export default function TrackForm({ initialOrderNo = "" }: { initialOrderNo?: string }) {
+  const [orderNo, setOrderNo] = useState(initialOrderNo);
   const [phone, setPhone] = useState("");
   const [order, setOrder] = useState<PublicOrder | null>(null);
   const [err, setErr] = useState<string | null>(null);
