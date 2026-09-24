@@ -7,6 +7,8 @@ import {
   fetchExistingLabel,
   parseDelhiveryCreate,
   parseShiprocketCreate,
+  parseShiprocketOrderRecord,
+  phoneDigitCount,
   requestProviderPickup,
   requestReverseShipment,
 } from "../../lib/store/shipping/book";
@@ -440,6 +442,30 @@ describe("gated courier writes", () => {
     assert.equal(created.labelUrl, "https://labels.example/sr1.pdf");
     assert.equal(calls.some((u) => u.includes("generate/pickup") || u.includes("cmu/create")), false);
     assert.equal(parseShiprocketCreate({ shipment_id: 1, awb_code: "" }).awb, null);
+  });
+
+  test("provider address keeps Sector-28 and a phone-named field without treating an order id as a phone", () => {
+    const parsed = parseShiprocketOrderRecord({
+      data: {
+        id: 1608157597,
+        billing_pincode: "134109",
+        billing_city: "Panchkula",
+        billing_state: "Haryana",
+        billing_address: "H No. 1920 P",
+        shipping_address_2: "Sector-28",
+        shipments: [{ shipping_phone: "9999999999", awb: "14112365007656" }],
+      },
+    });
+    assert.equal(parsed.pin, "134109");
+    assert.equal(parsed.hasHouse, true);
+    assert.equal(parsed.hasLocality, true);
+    assert.equal(parsed.phoneStored, true);
+    assert.equal(phoneDigitCount({ id: 1608157597, awb: "14112365007656" }), 0);
+    const missingLocality = parseShiprocketOrderRecord({
+      data: { billing_pincode: "134111", billing_city: "Zirakpur", billing_state: "Punjab", billing_address: "H No. 1920 P" },
+    });
+    assert.equal(missingLocality.hasLocality, false);
+    assert.equal(missingLocality.phoneStored, false);
   });
 
   test("delhivery create sends the facility name and does not invent an AWB", async () => {

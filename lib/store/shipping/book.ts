@@ -61,6 +61,28 @@ function str(v: unknown): string {
   return "";
 }
 
+/** Digit length of a phone-named field. Never returns the number itself. */
+export function phoneDigitCount(value: unknown): number {
+  let max = 0;
+  const walk = (node: unknown, key: string | null, depth: number) => {
+    if (depth > 6) return;
+    if (key && /phone|mobile|telephone/i.test(key) && (typeof node === "string" || typeof node === "number")) {
+      const digits = str(node).replace(/\D/g, "").length;
+      if (digits <= 13 && digits > max) max = digits;
+      return;
+    }
+    if (Array.isArray(node)) {
+      for (const item of node) walk(item, null, depth + 1);
+      return;
+    }
+    const row = record(node);
+    if (!row) return;
+    for (const [childKey, child] of Object.entries(row)) walk(child, childKey, depth + 1);
+  };
+  walk(value, null, 0);
+  return max;
+}
+
 function assertWrites(env: NodeJS.ProcessEnv): void {
   const blocked = dispatchBlocked(env);
   if (blocked) throw new Error(blocked);
@@ -101,11 +123,14 @@ export function parseShiprocketLabel(body: unknown): string | null {
   return url || null;
 }
 
-export function parseShiprocketPickup(body: unknown): { reference: string | null; date: string | null } {
+export function parseShiprocketPickup(body: unknown): { reference: string | null; date: string | null; time: string | null; status: string | null } {
   const response = record(record(body)?.response) || record(body);
+  const time = str(response?.pickup_scheduled_time) || str(response?.pickup_time);
   return {
-    reference: str(response?.pickup_token_number) || null,
+    reference: str(response?.pickup_token_number) || str(response?.pickup_token) || null,
     date: str(response?.pickup_scheduled_date) || null,
+    time: /^\d{1,2}:\d{2}/.test(time) ? time : null,
+    status: str(response?.status) || str(response?.pickup_status) || null,
   };
 }
 
@@ -364,16 +389,10 @@ export function parseShiprocketOrderRecord(body: unknown): {
   const pin = str(data?.billing_pincode) || str(data?.shipping_pincode) || str(data?.customer_pincode) || null;
   const city = str(data?.billing_city) || str(data?.shipping_city) || str(data?.customer_city) || null;
   const state = str(data?.billing_state) || str(data?.shipping_state) || str(data?.customer_state) || null;
-  const address = [str(data?.billing_address), str(data?.billing_address_2), str(data?.shipping_address), str(data?.shipping_address_2), str(data?.customer_address)]
+  const address = [str(data?.billing_address), str(data?.billing_address_2), str(data?.shipping_address), str(data?.shipping_address_2), str(data?.customer_address), str(data?.customer_address_2)]
     .filter(Boolean)
     .join(", ");
-  const phone = [
-    data?.billing_phone,
-    data?.shipping_phone,
-    data?.customer_phone,
-    data?.billing_mobile,
-    data?.phone,
-  ].map(str).find((value) => value.replace(/\D/g, "").length >= 10) || "";
+  const phoneDigits = phoneDigitCount(data);
   const awb = str(data?.awb_code) || str(record(Array.isArray(data?.shipments) ? data.shipments[0] : null)?.awb) || null;
   const courier = str(data?.courier_name) || str(record(Array.isArray(data?.shipments) ? data.shipments[0] : null)?.courier_name) || null;
   return {
@@ -381,7 +400,7 @@ export function parseShiprocketOrderRecord(body: unknown): {
     city,
     state,
     address: address || null,
-    phoneStored: phone.replace(/\D/g, "").length >= 10,
+    phoneStored: phoneDigits >= 10,
     read: Boolean(pin || city || state),
     awb,
     courier,
@@ -398,7 +417,7 @@ export async function requestProviderPickup(
     packageCount?: number;
   },
   opts: { fetchImpl?: FetchLike; env?: NodeJS.ProcessEnv } = {},
-): Promise<{ reference: string | null; date: string }> {
+): Promise<{ reference: string | null; date: string; time: string | null; status: string | null }> {
   const env = opts.env || process.env;
   assertWrites(env);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(input.date)) throw new Error("Pickup date must be YYYY-MM-DD.");
@@ -415,7 +434,7 @@ export async function requestProviderPickup(
     });
     const parsed = parseShiprocketPickup(await readJson(res));
     if (!res.ok) throw new Error("Shiprocket pickup was not scheduled.");
-    return { reference: parsed.reference, date: parsed.date || input.date };
+    return { reference: parsed.reference, date: parsed.date || input.date, time: parsed.time, status: parsed.status };
   }
   const token = delhiveryToken(env);
   const pickupName = delhiveryPickupLocation(env);
@@ -439,7 +458,7 @@ export async function requestProviderPickup(
   const body = record(await readJson(res));
   if (!res.ok) throw new Error((str(body?.error) || str(body?.message) || "Delhivery pickup was not scheduled.").slice(0, 180));
   const reference = str(body?.pickup_id) || str(body?.pr_id) || null;
-  return { reference, date: input.date };
+  return { reference, date: input.date, time: null, status: null };
 }
 
 export async function cancelProviderShipment(

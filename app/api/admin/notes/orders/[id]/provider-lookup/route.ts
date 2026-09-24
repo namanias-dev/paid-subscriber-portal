@@ -55,11 +55,13 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   if (!shippingWritesAuthorized()) {
     return NextResponse.json({ ok: false, error: "Live shipping is not enabled.", writes_authorized: false }, { status: 409 });
   }
-  const body = (await req.json().catch(() => null)) as { courier_id?: string } | null;
+  const body = (await req.json().catch(() => null)) as { courier_id?: string; action?: string } | null;
   if (body?.courier_id !== "51") {
     return NextResponse.json({ ok: false, error: "This assignment is only for courier 51." }, { status: 400 });
   }
-  if ((body as { action?: string }).action === "address") {
+  const db = storeDb();
+  if (!db) return NextResponse.json({ ok: false, error: "unavailable" }, { status: 503 });
+  if (body.action === "address") {
     const { data: current } = await db
       .from("store_shipments")
       .select("id,provider_payload")
@@ -80,39 +82,69 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     const phone = String(address.phone || order?.phone || "");
     const [first, ...rest] = String(address.name || order?.customer_name || "Customer").trim().split(/\s+/);
     const token = await shiprocketToken();
-    const updateRes = await fetch(`${shiprocketBaseUrl()}/orders/address/update`, {
-      method: "POST",
-      headers: { Accept: "application/json", "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-      body: JSON.stringify({
-        order_id: Number(orderId),
-        shipping_customer_name: first || "Customer",
-        shipping_last_name: rest.join(" ") || ".",
-        shipping_phone: phone,
-        shipping_address: [address.line1, address.line2].filter(Boolean).join(", "),
-        shipping_address_2: address.line2 || "",
-        shipping_city: address.city,
-        shipping_state: address.state,
-        shipping_country: "India",
-        shipping_pincode: address.pincode,
-      }),
-      signal: AbortSignal.timeout(20_000),
-    });
+    let updateOk = false;
+    try {
+      const updateRes = await fetch(`${shiprocketBaseUrl()}/orders/address/update`, {
+        method: "POST",
+        headers: { Accept: "application/json", "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          order_id: Number(orderId),
+          shipping_customer_name: first || "Customer",
+          shipping_last_name: rest.join(" ") || ".",
+          shipping_phone: phone,
+          shipping_address: [address.line1, address.line2].filter(Boolean).join(", "),
+          shipping_address_2: address.line2 || "",
+          shipping_city: address.city,
+          shipping_state: address.state,
+          shipping_country: "India",
+          shipping_pincode: address.pincode,
+        }),
+        signal: AbortSignal.timeout(20_000),
+      });
+      updateOk = updateRes.ok;
+    } catch {
+      updateOk = false;
+    }
     const checked = await readShiprocketOrderPublic(orderId);
+    const cityOk = String(checked.city || "").toLowerCase().replace(/[^a-z]/g, "") === "panchkula";
+    const stateOk = String(checked.state || "").toLowerCase().replace(/[^a-z]/g, "") === "haryana";
+    const addressOk = checked.pin === "134109" && cityOk && stateOk && checked.hasHouse === true && checked.hasLocality === true;
+    const phoneOk = checked.phoneStored === true;
+    if (current?.id) {
+      await db
+        .from("store_shipments")
+        .update({
+          provider_payload: {
+            ...currentPayload,
+            requested_pin: "134109",
+            requested_city: "Panchkula",
+            requested_state: "Haryana",
+            provider_pin: checked.pin,
+            provider_city: checked.city,
+            provider_state: checked.state,
+            phone_stored: phoneOk,
+            address_mismatch: !addressOk,
+            address_unverified: checked.read !== true,
+            do_not_handoff: !addressOk || !phoneOk || checked.read !== true,
+          },
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", current.id);
+    }
     return NextResponse.json(
       {
-        ok: updateRes.ok && checked.pin === "134109" && checked.hasHouse === true && checked.hasLocality === true,
+        ok: updateOk && addressOk && phoneOk,
+        updateAccepted: updateOk,
         pin: checked.pin,
         city: checked.city,
         state: checked.state,
         hasHouse: checked.hasHouse,
         hasLocality: checked.hasLocality,
-        phoneStored: checked.phoneStored,
+        phoneStored: phoneOk,
       },
       { headers: { "Cache-Control": "no-store" } },
     );
   }
-  const db = storeDb();
-  if (!db) return NextResponse.json({ ok: false, error: "unavailable" }, { status: 503 });
   const { data: shipment } = await db
     .from("store_shipments")
     .select("id,awb,provider_shipment_id,provider_payload,status")

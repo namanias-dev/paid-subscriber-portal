@@ -62,8 +62,14 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   await db
     .from("store_shipments")
     .update({
-      pickup_scheduled_at: `${pickup.date}T10:00:00+05:30`,
-      provider_payload: { ...payload, pickup_reference: pickup.reference, pickup_date: pickup.date },
+      pickup_scheduled_at: `${pickup.date}T00:00:00+05:30`,
+      provider_payload: {
+        ...payload,
+        pickup_reference: pickup.reference,
+        pickup_date: pickup.date,
+        pickup_status: pickup.status || "requested",
+        ...(pickup.time ? { pickup_time: pickup.time } : {}),
+      },
       updated_at: now,
     })
     .eq("id", shipment.id);
