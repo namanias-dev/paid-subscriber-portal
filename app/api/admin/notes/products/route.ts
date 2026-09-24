@@ -23,7 +23,7 @@ export async function GET(req: Request) {
   let q = db
     .from("store_products")
     .select(
-      "id,sku,slug,name,subject,mrp_paise,selling_price_paise,on_hand,reserved,low_stock_threshold,availability_mode,is_active,kind,cover_image_key,archived_at",
+      "id,sku,slug,name,subject,mrp_paise,selling_price_paise,on_hand,reserved,low_stock_threshold,availability_mode,is_active,kind,cover_image_key,archived_at,weight_grams,length_mm,width_mm,height_mm",
     )
     .order("position", { ascending: true });
   if (!includeArchived) q = q.is("archived_at", null);

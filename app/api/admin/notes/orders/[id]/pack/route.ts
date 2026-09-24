@@ -35,7 +35,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
 
   const { data: existing } = await db
     .from("store_shipments")
-    .select("id,status,awb")
+    .select("id,status,awb,provider_payload")
     .eq("order_id", order.id)
     .order("created_at", { ascending: false })
     .limit(1)
@@ -52,14 +52,17 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     height_mm: Math.round(pack.heightCm * 10),
     updated_at: now,
   };
+  const payload = { package_source: "STAFF_OVERRIDE" };
   if (existing) {
-    await db.from("store_shipments").update(row).eq("id", existing.id);
+    const previous = existing && "provider_payload" in existing && existing.provider_payload && typeof existing.provider_payload === "object" ? existing.provider_payload : {};
+    await db.from("store_shipments").update({ ...row, provider_payload: { ...previous, ...payload } }).eq("id", existing.id);
   } else {
     await db.from("store_shipments").insert({
       ...row,
       order_id: order.id,
       provider: "manual",
       status: "pending",
+      provider_payload: payload,
     });
   }
   await db.from("store_order_events").insert({

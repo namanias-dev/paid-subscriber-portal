@@ -76,7 +76,8 @@ export function parseDelhiveryPackage(body: unknown): {
   const root = record(body);
   const shipment = record(Array.isArray(root?.ShipmentData) ? record(root.ShipmentData[0])?.Shipment : null);
   const consignee = record(shipment?.Consignee) || record(shipment?.consignee);
-  const pin = str(consignee?.PinCode) || str(consignee?.Pincode) || str(consignee?.pin) || null;
+  const text = (value: unknown) => (typeof value === "number" && Number.isFinite(value) ? String(value) : str(value));
+  const pin = text(consignee?.PinCode) || text(consignee?.Pincode) || text(consignee?.pin) || null;
   const city = str(consignee?.City) || str(consignee?.city) || null;
   const state = str(consignee?.State) || str(consignee?.state) || null;
   const phone = [consignee?.Telephone1, consignee?.Telephone2, consignee?.Phone, consignee?.Mobile]

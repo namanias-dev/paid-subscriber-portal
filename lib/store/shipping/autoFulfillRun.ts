@@ -50,8 +50,8 @@ export async function runAutoFulfillment(orderId: string): Promise<{ ok: boolean
       return { ok: true, blocked: null, awb: (ships || []).find((row) => row.awb)?.awb || null };
     }
     const packed = (ships || []).find((row) => row.weight_grams && row.length_mm && row.width_mm && row.height_mm);
-    let pack = packed
-      ? { weightGrams: Number(packed.weight_grams), lengthCm: Number(packed.length_mm) / 10, widthCm: Number(packed.width_mm) / 10, heightCm: Number(packed.height_mm) / 10 }
+    let pack: { weightGrams: number; lengthCm: number; widthCm: number; heightCm: number; source: "PRODUCT_PROFILE" | "STAFF_OVERRIDE" } | null = packed
+      ? { weightGrams: Number(packed.weight_grams), lengthCm: Number(packed.length_mm) / 10, widthCm: Number(packed.width_mm) / 10, heightCm: Number(packed.height_mm) / 10, source: "STAFF_OVERRIDE" }
       : null;
     if (!pack) {
       const { data: items } = await db.from("store_order_items").select("qty,weight_grams_snapshot,product_id").eq("order_id", orderId);
@@ -74,7 +74,7 @@ export async function runAutoFulfillment(orderId: string): Promise<{ ok: boolean
         await release("blocked", resolved.reason);
         return { ok: false, blocked: resolved.reason, awb: null };
       }
-      pack = resolved;
+      pack = { ...resolved, source: "PRODUCT_PROFILE" };
     }
     const { data: address } = await db.from("store_addresses").select("name,phone,line1,line2,city,state,pincode").eq("id", locked.shipping_address_id).maybeSingle();
     if (!address?.pincode || !address.line1 || !address.city || !address.state) {
@@ -188,7 +188,7 @@ export async function runAutoFulfillment(orderId: string): Promise<{ ok: boolean
 async function createMapped(
   order: { id: string; order_no: string; total_paise: number },
   address: { name?: string | null; phone?: string | null; line1: string; line2?: string | null; city: string; state: string; pincode: string },
-  pack: { weightGrams: number; lengthCm: number; widthCm: number; heightCm: number },
+  pack: { weightGrams: number; lengthCm: number; widthCm: number; heightCm: number; source?: "PRODUCT_PROFILE" | "STAFF_OVERRIDE" },
   product: string,
   candidate: FulfillCandidate,
   attempt: number,
@@ -224,8 +224,9 @@ async function createMapped(
       length_mm: Math.round(pack.lengthCm * 10),
       width_mm: Math.round(pack.widthCm * 10),
       height_mm: Math.round(pack.heightCm * 10),
-      provider_payload: {
+        provider_payload: {
         attempt,
+        package_source: pack.source || "PRODUCT_PROFILE",
         rate_paise: candidate.ratePaise,
         label_url: created.labelUrl,
         provider_order_id: created.providerOrderId,

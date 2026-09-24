@@ -70,6 +70,7 @@ export interface AdminOrder {
     length_cm?: number | null;
     width_cm?: number | null;
     height_cm?: number | null;
+    package_source?: string | null;
   } | null;
   issue?: {
     id: string;
@@ -339,6 +340,7 @@ export default function OrderDetail({
               <p className="mt-2 text-sm text-[var(--ca-navy)]">
                 {ship?.weight_grams ? `${ship.weight_grams} g` : "Weight not saved"}
                 {ship?.length_cm ? ` · ${ship.length_cm} × ${ship.width_cm} × ${ship.height_cm} cm` : ""}
+                {ship?.package_source === "STAFF_OVERRIDE" ? " · Source: order override" : ship?.package_source === "PRODUCT_PROFILE" ? " · Source: product default profile" : ""}
                 {vol ? ` · Volumetric ${vol} g` : ""}
               </p>
             )}

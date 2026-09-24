@@ -7,6 +7,7 @@
  * storage. Nothing here touches money/identity tables — catalogue only.
  */
 import { isAvailabilityMode } from "./availability";
+import { validateProductPackage } from "./packageProfile";
 
 export const STAGES = new Set(["prelims", "mains", "both"]);
 
@@ -57,6 +58,15 @@ export function applyProductContentFields(patch: Record<string, unknown>, body: 
   if (body.length_mm !== undefined) patch.length_mm = intOrNull(body.length_mm);
   if (body.width_mm !== undefined) patch.width_mm = intOrNull(body.width_mm);
   if (body.height_mm !== undefined) patch.height_mm = intOrNull(body.height_mm);
+  if (body.weight_grams !== undefined || body.length_mm !== undefined || body.width_mm !== undefined || body.height_mm !== undefined) {
+    const invalid = validateProductPackage({
+      weightGrams: (patch.weight_grams as number | null) ?? null,
+      lengthMm: (patch.length_mm as number | null) ?? null,
+      widthMm: (patch.width_mm as number | null) ?? null,
+      heightMm: (patch.height_mm as number | null) ?? null,
+    });
+    if (invalid) throw new Error(invalid);
+  }
   if (body.dispatch_days != null && body.dispatch_days !== "") patch.dispatch_days = Math.max(0, Math.round(Number(body.dispatch_days)));
   if (body.max_quantity_per_order != null && body.max_quantity_per_order !== "")
     patch.max_quantity_per_order = Math.max(1, Math.round(Number(body.max_quantity_per_order)));

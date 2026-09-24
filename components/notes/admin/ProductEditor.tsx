@@ -264,10 +264,23 @@ export default function ProductEditor({ id }: { id: string }) {
             <Field label="Number of booklets"><input type="number" min={0} className={inp} value={p.booklets ?? ""} onChange={(e) => set("booklets", e.target.value === "" ? null : Number(e.target.value))} /></Field>
             <Field label="Physical format"><input className={inp} value={p.physical_format || ""} placeholder="Printed booklet set" onChange={(e) => set("physical_format", e.target.value)} /></Field>
             <Field label="Binding"><input className={inp} value={p.binding_type || ""} onChange={(e) => set("binding_type", e.target.value)} /></Field>
-            <Field label="Package weight (g)"><input type="number" min={0} className={inp} value={p.weight_grams ?? ""} onChange={(e) => set("weight_grams", e.target.value === "" ? null : Number(e.target.value))} /></Field>
-            <Field label="Length (cm)"><input type="number" min={0} step="0.1" className={inp} value={p.length_mm ? p.length_mm / 10 : ""} onChange={(e) => set("length_mm", e.target.value === "" ? null : Math.round(Number(e.target.value) * 10))} /></Field>
-            <Field label="Width (cm)"><input type="number" min={0} step="0.1" className={inp} value={p.width_mm ? p.width_mm / 10 : ""} onChange={(e) => set("width_mm", e.target.value === "" ? null : Math.round(Number(e.target.value) * 10))} /></Field>
-            <Field label="Height (cm)"><input type="number" min={0} step="0.1" className={inp} value={p.height_mm ? p.height_mm / 10 : ""} onChange={(e) => set("height_mm", e.target.value === "" ? null : Math.round(Number(e.target.value) * 10))} /></Field>
+          </Grid>
+        </Section>
+
+        <Section title="Shipping & package">
+          <p className="mb-2 text-sm text-[var(--ca-navy)]/70">Saved once and automatically used for courier rates and fulfillment for future orders.</p>
+          {p.weight_grams && p.length_mm && p.width_mm && p.height_mm ? (
+            <p className="mb-3 text-sm font-semibold text-emerald-800">
+              {p.weight_grams} g · {p.length_mm / 10} × {p.width_mm / 10} × {p.height_mm / 10} cm · Auto fulfillment ready
+            </p>
+          ) : (
+            <p className="mb-3 text-sm font-semibold text-amber-800">Package profile required · Auto fulfillment blocked</p>
+          )}
+          <Grid>
+            <Field label="Packed weight (g)"><input type="number" min={50} className={inp} value={p.weight_grams ?? ""} onChange={(e) => set("weight_grams", e.target.value === "" ? null : Number(e.target.value))} /></Field>
+            <Field label="Length (cm)"><input type="number" min={0.5} step="0.1" className={inp} value={p.length_mm ? p.length_mm / 10 : ""} onChange={(e) => set("length_mm", e.target.value === "" ? null : Math.round(Number(e.target.value) * 10))} /></Field>
+            <Field label="Width (cm)"><input type="number" min={0.5} step="0.1" className={inp} value={p.width_mm ? p.width_mm / 10 : ""} onChange={(e) => set("width_mm", e.target.value === "" ? null : Math.round(Number(e.target.value) * 10))} /></Field>
+            <Field label="Height (cm)"><input type="number" min={0.5} step="0.1" className={inp} value={p.height_mm ? p.height_mm / 10 : ""} onChange={(e) => set("height_mm", e.target.value === "" ? null : Math.round(Number(e.target.value) * 10))} /></Field>
           </Grid>
         </Section>
 

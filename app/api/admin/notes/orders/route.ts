@@ -157,6 +157,7 @@ export async function GET(req: Request) {
       length_cm: number | null;
       width_cm: number | null;
       height_cm: number | null;
+      package_source: string | null;
     }
   >();
   const payByOrder = new Map<string, { status: string; provider: string | null }>();
@@ -229,6 +230,7 @@ export async function GET(req: Request) {
           tracking_location?: string;
           address_mismatch?: boolean;
           do_not_handoff?: boolean;
+          package_source?: string;
         };
         shipByOrder.set(s.order_id, {
           courier: s.courier_name,
@@ -250,6 +252,7 @@ export async function GET(req: Request) {
           length_cm: s.length_mm ? Number(s.length_mm) / 10 : null,
           width_cm: s.width_mm ? Number(s.width_mm) / 10 : null,
           height_cm: s.height_mm ? Number(s.height_mm) / 10 : null,
+          package_source: payload.package_source || null,
         });
       }
     }

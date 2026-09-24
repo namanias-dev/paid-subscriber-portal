@@ -24,6 +24,10 @@ interface Row {
   has_cover: boolean;
   sample_count: number;
   order_count: number;
+  weight_grams: number | null;
+  length_mm: number | null;
+  width_mm: number | null;
+  height_mm: number | null;
 }
 
 const AVAILABILITY_LABEL: Record<AvailabilityMode, string> = {
@@ -46,7 +50,18 @@ export default function NotesProductAdmin() {
   const [showArchived, setShowArchived] = useState(false);
   const [creating, setCreating] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
-  const [form, setForm] = useState({ name: "", subject: "", sku: "", slug: "", kind: "single" as "single" | "bundle" });
+  const [form, setForm] = useState({
+    name: "",
+    subject: "",
+    sku: "",
+    slug: "",
+    kind: "single" as "single" | "bundle",
+    price: "2999",
+    weight: "",
+    length: "",
+    width: "",
+    height: "",
+  });
 
   async function load() {
     setLoading(true);
@@ -79,8 +94,12 @@ export default function NotesProductAdmin() {
         sku,
         slug,
         kind: form.kind,
-        mrp_paise: 0,
-        selling_price_paise: 0,
+        mrp_paise: form.kind === "single" ? Math.round(Number(form.price || 2999) * 100) : 0,
+        selling_price_paise: form.kind === "single" ? Math.round(Number(form.price || 2999) * 100) : 0,
+        weight_grams: form.weight ? Number(form.weight) : null,
+        length_mm: form.length ? Math.round(Number(form.length) * 10) : null,
+        width_mm: form.width ? Math.round(Number(form.width) * 10) : null,
+        height_mm: form.height ? Math.round(Number(form.height) * 10) : null,
         on_hand: 0,
         is_active: false,
       }),
@@ -134,6 +153,24 @@ export default function NotesProductAdmin() {
               <input value={form.slug} onChange={(e) => setForm({ ...form, slug: e.target.value })} className="min-h-10 w-full rounded-lg border border-line px-3 text-sm" placeholder="slug (auto if blank)" />
             </div>
           </details>
+          {form.kind === "single" && (
+            <label className="text-sm">
+              <span className="mb-1 block font-medium text-ink2">Selling price (₹)</span>
+              <input type="number" min={1} value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} className="min-h-10 w-full rounded-lg border border-line px-3 text-sm" />
+            </label>
+          )}
+          <label className="text-sm">
+            <span className="mb-1 block font-medium text-ink2">Packed weight (g)</span>
+            <input type="number" min={50} value={form.weight} onChange={(e) => setForm({ ...form, weight: e.target.value })} className="min-h-10 w-full rounded-lg border border-line px-3 text-sm" placeholder="Measure once" />
+          </label>
+          <label className="text-sm">
+            <span className="mb-1 block font-medium text-ink2">Length × width × height (cm)</span>
+            <span className="grid grid-cols-3 gap-2">
+              <input type="number" min={0.5} step="0.1" value={form.length} onChange={(e) => setForm({ ...form, length: e.target.value })} className="min-h-10 rounded-lg border border-line px-2 text-sm" placeholder="L" />
+              <input type="number" min={0.5} step="0.1" value={form.width} onChange={(e) => setForm({ ...form, width: e.target.value })} className="min-h-10 rounded-lg border border-line px-2 text-sm" placeholder="W" />
+              <input type="number" min={0.5} step="0.1" value={form.height} onChange={(e) => setForm({ ...form, height: e.target.value })} className="min-h-10 rounded-lg border border-line px-2 text-sm" placeholder="H" />
+            </span>
+          </label>
           <div className="sm:col-span-2">
             <button type="submit" className="h-10 rounded-full bg-ink px-5 text-sm font-semibold text-white">
               Create & edit
@@ -174,6 +211,11 @@ export default function NotesProductAdmin() {
                   )}
                 </div>
 
+                <p className="mt-2 text-sm text-ink2">
+                  {r.weight_grams && r.length_mm && r.width_mm && r.height_mm
+                    ? `${r.weight_grams} g · ${r.length_mm / 10} × ${r.width_mm / 10} × ${r.height_mm / 10} cm · Auto fulfillment ready`
+                    : "Package profile required · Auto fulfillment blocked"}
+                </p>
                 <div className="mt-2 text-sm text-ink2">
                   {r.availability_mode === "ready_stock" ? (
                     <span>{AVAILABILITY_LABEL.ready_stock} · {r.sellable} available</span>
