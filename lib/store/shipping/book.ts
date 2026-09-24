@@ -364,7 +364,7 @@ export function parseShiprocketOrderRecord(body: unknown): {
   const pin = str(data?.billing_pincode) || str(data?.shipping_pincode) || str(data?.customer_pincode) || null;
   const city = str(data?.billing_city) || str(data?.shipping_city) || str(data?.customer_city) || null;
   const state = str(data?.billing_state) || str(data?.shipping_state) || str(data?.customer_state) || null;
-  const address = [str(data?.billing_address), str(data?.billing_address_2), str(data?.shipping_address), str(data?.customer_address)]
+  const address = [str(data?.billing_address), str(data?.billing_address_2), str(data?.shipping_address), str(data?.shipping_address_2), str(data?.customer_address)]
     .filter(Boolean)
     .join(", ");
   const phone = [
