@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import test from "node:test";
 import {
   actionRequiredReasons,
@@ -41,6 +42,12 @@ test("cheapest quote is first and selected, fastest is labelled from returned ET
   const fastest = rankQuotes(quotes, "eta");
   assert.equal(fastest[0].etaDays, 1);
   assert.equal(fastest.find((q) => q.courier === "Ekart Surface")?.bestValue, false);
+});
+
+test("pickup scheduled orders stay in the default admin list", () => {
+  const src = fs.readFileSync(new URL("../../app/api/admin/notes/orders/route.ts", import.meta.url), "utf8");
+  const all = src.slice(src.indexOf("const ALL_STATUSES"), src.indexOf("export async function GET"));
+  assert.match(all, /BUCKETS\.pickup/);
 });
 
 test("sort puts action required ahead when requested and keeps newest otherwise", () => {

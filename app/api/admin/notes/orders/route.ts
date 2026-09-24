@@ -42,6 +42,7 @@ const ALL_STATUSES = [
   ...BUCKETS.new,
   ...BUCKETS.preparing,
   ...BUCKETS.packed,
+  ...BUCKETS.pickup,
   ...BUCKETS.shipped,
   ...BUCKETS.delivered,
   ...BUCKETS.cancelled,
