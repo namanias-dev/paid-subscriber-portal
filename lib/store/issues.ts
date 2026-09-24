@@ -1,4 +1,3 @@
-import { randomBytes } from "node:crypto";
 import type { CustomerStage } from "./projection";
 
 export const ISSUE_CATEGORIES = [
@@ -98,10 +97,6 @@ export function categoriesForStage(stage: CustomerStage): IssueCategory[] {
     return ["DAMAGE_ISSUE", "DELIVERY_DELAY", "ADDRESS_ISSUE", "TRACKING_ISSUE", "STATUS_MISMATCH", "OTHER"];
   }
   return base;
-}
-
-export function mintIssueReference(): string {
-  return `NIAS-I-${randomBytes(4).toString("hex").toUpperCase()}`;
 }
 
 export function clampIssueText(value: string, max = 600): string {

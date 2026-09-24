@@ -5,9 +5,9 @@ import {
   clampIssueText,
   issueCategoryAllowed,
   issueIsOpen,
-  mintIssueReference,
   toPublicIssue,
 } from "../../lib/store/issues";
+import { mintIssueReference } from "../../lib/store/issueRef";
 import { buildTrackingTimeline, safeCourierTrackUrl, trackingNarrative } from "../../lib/store/trackingView";
 
 test("issue reference and category checks", () => {

@@ -6,9 +6,9 @@ import {
   clampIssueText,
   issueCategoryAllowed,
   issueIsOpen,
-  mintIssueReference,
   toPublicIssue,
 } from "@/lib/store/issues";
+import { mintIssueReference } from "@/lib/store/issueRef";
 import { projectCustomerStage } from "@/lib/store/projection";
 
 export const dynamic = "force-dynamic";
