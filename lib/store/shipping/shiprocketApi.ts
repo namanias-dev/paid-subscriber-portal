@@ -113,11 +113,15 @@ export function shiprocketAdhocDraft(input: {
   if (!pickup || /^\d+$/.test(pickup)) {
     throw new Error("Shiprocket pickup_location must be the pickup nickname, not the numeric address id.");
   }
+  const parts = input.name.trim().split(/\s+/).filter(Boolean);
+  const first = parts[0] || "Customer";
+  const last = parts.slice(1).join(" ") || ".";
   return {
     order_id: input.orderNumber,
     order_date: "",
     pickup_location: pickup,
-    billing_customer_name: input.name,
+    billing_customer_name: first,
+    billing_last_name: last,
     billing_address: input.address,
     billing_city: input.city,
     billing_pincode: input.pin,

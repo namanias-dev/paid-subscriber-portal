@@ -14,13 +14,12 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
   }
   const db = storeDb();
   if (!db) return NextResponse.json({ ok: false, error: "unavailable" }, { status: 503 });
-  const { data: shipment } = await db
+  const { data: shipmentRows } = await db
     .from("store_shipments")
-    .select("provider,awb")
+    .select("provider,awb,status")
     .eq("order_id", params.id)
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+    .order("created_at", { ascending: false });
+  const shipment = (shipmentRows || []).find((row) => row.status !== "cancelled" && row.status !== "failed") || null;
   if (!shipment?.awb) {
     return NextResponse.json({ ok: false, error: "No AWB is stored for this order." }, { status: 404, headers: { "Cache-Control": "no-store" } });
   }

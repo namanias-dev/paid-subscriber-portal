@@ -220,9 +220,10 @@ async function createShiprocket(input: CreateProviderInput, env: NodeJS.ProcessE
     body: JSON.stringify({ ...draft, order_date: new Date().toISOString().slice(0, 16).replace("T", " ") }),
     signal: AbortSignal.timeout(20_000),
   });
-  const created = parseShiprocketCreate(await readJson(createdRes));
+  const createdBody = await readJson(createdRes);
+  const created = parseShiprocketCreate(createdBody);
   if (!createdRes.ok || !created.shipmentId) {
-    throw new Error((created.message || `Shiprocket order was not created (${createdRes.status}).`).slice(0, 180));
+    throw new Error((shiprocketErrorText(createdBody) || created.message || `Shiprocket order was not created (${createdRes.status}).`).slice(0, 180));
   }
   let awb = created.awb;
   let courierName = created.courierName;
@@ -275,6 +276,44 @@ async function createShiprocket(input: CreateProviderInput, env: NodeJS.ProcessE
     phoneStored: stored.phoneStored,
     addressMismatch: mismatch,
     addressUnverified: !stored.read,
+  };
+}
+
+function shiprocketErrorText(body: unknown): string | null {
+  const root = record(body);
+  const errors = root?.errors;
+  if (errors && typeof errors === "object") {
+    const bits = Object.entries(errors as Record<string, unknown>)
+      .map(([key, value]) => `${key}: ${Array.isArray(value) ? value.map(str).join(" ") : str(value)}`)
+      .filter((line) => line.trim().length > 2);
+    if (bits.length) return bits.join("; ");
+  }
+  return str(root?.message) || null;
+}
+
+export async function findShiprocketOrder(
+  orderNumber: string,
+  opts: { fetchImpl?: FetchLike; env?: NodeJS.ProcessEnv } = {},
+): Promise<{ found: boolean; orderId: string | null; shipmentId: string | null; awb: string | null; status: string | null }> {
+  const env = opts.env || process.env;
+  const fetchImpl = opts.fetchImpl || fetch;
+  const token = await shiprocketToken({ fetchImpl, env });
+  const res = await fetchImpl(`${shiprocketBaseUrl(env)}/orders?search=${encodeURIComponent(orderNumber)}`, {
+    headers: { Accept: "application/json", Authorization: `Bearer ${token}` },
+    signal: AbortSignal.timeout(20_000),
+  });
+  const root = record(await readJson(res));
+  const data = root?.data;
+  const rows = Array.isArray(data) ? data : [];
+  const match = rows.map(record).find((row) => str(row?.channel_order_id) === orderNumber || str(row?.order_id) === orderNumber) || null;
+  const shipments = Array.isArray(match?.shipments) ? match.shipments.map(record).filter(Boolean) : [];
+  const shipment = shipments[0] || null;
+  return {
+    found: Boolean(match),
+    orderId: str(match?.id) || null,
+    shipmentId: str(shipment?.id) || null,
+    awb: str(shipment?.awb) || str(match?.awb_code) || null,
+    status: str(match?.status) || null,
   };
 }
 
