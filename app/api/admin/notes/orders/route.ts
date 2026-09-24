@@ -4,6 +4,8 @@ import { storeDb } from "@/lib/store/db";
 import { staffPaymentLabel } from "@/lib/store/orders";
 import { fulfilmentAttention } from "@/lib/store/shipping/dispatch";
 import { issueCategoryLabel, issueStatusLabel, OPEN_ISSUE_STATUSES } from "@/lib/store/issues";
+import { actionRequiredReasons, pickupFailedActivity, sortAdminOrders } from "@/lib/store/adminConsole";
+import { shippingWritesAuthorized } from "@/lib/store/shipping/config";
 
 export const dynamic = "force-dynamic";
 
@@ -12,7 +14,8 @@ const BUCKETS: Record<string, string[]> = {
   confirming: ["PAYMENT_PENDING"],
   new: ["PAYMENT_CONFIRMED", "ORDER_CONFIRMED"],
   preparing: ["PROCESSING", "PRINTING", "QUALITY_CHECK", "READY_TO_PACK"],
-  packed: ["PACKED", "READY_FOR_PICKUP", "PICKUP_SCHEDULED"],
+  packed: ["PACKED", "READY_FOR_PICKUP"],
+  pickup: ["PICKUP_SCHEDULED"],
   shipped: ["PICKED_UP", "IN_TRANSIT", "OUT_FOR_DELIVERY"],
   delivered: ["DELIVERED"],
   cancelled: ["CANCELLED", "CANCEL_REQUESTED", "PAYMENT_FAILED", "PAYMENT_EXPIRED"],
@@ -55,8 +58,10 @@ export async function GET(req: Request) {
   const url = new URL(req.url);
   const bucket = url.searchParams.get("bucket") || "";
   const q = (url.searchParams.get("q") || "").trim();
-  const limit = Math.min(100, Math.max(1, Number(url.searchParams.get("limit") || 50)));
+  const limit = Math.min(50, Math.max(1, Number(url.searchParams.get("limit") || 25)));
   const offset = Math.max(0, Number(url.searchParams.get("offset") || 0));
+  const sort = url.searchParams.get("sort") || "newest";
+  const actionOnly = url.searchParams.get("action") === "required";
 
   const statuses = BUCKETS[bucket] || ALL_STATUSES;
   const issueFilter = url.searchParams.get("issue") || "";
@@ -90,7 +95,7 @@ export async function GET(req: Request) {
   let query = db
     .from("store_orders")
     .select(
-      "id,order_no,status,customer_name,phone,email,total_paise,discount_paise,subtotal_paise,promo_code,discount_trace_json,promised_delivery_date,placed_at,paid_at,shipped_at,delivered_at,internal_notes,shipping_address_id",
+      "id,order_no,status,customer_name,phone,email,total_paise,discount_paise,shipping_paise,subtotal_paise,promo_code,discount_trace_json,promised_delivery_date,placed_at,updated_at,paid_at,shipped_at,delivered_at,internal_notes,shipping_address_id",
       { count: "exact" },
     )
     .in("status", statuses);
@@ -108,9 +113,11 @@ export async function GET(req: Request) {
     query = query.or(ors.join(","));
   }
 
-  const { data, count } = await query
-    .order("placed_at", { ascending: false })
-    .range(offset, offset + limit - 1);
+  const sortColumn = sort.startsWith("value") ? "total_paise" : sort === "updated" || sort === "action" ? "updated_at" : "placed_at";
+  const ascending = sort === "oldest" || sort === "value_asc";
+  const scan = actionOnly ? 100 : limit;
+  const scanOffset = actionOnly ? 0 : offset;
+  const { data, count } = await query.order(sortColumn, { ascending }).range(scanOffset, scanOffset + scan - 1);
 
   const orders = data || [];
   const ids = orders.map((o) => o.id);
@@ -141,6 +148,8 @@ export async function GET(req: Request) {
       pickup_status: string | null;
       tracking_activity: string | null;
       tracking_event_at: string | null;
+      tracking_location: string | null;
+      address_mismatch: boolean;
       pickup_reference: string | null;
       pickup_time: string | null;
       weight_grams: number | null;
@@ -216,6 +225,9 @@ export async function GET(req: Request) {
           pickup_reattempt_date?: string;
           tracking_activity?: string;
           tracking_event_at?: string;
+          tracking_location?: string;
+          address_mismatch?: boolean;
+          do_not_handoff?: boolean;
         };
         shipByOrder.set(s.order_id, {
           courier: s.courier_name,
@@ -229,6 +241,8 @@ export async function GET(req: Request) {
           pickup_status: payload.pickup_status || null,
           tracking_activity: payload.tracking_activity || null,
           tracking_event_at: payload.tracking_event_at || null,
+          tracking_location: payload.tracking_location || null,
+          address_mismatch: Boolean(payload.address_mismatch || payload.do_not_handoff),
           pickup_reference: payload.pickup_reference || null,
           pickup_time: payload.pickup_time || null,
           weight_grams: s.weight_grams ?? null,
@@ -275,27 +289,78 @@ export async function GET(req: Request) {
     }
   }
 
+  const mapped = orders.map((o) => {
+    const ship = shipByOrder.get(o.id) || null;
+    const issue = issueByOrder.get(o.id) || null;
+    const reasons = actionRequiredReasons({
+      status: o.status,
+      awb: ship?.awb,
+      pickupFailed: pickupFailedActivity(ship?.tracking_activity),
+      addressMismatch: Boolean(ship?.address_mismatch),
+      openIssue: Boolean(issue?.open),
+      paymentPending: o.status === "PAYMENT_PENDING",
+    });
+    return {
+      ...o,
+      address: o.shipping_address_id ? addrMap.get(o.shipping_address_id) || null : null,
+      items: itemsByOrder.get(o.id) || [],
+      shipment: ship,
+      past_shipments: pastByOrder.get(o.id) || [],
+      attention: fulfilmentAttention({
+        orderStatus: o.status,
+        awb: ship?.awb,
+        hasLabel: ship?.has_label,
+      }),
+      action_required: reasons.length > 0,
+      action_reasons: reasons,
+      payment_status: staffPaymentLabel(payByOrder.get(o.id)?.provider, payByOrder.get(o.id)?.status),
+      issue,
+    };
+  });
+  const visible = sortAdminOrders(actionOnly ? mapped.filter((row) => row.action_required) : mapped, sort === "action" ? "action" : "newest");
+  const page = actionOnly ? visible.slice(offset, offset + limit) : sort === "action" ? visible : mapped;
+  const counts = await adminCounts(db);
+
   return NextResponse.json(
     {
       ok: true,
-      total: count ?? orders.length,
+      total: actionOnly ? visible.length : count ?? orders.length,
       limit,
       offset,
-      orders: orders.map((o) => ({
-        ...o,
-        address: o.shipping_address_id ? addrMap.get(o.shipping_address_id) || null : null,
-        items: itemsByOrder.get(o.id) || [],
-        shipment: shipByOrder.get(o.id) || null,
-        past_shipments: pastByOrder.get(o.id) || [],
-        attention: fulfilmentAttention({
-          orderStatus: o.status,
-          awb: shipByOrder.get(o.id)?.awb,
-          hasLabel: shipByOrder.get(o.id)?.has_label,
-        }),
-        payment_status: staffPaymentLabel(payByOrder.get(o.id)?.provider, payByOrder.get(o.id)?.status),
-        issue: issueByOrder.get(o.id) || null,
-      })),
+      writes_authorized: shippingWritesAuthorized(),
+      counts,
+      orders: page,
     },
     { headers: { "Cache-Control": "no-store" } },
   );
+}
+
+async function adminCounts(db: NonNullable<ReturnType<typeof storeDb>>) {
+  async function count(statuses: string[]) {
+    const { count: n } = await db.from("store_orders").select("id", { count: "exact", head: true }).in("status", statuses);
+    return n || 0;
+  }
+  const [total, fresh, preparing, packed, pickup, transit, delivered] = await Promise.all([
+    count(ALL_STATUSES),
+    count(BUCKETS.new),
+    count(BUCKETS.preparing),
+    count(["PACKED", "READY_FOR_PICKUP"]),
+    count(["PICKUP_SCHEDULED"]),
+    count(BUCKETS.shipped),
+    count(BUCKETS.delivered),
+  ]);
+  const { count: issues } = await db
+    .from("store_order_issues")
+    .select("id", { count: "exact", head: true })
+    .in("status", [...OPEN_ISSUE_STATUSES]);
+  return {
+    total,
+    new: fresh,
+    preparing,
+    packed,
+    pickup,
+    transit,
+    delivered,
+    issues: issues || 0,
+  };
 }

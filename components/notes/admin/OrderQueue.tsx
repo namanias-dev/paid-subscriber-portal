@@ -1,766 +1,321 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { PageHeader } from "@/components/admin/ui";
-import CourierQuotes from "@/components/notes/admin/CourierQuotes";
 import { formatPaise } from "@/lib/store/money";
+import {
+  fulfillmentLabel,
+  fulfillmentTone,
+  formatAdminWhen,
+  orderIndexLabel,
+  pickupFailedActivity,
+  primaryAction,
+  PRIMARY_LABEL,
+  type BadgeTone,
+} from "@/lib/store/adminConsole";
+import OrderDetail, { type AdminOrder } from "./orders/OrderDetail";
+import CourierPicker from "./orders/CourierPicker";
 
-interface Address {
-  name?: string;
-  phone?: string;
-  line1: string;
-  line2: string | null;
-  city: string;
-  state: string;
-  pincode: string;
-  landmark: string | null;
-  delivery_instructions?: string | null;
-}
+const FILTERS = [
+  { key: "", label: "All", count: "total" },
+  { key: "new", label: "New", count: "new" },
+  { key: "preparing", label: "Preparing", count: "preparing" },
+  { key: "packed", label: "Packed", count: "packed" },
+  { key: "pickup", label: "Pickup", count: "pickup" },
+  { key: "shipped", label: "Shipped", count: "transit" },
+  { key: "delivered", label: "Delivered", count: "delivered" },
+  { key: "issues", label: "Issues", count: "issues" },
+] as const;
 
-interface Row {
-  id: string;
-  order_no: string;
-  status: string;
-  customer_name: string;
-  phone: string;
-  email: string | null;
-  total_paise: number;
-  discount_paise?: number;
-  promo_code?: string | null;
-  discount_trace_json?: {
-    offer_name?: string;
-    discount_type?: string;
-    discount_value?: number;
-    discount_amount?: number;
-  } | null;
-  payment_status: string | null;
-  promised_delivery_date: string | null;
-  placed_at: string;
-  internal_notes: string | null;
-  address: Address | null;
-  items: Array<{ name: string; qty: number; sku: string; unit_price_paise?: number; line_total_paise?: number }>;
-  past_shipments?: Array<{
-    provider: string | null;
-    courier: string | null;
-    awb: string | null;
-    status: string | null;
-    reason: string | null;
-  }>;
-  shipment: {
-    courier: string | null;
-    awb: string | null;
-    tracking_url: string | null;
-    provider: string | null;
-    status: string | null;
-    has_label: boolean;
-    pickup_scheduled_at: string | null;
-    pickup_date?: string | null;
-    pickup_status?: string | null;
-    tracking_activity?: string | null;
-    tracking_event_at?: string | null;
-    pickup_reference?: string | null;
-    pickup_time?: string | null;
-    weight_grams?: number | null;
-    length_cm?: number | null;
-    width_cm?: number | null;
-    height_cm?: number | null;
-  } | null;
-  attention?: string[];
-  issue?: {
-    id: string;
-    reference: string;
-    category: string;
-    category_label: string;
-    status: string;
-    status_label: string;
-    description: string;
-    created_at: string;
-    customer_note: string | null;
-    admin_note: string | null;
-    callback_requested: boolean;
-    open: boolean;
-  } | null;
-}
+const TONE: Record<BadgeTone, string> = {
+  neutral: "bg-[var(--ca-navy)]/5 text-[var(--ca-navy)]",
+  navy: "bg-[var(--ca-navy)] text-white",
+  gold: "bg-[var(--ca-gold)]/30 text-[var(--ca-gold-dark)]",
+  amber: "bg-amber-100 text-amber-950",
+  green: "bg-emerald-50 text-emerald-900",
+  red: "bg-red-50 text-red-900",
+};
 
-const BUCKETS = [
-  { key: "", label: "All" },
-  { key: "confirming", label: "Payment confirming" },
-  { key: "new", label: "New" },
-  { key: "preparing", label: "Preparing" },
-  { key: "packed", label: "Packed" },
-  { key: "shipped", label: "Shipped" },
-  { key: "delivered", label: "Delivered" },
-  { key: "problem", label: "Problem" },
-  { key: "cancelled", label: "Cancelled" },
-];
-
-const EXCEPTIONS = [
-  { value: "damaged", label: "Damaged notes" },
-  { value: "wrong_subject", label: "Wrong subject" },
-  { value: "missing_item", label: "Missing product" },
-  { value: "incomplete_pages", label: "Incomplete pages" },
-  { value: "print_defect", label: "Print defect" },
-  { value: "delivery_problem", label: "Delivery issue" },
-  { value: "lost_in_transit", label: "Lost in transit" },
-  { value: "duplicate_order", label: "Duplicate order" },
-];
-
-const REFUNDABLE = new Set(["DELIVERED", "DELIVERY_FAILED", "RETURN_APPROVED", "RETURN_RECEIVED", "RTO_DELIVERED"]);
-
-function formatAddress(a: Address | null): string {
-  if (!a) return "—";
-  return [a.line1, a.line2, a.landmark, `${a.city}, ${a.state} ${a.pincode}`].filter(Boolean).join(", ");
-}
-
-function courierBlock(o: Row): string {
-  const a = o.address;
-  return [
-    o.customer_name,
-    o.phone,
-    a?.line1,
-    a?.line2,
-    a?.landmark,
-    a ? `${a.city}, ${a.state} - ${a.pincode}` : "",
-    `Order ${o.order_no}`,
-  ]
-    .filter(Boolean)
-    .join("\n");
+function readParams() {
+  const params = new URLSearchParams(window.location.search);
+  return {
+    bucket: params.get("status") || "",
+    q: params.get("q") || "",
+    sort: params.get("sort") || "newest",
+    action: params.get("action") === "required",
+    offset: Number(params.get("offset") || 0),
+  };
 }
 
 export default function NotesOrderQueue() {
-  const [orders, setOrders] = useState<Row[]>([]);
-  const [bucket, setBucket] = useState("");
-  const [issueOnly, setIssueOnly] = useState(false);
-  const [q, setQ] = useState("");
-  const [issueStatus, setIssueStatus] = useState<Record<string, string>>({});
-  const [issueAdmin, setIssueAdmin] = useState<Record<string, string>>({});
-  const [issueCustomer, setIssueCustomer] = useState<Record<string, string>>({});
+  const initial = typeof window === "undefined" ? { bucket: "", q: "", sort: "newest", action: false, offset: 0 } : readParams();
+  const [orders, setOrders] = useState<AdminOrder[]>([]);
+  const [counts, setCounts] = useState<Record<string, number>>({});
+  const [total, setTotal] = useState(0);
+  const [bucket, setBucket] = useState(initial.bucket === "issues" ? "" : initial.bucket);
+  const [issueOnly, setIssueOnly] = useState(initial.bucket === "issues");
+  const [actionOnly, setActionOnly] = useState(initial.action);
+  const [q, setQ] = useState(initial.q);
+  const [sort, setSort] = useState(initial.sort);
+  const [offset, setOffset] = useState(initial.offset);
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [compareId, setCompareId] = useState<string | null>(null);
+  const [writes, setWrites] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
-  const [awb, setAwb] = useState<Record<string, string>>({});
-  const [courier, setCourier] = useState<Record<string, string>>({});
-  const [noteOpen, setNoteOpen] = useState<string | null>(null);
-  const [note, setNote] = useState<Record<string, string>>({});
-  const [exc, setExc] = useState<Record<string, string>>({});
-  const [pickupDate, setPickupDate] = useState<Record<string, string>>({});
-  const [refundPaise, setRefundPaise] = useState<Record<string, string>>({});
-  const [refundRef, setRefundRef] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
-  const hasRows = useRef(false);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const queryRef = useRef(q);
+
+  const writeUrl = useCallback((next: { bucket: string; issue: boolean; action: boolean; q: string; sort: string; offset: number }) => {
+    const params = new URLSearchParams();
+    if (next.issue) params.set("status", "issues");
+    else if (next.bucket) params.set("status", next.bucket);
+    if (next.action) params.set("action", "required");
+    if (next.q) params.set("q", next.q);
+    if (next.sort && next.sort !== "newest") params.set("sort", next.sort);
+    if (next.offset) params.set("offset", String(next.offset));
+    const qs = params.toString();
+    window.history.replaceState(null, "", qs ? `/admin/notes?${qs}` : "/admin/notes");
+  }, []);
 
   const load = useCallback(async () => {
-    if (!hasRows.current) setLoading(true);
+    setLoading(true);
     const params = new URLSearchParams();
     if (bucket) params.set("bucket", bucket);
     if (issueOnly) params.set("issue", "open");
+    if (actionOnly) params.set("action", "required");
     if (q.trim()) params.set("q", q.trim());
+    if (sort) params.set("sort", sort);
+    params.set("limit", "25");
+    params.set("offset", String(offset));
     const res = await fetch(`/api/admin/notes/orders?${params}`, { cache: "no-store" });
     const json = await res.json();
-    const next = json.orders || [];
-    hasRows.current = next.length > 0;
-    setOrders(next);
+    const rows = (json.orders || []) as AdminOrder[];
+    setOrders(rows);
+    setCounts(json.counts || {});
+    setTotal(json.total || rows.length);
+    setWrites(Boolean(json.writes_authorized));
     setLoading(false);
-  }, [bucket, q, issueOnly]);
+  }, [bucket, issueOnly, actionOnly, q, sort, offset]);
 
   useEffect(() => {
     void load();
-  }, [bucket, issueOnly]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [load]);
 
-  async function copy(text: string, what: string) {
-    try {
-      await navigator.clipboard.writeText(text);
-      setMsg(`${what} copied`);
-      setTimeout(() => setMsg(null), 1400);
-    } catch {
-      setMsg("Copy failed");
-    }
+  function applyFilter(key: string) {
+    const issues = key === "issues";
+    setIssueOnly(issues);
+    setBucket(issues ? "" : key);
+    setActionOnly(false);
+    setOffset(0);
+    writeUrl({ bucket: issues ? "" : key, issue: issues, action: false, q, sort, offset: 0 });
   }
 
-  async function act(id: string, fn: () => Promise<Response>, ok: string) {
+  const open = orders.find((row) => row.id === openId) || null;
+  const compare = orders.find((row) => row.id === compareId) || null;
+
+  function act(id: string, fn: () => Promise<Response>, ok: string) {
     setBusyId(id);
     setMsg(null);
-    try {
-      const res = await fn();
-      const json = await res.json();
-      setMsg(json.ok ? ok : json.error);
-      await load();
-    } finally {
-      setBusyId(null);
-    }
+    void (async () => {
+      try {
+        const res = await fn();
+        const json = await res.json();
+        setMsg(json.ok ? ok : json.error || "Could not update the order.");
+        await load();
+      } finally {
+        setBusyId(null);
+      }
+    })();
   }
 
-  const reconcile = (id: string) =>
-    act(
-      id,
-      () => fetch(`/api/admin/notes/orders/${id}/reconcile`, { method: "POST", cache: "no-store" }),
-      "Payment rechecked with the gateway",
-    );
-
-  const advance = (id: string) =>
-    act(id, () => fetch(`/api/admin/notes/orders/${id}/advance`, { method: "POST", cache: "no-store" }), "Status advanced");
-
-  const ship = (id: string) =>
-    act(
-      id,
-      () =>
-        fetch(`/api/admin/notes/orders/${id}/ship`, {
-          method: "POST",
-          cache: "no-store",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ awb: awb[id], courier_name: courier[id] || "Manual" }),
-        }),
-      "Marked shipped — stock deducted",
-    );
-
-  const saveNote = (id: string) =>
-    act(
-      id,
-      () =>
-        fetch(`/api/admin/notes/orders/${id}/note`, {
-          method: "POST",
-          cache: "no-store",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ note: note[id] || "", exception_type: exc[id] || null }),
-        }),
-      "Saved",
-    ).then(() => {
-      setNote((m) => ({ ...m, [id]: "" }));
-      setExc((m) => ({ ...m, [id]: "" }));
-    });
-
   return (
-    <div>
-      <PageHeader
-        title="Notes Store — orders"
-        subtitle="Search, filter, prepare, pack and ship. Copy the shipping block straight into your courier portal."
-      />
+    <div className="mx-auto max-w-6xl">
+      <header className="mb-4">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--ca-gold-dark)]">Notes Store</p>
+        <h1 className="font-heading text-3xl font-bold text-[var(--ca-navy)]">Orders</h1>
+      </header>
 
-      <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center">
+      <div className="-mx-1 mb-4 flex gap-2 overflow-x-auto pb-1">
+        {[
+          ["total", "Total", ""],
+          ["new", "New", "new"],
+          ["packed", "Ready to ship", "packed"],
+          ["pickup", "Pickup", "pickup"],
+          ["transit", "In transit", "shipped"],
+          ["issues", "Issues", "issues"],
+        ].map(([countKey, label, filter]) => (
+          <button
+            key={label}
+            type="button"
+            onClick={() => (filter === "issues" ? applyFilter("issues") : applyFilter(filter))}
+            className="min-w-[8.5rem] shrink-0 rounded-2xl border border-[var(--ca-navy)]/10 bg-white px-3 py-3 text-left"
+          >
+            <span className="block text-[11px] font-semibold uppercase tracking-wide text-[var(--ca-navy)]/45">{label}</span>
+            <span className="mt-1 block font-heading text-2xl font-bold text-[var(--ca-navy)]">{counts[countKey] ?? "–"}</span>
+          </button>
+        ))}
+      </div>
+
+      <div className="mb-3 flex flex-wrap items-center gap-2">
         <form
+          className="min-w-0 flex-1"
           onSubmit={(e) => {
             e.preventDefault();
+            setOffset(0);
+            queryRef.current = q;
+            writeUrl({ bucket, issue: issueOnly, action: actionOnly, q, sort, offset: 0 });
             void load();
           }}
-          className="flex flex-1 gap-2"
         >
           <input
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="Search order no, name, phone, email, AWB"
-            className="h-9 w-full rounded-lg border border-line px-3 text-sm"
+            placeholder="Order, customer, phone, email, AWB"
+            className="min-h-11 w-full rounded-2xl border border-[var(--ca-navy)]/10 bg-white px-3 text-sm"
           />
-          <button type="submit" className="h-9 shrink-0 rounded-lg bg-ink px-3 text-sm font-semibold text-white">
-            Search
-          </button>
         </form>
+        <button type="button" onClick={() => setFiltersOpen((v) => !v)} className="min-h-11 rounded-full border bg-white px-4 text-sm font-semibold sm:hidden">
+          Filters
+        </button>
+        <select
+          aria-label="Sort orders"
+          value={sort}
+          onChange={(e) => {
+            setSort(e.target.value);
+            setOffset(0);
+            writeUrl({ bucket, issue: issueOnly, action: actionOnly, q, sort: e.target.value, offset: 0 });
+          }}
+          className="min-h-11 rounded-full border bg-white px-3 text-sm"
+        >
+          <option value="newest">Newest</option>
+          <option value="oldest">Oldest</option>
+          <option value="value_desc">Highest value</option>
+          <option value="value_asc">Lowest value</option>
+          <option value="updated">Recently updated</option>
+          <option value="action">Action required first</option>
+        </select>
       </div>
 
-      <div className="mb-4 -mx-1 flex gap-1 overflow-x-auto pb-1">
-        {BUCKETS.map((b) => (
-          <button
-            key={b.key}
-            type="button"
-            onClick={() => setBucket(b.key)}
-            className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-semibold ${
-              bucket === b.key ? "bg-ink text-white" : "bg-surface text-ink2 ring-1 ring-line"
-            }`}
-          >
-            {b.label}
-          </button>
-        ))}
+      <div className={`${filtersOpen ? "flex" : "hidden"} mb-4 flex-wrap gap-2 sm:flex`}>
+        {FILTERS.map((filter) => {
+          const active = filter.key === "issues" ? issueOnly : !issueOnly && bucket === filter.key;
+          return (
+            <button
+              key={filter.key || "all"}
+              type="button"
+              onClick={() => applyFilter(filter.key)}
+              className={`min-h-10 rounded-full px-3 text-sm font-semibold ${active ? "bg-[var(--ca-navy)] text-white" : "bg-white text-[var(--ca-navy)]"}`}
+            >
+              {filter.label}
+              {counts[filter.count] != null ? ` ${counts[filter.count]}` : ""}
+            </button>
+          );
+        })}
         <button
           type="button"
-          onClick={() => setIssueOnly((v) => !v)}
-          className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-semibold ${
-            issueOnly ? "bg-ink text-white" : "bg-surface text-ink2 ring-1 ring-line"
-          }`}
+          onClick={() => {
+            setActionOnly((v) => !v);
+            setOffset(0);
+            writeUrl({ bucket, issue: issueOnly, action: !actionOnly, q, sort, offset: 0 });
+          }}
+          className={`min-h-10 rounded-full px-3 text-sm font-semibold ${actionOnly ? "bg-amber-800 text-white" : "bg-white text-[var(--ca-navy)]"}`}
         >
-          Open issues
+          Action required
         </button>
       </div>
 
-      {msg && <p className="mb-3 rounded-lg border border-line bg-white px-3 py-2 text-sm">{msg}</p>}
+      {msg && <p className="mb-3 rounded-xl bg-white px-3 py-2 text-sm text-[var(--ca-navy)]">{msg}</p>}
 
       {loading ? (
-        <p className="text-sm text-muted">Loading…</p>
+        <div className="space-y-2" aria-hidden>
+          <div className="h-16 animate-pulse rounded-2xl bg-white" />
+          <div className="h-16 animate-pulse rounded-2xl bg-white" />
+        </div>
       ) : orders.length === 0 ? (
-        <p className="rounded-xl border border-dashed border-line bg-white p-8 text-center text-sm text-muted">
-          No orders match.
+        <p className="rounded-2xl bg-white p-8 text-center text-sm text-[var(--ca-navy)]/60">
+          {q || bucket || issueOnly || actionOnly ? "No orders match these filters." : "No orders yet."}
         </p>
       ) : (
-        <div className="space-y-4">
-          {orders.map((o) => (
-            <article key={o.id} className="rounded-xl border border-line bg-white p-4 shadow-soft-sm">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="font-mono text-xs font-semibold text-ink">{o.order_no}</p>
-                  <p className="mt-1 font-heading text-lg font-bold">{o.customer_name}</p>
-                  <p className="text-sm tabular-nums text-ink2">
-                    {o.phone}
-                    {o.email ? ` · ${o.email}` : ""}
-                  </p>
-                </div>
-                <div className="text-right">
-                  <p className="font-heading text-lg font-bold tabular-nums">{formatPaise(o.total_paise)}</p>
-                  {(o.discount_paise || 0) > 0 && (
-                    <p className="mt-1 text-[11px] text-ink2">
-                      Promotion: {o.discount_trace_json?.offer_name || o.promo_code || "Offer"}
-                      {o.discount_trace_json?.discount_type === "percentage" && o.discount_trace_json.discount_value
-                        ? ` · ${o.discount_trace_json.discount_value}%`
-                        : ""}
-                      <br />
-                      Discount: {formatPaise(o.discount_paise || o.discount_trace_json?.discount_amount || 0)}
-                    </p>
-                  )}
-                  <p className="mt-1 inline-flex rounded-full bg-surface px-2.5 py-0.5 text-xs font-semibold uppercase tracking-wide text-ink2">
-                    {o.status.replaceAll("_", " ")}
-                  </p>
-                  {o.payment_status && (
-                    <p className="mt-1 text-[11px] font-medium text-emerald-700">{o.payment_status}</p>
-                  )}
-                  {o.status === "PAYMENT_PENDING" && (
-                    <p className="mt-1 text-[11px] font-semibold text-amber-800">Payment confirming</p>
-                  )}
-                  {o.issue?.open && (
-                    <p className="mt-1 text-[11px] font-semibold text-amber-800">Issue {o.issue.status_label}</p>
-                  )}
-                </div>
-              </div>
-
-              {o.status === "PAYMENT_PENDING" && (
-                <button
-                  type="button"
-                  disabled={busyId === o.id}
-                  onClick={() => reconcile(o.id)}
-                  className="mt-3 h-9 rounded-lg bg-ink px-3 text-xs font-semibold text-white disabled:opacity-50"
-                >
-                  Reconcile payment
-                </button>
-              )}
-
-              <div className="mt-3 rounded-lg bg-surface p-2 text-sm text-ink2">
-                <span className="font-semibold text-ink">Ship to: </span>
-                {formatAddress(o.address)}
-                <div className="mt-2 flex flex-wrap gap-2">
-                  <button type="button" onClick={() => copy(formatAddress(o.address), "Address")} className="rounded border border-line bg-white px-2 py-1 text-xs font-medium">
-                    Copy address
+        <>
+          <ul className="hidden overflow-hidden rounded-2xl bg-white md:block">
+            {orders.map((order) => {
+              const failed = pickupFailedActivity(order.shipment?.tracking_activity);
+              const action = primaryAction({ status: order.status, awb: order.shipment?.awb, pickupFailed: failed, openIssue: order.issue?.open, paymentPending: order.status === "PAYMENT_PENDING" });
+              return (
+                <li key={order.id} className={`grid grid-cols-[1.3fr_1fr_0.7fr_0.8fr_0.8fr_auto] items-center gap-3 border-b border-[var(--ca-navy)]/5 px-4 py-3 ${order.action_required ? "border-l-2 border-l-amber-500" : ""}`}>
+                  <button type="button" onClick={() => setOpenId(order.id)} className="text-left">
+                    <span className="block font-heading text-base font-bold text-[var(--ca-navy)]">{orderIndexLabel(order.order_no)}</span>
+                    <span className="block font-mono text-[11px] text-[var(--ca-navy)]/50">{order.order_no}</span>
+                    <span className="block text-sm text-[var(--ca-navy)]">{order.customer_name}</span>
                   </button>
-                  <button type="button" onClick={() => copy(o.phone, "Phone")} className="rounded border border-line bg-white px-2 py-1 text-xs font-medium">
-                    Copy phone
+                  <span className="text-sm text-[var(--ca-navy)]/75">{order.items[0] ? `${order.items[0].name} × ${order.items[0].qty}` : "—"}</span>
+                  <span className="text-sm font-semibold tabular-nums">{formatPaise(order.total_paise)}</span>
+                  <span className={`w-fit rounded-full px-2 py-1 text-[11px] font-semibold ${TONE[fulfillmentTone(order.status, failed)]}`}>{fulfillmentLabel(order.status, failed)}</span>
+                  <span className="text-xs text-[var(--ca-navy)]/60">{order.shipment?.courier || "—"}<br />{formatAdminWhen(order.shipment?.tracking_event_at || order.updated_at || order.placed_at)}</span>
+                  <button type="button" onClick={() => setOpenId(order.id)} className="min-h-11 rounded-full px-3 text-sm font-semibold text-[var(--ca-navy)]">{PRIMARY_LABEL[action]}</button>
+                </li>
+              );
+            })}
+          </ul>
+          <ul className="space-y-2 md:hidden">
+            {orders.map((order) => {
+              const failed = pickupFailedActivity(order.shipment?.tracking_activity);
+              return (
+                <li key={order.id}>
+                  <button type="button" onClick={() => setOpenId(order.id)} className={`w-full rounded-2xl bg-white p-4 text-left ${order.action_required ? "border-l-2 border-l-amber-500" : ""}`}>
+                    <span className="flex items-start justify-between gap-3">
+                      <span>
+                        <span className="block font-heading text-lg font-bold">{orderIndexLabel(order.order_no)}</span>
+                        <span className="block font-mono text-[11px] text-[var(--ca-navy)]/50">{order.order_no}</span>
+                        <span className="mt-1 block text-sm">{order.customer_name}</span>
+                      </span>
+                      <span className="text-sm font-semibold tabular-nums">{formatPaise(order.total_paise)}</span>
+                    </span>
+                    <span className="mt-3 flex items-center justify-between gap-2">
+                      <span className={`rounded-full px-2 py-1 text-[11px] font-semibold ${TONE[fulfillmentTone(order.status, failed)]}`}>{fulfillmentLabel(order.status, failed)}</span>
+                      <span className="text-xs text-[var(--ca-navy)]/55">{order.items.length} item{order.items.length === 1 ? "" : "s"}</span>
+                    </span>
                   </button>
-                  <button type="button" onClick={() => copy(courierBlock(o), "Shipping block")} className="rounded border border-line bg-white px-2 py-1 text-xs font-medium">
-                    Copy full shipping
-                  </button>
-                </div>
-              </div>
+                </li>
+              );
+            })}
+          </ul>
+        </>
+      )}
 
-              <ul className="mt-2 text-sm text-ink2">
-                {o.items.map((it, i) => (
-                  <li key={i}>
-                    <span className="font-mono text-xs text-muted">{it.sku}</span> — {it.name} × {it.qty}
-                    {typeof it.unit_price_paise === "number" ? ` · ${formatPaise(it.unit_price_paise)} each` : ""}
-                  </li>
-                ))}
-              </ul>
+      <div className="mt-4 flex items-center justify-between text-sm">
+        <button type="button" disabled={offset === 0} onClick={() => setOffset((n) => Math.max(0, n - 25))} className="min-h-11 rounded-full px-3 disabled:opacity-40">Previous</button>
+        <span className="text-[var(--ca-navy)]/50">{offset + 1}–{Math.min(offset + orders.length, total)} of {total}</span>
+        <button type="button" disabled={offset + 25 >= total} onClick={() => setOffset((n) => n + 25)} className="min-h-11 rounded-full px-3 disabled:opacity-40">Next</button>
+      </div>
 
-              {o.shipment?.provider && o.shipment.provider !== "manual" && (
-                <p className="mt-2 text-sm text-ink2">
-                  <span className="font-semibold text-ink">Chosen courier: </span>
-                  {o.shipment.provider} · {o.shipment.courier || "service not named"}
-                  {o.shipment.awb ? "" : " · not booked"}
-                </p>
-              )}
-              {(o.past_shipments || []).map((past) => (
-                <p key={past.awb || past.courier} className="text-xs text-ink-500">
-                  Past shipment · {past.provider || "courier"} {past.awb ? <span className="font-mono">{past.awb}</span> : null}
-                  {past.reason ? ` · ${past.reason.replaceAll("_", " ")}` : ""}
-                  {past.status ? ` · ${past.status}` : ""}
-                </p>
-              ))}
-              {o.shipment?.awb && (
-                <p className="mt-2 text-sm text-ink2">
-                  <span className="font-semibold text-ink">AWB on file: </span>
-                  {o.shipment.courier || "Courier"} · <span className="font-mono">{o.shipment.awb}</span>
-                  {o.shipment.tracking_activity
-                    ? ` · ${o.shipment.tracking_activity}${o.shipment.tracking_event_at ? ` · ${o.shipment.tracking_event_at}` : ""}${o.shipment.pickup_status === "reattempt_requested" ? ` · reattempt ${o.shipment.pickup_date || "requested"}` : o.shipment.pickup_status === "already_in_pickup_queue" ? " · still in the courier pickup queue · no new date returned" : " · Awaiting pickup reschedule"}`
-                    : ""}
-                  {o.shipment.pickup_date || o.shipment.pickup_scheduled_at
-                    ? ` · Pickup scheduled ${o.shipment.pickup_date || o.shipment.pickup_scheduled_at?.slice(0, 10)}${o.shipment.pickup_time ? ` ${o.shipment.pickup_time.slice(0, 5)}` : " · exact time not returned by the courier"}${o.shipment.pickup_reference ? ` · request ${o.shipment.pickup_reference}` : ""}`
-                    : o.shipment.pickup_reference
-                      ? ` · Pickup requested ${o.shipment.pickup_reference} · exact time not returned by the courier`
-                      : ""}
-                  {o.shipment.status ? ` · ${o.shipment.status.replaceAll("_", " ")}` : ""}
-                </p>
-              )}
-              {(o.attention || []).length > 0 && (
-                <p className="mt-2 text-xs text-ink2">Needs attention: {(o.attention || []).join(", ").replaceAll("_", " ")}</p>
-              )}
-              {(o.shipment?.has_label ||
-                (o.shipment?.awb && ["PACKED", "READY_FOR_PICKUP", "PICKUP_SCHEDULED"].includes(o.status))) && (
-                <div className="mt-2 flex flex-wrap items-end gap-2">
-                  {o.shipment?.has_label && (
-                    <button
-                      type="button"
-                      className="inline-flex h-9 items-center rounded border border-line px-3 text-sm font-medium text-ink"
-                      onClick={() => {
-                        void (async () => {
-                          setBusyId(o.id);
-                          setMsg(null);
-                          try {
-                            const res = await fetch(`/api/admin/notes/orders/${o.id}/label`, { cache: "no-store" });
-                            const json = await res.json();
-                            if (json.fixture) setMsg("Test label on file. No courier document was purchased.");
-                            else if (json.ok && typeof json.url === "string" && /^https?:\/\//.test(json.url)) {
-                              window.open(json.url, "_blank", "noopener");
-                              setMsg("Opened the stored label. No new shipment was created.");
-                            } else setMsg(json.error || "No label is stored for this order.");
-                          } finally {
-                            setBusyId(null);
-                          }
-                        })();
-                      }}
-                    >
-                      Print label
-                    </button>
-                  )}
-                  {o.shipment?.awb && ["PACKED", "READY_FOR_PICKUP", "PICKUP_SCHEDULED"].includes(o.status) && (
-                    <>
-                      <label className="text-xs text-ink2">
-                        Pickup date
-                        <input
-                          type="date"
-                          value={pickupDate[o.id] || ""}
-                          onChange={(e) => setPickupDate((m) => ({ ...m, [o.id]: e.target.value }))}
-                          className="mt-1 block h-9 rounded border border-line px-2 text-sm text-ink"
-                        />
-                      </label>
-                      <button
-                        type="button"
-                        disabled={busyId === o.id || !pickupDate[o.id]}
-                        onClick={() =>
-                          act(
-                            o.id,
-                            () =>
-                              fetch(`/api/admin/notes/orders/${o.id}/pickup`, {
-                                method: "POST",
-                                headers: { "content-type": "application/json" },
-                                body: JSON.stringify({ date: pickupDate[o.id] }),
-                              }),
-                            "Pickup requested. The order stays packed until the courier scans it.",
-                          )
-                        }
-                        className="h-9 rounded border border-line px-3 text-sm font-medium text-ink disabled:opacity-50"
-                      >
-                        Schedule pickup
-                      </button>
-                    </>
-                  )}
-                </div>
-              )}
-              {o.status === "REFUND_PENDING" && (
-                <p className="mt-2 text-sm text-ink">Refund pending manual payment-gateway processing.</p>
-              )}
-              {o.issue && (
-                <div className="mt-3 rounded-lg border border-line bg-surface p-3 text-sm">
-                  <p className="font-semibold text-ink">
-                    {o.issue.reference} · {o.issue.category_label}
-                  </p>
-                  <p className="mt-1 text-xs text-ink2">
-                    {o.issue.status_label} · {new Date(o.issue.created_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}
-                    {o.issue.callback_requested ? " · callback requested" : ""}
-                  </p>
-                  <p className="mt-2 whitespace-pre-wrap text-ink">{o.issue.description}</p>
-                  {o.issue.customer_note && <p className="mt-2 text-xs text-ink2">Shown to student: {o.issue.customer_note}</p>}
-                  <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                    <select
-                      value={issueStatus[o.id] || o.issue.status}
-                      onChange={(e) => setIssueStatus((m) => ({ ...m, [o.id]: e.target.value }))}
-                      className="h-9 rounded border border-line px-2 text-sm"
-                    >
-                      <option value="OPEN">Issue received</option>
-                      <option value="IN_REVIEW">In review</option>
-                      <option value="WAITING_ON_TEAM">With the team</option>
-                      <option value="RESOLVED">Resolved</option>
-                      <option value="CLOSED">Closed</option>
-                    </select>
-                    <button
-                      type="button"
-                      disabled={busyId === o.id}
-                      onClick={() =>
-                        act(
-                          o.id,
-                          () =>
-                            fetch(`/api/admin/notes/orders/${o.id}/issues`, {
-                              method: "POST",
-                              headers: { "content-type": "application/json" },
-                              body: JSON.stringify({
-                                issue_id: o.issue?.id,
-                                status: issueStatus[o.id] || o.issue?.status,
-                                admin_note: issueAdmin[o.id] || "",
-                                customer_note: issueCustomer[o.id] || "",
-                              }),
-                            }),
-                          "Issue updated",
-                        )
-                      }
-                      className="h-9 rounded bg-ink px-3 text-sm font-semibold text-white disabled:opacity-50"
-                    >
-                      Update issue
-                    </button>
-                  </div>
-                  <textarea
-                    value={issueAdmin[o.id] || ""}
-                    onChange={(e) => setIssueAdmin((m) => ({ ...m, [o.id]: e.target.value }))}
-                    rows={2}
-                    placeholder="Internal note"
-                    className="mt-2 w-full rounded border border-line px-2 py-1 text-sm"
-                  />
-                  <textarea
-                    value={issueCustomer[o.id] || ""}
-                    onChange={(e) => setIssueCustomer((m) => ({ ...m, [o.id]: e.target.value }))}
-                    rows={2}
-                    placeholder="Note the student will see on the tracking page"
-                    className="mt-2 w-full rounded border border-line px-2 py-1 text-sm"
-                  />
-                </div>
-              )}
-              {o.internal_notes && (
-                <pre className="mt-2 whitespace-pre-wrap rounded-lg bg-surface p-2 text-xs text-ink2">{o.internal_notes}</pre>
-              )}
-
-              <CourierQuotes
-                orderId={o.id}
-                packed={o.shipment}
-                onUseCourier={(name) => setCourier((m) => ({ ...m, [o.id]: name }))}
-                onSaved={() => void load()}
-              />
-
-              <div className="mt-4 flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  disabled={busyId === o.id}
-                  onClick={() => advance(o.id)}
-                  className="h-9 rounded bg-surface px-3 text-sm font-semibold text-ink ring-1 ring-line hover:bg-white disabled:opacity-50"
-                >
-                  Advance status
-                </button>
-                <input
-                  value={courier[o.id] || ""}
-                  onChange={(e) => setCourier((m) => ({ ...m, [o.id]: e.target.value }))}
-                  placeholder="Courier"
-                  className="h-9 w-40 rounded border border-line px-2 text-sm"
-                />
-                <input
-                  value={awb[o.id] || ""}
-                  onChange={(e) => setAwb((m) => ({ ...m, [o.id]: e.target.value }))}
-                  placeholder="AWB"
-                  className="h-9 w-40 rounded border border-line px-2 font-mono text-sm"
-                />
-                <button
-                  type="button"
-                  disabled={busyId === o.id || !(awb[o.id] || "").trim()}
-                  onClick={() => ship(o.id)}
-                  className="h-9 rounded bg-ink px-3 text-sm font-semibold text-white disabled:opacity-50"
-                >
-                  Mark shipped
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setNoteOpen((c) => (c === o.id ? null : o.id))}
-                  className="h-9 rounded border border-line px-3 text-sm font-medium text-ink2"
-                >
-                  {noteOpen === o.id ? "Close" : "Note / issue"}
-                </button>
-              </div>
-
-              {noteOpen === o.id && (
-                <div className="mt-3 space-y-2 rounded-lg border border-line bg-surface p-3">
-                  <select
-                    value={exc[o.id] || ""}
-                    onChange={(e) => setExc((m) => ({ ...m, [o.id]: e.target.value }))}
-                    className="h-9 w-full rounded border border-line px-2 text-sm"
-                  >
-                    <option value="">Internal note (no exception)</option>
-                    {EXCEPTIONS.map((x) => (
-                      <option key={x.value} value={x.value}>
-                        {x.label}
-                      </option>
-                    ))}
-                  </select>
-                  <textarea
-                    value={note[o.id] || ""}
-                    onChange={(e) => setNote((m) => ({ ...m, [o.id]: e.target.value }))}
-                    rows={2}
-                    placeholder="e.g. Call before dispatch · replacement sent via Delhivery"
-                    className="w-full rounded border border-line px-2 py-1 text-sm"
-                  />
-                  <button
-                    type="button"
-                    disabled={busyId === o.id || !((note[o.id] || "").trim() || exc[o.id])}
-                    onClick={() => saveNote(o.id)}
-                    className="h-9 rounded bg-ink px-3 text-sm font-semibold text-white disabled:opacity-50"
-                  >
-                    Save note
-                  </button>
-                  {(o.status === "RETURN_REQUESTED" || o.status === "RETURN_APPROVED") && (
-                    <div className="flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        disabled={busyId === o.id}
-                        onClick={() =>
-                          act(
-                            o.id,
-                            () =>
-                              fetch(`/api/admin/notes/orders/${o.id}/support-decision`, {
-                                method: "POST",
-                                headers: { "content-type": "application/json" },
-                                body: JSON.stringify({ action: "approve", reason: note[o.id] || "Reviewed" }),
-                              }),
-                            "Return approved. No shipment was created.",
-                          )
-                        }
-                        className="h-9 rounded border border-line px-3 text-sm font-medium text-ink"
-                      >
-                        Approve
-                      </button>
-                      <button
-                        type="button"
-                        disabled={busyId === o.id || !(note[o.id] || "").trim()}
-                        onClick={() =>
-                          act(
-                            o.id,
-                            () =>
-                              fetch(`/api/admin/notes/orders/${o.id}/support-decision`, {
-                                method: "POST",
-                                headers: { "content-type": "application/json" },
-                                body: JSON.stringify({ action: "reject", reason: note[o.id] }),
-                              }),
-                            "Rejected. No refund was sent.",
-                          )
-                        }
-                        className="h-9 rounded border border-line px-3 text-sm font-medium text-ink disabled:opacity-50"
-                      >
-                        Reject
-                      </button>
-                      <button
-                        type="button"
-                        disabled={busyId === o.id || !(note[o.id] || "").trim()}
-                        onClick={() =>
-                          act(
-                            o.id,
-                            () =>
-                              fetch(`/api/admin/notes/orders/${o.id}/support-decision`, {
-                                method: "POST",
-                                headers: { "content-type": "application/json" },
-                                body: JSON.stringify({ action: "replace", reason: note[o.id] }),
-                              }),
-                            "Replacement recorded. No shipment was created.",
-                          )
-                        }
-                        className="h-9 rounded border border-line px-3 text-sm font-medium text-ink disabled:opacity-50"
-                      >
-                        Replace
-                      </button>
-                      <button
-                        type="button"
-                        disabled={busyId === o.id || !(note[o.id] || "").trim()}
-                        onClick={() =>
-                          act(
-                            o.id,
-                            () =>
-                              fetch(`/api/admin/notes/orders/${o.id}/support-decision`, {
-                                method: "POST",
-                                headers: { "content-type": "application/json" },
-                                body: JSON.stringify({ action: "reverse", reason: note[o.id] }),
-                              }),
-                            "Reverse pickup requested.",
-                          )
-                        }
-                        className="h-9 rounded border border-line px-3 text-sm font-medium text-ink disabled:opacity-50"
-                      >
-                        Reverse pickup
-                      </button>
-                    </div>
-                  )}
-                  {REFUNDABLE.has(o.status) && (
-                    <div className="flex flex-wrap items-end gap-2">
-                      <label className="text-xs text-ink2">
-                        Refund (paise)
-                        <input
-                          inputMode="numeric"
-                          value={refundPaise[o.id] || ""}
-                          onChange={(e) => setRefundPaise((m) => ({ ...m, [o.id]: e.target.value }))}
-                          className="mt-1 block h-9 w-28 rounded border border-line px-2 text-sm text-ink"
-                        />
-                      </label>
-                      <button
-                        type="button"
-                        disabled={busyId === o.id || !(note[o.id] || "").trim()}
-                        onClick={() =>
-                          act(
-                            o.id,
-                            () =>
-                              fetch(`/api/admin/notes/orders/${o.id}/refund`, {
-                                method: "POST",
-                                headers: { "content-type": "application/json" },
-                                body: JSON.stringify({
-                                  amount_paise: refundPaise[o.id] === undefined || refundPaise[o.id] === "" ? o.total_paise : Number(refundPaise[o.id]),
-                                  reason: note[o.id],
-                                  confirm: "REQUEST_REFUND",
-                                }),
-                              }),
-                            "Refund pending manual payment-gateway processing.",
-                          )
-                        }
-                        className="h-9 rounded border border-line px-3 text-sm font-medium text-ink disabled:opacity-50"
-                      >
-                        Request refund
-                      </button>
-                    </div>
-                  )}
-                  {o.status === "REFUND_PENDING" && (
-                    <div className="space-y-2">
-                      <p className="text-sm text-ink">Refund pending manual payment-gateway processing.</p>
-                      <div className="flex flex-wrap items-end gap-2">
-                        <label className="text-xs text-ink2">
-                          Gateway reference
-                          <input
-                            value={refundRef[o.id] || ""}
-                            onChange={(e) => setRefundRef((m) => ({ ...m, [o.id]: e.target.value }))}
-                            className="mt-1 block h-9 w-48 rounded border border-line px-2 text-sm text-ink"
-                          />
-                        </label>
-                        <button
-                          type="button"
-                          disabled={busyId === o.id || (refundRef[o.id] || "").trim().length < 4}
-                          onClick={() =>
-                            act(
-                              o.id,
-                              () =>
-                                fetch(`/api/admin/notes/orders/${o.id}/refund`, {
-                                  method: "POST",
-                                  headers: { "content-type": "application/json" },
-                                  body: JSON.stringify({
-                                    amount_paise: refundPaise[o.id] === undefined || refundPaise[o.id] === "" ? o.total_paise : Number(refundPaise[o.id]),
-                                    reference: refundRef[o.id],
-                                    confirm: "RECORD_MANUAL_REFUND",
-                                  }),
-                                }),
-                              "Gateway reference recorded. No new payment was sent.",
-                            )
-                          }
-                          className="h-9 rounded border border-line px-3 text-sm font-medium text-ink disabled:opacity-50"
-                        >
-                          Record gateway reference
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-            </article>
-          ))}
-        </div>
+      {open && (
+        <OrderDetail
+          order={open}
+          busy={busyId === open.id}
+          writesAuthorized={writes}
+          onClose={() => setOpenId(null)}
+          onRefresh={() => void load()}
+          onCompare={() => setCompareId(open.id)}
+          act={(fn, ok) => act(open.id, fn, ok)}
+        />
+      )}
+      {compare && (
+        <CourierPicker
+          orderId={compare.id}
+          open
+          writesAuthorized={writes}
+          weight={compare.shipment?.weight_grams || 500}
+          length={compare.shipment?.length_cm || 30}
+          width={compare.shipment?.width_cm || 25}
+          height={compare.shipment?.height_cm || 3}
+          onClose={() => setCompareId(null)}
+          onBooked={() => {
+            setCompareId(null);
+            void load();
+          }}
+        />
       )}
     </div>
   );
