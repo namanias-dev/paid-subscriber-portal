@@ -59,14 +59,16 @@ export async function POST(req: Request, { params }: { params: { id: string } })
 
   const now = new Date().toISOString();
   const payload = (shipment.provider_payload && typeof shipment.provider_payload === "object" ? shipment.provider_payload : {}) as Record<string, unknown>;
+  const dateOnly = pickup.date.slice(0, 10);
+  const scheduledAt = /^\d{4}-\d{2}-\d{2}$/.test(dateOnly) ? `${dateOnly}T00:00:00.000Z` : now;
   await db
     .from("store_shipments")
     .update({
-      pickup_scheduled_at: `${pickup.date}T00:00:00+05:30`,
+      pickup_scheduled_at: scheduledAt,
       provider_payload: {
         ...payload,
         pickup_reference: pickup.reference,
-        pickup_date: pickup.date,
+        pickup_date: dateOnly,
         pickup_status: pickup.status || "requested",
         ...(pickup.time ? { pickup_time: pickup.time } : {}),
       },

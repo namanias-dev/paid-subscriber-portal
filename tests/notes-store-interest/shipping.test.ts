@@ -20,7 +20,7 @@ import { customerStageLabel, projectCustomerStage } from "../../lib/store/projec
 import { rupeesToPaise } from "../../lib/store/shipping/quotes";
 import { classifyTrackingGap, shouldPollShipment } from "../../lib/store/shipping/reconcile";
 import { parseShiprocketQuotes, shiprocketAdhocDraft } from "../../lib/store/shipping/shiprocketApi";
-import { canAdvanceOrder, canAdvanceShipment, normalizeCourierStatus } from "../../lib/store/shipping/status";
+import { canAdvanceOrder, canAdvanceShipment, normalizeCourierStatus, orderStatusFromShipment } from "../../lib/store/shipping/status";
 import { parseCourierWebhook, scanAlreadyRecorded, webhookAuthorized } from "../../lib/store/shipping/webhook";
 
 const env = {
@@ -224,6 +224,10 @@ describe("courier tracking events", () => {
     assert.equal(normalizeCourierStatus("PICKED UP"), "picked_up");
     assert.equal(normalizeCourierStatus("Manifested"), "manifested");
     assert.equal(normalizeCourierStatus("Ready To Ship"), "manifested");
+    assert.equal(normalizeCourierStatus("Pickup Scheduled"), "manifested");
+    assert.equal(normalizeCourierStatus("Out For Pickup"), "manifested");
+    assert.equal(orderStatusFromShipment("manifested"), null);
+    assert.equal(orderStatusFromShipment("picked_up"), "PICKED_UP");
     assert.equal(normalizeCourierStatus("Out for Delivery"), "out_for_delivery");
     assert.equal(normalizeCourierStatus("Dispatched"), "out_for_delivery");
     assert.equal(normalizeCourierStatus("Delivered"), "delivered");

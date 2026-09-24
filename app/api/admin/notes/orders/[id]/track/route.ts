@@ -23,14 +23,45 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
   if (!shipment?.awb) {
     return NextResponse.json({ ok: false, error: "No AWB is stored for this order." }, { status: 404, headers: { "Cache-Control": "no-store" } });
   }
-  const raw =
+  const tracked =
     shipment.provider === "delhivery"
       ? await trackDelhiveryAwb(shipment.awb)
       : shipment.provider === "shiprocket"
         ? await trackShiprocketAwb(shipment.awb)
-        : { rawStatus: null };
+        : { rawStatus: null, recognized: false, courier: null, error: null };
+  const raw = tracked;
+  const recognized = "recognized" in tracked ? tracked.recognized : Boolean(raw.rawStatus);
+  const courier = "courier" in tracked ? tracked.courier : null;
+  const error = "error" in tracked ? tracked.error : null;
+  if (raw.rawStatus) {
+    const { data: current } = await db
+      .from("store_shipments")
+      .select("id,provider_payload")
+      .eq("order_id", params.id)
+      .eq("awb", shipment.awb)
+      .limit(1)
+      .maybeSingle();
+    const payload = (current?.provider_payload && typeof current.provider_payload === "object" ? current.provider_payload : {}) as Record<string, unknown>;
+    if (current?.id) {
+      await db
+        .from("store_shipments")
+        .update({
+          provider_payload: { ...payload, tracking_status: raw.rawStatus, tracking_courier: courier },
+          last_synced_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", current.id);
+    }
+  }
   return NextResponse.json(
-    { ok: true, raw_status: raw.rawStatus, mapped_status: raw.rawStatus ? normalizeCourierStatus(raw.rawStatus) : null },
+    {
+      ok: !error,
+      raw_status: raw.rawStatus,
+      mapped_status: raw.rawStatus ? normalizeCourierStatus(raw.rawStatus) : null,
+      recognized,
+      courier,
+      error,
+    },
     { headers: { "Cache-Control": "no-store" } },
   );
 }

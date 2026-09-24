@@ -143,11 +143,11 @@ export function shiprocketAdhocDraft(input: {
 export async function trackShiprocketAwb(
   awb: string,
   opts: { fetchImpl?: FetchLike; env?: NodeJS.ProcessEnv } = {},
-): Promise<{ rawStatus: string | null }> {
+): Promise<{ rawStatus: string | null; recognized: boolean; courier: string | null; error: string | null }> {
   const code = awb.trim();
-  if (!code) return { rawStatus: null };
+  if (!code) return { rawStatus: null, recognized: false, courier: null, error: null };
   const env = opts.env || process.env;
-  if (!shiprocketCredentials(env)) return { rawStatus: null };
+  if (!shiprocketCredentials(env)) return { rawStatus: null, recognized: false, courier: null, error: null };
   try {
     const token = await shiprocketToken(opts);
     const fetchImpl = opts.fetchImpl || fetch;
@@ -157,9 +157,23 @@ export async function trackShiprocketAwb(
     });
     const body = record(await res.json().catch(() => null));
     const tracking = record(body?.tracking_data);
-    return { rawStatus: str(tracking?.shipment_status) || str(body?.current_status) || null };
+    const tracks = Array.isArray(tracking?.shipment_track) ? tracking.shipment_track.map(record).filter(Boolean) : [];
+    const first = tracks[0] || null;
+    const rawStatus =
+      str(first?.current_status) ||
+      str(tracking?.current_status) ||
+      (typeof tracking?.shipment_status === "string" ? str(tracking.shipment_status) : "") ||
+      str(body?.current_status) ||
+      null;
+    const error = str(tracking?.error) || (!res.ok ? `Shiprocket tracking was not read (${res.status}).` : "");
+    return {
+      rawStatus: rawStatus || null,
+      recognized: Boolean(first?.awb_code || first?.current_status) && !error,
+      courier: str(first?.courier_name) || null,
+      error: error || null,
+    };
   } catch {
-    return { rawStatus: null };
+    return { rawStatus: null, recognized: false, courier: null, error: "Shiprocket tracking was not read." };
   }
 }
 

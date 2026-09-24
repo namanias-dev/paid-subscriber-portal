@@ -120,6 +120,8 @@ export async function GET(req: Request) {
       status: string | null;
       has_label: boolean;
       pickup_scheduled_at: string | null;
+      pickup_date: string | null;
+      pickup_status: string | null;
       pickup_reference: string | null;
       pickup_time: string | null;
       weight_grams: number | null;
@@ -173,6 +175,8 @@ export async function GET(req: Request) {
           label_url?: string;
           pickup_reference?: string;
           pickup_time?: string;
+          pickup_date?: string;
+          pickup_status?: string;
         };
         shipByOrder.set(s.order_id, {
           courier: s.courier_name,
@@ -182,6 +186,8 @@ export async function GET(req: Request) {
           status: s.status,
           has_label: Boolean(s.label_r2_key || payload.label_url || ((s.provider === "delhivery" || s.provider === "shiprocket") && s.awb)),
           pickup_scheduled_at: s.pickup_scheduled_at,
+          pickup_date: payload.pickup_date || null,
+          pickup_status: payload.pickup_status || null,
           pickup_reference: payload.pickup_reference || null,
           pickup_time: payload.pickup_time || null,
           weight_grams: s.weight_grams ?? null,
