@@ -415,6 +415,8 @@ export async function requestProviderPickup(
     providerShipmentId?: string | null;
     date: string;
     packageCount?: number;
+    /** Same shipment and AWB. Does not create an order. */
+    retry?: boolean;
   },
   opts: { fetchImpl?: FetchLike; env?: NodeJS.ProcessEnv } = {},
 ): Promise<{ reference: string | null; date: string; time: string | null; status: string | null }> {
@@ -429,7 +431,11 @@ export async function requestProviderPickup(
     const res = await fetchImpl(`${shiprocketBaseUrl(env)}/courier/generate/pickup`, {
       method: "POST",
       headers: { Accept: "application/json", "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ shipment_id: [shipmentId] }),
+      body: JSON.stringify(
+        input.retry
+          ? { shipment_id: [Number(shipmentId)], status: "retry", pickup_date: [input.date] }
+          : { shipment_id: [shipmentId] },
+      ),
       signal: AbortSignal.timeout(20_000),
     });
     const parsed = parseShiprocketPickup(await readJson(res));

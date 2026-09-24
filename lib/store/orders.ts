@@ -23,6 +23,7 @@ export interface PublicOrder {
   awb: string | null;
   courier: string | null;
   steps: ReturnType<typeof trackingSteps>;
+  pickup_note?: string | null;
   /** True while EazyPGVerify has not yet written a terminal. */
   confirming: boolean;
   /**
@@ -57,7 +58,7 @@ export async function getPublicOrder(
     .eq("order_id", order.id);
   const { data: shipRows } = await db
     .from("store_shipments")
-    .select("awb,courier_name,status")
+    .select("awb,courier_name,status,provider_payload")
     .eq("order_id", order.id)
     .order("created_at", { ascending: false });
   const ship = (shipRows || []).find((row) => row.status !== "cancelled" && row.status !== "failed") || null;
@@ -71,6 +72,12 @@ export async function getPublicOrder(
     if (addr) shipTo = customerShipTo(addr);
   }
   const hasAwb = !!(ship?.awb);
+  const payload = (ship?.provider_payload && typeof ship.provider_payload === "object" ? ship.provider_payload : {}) as {
+    tracking_activity?: string;
+    pickup_status?: string;
+    pickup_reattempt_date?: string;
+  };
+  const pickupDelayed = order.status === "PICKUP_SCHEDULED" && /not done|pickup exception|pickup failed/i.test(payload.tracking_activity || "") && payload.pickup_status !== "reattempt_requested";
   const stage = projectCustomerStage(order.status, hasAwb);
   return {
     order_no: order.order_no,
@@ -84,9 +91,16 @@ export async function getPublicOrder(
     awb: hasAwb ? ship!.awb : null,
     courier: hasAwb ? ship!.courier_name : null,
     steps: trackingSteps(stage, hasAwb).map((step) =>
-      step.id === "packed" && order.status === "PICKUP_SCHEDULED" ? { ...step, label: "Pickup scheduled" } : step,
+      step.id === "packed" && order.status === "PICKUP_SCHEDULED"
+        ? { ...step, label: pickupDelayed ? "Pickup delayed" : "Pickup scheduled" }
+        : step,
     ),
-    stage_label: order.status === "PICKUP_SCHEDULED" ? "Pickup scheduled" : customerStageLabel(stage),
+    stage_label: pickupDelayed ? "Pickup delayed" : order.status === "PICKUP_SCHEDULED" ? "Pickup scheduled" : customerStageLabel(stage),
+    pickup_note: pickupDelayed
+      ? "Courier collection is being rescheduled."
+      : order.status === "PICKUP_SCHEDULED"
+        ? "Courier collection is pending."
+        : null,
     confirming: stage === "pending",
     access_token: token,
   };

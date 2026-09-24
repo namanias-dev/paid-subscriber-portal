@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { storeDb } from "@/lib/store/db";
 import { trackDelhiveryAwb } from "@/lib/store/shipping/delhiveryApi";
-import { shouldPollShipment, type TrackingSnapshot } from "@/lib/store/shipping/reconcile";
+import { isPickupException, shouldPollShipment, type TrackingSnapshot } from "@/lib/store/shipping/reconcile";
 import { trackShiprocketAwb } from "@/lib/store/shipping/shiprocketApi";
 import { canAdvanceOrder, canAdvanceShipment, normalizeCourierStatus, orderStatusFromShipment } from "@/lib/store/shipping/status";
 
@@ -41,7 +41,7 @@ async function run(req: Request) {
   const nowIso = new Date().toISOString();
   const { data: rows, error } = await db
     .from("store_shipments")
-    .select("id,order_id,provider,awb,status,created_at,pickup_scheduled_at,picked_up_at,last_synced_at,expected_delivery_date")
+    .select("id,order_id,provider,awb,status,created_at,pickup_scheduled_at,picked_up_at,last_synced_at,expected_delivery_date,provider_payload")
     .in("status", OPEN_STATUSES)
     .order("created_at", { ascending: true })
     .limit(40);
@@ -63,6 +63,7 @@ async function run(req: Request) {
       pickedUpAt: row.picked_up_at,
       lastSyncedAt: row.last_synced_at,
       expectedDeliveryDate: row.expected_delivery_date,
+      pickupException: isPickupException(String((row.provider_payload as { tracking_activity?: string } | null)?.tracking_activity || "")),
     };
     if (!shouldPollShipment(snapshot)) continue;
     considered += 1;
@@ -72,7 +73,18 @@ async function run(req: Request) {
         : await trackShiprocketAwb(row.awb);
     polled += 1;
     const mapped = raw.rawStatus ? normalizeCourierStatus(raw.rawStatus) : null;
-    const patch: Record<string, unknown> = { last_synced_at: nowIso, updated_at: nowIso };
+    const payload = (row.provider_payload && typeof row.provider_payload === "object" ? row.provider_payload : {}) as Record<string, unknown>;
+    const patch: Record<string, unknown> = {
+      last_synced_at: nowIso,
+      updated_at: nowIso,
+      provider_payload: {
+        ...payload,
+        ...(raw.rawStatus ? { tracking_status: raw.rawStatus } : {}),
+        ...("activity" in raw && raw.activity ? { tracking_activity: raw.activity } : {}),
+        ...("eventTime" in raw && raw.eventTime ? { tracking_event_at: raw.eventTime } : {}),
+        ...("location" in raw && raw.location ? { tracking_location: raw.location } : {}),
+      },
+    };
     if (mapped && canAdvanceShipment(row.status, mapped)) {
       patch.status = mapped;
       if (mapped === "picked_up") patch.picked_up_at = nowIso;

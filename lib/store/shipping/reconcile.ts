@@ -9,11 +9,18 @@ const WAITING_PICKUP = new Set(["pending", "created", "manifested"]);
 const HOUR = 60 * 60 * 1000;
 
 export const TRACKING_STALE_MS = 12 * HOUR;
+/** Pre-pickup and pickup-exception reads follow the two-hour cron, not the 12-hour quiet period. */
+export const PICKUP_POLL_MS = 2 * HOUR;
 export const PICKUP_OVERDUE_MS = 24 * HOUR;
 export const FIRST_SCAN_GRACE_MS = 12 * HOUR;
 export const WEBHOOK_GAP_MS = 6 * HOUR;
 
 const POLL_REASONS = new Set(["pickup_overdue", "no_first_scan", "stale", "webhook_gap"]);
+
+export function isPickupException(activity: string | null | undefined): boolean {
+  const text = (activity || "").toLowerCase();
+  return text.includes("not done") || text.includes("pickup exception") || text.includes("pickup failed") || text.includes("pickup rescheduled");
+}
 
 export interface TrackingSnapshot {
   status: string;
@@ -25,6 +32,8 @@ export interface TrackingSnapshot {
   pickedUpAt?: string | null;
   lastSyncedAt?: string | null;
   expectedDeliveryDate?: string | null;
+  /** Pickup Not Done, failed, or exception. A recent read must not hide the next cron run. */
+  pickupException?: boolean;
 }
 
 function ageMs(iso: string | null | undefined, now: number): number | null {
@@ -78,6 +87,9 @@ export function shouldPollShipment(input: TrackingSnapshot): boolean {
   if (input.provider !== "shiprocket" && input.provider !== "delhivery") return false;
   if (!input.awb || !input.awb.trim()) return false;
   const syncAge = ageMs(input.lastSyncedAt, Date.parse(input.now));
-  if (syncAge !== null && syncAge <= TRACKING_STALE_MS) return false;
+  const waitingPickup = WAITING_PICKUP.has(input.status) || input.pickupException === true;
+  const quietMs = waitingPickup ? PICKUP_POLL_MS : TRACKING_STALE_MS;
+  if (syncAge !== null && syncAge <= quietMs) return false;
+  if (waitingPickup) return true;
   return classifyTrackingGap(input).some((reason) => POLL_REASONS.has(reason));
 }

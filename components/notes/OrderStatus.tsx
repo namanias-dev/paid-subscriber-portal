@@ -96,7 +96,7 @@ export default function OrderStatus({ order }: { order: PublicOrder }) {
                 : current.stage === "shipped" || current.stage === "in_transit" || current.stage === "out_for_delivery"
                   ? "The parcel is with the courier. Use the AWB above if it is available."
                   : current.stage === "packed"
-                    ? "Your notes are packed in Chandigarh. They ship when the courier picks the parcel up."
+                    ? current.pickup_note || "Your notes are packed in Chandigarh. They ship when the courier picks the parcel up."
                     : "The Academy prepares and packs your notes in Chandigarh, then hands them to the courier. You can track this order with your phone number anytime.";
 
   return (

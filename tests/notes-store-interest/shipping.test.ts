@@ -330,6 +330,9 @@ describe("courier tracking events", () => {
     assert.deepEqual(classifyTrackingGap({ ...base, status: "delivered", lastSyncedAt: "2026-09-01T00:00:00.000Z" }), []);
     assert.equal(shouldPollShipment({ ...base, status: "delivered", lastSyncedAt: "2026-09-01T00:00:00.000Z" }), false);
     assert.equal(shouldPollShipment({ ...base, status: "in_transit", lastSyncedAt: "2026-09-22T20:00:00.000Z" }), false);
+    assert.equal(shouldPollShipment({ ...base, status: "created", lastSyncedAt: "2026-09-22T23:00:00.000Z" }), false);
+    assert.equal(shouldPollShipment({ ...base, status: "created", lastSyncedAt: "2026-09-22T20:00:00.000Z", pickupException: true }), true);
+    assert.equal(shouldPollShipment({ ...base, status: "in_transit", lastSyncedAt: "2026-09-22T20:00:00.000Z", pickupException: true }), true);
     assert.equal(shouldPollShipment({ ...base, status: "in_transit", lastSyncedAt: "2026-09-21T00:00:00.000Z" }), true);
     assert.ok(classifyTrackingGap({ ...base, status: "delivery_failed", lastSyncedAt: "2026-09-22T23:00:00.000Z" }).includes("ndr"));
     assert.equal(shouldPollShipment({ ...base, status: "delivery_failed", lastSyncedAt: "2026-09-22T23:00:00.000Z" }), false);

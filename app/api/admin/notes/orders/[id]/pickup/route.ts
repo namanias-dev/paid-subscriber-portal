@@ -20,8 +20,9 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   if (blocked) {
     return NextResponse.json({ ok: false, error: blocked, writes_authorized: false }, { status: 409, headers: { "Cache-Control": "no-store" } });
   }
-  const body = (await req.json().catch(() => null)) as { date?: string } | null;
+  const body = (await req.json().catch(() => null)) as { date?: string; reattempt?: boolean } | null;
   const date = String(body?.date || "").trim();
+  const reattempt = body?.reattempt === true;
   const actor = await getActionActor();
   const db = storeDb();
   if (!db) return NextResponse.json({ ok: false, error: "unavailable" }, { status: 503 });
@@ -38,6 +39,15 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     return NextResponse.json({ ok: false, error: "Create the courier shipment before scheduling pickup." }, { status: 409 });
   }
   const existingPayload = (shipment.provider_payload && typeof shipment.provider_payload === "object" ? shipment.provider_payload : {}) as Record<string, unknown>;
+  if (reattempt && (shipment.provider !== "shiprocket" || !shipment.provider_shipment_id)) {
+    return NextResponse.json({ ok: false, error: "This reattempt only applies to the existing Shiprocket shipment." }, { status: 409 });
+  }
+  if (reattempt && existingPayload.pickup_reattempt_date === date && existingPayload.pickup_status === "reattempt_requested") {
+    return NextResponse.json(
+      { ok: true, already: true, pickup_date: date, pickup_reference: existingPayload.pickup_reference || null },
+      { headers: { "Cache-Control": "no-store" } },
+    );
+  }
   if (shipmentHandoffBlocked(existingPayload)) {
     return NextResponse.json(
       { ok: false, error: SHIPMENT_ADDRESS_MISMATCH, code: SHIPMENT_ADDRESS_MISMATCH },
@@ -51,6 +61,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       provider: shipment.provider,
       providerShipmentId: shipment.provider_shipment_id,
       date,
+      retry: reattempt,
     });
   } catch (e) {
     const message = e instanceof Error ? e.message : "Pickup was not scheduled.";
@@ -67,9 +78,11 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       pickup_scheduled_at: scheduledAt,
       provider_payload: {
         ...payload,
-        pickup_reference: pickup.reference,
+        pickup_reference: pickup.reference || payload.pickup_reference,
+        pickup_previous_reference: reattempt ? payload.pickup_reference || null : payload.pickup_previous_reference,
         pickup_date: dateOnly,
-        pickup_status: pickup.status || "requested",
+        pickup_status: reattempt ? "reattempt_requested" : pickup.status || "requested",
+        ...(reattempt ? { pickup_reattempt_date: dateOnly } : {}),
         ...(pickup.time ? { pickup_time: pickup.time } : {}),
       },
       updated_at: now,
