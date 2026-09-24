@@ -109,6 +109,7 @@ export async function GET(req: Request) {
   }
 
   const itemsByOrder = new Map<string, Array<{ name: string; qty: number; sku: string; unit_price_paise: number; line_total_paise: number }>>();
+  const pastByOrder = new Map<string, Array<{ provider: string | null; courier: string | null; awb: string | null; status: string | null; reason: string | null }>>();
   const shipByOrder = new Map<
     string,
     {
@@ -150,7 +151,24 @@ export async function GET(req: Request) {
       .in("order_id", ids)
       .order("created_at", { ascending: false });
     for (const s of shipRows || []) {
-      if (!shipByOrder.has(s.order_id)) {
+      const inactive = s.status === "cancelled" || s.status === "failed";
+      if (inactive) {
+        const payload = (s.provider_payload && typeof s.provider_payload === "object" ? s.provider_payload : {}) as {
+          cancellation_reason?: string;
+          reason?: string;
+        };
+        const list = pastByOrder.get(s.order_id) || [];
+        list.push({
+          provider: s.provider,
+          courier: s.courier_name,
+          awb: s.awb,
+          status: s.status,
+          reason: payload.cancellation_reason || payload.reason || null,
+        });
+        pastByOrder.set(s.order_id, list);
+      }
+      if (inactive || shipByOrder.has(s.order_id)) continue;
+      {
         const payload = (s.provider_payload && typeof s.provider_payload === "object" ? s.provider_payload : {}) as {
           label_url?: string;
           pickup_reference?: string;
@@ -194,6 +212,7 @@ export async function GET(req: Request) {
         address: o.shipping_address_id ? addrMap.get(o.shipping_address_id) || null : null,
         items: itemsByOrder.get(o.id) || [],
         shipment: shipByOrder.get(o.id) || null,
+        past_shipments: pastByOrder.get(o.id) || [],
         attention: fulfilmentAttention({
           orderStatus: o.status,
           awb: shipByOrder.get(o.id)?.awb,

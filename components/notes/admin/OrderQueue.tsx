@@ -39,6 +39,13 @@ interface Row {
   internal_notes: string | null;
   address: Address | null;
   items: Array<{ name: string; qty: number; sku: string; unit_price_paise?: number; line_total_paise?: number }>;
+  past_shipments?: Array<{
+    provider: string | null;
+    courier: string | null;
+    awb: string | null;
+    status: string | null;
+    reason: string | null;
+  }>;
   shipment: {
     courier: string | null;
     awb: string | null;
@@ -328,6 +335,13 @@ export default function NotesOrderQueue() {
                   {o.shipment.awb ? "" : " · not booked"}
                 </p>
               )}
+              {(o.past_shipments || []).map((past) => (
+                <p key={past.awb || past.courier} className="text-xs text-ink-500">
+                  Past shipment · {past.provider || "courier"} {past.awb ? <span className="font-mono">{past.awb}</span> : null}
+                  {past.reason ? ` · ${past.reason.replaceAll("_", " ")}` : ""}
+                  {past.status ? ` · ${past.status}` : ""}
+                </p>
+              ))}
               {o.shipment?.awb && (
                 <p className="mt-2 text-sm text-ink2">
                   <span className="font-semibold text-ink">AWB on file: </span>

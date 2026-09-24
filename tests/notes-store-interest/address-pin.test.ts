@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
-import { customerShipTo, keepCanonicalAddress, pinPlaceConflict, type CanonicalAddress } from "../../lib/store/address";
+import { customerShipTo, keepCanonicalAddress, pinPlaceConflict, providerDestinationMismatch, shipmentHandoffBlocked, type CanonicalAddress } from "../../lib/store/address";
 
 const CANONICAL: CanonicalAddress = {
   line1: "H No. 1920 P",
@@ -39,6 +39,28 @@ describe("canonical shipping address", () => {
 
   test("Panchkula and Haryana agree with PIN 134109", () => {
     assert.equal(pinPlaceConflict("Panchkula", "Haryana", "Panchkula", "Haryana"), null);
+  });
+
+  test("a courier PIN or state that is not 134109 Haryana blocks handoff", () => {
+    assert.equal(
+      providerDestinationMismatch(
+        { city: "Panchkula", state: "Haryana", pincode: "134109" },
+        { city: "Panchkula", state: "Haryana", pincode: "134109" },
+      ),
+      false,
+    );
+    assert.equal(
+      providerDestinationMismatch(
+        { city: "Panchkula", state: "Haryana", pincode: "134109" },
+        { city: "Panchkula", state: "Punjab", pincode: "134111" },
+      ),
+      true,
+    );
+    assert.equal(
+      shipmentHandoffBlocked({ requested_pin: "134109", provider_pin: "134111", do_not_handoff: true }),
+      true,
+    );
+    assert.equal(shipmentHandoffBlocked({ requested_pin: "134109", provider_pin: "134109" }), false);
   });
 
   test("Zirakpur or Punjab against a Panchkula PIN must be confirmed", () => {

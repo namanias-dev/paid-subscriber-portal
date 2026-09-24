@@ -55,3 +55,37 @@ export function pinPlaceConflict(
 export function keepCanonicalAddress(address: CanonicalAddress, _routing: CourierRouting): CanonicalAddress {
   return address;
 }
+
+export const SHIPMENT_ADDRESS_MISMATCH = "SHIPMENT_ADDRESS_MISMATCH";
+
+/**
+ * True when the courier stored a different PIN, city, or state from the order.
+ * A hub name is not compared. Pickup and label approval must stop when this is true.
+ */
+/** Block label approval, pickup, and handoff when the courier record disagrees with the order. */
+export function shipmentHandoffBlocked(payload: Record<string, unknown> | null | undefined): boolean {
+  if (!payload) return false;
+  if (payload.address_mismatch === true || payload.do_not_handoff === true) return true;
+  const requestedPin = String(payload.requested_pin || "").trim();
+  const storedPin = String(payload.provider_pin || "").trim();
+  if (requestedPin && storedPin && requestedPin !== storedPin) return true;
+  const requestedCity = String(payload.requested_city || "").trim();
+  const storedCity = String(payload.provider_city || "").trim();
+  if (requestedCity && storedCity && place(requestedCity) !== place(storedCity)) return true;
+  const requestedState = String(payload.requested_state || "").trim();
+  const storedState = String(payload.provider_state || "").trim();
+  if (requestedState && storedState && place(requestedState) !== place(storedState)) return true;
+  return false;
+}
+
+export function providerDestinationMismatch(
+  canonical: { city: string; state: string; pincode: string },
+  stored: { city?: string | null; state?: string | null; pincode?: string | null },
+): boolean {
+  const storedPin = String(stored.pincode || "").trim();
+  if (!storedPin || storedPin !== canonical.pincode.trim()) return true;
+  const storedCity = place(stored.city || "");
+  const storedState = place(stored.state || "");
+  if (!storedCity || !storedState) return true;
+  return storedCity !== place(canonical.city) || storedState !== place(canonical.state);
+}

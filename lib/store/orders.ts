@@ -55,13 +55,12 @@ export async function getPublicOrder(
     .from("store_order_items")
     .select("name_snapshot,qty,line_total_paise")
     .eq("order_id", order.id);
-  const { data: ship } = await db
+  const { data: shipRows } = await db
     .from("store_shipments")
-    .select("awb,courier_name")
+    .select("awb,courier_name,status")
     .eq("order_id", order.id)
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+    .order("created_at", { ascending: false });
+  const ship = (shipRows || []).find((row) => row.status !== "cancelled" && row.status !== "failed") || null;
   let shipTo: string | null = null;
   if (order.shipping_address_id) {
     const { data: addr } = await db

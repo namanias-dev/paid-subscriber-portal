@@ -4,6 +4,7 @@ import { storeDb } from "@/lib/store/db";
 import { requestProviderPickup } from "@/lib/store/shipping/book";
 import { dispatchBlocked } from "@/lib/store/shipping/dispatch";
 import { canAdvanceOrder } from "@/lib/store/shipping/status";
+import { SHIPMENT_ADDRESS_MISMATCH, shipmentHandoffBlocked } from "@/lib/store/address";
 
 export const dynamic = "force-dynamic";
 
@@ -27,15 +28,21 @@ export async function POST(req: Request, { params }: { params: { id: string } })
 
   const { data: order } = await db.from("store_orders").select("id,status").eq("id", params.id).maybeSingle();
   if (!order) return NextResponse.json({ ok: false, error: "not found" }, { status: 404 });
-  const { data: shipment } = await db
+  const { data: shipmentRows } = await db
     .from("store_shipments")
-    .select("id,provider,provider_shipment_id,awb,provider_payload")
+    .select("id,provider,provider_shipment_id,awb,status,provider_payload")
     .eq("order_id", order.id)
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+    .order("created_at", { ascending: false });
+  const shipment = (shipmentRows || []).find((row) => row.status !== "cancelled" && row.status !== "failed") || null;
   if (!shipment?.awb || (shipment.provider !== "shiprocket" && shipment.provider !== "delhivery")) {
     return NextResponse.json({ ok: false, error: "Create the courier shipment before scheduling pickup." }, { status: 409 });
+  }
+  const existingPayload = (shipment.provider_payload && typeof shipment.provider_payload === "object" ? shipment.provider_payload : {}) as Record<string, unknown>;
+  if (shipmentHandoffBlocked(existingPayload)) {
+    return NextResponse.json(
+      { ok: false, error: SHIPMENT_ADDRESS_MISMATCH, code: SHIPMENT_ADDRESS_MISMATCH },
+      { status: 409, headers: { "Cache-Control": "no-store" } },
+    );
   }
 
   let pickup;

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requirePermission } from "@/lib/adminGuard";
 import { storeDb } from "@/lib/store/db";
 import { fetchExistingLabel } from "@/lib/store/shipping/book";
+import { SHIPMENT_ADDRESS_MISMATCH, shipmentHandoffBlocked } from "@/lib/store/address";
 
 export const dynamic = "force-dynamic";
 
@@ -15,16 +16,21 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
   }
   const db = storeDb();
   if (!db) return NextResponse.json({ ok: false, error: "unavailable" }, { status: 503 });
-  const { data: shipment } = await db
+  const { data: shipmentRows } = await db
     .from("store_shipments")
-    .select("provider,awb,label_r2_key,provider_payload")
+    .select("provider,awb,status,label_r2_key,provider_payload")
     .eq("order_id", params.id)
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+    .order("created_at", { ascending: false });
+  const shipment = (shipmentRows || []).find((row) => row.status !== "cancelled" && row.status !== "failed") || null;
   const payload = (shipment?.provider_payload && typeof shipment.provider_payload === "object" ? shipment.provider_payload : {}) as {
     label_url?: string;
   };
+  if (shipmentHandoffBlocked(payload as Record<string, unknown>)) {
+    return NextResponse.json(
+      { ok: false, error: SHIPMENT_ADDRESS_MISMATCH, code: SHIPMENT_ADDRESS_MISMATCH },
+      { status: 409, headers: { "Cache-Control": "no-store" } },
+    );
+  }
   const stored = payload.label_url || shipment?.label_r2_key || null;
   if (typeof stored === "string" && stored.startsWith("fixture:")) {
     return NextResponse.json(
