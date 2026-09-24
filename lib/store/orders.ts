@@ -77,7 +77,9 @@ export async function getPublicOrder(
     pickup_status?: string;
     pickup_reattempt_date?: string;
   };
-  const pickupDelayed = order.status === "PICKUP_SCHEDULED" && /not done|pickup exception|pickup failed/i.test(payload.tracking_activity || "") && payload.pickup_status !== "reattempt_requested";
+  const pickupMissed = order.status === "PICKUP_SCHEDULED" && /not done|pickup exception|pickup failed/i.test(payload.tracking_activity || "");
+  const pickupQueued = payload.pickup_status === "already_in_pickup_queue" || payload.pickup_status === "reattempt_requested";
+  const pickupDelayed = pickupMissed && !pickupQueued;
   const stage = projectCustomerStage(order.status, hasAwb);
   return {
     order_no: order.order_no,
