@@ -34,6 +34,8 @@ export interface DelhiveryShipmentDraft {
   heightCm: number;
   /** Prepaid is a forward shipment. Pickup is a Delhivery reverse pickup. */
   paymentMode?: "Prepaid" | "Pickup";
+  /** Delhivery Express or Surface. Omitted only for older callers. */
+  shippingMode?: "Express" | "Surface";
 }
 
 /**
@@ -64,6 +66,7 @@ export function delhiveryCreateBody(draft: DelhiveryShipmentDraft): string {
         shipment_length: String(draft.lengthCm),
         shipment_width: String(draft.widthCm),
         shipment_height: String(draft.heightCm),
+        ...(draft.shippingMode ? { shipping_mode: draft.shippingMode } : {}),
       },
     ],
   };

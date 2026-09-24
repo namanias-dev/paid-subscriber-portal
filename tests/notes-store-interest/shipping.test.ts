@@ -160,8 +160,10 @@ describe("dispatch and support gates", () => {
       lengthCm: 30,
       widthCm: 22,
       heightCm: 3,
+      shippingMode: "Express",
     });
     assert.match(body, /^format=json&data=/);
+    assert.match(decodeURIComponent(body), /"shipping_mode":"Express"/);
     assert.match(decodeURIComponent(body), /"name":"NAMAN SHARMA IAS ACADEMY"/);
     assert.equal(body.includes("cmu/create"), false);
     assert.equal(delhiveryPackingSlipPath("AWB1").includes("cmu/create"), false);

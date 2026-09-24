@@ -29,6 +29,7 @@ export interface BookParty {
 export interface CreateProviderInput extends BookParty {
   provider: "shiprocket" | "delhivery";
   courierId?: string | null;
+  shippingMode?: "Express" | "Surface";
 }
 
 export interface CreatedShipment {
@@ -137,6 +138,7 @@ function draftOf(input: BookParty, paymentMode: "Prepaid" | "Pickup"): Delhivery
     widthCm: input.widthCm,
     heightCm: input.heightCm,
     paymentMode,
+    shippingMode: input.shippingMode,
   };
 }
 
@@ -177,7 +179,7 @@ async function createDelhivery(input: CreateProviderInput, env: NodeJS.ProcessEn
     providerShipmentId: parsed.awb,
     providerOrderId: input.orderNumber,
     awb: parsed.awb,
-    courierName: "Delhivery",
+    courierName: input.shippingMode === "Surface" ? "Delhivery Surface" : "Delhivery Express",
     labelUrl: null,
     shipmentStatus: "created",
     orderStatus: "READY_FOR_PICKUP",

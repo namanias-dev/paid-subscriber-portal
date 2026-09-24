@@ -45,7 +45,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
 
   const { data: shipment } = await db
     .from("store_shipments")
-    .select("id,status,awb,weight_grams,length_mm,width_mm,height_mm")
+    .select("id,status,awb,weight_grams,length_mm,width_mm,height_mm,courier_name")
     .eq("order_id", order.id)
     .order("created_at", { ascending: false })
     .limit(1)
@@ -91,6 +91,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       lengthCm: pack.lengthCm,
       widthCm: pack.widthCm,
       heightCm: pack.heightCm,
+      shippingMode: /surface/i.test(String(shipment?.courier_name || "")) ? "Surface" : "Express",
     });
   } catch (e) {
     const message = e instanceof Error ? e.message : "Shipment was not created.";
