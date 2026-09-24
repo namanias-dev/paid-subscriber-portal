@@ -47,6 +47,8 @@ interface Row {
     status: string | null;
     has_label: boolean;
     pickup_scheduled_at: string | null;
+    pickup_reference?: string | null;
+    pickup_time?: string | null;
     weight_grams?: number | null;
     length_cm?: number | null;
     width_cm?: number | null;
@@ -330,7 +332,9 @@ export default function NotesOrderQueue() {
                 <p className="mt-2 text-sm text-ink2">
                   <span className="font-semibold text-ink">AWB on file: </span>
                   {o.shipment.courier || "Courier"} · <span className="font-mono">{o.shipment.awb}</span>
-                  {o.shipment.pickup_scheduled_at ? " · pickup requested" : ""}
+                  {o.shipment.pickup_scheduled_at
+                    ? ` · Pickup scheduled ${o.shipment.pickup_scheduled_at.slice(0, 10)}${o.shipment.pickup_time ? ` ${o.shipment.pickup_time.slice(0, 5)}` : ""}${o.shipment.pickup_reference ? ` · request ${o.shipment.pickup_reference}` : ""}`
+                    : ""}
                   {o.shipment.status ? ` · ${o.shipment.status.replaceAll("_", " ")}` : ""}
                 </p>
               )}

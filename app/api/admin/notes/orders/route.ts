@@ -119,6 +119,8 @@ export async function GET(req: Request) {
       status: string | null;
       has_label: boolean;
       pickup_scheduled_at: string | null;
+      pickup_reference: string | null;
+      pickup_time: string | null;
       weight_grams: number | null;
       length_cm: number | null;
       width_cm: number | null;
@@ -149,7 +151,11 @@ export async function GET(req: Request) {
       .order("created_at", { ascending: false });
     for (const s of shipRows || []) {
       if (!shipByOrder.has(s.order_id)) {
-        const payload = (s.provider_payload && typeof s.provider_payload === "object" ? s.provider_payload : {}) as { label_url?: string };
+        const payload = (s.provider_payload && typeof s.provider_payload === "object" ? s.provider_payload : {}) as {
+          label_url?: string;
+          pickup_reference?: string;
+          pickup_time?: string;
+        };
         shipByOrder.set(s.order_id, {
           courier: s.courier_name,
           awb: s.awb,
@@ -158,6 +164,8 @@ export async function GET(req: Request) {
           status: s.status,
           has_label: Boolean(s.label_r2_key || payload.label_url || (s.provider === "delhivery" && s.awb)),
           pickup_scheduled_at: s.pickup_scheduled_at,
+          pickup_reference: payload.pickup_reference || null,
+          pickup_time: payload.pickup_time || null,
           weight_grams: s.weight_grams ?? null,
           length_cm: s.length_mm ? Number(s.length_mm) / 10 : null,
           width_cm: s.width_mm ? Number(s.width_mm) / 10 : null,

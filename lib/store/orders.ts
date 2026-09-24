@@ -1,4 +1,5 @@
 import { storeDb } from "./db";
+import { customerShipTo } from "./address";
 import { projectCustomerStage, customerStageLabel, trackingSteps, type CustomerStage } from "./projection";
 import { formatPaise } from "./money";
 import { verifyRawTokenAgainstHash } from "./accessToken";
@@ -65,12 +66,10 @@ export async function getPublicOrder(
   if (order.shipping_address_id) {
     const { data: addr } = await db
       .from("store_addresses")
-      .select("line1,city,state,pincode")
+      .select("line1,line2,city,state,pincode")
       .eq("id", order.shipping_address_id)
       .maybeSingle();
-    if (addr) {
-      shipTo = [addr.line1, addr.city, addr.state, addr.pincode].filter(Boolean).join(", ");
-    }
+    if (addr) shipTo = customerShipTo(addr);
   }
   const hasAwb = !!(ship?.awb);
   const stage = projectCustomerStage(order.status, hasAwb);

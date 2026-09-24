@@ -8,6 +8,7 @@
 import { storeDb } from "./db";
 import { makeStoreReference } from "./references";
 import { buildStorePaymentUrl, storeSubMerchantId } from "./payments/eazypay";
+import { pinPlaceConflict } from "./address";
 import { lockQuote, QUOTE_TTL_SECONDS, type FrozenQuote } from "./quote";
 import { reserveStock } from "./inventory";
 import type { CartView } from "./cart";
@@ -56,6 +57,8 @@ export async function placeCheckout(cart: CartView, address: CheckoutAddress): P
   const city = address.city.trim() || quote.city || "";
   const state = address.state.trim() || quote.state || "";
   if (!city || !state) throw new Error("Enter city and state");
+  const conflict = pinPlaceConflict(city, state, quote.city, quote.state);
+  if (conflict) throw new Error(conflict);
 
   // Upsert the store customer by phone_key. This is NOT an academy identity.
   const { data: existing } = await db
