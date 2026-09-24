@@ -28,7 +28,7 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
       ? await trackDelhiveryAwb(shipment.awb)
       : shipment.provider === "shiprocket"
         ? await trackShiprocketAwb(shipment.awb)
-        : { rawStatus: null, recognized: false, courier: null, error: null };
+        : { rawStatus: null, recognized: false, courier: null, error: null, eventTime: null, location: null, activity: null };
   const raw = tracked;
   const recognized = "recognized" in tracked ? tracked.recognized : Boolean(raw.rawStatus);
   const courier = "courier" in tracked ? tracked.courier : null;
@@ -46,7 +46,14 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
       await db
         .from("store_shipments")
         .update({
-          provider_payload: { ...payload, tracking_status: raw.rawStatus, tracking_courier: courier },
+          provider_payload: {
+            ...payload,
+            tracking_status: raw.rawStatus,
+            tracking_courier: courier,
+            tracking_activity: "activity" in tracked ? tracked.activity : null,
+            tracking_event_at: "eventTime" in tracked ? tracked.eventTime : null,
+            tracking_location: "location" in tracked ? tracked.location : null,
+          },
           last_synced_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
         })
@@ -61,6 +68,9 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
       recognized,
       courier,
       error,
+      event_time: "eventTime" in tracked ? tracked.eventTime : null,
+      location: "location" in tracked ? tracked.location : null,
+      activity: "activity" in tracked ? tracked.activity : null,
     },
     { headers: { "Cache-Control": "no-store" } },
   );

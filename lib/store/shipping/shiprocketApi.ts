@@ -143,11 +143,11 @@ export function shiprocketAdhocDraft(input: {
 export async function trackShiprocketAwb(
   awb: string,
   opts: { fetchImpl?: FetchLike; env?: NodeJS.ProcessEnv } = {},
-): Promise<{ rawStatus: string | null; recognized: boolean; courier: string | null; error: string | null }> {
+): Promise<{ rawStatus: string | null; recognized: boolean; courier: string | null; error: string | null; eventTime: string | null; location: string | null; activity: string | null }> {
   const code = awb.trim();
-  if (!code) return { rawStatus: null, recognized: false, courier: null, error: null };
+  if (!code) return { rawStatus: null, recognized: false, courier: null, error: null, eventTime: null, location: null, activity: null };
   const env = opts.env || process.env;
-  if (!shiprocketCredentials(env)) return { rawStatus: null, recognized: false, courier: null, error: null };
+  if (!shiprocketCredentials(env)) return { rawStatus: null, recognized: false, courier: null, error: null, eventTime: null, location: null, activity: null };
   try {
     const token = await shiprocketToken(opts);
     const fetchImpl = opts.fetchImpl || fetch;
@@ -166,14 +166,26 @@ export async function trackShiprocketAwb(
       str(body?.current_status) ||
       null;
     const error = str(tracking?.error) || (!res.ok ? `Shiprocket tracking was not read (${res.status}).` : "");
+    const activities = Array.isArray(tracking?.shipment_track_activities) ? tracking.shipment_track_activities.map(record).filter(Boolean) : [];
+    const latest = activities
+      .map((row) => ({
+        activity: str(row?.activity) || str(row?.["sr-status-label"]) || str(row?.status),
+        time: str(row?.date) || str(row?.["sr-status"]) || "",
+        location: str(row?.location),
+      }))
+      .filter((row) => row.activity || row.time)
+      .sort((a, b) => Date.parse(b.time) - Date.parse(a.time))[0];
     return {
       rawStatus: rawStatus || null,
       recognized: Boolean(first?.awb_code || first?.current_status) && !error,
       courier: str(first?.courier_name) || null,
       error: error || null,
+      eventTime: latest?.time || str(first?.updated_time_stamp) || str(first?.pickup_date) || null,
+      location: latest?.location || null,
+      activity: latest?.activity || rawStatus || null,
     };
   } catch {
-    return { rawStatus: null, recognized: false, courier: null, error: "Shiprocket tracking was not read." };
+    return { rawStatus: null, recognized: false, courier: null, error: "Shiprocket tracking was not read.", eventTime: null, location: null, activity: null };
   }
 }
 
