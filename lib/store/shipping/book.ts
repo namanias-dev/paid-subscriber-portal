@@ -121,7 +121,7 @@ export function parseDelhiveryLabel(body: unknown): string | null {
   return nested.startsWith("http") ? nested : null;
 }
 
-function draftOf(input: BookParty, paymentMode: "Prepaid" | "Pickup"): DelhiveryShipmentDraft {
+function draftOf(input: BookParty & { shippingMode?: "Express" | "Surface" }, paymentMode: "Prepaid" | "Pickup"): DelhiveryShipmentDraft {
   return {
     pickupName: "",
     orderNo: input.orderNumber,
