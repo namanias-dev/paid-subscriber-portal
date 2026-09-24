@@ -13,10 +13,14 @@ export const metadata = {
 export default function TrackPage() {
   noStore();
   return (
-    <div className="container-wide py-12">
-      <p className="ca-eyebrow text-[var(--ca-gold-dark)]">Delivery</p>
-      <h1 className="mt-2 font-heading text-3xl font-bold text-[var(--ca-navy)]">Track your notes</h1>
-      <p className="mt-2 text-sm text-[var(--ca-navy)]/60">Order number and the phone used at checkout. No login. Courier events appear only when they actually exist.</p>
+    <div className="container-wide px-4 py-10 sm:py-14">
+      <div className="mx-auto max-w-lg">
+        <p className="ca-eyebrow text-[var(--ca-gold-dark)]">Order tracking</p>
+        <h1 className="mt-2 font-heading text-3xl font-bold leading-tight text-[var(--ca-navy)] sm:text-4xl">Where is your order?</h1>
+        <p className="mt-3 text-[15px] leading-relaxed text-[var(--ca-navy)]/65">
+          Use the order number and the phone from checkout. No account needed.
+        </p>
+      </div>
       <TrackForm />
     </div>
   );

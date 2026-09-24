@@ -66,6 +66,20 @@ interface Row {
     height_cm?: number | null;
   } | null;
   attention?: string[];
+  issue?: {
+    id: string;
+    reference: string;
+    category: string;
+    category_label: string;
+    status: string;
+    status_label: string;
+    description: string;
+    created_at: string;
+    customer_note: string | null;
+    admin_note: string | null;
+    callback_requested: boolean;
+    open: boolean;
+  } | null;
 }
 
 const BUCKETS = [
@@ -116,7 +130,11 @@ function courierBlock(o: Row): string {
 export default function NotesOrderQueue() {
   const [orders, setOrders] = useState<Row[]>([]);
   const [bucket, setBucket] = useState("");
+  const [issueOnly, setIssueOnly] = useState(false);
   const [q, setQ] = useState("");
+  const [issueStatus, setIssueStatus] = useState<Record<string, string>>({});
+  const [issueAdmin, setIssueAdmin] = useState<Record<string, string>>({});
+  const [issueCustomer, setIssueCustomer] = useState<Record<string, string>>({});
   const [msg, setMsg] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [awb, setAwb] = useState<Record<string, string>>({});
@@ -134,6 +152,7 @@ export default function NotesOrderQueue() {
     if (!hasRows.current) setLoading(true);
     const params = new URLSearchParams();
     if (bucket) params.set("bucket", bucket);
+    if (issueOnly) params.set("issue", "open");
     if (q.trim()) params.set("q", q.trim());
     const res = await fetch(`/api/admin/notes/orders?${params}`, { cache: "no-store" });
     const json = await res.json();
@@ -141,11 +160,11 @@ export default function NotesOrderQueue() {
     hasRows.current = next.length > 0;
     setOrders(next);
     setLoading(false);
-  }, [bucket, q]);
+  }, [bucket, q, issueOnly]);
 
   useEffect(() => {
     void load();
-  }, [bucket]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [bucket, issueOnly]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function copy(text: string, what: string) {
     try {
@@ -249,6 +268,15 @@ export default function NotesOrderQueue() {
             {b.label}
           </button>
         ))}
+        <button
+          type="button"
+          onClick={() => setIssueOnly((v) => !v)}
+          className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-semibold ${
+            issueOnly ? "bg-ink text-white" : "bg-surface text-ink2 ring-1 ring-line"
+          }`}
+        >
+          Open issues
+        </button>
       </div>
 
       {msg && <p className="mb-3 rounded-lg border border-line bg-white px-3 py-2 text-sm">{msg}</p>}
@@ -292,6 +320,9 @@ export default function NotesOrderQueue() {
                   )}
                   {o.status === "PAYMENT_PENDING" && (
                     <p className="mt-1 text-[11px] font-semibold text-amber-800">Payment confirming</p>
+                  )}
+                  {o.issue?.open && (
+                    <p className="mt-1 text-[11px] font-semibold text-amber-800">Issue {o.issue.status_label}</p>
                   )}
                 </div>
               </div>
@@ -428,6 +459,70 @@ export default function NotesOrderQueue() {
               )}
               {o.status === "REFUND_PENDING" && (
                 <p className="mt-2 text-sm text-ink">Refund pending manual payment-gateway processing.</p>
+              )}
+              {o.issue && (
+                <div className="mt-3 rounded-lg border border-line bg-surface p-3 text-sm">
+                  <p className="font-semibold text-ink">
+                    {o.issue.reference} · {o.issue.category_label}
+                  </p>
+                  <p className="mt-1 text-xs text-ink2">
+                    {o.issue.status_label} · {new Date(o.issue.created_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}
+                    {o.issue.callback_requested ? " · callback requested" : ""}
+                  </p>
+                  <p className="mt-2 whitespace-pre-wrap text-ink">{o.issue.description}</p>
+                  {o.issue.customer_note && <p className="mt-2 text-xs text-ink2">Shown to student: {o.issue.customer_note}</p>}
+                  <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                    <select
+                      value={issueStatus[o.id] || o.issue.status}
+                      onChange={(e) => setIssueStatus((m) => ({ ...m, [o.id]: e.target.value }))}
+                      className="h-9 rounded border border-line px-2 text-sm"
+                    >
+                      <option value="OPEN">Issue received</option>
+                      <option value="IN_REVIEW">In review</option>
+                      <option value="WAITING_ON_TEAM">With the team</option>
+                      <option value="RESOLVED">Resolved</option>
+                      <option value="CLOSED">Closed</option>
+                    </select>
+                    <button
+                      type="button"
+                      disabled={busyId === o.id}
+                      onClick={() =>
+                        act(
+                          o.id,
+                          () =>
+                            fetch(`/api/admin/notes/orders/${o.id}/issues`, {
+                              method: "POST",
+                              headers: { "content-type": "application/json" },
+                              body: JSON.stringify({
+                                issue_id: o.issue?.id,
+                                status: issueStatus[o.id] || o.issue?.status,
+                                admin_note: issueAdmin[o.id] || "",
+                                customer_note: issueCustomer[o.id] || "",
+                              }),
+                            }),
+                          "Issue updated",
+                        )
+                      }
+                      className="h-9 rounded bg-ink px-3 text-sm font-semibold text-white disabled:opacity-50"
+                    >
+                      Update issue
+                    </button>
+                  </div>
+                  <textarea
+                    value={issueAdmin[o.id] || ""}
+                    onChange={(e) => setIssueAdmin((m) => ({ ...m, [o.id]: e.target.value }))}
+                    rows={2}
+                    placeholder="Internal note"
+                    className="mt-2 w-full rounded border border-line px-2 py-1 text-sm"
+                  />
+                  <textarea
+                    value={issueCustomer[o.id] || ""}
+                    onChange={(e) => setIssueCustomer((m) => ({ ...m, [o.id]: e.target.value }))}
+                    rows={2}
+                    placeholder="Note the student will see on the tracking page"
+                    className="mt-2 w-full rounded border border-line px-2 py-1 text-sm"
+                  />
+                </div>
               )}
               {o.internal_notes && (
                 <pre className="mt-2 whitespace-pre-wrap rounded-lg bg-surface p-2 text-xs text-ink2">{o.internal_notes}</pre>

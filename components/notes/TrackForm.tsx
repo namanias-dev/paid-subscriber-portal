@@ -34,23 +34,61 @@ export default function TrackForm({ initialOrderNo = "" }: { initialOrderNo?: st
   }
 
   return (
-    <div className="mt-8 max-w-xl">
-      <form onSubmit={onSubmit} className="space-y-3 rounded-3xl bg-white p-5 ns-elev-1">
-        <label className="block text-sm">
-          <span className="mb-1 block font-medium">Order number</span>
-          <input value={orderNo} onChange={(e) => setOrderNo(e.target.value.toUpperCase())} required className="min-h-11 w-full rounded-xl border px-3 font-mono" placeholder="NIAS-N-2026-001284" />
-        </label>
-        <label className="block text-sm">
-          <span className="mb-1 block font-medium">Phone</span>
-          <input value={phone} onChange={(e) => setPhone(e.target.value.replace(/\D/g, "").slice(0, 10))} required inputMode="numeric" className="min-h-11 w-full rounded-xl border px-3 tabular-nums" />
-        </label>
-        {err && <p className="text-sm text-red-700">{err}</p>}
-        <button type="submit" disabled={busy} className="min-h-12 w-full rounded-full bg-[var(--ca-navy)] text-sm font-semibold text-white">
-          {busy ? "Looking…" : "Track"}
-        </button>
-      </form>
+    <div className="mx-auto mt-6 w-full max-w-lg">
+      {!order && (
+        <form onSubmit={onSubmit} className="rounded-[28px] border border-[var(--ca-navy)]/8 bg-white p-5 ns-elev-2 sm:p-6">
+          <label className="block text-sm font-medium text-[var(--ca-navy)]">
+            Order number
+            <input
+              value={orderNo}
+              onChange={(e) => setOrderNo(e.target.value.toUpperCase())}
+              required
+              autoComplete="off"
+              className="mt-2 min-h-12 w-full rounded-2xl border border-[var(--ca-navy)]/12 px-3 font-mono text-base"
+              placeholder="NIAS-N-2026-001001"
+            />
+          </label>
+          <label className="mt-4 block text-sm font-medium text-[var(--ca-navy)]">
+            Phone used at checkout
+            <input
+              value={phone}
+              onChange={(e) => setPhone(e.target.value.replace(/\D/g, "").slice(0, 10))}
+              required
+              inputMode="numeric"
+              autoComplete="tel"
+              className="mt-2 min-h-12 w-full rounded-2xl border border-[var(--ca-navy)]/12 px-3 text-base tabular-nums"
+              placeholder="10-digit mobile"
+            />
+          </label>
+          {err && (
+            <p role="alert" className="mt-3 text-sm text-red-800">
+              {err}
+            </p>
+          )}
+          <button
+            type="submit"
+            disabled={busy}
+            className="mt-5 min-h-12 w-full rounded-full bg-[var(--ca-navy)] text-sm font-semibold text-white disabled:opacity-60"
+          >
+            {busy ? "Looking up your order…" : "Track order"}
+          </button>
+        </form>
+      )}
+      {busy && (
+        <div className="mt-4 space-y-3" aria-hidden>
+          <div className="h-40 animate-pulse rounded-[28px] bg-white" />
+          <div className="h-56 animate-pulse rounded-[28px] bg-white" />
+        </div>
+      )}
       {order && (
-        <div className="mt-8">
+        <div className="mt-2">
+          <button
+            type="button"
+            onClick={() => setOrder(null)}
+            className="mb-4 min-h-11 text-sm font-semibold text-[var(--ca-navy)]/70"
+          >
+            Track a different order
+          </button>
           <OrderStatus order={order} />
         </div>
       )}

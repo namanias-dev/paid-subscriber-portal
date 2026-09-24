@@ -3,6 +3,7 @@ import { requirePermission } from "@/lib/adminGuard";
 import { storeDb } from "@/lib/store/db";
 import { staffPaymentLabel } from "@/lib/store/orders";
 import { fulfilmentAttention } from "@/lib/store/shipping/dispatch";
+import { issueCategoryLabel, issueStatusLabel, OPEN_ISSUE_STATUSES } from "@/lib/store/issues";
 
 export const dynamic = "force-dynamic";
 
@@ -58,6 +59,21 @@ export async function GET(req: Request) {
   const offset = Math.max(0, Number(url.searchParams.get("offset") || 0));
 
   const statuses = BUCKETS[bucket] || ALL_STATUSES;
+  const issueFilter = url.searchParams.get("issue") || "";
+  let openIssueOrderIds: string[] | null = null;
+  if (issueFilter === "open") {
+    const { data: openRows, error: openError } = await db
+      .from("store_order_issues")
+      .select("order_id")
+      .in("status", [...OPEN_ISSUE_STATUSES])
+      .limit(200);
+    if (!openError) {
+      openIssueOrderIds = [...new Set((openRows || []).map((row) => row.order_id).filter(Boolean))] as string[];
+      if (!openIssueOrderIds.length) {
+        return NextResponse.json({ ok: true, total: 0, limit, offset, orders: [] }, { headers: { "Cache-Control": "no-store" } });
+      }
+    }
+  }
 
   // AWB search: resolve matching order ids from shipments first.
   let awbOrderIds: string[] | null = null;
@@ -78,6 +94,7 @@ export async function GET(req: Request) {
       { count: "exact" },
     )
     .in("status", statuses);
+  if (openIssueOrderIds) query = query.in("id", openIssueOrderIds);
 
   if (q) {
     const like = `%${q.replace(/[%,]/g, "")}%`;
@@ -133,6 +150,23 @@ export async function GET(req: Request) {
     }
   >();
   const payByOrder = new Map<string, { status: string; provider: string | null }>();
+  const issueByOrder = new Map<
+    string,
+    {
+      id: string;
+      reference: string;
+      category: string;
+      category_label: string;
+      status: string;
+      status_label: string;
+      description: string;
+      created_at: string;
+      customer_note: string | null;
+      admin_note: string | null;
+      callback_requested: boolean;
+      open: boolean;
+    }
+  >();
   if (ids.length) {
     const { data: itemRows } = await db
       .from("store_order_items")
@@ -212,6 +246,33 @@ export async function GET(req: Request) {
     for (const p of payRows || []) {
       if (!payByOrder.has(p.order_id)) payByOrder.set(p.order_id, { status: p.status, provider: p.provider || null });
     }
+    const { data: issueRows, error: issueError } = await db
+      .from("store_order_issues")
+      .select("id,order_id,reference,category,status,description,created_at,customer_note,admin_note,callback_requested")
+      .in("order_id", ids)
+      .order("created_at", { ascending: false });
+    if (!issueError) {
+      for (const issue of issueRows || []) {
+        const current = issueByOrder.get(issue.order_id);
+        const open = (OPEN_ISSUE_STATUSES as readonly string[]).includes(issue.status);
+        if (current?.open && !open) continue;
+        if (current && !open) continue;
+        issueByOrder.set(issue.order_id, {
+          id: issue.id,
+          reference: issue.reference,
+          category: issue.category,
+          category_label: issueCategoryLabel(issue.category),
+          status: issue.status,
+          status_label: issueStatusLabel(issue.status),
+          description: issue.description,
+          created_at: issue.created_at,
+          customer_note: issue.customer_note,
+          admin_note: issue.admin_note,
+          callback_requested: !!issue.callback_requested,
+          open,
+        });
+      }
+    }
   }
 
   return NextResponse.json(
@@ -232,6 +293,7 @@ export async function GET(req: Request) {
           hasLabel: shipByOrder.get(o.id)?.has_label,
         }),
         payment_status: staffPaymentLabel(payByOrder.get(o.id)?.provider, payByOrder.get(o.id)?.status),
+        issue: issueByOrder.get(o.id) || null,
       })),
     },
     { headers: { "Cache-Control": "no-store" } },
