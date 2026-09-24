@@ -433,13 +433,17 @@ export async function requestProviderPickup(
       headers: { Accept: "application/json", "Content-Type": "application/json", Authorization: `Bearer ${token}` },
       body: JSON.stringify(
         input.retry
-          ? { shipment_id: [Number(shipmentId)], status: "retry", pickup_date: [input.date] }
+          ? { shipment_id: [shipmentId], pickup_date: [input.date] }
           : { shipment_id: [shipmentId] },
       ),
       signal: AbortSignal.timeout(20_000),
     });
-    const parsed = parseShiprocketPickup(await readJson(res));
-    if (!res.ok) throw new Error("Shiprocket pickup was not scheduled.");
+    const responseBody = await readJson(res);
+    const parsed = parseShiprocketPickup(responseBody);
+    if (!res.ok) {
+      const message = str(record(responseBody)?.message) || "Shiprocket pickup was not scheduled.";
+      throw new Error(message.slice(0, 180));
+    }
     return { reference: parsed.reference, date: parsed.date || input.date, time: parsed.time, status: parsed.status };
   }
   const token = delhiveryToken(env);
