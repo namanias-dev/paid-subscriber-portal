@@ -5,7 +5,8 @@
  */
 import { delhiveryBaseUrl, delhiveryPickupLocation, delhiveryToken, shiprocketBaseUrl, shiprocketPickupLocation } from "./config";
 import { delhiveryCreateBody, dispatchBlocked, type DelhiveryShipmentDraft } from "./dispatch";
-import { delhiveryPackingSlipPath } from "./delhiveryApi";
+import { delhiveryPackingSlipPath, parseDelhiveryPackage } from "./delhiveryApi";
+import { providerDestinationMismatch } from "../address";
 import { shiprocketAdhocDraft, shiprocketToken } from "./shiprocketApi";
 
 type FetchLike = typeof fetch;
@@ -206,6 +207,17 @@ async function createDelhivery(input: CreateProviderInput, env: NodeJS.ProcessEn
   if (!res.ok || !parsed.awb) {
     throw new Error((parsed.remark || `Delhivery shipment was not created (${res.status}).`).slice(0, 180));
   }
+  const stored = await readDelhiveryPackage(parsed.awb, env, fetchImpl);
+  const mismatch = stored.read
+    ? stored.pin !== input.pin.trim() ||
+      !stored.city ||
+      !stored.state ||
+      providerDestinationMismatch(
+        { city: input.city, state: input.state, pincode: input.pin },
+        { city: stored.city, state: stored.state, pincode: stored.pin || "" },
+      ) ||
+      !stored.phoneStored
+    : false;
   return {
     provider: "delhivery",
     providerShipmentId: parsed.awb,
@@ -214,8 +226,33 @@ async function createDelhivery(input: CreateProviderInput, env: NodeJS.ProcessEn
     courierName: input.shippingMode === "Surface" ? "Delhivery Surface" : "Delhivery Express",
     labelUrl: null,
     shipmentStatus: "created",
-    orderStatus: "READY_FOR_PICKUP",
+    orderStatus: stored.read && !mismatch ? "READY_FOR_PICKUP" : null,
+    storedPin: stored.pin,
+    storedCity: stored.city,
+    storedState: stored.state,
+    phoneStored: stored.read ? stored.phoneStored : undefined,
+    addressMismatch: mismatch,
+    addressUnverified: !stored.read,
   };
+}
+
+async function readDelhiveryPackage(awb: string, env: NodeJS.ProcessEnv, fetchImpl: FetchLike) {
+  const empty = { pin: null, city: null, state: null, phoneStored: false, read: false, status: null };
+  const token = delhiveryToken(env);
+  if (!token) return empty;
+  try {
+    const res = await fetchImpl(
+      `${delhiveryBaseUrl(env)}/api/v1/packages/json/?waybill=${encodeURIComponent(awb)}`,
+      {
+        headers: { Accept: "application/json", Authorization: `Token ${token}`, "User-Agent": "NamanIAS-NotesStore/1.0" },
+        signal: AbortSignal.timeout(12_000),
+      },
+    );
+    if (!res.ok) return empty;
+    return parseDelhiveryPackage(await readJson(res));
+  } catch {
+    return empty;
+  }
 }
 
 async function createShiprocket(input: CreateProviderInput, env: NodeJS.ProcessEnv, fetchImpl: FetchLike): Promise<CreatedShipment> {
@@ -319,7 +356,17 @@ function shiprocketErrorText(body: unknown): string | null {
 export async function findShiprocketOrder(
   orderNumber: string,
   opts: { fetchImpl?: FetchLike; env?: NodeJS.ProcessEnv } = {},
-): Promise<{ found: boolean; orderId: string | null; shipmentId: string | null; awb: string | null; status: string | null }> {
+): Promise<{
+  found: boolean;
+  orderId: string | null;
+  shipmentId: string | null;
+  awb: string | null;
+  status: string | null;
+  pin: string | null;
+  city: string | null;
+  state: string | null;
+  phoneStored: boolean;
+}> {
   const env = opts.env || process.env;
   const fetchImpl = opts.fetchImpl || fetch;
   const token = await shiprocketToken({ fetchImpl, env });
@@ -333,12 +380,20 @@ export async function findShiprocketOrder(
   const match = rows.map(record).find((row) => str(row?.channel_order_id) === orderNumber || str(row?.order_id) === orderNumber) || null;
   const shipments = Array.isArray(match?.shipments) ? match.shipments.map(record).filter(Boolean) : [];
   const shipment = shipments[0] || null;
+  const orderId = str(match?.id) || null;
+  const stored = orderId
+    ? await readShiprocketOrder(shiprocketBaseUrl(env), token, orderId, fetchImpl)
+    : { pin: null, city: null, state: null, phoneStored: false };
   return {
     found: Boolean(match),
-    orderId: str(match?.id) || null,
+    orderId,
     shipmentId: str(shipment?.id) || null,
     awb: str(shipment?.awb) || str(match?.awb_code) || null,
     status: str(match?.status) || null,
+    pin: stored.pin,
+    city: stored.city,
+    state: stored.state,
+    phoneStored: stored.phoneStored,
   };
 }
 

@@ -35,6 +35,9 @@ interface Product {
   physical_format: string | null;
   binding_type: string | null;
   weight_grams: number | null;
+  length_mm: number | null;
+  width_mm: number | null;
+  height_mm: number | null;
   mrp_paise: number;
   selling_price_paise: number;
   availability_mode: AvailabilityMode;
@@ -143,6 +146,9 @@ export default function ProductEditor({ id }: { id: string }) {
         physical_format: p.physical_format,
         binding_type: p.binding_type,
         weight_grams: p.weight_grams,
+        length_mm: p.length_mm,
+        width_mm: p.width_mm,
+        height_mm: p.height_mm,
         mrp_paise: p.mrp_paise,
         selling_price_paise: p.selling_price_paise,
         availability_mode: p.availability_mode,
@@ -259,6 +265,9 @@ export default function ProductEditor({ id }: { id: string }) {
             <Field label="Physical format"><input className={inp} value={p.physical_format || ""} placeholder="Printed booklet set" onChange={(e) => set("physical_format", e.target.value)} /></Field>
             <Field label="Binding"><input className={inp} value={p.binding_type || ""} onChange={(e) => set("binding_type", e.target.value)} /></Field>
             <Field label="Package weight (g)"><input type="number" min={0} className={inp} value={p.weight_grams ?? ""} onChange={(e) => set("weight_grams", e.target.value === "" ? null : Number(e.target.value))} /></Field>
+            <Field label="Length (cm)"><input type="number" min={0} step="0.1" className={inp} value={p.length_mm ? p.length_mm / 10 : ""} onChange={(e) => set("length_mm", e.target.value === "" ? null : Math.round(Number(e.target.value) * 10))} /></Field>
+            <Field label="Width (cm)"><input type="number" min={0} step="0.1" className={inp} value={p.width_mm ? p.width_mm / 10 : ""} onChange={(e) => set("width_mm", e.target.value === "" ? null : Math.round(Number(e.target.value) * 10))} /></Field>
+            <Field label="Height (cm)"><input type="number" min={0} step="0.1" className={inp} value={p.height_mm ? p.height_mm / 10 : ""} onChange={(e) => set("height_mm", e.target.value === "" ? null : Math.round(Number(e.target.value) * 10))} /></Field>
           </Grid>
         </Section>
 

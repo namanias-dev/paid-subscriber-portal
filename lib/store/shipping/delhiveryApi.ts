@@ -64,6 +64,28 @@ async function getJson(fetchImpl: FetchLike, url: string, token: string): Promis
   return { ok: res.ok, status: res.status, body };
 }
 
+/** Consignee fields from a package read. Hub names in Destination are ignored. */
+export function parseDelhiveryPackage(body: unknown): {
+  pin: string | null;
+  city: string | null;
+  state: string | null;
+  phoneStored: boolean;
+  read: boolean;
+  status: string | null;
+} {
+  const root = record(body);
+  const shipment = record(Array.isArray(root?.ShipmentData) ? record(root.ShipmentData[0])?.Shipment : null);
+  const consignee = record(shipment?.Consignee) || record(shipment?.consignee);
+  const pin = str(consignee?.PinCode) || str(consignee?.Pincode) || str(consignee?.pin) || null;
+  const city = str(consignee?.City) || str(consignee?.city) || null;
+  const state = str(consignee?.State) || str(consignee?.state) || null;
+  const phone = [consignee?.Telephone1, consignee?.Telephone2, consignee?.Phone, consignee?.Mobile]
+    .map((value) => str(value).replace(/\D/g, ""))
+    .some((digits) => digits.length >= 10 && digits.length <= 13);
+  const status = str(record(shipment?.Status)?.Status) || null;
+  return { pin, city, state, phoneStored: phone, read: Boolean(pin || city || state), status };
+}
+
 /** Tracking read for an AWB that already exists. This does not create a shipment. */
 export async function trackDelhiveryAwb(
   awb: string,
