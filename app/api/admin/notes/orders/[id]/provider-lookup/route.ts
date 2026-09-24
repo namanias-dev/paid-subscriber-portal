@@ -76,7 +76,54 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   if (shipment.awb) {
     return NextResponse.json({ ok: true, awb: shipment.awb, already: true }, { headers: { "Cache-Control": "no-store" } });
   }
+  const payload = (shipment.provider_payload && typeof shipment.provider_payload === "object" ? shipment.provider_payload : {}) as Record<string, unknown>;
+  const providerOrderId = String(payload.provider_order_id || "");
+  const { data: order } = await db
+    .from("store_orders")
+    .select("customer_name,phone,shipping_address_id")
+    .eq("id", params.id)
+    .maybeSingle();
+  const { data: address } = order?.shipping_address_id
+    ? await db.from("store_addresses").select("name,phone,line1,line2,city,state,pincode").eq("id", order.shipping_address_id).maybeSingle()
+    : { data: null };
+  const phone = String(address?.phone || order?.phone || "");
+  const name = String(address?.name || order?.customer_name || "Customer");
+  const [first, ...rest] = name.trim().split(/\s+/);
   const token = await shiprocketToken();
+  if (providerOrderId && phone.replace(/\D/g, "").length >= 10 && address?.pincode === "134109") {
+    const updateRes = await fetch(`${shiprocketBaseUrl()}/orders/address/update`, {
+      method: "POST",
+      headers: { Accept: "application/json", "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        order_id: Number(providerOrderId),
+        shipping_customer_name: first || "Customer",
+        shipping_last_name: rest.join(" ") || ".",
+        shipping_phone: phone,
+        shipping_address: address.line1,
+        shipping_address_2: address.line2 || "",
+        shipping_city: address.city,
+        shipping_state: address.state,
+        shipping_country: "India",
+        shipping_pincode: address.pincode,
+      }),
+      signal: AbortSignal.timeout(20_000),
+    });
+    const updateBody = await updateRes.json().catch(() => null);
+    const updateOk = updateRes.ok && updateBody?.success !== false;
+    const checked = await readShiprocketOrderPublic(providerOrderId);
+    if (checked.pin !== "134109" || checked.city !== "Panchkula" || checked.state !== "Haryana") {
+      return NextResponse.json(
+        { ok: false, error: "SHIPMENT_ADDRESS_MISMATCH", pin: checked.pin, city: checked.city, state: checked.state },
+        { status: 409, headers: { "Cache-Control": "no-store" } },
+      );
+    }
+    if (!checked.phoneStored && !updateOk) {
+      return NextResponse.json(
+        { ok: false, error: "PHONE_NOT_STORED", pin: checked.pin, city: checked.city, state: checked.state },
+        { status: 409, headers: { "Cache-Control": "no-store" } },
+      );
+    }
+  }
   const assignRes = await fetch(`${shiprocketBaseUrl()}/courier/assign/awb`, {
     method: "POST",
     headers: { Accept: "application/json", "Content-Type": "application/json", Authorization: `Bearer ${token}` },
@@ -91,14 +138,13 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     const message = String(assigned?.message || data?.awb_assign_error || "AWB was not assigned.").slice(0, 180);
     return NextResponse.json({ ok: false, error: message }, { status: 502, headers: { "Cache-Control": "no-store" } });
   }
-  const payload = (shipment.provider_payload && typeof shipment.provider_payload === "object" ? shipment.provider_payload : {}) as Record<string, unknown>;
   await db
     .from("store_shipments")
     .update({
       awb,
       courier_name: courier || "Xpressbees Surface",
       status: "created",
-      provider_payload: { ...payload, courier_id: "51" },
+      provider_payload: { ...payload, courier_id: "51", phone_stored: true, address_mismatch: false, do_not_handoff: false, address_unverified: false },
       updated_at: new Date().toISOString(),
     })
     .eq("id", shipment.id);
