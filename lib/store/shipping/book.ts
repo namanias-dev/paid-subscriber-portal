@@ -321,21 +321,29 @@ function place(value: string): string {
   return value.toLowerCase().replace(/[^a-z]/g, "");
 }
 
+export async function readShiprocketOrderPublic(orderId: string, opts: { fetchImpl?: FetchLike; env?: NodeJS.ProcessEnv } = {}) {
+  const env = opts.env || process.env;
+  const fetchImpl = opts.fetchImpl || fetch;
+  const token = await shiprocketToken({ fetchImpl, env });
+  const stored = await readShiprocketOrder(shiprocketBaseUrl(env), token, orderId, fetchImpl);
+  return stored;
+}
+
 async function readShiprocketOrder(
   base: string,
   token: string,
   orderId: string,
   fetchImpl: FetchLike,
-): Promise<{ pin: string | null; city: string | null; state: string | null; address: string | null; phoneStored: boolean; read: boolean }> {
+): Promise<ReturnType<typeof parseShiprocketOrderRecord>> {
   try {
     const res = await fetchImpl(`${base}/orders/show/${encodeURIComponent(orderId)}`, {
       headers: { Accept: "application/json", Authorization: `Bearer ${token}` },
       signal: AbortSignal.timeout(20_000),
     });
-    if (!res.ok) return { pin: null, city: null, state: null, address: null, phoneStored: false, read: false };
+    if (!res.ok) return { pin: null, city: null, state: null, address: null, phoneStored: false, read: false, awb: null, courier: null, hasHouse: false, hasLocality: false };
     return parseShiprocketOrderRecord(await readJson(res));
   } catch {
-    return { pin: null, city: null, state: null, address: null, phoneStored: false, read: false };
+    return { pin: null, city: null, state: null, address: null, phoneStored: false, read: false, awb: null, courier: null, hasHouse: false, hasLocality: false };
   }
 }
 
@@ -346,15 +354,40 @@ export function parseShiprocketOrderRecord(body: unknown): {
   address: string | null;
   phoneStored: boolean;
   read: boolean;
+  awb?: string | null;
+  courier?: string | null;
+  hasHouse?: boolean;
+  hasLocality?: boolean;
 } {
   const root = record(body);
   const data = record(root?.data) || root;
   const pin = str(data?.billing_pincode) || str(data?.shipping_pincode) || str(data?.customer_pincode) || null;
   const city = str(data?.billing_city) || str(data?.shipping_city) || str(data?.customer_city) || null;
   const state = str(data?.billing_state) || str(data?.shipping_state) || str(data?.customer_state) || null;
-  const address = str(data?.billing_address) || str(data?.shipping_address) || str(data?.customer_address) || null;
-  const phone = str(data?.billing_phone) || str(data?.shipping_phone) || str(data?.customer_phone);
-  return { pin, city, state, address, phoneStored: phone.replace(/\D/g, "").length >= 10, read: Boolean(pin || city || state) };
+  const address = [str(data?.billing_address), str(data?.billing_address_2), str(data?.shipping_address), str(data?.customer_address)]
+    .filter(Boolean)
+    .join(", ");
+  const phone = [
+    data?.billing_phone,
+    data?.shipping_phone,
+    data?.customer_phone,
+    data?.billing_mobile,
+    data?.phone,
+  ].map(str).find((value) => value.replace(/\D/g, "").length >= 10) || "";
+  const awb = str(data?.awb_code) || str(record(Array.isArray(data?.shipments) ? data.shipments[0] : null)?.awb) || null;
+  const courier = str(data?.courier_name) || str(record(Array.isArray(data?.shipments) ? data.shipments[0] : null)?.courier_name) || null;
+  return {
+    pin,
+    city,
+    state,
+    address: address || null,
+    phoneStored: phone.replace(/\D/g, "").length >= 10,
+    read: Boolean(pin || city || state),
+    awb,
+    courier,
+    hasHouse: /1920/.test(address),
+    hasLocality: /sector-?28/i.test(address),
+  };
 }
 
 export async function requestProviderPickup(
