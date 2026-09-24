@@ -3,6 +3,12 @@ import { projectCustomerStage, customerStageLabel, trackingSteps, type CustomerS
 import { formatPaise } from "./money";
 import { verifyRawTokenAgainstHash } from "./accessToken";
 
+/** Staff queue label. A local test fixture must not read as a live capture. */
+export function staffPaymentLabel(provider: string | null | undefined, status: string | null | undefined): string | null {
+  if (provider === "TEST_FIXTURE") return "TEST — simulated, no gateway charge";
+  return status || null;
+}
+
 export interface PublicOrder {
   order_no: string;
   stage: CustomerStage;

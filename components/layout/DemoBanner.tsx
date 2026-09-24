@@ -20,7 +20,7 @@ export default function DemoBanner() {
       className="flex items-center justify-center gap-3 px-4 py-2 text-center text-xs font-semibold sm:text-sm"
       style={{ background: "var(--primary-tint)", color: "var(--primary)", borderBottom: "1px solid var(--line)" }}
     >
-      <span>✨ Demo Mode — add your keys in Vercel to go live. Demo credentials are in the README / .env.example.</span>
+      <span>Demo mode — this browser is not connected to the live database.</span>
       <button
         aria-label="Dismiss"
         onClick={() => {

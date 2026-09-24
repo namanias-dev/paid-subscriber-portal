@@ -861,6 +861,7 @@ a {
 
 .ns-offer-timer {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.45rem;
 }
 
@@ -930,6 +931,7 @@ a {
   letter-spacing: 0.16em;
   text-transform: uppercase;
   color: #fce9a8;
+  overflow-wrap: anywhere;
 }
 
 .ns-pdp-topic {

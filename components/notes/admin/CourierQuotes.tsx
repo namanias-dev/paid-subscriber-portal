@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { formatPaise } from "@/lib/store/money";
 
 interface Quote {
@@ -33,15 +33,30 @@ interface RateResponse {
 
 export default function CourierQuotes({
   orderId,
+  packed,
   onUseCourier,
+  onSaved,
 }: {
   orderId: string;
+  packed?: {
+    weight_grams?: number | null;
+    length_cm?: number | null;
+    width_cm?: number | null;
+    height_cm?: number | null;
+  } | null;
   onUseCourier: (courier: string) => void;
+  onSaved?: () => void;
 }) {
-  const [weight, setWeight] = useState("800");
-  const [length, setLength] = useState("30");
-  const [width, setWidth] = useState("22");
-  const [height, setHeight] = useState("3");
+  const [weight, setWeight] = useState(packed?.weight_grams ? String(packed.weight_grams) : "800");
+  const [length, setLength] = useState(packed?.length_cm ? String(packed.length_cm) : "30");
+  const [width, setWidth] = useState(packed?.width_cm ? String(packed.width_cm) : "22");
+  const [height, setHeight] = useState(packed?.height_cm ? String(packed.height_cm) : "3");
+  useEffect(() => {
+    if (packed?.weight_grams) setWeight(String(packed.weight_grams));
+    if (packed?.length_cm) setLength(String(packed.length_cm));
+    if (packed?.width_cm) setWidth(String(packed.width_cm));
+    if (packed?.height_cm) setHeight(String(packed.height_cm));
+  }, [packed?.weight_grams, packed?.length_cm, packed?.width_cm, packed?.height_cm]);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<RateResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -91,7 +106,10 @@ export default function CourierQuotes({
       });
       const json = await res.json();
       if (!json.ok) setError(json.error || "Could not save the packed size.");
-      else setSaved(true);
+      else {
+        setSaved(true);
+        onSaved?.();
+      }
     } catch {
       setError("Could not save the packed size.");
     } finally {
@@ -222,6 +240,29 @@ export default function CourierQuotes({
                     onClick={() => {
                       setChosen(quote);
                       onUseCourier(quote.courier);
+                      void (async () => {
+                        setBusy(true);
+                        setError(null);
+                        try {
+                          const res = await fetch(`/api/admin/notes/orders/${orderId}/carrier`, {
+                            method: "POST",
+                            headers: { "content-type": "application/json" },
+                            body: JSON.stringify({
+                              provider: quote.provider,
+                              courier: quote.courier,
+                              service: quote.service,
+                              courier_id: quote.courierId || null,
+                            }),
+                          });
+                          const json = await res.json();
+                          if (!json.ok) setError(json.error || "Could not save the courier.");
+                          else onSaved?.();
+                        } catch {
+                          setError("Could not save the courier.");
+                        } finally {
+                          setBusy(false);
+                        }
+                      })();
                     }}
                     className="rounded border border-line px-2 py-0.5 text-xs font-medium text-ink"
                   >

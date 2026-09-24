@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { PageHeader } from "@/components/admin/ui";
 import CourierQuotes from "@/components/notes/admin/CourierQuotes";
 import { formatPaise } from "@/lib/store/money";
@@ -38,7 +38,7 @@ interface Row {
   placed_at: string;
   internal_notes: string | null;
   address: Address | null;
-  items: Array<{ name: string; qty: number; sku: string }>;
+  items: Array<{ name: string; qty: number; sku: string; unit_price_paise?: number; line_total_paise?: number }>;
   shipment: {
     courier: string | null;
     awb: string | null;
@@ -47,6 +47,10 @@ interface Row {
     status: string | null;
     has_label: boolean;
     pickup_scheduled_at: string | null;
+    weight_grams?: number | null;
+    length_cm?: number | null;
+    width_cm?: number | null;
+    height_cm?: number | null;
   } | null;
   attention?: string[];
 }
@@ -110,15 +114,18 @@ export default function NotesOrderQueue() {
   const [refundPaise, setRefundPaise] = useState<Record<string, string>>({});
   const [refundRef, setRefundRef] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
+  const hasRows = useRef(false);
 
   const load = useCallback(async () => {
-    setLoading(true);
+    if (!hasRows.current) setLoading(true);
     const params = new URLSearchParams();
     if (bucket) params.set("bucket", bucket);
     if (q.trim()) params.set("q", q.trim());
     const res = await fetch(`/api/admin/notes/orders?${params}`, { cache: "no-store" });
     const json = await res.json();
-    setOrders(json.orders || []);
+    const next = json.orders || [];
+    hasRows.current = next.length > 0;
+    setOrders(next);
     setLoading(false);
   }, [bucket, q]);
 
@@ -285,59 +292,93 @@ export default function NotesOrderQueue() {
                 {o.items.map((it, i) => (
                   <li key={i}>
                     <span className="font-mono text-xs text-muted">{it.sku}</span> — {it.name} × {it.qty}
+                    {typeof it.unit_price_paise === "number" ? ` · ${formatPaise(it.unit_price_paise)} each` : ""}
                   </li>
                 ))}
               </ul>
 
+              {o.shipment?.provider && o.shipment.provider !== "manual" && (
+                <p className="mt-2 text-sm text-ink2">
+                  <span className="font-semibold text-ink">Chosen courier: </span>
+                  {o.shipment.provider} · {o.shipment.courier || "service not named"}
+                  {o.shipment.awb ? "" : " · not booked"}
+                </p>
+              )}
               {o.shipment?.awb && (
                 <p className="mt-2 text-sm text-ink2">
                   <span className="font-semibold text-ink">AWB on file: </span>
                   {o.shipment.courier || "Courier"} · <span className="font-mono">{o.shipment.awb}</span>
                   {o.shipment.pickup_scheduled_at ? " · pickup requested" : ""}
+                  {o.shipment.status ? ` · ${o.shipment.status.replaceAll("_", " ")}` : ""}
                 </p>
               )}
               {(o.attention || []).length > 0 && (
                 <p className="mt-2 text-xs text-ink2">Needs attention: {(o.attention || []).join(", ").replaceAll("_", " ")}</p>
               )}
-              {o.shipment?.awb && (
+              {(o.shipment?.has_label ||
+                (o.shipment?.awb && ["PACKED", "READY_FOR_PICKUP", "PICKUP_SCHEDULED"].includes(o.status))) && (
                 <div className="mt-2 flex flex-wrap items-end gap-2">
-                  <a
-                    href={`/api/admin/notes/orders/${o.id}/label`}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex h-9 items-center rounded border border-line px-3 text-sm font-medium text-ink"
-                  >
-                    Print label
-                  </a>
-                  <label className="text-xs text-ink2">
-                    Pickup date
-                    <input
-                      type="date"
-                      value={pickupDate[o.id] || ""}
-                      onChange={(e) => setPickupDate((m) => ({ ...m, [o.id]: e.target.value }))}
-                      className="mt-1 block h-9 rounded border border-line px-2 text-sm text-ink"
-                    />
-                  </label>
-                  <button
-                    type="button"
-                    disabled={busyId === o.id || !pickupDate[o.id]}
-                    onClick={() =>
-                      act(
-                        o.id,
-                        () =>
-                          fetch(`/api/admin/notes/orders/${o.id}/pickup`, {
-                            method: "POST",
-                            headers: { "content-type": "application/json" },
-                            body: JSON.stringify({ date: pickupDate[o.id] }),
-                          }),
-                        "Pickup requested. The order stays packed until the courier scans it.",
-                      )
-                    }
-                    className="h-9 rounded border border-line px-3 text-sm font-medium text-ink disabled:opacity-50"
-                  >
-                    Schedule pickup
-                  </button>
+                  {o.shipment?.has_label && (
+                    <button
+                      type="button"
+                      className="inline-flex h-9 items-center rounded border border-line px-3 text-sm font-medium text-ink"
+                      onClick={() => {
+                        void (async () => {
+                          setBusyId(o.id);
+                          setMsg(null);
+                          try {
+                            const res = await fetch(`/api/admin/notes/orders/${o.id}/label`, { cache: "no-store" });
+                            const json = await res.json();
+                            if (json.fixture) setMsg("Test label on file. No courier document was purchased.");
+                            else if (json.ok && typeof json.url === "string" && /^https?:\/\//.test(json.url)) {
+                              window.open(json.url, "_blank", "noopener");
+                              setMsg("Opened the stored label. No new shipment was created.");
+                            } else setMsg(json.error || "No label is stored for this order.");
+                          } finally {
+                            setBusyId(null);
+                          }
+                        })();
+                      }}
+                    >
+                      Print label
+                    </button>
+                  )}
+                  {o.shipment?.awb && ["PACKED", "READY_FOR_PICKUP", "PICKUP_SCHEDULED"].includes(o.status) && (
+                    <>
+                      <label className="text-xs text-ink2">
+                        Pickup date
+                        <input
+                          type="date"
+                          value={pickupDate[o.id] || ""}
+                          onChange={(e) => setPickupDate((m) => ({ ...m, [o.id]: e.target.value }))}
+                          className="mt-1 block h-9 rounded border border-line px-2 text-sm text-ink"
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        disabled={busyId === o.id || !pickupDate[o.id]}
+                        onClick={() =>
+                          act(
+                            o.id,
+                            () =>
+                              fetch(`/api/admin/notes/orders/${o.id}/pickup`, {
+                                method: "POST",
+                                headers: { "content-type": "application/json" },
+                                body: JSON.stringify({ date: pickupDate[o.id] }),
+                              }),
+                            "Pickup requested. The order stays packed until the courier scans it.",
+                          )
+                        }
+                        className="h-9 rounded border border-line px-3 text-sm font-medium text-ink disabled:opacity-50"
+                      >
+                        Schedule pickup
+                      </button>
+                    </>
+                  )}
                 </div>
+              )}
+              {o.status === "REFUND_PENDING" && (
+                <p className="mt-2 text-sm text-ink">Refund pending manual payment-gateway processing.</p>
               )}
               {o.internal_notes && (
                 <pre className="mt-2 whitespace-pre-wrap rounded-lg bg-surface p-2 text-xs text-ink2">{o.internal_notes}</pre>
@@ -345,7 +386,9 @@ export default function NotesOrderQueue() {
 
               <CourierQuotes
                 orderId={o.id}
+                packed={o.shipment}
                 onUseCourier={(name) => setCourier((m) => ({ ...m, [o.id]: name }))}
+                onSaved={() => void load()}
               />
 
               <div className="mt-4 flex flex-wrap items-center gap-2">
@@ -517,7 +560,7 @@ export default function NotesOrderQueue() {
                                 method: "POST",
                                 headers: { "content-type": "application/json" },
                                 body: JSON.stringify({
-                                  amount_paise: Number(refundPaise[o.id] || o.total_paise),
+                                  amount_paise: refundPaise[o.id] === undefined || refundPaise[o.id] === "" ? o.total_paise : Number(refundPaise[o.id]),
                                   reason: note[o.id],
                                   confirm: "REQUEST_REFUND",
                                 }),
@@ -554,7 +597,7 @@ export default function NotesOrderQueue() {
                                   method: "POST",
                                   headers: { "content-type": "application/json" },
                                   body: JSON.stringify({
-                                    amount_paise: Number(refundPaise[o.id] || o.total_paise),
+                                    amount_paise: refundPaise[o.id] === undefined || refundPaise[o.id] === "" ? o.total_paise : Number(refundPaise[o.id]),
                                     reference: refundRef[o.id],
                                     confirm: "RECORD_MANUAL_REFUND",
                                   }),

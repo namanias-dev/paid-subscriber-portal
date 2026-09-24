@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requirePermission } from "@/lib/adminGuard";
 import { storeDb } from "@/lib/store/db";
+import { staffPaymentLabel } from "@/lib/store/orders";
 import { fulfilmentAttention } from "@/lib/store/shipping/dispatch";
 
 export const dynamic = "force-dynamic";
@@ -105,7 +106,7 @@ export async function GET(req: Request) {
     for (const a of addrs || []) addrMap.set(a.id, a);
   }
 
-  const itemsByOrder = new Map<string, Array<{ name: string; qty: number; sku: string }>>();
+  const itemsByOrder = new Map<string, Array<{ name: string; qty: number; sku: string; unit_price_paise: number; line_total_paise: number }>>();
   const shipByOrder = new Map<
     string,
     {
@@ -116,22 +117,32 @@ export async function GET(req: Request) {
       status: string | null;
       has_label: boolean;
       pickup_scheduled_at: string | null;
+      weight_grams: number | null;
+      length_cm: number | null;
+      width_cm: number | null;
+      height_cm: number | null;
     }
   >();
-  const payByOrder = new Map<string, string>();
+  const payByOrder = new Map<string, { status: string; provider: string | null }>();
   if (ids.length) {
     const { data: itemRows } = await db
       .from("store_order_items")
-      .select("order_id,name_snapshot,qty,sku_snapshot")
+      .select("order_id,name_snapshot,qty,sku_snapshot,unit_price_paise,line_total_paise")
       .in("order_id", ids);
     for (const it of itemRows || []) {
       const list = itemsByOrder.get(it.order_id) || [];
-      list.push({ name: it.name_snapshot, qty: it.qty, sku: it.sku_snapshot });
+      list.push({
+        name: it.name_snapshot,
+        qty: it.qty,
+        sku: it.sku_snapshot,
+        unit_price_paise: Number(it.unit_price_paise) || 0,
+        line_total_paise: Number(it.line_total_paise) || 0,
+      });
       itemsByOrder.set(it.order_id, list);
     }
     const { data: shipRows } = await db
       .from("store_shipments")
-      .select("order_id,courier_name,awb,tracking_url,provider,status,label_r2_key,provider_payload,pickup_scheduled_at,created_at")
+      .select("order_id,courier_name,awb,tracking_url,provider,status,label_r2_key,provider_payload,pickup_scheduled_at,weight_grams,length_mm,width_mm,height_mm,created_at")
       .in("order_id", ids)
       .order("created_at", { ascending: false });
     for (const s of shipRows || []) {
@@ -145,16 +156,20 @@ export async function GET(req: Request) {
           status: s.status,
           has_label: Boolean(s.label_r2_key || payload.label_url),
           pickup_scheduled_at: s.pickup_scheduled_at,
+          weight_grams: s.weight_grams ?? null,
+          length_cm: s.length_mm ? Number(s.length_mm) / 10 : null,
+          width_cm: s.width_mm ? Number(s.width_mm) / 10 : null,
+          height_cm: s.height_mm ? Number(s.height_mm) / 10 : null,
         });
       }
     }
     const { data: payRows } = await db
       .from("store_order_payments")
-      .select("order_id,status,created_at")
+      .select("order_id,status,provider,created_at")
       .in("order_id", ids)
       .order("created_at", { ascending: false });
     for (const p of payRows || []) {
-      if (!payByOrder.has(p.order_id)) payByOrder.set(p.order_id, p.status);
+      if (!payByOrder.has(p.order_id)) payByOrder.set(p.order_id, { status: p.status, provider: p.provider || null });
     }
   }
 
@@ -174,7 +189,7 @@ export async function GET(req: Request) {
           awb: shipByOrder.get(o.id)?.awb,
           hasLabel: shipByOrder.get(o.id)?.has_label,
         }),
-        payment_status: payByOrder.get(o.id) || null,
+        payment_status: staffPaymentLabel(payByOrder.get(o.id)?.provider, payByOrder.get(o.id)?.status),
       })),
     },
     { headers: { "Cache-Control": "no-store" } },

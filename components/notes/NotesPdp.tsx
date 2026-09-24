@@ -124,8 +124,8 @@ export default async function NotesPdp({
         <span>{p.category_name || p.subject || "UPSC Notes"}</span>
       </nav>
 
-      <div className="mt-6 grid gap-10 lg:grid-cols-[1.05fr_0.95fr] lg:items-start">
-        <div>
+      <div className="mt-6 grid min-w-0 gap-10 lg:grid-cols-[1.05fr_0.95fr] lg:items-start">
+        <div className="min-w-0">
           <ProductGallery name={title} subject={p.subject} photos={p.photos} coverUrl={hero} />
           {p.samples.length > 0 && (
             <div className="mt-10" id="notes-samples">
@@ -140,7 +140,7 @@ export default async function NotesPdp({
           )}
         </div>
 
-        <div>
+        <div className="min-w-0">
           <p className="ca-eyebrow text-[var(--ca-gold-dark)]">{p.subject || p.category_name || "UPSC Notes"}</p>
           <h1 className="mt-2 font-heading text-3xl font-bold leading-tight text-[var(--ca-navy)] sm:text-4xl">{title}</h1>
           {subtitle && <p className="mt-3 text-base leading-relaxed text-[var(--ca-navy)]/70">{subtitle}</p>}

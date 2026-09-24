@@ -79,10 +79,29 @@ export default function OrderStatus({ order }: { order: PublicOrder }) {
   }, [current.confirming, current.order_no, current.access_token]);
 
   const confirmed = !current.confirming && current.stage !== "failed";
+  const exception = ["delivery_issue", "returning", "return_open", "refund", "refunded"].includes(current.stage);
+  const nextStep =
+    current.stage === "delivered"
+      ? "Your notes have been delivered. If anything arrived damaged, wrong, or incomplete, contact support with this order number."
+      : current.stage === "delivery_issue"
+        ? "The courier could not complete this delivery. Naman IAS will follow up. You do not need to contact the courier yourself."
+        : current.stage === "returning"
+          ? "This parcel is on the way back to Naman IAS. We will contact you about the next step."
+          : current.stage === "return_open"
+            ? "We have your report and will review it. No return shipment has been booked yet."
+            : current.stage === "refund"
+              ? "Refund pending manual payment-gateway processing."
+              : current.stage === "refunded"
+                ? "The refund has been recorded. The payment gateway processes the money separately."
+                : current.stage === "shipped" || current.stage === "in_transit" || current.stage === "out_for_delivery"
+                  ? "The parcel is with the courier. Use the AWB above if it is available."
+                  : current.stage === "packed"
+                    ? "Your notes are packed in Chandigarh. They ship when the courier picks the parcel up."
+                    : "The Academy prepares and packs your notes in Chandigarh, then hands them to the courier. You can track this order with your phone number anytime.";
 
   return (
     <div className="mx-auto max-w-xl">
-      {confirmed && (
+      {confirmed && !exception && (
         <motion.p
           className="ca-eyebrow"
           initial={reduce ? false : { opacity: 0, y: 8 }}
@@ -147,17 +166,9 @@ export default function OrderStatus({ order }: { order: PublicOrder }) {
       )}
       <div className="mt-6 rounded-3xl bg-white p-4 text-sm text-[var(--ca-navy)]/70 ns-elev-1">
         <p className="font-semibold text-[var(--ca-navy)]">What happens next</p>
-        <p className="mt-1">
-          {current.stage === "delivered"
-            ? "Your notes have been delivered. If anything arrived damaged, wrong, or incomplete, contact support with this order number."
-            : current.stage === "shipped" || current.stage === "in_transit" || current.stage === "out_for_delivery"
-              ? "The parcel is with the courier. Use the AWB above if it is available."
-              : current.stage === "packed"
-                ? "Your notes are packed in Chandigarh. They ship when the courier picks the parcel up."
-                : "The Academy prepares and packs your notes in Chandigarh, then hands them to the courier. You can track this order with your phone number anytime."}
-        </p>
+        <p className="mt-1">{nextStep}</p>
       </div>
-      {current.stage === "delivered" && current.access_token && (
+      {(current.stage === "delivered" || current.stage === "delivery_issue") && current.access_token && (
         <form
           className="mt-4 rounded-3xl bg-white p-4 ns-elev-1"
           onSubmit={async (e) => {

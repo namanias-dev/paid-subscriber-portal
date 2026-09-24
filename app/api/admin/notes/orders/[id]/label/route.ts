@@ -26,6 +26,12 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
     label_url?: string;
   };
   const stored = payload.label_url || shipment?.label_r2_key || null;
+  if (typeof stored === "string" && stored.startsWith("fixture:")) {
+    return NextResponse.json(
+      { ok: true, fixture: true, url: null },
+      { headers: { "Cache-Control": "no-store" } },
+    );
+  }
   if (!shipment?.awb && !stored) {
     return NextResponse.json({ ok: false, error: "No label is stored for this order." }, { status: 404, headers: { "Cache-Control": "no-store" } });
   }
