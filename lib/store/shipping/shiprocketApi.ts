@@ -143,11 +143,11 @@ export function shiprocketAdhocDraft(input: {
 export async function trackShiprocketAwb(
   awb: string,
   opts: { fetchImpl?: FetchLike; env?: NodeJS.ProcessEnv } = {},
-): Promise<{ rawStatus: string | null; recognized: boolean; courier: string | null; error: string | null; eventTime: string | null; location: string | null; activity: string | null }> {
+): Promise<{ rawStatus: string | null; recognized: boolean; courier: string | null; error: string | null; eventTime: string | null; location: string | null; activity: string | null; activities: { activity: string; time: string; location: string }[] }> {
   const code = awb.trim();
-  if (!code) return { rawStatus: null, recognized: false, courier: null, error: null, eventTime: null, location: null, activity: null };
+  if (!code) return { rawStatus: null, recognized: false, courier: null, error: null, eventTime: null, location: null, activity: null, activities: [] };
   const env = opts.env || process.env;
-  if (!shiprocketCredentials(env)) return { rawStatus: null, recognized: false, courier: null, error: null, eventTime: null, location: null, activity: null };
+  if (!shiprocketCredentials(env)) return { rawStatus: null, recognized: false, courier: null, error: null, eventTime: null, location: null, activity: null, activities: [] };
   try {
     const token = await shiprocketToken(opts);
     const fetchImpl = opts.fetchImpl || fetch;
@@ -183,9 +183,17 @@ export async function trackShiprocketAwb(
       eventTime: latest?.time || str(first?.updated_time_stamp) || str(first?.pickup_date) || null,
       location: latest?.location || null,
       activity: latest?.activity || rawStatus || null,
+      activities: activities
+        .map((row) => ({
+          activity: str(row?.activity) || str(row?.["sr-status-label"]) || str(row?.status),
+          time: str(row?.date),
+          location: str(row?.location),
+        }))
+        .filter((row) => row.activity || row.time)
+        .slice(0, 8),
     };
   } catch {
-    return { rawStatus: null, recognized: false, courier: null, error: "Shiprocket tracking was not read.", eventTime: null, location: null, activity: null };
+    return { rawStatus: null, recognized: false, courier: null, error: "Shiprocket tracking was not read.", eventTime: null, location: null, activity: null, activities: [] };
   }
 }
 

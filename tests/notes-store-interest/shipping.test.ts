@@ -225,6 +225,8 @@ describe("courier tracking events", () => {
     assert.equal(normalizeCourierStatus("Manifested"), "manifested");
     assert.equal(normalizeCourierStatus("Ready To Ship"), "manifested");
     assert.equal(normalizeCourierStatus("Pickup Scheduled"), "manifested");
+    assert.equal(normalizeCourierStatus("Pickup Not Done"), "pending");
+    assert.equal(normalizeCourierStatus("Pickup Done"), "picked_up");
     assert.equal(normalizeCourierStatus("Out For Pickup"), "manifested");
     assert.equal(orderStatusFromShipment("manifested"), null);
     assert.equal(orderStatusFromShipment("picked_up"), "PICKED_UP");

@@ -95,6 +95,7 @@ export function normalizeCourierStatus(raw: string): ShipmentStatus | null {
     return "delivery_failed";
   }
   if (s.includes("delivered") && !s.includes("undelivered")) return "delivered";
+  if (s.includes("not picked") || s.includes("not done") || s.includes("pickup failed") || s.includes("pickup exception") || s.includes("pickup cancelled")) return "pending";
   if (s.includes("picked up") || s.includes("pickup done") || s.includes("pickup complete") || s === "picked" || s === "shipment picked") return "picked_up";
   if (s.includes("out for pickup") || s.includes("pickup scheduled") || s.includes("pickup generated") || s.includes("pickup queued") || s.includes("awaiting pickup")) return "manifested";
   if (s.includes("in transit") || s.includes("reached") || s.includes("received at")) return "in_transit";

@@ -71,6 +71,7 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
       event_time: "eventTime" in tracked ? tracked.eventTime : null,
       location: "location" in tracked ? tracked.location : null,
       activity: "activity" in tracked ? tracked.activity : null,
+      activities: "activities" in tracked ? tracked.activities : [],
     },
     { headers: { "Cache-Control": "no-store" } },
   );
