@@ -49,6 +49,8 @@ import { buildKeyboard, sendMessage } from "../botApi";
 import { tgLog } from "../log";
 import { formatIstClock, formatIstEvent, inrExact, istBriefStamp, istNowParts } from "./format";
 import { ensureReportingReference } from "./definitions";
+import { withNotesCash } from "./businessFormat";
+import { loadNotesStoreReport } from "../../store/loadStoreReport";
 import { resolveLoginAverages } from "./loginAvg";
 import {
   getReportSettings,
@@ -607,6 +609,40 @@ export async function buildDigest(opts?: {
     }
   }
 
+  const todayWindow = istDayWindow(todayYmd);
+  const ydayWindow = istDayWindow(ydayYmd);
+  const mtdWindow = istMonthToDateWindow(todayYmd);
+  let notes: Awaited<ReturnType<typeof loadNotesStoreReport>> = null;
+  try {
+    notes = await withTimeout(
+      loadNotesStoreReport({
+        today: todayWindow,
+        yesterday: ydayWindow,
+        mtd: mtdWindow,
+        nowMs: Date.now(),
+      }),
+      8_000,
+      null,
+    );
+  } catch {
+    notes = null;
+  }
+  if (notes) {
+    if (todayMoney) todayMoney = withNotesCash(todayMoney, notes.today.cashRupees);
+    if (ydayMoney) ydayMoney = withNotesCash(ydayMoney, notes.yesterday.cashRupees);
+    if (mtdMoney) mtdMoney = withNotesCash(mtdMoney, notes.mtd.cashRupees);
+    const academyMtd = (mtdMoney?.netCollection || 0) - notes.mtd.cashRupees;
+    const purpose = (mtdMoney?.categories || []).reduce((sum, row) => sum + row.amount, 0);
+    const online = mtdMoney?.sources.find((row) => row.key === "online")?.amount || 0;
+    const staff = mtdMoney?.sources.find((row) => row.key === "manual")?.amount || 0;
+    const other = mtdMoney?.sources.find((row) => row.key === "other")?.amount || 0;
+    const sourceSum = Math.round((online + staff + other) * 100) / 100;
+    const purposeSum = Math.round((purpose + notes.mtd.cashRupees) * 100) / 100;
+    if (mtdMoney && (sourceSum !== mtdMoney.grossCollection || purposeSum !== mtdMoney.grossCollection)) {
+      tgLog("notes_collection_mismatch", { sourceSum, purposeSum, gross: mtdMoney.grossCollection, academyMtd }, "error");
+    }
+  }
+
   if (people?.uniqueLoginUsers != null && loginsToday != null && people.uniqueLoginUsers !== loginsToday) {
     tgLog(
       "login_trend_mismatch",
@@ -630,6 +666,11 @@ export async function buildDigest(opts?: {
     webinar_registered: webinar?.registered ?? null,
     webinar_id: webinar?.webinarId ?? null,
     failed_today: failedToday,
+    notes_orders_today: notes?.today.orders ?? null,
+    notes_cash_today: notes?.today.cashRupees ?? null,
+    notes_orders_mtd: notes?.mtd.orders ?? null,
+    notes_cash_mtd: notes?.mtd.cashRupees ?? null,
+    notes_open: notes?.fulfillment.open ?? null,
   };
   for (const c of courseBlocks) {
     metrics[`course:${c.title}:total`] = c.total;
@@ -705,6 +746,7 @@ export async function buildDigest(opts?: {
       due7dAmount: collections.due7dAmount,
     },
     failed,
+    notes,
     morningNote,
   });
 

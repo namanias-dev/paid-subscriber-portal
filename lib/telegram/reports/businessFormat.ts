@@ -11,12 +11,13 @@ import type {
   PeopleMetrics,
 } from "../../analytics/businessMetrics";
 import type { SmsDeliveryMetrics } from "../../analytics/smsDelivery";
+import type { NotesStoreReport } from "../../store/reporting";
 import { escapeHtml, inrExact } from "./format";
 
 const RULE = "━━━━━━━━━━━━━━━━━━";
 
 const CATEGORY_LABEL: Record<CollectionCategory, string> = {
-  admission: "Full payments",
+  admission: "Course full payments",
   installment: "Installments",
   seat: "Seat bookings",
   webinar: "Webinars",
@@ -132,7 +133,24 @@ export interface BriefInput {
   courses: CourseBrief[];
   outstanding: OutstandingBrief | null;
   failed: FailedBrief[];
+  notes: NotesStoreReport | null;
   morningNote: string | null;
+}
+
+/** Fold Notes Store receipts into academy cash once: online source and the headline total. */
+export function withNotesCash(metrics: CollectionMetrics, rupees: number): CollectionMetrics {
+  if (!rupees) return metrics;
+  const add = Math.round(rupees * 100) / 100;
+  return {
+    ...metrics,
+    grossCollection: Math.round((metrics.grossCollection + add) * 100) / 100,
+    netCollection: Math.round((metrics.netCollection + add) * 100) / 100,
+    sources: metrics.sources.map((source) =>
+      source.key === "online"
+        ? { ...source, amount: Math.round((source.amount + add) * 100) / 100 }
+        : source,
+    ),
+  };
 }
 
 /** Display only. Does not change the stored course title. Never ends in an ellipsis. */
@@ -200,13 +218,14 @@ function sourceBullets(c: CollectionMetrics): string[] {
   return lines;
 }
 
-function purposeLines(c: CollectionMetrics): string[] {
+function purposeLines(c: CollectionMetrics, notesRupees = 0): string[] {
   const lines: string[] = [];
   for (const key of CATEGORY_DISPLAY) {
     const cat = c.categories.find((x) => x.key === key);
     if (!cat || (cat.payments === 0 && cat.amount === 0)) continue;
     lines.push(`• ${CATEGORY_LABEL[key]} — ${inrExact(cat.amount)}`);
   }
+  if (notesRupees) lines.push(`• Notes Store — ${inrExact(notesRupees)}`);
   return lines;
 }
 
@@ -235,7 +254,7 @@ function attentionItem(item: string): string {
   return head || "Payment";
 }
 
-function collectionBody(input: Pick<BriefInput, "today" | "yesterday" | "mtd">): string[] {
+function collectionBody(input: Pick<BriefInput, "today" | "yesterday" | "mtd" | "notes">): string[] {
   const body: string[] = [];
   if (!input.today && !input.yesterday && !input.mtd) return body;
 
@@ -262,7 +281,7 @@ function collectionBody(input: Pick<BriefInput, "today" | "yesterday" | "mtd">):
     if (input.mtd.refundAmount > 0) {
       body.push(`• Gross ${inrExact(input.mtd.grossCollection)} · Refunds ${inrExact(input.mtd.refundAmount)}`);
     }
-    const purposes = purposeLines(input.mtd);
+    const purposes = purposeLines(input.mtd, input.notes?.mtd.cashRupees || 0);
     if (purposes.length) {
       body.push("");
       body.push("<b>Receipt Mix</b>");
@@ -395,6 +414,90 @@ function failedBody(failed: FailedBrief[]): string[] {
   return body;
 }
 
+function subjectBits(lines: { label: string; units: number }[], limit = 3): string {
+  return lines
+    .slice(0, limit)
+    .map((row) => `${escapeHtml(row.label)} ${row.units}`)
+    .join(" · ");
+}
+
+function notesHighlight(notes: NotesStoreReport): string | null {
+  if (notes.allTimeOrders <= 0 && notes.fulfillment.open <= 0 && notes.attention.length <= 0) return null;
+  if (notes.today.orders <= 0 && notes.attention.length > 0) {
+    return `📦 Notes Store: No new orders · ${notes.attention.length} need attention`;
+  }
+  if (notes.today.orders <= 0) {
+    return `📦 Notes Store: No new orders · ${notes.fulfillment.open} open`;
+  }
+  const tail = notes.attention.length
+    ? ` · ${notes.attention.length} need attention`
+    : notes.fulfillment.open
+      ? ` · ${notes.fulfillment.open} open`
+      : "";
+  return `📦 Notes Store: ${notes.today.orders} orders · ${inrExact(notes.today.cashRupees)} today${tail}`;
+}
+
+function notesBody(notes: NotesStoreReport | null): string[] {
+  if (!notes || (notes.allTimeOrders <= 0 && notes.fulfillment.open <= 0)) return [];
+  const body: string[] = [];
+  body.push(`<b>Today</b> — <b>${notes.today.orders} orders</b> · ${inrExact(notes.today.cashRupees)}`);
+  body.push(`• ${notes.today.units} units · ${notes.today.customers} customers`);
+  const todaySubjects = subjectBits(notes.today.subjects);
+  if (todaySubjects) body.push(`• ${todaySubjects}`);
+  if (notes.today.shipped > 0) body.push(`• Shipped today — ${notes.today.shipped}`);
+  if (notes.today.delivered > 0) body.push(`• Delivered today — ${notes.today.delivered}`);
+  body.push(`• Yesterday — ${notes.yesterday.orders} orders · ${inrExact(notes.yesterday.cashRupees)}`);
+
+  body.push("");
+  body.push(`<b>Month to Date</b> — <b>${notes.mtd.orders} orders</b> · ${inrExact(notes.mtd.cashRupees)}`);
+  const aov = notes.mtd.orders > 0 ? notes.mtd.cashRupees / notes.mtd.orders : 0;
+  body.push(`• ${notes.mtd.units} units · ${notes.mtd.customers} customers${aov ? ` · AOV ${inrExact(aov)}` : ""}`);
+  const mtdSubjects = subjectBits(notes.mtd.subjects, 6);
+  if (mtdSubjects) body.push(`• ${mtdSubjects}`);
+
+  const fulfill: string[] = [];
+  if (notes.fulfillment.toPack) fulfill.push(`To pack — ${notes.fulfillment.toPack}`);
+  if (notes.fulfillment.packed) fulfill.push(`Packed — ${notes.fulfillment.packed}`);
+  if (notes.fulfillment.shipmentCreated) fulfill.push(`Shipment created — ${notes.fulfillment.shipmentCreated}`);
+  if (notes.fulfillment.inTransit) fulfill.push(`In transit — ${notes.fulfillment.inTransit}`);
+  if (notes.fulfillment.outForDelivery) fulfill.push(`Out for delivery — ${notes.fulfillment.outForDelivery}`);
+  if (notes.fulfillment.delivered) fulfill.push(`Delivered — ${notes.fulfillment.delivered}`);
+  if (notes.fulfillment.rto) fulfill.push(`RTO — ${notes.fulfillment.rto}`);
+  if (notes.fulfillment.returns) fulfill.push(`Returns — ${notes.fulfillment.returns}`);
+  if (notes.fulfillment.issues) fulfill.push(`Issues — <b>${notes.fulfillment.issues}</b>`);
+  if (fulfill.length) {
+    body.push("");
+    body.push("<b>Fulfillment</b>");
+    for (const row of fulfill) body.push(`• ${row}`);
+  }
+  if (notes.providers.length > 1) {
+    body.push(notes.providers.map((row) => `${escapeHtml(row.label)} ${row.count}`).join(" · "));
+  }
+
+  if (notes.openOrders.length) {
+    body.push("");
+    body.push("<b>Open Orders</b>");
+    for (const order of notes.openOrders) {
+      const age = order.age ? ` · ${order.age}` : "";
+      body.push(`• ${escapeHtml(order.orderNo)} — ${escapeHtml(order.subjects)} — <b>${escapeHtml(order.label)}</b>${age}`);
+    }
+    if (notes.openOrdersTruncated) body.push("• Older open orders are in the status totals above");
+  }
+
+  if (notes.attention.length) {
+    body.push("");
+    body.push(`<b>Needs Attention — ${notes.attention.length}</b>`);
+    for (const row of notes.attention.slice(0, 8)) {
+      body.push(`• ${escapeHtml(row.orderNo)} — ${escapeHtml(row.subjects)} — <b>${escapeHtml(row.reason)}</b>`);
+    }
+  }
+
+  body.push("");
+  body.push(`<b>All time</b>`);
+  body.push(`${notes.allTimeOrders} orders · ${notes.allTimeDelivered} delivered`);
+  return body;
+}
+
 function highlightsBody(input: BriefInput): string[] {
   const body: string[] = [];
   const unique = input.people?.uniqueLoginUsers ?? input.login?.todayFallback ?? null;
@@ -417,6 +520,15 @@ function highlightsBody(input: BriefInput): string[] {
   if (input.people?.newAccounts != null) activity.push(`${input.people.newAccounts} new`);
   if (unique != null) activity.push(`${unique} logged in`);
   if (input.people?.activeUsers != null) activity.push(`${input.people.activeUsers} active`);
+
+  if (input.notes) {
+    const line = notesHighlight(input.notes);
+    if (line) {
+      if (body.length) body.push("");
+      body.push(line);
+    }
+  }
+
   if (activity.length) {
     if (body.length) body.push("");
     body.push(`👥 Activity: ${activity.join(" · ")}`);
@@ -428,9 +540,13 @@ function highlightsBody(input: BriefInput): string[] {
   }
 
   const unresolved = input.failed.filter((p) => !p.recovered).length;
-  if (unresolved > 0) {
+  const notesIssues = input.notes?.attention.length || 0;
+  const alerts: string[] = [];
+  if (unresolved > 0) alerts.push(`${unresolved} unresolved payment${unresolved === 1 ? "" : "s"}`);
+  if (notesIssues > 0) alerts.push(`${notesIssues} Notes order issue${notesIssues === 1 ? "" : "s"}`);
+  if (alerts.length) {
     if (body.length) body.push("");
-    body.push(`⚠️ Payments: <b>${unresolved}</b> unresolved failure${unresolved === 1 ? "" : "s"}`);
+    body.push(`⚠️ Attention: <b>${alerts.join(" · ")}</b>`);
   }
   return body;
 }
@@ -452,6 +568,7 @@ export function executiveBriefLines(input: BriefInput): string[] {
   }
 
   pushMajor(lines, opened, "💰", "COLLECTIONS", collectionBody(input));
+  pushMajor(lines, opened, "📦", "NOTES STORE", notesBody(input.notes));
   pushMajor(lines, opened, "👥", "STUDENTS &amp; ACTIVITY", studentBody(input.people, input.login));
   pushMajor(lines, opened, "📱", "SMS DELIVERY", smsBody(input.sms));
   pushMajor(lines, opened, "📣", "WEBINAR", webinarBody(input.webinar));
@@ -476,7 +593,7 @@ export function packTelegramMessages(lines: string[], limit = 3900): string[] {
 
   const heads = lines
     .map((line, index) => ({ index, line }))
-    .filter(({ line }) => /^(💰|👥|🎓|📱|📣|📚|📋|⚠️) /u.test(line));
+    .filter(({ line }) => /^(💰|📦|👥|🎓|📱|📣|📚|📋|⚠️) /u.test(line));
 
   let fallback: [string, string] | null = null;
   for (const head of heads) {
@@ -568,6 +685,7 @@ export function dailyBusinessLines(input: {
     courses: [],
     outstanding: null,
     failed: [],
+    notes: null,
     morningNote: null,
   });
 }
