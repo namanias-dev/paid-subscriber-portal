@@ -174,9 +174,22 @@ export async function getChat(
     type: string;
     title?: string;
     username?: string;
+    description?: string;
+    pinned_message?: { message_id?: number };
   }>
 > {
   return callMethod("getChat", { chat_id: chatId });
+}
+
+/** Channel description. 255-character Telegram limit. Does not change identity or admins. */
+export async function setChatDescription(
+  chatId: string | number,
+  description: string,
+): Promise<TelegramApiResult<boolean>> {
+  return callMethod<boolean>("setChatDescription", {
+    chat_id: chatId,
+    description: description.slice(0, 255),
+  });
 }
 
 /** Pin a message in a channel/group. Never throws via callMethod. */

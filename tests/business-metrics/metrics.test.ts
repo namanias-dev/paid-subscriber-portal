@@ -366,23 +366,28 @@ describe("telegram formatting", () => {
       mtd: money,
     });
     const html = lines.join("\n");
+    assert.match(html, /⚡ <b>KEY HIGHLIGHTS<\/b>/);
+    assert.match(html, /💰 <b>₹12,000<\/b> collected today/);
+    assert.match(html, /Online ₹2,000 · Staff ₹10,000/);
     assert.match(html, /💰 <b>COLLECTIONS<\/b>/);
     assert.match(html, /👥 <b>STUDENTS &amp; ACTIVITY<\/b>/);
-    assert.match(html, /Unique logins  <b>1<\/b>/);
-    assert.match(html, /Today  <b>1<\/b>/);
+    assert.match(html, /Unique logins — <b>1<\/b>/);
     assert.equal(html.includes("LOGINS"), false);
     assert.equal(html.includes("All-time"), false);
-    assert.match(html, /<b>Today<\/b>  <b>₹12,000<\/b>/);
-    assert.match(html, /Online ₹2,000 · Staff recorded ₹10,000/);
+    assert.equal(html.includes("Collected is money received"), false);
+    assert.match(html, /<b>Today<\/b> — <b>₹12,000<\/b>/);
+    assert.match(html, /• Online — ₹2,000/);
+    assert.match(html, /• Staff recorded — ₹10,000/);
     assert.match(html, /2 payments · 2 students/);
-    assert.match(html, /Seat bookings  ₹2,000/);
-    assert.match(html, /Installments  ₹10,000/);
-    assert.match(html, /Yesterday<\/b>  ₹34,500/);
-    assert.match(html, /Month to date/);
+    assert.match(html, /Seat bookings — ₹2,000/);
+    assert.match(html, /Installments — ₹10,000/);
+    assert.match(html, /Yesterday<\/b> — ₹34,500/);
+    assert.match(html, /Month to Date/);
     assert.match(html, /🎓 <b>ADMISSIONS TODAY<\/b>/);
     assert.match(html, /GS &lt;Foundation&gt;/);
     assert.equal(html.includes("<Foundation>"), false);
     assert.equal(html.includes("Manually triggered"), false);
+    assert.match(html, /No unresolved payment failures/);
     const seat = money.categories.find((c) => c.key === "seat")!.amount;
     const inst = money.categories.find((c) => c.key === "installment")!.amount;
     const full = money.categories.find((c) => c.key === "admission")!.amount;
@@ -411,7 +416,8 @@ describe("telegram formatting", () => {
       admissions: { admissions: 0, students: 0, byCourse: [] },
     });
     assert.match(html, /MONTHLY BRIEF/);
-    assert.match(html, /<b>Collected<\/b>  <b>₹0<\/b>/);
+    assert.match(html, /<b>Collected<\/b> — <b>₹0<\/b>/);
     assert.match(html, /Gross ₹5,000 · Refunds ₹5,000/);
+    assert.equal(html.includes("Collected is money received"), false);
   });
 });

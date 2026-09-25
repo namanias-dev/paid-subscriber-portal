@@ -4,9 +4,12 @@ import type { Payment } from "../../lib/types";
 import {
   collectionsReconcile,
   computeCollections,
+  computePeople,
   istDayWindow,
   istMonthToDateWindow,
 } from "../../lib/analytics/businessMetrics";
+import { webinarRegistrationReport } from "../../lib/webinarReg";
+import { REPORTING_CHANNEL_DESCRIPTION, reportingDefinitionsHtml } from "../../lib/telegram/reports/definitionCopy";
 import {
   genuineLoginKey,
   legacyTrendLoginKey,
@@ -302,8 +305,7 @@ describe("executive brief delivery", () => {
         todayFallback: 58,
         yesterday: 48,
         avg30: 40,
-        historicalAvg: 36,
-        firstTrackedYmd: "2026-06-28",
+        avg90: 36,
       },
       today: null,
       yesterday: null,
@@ -322,16 +324,18 @@ describe("executive brief delivery", () => {
       outstanding: { overdueCount: 2, overdueAmount: 150000, due7dAmount: 20000 },
       failed: [],
       morningNote: null,
-      manualValidation: true,
     });
     const html = lines.join("\n");
-    assert.match(html, /Unique logins  <b>51<\/b>/);
-    assert.match(html, /Today  <b>51<\/b>/);
+    assert.match(html, /⚡ <b>KEY HIGHLIGHTS<\/b>/);
+    assert.match(html, /👥 Activity: 7 new · 51 logged in · 102 active/);
+    assert.match(html, /Unique logins — <b>51<\/b>/);
+    assert.equal(/Login Trend[\s\S]*Today/.test(html), false);
     assert.equal(html.includes(">58<"), false);
-    assert.match(html, /Since 28 Jun 2026  36/);
+    assert.match(html, /Yesterday 48 · 30-day avg 40 · 90-day avg 36/);
     assert.match(html, /Fee &lt;Reminder&gt;/);
-    assert.match(html, /Manually triggered live-data validation/);
-    assert.match(html, /Still owed/);
+    assert.equal(html.includes("Manually triggered"), false);
+    assert.equal(html.includes("Collected is money received"), false);
+    assert.equal(html.includes("Students who signed in"), false);
     assert.equal(packTelegramMessages(lines).length, 1);
 
     const long = [...lines];
@@ -345,11 +349,169 @@ describe("executive brief delivery", () => {
     assert.match(packed[0], /STUDENTS/);
   });
 
-  test("course titles are shortened for display only", () => {
+  test("course titles use display aliases and never an ellipsis", () => {
     const original = "Naman IAS Optional Geography Foundation Programme for UPSC Mains";
     const shown = shortCourseTitle(original);
     assert.equal(original.startsWith("Naman IAS"), true);
-    assert.equal(shown.startsWith("Naman IAS"), false);
-    assert.ok(shown.length <= 42);
+    assert.equal(shown.includes("Naman IAS"), false);
+    assert.equal(shown.includes("…"), false);
+    assert.equal(
+      shortCourseTitle("Full GS Foundation SAFALTA BATCH For UPSC CSE 2027/28 | September 2026"),
+      "GS Foundation — SAFALTA Sep 2026",
+    );
+    assert.equal(
+      shortCourseTitle("Mains Answer Writing Program for UPSC CSE"),
+      "Mains Answer Writing Program",
+    );
+    assert.equal(
+      shortCourseTitle("UPSC Modern History Complete Course by Naman Sir"),
+      "Modern History",
+    );
+    assert.equal(shortCourseTitle("Public Administration Optional 2026"), "Public Administration Optional 2026");
+    assert.equal(shortCourseTitle("Saarthi (Old)"), "Saarthi (Old)");
+  });
+
+  test("highlights count unresolved failures and keep later-paid in the detail", () => {
+    const lines = executiveBriefLines({
+      dateLabel: "25 September 2026",
+      timeLabel: "10:05 PM",
+      people: null,
+      login: null,
+      today: null,
+      yesterday: null,
+      mtd: null,
+      todayAdmissions: { admissions: 0, students: 0, byCourse: [] },
+      sms: null,
+      webinar: {
+        title: "UPSC Full Masterclass by Naman Sir",
+        dateLabel: "26 Sept · 4:00 PM",
+        registered: 41,
+        newToday: 9,
+        pendingCheckout: 14,
+        attendedLastPct: null,
+        sources: [
+          { label: "Instagram", count: 18 },
+          { label: "Direct", count: 9 },
+        ],
+      },
+      courses: [],
+      outstanding: null,
+      failed: [
+        { name: "Ruthi", amount: 50, item: "Webinar registration — Masterclass", when: "5:27 PM", reason: null, recovered: false },
+        { name: "Jyoti", amount: 50, item: "Webinar registration — Masterclass", when: "4:17 PM", reason: null, recovered: true },
+      ],
+      morningNote: null,
+    });
+    const html = lines.join("\n");
+    assert.match(html, /NAMAN IAS — EXECUTIVE BRIEF/);
+    assert.equal(html.includes("Live figures through"), false);
+    assert.match(html, /⚠️ Payments: <b>1<\/b> unresolved failure/);
+    assert.match(html, /2 failed attempts<\/b> · 1 unresolved/);
+    assert.match(html, /<i>Still failed<\/i>/);
+    assert.match(html, /<i>Later paid<\/i>/);
+    assert.match(html, /Webinar: \+9 today · <b>41<\/b> paid total · 14 pending/);
+    assert.match(html, /Instagram 18 · Direct 9/);
+    assert.match(html, /No new admissions today/);
+    assert.equal(html.includes("981"), false);
+  });
+});
+
+describe("activity and webinar report definitions", () => {
+  test("five sign-ins are one unique login, and portal use without a sign-in is active only", () => {
+    const five = computePeople({
+      newAccountKeys: [],
+      loginEventKeys: ["p:9000000501", "p:9000000501", "p:9000000501", "p:9000000501", "p:9000000501"],
+      activityKeys: [],
+    });
+    assert.equal(five.uniqueLoginUsers, 1);
+    assert.equal(five.loginEvents, 5);
+    const continued = computePeople({
+      newAccountKeys: [],
+      loginEventKeys: [],
+      activityKeys: ["p:9000000502"],
+    });
+    assert.equal(continued.uniqueLoginUsers, 0);
+    assert.equal(continued.activeUsers, 1);
+    assert.equal(continued.returningActiveUsers, 1);
+  });
+
+  test("a staff copy of an online receipt is not collected twice", () => {
+    const m = computeCollections(
+      [
+        pay({ id: "gw", phone: "9000000601", amount: 2000, payment_kind: "seat", gateway: "ICICI_EAZYPAY" }),
+        pay({
+          id: "staff-copy",
+          phone: "9000000601",
+          amount: 2000,
+          payment_kind: "seat",
+          gateway: "offline",
+          payment_source: "admin_offline",
+          duplicate_of_payment_id: "gw",
+        }),
+      ],
+      DAY,
+      new Set(),
+    );
+    assert.equal(m.netCollection, 2000);
+    assert.equal(m.sources.find((s) => s.key === "online")?.amount, 2000);
+    assert.equal(m.sources.find((s) => s.key === "manual")?.amount, 0);
+    assert.equal(collectionsReconcile(m), true);
+  });
+
+  test("webinar new-today is the first paid seat, with the stored source", () => {
+    const slug = "masterclass";
+    const rows = [
+      pay({
+        id: "old",
+        phone: "9811111111",
+        amount: 50,
+        item_type: "webinar",
+        item_slug: slug,
+        attribution_source: "instagram",
+        created_at: "2026-09-22T04:00:00.000Z",
+      }),
+      pay({
+        id: "old-again",
+        phone: "9811111111",
+        amount: 50,
+        item_type: "webinar",
+        item_slug: slug,
+        attribution_source: "direct",
+        created_at: AT,
+      }),
+      pay({
+        id: "new",
+        phone: "9822222222",
+        amount: 50,
+        item_type: "webinar",
+        item_slug: slug,
+        attribution_source: "fb",
+        created_at: AT,
+      }),
+      pay({
+        id: "blank",
+        phone: "9833333333",
+        amount: 50,
+        item_type: "webinar",
+        item_slug: slug,
+        attribution_source: "",
+        created_at: AT,
+      }),
+    ];
+    const report = webinarRegistrationReport(rows, slug, "2026-09-23");
+    assert.equal(report.paidTotal, 3);
+    assert.equal(report.paidToday, 2);
+    assert.equal(report.hasAttribution, true);
+    assert.equal(report.sources.find((s) => s.label === "Instagram")?.count, 1);
+    assert.equal(report.sources.find((s) => s.label === "Facebook")?.count, 1);
+    assert.equal(report.sources.find((s) => s.label === "Unknown")?.count, 1);
+    assert.equal(report.sources.some((s) => s.label === "Meta Ads"), false);
+  });
+
+  test("definitions stay within the channel description limit", () => {
+    assert.ok(REPORTING_CHANNEL_DESCRIPTION.length <= 255);
+    assert.match(reportingDefinitionsHtml(), /actual money received/i);
+    assert.match(reportingDefinitionsHtml(), /90 complete IST days/);
+    assert.equal(reportingDefinitionsHtml().includes("Meta Ads"), false);
   });
 });
