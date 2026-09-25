@@ -84,4 +84,20 @@ export function applyProductContentFields(patch: Record<string, unknown>, body: 
   if (body.ideal_for !== undefined) patch.ideal_for_json = cleanStringArray(body.ideal_for);
   if (body.topics !== undefined) patch.topics_json = cleanStringArray(body.topics);
   if (body.category_id !== undefined) patch.category_id = body.category_id || null;
+
+  if (body.hsn_code !== undefined) {
+    const hsn = String(body.hsn_code || "").replace(/\s/g, "");
+    if (hsn && !/^\d{4,8}$/.test(hsn)) throw new Error("HSN must be 4 to 8 digits.");
+    patch.hsn_code = hsn || null;
+  }
+  if (body.tax_treatment !== undefined) {
+    const treatment = String(body.tax_treatment);
+    if (treatment !== "exempt" && treatment !== "nil" && treatment !== "taxable") throw new Error("Invalid tax treatment.");
+    patch.tax_treatment = treatment;
+  }
+  if (body.tax_rate_bps !== undefined) {
+    const bps = Math.round(Number(body.tax_rate_bps));
+    if (!Number.isFinite(bps) || bps < 0 || bps > 4000) throw new Error("GST rate is out of range.");
+    patch.tax_rate_bps = bps;
+  }
 }

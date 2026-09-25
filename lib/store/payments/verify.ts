@@ -205,8 +205,8 @@ async function applyOrderTerminal(
     }
     if (data?.length) {
       await consumeStoreOfferHold(orderId);
-      const { ensureStoreInvoice } = await import("../invoice/issue");
-      void ensureStoreInvoice(orderId).catch(() => {});
+      const { scheduleStoreInvoice } = await import("../invoice/issue");
+      scheduleStoreInvoice(orderId);
     }
     await holdReservationsUntilShip(orderId);
     return orderNo;

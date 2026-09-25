@@ -1,8 +1,13 @@
 /** Indian financial year and invoice serials. Production and test use separate sequences. */
 
 export function financialYearLabel(date: Date): string {
-  const year = date.getFullYear();
-  const month = date.getMonth() + 1;
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Kolkata",
+    year: "numeric",
+    month: "numeric",
+  }).formatToParts(date);
+  const year = Number(parts.find((part) => part.type === "year")?.value);
+  const month = Number(parts.find((part) => part.type === "month")?.value);
   const start = month >= 4 ? year : year - 1;
   const a = String(start).slice(-2);
   const b = String(start + 1).slice(-2);

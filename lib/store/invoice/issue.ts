@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { waitUntil } from "@vercel/functions";
 import { storeDb } from "../db";
 import { putObject, signGetUrl } from "@/lib/r2";
 import { financialYearLabel, formatInvoiceNumber, invoiceObjectKey } from "./number";
@@ -14,16 +15,83 @@ export interface InvoicePublic {
   attention: string | null;
 }
 
+export const INVOICE_URL_TTL_SECONDS = 600;
+const GENERATING_LEASE_MS = 120_000;
+
+export type InvoiceWork = "return" | "wait" | "allocate" | "render";
+
+/** Same number and snapshot are kept. A fresh PDF is rendered only for an unfinished row. */
+export function invoiceWorkPlan(
+  existing: { status: string; updatedAt: string | null; hasKey: boolean } | null,
+  now = Date.now(),
+): InvoiceWork {
+  if (!existing) return "allocate";
+  if (existing.status === "READY" && existing.hasKey) return "return";
+  if (existing.status === "READY") return "render";
+  if (existing.status === "GENERATING") {
+    const updated = existing.updatedAt ? Date.parse(existing.updatedAt) : 0;
+    if (Number.isFinite(updated) && now - updated < GENERATING_LEASE_MS) return "wait";
+    return "render";
+  }
+  if (existing.status === "PENDING" || existing.status === "FAILED") return "render";
+  return "return";
+}
+
+export function paymentAllowsInvoice(input: {
+  paid: boolean;
+  paymentStatus: string | null;
+  paymentAmountPaise: number;
+  orderTotalPaise: number;
+}): "ok" | "unpaid" | "mismatch" {
+  if (!input.paid || input.paymentStatus !== "CAPTURED") return "unpaid";
+  if (Number(input.paymentAmountPaise) !== Number(input.orderTotalPaise)) return "mismatch";
+  return "ok";
+}
+
+/** Continue PDF work after the payment response has already been sent. */
+export function scheduleStoreInvoice(orderId: string): void {
+  const work = ensureStoreInvoice(orderId).catch(() => {
+    console.info("[store/invoice] schedule_failed");
+  });
+  try {
+    waitUntil(work);
+  } catch {
+    void work;
+  }
+}
+
+/** Finish invoices that already exist. Does not create a row for an older paid order. */
+export async function resumeIncompleteInvoices(limit = 8): Promise<number> {
+  const db = storeDb();
+  if (!db) return 0;
+  const stale = new Date(Date.now() - GENERATING_LEASE_MS).toISOString();
+  const { data } = await db
+    .from("store_invoices")
+    .select("order_id,status,updated_at")
+    .in("status", ["PENDING", "FAILED", "GENERATING"])
+    .order("updated_at", { ascending: true })
+    .limit(limit);
+  let resumed = 0;
+  for (const row of data || []) {
+    if (row.status === "GENERATING" && row.updated_at && row.updated_at > stale) continue;
+    resumed += 1;
+    await ensureStoreInvoice(row.order_id).catch(() => {});
+  }
+  return resumed;
+}
+
 /** Issue one invoice for a captured order. Repeat calls keep the same number. */
 export async function ensureStoreInvoice(orderId: string, opts?: { namespace?: "production" | "test" }): Promise<{ ok: boolean; status: string; invoiceNumber: string | null }> {
   const db = storeDb();
   if (!db) return { ok: false, status: "FAILED", invoiceNumber: null };
-  const { data: existing } = await db.from("store_invoices").select("id,invoice_number,status,r2_object_key").eq("order_id", orderId).maybeSingle();
-  if (existing?.status === "READY" && existing.r2_object_key) {
-    return { ok: true, status: "READY", invoiceNumber: existing.invoice_number };
-  }
-  if (existing && existing.status !== "FAILED" && existing.status !== "PENDING") {
-    return { ok: true, status: existing.status, invoiceNumber: existing.invoice_number };
+  const { data: existing } = await db.from("store_invoices").select("id,invoice_number,status,r2_object_key,updated_at").eq("order_id", orderId).maybeSingle();
+  const plan = invoiceWorkPlan(
+    existing
+      ? { status: existing.status, updatedAt: existing.updated_at, hasKey: Boolean(existing.r2_object_key) }
+      : null,
+  );
+  if (plan === "return" || plan === "wait") {
+    return { ok: plan !== "wait" || existing?.status === "READY", status: existing?.status || "PENDING", invoiceNumber: existing?.invoice_number || null };
   }
 
   const { data: order } = await db
@@ -31,7 +99,7 @@ export async function ensureStoreInvoice(orderId: string, opts?: { namespace?: "
     .select("id,order_no,status,total_paise,subtotal_paise,discount_paise,shipping_paise,paid_at,customer_name,phone,shipping_address_id")
     .eq("id", orderId)
     .maybeSingle();
-  if (!order || !order.paid_at) return { ok: false, status: "NOT_REQUIRED", invoiceNumber: null };
+  if (!order?.paid_at) return { ok: false, status: "NOT_REQUIRED", invoiceNumber: null };
 
   const { data: payment } = await db
     .from("store_order_payments")
@@ -41,8 +109,15 @@ export async function ensureStoreInvoice(orderId: string, opts?: { namespace?: "
     .order("captured_at", { ascending: false })
     .limit(1)
     .maybeSingle();
-  if (!payment) return { ok: false, status: "NOT_REQUIRED", invoiceNumber: null };
-  if (Number(payment.amount_paise) !== Number(order.total_paise)) {
+  const allowed = paymentAllowsInvoice({
+    paid: true,
+    paymentStatus: payment?.status || null,
+    paymentAmountPaise: payment?.amount_paise || 0,
+    orderTotalPaise: order.total_paise,
+  });
+  if (!payment || allowed === "unpaid") return { ok: false, status: "NOT_REQUIRED", invoiceNumber: null };
+  if (allowed === "mismatch") {
+    console.info(`[store/invoice] amount_mismatch order=${order.order_no}`);
     return { ok: false, status: "FAILED", invoiceNumber: existing?.invoice_number || null };
   }
 
@@ -190,6 +265,6 @@ export async function invoiceDownloadUrl(orderId: string): Promise<{ url: string
   if (!db) return null;
   const { data } = await db.from("store_invoices").select("invoice_number,status,r2_object_key").eq("order_id", orderId).maybeSingle();
   if (!data || data.status !== "READY" || !data.r2_object_key) return null;
-  const url = await signGetUrl(data.r2_object_key, 600);
+  const url = await signGetUrl(data.r2_object_key, INVOICE_URL_TTL_SECONDS);
   return { url, invoiceNumber: data.invoice_number };
 }

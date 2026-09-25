@@ -13,6 +13,7 @@
 9. `supabase/migrations/2026-09-20-notes-store-subject-interest.sql` — **additive**: `store_subject_interest` (product_id, voter_hash, source, created_at). Demand signal only; no money/inventory/order changes.
 10. `supabase/migrations/2026-09-20-notes-store-preference-submissions.sql` — **additive**: `store_interest_submissions` + `store_interest_submission_subjects`. One preference SET per voter hash (update-in-place). Not marketing consent.
 11. `supabase/migrations/2026-09-21-notes-store-offers.sql` — **additive**: `store_offers` + `store_offer_holds`, hold/consume/release RPCs, `store_orders.offer_id`, merchandised singles → ₹2,999, `notes_store_bundles` flag (off), seed Launch Offer (20% / first 100 / 7-day window, all admin-editable).
+12. `supabase/migrations/2026-09-25-notes-store-invoices.sql` — **additive**: `store_invoice_settings`, `store_invoice_counters`, `store_invoices`, `next_store_invoice_seq`. One invoice row per order. Historical orders are not backfilled.
 
 ## Tables (`store_*`) — 23
 
@@ -39,6 +40,9 @@
 | `store_interest_submission_subjects` | Selected `store_categories` for a submission |
 | `store_offers` | Admin-controlled limited-time campaigns |
 | `store_offer_holds` | Checkout-time offer capacity reservation |
+| `store_invoice_settings` | Legal supplier and document mode. Empty GSTIN is left empty. |
+| `store_invoice_counters` | Financial-year sequences. Production and test namespaces are separate. |
+| `store_invoices` | Immutable issued snapshot, PDF key, and credit-note status |
 
 **No FKs** from these tables into Academy `payments` / `students` / `buyers` / `leads` / enrollments.
 

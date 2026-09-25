@@ -72,6 +72,7 @@ export interface AdminOrder {
     height_cm?: number | null;
     package_source?: string | null;
   } | null;
+  invoice_status?: string | null;
   issue?: {
     id: string;
     reference: string;
@@ -153,7 +154,21 @@ export default function OrderDetail({
   const [issueCustomer, setIssueCustomer] = useState("");
   const [confirmAdvance, setConfirmAdvance] = useState(false);
   const [events, setEvents] = useState<Array<{ id: string; event: string; created_at: string; actor_name?: string | null }>>([]);
-  const [invoice, setInvoice] = useState<{ invoice_number?: string; status?: string; document_type?: string; grand_total_minor?: number } | null>(null);
+  const [invoice, setInvoice] = useState<{
+    invoice_number?: string;
+    status?: string;
+    document_type?: string;
+    issued_at?: string | null;
+    grand_total_minor?: number;
+    taxable_minor?: number;
+    cgst_minor?: number;
+    sgst_minor?: number;
+    igst_minor?: number;
+    gateway_reference?: string | null;
+    attention?: string | null;
+    credit_note_status?: string | null;
+  } | null>(null);
+  const [invoiceBusy, setInvoiceBusy] = useState(false);
   const [scans, setScans] = useState<Array<{ activity?: string; time?: string; location?: string }>>([]);
   const [toast, setToast] = useState<string | null>(null);
 
@@ -343,13 +358,53 @@ export default function OrderDetail({
             <h2 className="font-heading text-lg font-bold text-[var(--ca-navy)]">Invoice</h2>
             {invoice?.invoice_number ? (
               <div className="mt-2 text-sm text-[var(--ca-navy)]">
-                <p>{invoice.document_type?.replaceAll("_", " ")} · {invoice.invoice_number} · {invoice.status}</p>
-                {invoice.status === "READY" && (
-                  <a className="mt-2 inline-flex min-h-11 items-center font-semibold" href={`/api/admin/notes/orders/${order.id}/invoice?download=1`}>Download PDF</a>
-                )}
+                <p>{invoice.document_type?.replaceAll("_", " ") || "Invoice"}</p>
+                <p className="mt-1 font-mono text-xs">{invoice.invoice_number}</p>
+                <dl className="mt-3 grid grid-cols-2 gap-3">
+                  <Field label="Status" value={invoice.status} />
+                  <Field label="Issued" value={invoice.issued_at ? formatAdminWhen(invoice.issued_at) : null} />
+                  <Field label="Taxable" value={typeof invoice.taxable_minor === "number" ? formatPaise(invoice.taxable_minor) : null} />
+                  <Field label="CGST" value={typeof invoice.cgst_minor === "number" ? formatPaise(invoice.cgst_minor) : null} />
+                  <Field label="SGST" value={typeof invoice.sgst_minor === "number" ? formatPaise(invoice.sgst_minor) : null} />
+                  <Field label="IGST" value={typeof invoice.igst_minor === "number" ? formatPaise(invoice.igst_minor) : null} />
+                  <Field label="Total" value={typeof invoice.grand_total_minor === "number" ? formatPaise(invoice.grand_total_minor) : null} />
+                  <Field label="Eazypay reference" value={invoice.gateway_reference} />
+                </dl>
+                {invoice.credit_note_status && <p className="mt-2 text-xs text-[var(--ca-navy)]/60">Credit note {invoice.credit_note_status.replaceAll("_", " ").toLowerCase()}</p>}
+                {invoice.attention && <p className="mt-2 text-xs text-amber-900">{invoice.attention}</p>}
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button type="button" onClick={() => copy(invoice.invoice_number || "")} className="min-h-11 rounded-full border px-3 text-xs font-semibold">Copy invoice number</button>
+                  {invoice.status === "READY" && (
+                    <a className="inline-flex min-h-11 items-center rounded-full bg-[var(--ca-navy)] px-3 text-xs font-semibold text-white" href={`/api/admin/notes/orders/${order.id}/invoice?download=1`} target="_blank" rel="noreferrer">View PDF</a>
+                  )}
+                  {invoice.status === "FAILED" && (
+                    <button
+                      type="button"
+                      disabled={invoiceBusy}
+                      onClick={() => {
+                        setInvoiceBusy(true);
+                        void fetch(`/api/admin/notes/orders/${order.id}/invoice`, {
+                          method: "POST",
+                          headers: { "content-type": "application/json" },
+                          body: JSON.stringify({ retry: true }),
+                        })
+                          .then((res) => res.json())
+                          .then((json) => {
+                            setToast(json.ok ? "Invoice PDF regenerated" : json.error || "Retry failed");
+                            return fetch(`/api/admin/notes/orders/${order.id}/invoice`, { cache: "no-store" }).then((r) => r.json());
+                          })
+                          .then((json) => setInvoice(json?.invoice || null))
+                          .finally(() => setInvoiceBusy(false));
+                      }}
+                      className="min-h-11 rounded-full border px-3 text-xs font-semibold"
+                    >
+                      {invoiceBusy ? "Regenerating…" : "Regenerate PDF"}
+                    </button>
+                  )}
+                </div>
               </div>
             ) : (
-              <p className="mt-2 text-sm text-[var(--ca-navy)]/60">No invoice on this order.</p>
+              <p className="mt-2 text-sm text-[var(--ca-navy)]/60">{order.invoice_status ? "Generating" : "Not applicable"}</p>
             )}
           </section>
 

@@ -161,6 +161,7 @@ export async function GET(req: Request) {
     }
   >();
   const payByOrder = new Map<string, { status: string; provider: string | null }>();
+  const invoiceByOrder = new Map<string, string>();
   const issueByOrder = new Map<
     string,
     {
@@ -264,6 +265,8 @@ export async function GET(req: Request) {
     for (const p of payRows || []) {
       if (!payByOrder.has(p.order_id)) payByOrder.set(p.order_id, { status: p.status, provider: p.provider || null });
     }
+    const { data: invoiceRows } = await db.from("store_invoices").select("order_id,status").in("order_id", ids);
+    for (const row of invoiceRows || []) invoiceByOrder.set(row.order_id, row.status);
     const { data: issueRows, error: issueError } = await db
       .from("store_order_issues")
       .select("id,order_id,reference,category,status,description,created_at,customer_note,admin_note,callback_requested")
@@ -318,6 +321,7 @@ export async function GET(req: Request) {
       action_required: reasons.length > 0,
       action_reasons: reasons,
       payment_status: staffPaymentLabel(payByOrder.get(o.id)?.provider, payByOrder.get(o.id)?.status),
+      invoice_status: invoiceByOrder.get(o.id) || null,
       issue,
     };
   });

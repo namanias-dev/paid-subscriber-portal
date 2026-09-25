@@ -248,6 +248,7 @@ export default function NotesOrderQueue() {
                     <span className="block font-heading text-base font-bold text-[var(--ca-navy)]">{orderIndexLabel(order.order_no)}</span>
                     <span className="block font-mono text-[11px] text-[var(--ca-navy)]/50">{order.order_no}</span>
                     <span className="block text-sm text-[var(--ca-navy)]">{order.customer_name}</span>
+                    <span className="mt-1 block text-[11px] text-[var(--ca-navy)]/45">{order.invoice_status === "READY" ? "Invoice ready" : order.invoice_status === "FAILED" ? "Invoice needs attention" : order.invoice_status ? "Invoice generating" : "Invoice not applicable"}</span>
                   </button>
                   <span className="text-sm text-[var(--ca-navy)]/75">{order.items[0] ? `${order.items[0].name} × ${order.items[0].qty}` : "—"}</span>
                   <span className="text-sm font-semibold tabular-nums">{formatPaise(order.total_paise)}</span>
@@ -269,6 +270,7 @@ export default function NotesOrderQueue() {
                         <span className="block font-heading text-lg font-bold">{orderIndexLabel(order.order_no)}</span>
                         <span className="block font-mono text-[11px] text-[var(--ca-navy)]/50">{order.order_no}</span>
                         <span className="mt-1 block text-sm">{order.customer_name}</span>
+                        <span className="mt-1 block text-[11px] text-[var(--ca-navy)]/45">{order.invoice_status === "READY" ? "Invoice ready" : order.invoice_status === "FAILED" ? "Invoice needs attention" : order.invoice_status ? "Invoice generating" : "Invoice not applicable"}</span>
                       </span>
                       <span className="text-sm font-semibold tabular-nums">{formatPaise(order.total_paise)}</span>
                     </span>

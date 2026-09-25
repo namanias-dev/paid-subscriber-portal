@@ -56,6 +56,8 @@ export default function OrderStatus({ order }: { order: PublicOrder }) {
   const [reportText, setReportText] = useState("");
   const [reportState, setReportState] = useState<string | null>(null);
   const completedFired = useRef(false);
+  const sawConfirming = useRef(order.confirming);
+  if (current.confirming) sawConfirming.current = true;
   const reduce = useReducedMotion();
 
   useEffect(() => {
@@ -115,6 +117,44 @@ export default function OrderStatus({ order }: { order: PublicOrder }) {
       if (timer) clearTimeout(timer);
     };
   }, [current.confirming, current.order_no, current.access_token]);
+
+  useEffect(() => {
+    const fresh = sawConfirming.current && !current.confirming && !current.invoice_status;
+    const pending = current.invoice_status === "PENDING" || current.invoice_status === "GENERATING";
+    if (!fresh && !pending) return;
+    const token = current.access_token;
+    if (!token) return;
+    let cancelled = false;
+    const started = Date.now();
+    let gapIdx = 0;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const run = async () => {
+      try {
+        const res = await fetch(`/api/notes/order/${encodeURIComponent(current.order_no)}/verify`, {
+          method: "POST",
+          cache: "no-store",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ t: token }),
+        });
+        const json = await res.json();
+        if (!cancelled && json.ok && json.order) {
+          setCurrent(json.order);
+          if (json.order.invoice_status === "READY" || json.order.invoice_status === "FAILED") return;
+        }
+      } catch {
+        /* next tick retries */
+      }
+      if (cancelled || Date.now() - started >= MAX_MS) return;
+      const gap = GAPS_MS[Math.min(gapIdx, GAPS_MS.length - 1)];
+      gapIdx += 1;
+      timer = setTimeout(() => void run(), gap);
+    };
+    timer = setTimeout(() => void run(), GAPS_MS[0]);
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [current.confirming, current.invoice_status, current.order_no, current.access_token]);
 
   const narrative = trackingNarrative({
     stage: current.stage,
@@ -264,20 +304,34 @@ export default function OrderStatus({ order }: { order: PublicOrder }) {
         <p className="mt-2 text-[15px] leading-relaxed text-[var(--ca-navy)]/75">{narrative.next}</p>
       </section>
 
-      {current.invoice_number && (
+      {(current.invoice_number || current.invoice_status || (sawConfirming.current && !current.confirming)) && (
         <section className="mt-4 rounded-[28px] border border-[var(--ca-navy)]/8 bg-white p-5 ns-elev-1">
           <p className="text-xs font-semibold uppercase tracking-wide text-[var(--ca-gold-dark)]">{current.invoice_document?.replaceAll("_", " ") || "Invoice"}</p>
-          <h2 className="mt-1 font-heading text-lg font-bold text-[var(--ca-navy)]">{current.invoice_number}</h2>
+          <h2 className="mt-1 font-heading text-lg font-bold text-[var(--ca-navy)]">{current.invoice_number || "Preparing your invoice"}</h2>
           <p className="mt-1 text-sm text-[var(--ca-navy)]/70">
-            {current.invoice_status === "READY" ? "Invoice ready" : "Preparing your invoice…"}
+            {current.invoice_status === "READY"
+              ? "Invoice ready"
+              : current.invoice_status === "FAILED"
+                ? "Your payment is confirmed. The invoice file will be ready when you refresh."
+                : "Preparing your invoice…"}
           </p>
           {current.invoice_status === "READY" && current.access_token && (
-            <a
-              className="mt-3 inline-flex min-h-11 items-center rounded-full bg-[var(--ca-navy)] px-4 text-sm font-semibold text-white"
-              href={`/api/notes/order/${encodeURIComponent(current.order_no)}/invoice?t=${encodeURIComponent(current.access_token)}`}
-            >
-              Download invoice
-            </a>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <a
+                className="inline-flex min-h-11 items-center rounded-full bg-[var(--ca-navy)] px-4 text-sm font-semibold text-white"
+                href={`/api/notes/order/${encodeURIComponent(current.order_no)}/invoice?t=${encodeURIComponent(current.access_token)}`}
+                target="_blank"
+                rel="noreferrer"
+              >
+                View invoice
+              </a>
+              <a
+                className="inline-flex min-h-11 items-center rounded-full border border-[var(--ca-navy)]/15 px-4 text-sm font-semibold text-[var(--ca-navy)]"
+                href={`/api/notes/order/${encodeURIComponent(current.order_no)}/invoice?t=${encodeURIComponent(current.access_token)}`}
+              >
+                Download PDF
+              </a>
+            </div>
           )}
         </section>
       )}

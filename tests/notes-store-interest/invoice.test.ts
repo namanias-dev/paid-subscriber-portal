@@ -1,12 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { renderInvoicePdf } from "../../lib/store/invoice/pdf";
+import { INVOICE_URL_TTL_SECONDS, invoiceWorkPlan, paymentAllowsInvoice } from "../../lib/store/invoice/issue";
 import { financialYearLabel, formatInvoiceNumber } from "../../lib/store/invoice/number";
 import { amountInWords, chooseDocumentType, computeTaxDocument, splitTax, taxOnAmount } from "../../lib/store/invoice/tax";
 
 test("invoice numbers reset with the Indian financial year and never reuse a width", () => {
   assert.equal(financialYearLabel(new Date("2026-09-25T00:00:00+05:30")), "26-27");
   assert.equal(financialYearLabel(new Date("2026-03-31T00:00:00+05:30")), "25-26");
+  assert.equal(financialYearLabel(new Date("2026-03-31T18:29:59Z")), "25-26");
+  assert.equal(financialYearLabel(new Date("2026-03-31T18:30:00Z")), "26-27");
   assert.equal(formatInvoiceNumber("NIA", "26-27", 1), "NIA/26-27/00001");
   assert.equal(formatInvoiceNumber("TEST", "26-27", 12), "TEST/26-27/00012");
   assert.notEqual(formatInvoiceNumber("NIA", "26-27", 1), formatInvoiceNumber("TEST", "26-27", 1));
@@ -80,6 +83,34 @@ test("a bill of supply renders a PDF", async () => {
   }));
   assert.equal(pdf.subarray(0, 5).toString(), "%PDF-");
   assert.ok(pdf.length > 1000);
+});
+
+test("exclusive tax, rounding, and a refused amount do not invent a document", () => {
+  assert.equal(taxOnAmount(10000, "taxable", 1800, false), 1800);
+  const exclusive = computeTaxDocument({
+    lines: [{ name: "Notes", sku: "N", hsn: "4901", qty: 1, lineTotalPaise: 10000, discountPaise: 500, taxTreatment: "taxable", taxRateBps: 1800 }],
+    shippingPaise: 0,
+    pricesIncludeTax: false,
+    supplierStateCode: "04",
+    placeOfSupplyCode: "04",
+    chargedTotalPaise: 11800,
+  });
+  assert.equal(exclusive.cgstPaise + exclusive.sgstPaise, 1800);
+  assert.equal(exclusive.igstPaise, 0);
+  assert.equal(exclusive.roundingPaise, 0);
+  assert.equal(exclusive.grandTotalPaise, 11800);
+  assert.equal(paymentAllowsInvoice({ paid: true, paymentStatus: "FAILED", paymentAmountPaise: 100, orderTotalPaise: 100 }), "unpaid");
+  assert.equal(paymentAllowsInvoice({ paid: true, paymentStatus: "CAPTURED", paymentAmountPaise: 99, orderTotalPaise: 100 }), "mismatch");
+  assert.equal(paymentAllowsInvoice({ paid: false, paymentStatus: "CAPTURED", paymentAmountPaise: 100, orderTotalPaise: 100 }), "unpaid");
+});
+
+test("a ready invoice is not reissued and a failed PDF can be rendered again", () => {
+  assert.equal(invoiceWorkPlan({ status: "READY", updatedAt: new Date().toISOString(), hasKey: true }), "return");
+  assert.equal(invoiceWorkPlan({ status: "FAILED", updatedAt: new Date().toISOString(), hasKey: false }), "render");
+  assert.equal(invoiceWorkPlan(null), "allocate");
+  assert.equal(invoiceWorkPlan({ status: "GENERATING", updatedAt: new Date().toISOString(), hasKey: false }), "wait");
+  assert.equal(invoiceWorkPlan({ status: "GENERATING", updatedAt: new Date(Date.now() - 180_000).toISOString(), hasKey: false }), "render");
+  assert.ok(INVOICE_URL_TTL_SECONDS >= 300 && INVOICE_URL_TTL_SECONDS <= 600);
 });
 
 test("a second capture does not allocate another number", () => {

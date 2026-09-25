@@ -38,6 +38,9 @@ interface Product {
   length_mm: number | null;
   width_mm: number | null;
   height_mm: number | null;
+  hsn_code: string | null;
+  tax_treatment: string | null;
+  tax_rate_bps: number | null;
   mrp_paise: number;
   selling_price_paise: number;
   availability_mode: AvailabilityMode;
@@ -149,6 +152,9 @@ export default function ProductEditor({ id }: { id: string }) {
         length_mm: p.length_mm,
         width_mm: p.width_mm,
         height_mm: p.height_mm,
+        hsn_code: p.hsn_code,
+        tax_treatment: p.tax_treatment || "exempt",
+        tax_rate_bps: p.tax_rate_bps || 0,
         mrp_paise: p.mrp_paise,
         selling_price_paise: p.selling_price_paise,
         availability_mode: p.availability_mode,
@@ -281,6 +287,23 @@ export default function ProductEditor({ id }: { id: string }) {
             <Field label="Length (cm)"><input type="number" min={0.5} step="0.1" className={inp} value={p.length_mm ? p.length_mm / 10 : ""} onChange={(e) => set("length_mm", e.target.value === "" ? null : Math.round(Number(e.target.value) * 10))} /></Field>
             <Field label="Width (cm)"><input type="number" min={0.5} step="0.1" className={inp} value={p.width_mm ? p.width_mm / 10 : ""} onChange={(e) => set("width_mm", e.target.value === "" ? null : Math.round(Number(e.target.value) * 10))} /></Field>
             <Field label="Height (cm)"><input type="number" min={0.5} step="0.1" className={inp} value={p.height_mm ? p.height_mm / 10 : ""} onChange={(e) => set("height_mm", e.target.value === "" ? null : Math.round(Number(e.target.value) * 10))} /></Field>
+          </Grid>
+        </Section>
+
+        <Section title="Tax">
+          <p className="mb-2 text-sm text-[var(--ca-navy)]/70">Leave HSN and the rate blank until your CA confirms them. Existing orders keep the snapshot taken at checkout.</p>
+          <Grid>
+            <Field label="HSN"><input className={inp} value={p.hsn_code || ""} inputMode="numeric" onChange={(e) => set("hsn_code", e.target.value.replace(/[^\d]/g, "").slice(0, 8) || null)} /></Field>
+            <Field label="Tax treatment">
+              <select className={inp} value={p.tax_treatment || "exempt"} onChange={(e) => set("tax_treatment", e.target.value)}>
+                <option value="exempt">Exempt</option>
+                <option value="nil">Nil rated</option>
+                <option value="taxable">Taxable</option>
+              </select>
+            </Field>
+            <Field label="GST rate (%)">
+              <input type="number" min={0} max={40} step="0.01" className={inp} value={p.tax_rate_bps ? p.tax_rate_bps / 100 : ""} placeholder="Only when taxable" onChange={(e) => set("tax_rate_bps", e.target.value === "" ? 0 : Math.round(Number(e.target.value) * 100))} />
+            </Field>
           </Grid>
         </Section>
 

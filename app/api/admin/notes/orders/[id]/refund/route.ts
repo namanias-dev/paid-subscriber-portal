@@ -62,6 +62,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
         updated_at: now,
       })
       .eq("id", order.id);
+    await db.from("store_invoices").update({ credit_note_status: "PENDING_REVIEW", updated_at: now }).eq("order_id", order.id);
     await db.from("store_order_events").insert({
       order_id: order.id,
       event: "refund_recorded",
