@@ -4,7 +4,8 @@ import { PDFDocument } from "pdf-lib";
 import { renderInvoicePdf } from "../../lib/store/invoice/pdf";
 import { INVOICE_URL_TTL_SECONDS, invoiceWorkPlan, paymentAllowsInvoice } from "../../lib/store/invoice/issue";
 import { financialYearLabel, formatInvoiceNumber } from "../../lib/store/invoice/number";
-import { amountInWords, chooseDocumentType, computeTaxDocument, splitTax, taxOnAmount } from "../../lib/store/invoice/tax";
+import { GST_STATE_NAME, validateGstin } from "../../lib/store/invoice/gstin";
+import { amountInWords, chooseDocumentType, computeTaxDocument, localTaxKind, splitTax, taxClassificationConfirmed, taxOnAmount } from "../../lib/store/invoice/tax";
 
 test("invoice numbers reset with the Indian financial year and never reuse a width", () => {
   assert.equal(financialYearLabel(new Date("2026-09-25T00:00:00+05:30")), "26-27");
@@ -134,7 +135,8 @@ test("exclusive tax, rounding, and a refused amount do not invent a document", (
     placeOfSupplyCode: "04",
     chargedTotalPaise: 11800,
   });
-  assert.equal(exclusive.cgstPaise + exclusive.sgstPaise, 1800);
+  assert.equal(exclusive.cgstPaise + exclusive.utgstPaise, 1800);
+  assert.equal(exclusive.sgstPaise, 0);
   assert.equal(exclusive.igstPaise, 0);
   assert.equal(exclusive.roundingPaise, 0);
   assert.equal(exclusive.grandTotalPaise, 11800);
@@ -150,6 +152,37 @@ test("a ready invoice is not reissued and a failed PDF can be rendered again", (
   assert.equal(invoiceWorkPlan({ status: "GENERATING", updatedAt: new Date().toISOString(), hasKey: false }), "wait");
   assert.equal(invoiceWorkPlan({ status: "GENERATING", updatedAt: new Date(Date.now() - 180_000).toISOString(), hasKey: false }), "render");
   assert.ok(INVOICE_URL_TTL_SECONDS >= 300 && INVOICE_URL_TTL_SECONDS <= 600);
+});
+
+test("Chandigarh local tax is UTGST and the verified GSTIN matches state 04", () => {
+  const ut = splitTax(1800, false, "04");
+  assert.equal(ut.cgst, 900);
+  assert.equal(ut.utgst, 900);
+  assert.equal(ut.sgst, 0);
+  assert.equal(localTaxKind("04", false), "UTGST");
+  assert.equal(localTaxKind("06", false), "SGST");
+  const haryana = computeTaxDocument({
+    lines: [{ name: "Notes", sku: "N", hsn: "4901", qty: 1, lineTotalPaise: 11800, discountPaise: 0, taxTreatment: "taxable", taxRateBps: 1800 }],
+    shippingPaise: 0,
+    pricesIncludeTax: true,
+    supplierStateCode: "06",
+    placeOfSupplyCode: "06",
+    chargedTotalPaise: 11800,
+  });
+  assert.equal(haryana.sgstPaise, haryana.cgstPaise);
+  assert.equal(haryana.utgstPaise, 0);
+  const gstin = validateGstin("04CDVPS5346D2Z6");
+  assert.equal(gstin.ok, true);
+  if (gstin.ok) {
+    assert.equal(gstin.stateCode, "04");
+    assert.equal(gstin.pan, "CDVPS5346D");
+  }
+  assert.equal(validateGstin("04CDVPS5346D2Z5").ok, false);
+  assert.equal(GST_STATE_NAME["04"], "Chandigarh");
+  assert.equal(chooseDocumentType({ gstin: "04CDVPS5346D2Z6", anyTaxable: false }).type, "BILL_OF_SUPPLY");
+  assert.equal(chooseDocumentType({ gstin: "04CDVPS5346D2Z6", anyTaxable: true }).type, "TAX_INVOICE");
+  assert.equal(taxClassificationConfirmed([{ hsn: null }]), false);
+  assert.equal(taxClassificationConfirmed([{ hsn: "4901" }]), true);
 });
 
 test("a second capture does not allocate another number", () => {

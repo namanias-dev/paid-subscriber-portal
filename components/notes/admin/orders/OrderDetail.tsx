@@ -163,8 +163,11 @@ export default function OrderDetail({
     taxable_minor?: number;
     cgst_minor?: number;
     sgst_minor?: number;
+    utgst_minor?: number;
     igst_minor?: number;
     gateway_reference?: string | null;
+    seller_snapshot?: { gstin?: string | null } | null;
+    line_items_snapshot?: Array<{ hsn?: string | null; rateBps?: number; name?: string }> | null;
     attention?: string | null;
     credit_note_status?: string | null;
   } | null>(null);
@@ -364,8 +367,11 @@ export default function OrderDetail({
                   <Field label="Status" value={invoice.status} />
                   <Field label="Issued" value={invoice.issued_at ? formatAdminWhen(invoice.issued_at) : null} />
                   <Field label="Taxable" value={typeof invoice.taxable_minor === "number" ? formatPaise(invoice.taxable_minor) : null} />
+                  <Field label="GSTIN" value={invoice.seller_snapshot?.gstin || null} />
+                  <Field label="HSN" value={(invoice.line_items_snapshot || []).map((line) => line.hsn).filter(Boolean).join(", ") || null} />
                   <Field label="CGST" value={typeof invoice.cgst_minor === "number" ? formatPaise(invoice.cgst_minor) : null} />
                   <Field label="SGST" value={typeof invoice.sgst_minor === "number" ? formatPaise(invoice.sgst_minor) : null} />
+                  <Field label="UTGST" value={typeof invoice.utgst_minor === "number" ? formatPaise(invoice.utgst_minor) : null} />
                   <Field label="IGST" value={typeof invoice.igst_minor === "number" ? formatPaise(invoice.igst_minor) : null} />
                   <Field label="Total" value={typeof invoice.grand_total_minor === "number" ? formatPaise(invoice.grand_total_minor) : null} />
                   <Field label="Eazypay reference" value={invoice.gateway_reference} />
@@ -375,7 +381,10 @@ export default function OrderDetail({
                 <div className="mt-3 flex flex-wrap gap-2">
                   <button type="button" onClick={() => copy(invoice.invoice_number || "")} className="min-h-11 rounded-full border px-3 text-xs font-semibold">Copy invoice number</button>
                   {invoice.status === "READY" && (
-                    <a className="inline-flex min-h-11 items-center rounded-full bg-[var(--ca-navy)] px-3 text-xs font-semibold text-white" href={`/api/admin/notes/orders/${order.id}/invoice?download=1`} target="_blank" rel="noreferrer">View PDF</a>
+                    <>
+                      <a className="inline-flex min-h-11 items-center rounded-full bg-[var(--ca-navy)] px-3 text-xs font-semibold text-white" href={`/api/admin/notes/orders/${order.id}/invoice?download=1`} target="_blank" rel="noreferrer">View PDF</a>
+                      <a className="inline-flex min-h-11 items-center rounded-full border px-3 text-xs font-semibold" href={`/api/admin/notes/orders/${order.id}/invoice?download=1`}>Download PDF</a>
+                    </>
                   )}
                   {invoice.status === "FAILED" && (
                     <button

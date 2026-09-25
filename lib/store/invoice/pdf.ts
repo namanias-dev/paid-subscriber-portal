@@ -186,6 +186,7 @@ export async function renderInvoicePdf(model: InvoicePdfModel): Promise<Uint8Arr
     ["Taxable value", model.tax.taxablePaise, true],
     ["CGST", model.tax.cgstPaise, model.tax.cgstPaise > 0],
     ["SGST", model.tax.sgstPaise, model.tax.sgstPaise > 0],
+    ["UTGST", model.tax.utgstPaise, model.tax.utgstPaise > 0],
     ["IGST", model.tax.igstPaise, model.tax.igstPaise > 0],
     ["Shipping", model.tax.shippingPaise, model.tax.shippingPaise > 0],
     ["Rounding", model.tax.roundingPaise, model.tax.roundingPaise !== 0],

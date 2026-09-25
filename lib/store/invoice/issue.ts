@@ -3,7 +3,7 @@ import { waitUntil } from "@vercel/functions";
 import { storeDb } from "../db";
 import { putObject, signGetUrl } from "@/lib/r2";
 import { financialYearLabel, formatInvoiceNumber, invoiceObjectKey } from "./number";
-import { amountInWords, chooseDocumentType, computeTaxDocument, stateCodeFromName, type TaxLineInput } from "./tax";
+import { amountInWords, chooseDocumentType, computeTaxDocument, stateCodeFromName, taxClassificationConfirmed, type TaxDocument, type TaxLineInput } from "./tax";
 import { renderInvoicePdf, type InvoicePdfModel } from "./pdf";
 import { loadInvoiceLogo } from "./logo";
 
@@ -141,6 +141,24 @@ export async function ensureStoreInvoice(orderId: string, opts?: { namespace?: "
     taxTreatment: item.tax_treatment_snapshot || "exempt",
     taxRateBps: item.tax_rate_bps_snapshot || 0,
   }));
+  const skus = lines.map((line) => line.sku).filter((sku): sku is string => Boolean(sku));
+  if (skus.length) {
+    const { data: products } = await db.from("store_products").select("sku,hsn_code,tax_treatment,tax_rate_bps").in("sku", skus);
+    const bySku = new Map((products || []).map((product) => [product.sku, product]));
+    for (const line of lines) {
+      if (line.hsn) continue;
+      const product = line.sku ? bySku.get(line.sku) : undefined;
+      if (!product?.hsn_code) continue;
+      line.hsn = product.hsn_code;
+      line.taxTreatment = product.tax_treatment || line.taxTreatment;
+      line.taxRateBps = product.tax_rate_bps || 0;
+    }
+  }
+  const namespace = opts?.namespace || "production";
+  if (namespace !== "test" && !existing && !taxClassificationConfirmed(lines)) {
+    console.info(`[store/invoice] classification_unconfirmed order=${order.order_no}`);
+    return { ok: false, status: "UNCONFIRMED", invoiceNumber: null };
+  }
   const inclusive = (settings?.price_tax_mode || "inclusive") !== "exclusive";
   const placeCode = stateCodeFromName(address?.state);
   const tax = computeTaxDocument({
@@ -156,7 +174,6 @@ export async function ensureStoreInvoice(orderId: string, opts?: { namespace?: "
     anyTaxable: tax.anyTaxable,
     requested: settings?.document_mode,
   });
-  const namespace = opts?.namespace || "production";
   const fy = financialYearLabel(new Date(order.paid_at));
   let invoiceNumber = existing?.invoice_number || null;
   let sequence = 0;
@@ -182,11 +199,13 @@ export async function ensureStoreInvoice(orderId: string, opts?: { namespace?: "
       status: "PENDING",
       attention: chosen.attention,
       seller_snapshot: {
-        display_name: settings?.display_name || "Naman IAS Academy",
+        display_name: settings?.trade_name || settings?.display_name || "Naman IAS Academy",
         legal_name: settings?.legal_name || null,
+        trade_name: settings?.trade_name || null,
         address: [settings?.address_line, settings?.city, settings?.state, settings?.pincode].filter(Boolean).join(", ") || null,
         gstin: settings?.gstin || null,
         pan: settings?.pan || null,
+        constitution: settings?.constitution || null,
       },
       buyer_snapshot: { name: order.customer_name, phone_present: Boolean(order.phone) },
       shipping_snapshot: address
@@ -200,6 +219,7 @@ export async function ensureStoreInvoice(orderId: string, opts?: { namespace?: "
       taxable_minor: tax.taxablePaise,
       cgst_minor: tax.cgstPaise,
       sgst_minor: tax.sgstPaise,
+      utgst_minor: tax.utgstPaise,
       igst_minor: tax.igstPaise,
       rounding_minor: tax.roundingPaise,
       grand_total_minor: tax.grandTotalPaise,
@@ -217,23 +237,54 @@ export async function ensureStoreInvoice(orderId: string, opts?: { namespace?: "
     console.info(`[store/invoice] allocated order=${order.order_no} number=${invoiceNumber}`);
   }
 
-  const model: InvoicePdfModel = {
+  const issuedLabel = `Issued ${new Date().toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata" })}`;
+  let model: InvoicePdfModel = {
     documentType: chosen.type,
     invoiceNumber: invoiceNumber || "",
     orderNumber: order.order_no,
-    issuedAt: new Date(order.paid_at).toLocaleDateString("en-IN"),
-    sellerName: settings?.legal_name || settings?.display_name || "Naman IAS Academy",
-    sellerLines: [settings?.address_line, [settings?.city, settings?.state, settings?.pincode].filter(Boolean).join(", "), settings?.gstin ? `GSTIN ${settings.gstin}` : ""].filter(Boolean) as string[],
+    issuedAt: issuedLabel,
+    sellerName: settings?.trade_name || settings?.display_name || "Naman IAS Academy",
+    sellerLines: [
+      settings?.legal_name ? `Legal supplier: ${settings.legal_name}` : "",
+      settings?.address_line,
+      [settings?.city, settings?.state, settings?.pincode].filter(Boolean).join(", "),
+      settings?.gstin ? `GSTIN ${settings.gstin}` : "",
+    ].filter(Boolean) as string[],
     buyerLines: [order.customer_name || "Customer"].filter(Boolean),
     shipLines: address ? [address.line1, address.line2, `${address.city}, ${address.state} ${address.pincode}`].filter(Boolean) as string[] : ["Address on order"],
     paymentReference: payment.reference_no,
-    paidAt: payment.captured_at ? new Date(payment.captured_at).toLocaleString("en-IN") : null,
+    paidAt: payment.captured_at ? new Date(payment.captured_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }) : null,
     tax,
     words: amountInWords(tax.grandTotalPaise),
     footer: settings?.legal_footer || null,
     attention: chosen.attention,
     logoPng: await loadInvoiceLogo(settings?.logo_url || null),
   };
+  if (existing) {
+    const { data: stored } = await db
+      .from("store_invoices")
+      .select("seller_snapshot,shipping_snapshot,line_items_snapshot,tax_summary,document_type,invoice_number,issued_at,gateway_reference,paid_at,grand_total_minor")
+      .eq("order_id", orderId)
+      .maybeSingle();
+    const seller = (stored?.seller_snapshot || {}) as { display_name?: string; legal_name?: string; address?: string; gstin?: string };
+    const ship = (stored?.shipping_snapshot || {}) as { line1?: string; line2?: string; city?: string; state?: string; pincode?: string };
+    const storedTax = stored?.tax_summary as TaxDocument | undefined;
+    if (stored && storedTax?.lines) {
+      model = {
+        ...model,
+        documentType: stored.document_type,
+        invoiceNumber: stored.invoice_number,
+        issuedAt: `Issued ${new Date(stored.issued_at).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata" })}`,
+        sellerName: seller.display_name || model.sellerName,
+        sellerLines: [seller.legal_name ? `Legal supplier: ${seller.legal_name}` : "", seller.address || "", seller.gstin ? `GSTIN ${seller.gstin}` : ""].filter(Boolean),
+        shipLines: [ship.line1, ship.line2, [ship.city, ship.state, ship.pincode].filter(Boolean).join(" ")].filter(Boolean) as string[],
+        paymentReference: stored.gateway_reference,
+        paidAt: stored.paid_at ? `Paid ${new Date(stored.paid_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}` : model.paidAt,
+        tax: storedTax,
+        words: amountInWords(stored.grand_total_minor || storedTax.grandTotalPaise),
+      };
+    }
+  }
 
   try {
     await db.from("store_invoices").update({ status: "GENERATING", updated_at: new Date().toISOString() }).eq("order_id", orderId);
@@ -260,6 +311,28 @@ export async function ensureStoreInvoice(orderId: string, opts?: { namespace?: "
     console.info(`[store/invoice] failed order=${order.order_no}`);
     return { ok: false, status: "FAILED", invoiceNumber };
   }
+}
+
+/** One historical order. Refuses every other order number. Does not allocate when classification is unconfirmed. */
+export const HISTORICAL_INVOICE_ORDER = "NIAS-N-2026-001001";
+
+export async function issueHistoricalStoreInvoice(orderNo: string): Promise<{ ok: boolean; status: string; invoiceNumber: string | null; error?: string }> {
+  if (orderNo !== HISTORICAL_INVOICE_ORDER) {
+    return { ok: false, status: "REFUSED", invoiceNumber: null, error: "This issuer only accepts NIAS-N-2026-001001." };
+  }
+  const db = storeDb();
+  if (!db) return { ok: false, status: "FAILED", invoiceNumber: null, error: "unavailable" };
+  const { data: order } = await db.from("store_orders").select("id,paid_at,total_paise").eq("order_no", orderNo).maybeSingle();
+  if (!order?.id || !order.paid_at) return { ok: false, status: "NOT_REQUIRED", invoiceNumber: null, error: "Order is not paid." };
+  const { data: payment } = await db.from("store_order_payments").select("status,amount_paise").eq("order_id", order.id).eq("status", "CAPTURED").limit(1).maybeSingle();
+  const allowed = paymentAllowsInvoice({
+    paid: true,
+    paymentStatus: payment?.status || null,
+    paymentAmountPaise: payment?.amount_paise || 0,
+    orderTotalPaise: order.total_paise,
+  });
+  if (allowed !== "ok") return { ok: false, status: allowed === "mismatch" ? "FAILED" : "NOT_REQUIRED", invoiceNumber: null, error: allowed };
+  return ensureStoreInvoice(order.id);
 }
 
 export async function invoiceDownloadUrl(orderId: string): Promise<{ url: string; invoiceNumber: string } | null> {

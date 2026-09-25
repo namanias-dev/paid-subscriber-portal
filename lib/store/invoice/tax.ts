@@ -29,6 +29,7 @@ export interface TaxLine {
   rateBps: number;
   cgstPaise: number;
   sgstPaise: number;
+  utgstPaise: number;
   igstPaise: number;
   taxPaise: number;
   totalPaise: number;
@@ -42,6 +43,7 @@ export interface TaxDocument {
   taxablePaise: number;
   cgstPaise: number;
   sgstPaise: number;
+  utgstPaise: number;
   igstPaise: number;
   taxPaise: number;
   roundingPaise: number;
@@ -50,12 +52,27 @@ export interface TaxDocument {
   anyTaxable: boolean;
 }
 
-export function splitTax(taxPaise: number, interstate: boolean): { cgst: number; sgst: number; igst: number } {
+/** Union territories without a legislature. Local tax is UTGST, not SGST. */
+const UTGST_STATE_CODES = new Set(["04", "26", "31", "35", "38"]);
+
+export function localTaxKind(supplierStateCode: string | null, interstate: boolean): "IGST" | "UTGST" | "SGST" {
+  if (interstate) return "IGST";
+  if (UTGST_STATE_CODES.has((supplierStateCode || "").trim())) return "UTGST";
+  return "SGST";
+}
+
+export function splitTax(
+  taxPaise: number,
+  interstate: boolean,
+  supplierStateCode: string | null = null,
+): { cgst: number; sgst: number; utgst: number; igst: number } {
   const tax = Math.max(0, Math.round(taxPaise));
-  if (!tax) return { cgst: 0, sgst: 0, igst: 0 };
-  if (interstate) return { cgst: 0, sgst: 0, igst: tax };
+  if (!tax) return { cgst: 0, sgst: 0, utgst: 0, igst: 0 };
+  if (interstate) return { cgst: 0, sgst: 0, utgst: 0, igst: tax };
   const cgst = Math.floor(tax / 2);
-  return { cgst, sgst: tax - cgst, igst: 0 };
+  const local = tax - cgst;
+  if (localTaxKind(supplierStateCode, false) === "UTGST") return { cgst, sgst: 0, utgst: local, igst: 0 };
+  return { cgst, sgst: local, utgst: 0, igst: 0 };
 }
 
 /** Tax embedded in an inclusive amount, or added on an exclusive amount. */
@@ -80,7 +97,7 @@ export function computeTaxDocument(input: {
     const qty = Math.max(1, Math.round(line.qty || 1));
     const total = Math.max(0, Math.round(line.lineTotalPaise || 0));
     const tax = taxOnAmount(total, line.taxTreatment, line.taxRateBps, input.pricesIncludeTax);
-    const split = splitTax(tax, interstate);
+    const split = splitTax(tax, interstate, supplier);
     const taxable = input.pricesIncludeTax ? total - tax : total;
     return {
       name: line.name,
@@ -93,6 +110,7 @@ export function computeTaxDocument(input: {
       rateBps: line.taxTreatment === "taxable" ? line.taxRateBps : 0,
       cgstPaise: split.cgst,
       sgstPaise: split.sgst,
+      utgstPaise: split.utgst,
       igstPaise: split.igst,
       taxPaise: tax,
       totalPaise: input.pricesIncludeTax ? total : total + tax,
@@ -113,6 +131,7 @@ export function computeTaxDocument(input: {
     taxablePaise: lines.reduce((n, line) => n + line.taxablePaise, 0),
     cgstPaise: lines.reduce((n, line) => n + line.cgstPaise, 0),
     sgstPaise: lines.reduce((n, line) => n + line.sgstPaise, 0),
+    utgstPaise: lines.reduce((n, line) => n + line.utgstPaise, 0),
     igstPaise: lines.reduce((n, line) => n + line.igstPaise, 0),
     taxPaise: lines.reduce((n, line) => n + line.taxPaise, 0),
     roundingPaise: rounding,
@@ -123,6 +142,11 @@ export function computeTaxDocument(input: {
 }
 
 export type DocumentType = "TAX_INVOICE" | "BILL_OF_SUPPLY" | "INVOICE";
+
+/** A production invoice needs a saved 4–8 digit HSN on every line. Blank HSN is unconfirmed. */
+export function taxClassificationConfirmed(lines: { hsn: string | null }[]): boolean {
+  return lines.length > 0 && lines.every((line) => /^\d{4,8}$/.test((line.hsn || "").trim()));
+}
 
 export function chooseDocumentType(input: {
   gstin: string | null;

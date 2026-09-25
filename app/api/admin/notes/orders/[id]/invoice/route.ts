@@ -16,7 +16,7 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
     if (!file) return NextResponse.json({ ok: false, error: "The invoice is not ready yet." }, { status: 409 });
     return Response.redirect(file.url, 302);
   }
-  const { data } = await db.from("store_invoices").select("invoice_number,document_type,status,issued_at,grand_total_minor,taxable_minor,cgst_minor,sgst_minor,igst_minor,gateway_reference,attention,credit_note_status").eq("order_id", params.id).maybeSingle();
+  const { data } = await db.from("store_invoices").select("invoice_number,document_type,status,issued_at,grand_total_minor,taxable_minor,cgst_minor,sgst_minor,utgst_minor,igst_minor,gateway_reference,attention,credit_note_status,seller_snapshot,line_items_snapshot,place_of_supply_state_code").eq("order_id", params.id).maybeSingle();
   return NextResponse.json({ ok: true, invoice: data || null }, { headers: { "Cache-Control": "no-store" } });
 }
 
