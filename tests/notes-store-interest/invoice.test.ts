@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { PDFDocument } from "pdf-lib";
 import { renderInvoicePdf } from "../../lib/store/invoice/pdf";
 import { INVOICE_URL_TTL_SECONDS, invoiceWorkPlan, paymentAllowsInvoice } from "../../lib/store/invoice/issue";
 import { financialYearLabel, formatInvoiceNumber } from "../../lib/store/invoice/number";
@@ -82,6 +83,44 @@ test("a bill of supply renders a PDF", async () => {
       attention: null,
   }));
   assert.equal(pdf.subarray(0, 5).toString(), "%PDF-");
+  const loaded = await PDFDocument.load(pdf);
+  const size = loaded.getPages()[0].getSize();
+  assert.ok(Math.abs(size.width - 595.28) < 0.2);
+  assert.ok(Math.abs(size.height - 841.89) < 0.2);
+});
+
+test("a long address and a logo still fit an A4 page", async () => {
+  const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64");
+  const tax = computeTaxDocument({
+    lines: [
+      { name: "Indian Polity Notes for a very long handwritten compilation title that must wrap inside the description column", sku: "NOTES-POLITY", hsn: null, qty: 1, lineTotalPaise: 239920, discountPaise: 0, taxTreatment: "exempt", taxRateBps: 0 },
+      { name: "Indian Economy Notes", sku: "NOTES-ECONOMY", hsn: "4901", qty: 2, lineTotalPaise: 23600, discountPaise: 0, taxTreatment: "taxable", taxRateBps: 1800 },
+    ],
+    shippingPaise: 5900,
+    pricesIncludeTax: true,
+    supplierStateCode: "04",
+    placeOfSupplyCode: "06",
+    chargedTotalPaise: 269420,
+  });
+  const pdf = Buffer.from(await renderInvoicePdf({
+    documentType: "TAX_INVOICE",
+    invoiceNumber: "TEST/26-27/00002",
+    orderNumber: "NIAS-N-2026-900001",
+    issuedAt: "25 Sep 2026",
+    sellerName: "Naman Sharma IAS Academy",
+    sellerLines: ["SCO 173-174, Sector 17C, Chandigarh, 160017"],
+    buyerLines: ["A very long customer name that should wrap rather than run off the page"],
+    shipLines: ["House number 1920, a long locality name, Sector 28, Panchkula, Haryana 134109"],
+    paymentReference: "NIASN-N-TEST-REFERENCE",
+    paidAt: "25 Sep 2026, 10:15 am",
+    tax,
+    words: amountInWords(269420),
+    footer: "Support line for this electronic record.",
+    attention: null,
+    logoPng: png,
+  }));
+  const loaded = await PDFDocument.load(pdf);
+  assert.ok(loaded.getPageCount() >= 1);
   assert.ok(pdf.length > 1000);
 });
 

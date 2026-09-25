@@ -307,13 +307,11 @@ export default function OrderStatus({ order }: { order: PublicOrder }) {
       {(current.invoice_number || current.invoice_status || (sawConfirming.current && !current.confirming)) && (
         <section className="mt-4 rounded-[28px] border border-[var(--ca-navy)]/8 bg-white p-5 ns-elev-1">
           <p className="text-xs font-semibold uppercase tracking-wide text-[var(--ca-gold-dark)]">{current.invoice_document?.replaceAll("_", " ") || "Invoice"}</p>
-          <h2 className="mt-1 font-heading text-lg font-bold text-[var(--ca-navy)]">{current.invoice_number || "Preparing your invoice"}</h2>
+          <h2 className="mt-1 break-all font-heading text-lg font-bold text-[var(--ca-navy)]">{current.invoice_number || "Preparing your invoice"}</h2>
           <p className="mt-1 text-sm text-[var(--ca-navy)]/70">
             {current.invoice_status === "READY"
               ? "Invoice ready"
-              : current.invoice_status === "FAILED"
-                ? "Your payment is confirmed. The invoice file will be ready when you refresh."
-                : "Preparing your invoice…"}
+              : "Payment confirmed. Your invoice is being prepared and will also be available from Track Order."}
           </p>
           {current.invoice_status === "READY" && current.access_token && (
             <div className="mt-3 flex flex-wrap gap-2">

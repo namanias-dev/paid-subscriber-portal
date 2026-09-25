@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { ImageUploadField } from "@/components/admin/FormFields";
 
 interface Settings {
   display_name?: string | null;
@@ -17,6 +18,7 @@ interface Settings {
   invoice_prefix?: string | null;
   document_mode?: string | null;
   legal_footer?: string | null;
+  logo_url?: string | null;
 }
 
 export default function InvoiceSettingsCard() {
@@ -91,6 +93,15 @@ export default function InvoiceSettingsCard() {
             <option value="INVOICE">Invoice</option>
           </select>
         </label>
+        <div className="sm:col-span-2">
+          <ImageUploadField
+            label="Invoice logo"
+            folder="branding"
+            value={form.logo_url}
+            onChange={(url) => setForm((cur) => ({ ...cur, logo_url: url }))}
+            hint="PNG or JPEG. The academy header logo is used when this is empty. SVG is not embedded in the PDF."
+          />
+        </div>
         <button type="submit" className="min-h-11 rounded-full bg-[var(--ca-navy)] px-4 text-sm font-semibold text-white sm:col-span-2 sm:w-fit">Save legal details</button>
       </form>
     </section>

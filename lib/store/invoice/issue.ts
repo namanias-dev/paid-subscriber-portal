@@ -5,6 +5,7 @@ import { putObject, signGetUrl } from "@/lib/r2";
 import { financialYearLabel, formatInvoiceNumber, invoiceObjectKey } from "./number";
 import { amountInWords, chooseDocumentType, computeTaxDocument, stateCodeFromName, type TaxLineInput } from "./tax";
 import { renderInvoicePdf, type InvoicePdfModel } from "./pdf";
+import { loadInvoiceLogo } from "./logo";
 
 export interface InvoicePublic {
   invoice_number: string | null;
@@ -231,6 +232,7 @@ export async function ensureStoreInvoice(orderId: string, opts?: { namespace?: "
     words: amountInWords(tax.grandTotalPaise),
     footer: settings?.legal_footer || null,
     attention: chosen.attention,
+    logoPng: await loadInvoiceLogo(settings?.logo_url || null),
   };
 
   try {

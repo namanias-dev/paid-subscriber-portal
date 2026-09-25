@@ -9,9 +9,12 @@
  * It is not a second store. It speaks the same query shape the admin and
  * tracking routes already use, and it holds exactly one seeded test order.
  */
+import { hashStoreAccessToken } from "./accessToken";
+
 export const LOCAL_FIXTURE_ORDER_NO = "NIAS-N-2026-900001";
 export const LOCAL_FIXTURE_ORDER_ID = "11111111-1111-4111-8111-111111111111";
 export const LOCAL_FIXTURE_AWB = "TESTAWB110001";
+export const LOCAL_FIXTURE_TOKEN = "fixture-order-access";
 
 const IDS = {
   order: LOCAL_FIXTURE_ORDER_ID,
@@ -75,6 +78,9 @@ function blankTables(): void {
     "store_pincode_cache",
     "store_inventory_reservations",
     "app_feature_flags",
+    "store_invoices",
+    "store_invoice_settings",
+    "store_invoice_counters",
   ]) {
     tables.set(name, []);
   }
@@ -148,7 +154,7 @@ export function resetLocalFixture(): void {
     delivered_at: null,
     promised_delivery_date: null,
     tracking_token: null,
-    tracking_token_hash: null,
+    tracking_token_hash: hashStoreAccessToken(LOCAL_FIXTURE_TOKEN),
     offer_id: null,
     created_at: now,
     updated_at: now,
@@ -163,6 +169,9 @@ export function resetLocalFixture(): void {
     unit_price_paise: 239920,
     line_discount_paise: 0,
     line_total_paise: 239920,
+    tax_treatment_snapshot: "exempt",
+    tax_rate_bps_snapshot: 0,
+    hsn_snapshot: null,
     created_at: now,
   });
   tables.get("store_order_payments")!.push({
@@ -176,6 +185,22 @@ export function resetLocalFixture(): void {
     amount_paise: 249820,
     created_at: now,
     updated_at: now,
+  });
+  tables.get("store_invoice_settings")!.push({
+    id: 1,
+    display_name: "Naman IAS Academy",
+    legal_name: null,
+    address_line: null,
+    city: null,
+    state: null,
+    state_code: null,
+    pincode: null,
+    gstin: null,
+    invoice_prefix: "NIA",
+    price_tax_mode: "inclusive",
+    document_mode: "auto",
+    legal_footer: null,
+    logo_url: null,
   });
   tables.get("store_order_events")!.push({
     id: IDS.event,
@@ -547,6 +572,9 @@ class FixtureQuery {
         if (!row.created_at) row.created_at = stamp;
         if (!row.updated_at) row.updated_at = stamp;
         if (this.table === "store_orders" && !row.placed_at) row.placed_at = stamp;
+        if (this.table === "store_invoices" && rows(this.table).some((existing) => existing.order_id === row.order_id || existing.invoice_number === row.invoice_number)) {
+          return { data: null, error: { message: "duplicate invoice" }, count: 0 };
+        }
         rows(this.table).push(row);
         created.push(this.decorate(row));
       }
@@ -600,9 +628,21 @@ export function localFixtureClient() {
     from(table: string) {
       return new FixtureQuery(table);
     },
-    rpc(fn: string) {
+    rpc(fn: string, args?: Record<string, unknown>) {
       if (fn === "next_store_order_no") return Promise.resolve({ data: "NIAS-N-2026-900099", error: null });
       if (fn === "store_commit_reservations") return Promise.resolve({ data: 0, error: null });
+      if (fn === "next_store_invoice_seq") {
+        const namespace = String(args?.p_namespace || "test");
+        const fy = String(args?.p_fy || "");
+        const table = rows("store_invoice_counters");
+        const found = table.find((row) => row.namespace === namespace && row.financial_year === fy);
+        if (!found) {
+          table.push({ namespace, financial_year: fy, last_value: 1 });
+          return Promise.resolve({ data: 1, error: null });
+        }
+        found.last_value = Number(found.last_value) + 1;
+        return Promise.resolve({ data: found.last_value, error: null });
+      }
       return Promise.resolve({ data: null, error: { message: "rpc unavailable" } });
     },
   };

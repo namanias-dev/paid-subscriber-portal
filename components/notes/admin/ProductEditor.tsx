@@ -291,7 +291,11 @@ export default function ProductEditor({ id }: { id: string }) {
         </Section>
 
         <Section title="Tax">
-          <p className="mb-2 text-sm text-[var(--ca-navy)]/70">Leave HSN and the rate blank until your CA confirms them. Existing orders keep the snapshot taken at checkout.</p>
+          <p className="mb-2 text-sm text-[var(--ca-navy)]/70">Confirm HSN and tax treatment with your CA before accepting production orders. Printed books may have different GST treatment from brochures, loose printed material, workbooks or other printed products.</p>
+          <p className="mb-2 text-sm text-[var(--ca-navy)]/70">Store prices are tax-inclusive unless Invoice and tax settings say exclusive. Existing orders keep the snapshot taken at checkout.</p>
+          {!p.hsn_code && (p.tax_treatment || "exempt") !== "taxable" && (
+            <p className="mb-3 text-sm text-amber-800">HSN is blank. This does not block checkout. Confirm the code with your CA before treating the classification as final.</p>
+          )}
           <Grid>
             <Field label="HSN"><input className={inp} value={p.hsn_code || ""} inputMode="numeric" onChange={(e) => set("hsn_code", e.target.value.replace(/[^\d]/g, "").slice(0, 8) || null)} /></Field>
             <Field label="Tax treatment">

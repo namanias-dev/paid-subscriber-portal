@@ -4,7 +4,7 @@ import { storeDb } from "@/lib/store/db";
 
 export const dynamic = "force-dynamic";
 
-const FIELDS = ["display_name", "legal_name", "address_line", "city", "state", "state_code", "pincode", "gstin", "pan", "support_phone", "support_email", "invoice_prefix", "price_tax_mode", "document_mode", "legal_footer", "signatory_name"] as const;
+const FIELDS = ["display_name", "legal_name", "address_line", "city", "state", "state_code", "pincode", "gstin", "pan", "support_phone", "support_email", "invoice_prefix", "price_tax_mode", "document_mode", "legal_footer", "signatory_name", "logo_url"] as const;
 
 export async function GET() {
   if (!(await requirePermission("store_manage_orders"))) {
