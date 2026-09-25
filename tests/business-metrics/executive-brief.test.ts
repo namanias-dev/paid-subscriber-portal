@@ -323,6 +323,7 @@ describe("executive brief delivery", () => {
       courses: [],
       outstanding: { overdueCount: 2, overdueAmount: 150000, due7dAmount: 20000 },
       failed: [],
+      notes: null,
       morningNote: null,
     });
     const html = lines.join("\n");
@@ -400,12 +401,13 @@ describe("executive brief delivery", () => {
         { name: "Ruthi", amount: 50, item: "Webinar registration — Masterclass", when: "5:27 PM", reason: null, recovered: false },
         { name: "Jyoti", amount: 50, item: "Webinar registration — Masterclass", when: "4:17 PM", reason: null, recovered: true },
       ],
+      notes: null,
       morningNote: null,
     });
     const html = lines.join("\n");
     assert.match(html, /NAMAN IAS — EXECUTIVE BRIEF/);
     assert.equal(html.includes("Live figures through"), false);
-    assert.match(html, /⚠️ Payments: <b>1<\/b> unresolved failure/);
+    assert.match(html, /⚠️ Attention: <b>1 unresolved payment<\/b>/);
     assert.match(html, /2 failed attempts<\/b> · 1 unresolved/);
     assert.match(html, /<i>Still failed<\/i>/);
     assert.match(html, /<i>Later paid<\/i>/);

@@ -13,12 +13,16 @@ export function dash(n: number | null | undefined): string {
   return String(Math.round(n));
 }
 
-/** Exact rupees for accounting lines. The ledger stores integer rupees, not paise. */
+/** Rupees for accounting lines. Whole rupees stay whole. Paise show when the amount is not whole. */
 export function inrExact(n: number | null | undefined): string {
   if (n == null || !Number.isFinite(n)) return "—";
-  const rounded = Math.round(n);
-  const sign = rounded < 0 ? "-" : "";
-  return `${sign}₹${Math.abs(rounded).toLocaleString("en-IN")}`;
+  const negative = n < 0;
+  const abs = Math.abs(n);
+  const whole = Math.abs(abs - Math.round(abs)) < 0.001;
+  const formatted = whole
+    ? Math.round(abs).toLocaleString("en-IN")
+    : abs.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return `${negative ? "-" : ""}₹${formatted}`;
 }
 
 export function inr(n: number | null | undefined): string {
