@@ -58,6 +58,15 @@ export default function NotesOrderQueue() {
   const [sort, setSort] = useState(initial.sort);
   const [offset, setOffset] = useState(initial.offset);
   const [openId, setOpenId] = useState<string | null>(null);
+  const openOrder = useCallback((id: string) => {
+    window.history.pushState({ notesOrder: id }, "", window.location.href);
+    setOpenId(id);
+  }, []);
+  useEffect(() => {
+    const onPop = () => setOpenId(window.history.state?.notesOrder || null);
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
   const [compareId, setCompareId] = useState<string | null>(null);
   const [writes, setWrites] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
@@ -244,7 +253,7 @@ export default function NotesOrderQueue() {
               const action = primaryAction({ status: order.status, awb: order.shipment?.awb, pickupFailed: failed, openIssue: order.issue?.open, paymentPending: order.status === "PAYMENT_PENDING" });
               return (
                 <li key={order.id} className={`grid grid-cols-[1.3fr_1fr_0.7fr_0.8fr_0.8fr_auto] items-center gap-3 border-b border-[var(--ca-navy)]/5 px-4 py-3 ${order.action_required ? "border-l-2 border-l-amber-500" : ""}`}>
-                  <button type="button" onClick={() => setOpenId(order.id)} className="text-left">
+                  <button type="button" onClick={() => openOrder(order.id)} className="text-left">
                     <span className="block font-heading text-base font-bold text-[var(--ca-navy)]">{orderIndexLabel(order.order_no)}</span>
                     <span className="block font-mono text-[11px] text-[var(--ca-navy)]/50">{order.order_no}</span>
                     <span className="block text-sm text-[var(--ca-navy)]">{order.customer_name}</span>
@@ -254,7 +263,7 @@ export default function NotesOrderQueue() {
                   <span className="text-sm font-semibold tabular-nums">{formatPaise(order.total_paise)}</span>
                   <span className={`w-fit rounded-full px-2 py-1 text-[11px] font-semibold ${TONE[fulfillmentTone(order.status, failed)]}`}>{fulfillmentLabel(order.status, failed)}</span>
                   <span className="text-xs text-[var(--ca-navy)]/60">{order.shipment?.courier || "—"}<br />{formatAdminWhen(order.shipment?.tracking_event_at || order.updated_at || order.placed_at)}</span>
-                  <button type="button" onClick={() => setOpenId(order.id)} className="min-h-11 rounded-full px-3 text-sm font-semibold text-[var(--ca-navy)]">{PRIMARY_LABEL[action]}</button>
+                  <button type="button" onClick={() => openOrder(order.id)} className="min-h-11 rounded-full px-3 text-sm font-semibold text-[var(--ca-navy)]">{PRIMARY_LABEL[action]}</button>
                 </li>
               );
             })}
@@ -264,7 +273,7 @@ export default function NotesOrderQueue() {
               const failed = pickupFailedActivity(order.shipment?.tracking_activity);
               return (
                 <li key={order.id}>
-                  <button type="button" onClick={() => setOpenId(order.id)} className={`w-full rounded-2xl bg-white p-4 text-left ${order.action_required ? "border-l-2 border-l-amber-500" : ""}`}>
+                  <button type="button" onClick={() => openOrder(order.id)} className={`w-full rounded-2xl bg-white p-4 text-left ${order.action_required ? "border-l-2 border-l-amber-500" : ""}`}>
                     <span className="flex items-start justify-between gap-3">
                       <span>
                         <span className="block font-heading text-lg font-bold">{orderIndexLabel(order.order_no)}</span>
@@ -297,7 +306,10 @@ export default function NotesOrderQueue() {
           order={open}
           busy={busyId === open.id}
           writesAuthorized={writes}
-          onClose={() => setOpenId(null)}
+          onClose={() => {
+            if (window.history.state?.notesOrder) window.history.back();
+            else setOpenId(null);
+          }}
           onRefresh={() => void load()}
           onCompare={() => setCompareId(open.id)}
           act={(fn, ok) => act(open.id, fn, ok)}
