@@ -5,13 +5,11 @@
  * staff and leads excluded, analytics login events plus access-log logins.
  * Multiple sign-ins by one student on one day count once.
  *
- * 30-day average = mean unique students over the last 30 complete IST days.
- * A day with no logins counts as zero.
+ * 30-day and 90-day averages = mean unique students over the last 30 or 90
+ * complete IST days. A day with no logins counts as zero. Today is excluded.
  *
- * Tracked-day average = mean unique students on complete days that had at
- * least one genuine login, from the first tracked day through yesterday.
- * Days before login tracking started are not treated as zeros. Today is open
- * and is not included. This is not an all-time average of the academy's life.
+ * Tracked-day average is still stored for history. The brief shows the 90-day
+ * average instead of that tracked-day figure.
  *
  * Stored under login_avg_stats_v2 so the previous buyer-id counter is not
  * incremented into the new sum.
@@ -46,6 +44,7 @@ export interface LoginAvgStats {
 export interface LoginAvgResult {
   allTimeAvg: number | null;
   rolling30Avg: number | null;
+  rolling90Avg: number | null;
   today: number | null;
   yesterday: number | null;
   activeDays: number;
@@ -259,7 +258,7 @@ export async function resolveLoginAverages(): Promise<LoginAvgResult> {
   const needsHistory = !stored || stored.definition !== DEFINITION || stored.last_applied_ymd !== yesterday;
   const hits = needsHistory
     ? await pageHits(null, null)
-    : await pageHits(bounds(ymdDaysAgoFrom(today, 30)).fromIso, bounds(ymdPlus(today, 1)).fromIso);
+    : await pageHits(bounds(ymdDaysAgoFrom(today, 90)).fromIso, bounds(ymdPlus(today, 1)).fromIso);
 
   if (needsHistory && hits) {
     stored = statsFromHits(hits, excluded, today);
@@ -274,12 +273,18 @@ export async function resolveLoginAverages(): Promise<LoginAvgResult> {
   };
 
   const byDay = hits ? uniqueLoginsByDay(hits, excluded) : null;
-  const rollingCounts: number[] = [];
-  for (let i = 30; i >= 1; i--) rollingCounts.push(byDay?.get(ymdDaysAgoFrom(today, i))?.size || 0);
+  const rolling30: number[] = [];
+  const rolling90: number[] = [];
+  for (let i = 90; i >= 1; i--) {
+    const n = byDay?.get(ymdDaysAgoFrom(today, i))?.size || 0;
+    rolling90.push(n);
+    if (i <= 30) rolling30.push(n);
+  }
 
   return {
     allTimeAvg: stats.active_days > 0 ? Math.round(stats.unique_sum / stats.active_days) : null,
-    rolling30Avg: byDay ? meanDailyUniques(rollingCounts) : null,
+    rolling30Avg: byDay ? meanDailyUniques(rolling30) : null,
+    rolling90Avg: byDay ? meanDailyUniques(rolling90) : null,
     today: byDay ? byDay.get(today)?.size || 0 : null,
     yesterday: byDay ? byDay.get(yesterday)?.size || 0 : null,
     activeDays: stats.active_days,

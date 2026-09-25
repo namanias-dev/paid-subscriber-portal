@@ -42,11 +42,13 @@ import { isPaidStatus } from "../../paymentsAgg";
 import {
   paidWebinarRegistrationCount,
   pendingWebinarCheckoutCount,
+  webinarRegistrationReport,
 } from "../../webinarReg";
 import type { Course, CourseBatch, CourseEnrollment, LearningMode, Payment } from "../../types";
 import { buildKeyboard, sendMessage } from "../botApi";
 import { tgLog } from "../log";
-import { formatIstShort, inrExact, istBriefStamp, istNowParts } from "./format";
+import { formatIstClock, formatIstEvent, inrExact, istBriefStamp, istNowParts } from "./format";
+import { ensureReportingReference } from "./definitions";
 import { resolveLoginAverages } from "./loginAvg";
 import {
   getReportSettings,
@@ -344,8 +346,10 @@ async function pickUpcomingWebinar(payments: Payment[]): Promise<{
   title: string;
   dateLabel: string;
   registered: number;
+  newToday: number | null;
   pendingCheckout: number;
   attendedLastPct: number | null;
+  sources: { label: string; count: number }[] | null;
   webinarId: string;
   slug: string;
 } | null> {
@@ -360,9 +364,15 @@ async function pickUpcomingWebinar(payments: Payment[]): Promise<{
     if (!upcoming) return null;
 
     const price = Number(upcoming.price) || 0;
+    const todayYmd = istTodayYMD();
     let registered = 0;
+    let newToday: number | null = null;
+    let sources: { label: string; count: number }[] | null = null;
     if (price > 0) {
-      registered = paidWebinarRegistrationCount(payments, upcoming.slug);
+      const report = webinarRegistrationReport(payments, upcoming.slug, todayYmd);
+      registered = report.paidTotal || paidWebinarRegistrationCount(payments, upcoming.slug);
+      newToday = report.paidToday;
+      sources = report.hasAttribution ? report.sources : null;
     } else {
       const { getAllWebinarRegistrations } = await import("../../dataProvider");
       const regs = await getAllWebinarRegistrations();
@@ -373,10 +383,12 @@ async function pickUpcomingWebinar(payments: Payment[]): Promise<{
 
     return {
       title: upcoming.title,
-      dateLabel: formatIstShort(upcoming.datetime),
+      dateLabel: formatIstEvent(upcoming.datetime),
       registered,
+      newToday,
       pendingCheckout,
       attendedLastPct: null,
+      sources,
       webinarId: upcoming.id,
       slug: upcoming.slug,
     };
@@ -469,8 +481,6 @@ export interface DigestBuildResult {
 export async function buildDigest(opts?: {
   forceMorningExtras?: boolean;
   previous?: SnapshotMetrics | null;
-  /** Live manual send. Does not change figures. Adds one validation line. */
-  manualValidation?: boolean;
 }): Promise<DigestBuildResult> {
   const parts = istNowParts();
   // Yesterday close / 7-day trend only at real 6 AM IST — not on manual force sends.
@@ -488,14 +498,15 @@ export async function buildDigest(opts?: {
   let enrollmentsOk = false;
   let loginAvg: number | null = null;
   let loginAvg30: number | null = null;
+  let loginAvg90: number | null = null;
   let loginsToday: number | null = null;
   let loginsYday: number | null = null;
-  let loginFirst: string | null = null;
 
   const prev = opts?.previous || null;
   const emptyLogins = {
     allTimeAvg: null as number | null,
     rolling30Avg: null as number | null,
+    rolling90Avg: null as number | null,
     today: null as number | null,
     yesterday: null as number | null,
     activeDays: 0,
@@ -540,9 +551,9 @@ export async function buildDigest(opts?: {
     if (settled[5].status === "fulfilled") {
       loginAvg = settled[5].value.allTimeAvg;
       loginAvg30 = settled[5].value.rolling30Avg;
+      loginAvg90 = settled[5].value.rolling90Avg;
       loginsToday = settled[5].value.today;
       loginsYday = settled[5].value.yesterday;
-      loginFirst = settled[5].value.firstActiveYmd;
     }
   } catch {
     /* sections omit missing data */
@@ -609,6 +620,7 @@ export async function buildDigest(opts?: {
     logins_yday: loginsYday,
     logins_avg: loginAvg,
     logins_avg_30d: loginAvg30,
+    logins_avg_90d: loginAvg90,
     revenue_today: todayMoney?.netCollection ?? null,
     revenue_mtd: mtdMoney?.netCollection ?? null,
     revenue_yday: ydayMoney?.netCollection ?? null,
@@ -635,7 +647,7 @@ export async function buildDigest(opts?: {
     name: p.student_name || "Student",
     amount: p.amount,
     item: `${paymentKindLabel(p)} — ${fullItemName(p)}`,
-    when: formatIstShort(p.created_at),
+    when: formatIstClock(p.created_at),
     reason: failureReasonShort(p),
     recovered: laterPaidSameItem(p, allPayments),
   }));
@@ -668,8 +680,7 @@ export async function buildDigest(opts?: {
       todayFallback: people?.uniqueLoginUsers == null ? loginsToday : null,
       yesterday: loginsYday,
       avg30: loginAvg30,
-      historicalAvg: loginAvg,
-      firstTrackedYmd: loginFirst,
+      avg90: loginAvg90,
     },
     today: todayMoney,
     yesterday: ydayMoney,
@@ -681,8 +692,10 @@ export async function buildDigest(opts?: {
           title: webinar.title,
           dateLabel: webinar.dateLabel,
           registered: webinar.registered,
+          newToday: webinar.newToday,
           pendingCheckout: webinar.pendingCheckout,
           attendedLastPct: webinar.attendedLastPct,
+          sources: webinar.sources,
         }
       : null,
     courses: coursesForBrief,
@@ -693,7 +706,6 @@ export async function buildDigest(opts?: {
     },
     failed,
     morningNote,
-    manualValidation: opts?.manualValidation === true,
   });
 
   return {
@@ -797,7 +809,6 @@ export async function sendDigestNow(opts?: {
       built = await buildDigest({
         previous: prev?.metrics || null,
         forceMorningExtras: opts?.morningExtras === true,
-        manualValidation: opts?.skipIdempotency === true,
       });
     } catch (e) {
       const msg = (e as Error).message || "build_failed";
@@ -853,6 +864,7 @@ export async function sendDigestNow(opts?: {
     messageHtml: built.html,
   });
   if (!manual) await markDigestResult(true);
+  await ensureReportingReference(channel);
   return {
     ok: true,
     html: built.html,

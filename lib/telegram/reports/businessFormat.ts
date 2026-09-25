@@ -1,6 +1,7 @@
 /**
  * Telegram HTML for the daily executive brief and the month-end report.
- * Parse mode is HTML. One emoji per main heading. Dynamic text is escaped.
+ * Parse mode is HTML. Dynamic text is escaped. Metric definitions live in the
+ * channel description and the pinned Reporting Definitions message.
  */
 import type {
   AdmissionMetrics,
@@ -12,7 +13,7 @@ import type {
 import type { SmsDeliveryMetrics } from "../../analytics/smsDelivery";
 import { escapeHtml, inrExact } from "./format";
 
-const RULE = "────────";
+const RULE = "━━━━━━━━━━━━━━━━━━";
 
 const CATEGORY_LABEL: Record<CollectionCategory, string> = {
   admission: "Full payments",
@@ -20,7 +21,7 @@ const CATEGORY_LABEL: Record<CollectionCategory, string> = {
   seat: "Seat bookings",
   webinar: "Webinars",
   plan: "Plans",
-  other: "Other payments",
+  other: "Other",
 };
 
 const CATEGORY_DISPLAY: CollectionCategory[] = [
@@ -32,10 +33,31 @@ const CATEGORY_DISPLAY: CollectionCategory[] = [
   "other",
 ];
 
-const SOURCE_LABEL: Record<CollectionSource, string> = {
-  online: "Online",
-  manual: "Staff recorded",
-  other: "Other",
+const MONTHS: Record<string, string> = {
+  january: "Jan",
+  february: "Feb",
+  march: "Mar",
+  april: "Apr",
+  may: "May",
+  june: "Jun",
+  july: "Jul",
+  august: "Aug",
+  september: "Sep",
+  sept: "Sep",
+  october: "Oct",
+  november: "Nov",
+  december: "Dec",
+  jan: "Jan",
+  feb: "Feb",
+  mar: "Mar",
+  apr: "Apr",
+  jun: "Jun",
+  jul: "Jul",
+  aug: "Aug",
+  sep: "Sep",
+  oct: "Oct",
+  nov: "Nov",
+  dec: "Dec",
 };
 
 export interface LoginTrendBrief {
@@ -43,8 +65,8 @@ export interface LoginTrendBrief {
   todayFallback: number | null;
   yesterday: number | null;
   avg30: number | null;
-  historicalAvg: number | null;
-  firstTrackedYmd: string | null;
+  /** Mean unique logins over the previous 90 complete IST days, zeros included. */
+  avg90: number | null;
 }
 
 export interface CourseBrief {
@@ -64,12 +86,21 @@ export interface CourseBrief {
   modeEmpty: boolean;
 }
 
+export interface WebinarSourceBrief {
+  label: string;
+  count: number;
+}
+
 export interface WebinarBrief {
   title: string;
   dateLabel: string;
   registered: number;
+  /** Paid seats whose first receipt was created today (IST). */
+  newToday: number | null;
   pendingCheckout: number;
   attendedLastPct: number | null;
+  /** Null when no attribution stamp exists. Empty array is not used for that. */
+  sources: WebinarSourceBrief[] | null;
 }
 
 export interface FailedBrief {
@@ -102,15 +133,31 @@ export interface BriefInput {
   outstanding: OutstandingBrief | null;
   failed: FailedBrief[];
   morningNote: string | null;
-  manualValidation?: boolean;
 }
 
-/** Display only. Does not change the stored course title. */
+/** Display only. Does not change the stored course title. Never ends in an ellipsis. */
 export function shortCourseTitle(title: string): string {
-  let t = String(title || "").trim();
-  t = t.replace(/^naman\s+ias\s*[-–—:|]?\s*/i, "");
-  t = t.replace(/\s+/g, " ").trim();
-  if (t.length > 42) t = `${t.slice(0, 40).trimEnd()}…`;
+  let raw = String(title || "").replace(/\s+/g, " ").trim();
+  raw = raw.replace(/^naman\s+ias\s*[-–—:|]?\s*/i, "").trim();
+  if (!raw) return "Course";
+
+  if (/safalta/i.test(raw) && /foundation/i.test(raw)) {
+    const month = raw.match(
+      /\b(january|february|march|april|may|june|july|august|september|sept|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec)\s+(20\d{2})\b/i,
+    );
+    const range = raw.match(/\b(20\d{2})\s*\/\s*(\d{2,4})\b/);
+    let suffix = "";
+    if (month) suffix = ` ${MONTHS[month[1].toLowerCase()] || month[1]} ${month[2]}`;
+    else if (range) suffix = ` ${range[1]}/${range[2]}`;
+    return `GS Foundation — SAFALTA${suffix}`;
+  }
+
+  let t = raw.replace(/\s+by\s+naman\s+sir\b/gi, "");
+  t = t.replace(/^upsc\s+/i, "");
+  t = t.replace(/\bcomplete\s+course\b/gi, "");
+  t = t.replace(/\s+for\s+upsc\b.*$/i, "");
+  t = t.replace(/\s*\|\s*/g, " ").replace(/\s+/g, " ").trim();
+  t = t.replace(/[\s–—-]+$/g, "").trim();
   return t || "Course";
 }
 
@@ -139,14 +186,18 @@ function paymentWord(n: number): string {
   return `${n} payment${n === 1 ? "" : "s"}`;
 }
 
-function sourceLine(c: CollectionMetrics): string {
-  const bits = (["online", "manual"] as CollectionSource[]).map((key) => {
-    const row = c.sources.find((s) => s.key === key);
-    return `${SOURCE_LABEL[key]} ${inrExact(row?.amount || 0)}`;
-  });
-  const other = c.sources.find((s) => s.key === "other");
-  if (other && other.amount !== 0) bits.push(`${SOURCE_LABEL.other} ${inrExact(other.amount)}`);
-  return bits.join(" · ");
+function sourceAmount(c: CollectionMetrics, key: CollectionSource): number {
+  return c.sources.find((s) => s.key === key)?.amount || 0;
+}
+
+function sourceBullets(c: CollectionMetrics): string[] {
+  const lines = [
+    `• Online — ${inrExact(sourceAmount(c, "online"))}`,
+    `• Staff recorded — ${inrExact(sourceAmount(c, "manual"))}`,
+  ];
+  const other = sourceAmount(c, "other");
+  if (other !== 0) lines.push(`• Other — ${inrExact(other)}`);
+  return lines;
 }
 
 function purposeLines(c: CollectionMetrics): string[] {
@@ -154,60 +205,68 @@ function purposeLines(c: CollectionMetrics): string[] {
   for (const key of CATEGORY_DISPLAY) {
     const cat = c.categories.find((x) => x.key === key);
     if (!cat || (cat.payments === 0 && cat.amount === 0)) continue;
-    lines.push(`${CATEGORY_LABEL[key]}  ${inrExact(cat.amount)}`);
+    lines.push(`• ${CATEGORY_LABEL[key]} — ${inrExact(cat.amount)}`);
   }
   return lines;
 }
 
-function trackedSince(ymd: string | null): string {
-  if (!ymd || !/^\d{4}-\d{2}-\d{2}$/.test(ymd)) return "Since tracking began";
-  const [y, m, d] = ymd.split("-").map(Number);
-  const month = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][m - 1];
-  if (!month) return "Since tracking began";
-  return `Since ${d} ${month} ${y}`;
+function highlightSources(c: CollectionMetrics): string {
+  const bits = [`Online ${inrExact(sourceAmount(c, "online"))}`, `Staff ${inrExact(sourceAmount(c, "manual"))}`];
+  const other = sourceAmount(c, "other");
+  if (other !== 0) bits.push(`Other ${inrExact(other)}`);
+  return bits.join(" · ");
+}
+
+function sourceSummary(sources: WebinarSourceBrief[] | null, limit?: number): string | null {
+  if (sources == null) return null;
+  const rows = sources.filter((s) => s.count > 0);
+  const shown = limit ? rows.slice(0, limit) : rows;
+  if (!shown.length) return null;
+  return shown.map((s) => `${escapeHtml(s.label)} ${s.count}`).join(" · ");
+}
+
+function attentionItem(item: string): string {
+  const raw = String(item || "").trim();
+  if (/^webinar/i.test(raw)) return "Webinar";
+  if (/seat/i.test(raw)) return "Seat booking";
+  if (/installment/i.test(raw)) return "Installment";
+  if (/full/i.test(raw)) return "Full payment";
+  const head = raw.split("—")[0].trim();
+  return head || "Payment";
 }
 
 function collectionBody(input: Pick<BriefInput, "today" | "yesterday" | "mtd">): string[] {
   const body: string[] = [];
   if (!input.today && !input.yesterday && !input.mtd) return body;
-  body.push("<i>Collected is money received on a paid receipt, not the course fee or what is still owed.</i>");
 
   if (input.today) {
-    body.push("");
-    body.push(`<b>Today</b>  <b>${inrExact(input.today.netCollection)}</b>`);
-    body.push(sourceLine(input.today));
-    body.push(`${paymentWord(input.today.successfulPayments)} · ${input.today.payingStudents} students`);
+    body.push(`<b>Today</b> — <b>${inrExact(input.today.netCollection)}</b>`);
+    body.push(...sourceBullets(input.today));
+    body.push(`• ${paymentWord(input.today.successfulPayments)} · ${input.today.payingStudents} students`);
     if (input.today.refundAmount > 0) {
-      body.push(`Gross ${inrExact(input.today.grossCollection)} · Refunds ${inrExact(input.today.refundAmount)}`);
-    }
-    if (input.today.paymentsWithoutPhone > 0) {
-      body.push(`<i>${input.today.paymentsWithoutPhone} payments have no mobile, so they are not in the student count.</i>`);
+      body.push(`• Gross ${inrExact(input.today.grossCollection)} · Refunds ${inrExact(input.today.refundAmount)}`);
     }
   }
 
   if (input.yesterday) {
-    body.push("");
-    body.push(
-      `<b>Yesterday</b>  ${inrExact(input.yesterday.netCollection)} · ${paymentWord(input.yesterday.successfulPayments)}`,
-    );
+    if (body.length) body.push("");
+    body.push(`<b>Yesterday</b> — ${inrExact(input.yesterday.netCollection)}`);
+    body.push(`• ${paymentWord(input.yesterday.successfulPayments)}`);
   }
 
   if (input.mtd) {
-    body.push("");
-    body.push(`<b>Month to date</b>  <b>${inrExact(input.mtd.netCollection)}</b>`);
-    body.push(sourceLine(input.mtd));
-    body.push(`${paymentWord(input.mtd.successfulPayments)} · ${input.mtd.payingStudents} students`);
+    if (body.length) body.push("");
+    body.push(`<b>Month to Date</b> — <b>${inrExact(input.mtd.netCollection)}</b>`);
+    body.push(...sourceBullets(input.mtd));
+    body.push(`• ${paymentWord(input.mtd.successfulPayments)} · ${input.mtd.payingStudents} students`);
     if (input.mtd.refundAmount > 0) {
-      body.push(`Gross ${inrExact(input.mtd.grossCollection)} · Refunds ${inrExact(input.mtd.refundAmount)}`);
-      body.push("<i>Online, staff and purpose figures are before refunds.</i>");
+      body.push(`• Gross ${inrExact(input.mtd.grossCollection)} · Refunds ${inrExact(input.mtd.refundAmount)}`);
     }
-    body.push("<i>Staff recorded is cash, UPI or bank entered by the team. It is already inside the total.</i>");
-    body.push("<i>Paying students counts a person once, even if they paid more than once.</i>");
     const purposes = purposeLines(input.mtd);
     if (purposes.length) {
       body.push("");
-      body.push("<i>What this month's receipts were for</i>");
-      for (const row of purposes) body.push(row);
+      body.push("<b>Receipt Mix</b>");
+      body.push(...purposes);
     }
   }
   return body;
@@ -216,82 +275,77 @@ function collectionBody(input: Pick<BriefInput, "today" | "yesterday" | "mtd">):
 function studentBody(people: PeopleMetrics | null, login: LoginTrendBrief | null): string[] {
   const body: string[] = [];
   const unique = people?.uniqueLoginUsers ?? login?.todayFallback ?? null;
-  if (people?.newAccounts != null) body.push(`New accounts  ${people.newAccounts}`);
-  if (unique != null) {
-    body.push(`Unique logins  <b>${unique}</b>`);
-    body.push("<i>Students who signed in. A second sign-in does not add another.</i>");
-  }
-  if (people?.loginEvents != null) {
-    body.push(`Login events  ${people.loginEvents}`);
-    body.push("<i>Every sign-in. One student can add more than one.</i>");
-  }
-  if (people?.activeUsers != null) {
-    body.push(`Active students  <b>${people.activeUsers}</b>`);
-    body.push("<i>Signed in, or opened the portal, a class or a course.</i>");
-  }
-  if (people?.returningActiveUsers != null) {
-    body.push(`Returning  ${people.returningActiveUsers}`);
-    body.push("<i>Active today, and not a new account.</i>");
-  }
+  if (people?.newAccounts != null) body.push(`• New accounts — ${people.newAccounts}`);
+  if (unique != null) body.push(`• Unique logins — <b>${unique}</b>`);
+  if (people?.loginEvents != null) body.push(`• Login events — ${people.loginEvents}`);
+  if (people?.activeUsers != null) body.push(`• Active students — <b>${people.activeUsers}</b>`);
+  if (people?.returningActiveUsers != null) body.push(`• Returning active — ${people.returningActiveUsers}`);
 
   const trend: string[] = [];
-  if (unique != null) trend.push(`Today  <b>${unique}</b>`);
-  if (login?.yesterday != null) trend.push(`Yesterday  ${login.yesterday}`);
-  if (login?.avg30 != null) {
-    trend.push(`30-day average  ${login.avg30}`);
-    trend.push("<i>Last 30 complete days, including quiet days.</i>");
-  }
-  if (login?.historicalAvg != null) {
-    trend.push(`${trackedSince(login.firstTrackedYmd)}  ${login.historicalAvg}`);
-    trend.push("<i>Average of complete days that had a sign-in. Today is not included.</i>");
-  } else if (login && login.historicalAvg == null && login.avg30 == null && login.yesterday == null) {
-    /* nothing else known */
-  }
+  if (login?.yesterday != null) trend.push(`Yesterday ${login.yesterday}`);
+  if (login?.avg30 != null) trend.push(`30-day avg ${login.avg30}`);
+  if (login?.avg90 != null) trend.push(`90-day avg ${login.avg90}`);
   if (trend.length) {
     body.push("");
-    body.push("<b>Login trend</b>");
-    body.push("<i>Today matches unique logins above.</i>");
-    for (const row of trend) body.push(row);
+    body.push("<b>Login Trend</b>");
+    body.push(trend.join(" · "));
   }
   return body;
 }
 
 function admissionBody(admissions: AdmissionMetrics | null): string[] {
   if (!admissions) return [];
-  const body = [`New admissions  <b>${admissions.admissions}</b>`];
+  if (admissions.admissions <= 0) return ["No new admissions today"];
+  const body = [`<b>${admissions.admissions} new admission${admissions.admissions === 1 ? "" : "s"}</b>`];
   for (const course of admissions.byCourse) {
-    body.push(`${escapeHtml(shortCourseTitle(course.title))}  ${course.admissions}`);
+    if (course.admissions <= 0) continue;
+    body.push(`• ${escapeHtml(shortCourseTitle(course.title))} — ${course.admissions}`);
   }
   return body;
 }
 
+function smsBits(row: { sent: number; delivered: number; failed: number; pending: number; queued: number }, withSent: boolean): string {
+  const bits: string[] = [];
+  if (withSent) bits.push(`${row.sent} sent`);
+  bits.push(`${row.delivered} delivered`);
+  if (row.failed > 0) bits.push(`${row.failed} failed`);
+  if (row.pending > 0) bits.push(`${row.pending} pending`);
+  if (row.queued > 0) bits.push(`${row.queued} queued`);
+  return bits.join(" · ");
+}
+
 function smsBody(sms: SmsDeliveryMetrics | null): string[] {
-  if (!sms) return ["<i>Unavailable for this run.</i>"];
-  const body = [
-    "<i>Sent means the provider accepted it. Delivered means the phone confirmed it. A retry counts again. A delivery receipt does not.</i>",
-    `Sent  <b>${sms.sent}</b>`,
-    `Delivered  <b>${sms.delivered}</b>`,
-    `Failed  ${sms.failed}`,
-    `Pending  ${sms.pending}`,
-  ];
-  if (sms.queued > 0) body.push(`Still queued  ${sms.queued}`);
-  for (const t of sms.templates) {
-    const bits = [`Sent ${t.sent}`, `Delivered ${t.delivered}`, `Failed ${t.failed}`];
-    if (t.pending > 0) bits.push(`Pending ${t.pending}`);
-    if (t.queued > 0) bits.push(`Queued ${t.queued}`);
-    body.push(`${escapeHtml(t.name)}  ${bits.join(" · ")}`);
+  if (!sms) return ["Unavailable for this run."];
+  if (sms.sent === 0 && sms.queued === 0 && sms.pending === 0) return ["No SMS sent today"];
+  const body = [`Sent ${sms.sent} · Delivered ${sms.delivered} · Failed ${sms.failed}${sms.queued > 0 ? ` · Queued ${sms.queued}` : ""}${sms.pending > 0 ? ` · Pending ${sms.pending}` : ""}`];
+  const terminal = sms.delivered + sms.failed;
+  if (sms.failed > 0 && terminal > 0) {
+    body.push(`Delivery rate ${Math.round((sms.delivered / terminal) * 100)}%`);
+  }
+  if (sms.templates.length) {
+    body.push("");
+    body.push("<b>By Template</b>");
+    for (const t of sms.templates) {
+      body.push(`• ${escapeHtml(t.name)} — ${smsBits(t, true)}`);
+    }
   }
   return body;
 }
 
 function webinarBody(webinar: WebinarBrief | null): string[] {
   if (!webinar) return [];
-  if (webinar.registered <= 0 && webinar.pendingCheckout <= 0) return [];
+  const quiet = webinar.registered <= 0 && webinar.pendingCheckout <= 0 && !(webinar.newToday && webinar.newToday > 0);
+  if (quiet) return [];
   const body = [`<b>${escapeHtml(webinar.title)}</b>`];
-  if (webinar.dateLabel) body.push(`<i>${escapeHtml(webinar.dateLabel)}</i>`);
-  body.push(`Paid registrations  <b>${webinar.registered}</b>`);
-  if (webinar.pendingCheckout > 0) body.push(`Pending checkout  ${webinar.pendingCheckout}`);
-  if (webinar.attendedLastPct != null) body.push(`Last attendance  ${webinar.attendedLastPct}%`);
+  if (webinar.dateLabel) body.push(escapeHtml(webinar.dateLabel));
+  body.push(`• Paid registrations — <b>${webinar.registered}</b>`);
+  if (webinar.newToday != null) body.push(`• New today — <b>${webinar.newToday}</b>`);
+  if (webinar.pendingCheckout > 0) body.push(`• Pending checkout — ${webinar.pendingCheckout}`);
+  if (webinar.attendedLastPct != null) body.push(`• Last attendance — ${webinar.attendedLastPct}%`);
+  body.push("");
+  body.push("<b>Sources</b>");
+  const sources = sourceSummary(webinar.sources);
+  body.push(sources || "Source attribution unavailable");
   return body;
 }
 
@@ -299,9 +353,8 @@ function courseBody(courses: CourseBrief[]): string[] {
   const body: string[] = [];
   for (const c of courses.filter((x) => x.total > 0)) {
     if (body.length) body.push("");
-    const seats =
-      c.capacity != null && c.capacity > 0 ? `${c.total} of ${c.capacity}` : `${c.total}`;
-    body.push(`<b>${escapeHtml(shortCourseTitle(c.title))}</b>  ${seats}`);
+    const seats = c.capacity != null && c.capacity > 0 ? `${c.total}/${c.capacity}` : `${c.total}`;
+    body.push(`<b>${escapeHtml(shortCourseTitle(c.title))}</b> — ${seats}`);
     if (c.modeOk) body.push(`Online ${c.online} · Offline ${c.offline}`);
     else if (!c.modeEmpty) {
       body.push(`Online ${c.online} · Offline ${c.offline} · Unmapped ${c.total - c.online - c.offline}`);
@@ -310,7 +363,7 @@ function courseBody(courses: CourseBrief[]): string[] {
     else if (!c.timingEmpty) {
       body.push(`Morning ${c.morning} · Evening ${c.evening} · Unmapped ${c.total - c.morning - c.evening}`);
     }
-    const pay = [`Full paid ${c.fullPaid}`, `Partial ${c.partial}`];
+    const pay = [`Full ${c.fullPaid}`, `Partial ${c.partial}`];
     if (c.unpaid > 0) pay.push(`Unpaid ${c.unpaid}`);
     body.push(pay.join(" · "));
   }
@@ -319,59 +372,102 @@ function courseBody(courses: CourseBrief[]): string[] {
 
 function outstandingBody(o: OutstandingBrief | null): string[] {
   if (!o || (o.overdueCount <= 0 && o.due7dAmount <= 0)) return [];
-  const body = ["<i>Still owed. This is not money received.</i>"];
-  if (o.overdueCount > 0) body.push(`Overdue  <b>${inrExact(o.overdueAmount)}</b> · ${o.overdueCount} students`);
-  if (o.due7dAmount > 0) body.push(`Due this week  <b>${inrExact(o.due7dAmount)}</b>`);
+  const body: string[] = [];
+  if (o.overdueCount > 0) body.push(`• Overdue — <b>${inrExact(o.overdueAmount)}</b> · ${o.overdueCount} students`);
+  if (o.due7dAmount > 0) body.push(`• Due this week — <b>${inrExact(o.due7dAmount)}</b>`);
   return body;
 }
 
 function failedBody(failed: FailedBrief[]): string[] {
-  if (!failed.length) return [];
-  const body = [`<b>${failed.length} failed attempt${failed.length === 1 ? "" : "s"} today</b>`];
-  failed.slice(0, 6).forEach((p, idx) => {
-    body.push(`${idx + 1}. ${escapeHtml(p.name)}  ${inrExact(p.amount)}`);
-    const status = p.recovered ? "Later paid" : "Still failed";
-    body.push(`${escapeHtml(p.item)} · ${escapeHtml(p.when)} · ${status}`);
-    if (p.reason) body.push(escapeHtml(p.reason));
+  if (!failed.length) return ["No unresolved payment failures"];
+  const unresolved = failed.filter((p) => !p.recovered).length;
+  const body = [
+    `<b>${failed.length} failed attempt${failed.length === 1 ? "" : "s"}</b> · ${unresolved} unresolved`,
+  ];
+  failed.slice(0, 6).forEach((p) => {
+    const mark = p.recovered ? "🟢" : "🔴";
+    const status = p.recovered ? "<i>Later paid</i>" : "<i>Still failed</i>";
+    body.push("");
+    body.push(`${mark} ${escapeHtml(p.name)} — ${inrExact(p.amount)}`);
+    body.push(`${escapeHtml(attentionItem(p.item))} · ${escapeHtml(p.when)} · ${status}`);
   });
-  if (failed.length > 6) body.push(`…and ${failed.length - 6} more`);
+  if (failed.length > 6) body.push(`• ${failed.length - 6} more`);
+  return body;
+}
+
+function highlightsBody(input: BriefInput): string[] {
+  const body: string[] = [];
+  const unique = input.people?.uniqueLoginUsers ?? input.login?.todayFallback ?? null;
+
+  if (input.today) {
+    body.push(`💰 <b>${inrExact(input.today.netCollection)}</b> collected today`);
+    body.push(highlightSources(input.today));
+  }
+
+  if (input.webinar && (input.webinar.registered > 0 || (input.webinar.newToday || 0) > 0 || input.webinar.pendingCheckout > 0)) {
+    if (body.length) body.push("");
+    const today = input.webinar.newToday != null ? `+${input.webinar.newToday} today · ` : "";
+    const pending = input.webinar.pendingCheckout > 0 ? ` · ${input.webinar.pendingCheckout} pending` : "";
+    body.push(`📣 Webinar: ${today}<b>${input.webinar.registered}</b> paid total${pending}`);
+    const sources = sourceSummary(input.webinar.sources, 4);
+    body.push(sources || "Source attribution unavailable");
+  }
+
+  const activity: string[] = [];
+  if (input.people?.newAccounts != null) activity.push(`${input.people.newAccounts} new`);
+  if (unique != null) activity.push(`${unique} logged in`);
+  if (input.people?.activeUsers != null) activity.push(`${input.people.activeUsers} active`);
+  if (activity.length) {
+    if (body.length) body.push("");
+    body.push(`👥 Activity: ${activity.join(" · ")}`);
+  }
+
+  if (input.sms) {
+    if (body.length) body.push("");
+    body.push(`📱 SMS: ${input.sms.sent} sent · ${input.sms.delivered} delivered · ${input.sms.failed} failed`);
+  }
+
+  const unresolved = input.failed.filter((p) => !p.recovered).length;
+  if (unresolved > 0) {
+    if (body.length) body.push("");
+    body.push(`⚠️ Payments: <b>${unresolved}</b> unresolved failure${unresolved === 1 ? "" : "s"}`);
+  }
   return body;
 }
 
 export function executiveBriefLines(input: BriefInput): string[] {
   const lines: string[] = [];
-  lines.push("<b>NAMAN IAS | EXECUTIVE BRIEF</b>");
-  lines.push(`${escapeHtml(input.dateLabel)} | ${escapeHtml(input.timeLabel)} IST`);
-  lines.push(`<i>Live figures through ${escapeHtml(input.timeLabel)}</i>`);
+  lines.push(RULE);
+  lines.push("<b>NAMAN IAS — EXECUTIVE BRIEF</b>");
+  lines.push(`${escapeHtml(input.dateLabel)} · ${escapeHtml(input.timeLabel)} IST`);
+  lines.push(RULE);
 
   const opened = { value: false };
+  const highlights = highlightsBody(input);
+  if (highlights.length) {
+    lines.push("");
+    lines.push(heading("⚡", "KEY HIGHLIGHTS"));
+    for (const row of highlights) lines.push(row);
+    opened.value = true;
+  }
+
   pushMajor(lines, opened, "💰", "COLLECTIONS", collectionBody(input));
   pushMajor(lines, opened, "👥", "STUDENTS &amp; ACTIVITY", studentBody(input.people, input.login));
-  pushMajor(lines, opened, "🎓", "ADMISSIONS TODAY", admissionBody(input.todayAdmissions));
   pushMajor(lines, opened, "📱", "SMS DELIVERY", smsBody(input.sms));
   pushMajor(lines, opened, "📣", "WEBINAR", webinarBody(input.webinar));
+  pushMajor(lines, opened, "🎓", "ADMISSIONS TODAY", admissionBody(input.todayAdmissions));
   pushMajor(lines, opened, "📚", "COURSE ADMISSIONS", courseBody(input.courses));
   pushMajor(lines, opened, "📋", "OUTSTANDING FEES", outstandingBody(input.outstanding));
+  pushMajor(lines, opened, "⚠️", "PAYMENT ATTENTION", failedBody(input.failed));
 
-  const failed = failedBody(input.failed);
-  if (failed.length) {
-    lines.push("");
-    lines.push(RULE);
-    lines.push("");
-    for (const row of failed) lines.push(row);
-  }
   if (input.morningNote) {
     lines.push("");
     lines.push(input.morningNote);
   }
-  if (input.manualValidation) {
-    lines.push("");
-    lines.push("<i>Manually triggered live-data validation.</i>");
-  }
   return lines;
 }
 
-const CONTINUED = "<b>NAMAN IAS | EXECUTIVE BRIEF</b>\n<i>Continued</i>";
+const CONTINUED = "<b>NAMAN IAS — EXECUTIVE BRIEF</b>\n<i>Continued</i>";
 
 /** One message when it fits. Otherwise two, split on a section heading. */
 export function packTelegramMessages(lines: string[], limit = 3900): string[] {
@@ -380,7 +476,7 @@ export function packTelegramMessages(lines: string[], limit = 3900): string[] {
 
   const heads = lines
     .map((line, index) => ({ index, line }))
-    .filter(({ line }) => /^(💰|👥|🎓|📱|📣|📚|📋) /u.test(line));
+    .filter(({ line }) => /^(💰|👥|🎓|📱|📣|📚|📋|⚠️) /u.test(line));
 
   let fallback: [string, string] | null = null;
   for (const head of heads) {
@@ -408,46 +504,44 @@ export function monthlyBusinessHtml(input: {
   sms?: SmsDeliveryMetrics | null;
 }): string {
   const lines: string[] = [];
-  lines.push("<b>NAMAN IAS | MONTHLY BRIEF</b>");
+  lines.push(RULE);
+  lines.push("<b>NAMAN IAS — MONTHLY BRIEF</b>");
   lines.push(`<b>${escapeHtml(input.label)}</b>`);
+  lines.push(RULE);
   const opened = { value: false };
   const monthBody = [
-    "<i>Collected is money received on a paid receipt, not the course fee or what is still owed.</i>",
-    "",
-    `<b>Collected</b>  <b>${inrExact(input.money.netCollection)}</b>`,
-    sourceLine(input.money),
-    `${paymentWord(input.money.successfulPayments)} · ${input.money.payingStudents} students`,
+    `<b>Collected</b> — <b>${inrExact(input.money.netCollection)}</b>`,
+    ...sourceBullets(input.money),
+    `• ${paymentWord(input.money.successfulPayments)} · ${input.money.payingStudents} students`,
   ];
   if (input.money.refundAmount > 0) {
-    monthBody.push(`Gross ${inrExact(input.money.grossCollection)} · Refunds ${inrExact(input.money.refundAmount)}`);
-    monthBody.push("<i>Online, staff and purpose figures are before refunds.</i>");
+    monthBody.push(`• Gross ${inrExact(input.money.grossCollection)} · Refunds ${inrExact(input.money.refundAmount)}`);
   }
-  monthBody.push("<i>Staff recorded is cash, UPI or bank entered by the team. It is already inside the total.</i>");
-  monthBody.push("<i>Paying students counts a person once, even if they paid more than once.</i>");
   const purposes = purposeLines(input.money);
   if (purposes.length) {
     monthBody.push("");
-    monthBody.push("<i>What the month's receipts were for</i>");
-    for (const row of purposes) monthBody.push(row);
+    monthBody.push("<b>Receipt Mix</b>");
+    monthBody.push(...purposes);
   }
   pushMajor(lines, opened, "💰", "COLLECTIONS", monthBody);
   pushMajor(lines, opened, "👥", "STUDENTS &amp; ACTIVITY", studentBody(input.people, null));
-  const adm = [
-    `New admissions  <b>${input.admissions.admissions}</b>`,
-    `Students  ${input.admissions.students}`,
-  ];
-  for (const course of input.admissions.byCourse) {
-    adm.push(`${escapeHtml(shortCourseTitle(course.title))}  ${course.admissions}`);
-  }
+  const adm =
+    input.admissions.admissions <= 0
+      ? ["No new admissions"]
+      : [
+          `<b>${input.admissions.admissions} new admission${input.admissions.admissions === 1 ? "" : "s"}</b>`,
+          `• Students — ${input.admissions.students}`,
+          ...input.admissions.byCourse
+            .filter((course) => course.admissions > 0)
+            .map((course) => `• ${escapeHtml(shortCourseTitle(course.title))} — ${course.admissions}`),
+        ];
   pushMajor(lines, opened, "🎓", "ADMISSIONS", adm);
   if (input.sms) pushMajor(lines, opened, "📱", "SMS DELIVERY", smsBody(input.sms));
   if (input.money.payingStudents > 0) {
     lines.push("");
     lines.push(RULE);
     lines.push("");
-    lines.push(
-      `Average per paying student  ${inrExact(input.money.netCollection / input.money.payingStudents)}`,
-    );
+    lines.push(`Average per paying student — ${inrExact(input.money.netCollection / input.money.payingStudents)}`);
   }
   return lines.join("\n");
 }

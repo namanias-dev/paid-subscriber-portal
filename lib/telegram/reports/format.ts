@@ -109,12 +109,39 @@ export function istNowParts(d = new Date()): {
   };
 }
 
+/** Clock only, Asia/Kolkata, e.g. "5:27 PM". */
+export function formatIstClock(iso: string | Date): string {
+  const d = typeof iso === "string" ? new Date(iso) : iso;
+  if (!Number.isFinite(d.getTime())) return "—";
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Kolkata",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  })
+    .format(d)
+    .replace(/\s*([ap])m\s*$/i, (_, ap) => ` ${String(ap).toUpperCase()}M`);
+}
+
+/** Upcoming event line, e.g. "26 Sept · 4:00 PM". */
+export function formatIstEvent(iso: string | Date): string {
+  const d = typeof iso === "string" ? new Date(iso) : iso;
+  if (!Number.isFinite(d.getTime())) return "";
+  const day = new Intl.DateTimeFormat("en-IN", {
+    timeZone: "Asia/Kolkata",
+    day: "numeric",
+    month: "short",
+  }).format(d);
+  return `${day} · ${formatIstClock(d)}`;
+}
+
 /** Date and clock for the executive brief, in Asia/Kolkata. */
 export function istBriefStamp(d = new Date()): { dateLabel: string; timeLabel: string } {
   const dateLabel = new Intl.DateTimeFormat("en-GB", {
     timeZone: "Asia/Kolkata",
     day: "numeric",
     month: "long",
+    year: "numeric",
   }).format(d);
   const timeLabel = new Intl.DateTimeFormat("en-US", {
     timeZone: "Asia/Kolkata",
