@@ -264,6 +264,24 @@ export default function OrderStatus({ order }: { order: PublicOrder }) {
         <p className="mt-2 text-[15px] leading-relaxed text-[var(--ca-navy)]/75">{narrative.next}</p>
       </section>
 
+      {current.invoice_number && (
+        <section className="mt-4 rounded-[28px] border border-[var(--ca-navy)]/8 bg-white p-5 ns-elev-1">
+          <p className="text-xs font-semibold uppercase tracking-wide text-[var(--ca-gold-dark)]">{current.invoice_document?.replaceAll("_", " ") || "Invoice"}</p>
+          <h2 className="mt-1 font-heading text-lg font-bold text-[var(--ca-navy)]">{current.invoice_number}</h2>
+          <p className="mt-1 text-sm text-[var(--ca-navy)]/70">
+            {current.invoice_status === "READY" ? "Invoice ready" : "Preparing your invoice…"}
+          </p>
+          {current.invoice_status === "READY" && current.access_token && (
+            <a
+              className="mt-3 inline-flex min-h-11 items-center rounded-full bg-[var(--ca-navy)] px-4 text-sm font-semibold text-white"
+              href={`/api/notes/order/${encodeURIComponent(current.order_no)}/invoice?t=${encodeURIComponent(current.access_token)}`}
+            >
+              Download invoice
+            </a>
+          )}
+        </section>
+      )}
+
       <section className="mt-4 rounded-[28px] border border-[var(--ca-navy)]/8 bg-white p-5 ns-elev-1">
         <h2 className="font-heading text-lg font-bold text-[var(--ca-navy)]">Order details</h2>
         <ul className="mt-3 divide-y divide-[var(--ca-navy)]/8">

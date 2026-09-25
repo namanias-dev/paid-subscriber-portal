@@ -38,6 +38,9 @@ export interface PublicOrder {
   delivered_at?: string | null;
   event_at?: string | null;
   issues?: PublicIssue[];
+  invoice_number?: string | null;
+  invoice_status?: string | null;
+  invoice_document?: string | null;
   /** True while EazyPGVerify has not yet written a terminal. */
   confirming: boolean;
   /**
@@ -104,6 +107,11 @@ export async function getPublicOrder(
     .order("created_at", { ascending: false })
     .limit(5);
   const issues = issueError ? [] : (issueRows || []).map((row) => toPublicIssue(row));
+  const { data: invoice } = await db
+    .from("store_invoices")
+    .select("invoice_number,status,document_type")
+    .eq("order_id", order.id)
+    .maybeSingle();
   const pickupMissed = order.status === "PICKUP_SCHEDULED" && /not done|pickup exception|pickup failed/i.test(payload.tracking_activity || "");
   const pickupQueued = payload.pickup_status === "already_in_pickup_queue" || payload.pickup_status === "reattempt_requested";
   const pickupDelayed = pickupMissed && !pickupQueued;
@@ -142,6 +150,9 @@ export async function getPublicOrder(
     delivered_at: order.delivered_at || null,
     event_at: payload.tracking_event_at || null,
     issues,
+    invoice_number: invoice?.invoice_number || null,
+    invoice_status: invoice?.status || null,
+    invoice_document: invoice?.document_type || null,
     confirming: stage === "pending",
     access_token: token,
   };

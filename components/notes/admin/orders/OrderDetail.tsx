@@ -153,6 +153,7 @@ export default function OrderDetail({
   const [issueCustomer, setIssueCustomer] = useState("");
   const [confirmAdvance, setConfirmAdvance] = useState(false);
   const [events, setEvents] = useState<Array<{ id: string; event: string; created_at: string; actor_name?: string | null }>>([]);
+  const [invoice, setInvoice] = useState<{ invoice_number?: string; status?: string; document_type?: string; grand_total_minor?: number } | null>(null);
   const [scans, setScans] = useState<Array<{ activity?: string; time?: string; location?: string }>>([]);
   const [toast, setToast] = useState<string | null>(null);
 
@@ -170,6 +171,13 @@ export default function OrderDetail({
       .then((json) => setEvents(json.events || []))
       .catch(() => setEvents([]));
   }, [order.id, order.updated_at, order.status]);
+
+  useEffect(() => {
+    void fetch(`/api/admin/notes/orders/${order.id}/invoice`, { cache: "no-store" })
+      .then((res) => res.json())
+      .then((json) => setInvoice(json.invoice || null))
+      .catch(() => setInvoice(null));
+  }, [order.id]);
 
   async function copy(text: string) {
     try {
@@ -329,6 +337,20 @@ export default function OrderDetail({
               {(order.shipping_paise || 0) > 0 && <div className="flex justify-between"><dt>Shipping</dt><dd>{formatPaise(order.shipping_paise || 0)}</dd></div>}
               <div className="flex justify-between font-semibold text-[var(--ca-navy)]"><dt>Total</dt><dd>{formatPaise(order.total_paise)}</dd></div>
             </dl>
+          </section>
+
+          <section className="rounded-2xl bg-white p-4">
+            <h2 className="font-heading text-lg font-bold text-[var(--ca-navy)]">Invoice</h2>
+            {invoice?.invoice_number ? (
+              <div className="mt-2 text-sm text-[var(--ca-navy)]">
+                <p>{invoice.document_type?.replaceAll("_", " ")} · {invoice.invoice_number} · {invoice.status}</p>
+                {invoice.status === "READY" && (
+                  <a className="mt-2 inline-flex min-h-11 items-center font-semibold" href={`/api/admin/notes/orders/${order.id}/invoice?download=1`}>Download PDF</a>
+                )}
+              </div>
+            ) : (
+              <p className="mt-2 text-sm text-[var(--ca-navy)]/60">No invoice on this order.</p>
+            )}
           </section>
 
           <section className="rounded-2xl bg-white p-4">

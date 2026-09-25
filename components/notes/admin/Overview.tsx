@@ -5,6 +5,7 @@ import Link from "next/link";
 import { PageHeader } from "@/components/admin/ui";
 import StoreStatusControl from "@/components/notes/admin/StoreStatusControl";
 import FulfillmentSettings from "@/components/notes/admin/FulfillmentSettings";
+import InvoiceSettingsCard from "@/components/notes/admin/InvoiceSettingsCard";
 
 interface Cards {
   orders_today: number;
@@ -102,6 +103,7 @@ export default function NotesOverview() {
 
       <StoreStatusControl />
       <FulfillmentSettings />
+      <InvoiceSettingsCard />
 
       {loading || !cards ? (
         <p className="text-sm text-muted">Loading…</p>
