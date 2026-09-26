@@ -2590,6 +2590,45 @@ export async function getWebinarBySlugCached(slug: string): Promise<Webinar | nu
 }
 
 /**
+ * Any stored webinar by slug, including completed/inactive rows the public list
+ * hides. Draft filtering happens in the public state resolver — this read exists
+ * so historical URLs can recover traffic instead of 404ing. Tagged with the
+ * public webinar cache so an admin publish/close shows up with the rest.
+ */
+const loadRecoverableWebinarBySlug = unstable_cache(
+  async (slug: string): Promise<Webinar | null> => {
+    const s = (slug || "").trim();
+    if (!s) return null;
+    if (demoMode()) return mock.webinars.find((w) => w.slug === s) ?? null;
+    const db = getSupabaseDataCache();
+    if (!db) return mock.webinars.find((w) => w.slug === s) ?? null;
+    const { data, error } = await db.from("webinars").select("*").eq("slug", s).maybeSingle();
+    if (error) throw new Error(`getRecoverableWebinarBySlug: ${error.message}`);
+    return (data as Webinar | null) ?? null;
+  },
+  ["webinar-recovery-by-slug"],
+  { revalidate: 300, tags: [PUBLIC_CACHE_TAGS.webinars] },
+);
+
+export async function getRecoverableWebinarBySlug(slug: string): Promise<Webinar | null> {
+  return loadRecoverableWebinarBySlug((slug || "").trim());
+}
+
+/**
+ * Public page loader. Active webinars come from the shared list. A miss falls
+ * through to the historical row so an ended event can still be recognised.
+ */
+export async function getWebinarForPublicDisplay(slug: string): Promise<Webinar | null> {
+  try {
+    const active = await getWebinarBySlugCached(slug);
+    if (active) return active;
+  } catch {
+    // The public list failed. A direct slug read can still recognise a historical row.
+  }
+  return getRecoverableWebinarBySlug(slug);
+}
+
+/**
  * Live webinar by slug — admin client, cache:"no-store". Required for checkout,
  * coupons, capacity, and any POST / server action / webhook / mutation.
  */
