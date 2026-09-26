@@ -7,6 +7,7 @@ import { calculateStorePrice, offerDiscountLabel, type OfferForPricing } from "@
 import { notesProductPath } from "@/lib/store/paths";
 import { trackClient } from "@/lib/analytics/client";
 import NotebookStack from "./NotebookStack";
+import { landingNotebookImage } from "@/lib/store/landingImage";
 
 function cardTitle(product: StoreProductCard): string {
   return product.short_name || product.category_name || product.subject || product.name;
@@ -60,6 +61,7 @@ export default function SubjectRail({
           const badge = view?.badge || null;
           const href = notesProductPath(product.slug);
           const title = cardTitle(product);
+          const image = landingNotebookImage(product);
 
           return (
             <article key={product.id} className="ns-product-card w-[82vw] max-w-[300px] shrink-0 snap-center sm:w-auto sm:max-w-none">
@@ -87,7 +89,7 @@ export default function SubjectRail({
                   ) : null}
                 </div>
                 <div className="pointer-events-none px-7 py-4">
-                  <NotebookStack coverUrl={product.cover_url} title={title} subject={title} />
+                  <NotebookStack coverUrl={image.url} fit={image.fit} title={title} subject={title} />
                 </div>
                 <div className="px-4 pb-4">
                   {available && priced ? (

@@ -4,22 +4,24 @@ import { useState } from "react";
 import Image from "next/image";
 
 /**
- * Physical notes composition. A real product cover sits inside the notebook
- * face when `coverUrl` is present. The admin cover is 4:3, so it is contained
- * (never stretched, never edge-cropped) on the 4:5 notebook. Missing or broken
- * covers keep the navy booklet fallback.
+ * Physical notes composition. A dedicated 4:5 landing thumbnail fills the
+ * notebook (`fit="cover"`). A 4:3 product cover is contained so it is not
+ * cropped. Missing or broken images keep the navy booklet fallback.
  */
 export default function NotebookStack({
   coverUrl,
   title,
   subject,
   eager = false,
+  fit = "contain",
 }: {
   coverUrl?: string | null;
   title?: string | null;
   subject?: string | null;
   /** Above-the-fold callers may opt into eager loading. Landing cards stay lazy. */
   eager?: boolean;
+  /** `cover` fills a dedicated 4:5 thumbnail. `contain` keeps a 4:3 cover uncropped. */
+  fit?: "cover" | "contain";
 }) {
   const [failedUrl, setFailedUrl] = useState<string | null>(null);
   const showCover = Boolean(coverUrl) && failedUrl !== coverUrl;
@@ -41,8 +43,8 @@ export default function NotebookStack({
             src={coverUrl}
             alt={title || "UPSC notes"}
             fill
-            sizes="(max-width: 640px) 70vw, 320px"
-            className="object-contain"
+            sizes="(max-width: 639px) 280px, 320px"
+            className={fit === "cover" ? "object-cover" : "object-contain"}
             priority={eager}
             onError={() => setFailedUrl(coverUrl)}
           />

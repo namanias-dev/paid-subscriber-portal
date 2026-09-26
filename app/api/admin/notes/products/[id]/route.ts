@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { requirePermission } from "@/lib/adminGuard";
 import { storeDb } from "@/lib/store/db";
 import { revalidateTag } from "next/cache";
-import { STORE_CACHE_TAG } from "@/lib/store/catalogue";
+import { STORE_CACHE_TAG, publicStoreMediaUrl } from "@/lib/store/catalogue";
 import { assertActiveSellingPrice, normalizeStoreProductPrices } from "@/lib/store/productPrice";
 import { applyProductContentFields, publicProductSaveError } from "@/lib/store/productAdmin";
 import { deleteProductMedia, listProductMedia } from "@/lib/store/media/upload";
@@ -96,6 +96,9 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
       is_bestseller: p.is_bestseller,
       archived: !!p.archived_at,
       cover_image_key: p.cover_image_key,
+      cover_url: publicStoreMediaUrl(p.cover_image_key),
+      store_thumbnail_image_key: p.store_thumbnail_image_key ?? null,
+      store_thumbnail_url: publicStoreMediaUrl(p.store_thumbnail_image_key),
       seo_title: p.seo_title,
       seo_description: p.seo_description,
       paid_demand: paidDemand,
