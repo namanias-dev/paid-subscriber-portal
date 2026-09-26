@@ -1,10 +1,16 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import test from "node:test";
+import fontkit from "@pdf-lib/fontkit";
 import { PDFDocument } from "pdf-lib";
-import { renderInvoicePdf } from "../../lib/store/invoice/pdf";
+import sharp from "sharp";
+import { invoiceLogoDrawSize, renderInvoicePdf } from "../../lib/store/invoice/pdf";
 import { INVOICE_URL_TTL_SECONDS, invoiceWorkPlan, paymentAllowsInvoice } from "../../lib/store/invoice/issue";
 import { financialYearLabel, formatInvoiceNumber } from "../../lib/store/invoice/number";
+import { formatRegisteredAddress, normalizeCertificateFloor } from "../../lib/store/invoice/address";
 import { GST_STATE_NAME, validateGstin } from "../../lib/store/invoice/gstin";
+import { prepareInvoiceLogo } from "../../lib/store/invoice/logo";
 import { amountInWords, chooseDocumentType, computeTaxDocument, localTaxKind, splitTax, taxClassificationConfirmed, taxOnAmount } from "../../lib/store/invoice/tax";
 
 test("invoice numbers reset with the Indian financial year and never reuse a width", () => {
@@ -199,3 +205,112 @@ test("a second capture does not allocate another number", () => {
   assert.equal(once("order", "NIA/26-27/00001"), "NIA/26-27/00001");
   assert.equal(once("order", "NIA/26-27/00002"), 1);
 });
+
+test("registered address uses Sector 17C, PIN 160030, and Second Floor", async () => {
+  const raw = normalizeCertificateFloor("SECOUND FLOOR");
+  assert.equal(raw.raw, "SECOUND FLOOR");
+  assert.equal(raw.display, "Second Floor");
+  const lines = formatRegisteredAddress({
+    floorDisplay: "SECOUND FLOOR",
+    building: "SCO-173-174",
+    sector: "17C",
+    city: "CHANDIGARH",
+    state: "CHANDIGARH",
+    pincode: "160030",
+  });
+  assert.deepEqual(lines, [
+    "Second Floor, SCO-173-174",
+    "Sector 17C, Chandigarh",
+    "Chandigarh 160030, India",
+  ]);
+  const joined = lines.join("\n");
+  assert.equal(joined.includes("160017"), false);
+  assert.equal(joined.includes("SECOUND"), false);
+  assert.equal(joined.includes("Sector 17,"), false);
+  assert.equal(joined.split("Chandigarh").length - 1, 2);
+  const doc = await PDFDocument.create();
+  doc.registerFontkit(fontkit);
+  const font = await doc.embedFont(readFileSync(join(process.cwd(), "lib/store/invoice/NotoSans-Regular.ttf")));
+  for (const line of [...lines, "GSTIN: 04CDVPS5346D2Z6"]) {
+    assert.ok(font.widthOfTextAtSize(line, 9) <= 250, line);
+  }
+});
+
+test("invoice logo trims padding, keeps aspect, and stays optional", async () => {
+  const padded = await sharp({
+    create: { width: 900, height: 900, channels: 3, background: { r: 255, g: 255, b: 255 } },
+  })
+    .composite([{
+      input: await sharp({
+        create: { width: 240, height: 48, channels: 3, background: { r: 0, g: 0, b: 0 } },
+      }).png().toBuffer(),
+      left: 80,
+      top: 400,
+    }])
+    .jpeg()
+    .toBuffer();
+  const prepared = await prepareInvoiceLogo(new Uint8Array(padded));
+  assert.ok(prepared);
+  const meta = await sharp(Buffer.from(prepared!)).metadata();
+  assert.equal(meta.format, "png");
+  assert.ok((meta.width || 0) < 400);
+  assert.ok((meta.height || 0) <= 168);
+  assert.ok((meta.width || 0) > (meta.height || 1));
+  const ratio = (meta.width || 1) / (meta.height || 1);
+  assert.ok(Math.abs(ratio - 5) < 0.35);
+  const draw = invoiceLogoDrawSize(meta.width || 1, meta.height || 1);
+  assert.ok(draw.height <= 36 && draw.height > 0);
+  assert.ok(draw.width <= 210);
+  assert.ok(Math.abs(draw.width / draw.height - ratio) < 0.02);
+  assert.equal(await prepareInvoiceLogo(new Uint8Array([1, 2, 3, 4])), null);
+
+  const tax = computeTaxDocument({
+    lines: [{ name: "Indian Polity Notes", sku: "NOTES-POLITY", hsn: "49011010", qty: 1, lineTotalPaise: 239920, discountPaise: 59980, taxTreatment: "nil", taxRateBps: 0 }],
+    shippingPaise: 5900,
+    pricesIncludeTax: true,
+    supplierStateCode: "04",
+    placeOfSupplyCode: "06",
+    chargedTotalPaise: 245820,
+  });
+  const base = {
+    documentType: "BILL_OF_SUPPLY" as const,
+    invoiceNumber: "TEST/26-27/00009",
+    orderNumber: "NIAS-N-TEST",
+    issuedAt: "26 Sep 2026",
+    sellerName: "NAMAN SHARMA IAS ACADEMY",
+    sellerLines: [
+      "Legal name: NAMAN SHARMA",
+      "GSTIN: 04CDVPS5346D2Z6",
+      ...linesForLogo(),
+      "State code: 04",
+    ],
+    buyerLines: ["Student"],
+    shipLines: ["Panchkula, Haryana 134109"],
+    paymentReference: "NIASN-N-TEST",
+    paidAt: null,
+    tax,
+    words: amountInWords(245820),
+    footer: null,
+    attention: null,
+  };
+  const without = Buffer.from(await renderInvoicePdf({ ...base, logoPng: null }));
+  const broken = Buffer.from(await renderInvoicePdf({ ...base, logoPng: new Uint8Array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33]) }));
+  const withLogo = Buffer.from(await renderInvoicePdf({ ...base, logoPng: prepared }));
+  assert.equal(without.subarray(0, 5).toString(), "%PDF-");
+  assert.equal(broken.subarray(0, 5).toString(), "%PDF-");
+  assert.equal(withLogo.subarray(0, 5).toString(), "%PDF-");
+  assert.equal(without.toString("latin1").includes("/Subtype /Image") || without.toString("latin1").includes("/Subtype/Image"), false);
+  assert.equal(/\/Subtype\s*\/Image/.test(withLogo.toString("latin1")), true);
+  assert.ok(withLogo.length < 200_000);
+});
+
+function linesForLogo(): string[] {
+  return formatRegisteredAddress({
+    floorDisplay: "Second Floor",
+    building: "SCO-173-174",
+    sector: "17C",
+    city: "Chandigarh",
+    state: "Chandigarh",
+    pincode: "160030",
+  });
+}

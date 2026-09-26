@@ -61,6 +61,16 @@ function fontFile(): Uint8Array {
   return new Uint8Array(readFileSync(join(process.cwd(), "lib/store/invoice/NotoSans-Regular.ttf")));
 }
 
+const MAX_LOGO_H = 36;
+const MAX_LOGO_W = 210;
+
+/** Contain the mark inside the header box. Never crop, stretch, or grow the page for source pixels. */
+export function invoiceLogoDrawSize(pixelWidth: number, pixelHeight: number): { width: number; height: number } {
+  if (pixelWidth <= 0 || pixelHeight <= 0) return { width: 0, height: 0 };
+  const fit = Math.min(MAX_LOGO_H / pixelHeight, MAX_LOGO_W / pixelWidth);
+  return { width: pixelWidth * fit, height: pixelHeight * fit };
+}
+
 /** A4 invoice. Logo is optional; a missing image keeps the supplier name. */
 export async function renderInvoicePdf(model: InvoicePdfModel): Promise<Uint8Array> {
   const doc = await PDFDocument.create();
@@ -91,12 +101,9 @@ export async function renderInvoicePdf(model: InvoicePdfModel): Promise<Uint8Arr
     page.drawText(value, { x, y, size, font: face, color });
   };
 
-  const logoH = 36;
   if (logo) {
-    const scale = logoH / logo.height;
-    const logoW = Math.min(120, logo.width * scale);
-    const drawH = logoW / (logo.width / logo.height);
-    page.drawImage(logo, { x: M, y: y - drawH, width: logoW, height: drawH });
+    const { width: drawW, height: drawH } = invoiceLogoDrawSize(logo.width, logo.height);
+    page.drawImage(logo, { x: M, y: y - drawH, width: drawW, height: drawH });
     y -= drawH + 8;
   }
   text(model.sellerName, M, 13, NAVY, bold);

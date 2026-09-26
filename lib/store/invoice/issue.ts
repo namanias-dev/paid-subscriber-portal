@@ -6,6 +6,7 @@ import { financialYearLabel, formatInvoiceNumber, invoiceObjectKey } from "./num
 import { PRINTED_NOTES_TAX_PROFILE } from "./profile";
 import { amountInWords, chooseDocumentType, computeTaxDocument, stateCodeFromName, taxClassificationConfirmed, type TaxDocument, type TaxLineInput } from "./tax";
 import { renderInvoicePdf, type InvoicePdfModel } from "./pdf";
+import { formatRegisteredAddress } from "./address";
 import { loadInvoiceLogo } from "./logo";
 
 export interface InvoicePublic {
@@ -212,11 +213,21 @@ export async function ensureStoreInvoice(orderId: string, opts?: { namespace?: "
         legal_name: settings?.legal_name || null,
         trade_name: settings?.trade_name || null,
         address_line: settings?.address_line || null,
+        floor_display: settings?.address_floor_display || null,
+        floor_raw: settings?.address_floor_raw || null,
+        sector: settings?.address_sector || null,
         city: settings?.city || null,
         state: settings?.state || null,
         state_code: settings?.state_code || null,
         pincode: settings?.pincode || null,
-        address: [settings?.address_line, settings?.city, settings?.state, settings?.pincode].filter(Boolean).join(", ") || null,
+        address: formatRegisteredAddress({
+          floorDisplay: settings?.address_floor_display,
+          building: settings?.address_line,
+          sector: settings?.address_sector,
+          city: settings?.city,
+          state: settings?.state,
+          pincode: settings?.pincode,
+        }).join("\n") || null,
         gstin: settings?.gstin || null,
         pan: settings?.pan || null,
         constitution: settings?.constitution || null,
@@ -261,10 +272,15 @@ export async function ensureStoreInvoice(orderId: string, opts?: { namespace?: "
     sellerName: settings?.trade_name || settings?.display_name || "Naman IAS Academy",
     sellerLines: [
       settings?.legal_name ? `Legal name: ${settings.legal_name}` : "",
-      settings?.address_line,
-      [settings?.city, settings?.state, settings?.pincode].filter(Boolean).join(", "),
-      settings?.gstin ? `GSTIN ${settings.gstin}` : "",
-      settings?.state ? `State: ${settings.state}` : "",
+      settings?.gstin ? `GSTIN: ${settings.gstin}` : "",
+      ...formatRegisteredAddress({
+        floorDisplay: settings?.address_floor_display,
+        building: settings?.address_line,
+        sector: settings?.address_sector,
+        city: settings?.city,
+        state: settings?.state,
+        pincode: settings?.pincode,
+      }),
       settings?.state_code ? `State code: ${settings.state_code}` : "",
     ].filter(Boolean) as string[],
     buyerLines: [order.customer_name || "Customer"].filter(Boolean),
@@ -286,7 +302,7 @@ export async function ensureStoreInvoice(orderId: string, opts?: { namespace?: "
       .select("seller_snapshot,shipping_snapshot,line_items_snapshot,tax_summary,document_type,invoice_number,issued_at,gateway_reference,paid_at,grand_total_minor")
       .eq("order_id", orderId)
       .maybeSingle();
-    const seller = (stored?.seller_snapshot || {}) as { display_name?: string; legal_name?: string; address?: string; gstin?: string };
+    const seller = (stored?.seller_snapshot || {}) as { display_name?: string; legal_name?: string; address?: string; gstin?: string; state_code?: string };
     const ship = (stored?.shipping_snapshot || {}) as { line1?: string; line2?: string; city?: string; state?: string; pincode?: string };
     const storedTax = stored?.tax_summary as TaxDocument | undefined;
     if (stored && storedTax?.lines) {
@@ -296,7 +312,12 @@ export async function ensureStoreInvoice(orderId: string, opts?: { namespace?: "
         invoiceNumber: stored.invoice_number,
         issuedAt: `Issued ${new Date(stored.issued_at).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata" })}`,
         sellerName: seller.display_name || model.sellerName,
-        sellerLines: [seller.legal_name ? `Legal supplier: ${seller.legal_name}` : "", seller.address || "", seller.gstin ? `GSTIN ${seller.gstin}` : ""].filter(Boolean),
+        sellerLines: [
+          seller.legal_name ? `Legal name: ${seller.legal_name}` : "",
+          seller.gstin ? `GSTIN: ${seller.gstin}` : "",
+          ...(seller.address || "").split("\n").map((line) => line.trim()).filter(Boolean),
+          seller.state_code ? `State code: ${seller.state_code}` : "",
+        ].filter(Boolean),
         shipLines: [ship.line1, ship.line2, [ship.city, ship.state, ship.pincode].filter(Boolean).join(" ")].filter(Boolean) as string[],
         paymentReference: stored.gateway_reference,
         paidAt: stored.paid_at ? `Paid ${new Date(stored.paid_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}` : model.paidAt,

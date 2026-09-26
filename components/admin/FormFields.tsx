@@ -38,12 +38,14 @@ export function ImageUploadField({
   value,
   onChange,
   folder,
+  previewFit = "cover",
 }: {
   label: string;
   hint?: string;
   value: string | null | undefined;
   onChange: (url: string | null) => void;
   folder: string;
+  previewFit?: "cover" | "contain";
 }) {
   const { toast } = useToast();
   const [busy, setBusy] = useState(false);
@@ -71,7 +73,7 @@ export function ImageUploadField({
         <div className="relative h-28 w-44 shrink-0 overflow-hidden rounded-xl border border-line bg-surface2">
           {value ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={value} alt="preview" className="h-full w-full object-cover" />
+            <img src={value} alt="preview" className={`h-full w-full ${previewFit === "contain" ? "bg-white object-contain p-2" : "object-cover"}`} />
           ) : (
             <div className="flex h-full w-full items-center justify-center text-xs text-muted">No image</div>
           )}

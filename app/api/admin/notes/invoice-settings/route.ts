@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
 import { getActionActor, requirePermission } from "@/lib/adminGuard";
 import { storeDb } from "@/lib/store/db";
+import { normalizeCertificateFloor } from "@/lib/store/invoice/address";
 import { validateGstin } from "@/lib/store/invoice/gstin";
 
 export const dynamic = "force-dynamic";
 
-const FIELDS = ["display_name", "legal_name", "trade_name", "address_line", "city", "state", "state_code", "pincode", "gstin", "pan", "support_phone", "support_email", "invoice_prefix", "price_tax_mode", "document_mode", "legal_footer", "signatory_name", "logo_url", "constitution", "gst_registration_status", "registration_type"] as const;
+const FIELDS = ["display_name", "legal_name", "trade_name", "address_line", "address_floor_display", "address_floor_raw", "address_sector", "city", "state", "state_code", "pincode", "gstin", "pan", "support_phone", "support_email", "invoice_prefix", "price_tax_mode", "document_mode", "legal_footer", "signatory_name", "logo_url", "constitution", "gst_registration_status", "registration_type"] as const;
 
 export async function GET() {
   if (!(await requirePermission("store_manage_orders"))) {
@@ -23,7 +24,7 @@ export async function GET() {
     ok: true,
     settings: row,
     warning: missing ? "Legal supplier name, address, or GSTIN is not complete." : classification,
-    futureOnly: "Changing these settings affects future invoices only. Issued invoices keep their snapshot.",
+    futureOnly: "Changes to seller settings affect future documents only.",
   });
 }
 
@@ -38,6 +39,13 @@ export async function POST(req: Request) {
     if (body[key] !== undefined) patch[key] = body[key] == null ? null : String(body[key]).trim() || null;
   }
   if (typeof body.show_bank_details === "boolean") patch.show_bank_details = body.show_bank_details;
+  if (typeof patch.address_floor_display === "string") {
+    const floor = normalizeCertificateFloor(patch.address_floor_display);
+    if (floor.display && floor.raw && floor.display !== floor.raw) {
+      patch.address_floor_display = floor.display;
+      if (!patch.address_floor_raw) patch.address_floor_raw = floor.raw;
+    }
+  }
   if (typeof patch.gstin === "string" && patch.gstin) {
     const checked = validateGstin(patch.gstin);
     if (!checked.ok) return NextResponse.json({ ok: false, error: checked.error }, { status: 400 });

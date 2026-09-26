@@ -2,12 +2,16 @@
 
 import { useEffect, useState } from "react";
 import { ImageUploadField } from "@/components/admin/FormFields";
+import { formatRegisteredAddress } from "@/lib/store/invoice/address";
 
 interface Settings {
   display_name?: string | null;
   legal_name?: string | null;
   trade_name?: string | null;
   address_line?: string | null;
+  address_floor_display?: string | null;
+  address_floor_raw?: string | null;
+  address_sector?: string | null;
   city?: string | null;
   state?: string | null;
   state_code?: string | null;
@@ -54,6 +58,26 @@ export default function InvoiceSettingsCard() {
         Prefix {settings.invoice_prefix || "NIA"}. Prices are tax-inclusive.
       </p>
       {futureOnly && <p className="mt-2 text-sm text-[var(--ca-navy)]/70">{futureOnly}</p>}
+      <div className="mt-3 space-y-0.5 text-sm leading-5 text-[var(--ca-navy)]">
+        {form.legal_name && <p className="font-semibold">{form.legal_name}</p>}
+        {form.trade_name && <p>{form.trade_name}</p>}
+        {form.gstin && <p className="whitespace-nowrap">GSTIN: {form.gstin}</p>}
+        {formatRegisteredAddress({
+          floorDisplay: form.address_floor_display,
+          building: form.address_line,
+          sector: form.address_sector,
+          city: form.city,
+          state: form.state,
+          pincode: form.pincode,
+        }).map((line) => (
+          <p key={line}>{line.replace(/, India$/, "")}</p>
+        ))}
+        {form.state_code && <p>State code: {form.state_code}</p>}
+        <p>Registration: {settings.registration_type === "REGULAR" ? "Regular" : settings.registration_type || "Not set"}</p>
+      </div>
+      {form.address_floor_raw && form.address_floor_raw !== form.address_floor_display && (
+        <p className="mt-1 text-xs text-[var(--ca-navy)]/50">Certificate floor text kept internally as {form.address_floor_raw}. Invoices show {form.address_floor_display}.</p>
+      )}
       {warning && <p className="mt-2 text-sm text-amber-800">{warning}</p>}
       <form
         className="mt-3 grid gap-2 sm:grid-cols-2"
@@ -69,7 +93,9 @@ export default function InvoiceSettingsCard() {
         {([
           ["legal_name", "Legal supplier name"],
           ["trade_name", "Trade name"],
-          ["address_line", "Registered address"],
+          ["address_floor_display", "Floor"],
+          ["address_line", "Building"],
+          ["address_sector", "Sector"],
           ["city", "City"],
           ["state", "State"],
           ["state_code", "State code"],
@@ -130,11 +156,12 @@ export default function InvoiceSettingsCard() {
         </label>
         <div className="sm:col-span-2">
           <ImageUploadField
-            label="Invoice logo"
+            label="Invoice Logo"
             folder="branding"
+            previewFit="contain"
             value={form.logo_url}
             onChange={(url) => setForm((cur) => ({ ...cur, logo_url: url }))}
-            hint="PNG or JPEG. The academy header logo is used when this is empty. SVG is not embedded in the PDF."
+            hint="PNG or JPEG. Extra padding is trimmed and the mark is scaled for the PDF. If the file cannot be read, the invoice still prints the academy name."
           />
         </div>
         <label className="flex min-h-11 items-center gap-2 text-sm text-[var(--ca-navy)] sm:col-span-2">
