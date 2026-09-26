@@ -9,6 +9,7 @@ import { invoiceLogoDrawSize, renderInvoicePdf } from "../../lib/store/invoice/p
 import { INVOICE_URL_TTL_SECONDS, invoiceWorkPlan, paymentAllowsInvoice } from "../../lib/store/invoice/issue";
 import { financialYearLabel, formatInvoiceNumber } from "../../lib/store/invoice/number";
 import { formatRegisteredAddress, normalizeCertificateFloor } from "../../lib/store/invoice/address";
+import { clericalCorrectionAllowed, correctedSellerDisplay, SELLER_DISPLAY_CORRECTION_REASON } from "../../lib/store/invoice/correct";
 import { GST_STATE_NAME, validateGstin } from "../../lib/store/invoice/gstin";
 import { prepareInvoiceLogo } from "../../lib/store/invoice/logo";
 import { amountInWords, chooseDocumentType, computeTaxDocument, localTaxKind, splitTax, taxClassificationConfirmed, taxOnAmount } from "../../lib/store/invoice/tax";
@@ -302,6 +303,39 @@ test("invoice logo trims padding, keeps aspect, and stays optional", async () =>
   assert.equal(without.toString("latin1").includes("/Subtype /Image") || without.toString("latin1").includes("/Subtype/Image"), false);
   assert.equal(/\/Subtype\s*\/Image/.test(withLogo.toString("latin1")), true);
   assert.ok(withLogo.length < 200_000);
+});
+
+test("a clerical correction keeps the invoice number and only replaces seller display", () => {
+  assert.equal(clericalCorrectionAllowed({ status: "READY", hasKey: true, hasTaxLines: true }), true);
+  assert.equal(clericalCorrectionAllowed({ status: "READY", hasKey: false, hasTaxLines: true }), false);
+  assert.equal(clericalCorrectionAllowed({ status: "FAILED", hasKey: true, hasTaxLines: true }), false);
+  const oldAddress = correctedSellerDisplay(
+    { legalName: "NAMAN SHARMA", gstin: "04CDVPS5346D2Z6", stateCode: "04" },
+    { address_line: "SCO-173-174, SECTOR-17", city: "CHANDIGARH", state: "CHANDIGARH", pincode: "160017" },
+  );
+  assert.equal(oldAddress.ok, false);
+  const next = correctedSellerDisplay(
+    { legalName: "NAMAN SHARMA", gstin: "04CDVPS5346D2Z6", stateCode: "04" },
+    {
+      address_floor_display: "Second Floor",
+      address_line: "SCO-173-174",
+      address_sector: "17C",
+      city: "CHANDIGARH",
+      state: "CHANDIGARH",
+      pincode: "160030",
+    },
+  );
+  assert.equal(next.ok, true);
+  assert.deepEqual(next.lines, [
+    "Legal name: NAMAN SHARMA",
+    "GSTIN: 04CDVPS5346D2Z6",
+    "Second Floor, SCO-173-174",
+    "Sector 17C, Chandigarh",
+    "Chandigarh 160030, India",
+    "State code: 04",
+  ]);
+  assert.equal(SELLER_DISPLAY_CORRECTION_REASON.includes("address"), true);
+  assert.equal(next.lines.join(" ").includes("160017"), false);
 });
 
 function linesForLogo(): string[] {

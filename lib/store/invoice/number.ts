@@ -24,3 +24,9 @@ export function invoiceObjectKey(financialYear: string, invoiceNumber: string): 
   const safe = invoiceNumber.replace(/[^A-Za-z0-9/_-]/g, "");
   return `invoices/FY${financialYear}/${safe}.pdf`;
 }
+
+/** Private audit copy. Customer downloads keep using invoiceObjectKey. */
+export function invoiceAuditObjectKey(financialYear: string, invoiceNumber: string, revision: number): string {
+  const safe = invoiceNumber.replace(/[^A-Za-z0-9/_-]/g, "");
+  return `invoices/audit/FY${financialYear}/${safe}-r${revision}.pdf`;
+}

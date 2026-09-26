@@ -6,6 +6,7 @@ import {
   fulfillmentLabel,
   fulfillmentTone,
   formatAdminWhen,
+  invoiceStatusLabel,
   orderIndexLabel,
   pickupFailedActivity,
   primaryAction,
@@ -14,6 +15,7 @@ import {
 } from "@/lib/store/adminConsole";
 import OrderDetail, { type AdminOrder } from "./orders/OrderDetail";
 import CourierPicker from "./orders/CourierPicker";
+import { ViewInvoiceButton } from "./orders/InvoiceActions";
 
 const FILTERS = [
   { key: "", label: "All", count: "total" },
@@ -253,12 +255,17 @@ export default function NotesOrderQueue() {
               const action = primaryAction({ status: order.status, awb: order.shipment?.awb, pickupFailed: failed, openIssue: order.issue?.open, paymentPending: order.status === "PAYMENT_PENDING" });
               return (
                 <li key={order.id} className={`grid grid-cols-[1.3fr_1fr_0.7fr_0.8fr_0.8fr_auto] items-center gap-3 border-b border-[var(--ca-navy)]/5 px-4 py-3 ${order.action_required ? "border-l-2 border-l-amber-500" : ""}`}>
-                  <button type="button" onClick={() => openOrder(order.id)} className="text-left">
-                    <span className="block font-heading text-base font-bold text-[var(--ca-navy)]">{orderIndexLabel(order.order_no)}</span>
-                    <span className="block font-mono text-[11px] text-[var(--ca-navy)]/50">{order.order_no}</span>
-                    <span className="block text-sm text-[var(--ca-navy)]">{order.customer_name}</span>
-                    <span className="mt-1 block text-[11px] text-[var(--ca-navy)]/45">{order.invoice_status === "READY" ? "Invoice ready" : order.invoice_status === "FAILED" ? "Invoice needs attention" : order.invoice_status ? "Invoice generating" : "Invoice not applicable"}</span>
-                  </button>
+                  <div>
+                    <button type="button" onClick={() => openOrder(order.id)} className="text-left">
+                      <span className="block font-heading text-base font-bold text-[var(--ca-navy)]">{orderIndexLabel(order.order_no)}</span>
+                      <span className="block font-mono text-[11px] text-[var(--ca-navy)]/50">{order.order_no}</span>
+                      <span className="block text-sm text-[var(--ca-navy)]">{order.customer_name}</span>
+                    </button>
+                    <span className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-[var(--ca-navy)]/45">
+                      {invoiceStatusLabel(order.invoice_status)}
+                      {order.invoice_status === "READY" && <ViewInvoiceButton orderId={order.id} />}
+                    </span>
+                  </div>
                   <span className="text-sm text-[var(--ca-navy)]/75">{order.items[0] ? `${order.items[0].name} × ${order.items[0].qty}` : "—"}</span>
                   <span className="text-sm font-semibold tabular-nums">{formatPaise(order.total_paise)}</span>
                   <span className={`w-fit rounded-full px-2 py-1 text-[11px] font-semibold ${TONE[fulfillmentTone(order.status, failed)]}`}>{fulfillmentLabel(order.status, failed)}</span>
@@ -272,14 +279,14 @@ export default function NotesOrderQueue() {
             {orders.map((order) => {
               const failed = pickupFailedActivity(order.shipment?.tracking_activity);
               return (
-                <li key={order.id}>
-                  <button type="button" onClick={() => openOrder(order.id)} className={`w-full rounded-2xl bg-white p-4 text-left ${order.action_required ? "border-l-2 border-l-amber-500" : ""}`}>
+                <li key={order.id} className={`rounded-2xl bg-white p-4 ${order.action_required ? "border-l-2 border-l-amber-500" : ""}`}>
+                  <button type="button" onClick={() => openOrder(order.id)} className="w-full text-left">
                     <span className="flex items-start justify-between gap-3">
                       <span>
                         <span className="block font-heading text-lg font-bold">{orderIndexLabel(order.order_no)}</span>
                         <span className="block font-mono text-[11px] text-[var(--ca-navy)]/50">{order.order_no}</span>
                         <span className="mt-1 block text-sm">{order.customer_name}</span>
-                        <span className="mt-1 block text-[11px] text-[var(--ca-navy)]/45">{order.invoice_status === "READY" ? "Invoice ready" : order.invoice_status === "FAILED" ? "Invoice needs attention" : order.invoice_status ? "Invoice generating" : "Invoice not applicable"}</span>
+                        <span className="mt-1 block text-[11px] text-[var(--ca-navy)]/45">{invoiceStatusLabel(order.invoice_status)}</span>
                       </span>
                       <span className="text-sm font-semibold tabular-nums">{formatPaise(order.total_paise)}</span>
                     </span>
@@ -288,6 +295,11 @@ export default function NotesOrderQueue() {
                       <span className="text-xs text-[var(--ca-navy)]/55">{order.items.length} item{order.items.length === 1 ? "" : "s"}</span>
                     </span>
                   </button>
+                  {order.invoice_status === "READY" && (
+                    <div className="mt-3">
+                      <ViewInvoiceButton orderId={order.id} />
+                    </div>
+                  )}
                 </li>
               );
             })}

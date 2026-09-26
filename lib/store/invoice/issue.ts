@@ -376,11 +376,13 @@ export async function issueHistoricalStoreInvoice(orderNo: string): Promise<{ ok
   return ensureStoreInvoice(order.id);
 }
 
-export async function invoiceDownloadUrl(orderId: string): Promise<{ url: string; invoiceNumber: string } | null> {
+export async function invoiceDownloadUrl(orderId: string, opts?: { attachment?: boolean }): Promise<{ url: string; invoiceNumber: string } | null> {
   const db = storeDb();
   if (!db) return null;
   const { data } = await db.from("store_invoices").select("invoice_number,status,r2_object_key").eq("order_id", orderId).maybeSingle();
   if (!data || data.status !== "READY" || !data.r2_object_key) return null;
-  const url = await signGetUrl(data.r2_object_key, INVOICE_URL_TTL_SECONDS);
+  const filename = `${String(data.invoice_number).replace(/[^\w.-]+/g, "-")}.pdf`;
+  const disposition = opts?.attachment ? `attachment; filename="${filename}"` : undefined;
+  const url = await signGetUrl(data.r2_object_key, INVOICE_URL_TTL_SECONDS, disposition);
   return { url, invoiceNumber: data.invoice_number };
 }

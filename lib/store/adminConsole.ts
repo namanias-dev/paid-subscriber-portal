@@ -187,6 +187,40 @@ export function hasActiveShipment(status: string | null | undefined, awb: string
   return status !== "cancelled" && status !== "failed";
 }
 
+/** Prefer the shipment row status over an older courier scan still stored in the payload. */
+export function canonicalShipmentStatusLabel(status: string | null | undefined, activity: string | null | undefined): string {
+  const canonical = (status || "").trim().toLowerCase();
+  if (canonical === "delivered") return "Delivered";
+  if (canonical === "out_for_delivery") return "Out for delivery";
+  if (canonical === "in_transit") return "In transit";
+  if (canonical === "picked_up") return "Picked up";
+  if (activity) return activity;
+  if (!status) return "—";
+  return status.replaceAll("_", " ");
+}
+
+/** A delivered parcel is not still waiting in the pickup queue. */
+export function shipmentPickupLabel(
+  status: string | null | undefined,
+  pickupStatus: string | null | undefined,
+  pickupDate: string | null | undefined,
+): string {
+  const canonical = (status || "").trim().toLowerCase();
+  const queued = pickupStatus === "already_in_pickup_queue" || pickupStatus === "reattempt_requested";
+  if (canonical === "delivered" || canonical === "in_transit" || canonical === "out_for_delivery" || canonical === "picked_up") {
+    return pickupDate || "Collected";
+  }
+  if (queued) return "Still in courier queue";
+  return pickupDate || "Not scheduled";
+}
+
+export function invoiceStatusLabel(status: string | null | undefined): string {
+  if (status === "READY") return "Invoice ready";
+  if (status === "FAILED") return "Invoice needs attention";
+  if (status === "PENDING" || status === "GENERATING") return "Invoice generating";
+  return "Invoice not applicable";
+}
+
 function quoteKey(q: AdminQuote): string {
   return `${q.provider}|${q.courier}|${q.service}|${q.ratePaise}`;
 }

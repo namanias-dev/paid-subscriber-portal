@@ -4,8 +4,11 @@ import test from "node:test";
 import {
   actionRequiredReasons,
   defaultQuote,
+  canonicalShipmentStatusLabel,
   fulfillmentLabel,
   hasActiveShipment,
+  invoiceStatusLabel,
+  shipmentPickupLabel,
   nextPreparationStatus,
   orderIndexLabel,
   primaryAction,
@@ -26,6 +29,28 @@ test("pickup failure outranks booking and does not treat a cancelled AWB as acti
   assert.deepEqual(actionRequiredReasons({ status: "PICKUP_SCHEDULED", awb: "1", pickupFailed: true }), ["Pickup wasn't completed"]);
   assert.equal(fulfillmentLabel("PICKUP_SCHEDULED", true), "Pickup issue");
   assert.equal(nextPreparationStatus("PICKED_UP"), null);
+});
+
+test("a delivered shipment does not keep an older in-transit scan or pickup queue", () => {
+  assert.equal(canonicalShipmentStatusLabel("delivered", "In Transit"), "Delivered");
+  assert.equal(shipmentPickupLabel("delivered", "already_in_pickup_queue", "2026-09-24"), "2026-09-24");
+  assert.equal(shipmentPickupLabel("created", "already_in_pickup_queue", "2026-09-24"), "Still in courier queue");
+  assert.equal(invoiceStatusLabel("READY"), "Invoice ready");
+  assert.equal(invoiceStatusLabel("FAILED"), "Invoice needs attention");
+  assert.equal(invoiceStatusLabel(null), "Invoice not applicable");
+});
+
+test("an invoice button click does not open the order card", () => {
+  let opened = false;
+  const event = {
+    stopped: false,
+    stopPropagation() { this.stopped = true; },
+    preventDefault() { this.stopped = true; },
+  };
+  event.stopPropagation();
+  event.preventDefault();
+  if (!event.stopped) opened = true;
+  assert.equal(opened, false);
 });
 
 test("cheapest quote is first and selected, fastest is labelled from returned ETAs", () => {

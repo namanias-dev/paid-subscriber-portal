@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { formatPaise } from "@/lib/store/money";
 import {
   PRIMARY_LABEL,
+  canonicalShipmentStatusLabel,
   fulfillmentLabel,
   fulfillmentTone,
   formatAdminWhen,
@@ -12,9 +13,11 @@ import {
   orderIndexLabel,
   pickupFailedActivity,
   primaryAction,
+  shipmentPickupLabel,
   volumetricGrams,
   type BadgeTone,
 } from "@/lib/store/adminConsole";
+import { DownloadInvoiceButton, ViewInvoiceButton } from "./InvoiceActions";
 
 interface Address {
   name?: string;
@@ -264,6 +267,15 @@ export default function OrderDetail({
         </header>
 
         <div className="space-y-3 px-4 py-4">
+          {order.invoice_status === "READY" && !(active && ship) && (
+            <section className="rounded-2xl bg-white p-4">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--ca-gold-dark)]">Invoice</p>
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                <ViewInvoiceButton orderId={order.id} prominent />
+                <DownloadInvoiceButton orderId={order.id} />
+              </div>
+            </section>
+          )}
           {reasons.length > 0 && (
             <section className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
               <p className="text-sm font-semibold text-amber-950">Action required</p>
@@ -294,21 +306,23 @@ export default function OrderDetail({
               <h2 className="mt-1 font-heading text-xl font-bold text-[var(--ca-navy)]">{ship.courier || ship.provider}</h2>
               <dl className="mt-4 grid grid-cols-2 gap-4">
                 <Field label="AWB" value={ship.awb} />
-                <Field label="Status" value={ship.tracking_activity || ship.status} />
+                <Field label="Status" value={canonicalShipmentStatusLabel(ship.status, ship.tracking_activity)} />
                 <Field label="Latest update" value={formatAdminWhen(ship.tracking_event_at)} />
-                <Field label="Pickup" value={queued ? "Still in courier queue" : ship.pickup_date || "Not scheduled"} />
+                <Field label="Pickup" value={shipmentPickupLabel(ship.status, ship.pickup_status, ship.pickup_date)} />
                 <Field label="Reference" value={ship.pickup_reference} />
                 <Field label="Destination" value={address ? `${address.city} · ${address.pincode}` : null} />
               </dl>
-              <div className="mt-4 flex flex-wrap gap-2">
+              <div className="mt-4 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
                 {ship.has_label && (
-                  <button type="button" onClick={() => void printLabel()} className="min-h-11 rounded-full border border-[var(--ca-navy)]/15 px-4 text-sm font-semibold text-[var(--ca-navy)]">
-                    Print label
+                  <button type="button" onClick={() => void printLabel()} className="min-h-11 rounded-full border border-[var(--ca-navy)]/15 px-4 text-sm font-semibold text-[var(--ca-navy)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2">
+                    Print Label
                   </button>
                 )}
-                <button type="button" onClick={() => void refreshTrack()} className="min-h-11 rounded-full border border-[var(--ca-navy)]/15 px-4 text-sm font-semibold text-[var(--ca-navy)]">
-                  View tracking
+                <button type="button" onClick={() => void refreshTrack()} className="min-h-11 rounded-full border border-[var(--ca-navy)]/15 px-4 text-sm font-semibold text-[var(--ca-navy)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2">
+                  View Tracking
                 </button>
+                {order.invoice_status === "READY" && <ViewInvoiceButton orderId={order.id} prominent />}
+                {order.invoice_status === "READY" && <DownloadInvoiceButton orderId={order.id} />}
               </div>
             </section>
           )}
@@ -382,12 +396,6 @@ export default function OrderDetail({
                 {invoice.attention && <p className="mt-2 text-xs text-amber-900">{invoice.attention}</p>}
                 <div className="mt-3 flex flex-wrap gap-2">
                   <button type="button" onClick={() => copy(invoice.invoice_number || "")} className="min-h-11 rounded-full border px-3 text-xs font-semibold">Copy invoice number</button>
-                  {invoice.status === "READY" && (
-                    <>
-                      <a className="inline-flex min-h-11 items-center rounded-full bg-[var(--ca-navy)] px-3 text-xs font-semibold text-white" href={`/api/admin/notes/orders/${order.id}/invoice?download=1`} target="_blank" rel="noreferrer">View PDF</a>
-                      <a className="inline-flex min-h-11 items-center rounded-full border px-3 text-xs font-semibold" href={`/api/admin/notes/orders/${order.id}/invoice?download=1`}>Download PDF</a>
-                    </>
-                  )}
                   {invoice.status === "FAILED" && (
                     <button
                       type="button"

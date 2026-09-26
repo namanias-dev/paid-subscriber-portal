@@ -11,9 +11,13 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
   }
   const db = storeDb();
   if (!db) return NextResponse.json({ ok: false, error: "unavailable" }, { status: 503 });
-  if (new URL(req.url).searchParams.get("download") === "1") {
-    const file = await invoiceDownloadUrl(params.id);
-    if (!file) return NextResponse.json({ ok: false, error: "The invoice is not ready yet." }, { status: 409 });
+  const url = new URL(req.url);
+  if (url.searchParams.get("download") === "1") {
+    const file = await invoiceDownloadUrl(params.id, { attachment: url.searchParams.get("attachment") === "1" });
+    if (!file) return NextResponse.json({ ok: false, error: "Unable to open invoice. Try again." }, { status: 409 });
+    if (url.searchParams.get("format") === "json") {
+      return NextResponse.json({ ok: true, url: file.url, invoiceNumber: file.invoiceNumber }, { headers: { "Cache-Control": "no-store" } });
+    }
     return Response.redirect(file.url, 302);
   }
   const { data } = await db.from("store_invoices").select("invoice_number,document_type,status,issued_at,grand_total_minor,taxable_minor,cgst_minor,sgst_minor,utgst_minor,igst_minor,gateway_reference,attention,credit_note_status,seller_snapshot,line_items_snapshot,place_of_supply_state_code").eq("order_id", params.id).maybeSingle();

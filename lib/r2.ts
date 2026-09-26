@@ -262,8 +262,16 @@ export async function listStaleMultipart(olderThanMs: number): Promise<{ key: st
 }
 
 // ----------------------------- Signed GET / PUT -----------------------------
-export function signGetUrl(key: string, ttl = PLAYBACK_TTL): Promise<string> {
-  return getSignedUrl(r2(), new GetObjectCommand({ Bucket: bucket(), Key: key }), { expiresIn: ttl });
+export function signGetUrl(key: string, ttl = PLAYBACK_TTL, responseContentDisposition?: string): Promise<string> {
+  return getSignedUrl(
+    r2(),
+    new GetObjectCommand({
+      Bucket: bucket(),
+      Key: key,
+      ...(responseContentDisposition ? { ResponseContentDisposition: responseContentDisposition } : {}),
+    }),
+    { expiresIn: ttl },
+  );
 }
 
 export function signPutUrl(key: string, contentType: string, ttl = 600): Promise<string> {
