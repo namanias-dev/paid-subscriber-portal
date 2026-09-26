@@ -83,6 +83,26 @@ export function batchChoiceLabel(batch: CourseBatch): string {
 }
 
 /**
+ * Batch labels often restate mode, timing, and the start date already shown
+ * in the selected-batch summary. Only surface the stored label when it adds
+ * a detail those lines do not already cover.
+ */
+export function batchLabelAddsDetail(label: string | null | undefined, title: string, startLabel: string | null): boolean {
+  const raw = (label || "").trim();
+  if (!raw) return false;
+  const known = new Set(
+    [title, startLabel || "", ...title.split(/\s*[·•|/]\s*/)]
+      .map((part) => part.trim().toLowerCase())
+      .filter(Boolean),
+  );
+  return raw
+    .split(/\s*[·•|/]\s*/)
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .some((part) => !known.has(part.toLowerCase()));
+}
+
+/**
  * True when the browser sent an expected charge that does not match the
  * server-computed amount. A missing expected amount is not a conflict — older
  * clients omit it and keep the previous behaviour.

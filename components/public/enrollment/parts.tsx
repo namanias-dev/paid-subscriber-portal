@@ -6,7 +6,7 @@ import { Check, ChevronDown, ShieldCheck } from "lucide-react";
 import { formatINR, formatISTDate } from "@/lib/dates";
 import type { CourseBatch, InstallmentItem } from "@/lib/types";
 import { batchModeLabel, batchTimingLabel } from "@/lib/installments";
-import { batchChoiceLabel } from "@/lib/enrollmentCheckout";
+import { batchChoiceLabel, batchLabelAddsDetail } from "@/lib/enrollmentCheckout";
 
 export function SegmentedRadio({
   label,
@@ -127,13 +127,14 @@ export function SelectedBatchSummary({
 }) {
   const pair = [batchModeLabel(batch), batchTimingLabel(batch)].filter(Boolean).join(" · ");
   const title = pair || batchChoiceLabel(batch);
+  const startLabel = batch.start_date ? `Starts ${formatISTDate(batch.start_date)}` : null;
   const showOriginal = originalPrice != null && originalPrice > courseFee;
   return (
     <div className="mt-3 rounded-xl border border-[var(--ca-gold)] bg-[rgba(212,175,55,0.08)] px-3 py-3" aria-live="polite">
       <p className="text-[11px] font-semibold uppercase tracking-wide text-[var(--ca-gold-dark)]">Selected batch</p>
       <p className="mt-0.5 font-semibold text-[var(--ca-navy-900)]">{title}</p>
-      {batch.label && pair && batch.label !== pair && <p className="text-xs text-[var(--ca-slate-700)]">{batch.label}</p>}
-      {batch.start_date && <p className="mt-1 text-sm text-[var(--ca-slate-700)]">Starts {formatISTDate(batch.start_date)}</p>}
+      {batchLabelAddsDetail(batch.label, title, startLabel) && <p className="text-xs text-[var(--ca-slate-700)]">{batch.label}</p>}
+      {startLabel && <p className="mt-1 text-sm text-[var(--ca-slate-700)]">{startLabel}</p>}
       <div className="mt-2 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
         <span className="text-xs font-semibold uppercase tracking-wide text-[var(--ca-slate-700)]">Course fee</span>
         <span className="font-heading text-lg font-extrabold text-[var(--ca-navy-900)]">{formatINR(courseFee)}</span>

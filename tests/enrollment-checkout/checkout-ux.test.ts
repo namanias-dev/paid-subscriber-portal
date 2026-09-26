@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { planCourseEnrollment } from "../../lib/installments";
 import {
   analyzeBatches,
+  batchLabelAddsDetail,
   batchPairKey,
   buildEnrollmentPaymentBody,
   checkoutAmountsDiffer,
@@ -107,6 +108,13 @@ describe("batch selection maps onto real batch ids", () => {
     if (model.kind !== "matrix") return;
     assert.deepEqual(model.modes, ["Offline", "Recorded"]);
     assert.equal(resolveBatchId(model, "Recorded", "Weekend"), "rec");
+  });
+
+  test("a batch label that only restates mode, timing, and start date is not repeated", () => {
+    assert.equal(batchLabelAddsDetail("Starts 12 Oct 2026 · Offline · Morning", "Offline · Morning", "Starts 12 Oct 2026"), false);
+    assert.equal(batchLabelAddsDetail("Offline · Morning", "Offline · Morning", "Starts 12 Oct 2026"), false);
+    assert.equal(batchLabelAddsDetail("Delhi Centre · Offline · Morning", "Offline · Morning", "Starts 12 Oct 2026"), true);
+    assert.equal(batchLabelAddsDetail(null, "Offline · Morning", null), false);
   });
 
   test("duplicate pairs and legacy multi-value batches fall back to the batch list", () => {
