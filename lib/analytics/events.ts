@@ -15,6 +15,15 @@ export type EventName =
   | "course_view"
   | "click_enroll"
   | "enrollment_created"
+  // Enrollment checkout interactions. PII-free. Does not replace course_view,
+  // click_enroll, or the server Purchase / payment_paid events.
+  | "batch_selected"
+  | "seat_booking_selected"
+  | "booking_amount_changed"
+  | "installments_selected"
+  | "pay_in_full_selected"
+  | "installment_schedule_expanded"
+  | "coupon_opened"
   // payment
   | "payment_initiated"
   | "payment_status_changed"
@@ -144,6 +153,13 @@ export const CLIENT_ALLOWED_EVENTS: ReadonlySet<EventName> = new Set<EventName>(
   "expired_webinar_cta_clicked",
   "expired_webinar_auto_forwarded",
   "course_view",
+  "batch_selected",
+  "seat_booking_selected",
+  "booking_amount_changed",
+  "installments_selected",
+  "pay_in_full_selected",
+  "installment_schedule_expanded",
+  "coupon_opened",
   "click_register_pay",
   "registration_attempt",
   "click_enroll",

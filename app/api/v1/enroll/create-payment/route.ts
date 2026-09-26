@@ -24,6 +24,7 @@ import { scheduleAsCheckoutIntent } from "@/lib/enrollmentScope";
 import { validateCoupon, couponDiscountReason, parseCouponCodeFromReason } from "@/lib/coupons";
 import type { CourseEnrollment } from "@/lib/types";
 import { parseGaClientId } from "@/lib/analytics/gaClientId";
+import { checkoutAmountsDiffer } from "@/lib/enrollmentCheckout";
 
 export const dynamic = "force-dynamic";
 
@@ -126,6 +127,21 @@ export async function POST(req: Request) {
       discountAmount,
     } = planned.plan;
     let { firstAmount, firstKind, firstInstallmentNo } = planned.plan;
+
+    // Fresh quotes only. Coupon previews are validated against the course list
+    // price while this route recomputes against the selected plan, so a coupon
+    // checkout must not be rejected for that existing difference. Omitted
+    // expectedAmount (older clients) is also ignored.
+    if (!couponCode && checkoutAmountsDiffer(body.expectedAmount, firstAmount)) {
+      return NextResponse.json(
+        {
+          ok: false,
+          priceChanged: true,
+          error: "Course pricing has been updated. We've refreshed your enrollment total.",
+        },
+        { status: 409 },
+      );
+    }
 
     const discountPatch: Partial<CourseEnrollment> =
       discountAmount > 0 && appliedCouponCode

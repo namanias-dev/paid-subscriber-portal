@@ -3,6 +3,7 @@
 import { usePathname } from "next/navigation";
 import { motion, useReducedMotion } from "framer-motion";
 import { ga4Event } from "@/lib/analytics/ga4";
+import { isEnrollmentCheckoutPath } from "@/lib/enrollmentPath";
 
 /** Path prefixes where the floating support button should appear. */
 const ALLOWED_PREFIXES = ["/courses", "/webinars", "/portal"];
@@ -16,7 +17,9 @@ export default function FloatingWhatsApp({ waLink }: { waLink: string | null }) 
   const pathname = usePathname() || "";
   const reduce = useReducedMotion();
 
-  const show = !!waLink && ALLOWED_PREFIXES.some((p) => pathname === p || pathname.startsWith(`${p}/`) || pathname.startsWith(p));
+  const show = !!waLink
+    && !isEnrollmentCheckoutPath(pathname)
+    && ALLOWED_PREFIXES.some((p) => pathname === p || pathname.startsWith(`${p}/`) || pathname.startsWith(p));
   if (!show) return null;
 
   return (
