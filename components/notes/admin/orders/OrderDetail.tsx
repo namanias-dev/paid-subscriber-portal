@@ -369,6 +369,8 @@ export default function OrderDetail({
                   <Field label="Taxable" value={typeof invoice.taxable_minor === "number" ? formatPaise(invoice.taxable_minor) : null} />
                   <Field label="GSTIN" value={invoice.seller_snapshot?.gstin || null} />
                   <Field label="HSN" value={(invoice.line_items_snapshot || []).map((line) => line.hsn).filter(Boolean).join(", ") || null} />
+                  <Field label="Tax treatment" value={(invoice.line_items_snapshot || []).some((line) => line.rateBps) ? "Taxable" : "Nil rated"} />
+                  <Field label="GST" value={(invoice.line_items_snapshot || []).some((line) => line.rateBps) ? null : "0%"} />
                   <Field label="CGST" value={typeof invoice.cgst_minor === "number" ? formatPaise(invoice.cgst_minor) : null} />
                   <Field label="SGST" value={typeof invoice.sgst_minor === "number" ? formatPaise(invoice.sgst_minor) : null} />
                   <Field label="UTGST" value={typeof invoice.utgst_minor === "number" ? formatPaise(invoice.utgst_minor) : null} />

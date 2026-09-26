@@ -3,6 +3,7 @@ import { waitUntil } from "@vercel/functions";
 import { storeDb } from "../db";
 import { putObject, signGetUrl } from "@/lib/r2";
 import { financialYearLabel, formatInvoiceNumber, invoiceObjectKey } from "./number";
+import { PRINTED_NOTES_TAX_PROFILE } from "./profile";
 import { amountInWords, chooseDocumentType, computeTaxDocument, stateCodeFromName, taxClassificationConfirmed, type TaxDocument, type TaxLineInput } from "./tax";
 import { renderInvoicePdf, type InvoicePdfModel } from "./pdf";
 import { loadInvoiceLogo } from "./logo";
@@ -97,7 +98,7 @@ export async function ensureStoreInvoice(orderId: string, opts?: { namespace?: "
 
   const { data: order } = await db
     .from("store_orders")
-    .select("id,order_no,status,total_paise,subtotal_paise,discount_paise,shipping_paise,paid_at,customer_name,phone,shipping_address_id")
+    .select("id,order_no,status,total_paise,subtotal_paise,discount_paise,shipping_paise,paid_at,placed_at,customer_name,phone,shipping_address_id")
     .eq("id", orderId)
     .maybeSingle();
   if (!order?.paid_at) return { ok: false, status: "NOT_REQUIRED", invoiceNumber: null };
@@ -135,6 +136,8 @@ export async function ensureStoreInvoice(orderId: string, opts?: { namespace?: "
     name: item.name_snapshot,
     sku: item.sku_snapshot,
     hsn: item.hsn_snapshot,
+    unit: null,
+    taxConfigurationStatus: null,
     qty: item.qty,
     lineTotalPaise: item.line_total_paise,
     discountPaise: item.line_discount_paise || 0,
@@ -143,15 +146,17 @@ export async function ensureStoreInvoice(orderId: string, opts?: { namespace?: "
   }));
   const skus = lines.map((line) => line.sku).filter((sku): sku is string => Boolean(sku));
   if (skus.length) {
-    const { data: products } = await db.from("store_products").select("sku,hsn_code,tax_treatment,tax_rate_bps").in("sku", skus);
+    const { data: products } = await db.from("store_products").select("sku,hsn_code,tax_treatment,tax_rate_bps,tax_configuration_status").in("sku", skus);
     const bySku = new Map((products || []).map((product) => [product.sku, product]));
     for (const line of lines) {
-      if (line.hsn) continue;
+      if (line.hsn && line.taxConfigurationStatus === "CONFIRMED") continue;
       const product = line.sku ? bySku.get(line.sku) : undefined;
-      if (!product?.hsn_code) continue;
+      if (!product?.hsn_code || product.tax_configuration_status !== "CONFIRMED") continue;
       line.hsn = product.hsn_code;
       line.taxTreatment = product.tax_treatment || line.taxTreatment;
       line.taxRateBps = product.tax_rate_bps || 0;
+      line.taxConfigurationStatus = product.tax_configuration_status;
+      line.unit = product.hsn_code === PRINTED_NOTES_TAX_PROFILE.hsn ? PRINTED_NOTES_TAX_PROFILE.unit : "NOS";
     }
   }
   const namespace = opts?.namespace || "production";
@@ -174,6 +179,10 @@ export async function ensureStoreInvoice(orderId: string, opts?: { namespace?: "
     anyTaxable: tax.anyTaxable,
     requested: settings?.document_mode,
   });
+  const { data: shipmentRows } = await db.from("store_shipments").select("awb,courier_name,status,created_at").eq("order_id", orderId);
+  const shipment = (shipmentRows || [])
+    .filter((row) => row.status !== "cancelled")
+    .sort((a, b) => String(b.created_at || "").localeCompare(String(a.created_at || "")))[0] || null;
   const fy = financialYearLabel(new Date(order.paid_at));
   let invoiceNumber = existing?.invoice_number || null;
   let sequence = 0;
@@ -202,15 +211,20 @@ export async function ensureStoreInvoice(orderId: string, opts?: { namespace?: "
         display_name: settings?.trade_name || settings?.display_name || "Naman IAS Academy",
         legal_name: settings?.legal_name || null,
         trade_name: settings?.trade_name || null,
+        address_line: settings?.address_line || null,
+        city: settings?.city || null,
+        state: settings?.state || null,
+        state_code: settings?.state_code || null,
+        pincode: settings?.pincode || null,
         address: [settings?.address_line, settings?.city, settings?.state, settings?.pincode].filter(Boolean).join(", ") || null,
         gstin: settings?.gstin || null,
         pan: settings?.pan || null,
         constitution: settings?.constitution || null,
       },
-      buyer_snapshot: { name: order.customer_name, phone_present: Boolean(order.phone) },
+      buyer_snapshot: { name: order.customer_name, phone_present: Boolean(order.phone), placed_at: order.placed_at },
       shipping_snapshot: address
-        ? { line1: address.line1, line2: address.line2, city: address.city, state: address.state, pincode: address.pincode }
-        : {},
+        ? { line1: address.line1, line2: address.line2, city: address.city, state: address.state, pincode: address.pincode, name: address.name, courier: shipment?.courier_name || null, awb: shipment?.awb || null }
+        : { courier: shipment?.courier_name || null, awb: shipment?.awb || null },
       line_items_snapshot: tax.lines,
       tax_summary: tax,
       subtotal_minor: tax.subtotalPaise,
@@ -238,6 +252,7 @@ export async function ensureStoreInvoice(orderId: string, opts?: { namespace?: "
   }
 
   const issuedLabel = `Issued ${new Date().toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata" })}`;
+  const orderDate = order.placed_at ? new Date(order.placed_at).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata" }) : null;
   let model: InvoicePdfModel = {
     documentType: chosen.type,
     invoiceNumber: invoiceNumber || "",
@@ -245,13 +260,18 @@ export async function ensureStoreInvoice(orderId: string, opts?: { namespace?: "
     issuedAt: issuedLabel,
     sellerName: settings?.trade_name || settings?.display_name || "Naman IAS Academy",
     sellerLines: [
-      settings?.legal_name ? `Legal supplier: ${settings.legal_name}` : "",
+      settings?.legal_name ? `Legal name: ${settings.legal_name}` : "",
       settings?.address_line,
       [settings?.city, settings?.state, settings?.pincode].filter(Boolean).join(", "),
       settings?.gstin ? `GSTIN ${settings.gstin}` : "",
+      settings?.state ? `State: ${settings.state}` : "",
+      settings?.state_code ? `State code: ${settings.state_code}` : "",
     ].filter(Boolean) as string[],
     buyerLines: [order.customer_name || "Customer"].filter(Boolean),
-    shipLines: address ? [address.line1, address.line2, `${address.city}, ${address.state} ${address.pincode}`].filter(Boolean) as string[] : ["Address on order"],
+    shipLines: address ? [address.name, address.line1, address.line2, `${address.city}, ${address.state} ${address.pincode}`, "India"].filter(Boolean) as string[] : ["Address on order"],
+    orderDate,
+    courier: shipment?.courier_name || null,
+    awb: shipment?.awb || null,
     paymentReference: payment.reference_no,
     paidAt: payment.captured_at ? new Date(payment.captured_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }) : null,
     tax,

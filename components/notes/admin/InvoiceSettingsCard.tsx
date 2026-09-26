@@ -20,6 +20,7 @@ interface Settings {
   document_mode?: string | null;
   legal_footer?: string | null;
   logo_url?: string | null;
+  show_bank_details?: boolean | null;
   constitution?: string | null;
   gst_registration_status?: string | null;
   registration_type?: string | null;
@@ -136,6 +137,10 @@ export default function InvoiceSettingsCard() {
             hint="PNG or JPEG. The academy header logo is used when this is empty. SVG is not embedded in the PDF."
           />
         </div>
+        <label className="flex min-h-11 items-center gap-2 text-sm text-[var(--ca-navy)] sm:col-span-2">
+          <input type="checkbox" checked={Boolean(form.show_bank_details)} onChange={(e) => setForm((cur) => ({ ...cur, show_bank_details: e.target.checked }))} />
+          Show bank details on invoice (off by default; no account details are stored here)
+        </label>
         <button type="submit" className="min-h-11 rounded-full bg-[var(--ca-navy)] px-4 text-sm font-semibold text-white sm:col-span-2 sm:w-fit">Save legal details</button>
       </form>
     </section>

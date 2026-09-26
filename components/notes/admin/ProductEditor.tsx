@@ -41,6 +41,8 @@ interface Product {
   hsn_code: string | null;
   tax_treatment: string | null;
   tax_rate_bps: number | null;
+  tax_configuration_status?: string | null;
+  tax_configuration_source?: string | null;
   mrp_paise: number;
   selling_price_paise: number;
   availability_mode: AvailabilityMode;
@@ -155,6 +157,8 @@ export default function ProductEditor({ id }: { id: string }) {
         hsn_code: p.hsn_code,
         tax_treatment: p.tax_treatment || "exempt",
         tax_rate_bps: p.tax_rate_bps || 0,
+        tax_configuration_status: p.tax_configuration_status || null,
+        tax_configuration_source: p.tax_configuration_source || null,
         mrp_paise: p.mrp_paise,
         selling_price_paise: p.selling_price_paise,
         availability_mode: p.availability_mode,
@@ -293,9 +297,24 @@ export default function ProductEditor({ id }: { id: string }) {
         <Section title="Tax">
           <p className="mb-2 text-sm text-[var(--ca-navy)]/70">Confirm HSN and tax treatment with your CA before accepting production orders. Printed books may have different GST treatment from brochures, loose printed material, workbooks or other printed products.</p>
           <p className="mb-2 text-sm text-[var(--ca-navy)]/70">Store prices are tax-inclusive unless Invoice and tax settings say exclusive. Existing orders keep the snapshot taken at checkout.</p>
-          {!p.hsn_code && (
+          {p.tax_configuration_status === "CONFIRMED" && p.hsn_code ? (
+            <p className="mb-3 text-sm text-emerald-800">HSN {p.hsn_code} · {p.tax_treatment === "nil" ? "Nil rated" : p.tax_treatment} · GST {p.tax_rate_bps ? `${p.tax_rate_bps / 100}%` : "0%"} · Confirmed{p.tax_configuration_source ? ` · ${p.tax_configuration_source}` : ""}. Changes affect future invoices only.</p>
+          ) : (
             <p className="mb-3 text-sm text-amber-800">Product HSN/tax classification requires confirmation.</p>
           )}
+          <button
+            type="button"
+            className="mb-3 min-h-11 rounded-full border px-3 text-xs font-semibold"
+            onClick={() => {
+              set("hsn_code", "49011010");
+              set("tax_treatment", "nil");
+              set("tax_rate_bps", 0);
+              set("tax_configuration_status", "CONFIRMED");
+              set("tax_configuration_source", "CA");
+            }}
+          >
+            Use printed UPSC notes profile
+          </button>
           <Grid>
             <Field label="HSN"><input className={inp} value={p.hsn_code || ""} inputMode="numeric" onChange={(e) => set("hsn_code", e.target.value.replace(/[^\d]/g, "").slice(0, 8) || null)} /></Field>
             <Field label="Tax treatment">

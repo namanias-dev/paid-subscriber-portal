@@ -182,7 +182,11 @@ test("Chandigarh local tax is UTGST and the verified GSTIN matches state 04", ()
   assert.equal(chooseDocumentType({ gstin: "04CDVPS5346D2Z6", anyTaxable: false }).type, "BILL_OF_SUPPLY");
   assert.equal(chooseDocumentType({ gstin: "04CDVPS5346D2Z6", anyTaxable: true }).type, "TAX_INVOICE");
   assert.equal(taxClassificationConfirmed([{ hsn: null }]), false);
-  assert.equal(taxClassificationConfirmed([{ hsn: "4901" }]), true);
+  assert.equal(taxClassificationConfirmed([{ hsn: "49011010", taxTreatment: "nil", taxConfigurationStatus: "CONFIRMED" }]), true);
+  assert.equal(taxClassificationConfirmed([{ hsn: "49011010", taxTreatment: "exempt", taxConfigurationStatus: "CONFIRMED" }]), false);
+  assert.equal(amountInWords(245820), "INR Two Thousand Four Hundred Fifty-Eight and Twenty Paise Only");
+  assert.equal(amountInWords(50000), "INR Five Hundred Only");
+  assert.equal(amountInWords(10000000), "INR One Lakh Only");
 });
 
 test("a second capture does not allocate another number", () => {

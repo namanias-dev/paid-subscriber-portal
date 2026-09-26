@@ -11,6 +11,8 @@ export interface TaxLineInput {
   sku: string | null;
   hsn: string | null;
   qty: number;
+  unit?: string | null;
+  taxConfigurationStatus?: string | null;
   /** Customer line total after discount, in paise. */
   lineTotalPaise: number;
   discountPaise: number;
@@ -23,6 +25,7 @@ export interface TaxLine {
   sku: string | null;
   hsn: string | null;
   qty: number;
+  unit: string;
   unitPaise: number;
   discountPaise: number;
   taxablePaise: number;
@@ -104,7 +107,8 @@ export function computeTaxDocument(input: {
       sku: line.sku,
       hsn: line.hsn,
       qty,
-      unitPaise: Math.round(total / qty),
+      unit: line.unit || "NOS",
+      unitPaise: Math.round((total + Math.max(0, Math.round(line.discountPaise || 0))) / qty),
       discountPaise: Math.max(0, Math.round(line.discountPaise || 0)),
       taxablePaise: taxable,
       rateBps: line.taxTreatment === "taxable" ? line.taxRateBps : 0,
@@ -143,9 +147,16 @@ export function computeTaxDocument(input: {
 
 export type DocumentType = "TAX_INVOICE" | "BILL_OF_SUPPLY" | "INVOICE";
 
-/** A production invoice needs a saved 4–8 digit HSN on every line. Blank HSN is unconfirmed. */
-export function taxClassificationConfirmed(lines: { hsn: string | null }[]): boolean {
-  return lines.length > 0 && lines.every((line) => /^\d{4,8}$/.test((line.hsn || "").trim()));
+/** Production issuance needs an explicit confirmed nil or taxable HSN. Exempt placeholders stay blocked. */
+export function taxClassificationConfirmed(lines: { hsn: string | null; taxTreatment?: string | null; taxConfigurationStatus?: string | null }[]): boolean {
+  return lines.length > 0 && lines.every((line) => {
+    const treatment = (line.taxTreatment || "").toLowerCase();
+    return (
+      line.taxConfigurationStatus === "CONFIRMED" &&
+      (treatment === "nil" || treatment === "taxable") &&
+      /^\d{4,8}$/.test((line.hsn || "").trim())
+    );
+  });
 }
 
 export function chooseDocumentType(input: {
@@ -207,20 +218,33 @@ export function stateCodeFromName(state: string | null | undefined): string | nu
 }
 
 export function amountInWords(paise: number): string {
-  const rupees = Math.floor(Math.max(0, paise) / 100);
-  const rest = Math.max(0, paise) % 100;
-  const words = rupeesToWords(rupees);
-  return rest ? `${words} and ${rest}/100` : words;
+  const safe = Math.max(0, Math.round(paise));
+  const rupees = Math.floor(safe / 100);
+  const rest = safe % 100;
+  const rupeeWords = titleCase(indianNumberWords(rupees));
+  if (!rest) return `INR ${rupeeWords} Only`;
+  return `INR ${rupeeWords} and ${titleCase(underHundred(rest))} Paise Only`;
 }
 
-function rupeesToWords(n: number): string {
-  if (n === 0) return "Zero rupees";
+function titleCase(value: string): string {
+  return value.replace(/\b[a-z]/g, (letter) => letter.toUpperCase());
+}
+
+function underHundred(v: number): string {
   const ones = ["", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen"];
   const tens = ["", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety"];
+  if (v < 20) return ones[v] || "zero";
+  return `${tens[Math.floor(v / 10)]}${v % 10 ? `-${ones[v % 10]}` : ""}`;
+}
+
+function indianNumberWords(n: number): string {
+  if (n === 0) return "zero";
   const chunk = (v: number): string => {
-    if (v < 20) return ones[v];
-    if (v < 100) return `${tens[Math.floor(v / 10)]}${v % 10 ? ` ${ones[v % 10]}` : ""}`;
-    return `${ones[Math.floor(v / 100)]} hundred${v % 100 ? ` ${chunk(v % 100)}` : ""}`;
+    if (v < 100) return underHundred(v);
+    const hundreds = Math.floor(v / 100);
+    const rest = v % 100;
+    const ones = ["", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine"];
+    return `${ones[hundreds]} hundred${rest ? ` ${underHundred(rest)}` : ""}`;
   };
   const parts: string[] = [];
   const crore = Math.floor(n / 10000000);
@@ -231,5 +255,5 @@ function rupeesToWords(n: number): string {
   if (lakh) parts.push(`${chunk(lakh)} lakh`);
   if (thousand) parts.push(`${chunk(thousand)} thousand`);
   if (hundred) parts.push(chunk(hundred));
-  return `${parts.join(" ").replace(/\s+/g, " ")} rupees`;
+  return parts.join(" ").replace(/\s+/g, " ");
 }

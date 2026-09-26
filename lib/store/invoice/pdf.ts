@@ -15,6 +15,9 @@ export interface InvoicePdfModel {
   shipLines: string[];
   paymentReference: string | null;
   paidAt: string | null;
+  orderDate?: string | null;
+  courier?: string | null;
+  awb?: string | null;
   tax: TaxDocument;
   words: string;
   footer: string | null;
@@ -107,6 +110,7 @@ export async function renderInvoicePdf(model: InvoicePdfModel): Promise<Uint8Arr
   let metaY = PAGE_H - M - 4;
   const meta = [
     model.documentType.replaceAll("_", " "),
+    "Computer Generated Invoice / Sales Document",
     "PAID",
     `Invoice ${model.invoiceNumber}`,
     `Order ${model.orderNumber}`,
@@ -145,10 +149,11 @@ export async function renderInvoicePdf(model: InvoicePdfModel): Promise<Uint8Arr
   const columns = () => {
     need(22);
     page.drawText("Description", { x: M, y, size: 8, font, color: NAVY });
-    page.drawText("HSN", { x: 250, y, size: 8, font, color: NAVY });
-    page.drawText("Qty", { x: 300, y, size: 8, font, color: NAVY });
-    page.drawText("Taxable", { x: 340, y, size: 8, font, color: NAVY });
-    page.drawText("GST", { x: 430, y, size: 8, font, color: NAVY });
+    page.drawText("HSN", { x: 200, y, size: 8, font, color: NAVY });
+    page.drawText("Qty", { x: 268, y, size: 8, font, color: NAVY });
+    page.drawText("Unit", { x: 292, y, size: 8, font, color: NAVY });
+    page.drawText("Rate", { x: 340, y, size: 8, font, color: NAVY });
+    page.drawText("GST", { x: 410, y, size: 8, font, color: NAVY });
     const totalLabel = "Total";
     page.drawText(totalLabel, { x: RIGHT - font.widthOfTextAtSize(totalLabel, 8), y, size: 8, font, color: NAVY });
     y -= 6;
@@ -158,7 +163,7 @@ export async function renderInvoicePdf(model: InvoicePdfModel): Promise<Uint8Arr
   columns();
 
   for (const line of model.tax.lines) {
-    const nameLines = wrap(line.name, font, 9, 200);
+    const nameLines = wrap(line.name, font, 9, 155);
     const block = Math.max(1, nameLines.length) * 12 + 4;
     if (y - block < 56) {
       page = doc.addPage([PAGE_W, PAGE_H]);
@@ -168,10 +173,11 @@ export async function renderInvoicePdf(model: InvoicePdfModel): Promise<Uint8Arr
     nameLines.forEach((part, index) => {
       text(part, M, 9);
       if (index === 0) {
-        page.drawText(line.hsn || "—", { x: 250, y, size: 9, font, color: NAVY });
-        page.drawText(String(line.qty), { x: 300, y, size: 9, font, color: NAVY });
-        page.drawText(money(line.taxablePaise), { x: 340, y, size: 9, font, color: NAVY });
-        page.drawText(money(line.taxPaise), { x: 420, y, size: 9, font, color: NAVY });
+        page.drawText(line.hsn || "—", { x: 200, y, size: 8, font, color: NAVY });
+        page.drawText(String(line.qty), { x: 268, y, size: 8, font, color: NAVY });
+        page.drawText(line.unit || "NOS", { x: 292, y, size: 8, font, color: NAVY });
+        page.drawText(money(line.unitPaise), { x: 340, y, size: 8, font, color: NAVY });
+        page.drawText(line.rateBps > 0 ? money(line.taxPaise) : "NIL", { x: 410, y, size: 8, font, color: NAVY });
         const total = money(line.totalPaise);
         page.drawText(total, { x: RIGHT - font.widthOfTextAtSize(total, 9), y, size: 9, font, color: NAVY });
       }
@@ -180,41 +186,57 @@ export async function renderInvoicePdf(model: InvoicePdfModel): Promise<Uint8Arr
     y -= 4;
   }
 
-  const summary: Array<[string, number, boolean]> = [
-    ["Subtotal", model.tax.subtotalPaise, true],
-    ["Discount", model.tax.discountPaise, model.tax.discountPaise > 0],
-    ["Taxable value", model.tax.taxablePaise, true],
-    ["CGST", model.tax.cgstPaise, model.tax.cgstPaise > 0],
-    ["SGST", model.tax.sgstPaise, model.tax.sgstPaise > 0],
-    ["UTGST", model.tax.utgstPaise, model.tax.utgstPaise > 0],
-    ["IGST", model.tax.igstPaise, model.tax.igstPaise > 0],
-    ["Shipping", model.tax.shippingPaise, model.tax.shippingPaise > 0],
-    ["Rounding", model.tax.roundingPaise, model.tax.roundingPaise !== 0],
+  const gross = model.tax.lines.reduce((n, line) => n + line.totalPaise + line.discountPaise, 0);
+  const net = model.tax.lines.reduce((n, line) => n + line.totalPaise, 0);
+  const summary: Array<[string, string]> = [
+    ["Subtotal", money(gross)],
+    ["Discount", model.tax.discountPaise > 0 ? `−${money(model.tax.discountPaise)}` : money(0)],
+    ["Net goods", money(net)],
+    ["Shipping", money(model.tax.shippingPaise)],
+    ["GST", money(model.tax.taxPaise)],
   ];
-  need(summary.filter((row) => row[2]).length * 14 + 48);
-  for (const [label, amount, show] of summary) {
-    if (!show) continue;
+  if (model.tax.roundingPaise) summary.push(["Rounding", money(model.tax.roundingPaise)]);
+  need(summary.length * 14 + 120);
+  for (const [label, value] of summary) {
     page.drawText(label, { x: 360, y, size: 9, font, color: NAVY });
-    const value = money(amount);
     page.drawText(value, { x: RIGHT - font.widthOfTextAtSize(value, 9), y, size: 9, font, color: NAVY });
     y -= 14;
   }
-  const grand = `Grand total ${money(model.tax.grandTotalPaise)}`;
+  page.drawLine({ start: { x: 360, y: y + 8 }, end: { x: RIGHT, y: y + 8 }, thickness: 0.4, color: LINE });
+  const grand = `GRAND TOTAL  ${money(model.tax.grandTotalPaise)}`;
   page.drawText(grand, { x: RIGHT - font.widthOfTextAtSize(grand, 11), y, size: 11, font, color: NAVY });
-  y -= 18;
-  for (const line of wrap(model.words, font, 8, RIGHT - M)) {
-    text(line, M, 8, MUTED);
-    y -= 11;
-  }
-  if (model.attention) {
-    for (const line of wrap(model.attention, font, 8, RIGHT - M)) {
+  y -= 16;
+  const nil = model.tax.lines.find((line) => line.rateBps === 0 && line.hsn);
+  if (nil) {
+    for (const line of wrap(`GST treatment: Nil rated · HSN ${nil.hsn} · Rate NIL · Tax ${money(0)}`, font, 8, RIGHT - M)) {
       text(line, M, 8, MUTED);
       y -= 11;
     }
   }
-  const footer = model.footer || "This document records the payment captured for this Notes order.";
-  const footerLines = wrap(footer, font, 8, RIGHT - M);
-  page.drawText(footerLines[0] || footer, { x: M, y: 36, size: 8, font, color: MUTED });
-  if (footerLines[1]) page.drawText(footerLines[1], { x: M, y: 24, size: 8, font, color: MUTED });
+  for (const line of wrap(`Amount chargeable (in words): ${model.words}`, font, 8, RIGHT - M)) {
+    text(line, M, 8, NAVY);
+    y -= 11;
+  }
+  if (model.orderDate) {
+    text(`Order date: ${model.orderDate}`, M, 8, MUTED);
+    y -= 11;
+  }
+  const dispatch = model.courier ? `Dispatched through: ${model.courier}${model.awb ? ` · AWB ${model.awb}` : ""}` : "Dispatched through: Pending fulfillment";
+  for (const line of wrap(dispatch, font, 8, RIGHT - M)) {
+    text(line, M, 8, MUTED);
+    y -= 11;
+  }
+  y -= 8;
+  for (const line of wrap("We declare that this document shows the actual value of the goods described and that the particulars stated above are true and correct.", font, 8, 320)) {
+    text(line, M, 8, MUTED);
+    y -= 11;
+  }
+  y -= 10;
+  text("For NAMAN SHARMA", 360, 9, NAVY);
+  y -= 12;
+  page.drawText("NAMAN SHARMA IAS ACADEMY", { x: 360, y, size: 8, font, color: MUTED });
+  y -= 16;
+  page.drawText("Authorised Signatory", { x: 360, y, size: 8, font, color: NAVY });
+  page.drawText("This is a computer-generated document.", { x: M, y: 28, size: 8, font, color: MUTED });
   return doc.save();
 }

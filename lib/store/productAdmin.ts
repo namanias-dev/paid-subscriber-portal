@@ -100,4 +100,12 @@ export function applyProductContentFields(patch: Record<string, unknown>, body: 
     if (!Number.isFinite(bps) || bps < 0 || bps > 4000) throw new Error("GST rate is out of range.");
     patch.tax_rate_bps = bps;
   }
+  if (body.tax_configuration_status !== undefined) {
+    const status = body.tax_configuration_status == null ? "" : String(body.tax_configuration_status);
+    if (status && status !== "CONFIRMED" && status !== "UNCONFIRMED") throw new Error("Invalid tax configuration status.");
+    patch.tax_configuration_status = status || null;
+  }
+  if (body.tax_configuration_source !== undefined) {
+    patch.tax_configuration_source = body.tax_configuration_source == null ? null : String(body.tax_configuration_source).slice(0, 40) || null;
+  }
 }
