@@ -11,7 +11,7 @@ import PurchaseDock from "@/components/notes/PurchaseDock";
 import NotesProofSection from "@/components/notes/NotesProofSection";
 import { notesSampleForProduct, type NotesProofProduct } from "@/lib/store/notesProof";
 import { listStorefrontProducts, type StoreProductDetail } from "@/lib/store/catalogue";
-import { formatPaise } from "@/lib/store/money";
+import { formatPaise, presentStorePrice } from "@/lib/store/money";
 import { calculateStorePrice } from "@/lib/store/pricing";
 import { getNotesCurriculum } from "@/lib/store/notesCurriculum";
 import { notesProductPath } from "@/lib/store/paths";
@@ -61,6 +61,7 @@ export default async function NotesPdp({
     p.page_count ? `${p.page_count} pages` : null,
     p.booklets ? `${p.booklets} booklet${p.booklets === 1 ? "" : "s"}` : null,
     p.language,
+    p.physical_format,
     p.binding_type,
   ]
     .filter(Boolean)
@@ -69,7 +70,15 @@ export default async function NotesPdp({
   const stage = stageLabel(p.stage);
   const related = (await listStorefrontProducts()).filter((r) => r.id !== p.id).slice(0, 2);
   const canonical = `${SITE_URL}${notesProductPath(p.slug)}`;
+  const view = presentStorePrice({
+    mrpPaise: p.mrp_paise,
+    finalPaise: priced.final_paise,
+    offerDiscountPaise: priced.discount_paise,
+    offerBasePaise: priced.base_paise,
+    offerBadge: publicOffer?.badge_text || null,
+  });
   const showSale = purchasable && priced.discount_paise > 0 && publicOffer?.status === "ACTIVE";
+  const showList = purchasable && view.comparePaise != null && view.savePaise > 0;
   const jsonLd = {
     "@context": "https://schema.org",
     "@type": "Product",
@@ -81,7 +90,7 @@ export default async function NotesPdp({
     offers: {
       "@type": "Offer",
       priceCurrency: "INR",
-      price: ((purchasable ? priced.final_paise : p.selling_price_paise) / 100).toFixed(2),
+      price: ((purchasable ? view.payablePaise : p.selling_price_paise) / 100).toFixed(2),
       ...(showSale && publicOffer?.ends_at ? { priceValidUntil: publicOffer.ends_at.slice(0, 10) } : {}),
       availability: purchasable ? "https://schema.org/InStock" : "https://schema.org/OutOfStock",
       url: canonical,
@@ -105,7 +114,7 @@ export default async function NotesPdp({
           slug: p.slug,
           subject: p.subject || p.category_slug,
           kind: p.kind,
-          price_paise: priced.final_paise,
+          price_paise: view.payablePaise,
           offer_id: priced.offer_id,
         }}
       />
@@ -166,9 +175,9 @@ export default async function NotesPdp({
           <div className="mt-5">
             <PurchaseDock
               productId={p.id}
-              price={formatPaise(priced.final_paise)}
-              compare={showSale ? formatPaise(priced.base_paise) : null}
-              save={showSale ? `Save ${formatPaise(priced.discount_paise)}` : null}
+              price={formatPaise(view.payablePaise)}
+              compare={showList && view.comparePaise ? formatPaise(view.comparePaise) : null}
+              save={showList ? (view.percentOff > 0 ? `${view.percentOff}% OFF` : `Save ${formatPaise(view.savePaise)}`) : null}
               status={av.state === "on_demand" ? "Available to order · printed for you" : av.label}
               purchasable={purchasable}
               showInterest={showInterest}
@@ -195,7 +204,7 @@ export default async function NotesPdp({
               slug: p.slug,
               subject: p.subject || p.category_slug,
               name: p.short_name || title,
-              priceLabel: formatPaise(priced.final_paise),
+              priceLabel: formatPaise(view.payablePaise),
               purchasable,
               statusLabel: av.label,
             } satisfies NotesProofProduct}

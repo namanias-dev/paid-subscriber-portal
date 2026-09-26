@@ -57,7 +57,7 @@ export function validateProductPackage(input: {
   if (!present.length) return null;
   if (present.length !== 4) return "Enter weight, length, width and height together.";
   if (!input.weightGrams || input.weightGrams < 50 || input.weightGrams > 30000) {
-    return "Packed weight must be between 50 g and 30 kg.";
+    return "Invalid shipping weight. Packed weight must be between 50 g and 30 kg.";
   }
   for (const [label, mm] of [
     ["Length", input.lengthMm],

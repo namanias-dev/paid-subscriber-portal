@@ -109,3 +109,36 @@ export function applyProductContentFields(patch: Record<string, unknown>, body: 
     patch.tax_configuration_source = body.tax_configuration_source == null ? null : String(body.tax_configuration_source).slice(0, 40) || null;
   }
 }
+
+/** Client-side gate so the editor explains a refusal before the request. */
+export function productEditorSaveBlocker(input: {
+  mrpPaise: number;
+  sellingPaise: number;
+  isActive: boolean;
+  weightGrams: number | null;
+  lengthMm: number | null;
+  widthMm: number | null;
+  heightMm: number | null;
+}): string | null {
+  if (!Number.isFinite(input.mrpPaise) || !Number.isFinite(input.sellingPaise)) return "Could not save pricing";
+  if (input.sellingPaise > input.mrpPaise) return "Selling price cannot exceed MRP.";
+  if (input.isActive && input.sellingPaise <= 0) return "A live product needs a selling price above ₹0.";
+  return validateProductPackage({
+    weightGrams: input.weightGrams,
+    lengthMm: input.lengthMm,
+    widthMm: input.widthMm,
+    heightMm: input.heightMm,
+  });
+}
+
+/** Safe text for the admin editor. Raw database errors stay in the server log. */
+export function publicProductSaveError(error: unknown): string {
+  const message = (error instanceof Error ? error.message : "").trim();
+  if (!message) return "Product update failed";
+  if (/check constraint|violates|duplicate key|syntax error|service_role|password|bearer /i.test(message)) {
+    if (/price_not_above_mrp/i.test(message)) return "Selling price cannot exceed MRP.";
+    return "Product update failed";
+  }
+  if (message.length > 180) return "Product update failed";
+  return message;
+}

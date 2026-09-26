@@ -1,7 +1,7 @@
 import Link from "next/link";
 import Image from "next/image";
 import { BookOpen } from "lucide-react";
-import { formatPaise } from "@/lib/store/money";
+import { formatPaise, presentStorePrice } from "@/lib/store/money";
 import { calculateStorePrice, offerDiscountLabel, type OfferForPricing } from "@/lib/store/pricing";
 import type { StoreProductCard } from "@/lib/store/catalogue";
 import { notesProductPath } from "@/lib/store/paths";
@@ -30,14 +30,18 @@ export default function ProductCard({
         offer,
       )
     : null;
+  const view = priced
+    ? presentStorePrice({
+        mrpPaise: product.mrp_paise,
+        finalPaise: priced.final_paise,
+        offerDiscountPaise: priced.discount_paise,
+        offerBasePaise: priced.base_paise,
+        offerBadge: offer ? offer.badge_text || offerDiscountLabel(offer) : null,
+      })
+    : null;
   const badge =
-    priced && priced.discount_paise > 0 && offer
-      ? offer.badge_text || offerDiscountLabel(offer)
-      : av.lowStock
-        ? av.label
-        : av.mode === "on_demand" && av.purchasable
-          ? "Made to order"
-          : null;
+    view?.badge ||
+    (av.lowStock ? av.label : av.mode === "on_demand" && av.purchasable ? "Made to order" : null);
 
   return (
     <article className={`ns-product-card ${featured ? "lg:min-h-full" : ""}`}>
@@ -75,13 +79,13 @@ export default function ProductCard({
           {av.purchasable && priced ? (
             <div className="mt-3">
               <p className="font-heading text-[1.5rem] font-extrabold leading-none tabular-nums text-[var(--ca-navy)]">
-                {formatPaise(priced.final_paise)}
+                {formatPaise(view?.payablePaise || priced.final_paise)}
               </p>
-              {priced.discount_paise > 0 ? (
+              {view && view.savePaise > 0 && view.comparePaise ? (
                 <p className="mt-1 text-[12px] text-[var(--ca-navy)]/55">
-                  <span className="tabular-nums line-through">{formatPaise(priced.base_paise)}</span>
+                  <span className="tabular-nums line-through">{formatPaise(view.comparePaise)}</span>
                   <span className="sr-only"> regular price </span>
-                  <span className="ml-1 font-bold text-[var(--ca-gold-dark)]">Save {formatPaise(priced.discount_paise)}</span>
+                  <span className="ml-1 font-bold text-[var(--ca-gold-dark)]">Save {formatPaise(view.savePaise)}</span>
                 </p>
               ) : (
                 <p className="mt-1 text-[12px] text-[var(--ca-navy)]/45">incl. GST</p>

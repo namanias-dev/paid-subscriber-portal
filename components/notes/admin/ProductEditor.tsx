@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { PageHeader } from "@/components/admin/ui";
 import MediaManager from "@/components/notes/admin/MediaManager";
 import BundleComponents from "@/components/notes/admin/BundleComponents";
+import { productEditorSaveBlocker } from "@/lib/store/productAdmin";
 
 type AvailabilityMode = "ready_stock" | "on_demand" | "coming_soon" | "unavailable";
 
@@ -114,64 +115,75 @@ export default function ProductEditor({ id }: { id: string }) {
 
   async function persist() {
     if (!p) return;
-    if (p.selling_price_paise > p.mrp_paise) {
-      setErr("Selling price cannot exceed MRP.");
-      setSave("error");
-      return;
-    }
-    if (p.is_active && p.selling_price_paise <= 0) {
-      setErr("A live product needs a selling price above ₹0.");
+    const blocked = productEditorSaveBlocker({
+      mrpPaise: p.mrp_paise,
+      sellingPaise: p.selling_price_paise,
+      isActive: p.is_active,
+      weightGrams: p.weight_grams,
+      lengthMm: p.length_mm,
+      widthMm: p.width_mm,
+      heightMm: p.height_mm,
+    });
+    if (blocked) {
+      setErr(blocked);
       setSave("error");
       return;
     }
     setSave("saving");
     setErr(null);
-    const res = await fetch(`/api/admin/notes/products/${id}`, {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        name: p.name,
-        subtitle: p.subtitle,
-        subject: p.subject,
-        author: p.author,
-        language: p.language,
-        edition: p.edition,
-        stage: p.stage,
-        short_description: p.short_description,
-        description_md: p.description_md,
-        how_to_use_md: p.how_to_use_md,
-        prelims_relevance_md: p.prelims_relevance_md,
-        mains_relevance_md: p.mains_relevance_md,
-        revision_value_md: p.revision_value_md,
-        highlights: p.highlights,
-        ideal_for: p.ideal_for,
-        topics: p.topics,
-        page_count: p.page_count,
-        booklets: p.booklets,
-        physical_format: p.physical_format,
-        binding_type: p.binding_type,
-        weight_grams: p.weight_grams,
-        length_mm: p.length_mm,
-        width_mm: p.width_mm,
-        height_mm: p.height_mm,
-        hsn_code: p.hsn_code,
-        tax_treatment: p.tax_treatment || "exempt",
-        tax_rate_bps: p.tax_rate_bps || 0,
-        tax_configuration_status: p.tax_configuration_status || null,
-        tax_configuration_source: p.tax_configuration_source || null,
-        mrp_paise: p.mrp_paise,
-        selling_price_paise: p.selling_price_paise,
-        availability_mode: p.availability_mode,
-        on_hand: p.on_hand,
-        low_stock_threshold: p.low_stock_threshold,
-        is_active: p.is_active,
-      }),
-    });
-    const json = await res.json();
-    if (json.ok) {
-      setSave("saved");
-    } else {
-      setErr(json.error);
+    try {
+      const res = await fetch(`/api/admin/notes/products/${id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          name: p.name,
+          subtitle: p.subtitle,
+          subject: p.subject,
+          author: p.author,
+          language: p.language,
+          edition: p.edition,
+          stage: p.stage,
+          short_description: p.short_description,
+          description_md: p.description_md,
+          how_to_use_md: p.how_to_use_md,
+          prelims_relevance_md: p.prelims_relevance_md,
+          mains_relevance_md: p.mains_relevance_md,
+          revision_value_md: p.revision_value_md,
+          highlights: p.highlights,
+          ideal_for: p.ideal_for,
+          topics: p.topics,
+          page_count: p.page_count,
+          booklets: p.booklets,
+          physical_format: p.physical_format,
+          binding_type: p.binding_type,
+          weight_grams: p.weight_grams,
+          length_mm: p.length_mm,
+          width_mm: p.width_mm,
+          height_mm: p.height_mm,
+          hsn_code: p.hsn_code,
+          tax_treatment: p.tax_treatment || "exempt",
+          tax_rate_bps: p.tax_rate_bps || 0,
+          tax_configuration_status: p.tax_configuration_status || null,
+          tax_configuration_source: p.tax_configuration_source || null,
+          mrp_paise: p.mrp_paise,
+          selling_price_paise: p.selling_price_paise,
+          availability_mode: p.availability_mode,
+          on_hand: p.on_hand,
+          low_stock_threshold: p.low_stock_threshold,
+          is_active: p.is_active,
+        }),
+      });
+      const json = await res.json().catch(() => null);
+      if (json?.ok) {
+        setSave("saved");
+        setErr(null);
+      } else {
+        setErr(typeof json?.error === "string" && json.error ? json.error : "Product update failed");
+        setSave("error");
+      }
+    } catch (e) {
+      console.error("[notes-product-editor]", e);
+      setErr("Product update failed");
       setSave("error");
     }
   }
@@ -332,8 +344,8 @@ export default function ProductEditor({ id }: { id: string }) {
 
         <Section title="Pricing">
           <Grid>
-            <Field label="MRP (₹)"><input type="number" min={0} className={inp} value={rupees(p.mrp_paise)} onChange={(e) => set("mrp_paise", Math.round(Number(e.target.value) * 100))} /></Field>
-            <Field label="Selling price (₹)"><input type="number" min={0} className={inp} value={rupees(p.selling_price_paise)} onChange={(e) => set("selling_price_paise", Math.round(Number(e.target.value) * 100))} /></Field>
+            <Field label="MRP (₹)"><input type="number" min={0} className={inp} value={rupees(p.mrp_paise)} onChange={(e) => { const n = Number(e.target.value); if (e.target.value !== "" && Number.isFinite(n)) set("mrp_paise", Math.round(n * 100)); }} /></Field>
+            <Field label="Selling price (₹)"><input type="number" min={0} className={inp} value={rupees(p.selling_price_paise)} onChange={(e) => { const n = Number(e.target.value); if (e.target.value !== "" && Number.isFinite(n)) set("selling_price_paise", Math.round(n * 100)); }} /></Field>
           </Grid>
           {discountPct > 0 && (
             <p className="mt-2 text-sm font-medium text-emerald-700">
@@ -414,7 +426,7 @@ export default function ProductEditor({ id }: { id: string }) {
               save === "saved" ? "text-emerald-700" : save === "error" ? "text-red-700" : "text-amber-700"
             }`}
           >
-            {save === "saved" ? "All changes saved" : save === "dirty" ? "Unsaved changes" : save === "saving" ? "Saving…" : "Save failed"}
+            {save === "saved" ? "All changes saved" : save === "dirty" ? "Unsaved changes" : save === "saving" ? "Saving…" : err || "Product update failed"}
           </span>
           <button
             type="button"

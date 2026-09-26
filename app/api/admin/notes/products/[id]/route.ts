@@ -4,7 +4,7 @@ import { storeDb } from "@/lib/store/db";
 import { revalidateTag } from "next/cache";
 import { STORE_CACHE_TAG } from "@/lib/store/catalogue";
 import { assertActiveSellingPrice, normalizeStoreProductPrices } from "@/lib/store/productPrice";
-import { applyProductContentFields } from "@/lib/store/productAdmin";
+import { applyProductContentFields, publicProductSaveError } from "@/lib/store/productAdmin";
 import { deleteProductMedia, listProductMedia } from "@/lib/store/media/upload";
 import { PREPARATION_STATUSES } from "@/lib/store/availability";
 
@@ -151,11 +151,19 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
     assertActiveSellingPrice(selling, !!active);
 
     const { error } = await db.from("store_products").update(patch).eq("id", params.id);
-    if (error) return noStore({ ok: false, error: error.message }, 400);
-    revalidateTag(STORE_CACHE_TAG);
+    if (error) {
+      console.error("[notes-product-save]", params.id, error.message);
+      return noStore({ ok: false, error: publicProductSaveError(new Error(error.message)) }, 400);
+    }
+    try {
+      revalidateTag(STORE_CACHE_TAG);
+    } catch (revalidateError) {
+      console.error("[notes-product-save] revalidate", params.id, (revalidateError as Error).message);
+    }
     return noStore({ ok: true });
   } catch (e) {
-    return noStore({ ok: false, error: (e as Error).message }, 400);
+    console.error("[notes-product-save]", params.id, (e as Error).message);
+    return noStore({ ok: false, error: publicProductSaveError(e) }, 400);
   }
 }
 

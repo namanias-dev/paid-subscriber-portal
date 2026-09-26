@@ -58,7 +58,7 @@ export default function MediaManager({ productId, coverKey }: { productId: strin
         const res = await fetch("/api/admin/notes/media", { method: "POST", body: fd });
         const json = await res.json();
         if (!json.ok) {
-          setMsg(`${file.name}: ${json.error}`);
+          setMsg(json.error ? `${file.name}: ${json.error}` : "Image upload failed");
           break;
         }
       }
@@ -138,11 +138,16 @@ export default function MediaManager({ productId, coverKey }: { productId: strin
   async function setCover(id: string) {
     setBusy(true);
     try {
-      await fetch("/api/admin/notes/media", {
+      const res = await fetch("/api/admin/notes/media", {
         method: "PATCH",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ action: "set_cover", product_id: productId, media_id: id }),
       });
+      const json = await res.json().catch(() => null);
+      if (!json?.ok) {
+        setMsg(typeof json?.error === "string" && json.error ? json.error : "Image upload failed");
+        return;
+      }
       setMsg("Cover updated");
       await load();
     } finally {

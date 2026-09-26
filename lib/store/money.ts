@@ -25,6 +25,49 @@ export function discountPercent(mrpPaise: number, sellingPaise: number): number 
 }
 
 /**
+ * What the storefront shows. An active offer discount stays the payable price.
+ * With no offer, MRP above the selling price is the struck list price — the
+ * selling price itself is what checkout charges.
+ */
+export function presentStorePrice(input: {
+  mrpPaise: number;
+  finalPaise: number;
+  offerDiscountPaise?: number;
+  offerBasePaise?: number;
+  offerBadge?: string | null;
+}): {
+  payablePaise: number;
+  comparePaise: number | null;
+  savePaise: number;
+  percentOff: number;
+  badge: string | null;
+} {
+  const payablePaise = Math.max(0, Math.round(Number(input.finalPaise) || 0));
+  const offerDiscountPaise = Math.max(0, Math.round(Number(input.offerDiscountPaise) || 0));
+  if (offerDiscountPaise > 0) {
+    return {
+      payablePaise,
+      comparePaise: Math.max(0, Math.round(Number(input.offerBasePaise) || 0)) || null,
+      savePaise: offerDiscountPaise,
+      percentOff: 0,
+      badge: input.offerBadge || null,
+    };
+  }
+  const mrpPaise = Math.max(0, Math.round(Number(input.mrpPaise) || 0));
+  const percentOff = discountPercent(mrpPaise, payablePaise);
+  if (percentOff > 0) {
+    return {
+      payablePaise,
+      comparePaise: mrpPaise,
+      savePaise: mrpPaise - payablePaise,
+      percentOff,
+      badge: `${percentOff}% OFF`,
+    };
+  }
+  return { payablePaise, comparePaise: null, savePaise: 0, percentOff: 0, badge: null };
+}
+
+/**
  * Tax on a line, from the product's own snapshot. Never a hard-coded rate: the
  * CA's position on HSN 4901 vs 4820 decides the treatment, and it is data.
  */
