@@ -261,9 +261,15 @@ export default function StatusClient({ contact }: { contact: Contact }) {
                       <Row label="Next payment" value={`${formatISTDate(nextDue.due)} · ${formatINR(nextDue.amount)}`} />
                     )}
                   </div>
-                  <p className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-primary/10 px-3 py-1.5 text-xs font-semibold text-primary">
-                    🎓 Class Hub access unlocked
-                  </p>
+                  {enr.remaining <= 0 ? (
+                    <p className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-primary/10 px-3 py-1.5 text-xs font-semibold text-primary">
+                      Class Hub access unlocked
+                    </p>
+                  ) : (
+                    <p className="mt-3 text-xs text-ink2">
+                      Log in with your mobile number to see this plan, your receipt, and the next payment.
+                    </p>
+                  )}
                 </div>
               )}
 

@@ -146,6 +146,43 @@ export function checkoutAmountsDiffer(expected: unknown, authoritativeRupees: nu
   return Math.round(n) !== Math.round(authoritativeRupees);
 }
 
+/**
+ * Public create-payment plan guard. Pay in full never carries a seat amount.
+ * Unknown plan names are rejected rather than charged as a full payment.
+ */
+export function normalizePublicPaymentRequest(body: {
+  plan?: unknown;
+  mode?: unknown;
+  bookSeat?: unknown;
+  seatAmount?: unknown;
+}): { ok: true; plan: "full" | "emi"; bookSeat: boolean } | { ok: false; error: string } {
+  const raw = String(body.plan || body.mode || "full");
+  if (raw !== "full" && raw !== "emi") return { ok: false, error: "Invalid payment plan." };
+  const requestedSeat = body.bookSeat === true || body.bookSeat === "true";
+  const sentSeatAmount = body.seatAmount != null && String(body.seatAmount).trim() !== "";
+  if (raw === "full" && (requestedSeat || sentSeatAmount)) {
+    return { ok: false, error: "Seat amount does not apply to pay in full." };
+  }
+  return { ok: true, plan: raw, bookSeat: raw === "emi" && requestedSeat };
+}
+
+/**
+ * A multi-batch course must name a real batch. A single-batch course may omit
+ * the id (course-level pricing is that batch) but cannot name an unknown one.
+ */
+export function checkoutBatchError(
+  batches: { id: string }[] | null | undefined,
+  batchId: string | null,
+): string | null {
+  const list = batches || [];
+  if (list.length >= 2) {
+    if (!batchId || !list.some((b) => b.id === batchId)) return "Please choose a batch.";
+    return null;
+  }
+  if (batchId && list.length > 0 && !list.some((b) => b.id === batchId)) return "Please choose a batch.";
+  return null;
+}
+
 export interface EnrollmentPaymentBodyInput {
   courseSlug: string;
   name: string;

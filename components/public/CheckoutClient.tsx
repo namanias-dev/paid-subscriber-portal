@@ -114,17 +114,20 @@ export default function CheckoutClient({ course, waLink = null }: { course: Cour
   }, [course.slug]);
 
   const bookingISO = useMemo(() => new Date().toISOString(), []);
+  const seatCeiling = standardTotal;
+  const seatOutOfRange = cfg.allowCustomSeat && (seatInput < seatFloor || seatInput >= seatCeiling);
+  const reservationForPlan = cfg.allowCustomSeat && !seatOutOfRange ? seatInput : (cfg.seatAmount ?? seatFloor);
   const installmentIntent = publicPaymentIntent({
     method: "installments",
     seatConfigured,
     allowCustomSeat: cfg.allowCustomSeat,
-    reservationAmount: seatInput,
+    reservationAmount: reservationForPlan,
   });
   const selectedIntent = publicPaymentIntent({
     method,
     seatConfigured,
     allowCustomSeat: cfg.allowCustomSeat,
-    reservationAmount: seatInput,
+    reservationAmount: reservationForPlan,
   });
   const seatActive = method === "installments" && installmentIntent.bookSeat;
 
@@ -154,25 +157,28 @@ export default function CheckoutClient({ course, waLink = null }: { course: Cour
   }, [fullAvailable, ec, bookingISO, applied]);
 
   const plannedPreview = method === "installments" ? emiPreview : fullPreview;
-  const schedule: InstallmentItem[] = plannedPreview?.ok ? plannedPreview.plan.schedule : [];
-  const todayAmount = plannedPreview?.ok ? plannedPreview.plan.firstAmount : 0;
-  const grandTotal = plannedPreview?.ok ? plannedPreview.plan.totalFee : 0;
-  const remaining = Math.max(0, grandTotal - todayAmount);
+  const planOk = plannedPreview?.ok === true;
+  const schedule: InstallmentItem[] = planOk ? plannedPreview.plan.schedule : [];
+  const plannedToday = planOk ? plannedPreview.plan.firstAmount : 0;
+  const grandTotal = planOk ? plannedPreview.plan.totalFee : (method === "full" ? payInFull : standardTotal);
+  const todayAmount = seatActive && (seatOutOfRange || !planOk) ? seatInput : plannedToday;
+  const remaining = seatOutOfRange || !planOk ? 0 : Math.max(0, grandTotal - todayAmount);
   const couponDiscount = plannedPreview?.ok ? plannedPreview.plan.discountAmount : (applied?.discount ?? 0);
   const originalTotal = plannedPreview?.ok ? plannedPreview.plan.originalTotalFee : (method === "full" ? payInFull : standardTotal);
 
   const seatTooLow = seatActive && cfg.allowCustomSeat && seatInput < seatFloor;
-  const seatCeiling = emiPreview?.ok ? emiPreview.plan.originalTotalFee : standardTotal;
   const seatTooHigh = seatActive && cfg.allowCustomSeat && seatInput >= seatCeiling;
   const seatInvalid = seatTooLow || seatTooHigh || (method === "installments" && !!emiPreview && !emiPreview.ok);
 
-  const proposition = method === "full" && fullPreview?.ok
-    ? { kind: "payFull" as const, amount: fullPreview.plan.firstAmount }
-    : seatActive && emiPreview?.ok
-      ? { kind: "reserve" as const, amount: seatInvalid ? (cfg.seatAmount ?? seatFloor) : emiPreview.plan.firstAmount }
-      : method === "installments" && emiPreview?.ok
-        ? { kind: "payToday" as const, amount: emiPreview.plan.firstAmount }
-        : null;
+  const proposition = seatOutOfRange
+    ? null
+    : method === "full" && fullPreview?.ok
+      ? { kind: "payFull" as const, amount: fullPreview.plan.firstAmount }
+      : seatActive && emiPreview?.ok
+        ? { kind: "reserve" as const, amount: emiPreview.plan.firstAmount }
+        : method === "installments" && emiPreview?.ok
+          ? { kind: "payToday" as const, amount: emiPreview.plan.firstAmount }
+          : null;
 
   const selectedBatch = multiBatch ? batches.find((b) => b.id === batchId) ?? null : null;
   const selectedAxis = selectedBatch && batchModel.kind === "matrix" ? batchAxis(selectedBatch) : null;
@@ -185,7 +191,7 @@ export default function CheckoutClient({ course, waLink = null }: { course: Cour
   const fullPlanTotal = fullPreview?.ok ? fullPreview.plan.totalFee : payInFull;
   const saveVsInstallments = Math.max(0, emiPlanTotal - fullPlanTotal);
 
-  const payLabel = seatActive && !seatInvalid
+  const payLabel = seatActive
     ? "Reserve My Seat"
     : `Pay ${formatINR(todayAmount)} Securely`;
 
@@ -207,10 +213,15 @@ export default function CheckoutClient({ course, waLink = null }: { course: Cour
     if (id) chooseBatch(id);
   }
 
+  function clampSeat(value: number) {
+    return Math.min(Math.max(seatFloor, seatCeiling - 1), Math.max(seatFloor, value));
+  }
+
   function chooseMethod(next: PublicPaymentMethod) {
     if (next === method) return;
     if (next === "installments" && !emiAvailable) return;
     if (next === "full" && !fullAvailable) return;
+    if (next !== "installments") setSeatInput((value) => clampSeat(value));
     setMethod(next);
     setScheduleOpen(false);
     setAmountOpen(false);
@@ -271,25 +282,29 @@ export default function CheckoutClient({ course, waLink = null }: { course: Cour
 
   async function proceed() {
     if (loading || submitting.current) return;
+    submitting.current = true;
     setError(null);
     if (!name.trim() || !/^\d{10}$/.test(phone)) {
       setError("Enter your name and a valid 10-digit mobile number.");
+      submitting.current = false;
       document.getElementById("enrollment-details")?.scrollIntoView({ behavior: "smooth", block: "center" });
       return;
     }
     if (email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
       setError("Enter a valid email address, or leave it blank.");
+      submitting.current = false;
       return;
     }
     if (seatInvalid) {
-      setError("Please choose a valid seat-booking amount.");
+      setError(seatTooLow ? `Minimum amount is ${formatINR(seatFloor)}.` : "Please choose a valid seat-booking amount.");
+      submitting.current = false;
       return;
     }
     if (!plannedPreview?.ok) {
       setError(plannedPreview?.error || "This payment plan is not available.");
+      submitting.current = false;
       return;
     }
-    submitting.current = true;
     setLoading(true);
     trackClient("click_enroll", { course_id: course.id, course_slug: course.slug, item_type: "course", price: ec.price });
     const productType = seatActive ? "seat_booking" : method === "installments" ? "installment" : "full_payment";
@@ -368,7 +383,9 @@ export default function CheckoutClient({ course, waLink = null }: { course: Cour
     ? `${count} monthly payments`
     : `${count} payments, every ${cfg.intervalMonths} months`;
   const laterSchedule = schedule.filter((item) => item.kind === "installment");
-  const emiToday = emiPreview?.ok ? emiPreview.plan.firstAmount : (cfg.seatAmount ?? seatFloor);
+  const emiToday = seatActive && seatOutOfRange
+    ? seatInput
+    : emiPreview?.ok ? emiPreview.plan.firstAmount : (cfg.seatAmount ?? seatFloor);
   const fullToday = fullPreview?.ok ? fullPreview.plan.firstAmount : payInFull;
   const totalLabel = method === "full" ? "Pay-in-full price" : "Installment plan total";
 
@@ -378,6 +395,7 @@ export default function CheckoutClient({ course, waLink = null }: { course: Cour
     const apply = () => {
       const height = Math.ceil(el.getBoundingClientRect().height);
       document.documentElement.style.setProperty("--checkout-paybar-height", `${height}px`);
+      document.documentElement.style.scrollPaddingBottom = height > 0 ? `calc(${height}px + 1rem)` : "";
     };
     apply();
     const observer = new ResizeObserver(apply);
@@ -385,11 +403,21 @@ export default function CheckoutClient({ course, waLink = null }: { course: Cour
     return () => {
       observer.disconnect();
       document.documentElement.style.removeProperty("--checkout-paybar-height");
+      document.documentElement.style.scrollPaddingBottom = "";
     };
   }, [todayAmount, payLabel, error]);
 
   return (
-    <div className="bg-[var(--ca-slate-50)] pb-[calc(var(--checkout-paybar-height,5.5rem)+1.25rem)] lg:pb-16">
+    <div
+      className="bg-[var(--ca-slate-50)] pb-[calc(var(--checkout-paybar-height,calc(5.5rem+env(safe-area-inset-bottom,0px)))+1.25rem)] lg:pb-16"
+      onFocusCapture={(event) => {
+        onFocusCapture();
+        const target = event.target;
+        if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
+          target.scrollIntoView({ block: "center", inline: "nearest" });
+        }
+      }}
+    >
       <div className="container-wide pt-3">
         <Link href={`/courses/${course.slug}`} className="ca-focus inline-flex min-h-11 items-center text-sm font-semibold text-[var(--ca-navy-600)]">
           Back to course
@@ -486,7 +514,13 @@ export default function CheckoutClient({ course, waLink = null }: { course: Cour
                 <p className="text-[11px] font-semibold uppercase tracking-wide text-[var(--ca-slate-700)]">Your payment</p>
                 <MoneyRow label="Pay today" value={formatINR(todayAmount)} strong />
                 <MoneyRow label={totalLabel} value={formatINR(grandTotal)} />
-                <MoneyRow label="Remaining balance" value={formatINR(remaining)} />
+                {!seatOutOfRange && planOk && <MoneyRow label="Remaining balance" value={formatINR(remaining)} />}
+                {seatTooLow && (
+                  <p role="alert" className="text-sm text-red-600">Minimum amount is {formatINR(seatFloor)}.</p>
+                )}
+                {seatTooHigh && (
+                  <p role="alert" className="text-sm text-red-600">Amount must stay below the installment plan total.</p>
+                )}
                 {method === "full" && saveVsInstallments > 0 && (
                   <MoneyRow label="You save" value={`${formatINR(saveVsInstallments)} vs installments`} save />
                 )}
@@ -502,7 +536,7 @@ export default function CheckoutClient({ course, waLink = null }: { course: Cour
                     {firstInstallment?.due ? ` · First due ${formatISTDate(firstInstallment.due)}` : ""}
                   </p>
                 )}
-                {seatActive && (
+                {seatActive && !seatOutOfRange && planOk && (
                   <p className="text-sm text-[var(--ca-slate-700)]">
                     Today&apos;s {formatINR(todayAmount)} is part of the {formatINR(grandTotal)} installment plan, not a separate fee.
                   </p>
@@ -533,7 +567,7 @@ export default function CheckoutClient({ course, waLink = null }: { course: Cour
                 </div>
               )}
 
-              {method === "installments" && laterSchedule.length > 0 && (
+              {method === "installments" && !seatOutOfRange && laterSchedule.length > 0 && (
                 <InstallmentScheduleAccordion
                   open={scheduleOpen}
                   onToggle={() => {
@@ -573,7 +607,7 @@ export default function CheckoutClient({ course, waLink = null }: { course: Cour
                           inputMode="numeric"
                           aria-invalid={seatInvalid}
                           aria-describedby="booking-amount-help"
-                          className="w-40 rounded-xl border border-[var(--ca-slate-300)] px-3 py-2.5 text-base font-semibold focus:border-[var(--ca-gold)] focus:outline-none"
+                          className="w-40 scroll-mb-[calc(var(--checkout-paybar-height,5.5rem)+1rem)] rounded-xl border border-[var(--ca-slate-300)] px-3 py-2.5 text-base font-semibold focus:border-[var(--ca-gold)] focus:outline-none"
                           value={seatInput}
                           min={seatFloor}
                           max={Math.max(seatFloor, seatCeiling - 1)}
@@ -583,7 +617,7 @@ export default function CheckoutClient({ course, waLink = null }: { course: Cour
                           }}
                           onBlur={() => {
                             setSeatInput((v) => {
-                              const clamped = Math.min(Math.max(seatFloor, seatCeiling - 1), Math.max(seatFloor, v));
+                              const clamped = clampSeat(v);
                               if (clamped !== (cfg.seatAmount ?? seatFloor)) {
                                 trackClient("booking_amount_changed", {
                                   course_id: course.id,
@@ -597,7 +631,7 @@ export default function CheckoutClient({ course, waLink = null }: { course: Cour
                         />
                       </div>
                       <p id="booking-amount-help" className={`mt-1 text-sm ${seatInvalid ? "text-red-600" : "text-[var(--ca-slate-700)]"}`} role={seatInvalid ? "alert" : undefined}>
-                        {seatTooHigh ? "Amount must stay below the installment plan total." : `Minimum ${formatINR(seatFloor)}.`}
+                        {seatTooHigh ? "Amount must stay below the installment plan total." : `Minimum amount is ${formatINR(seatFloor)}.`}
                       </p>
                     </div>
                   )}
@@ -648,7 +682,7 @@ export default function CheckoutClient({ course, waLink = null }: { course: Cour
               <MoneyRow label="Plan" value={method === "installments" ? "Installments" : "Pay in Full"} />
               <MoneyRow label={totalLabel} value={formatINR(grandTotal)} />
               <MoneyRow label="Pay today" value={formatINR(todayAmount)} strong />
-              <MoneyRow label="Remaining balance" value={formatINR(remaining)} />
+              {!seatOutOfRange && planOk && <MoneyRow label="Remaining balance" value={formatINR(remaining)} />}
             </div>
             {error && <p role="alert" className="mt-3 text-sm text-red-600">{error}</p>}
             <div className="mt-4">

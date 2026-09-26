@@ -8,7 +8,9 @@ import {
   batchPairKey,
   buildEnrollmentPaymentBody,
   checkoutAmountsDiffer,
+  checkoutBatchError,
   defaultInstallmentCount,
+  normalizePublicPaymentRequest,
   publicPaymentIntent,
   resolveBatchId,
   timingsForMode,
@@ -66,8 +68,9 @@ function sum(schedule: InstallmentItem[]): number {
 }
 
 const offlineMorning = batch({ id: "off-m", mode: "Offline", timing: "Morning", price: 85000, original_price: 100000, pay_in_full_price: 70000 });
-const offlineEvening = batch({ id: "off-e", mode: "Offline", timing: "Evening", price: 85000, pay_in_full_price: 70000 });
-const onlineMorning = batch({ id: "on-m", mode: "Online", timing: "Morning", price: 55000, pay_in_full_price: 50000 });
+const offlineEvening = batch({ id: "off-e", mode: "Offline", timing: "Evening", price: 85000, original_price: 100000, pay_in_full_price: 70000 });
+const onlineMorning = batch({ id: "on-m", mode: "Online", timing: "Morning", price: 55000, original_price: 65000, pay_in_full_price: 55000 });
+const onlineEvening = batch({ id: "on-e", mode: "Online", timing: "Evening", price: 55000, original_price: 65000, pay_in_full_price: 50000 });
 
 describe("enrollment paths stay scoped to checkout", () => {
   test("course enroll and legacy enroll resolve back to the course", () => {
@@ -118,6 +121,27 @@ describe("batch selection maps onto real batch ids", () => {
     assert.equal(batchLabelAddsDetail(null, "Offline · Morning", null), false);
   });
 
+  test("only offline, only morning, and a missing pair never invent a selectable combination", () => {
+    const onlyOffline = analyzeBatches([offlineMorning, offlineEvening]);
+    assert.equal(onlyOffline.kind, "matrix");
+    if (onlyOffline.kind !== "matrix") return;
+    assert.deepEqual(onlyOffline.modes, ["Offline"]);
+    assert.equal(resolveBatchId(onlyOffline, "Online", "Evening"), null);
+
+    const onlyMorning = analyzeBatches([offlineMorning, onlineMorning]);
+    assert.equal(onlyMorning.kind, "matrix");
+    if (onlyMorning.kind !== "matrix") return;
+    assert.deepEqual(timingsForMode(onlyMorning, "Online"), ["Morning"]);
+    assert.equal(resolveBatchId(onlyMorning, "Online", "Evening"), "on-m");
+    assert.equal(resolveBatchId(onlyMorning, "Online", "Morning"), "on-m");
+
+    const missingEvening = analyzeBatches([offlineMorning, offlineEvening, onlineMorning]);
+    assert.equal(missingEvening.kind, "matrix");
+    if (missingEvening.kind !== "matrix") return;
+    assert.deepEqual(timingsForMode(missingEvening, "Online"), ["Morning"]);
+    assert.equal(resolveBatchId(missingEvening, "Online", "Evening"), "on-m");
+  });
+
   test("duplicate pairs and legacy multi-value batches fall back to the batch list", () => {
     const dup = batch({ id: "dup", mode: "Offline", timing: "Morning", price: 85000 });
     assert.equal(analyzeBatches([offlineMorning, dup]).kind, "list");
@@ -164,8 +188,8 @@ describe("installment default and payment bodies preserve the checkout contract"
     });
     assert.equal(fullNow.ok, true);
     if (!fullNow.ok) return;
-    assert.equal(fullNow.plan.firstAmount, 50000);
-    assert.equal(fullNow.plan.totalFee, 50000);
+    assert.equal(fullNow.plan.firstAmount, 55000);
+    assert.equal(fullNow.plan.totalFee, 55000);
     assert.equal(fullNow.plan.schedule.length, 1);
 
     const fullSeat = planCourseEnrollment({
@@ -269,6 +293,124 @@ describe("installment default and payment bodies preserve the checkout contract"
     );
   });
 
+  test("every current SAFALTA batch shape balances through the planner", () => {
+    const shapes = [offlineMorning, offlineEvening, onlineMorning, onlineEvening];
+    const c = course(shapes, { emi_config: emi(2000) });
+    for (const item of shapes) {
+      const seat = planCourseEnrollment({
+        course: c, plan: "emi", bookSeat: true, seatAmount: 2000, installmentCount: 3, batchId: item.id, bookingISO: BOOKING,
+      });
+      assert.equal(seat.ok, true, item.id);
+      if (!seat.ok) continue;
+      const later = seat.plan.schedule.filter((line) => line.kind === "installment");
+      assert.equal(seat.plan.firstAmount + later.reduce((a, line) => a + line.amount, 0), seat.plan.totalFee);
+      assert.equal(sum(seat.plan.schedule), seat.plan.totalFee);
+      assert.equal(seat.plan.totalFee - seat.plan.firstAmount, seat.plan.totalFee - 2000);
+      assert.equal(seat.plan.firstAmount, 2000);
+      assert.equal(seat.plan.totalFee, item.price);
+
+      const custom = planCourseEnrollment({
+        course: c, plan: "emi", bookSeat: true, seatAmount: 5000, installmentCount: 3, batchId: item.id, bookingISO: BOOKING,
+      });
+      assert.equal(custom.ok, true, item.id);
+      if (!custom.ok) continue;
+      const customLater = custom.plan.schedule.filter((line) => line.kind === "installment");
+      assert.equal(custom.plan.firstAmount, 5000);
+      assert.equal(custom.plan.firstAmount + customLater.reduce((a, line) => a + line.amount, 0), custom.plan.totalFee);
+      assert.equal(custom.plan.totalFee - custom.plan.firstAmount, item.price - 5000);
+
+      const full = planCourseEnrollment({
+        course: c, plan: "full", bookSeat: false, batchId: item.id, bookingISO: BOOKING,
+      });
+      assert.equal(full.ok, true, item.id);
+      if (!full.ok) continue;
+      const fullPrice = item.pay_in_full_price ?? item.price;
+      assert.equal(full.plan.firstAmount, fullPrice);
+      assert.equal(full.plan.totalFee, fullPrice);
+      assert.equal(full.plan.totalFee - full.plan.firstAmount, 0);
+      assert.equal(full.plan.schedule.some((line) => line.kind === "installment"), false);
+
+      const wire = JSON.parse(JSON.stringify(buildEnrollmentPaymentBody({
+        courseSlug: "safalta",
+        name: "Naman",
+        email: "",
+        mobile: "9812345678",
+        plan: "full",
+        bookSeat: false,
+        installmentCount: 3,
+        seatAmount: 2000,
+        allowCustomSeat: true,
+        multiBatch: true,
+        batchId: item.id,
+        expectedAmount: full.plan.firstAmount,
+      }))) as Record<string, unknown>;
+      assert.equal(wire.expectedAmount, fullPrice);
+      assert.equal("installmentCount" in wire, false);
+      assert.equal("seatAmount" in wire, false);
+
+      const save = item.price - fullPrice;
+      assert.equal(save > 0, item.price > fullPrice);
+      if (item.id === "on-m") assert.equal(save, 0);
+    }
+  });
+
+  test("a seat below the minimum is clamped by the planner and disagrees with the typed quote", () => {
+    const c = course([offlineMorning]);
+    const low = planCourseEnrollment({
+      course: c, plan: "emi", bookSeat: true, seatAmount: 500, installmentCount: 3, batchId: "off-m", bookingISO: BOOKING,
+    });
+    assert.equal(low.ok, true);
+    if (!low.ok) return;
+    assert.equal(low.plan.firstAmount, 2000);
+    assert.equal(checkoutAmountsDiffer(500, low.plan.firstAmount), true);
+
+    const high = planCourseEnrollment({
+      course: c, plan: "emi", bookSeat: true, seatAmount: 90000, installmentCount: 3, batchId: "off-m", bookingISO: BOOKING,
+    });
+    assert.equal(high.ok, true);
+    if (!high.ok) return;
+    assert.ok(high.plan.firstAmount < 85000);
+    assert.equal(checkoutAmountsDiffer(90000, high.plan.firstAmount), true);
+  });
+
+  test("public create-payment rejects a bad plan, a seat on pay in full, and an unknown batch", () => {
+    assert.equal(normalizePublicPaymentRequest({ plan: "nope" }).ok, false);
+    assert.deepEqual(
+      normalizePublicPaymentRequest({ plan: "full", bookSeat: false }),
+      { ok: true, plan: "full", bookSeat: false },
+    );
+    const withSeat = normalizePublicPaymentRequest({ plan: "full", bookSeat: true, seatAmount: 2000 });
+    assert.equal(withSeat.ok, false);
+    const seatOnly = normalizePublicPaymentRequest({ plan: "full", seatAmount: 2000 });
+    assert.equal(seatOnly.ok, false);
+    assert.deepEqual(
+      normalizePublicPaymentRequest({ plan: "emi", bookSeat: true }),
+      { ok: true, plan: "emi", bookSeat: true },
+    );
+
+    const batches = [{ id: "off-m" }, { id: "on-m" }];
+    assert.equal(checkoutBatchError(batches, "missing"), "Please choose a batch.");
+    assert.equal(checkoutBatchError(batches, null), "Please choose a batch.");
+    assert.equal(checkoutBatchError(batches, "off-m"), null);
+    assert.equal(checkoutBatchError([{ id: "only" }], null), null);
+    assert.equal(checkoutBatchError([{ id: "only" }], "other"), "Please choose a batch.");
+  });
+
+  test("invalid installment count and unsupported EMI are refused by the planner", () => {
+    const c = course([offlineMorning]);
+    const badCount = planCourseEnrollment({
+      course: c, plan: "emi", bookSeat: true, installmentCount: 9, batchId: "off-m", bookingISO: BOOKING,
+    });
+    assert.equal(badCount.ok, false);
+    const disabled = { ...emi(), enabled: false };
+    const noEmi = course(
+      [batch({ id: "plain", mode: "Offline", timing: "Morning", price: 10000, emi_config: disabled })],
+      { emi_config: disabled },
+    );
+    const refused = planCourseEnrollment({ course: noEmi, plan: "emi", bookSeat: true, installmentCount: 3, bookingISO: BOOKING });
+    assert.equal(refused.ok, false);
+  });
+
   test("a stale quoted amount is a conflict and a missing quote is not", () => {
     assert.equal(checkoutAmountsDiffer(undefined, 2000), false);
     assert.equal(checkoutAmountsDiffer("", 2000), false);
@@ -298,6 +440,15 @@ describe("checkout UI does not hardcode production prices", () => {
     assert.match(client, /publicPaymentIntent/);
     assert.match(client, /Installment plan total/);
     assert.match(client, /Pay-in-full price/);
+    assert.match(client, /Minimum amount is/);
+    assert.match(client, /scrollPaddingBottom/);
+    assert.doesNotMatch(client, /Course fee/);
+    const status = readFileSync(new URL("../../app/(site)/payment/status/StatusClient.tsx", import.meta.url), "utf8");
+    assert.match(status, /Your seat is reserved/);
+    assert.match(status, /Enrollment confirmed/);
+    assert.match(status, /Payment not completed yet/);
+    assert.match(status, /enr\.remaining <= 0/);
+    assert.match(status, /!purchaseFired\.current && isPaid/);
     assert.doesNotMatch(client, /Start the payment plan today/);
     assert.doesNotMatch(client, /Pay the full /);
     assert.match(client, /\/api\/v1\/enroll\/create-payment/);

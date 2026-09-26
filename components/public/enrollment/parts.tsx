@@ -169,7 +169,10 @@ export function BatchList({
               <span className="block text-[10px] font-semibold uppercase tracking-wide text-[var(--ca-slate-700)]">Installment plan</span>
               <span className="font-heading font-bold text-[var(--ca-navy-900)]">{formatINR(fee.courseFee)}</span>
               {fee.original != null && fee.original > fee.courseFee && (
-                <span className="block text-xs text-[var(--ca-slate-400)] line-through">{formatINR(fee.original)}</span>
+                <span className="block text-xs text-[var(--ca-slate-400)]">
+                  <span className="sr-only">Original price </span>
+                  <span className="line-through">{formatINR(fee.original)}</span>
+                </span>
               )}
             </span>
           </button>
@@ -248,6 +251,7 @@ export function InstallmentScheduleAccordion({
       <div
         id={panelId}
         role="region"
+        aria-hidden={!open}
         className={`grid transition-[grid-template-rows] duration-200 motion-reduce:transition-none ${open ? "grid-rows-[1fr]" : "grid-rows-[0fr]"}`}
       >
         <div className="overflow-hidden">
@@ -301,7 +305,7 @@ export function StudentDetailsForm({
             id="enroll-name"
             name="name"
             autoComplete="name"
-            className="mt-1 w-full scroll-mb-[var(--checkout-paybar-height,5.5rem)] rounded-xl border border-[var(--ca-slate-300)] px-3 py-2.5 text-base font-medium focus:border-[var(--ca-gold)] focus:outline-none"
+            className="mt-1 w-full scroll-mb-[calc(var(--checkout-paybar-height,5.5rem)+1rem)] rounded-xl border border-[var(--ca-slate-300)] px-3 py-2.5 text-base font-medium focus:border-[var(--ca-gold)] focus:outline-none"
             value={name}
             onChange={(e) => onName(e.target.value)}
             onFocus={onFocusCapture}
@@ -317,7 +321,7 @@ export function StudentDetailsForm({
             pattern="[0-9]*"
             aria-invalid={phoneInvalid}
             aria-describedby={phoneInvalid ? "enroll-form-error" : undefined}
-            className="mt-1 w-full scroll-mb-[var(--checkout-paybar-height,5.5rem)] rounded-xl border border-[var(--ca-slate-300)] px-3 py-2.5 text-base font-medium focus:border-[var(--ca-gold)] focus:outline-none"
+            className="mt-1 w-full scroll-mb-[calc(var(--checkout-paybar-height,5.5rem)+1rem)] rounded-xl border border-[var(--ca-slate-300)] px-3 py-2.5 text-base font-medium focus:border-[var(--ca-gold)] focus:outline-none"
             value={phone}
             onChange={(e) => onPhone(e.target.value.replace(/\D/g, "").slice(0, 10))}
           />
@@ -331,7 +335,7 @@ export function StudentDetailsForm({
             autoComplete="email"
             inputMode="email"
             aria-invalid={emailInvalid}
-            className="mt-1 w-full scroll-mb-[var(--checkout-paybar-height,5.5rem)] rounded-xl border border-[var(--ca-slate-300)] px-3 py-2.5 text-base font-medium focus:border-[var(--ca-gold)] focus:outline-none"
+            className="mt-1 w-full scroll-mb-[calc(var(--checkout-paybar-height,5.5rem)+1rem)] rounded-xl border border-[var(--ca-slate-300)] px-3 py-2.5 text-base font-medium focus:border-[var(--ca-gold)] focus:outline-none"
             value={email}
             onChange={(e) => onEmail(e.target.value)}
           />
@@ -394,13 +398,13 @@ export function CouponAccordion({
             Have a coupon code?
             <ChevronDown size={16} aria-hidden="true" className={`text-[var(--ca-slate-400)] transition-transform duration-200 motion-reduce:transition-none ${open ? "rotate-180" : ""}`} />
           </button>
-          <div id={panelId} className={`grid transition-[grid-template-rows] duration-200 motion-reduce:transition-none ${open ? "grid-rows-[1fr]" : "grid-rows-[0fr]"}`}>
+          <div id={panelId} aria-hidden={!open} className={`grid transition-[grid-template-rows] duration-200 motion-reduce:transition-none ${open ? "grid-rows-[1fr]" : "grid-rows-[0fr]"}`}>
             <div className="overflow-hidden">
               <div className="flex gap-2 pt-2">
                 <label className="sr-only" htmlFor="enroll-coupon">Coupon code</label>
                 <input
                   id="enroll-coupon"
-                  className="w-full rounded-xl border border-[var(--ca-slate-300)] px-3 py-2.5 text-base uppercase focus:border-[var(--ca-gold)] focus:outline-none"
+                  className="w-full scroll-mb-[calc(var(--checkout-paybar-height,5.5rem)+1rem)] rounded-xl border border-[var(--ca-slate-300)] px-3 py-2.5 text-base uppercase focus:border-[var(--ca-gold)] focus:outline-none"
                   placeholder="Enter code"
                   value={input}
                   onChange={(e) => onInput(e.target.value.toUpperCase())}
