@@ -54,6 +54,12 @@ export const NOTES_SAMPLE_ASSETS: NotesSampleAsset[] = [
     productSlug: "polity",
     pageCount: 23,
   },
+  {
+    id: "foreign-direct-investment",
+    title: "Foreign Direct Investment (FDI)",
+    productSlug: "economy",
+    pageCount: 24,
+  },
 ];
 
 /** Encoded portrait file from `notes-reels/IMG_7595_CURSOR_UPLOAD.mp4`. */
@@ -67,8 +73,34 @@ export const PHYSICAL_NOTES_VIDEO: PhysicalNotesVideo = {
   ariaLabel: "Naman showing the printed notes that ship after an order",
 };
 
+/** Encoded portrait file from `notes-reels/IMG_7678_CURSOR_UPLOAD.mp4`. */
+const ECONOMY_PHYSICAL_NOTES_VIDEO: PhysicalNotesVideo = {
+  id: "physical-notes-economy",
+  posterSrc: teachingVideoPublicSrc("physical-notes-economy", "poster.webp"),
+  fullSrc: teachingVideoPublicSrc("physical-notes-economy", "full.mp4"),
+  width: 720,
+  height: 1290,
+  enabled: true,
+  ariaLabel: "Naman showing the printed Indian Economy notes that ship after an order",
+};
+
+const PHYSICAL_NOTES_BY_SLUG: Record<string, PhysicalNotesVideo> = {
+  polity: PHYSICAL_NOTES_VIDEO,
+  economy: ECONOMY_PHYSICAL_NOTES_VIDEO,
+};
+
+export function notesSampleForProduct(slug: string | null | undefined): NotesSampleAsset | null {
+  if (!slug) return null;
+  return NOTES_SAMPLE_ASSETS.find((sample) => sample.productSlug === slug) ?? null;
+}
+
+export function physicalNotesVideoForProduct(slug: string | null | undefined): PhysicalNotesVideo | null {
+  if (!slug) return null;
+  return PHYSICAL_NOTES_BY_SLUG[slug] ?? null;
+}
+
 export function defaultNotesSample(): NotesSampleAsset {
-  const sample = NOTES_SAMPLE_ASSETS[0];
+  const sample = notesSampleForProduct("polity");
   if (!sample) throw new Error("Notes proof sample is not configured");
   return sample;
 }
@@ -86,13 +118,8 @@ export function samplePageSrc(sampleId: string, page: number): string {
 export function isNotesProofProduct(product: {
   slug: string;
   category_slug?: string | null;
-  subject?: string | null;
-  name?: string;
-  short_name?: string | null;
 }): boolean {
-  if (product.slug === "polity" || product.category_slug === "polity") return true;
-  const blob = `${product.subject || ""} ${product.name || ""} ${product.short_name || ""}`.toLowerCase();
-  return blob.includes("polity");
+  return Boolean(notesSampleForProduct(product.slug) || notesSampleForProduct(product.category_slug));
 }
 
 export function proofAttribution(product: NotesProofProduct | null, extra: Record<string, string | number | boolean | null> = {}) {

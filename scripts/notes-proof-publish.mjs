@@ -4,7 +4,9 @@
  * to the public `media/` prefix. The source PDF is already watermarked.
  * Pages are screen-sized WebP derivatives — not a second watermark pass.
  *
- *   node scripts/notes-proof-publish.mjs --pdf <file> [--video-key notes-reels/IMG_7595_CURSOR_UPLOAD.mp4]
+ *   node scripts/notes-proof-publish.mjs --pdf <file> \
+ *     [--sample-id anti-defection-law] [--video-id physical-notes] \
+ *     [--video-key notes-reels/IMG_7595_CURSOR_UPLOAD.mp4]
  */
 import { spawnSync } from "node:child_process";
 import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
@@ -18,9 +20,11 @@ const flag = (name, fallback = "") => {
   return i >= 0 ? args[i + 1] : fallback;
 };
 const pdfPath = flag("pdf");
+const sampleId = flag("sample-id", "anti-defection-law");
+const videoId = flag("video-id", "physical-notes");
 const videoKey = flag("video-key", "notes-reels/IMG_7595_CURSOR_UPLOAD.mp4");
-if (!pdfPath) {
-  console.error("Missing --pdf");
+if (!pdfPath || !/^[a-z0-9-]+$/.test(sampleId) || !/^[a-z0-9-]+$/.test(videoId)) {
+  console.error("Missing --pdf or invalid --sample-id/--video-id");
   process.exit(1);
 }
 
@@ -112,10 +116,10 @@ const encodedVideo = (encoded.streams || []).find((s) => s.codec_type === "video
 
 const uploadedPages = [];
 for (const page of pages) {
-  uploadedPages.push(await put(page.file, `media/store/samples/anti-defection-law/${page.name}`, "image/webp"));
+  uploadedPages.push(await put(page.file, `media/store/samples/${sampleId}/${page.name}`, "image/webp"));
 }
-const uploadedPoster = await put(poster, "media/store/videos/physical-notes/poster.webp", "image/webp");
-const uploadedFull = await put(full, "media/store/videos/physical-notes/full.mp4", "video/mp4");
+const uploadedPoster = await put(poster, `media/store/videos/${videoId}/poster.webp`, "image/webp");
+const uploadedFull = await put(full, `media/store/videos/${videoId}/full.mp4`, "video/mp4");
 
 const report = {
   pages: pages.map((p) => ({ name: p.name, bytes: p.bytes, width: p.width, height: p.height })),

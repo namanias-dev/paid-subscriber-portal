@@ -48,6 +48,7 @@ export default async function NotesLanding() {
     getPublicActiveOffer(),
   ]);
   const proofSource =
+    products.find((product) => product.slug === "polity" || product.category_slug === "polity") ||
     products.find((product) => isNotesProofProduct(product)) ||
     products.find((product) => product.availability.purchasable) ||
     products[0] ||

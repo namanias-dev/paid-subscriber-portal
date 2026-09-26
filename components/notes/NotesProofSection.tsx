@@ -7,8 +7,9 @@ import PhysicalNotesVideo from "@/components/notes/PhysicalNotesVideo";
 import { bindNotesSample } from "@/components/notes/notesProofBridge";
 import { trackClient } from "@/lib/analytics/client";
 import {
-  PHYSICAL_NOTES_VIDEO,
   defaultNotesSample,
+  notesSampleForProduct,
+  physicalNotesVideoForProduct,
   proofAttribution,
   samplePageSrc,
   type NotesProofProduct,
@@ -23,13 +24,14 @@ export default function NotesProofSection({
   product: NotesProofProduct | null;
   placement: "landing" | "pdp";
 }) {
-  const sample = defaultNotesSample();
+  const sample = notesSampleForProduct(product?.slug) ?? (placement === "landing" ? defaultNotesSample() : null);
+  const video = physicalNotesVideoForProduct(product?.slug) ?? (placement === "landing" ? physicalNotesVideoForProduct("polity") : null);
   const rootRef = useRef<HTMLElement>(null);
   const impressed = useRef(false);
   const videoPlayed = useRef(false);
   const [open, setOpen] = useState(false);
-  const front = samplePageSrc(sample.id, 1);
-  const back = sample.pageCount > 1 ? samplePageSrc(sample.id, 2) : front;
+  const front = sample ? samplePageSrc(sample.id, 1) : "";
+  const back = sample && sample.pageCount > 1 ? samplePageSrc(sample.id, 2) : front;
 
   useEffect(() => bindNotesSample(() => setOpen(true)), []);
 
@@ -40,21 +42,25 @@ export default function NotesProofSection({
       ([entry]) => {
         if (!entry?.isIntersecting || impressed.current || entry.intersectionRatio < 0.35) return;
         impressed.current = true;
+        if (!sample) return;
         trackClient("notes_sample_impression", proofAttribution(product, { sample_id: sample.id, placement }));
       },
       { threshold: [0.35] },
     );
     io.observe(root);
     return () => io.disconnect();
-  }, [placement, product, sample.id]);
+  }, [placement, product, sample]);
+
+  if (!sample || !video) return null;
 
   function buyFromBridge() {
+    if (!sample || !video) return;
     const played = videoPlayed.current;
     trackClient(
       played ? "notes_physical_video_buy_clicked" : "notes_sample_buy_clicked",
       proofAttribution(product, {
         sample_id: sample.id,
-        video_id: PHYSICAL_NOTES_VIDEO.id,
+        video_id: video.id,
         placement: `${placement}_bridge`,
         video_played: played,
       }),
@@ -113,7 +119,7 @@ export default function NotesProofSection({
               <li>Delivered to your doorstep</li>
             </ul>
           </div>
-          <PhysicalNotesVideo product={product} placement={placement} onPlayed={() => { videoPlayed.current = true; }} />
+          <PhysicalNotesVideo product={product} placement={placement} video={video} onPlayed={() => { videoPlayed.current = true; }} />
         </article>
       </div>
 

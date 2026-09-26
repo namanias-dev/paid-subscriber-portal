@@ -7,6 +7,8 @@ import {
   PHYSICAL_NOTES_VIDEO,
   defaultNotesSample,
   isNotesProofProduct,
+  notesSampleForProduct,
+  physicalNotesVideoForProduct,
   samplePageObjectKey,
   samplePageSrc,
 } from "../../lib/store/notesProof.ts";
@@ -33,7 +35,22 @@ describe("see before you buy", () => {
       "media/store/samples/anti-defection-law/page-23.webp",
     );
     assert.match(samplePageSrc(sample.id, 2), /\/media\/store\/samples\/anti-defection-law\/page-02\.webp$/);
-    assert.equal(NOTES_SAMPLE_ASSETS.length, 1);
+    assert.equal(NOTES_SAMPLE_ASSETS.length, 2);
+    const economy = notesSampleForProduct("economy");
+    assert.ok(economy);
+    assert.equal(economy.id, "foreign-direct-investment");
+    assert.equal(economy.title, "Foreign Direct Investment (FDI)");
+    assert.equal(economy.pageCount, 24);
+    assert.equal(
+      samplePageObjectKey(economy.id, 1),
+      "media/store/samples/foreign-direct-investment/page-01.webp",
+    );
+    assert.equal(
+      samplePageObjectKey(economy.id, 24),
+      "media/store/samples/foreign-direct-investment/page-24.webp",
+    );
+    assert.equal(notesSampleForProduct("polity")?.id, "anti-defection-law");
+    assert.equal(notesSampleForProduct("modern-history"), null);
     assert.doesNotMatch(reader, /<iframe/);
     assert.doesNotMatch(section, /application\/pdf/);
   });
@@ -44,6 +61,14 @@ describe("see before you buy", () => {
     assert.ok(PHYSICAL_NOTES_VIDEO.height > PHYSICAL_NOTES_VIDEO.width);
     assert.match(PHYSICAL_NOTES_VIDEO.fullSrc, /\/media\/store\/videos\/physical-notes\/full\.mp4$/);
     assert.match(PHYSICAL_NOTES_VIDEO.posterSrc, /\/media\/store\/videos\/physical-notes\/poster\.webp$/);
+    const economyVideo = physicalNotesVideoForProduct("economy");
+    assert.ok(economyVideo);
+    assert.equal(economyVideo.id, "physical-notes-economy");
+    assert.notEqual(economyVideo.fullSrc, PHYSICAL_NOTES_VIDEO.fullSrc);
+    assert.match(economyVideo.fullSrc, /\/media\/store\/videos\/physical-notes-economy\/full\.mp4$/);
+    assert.match(economyVideo.posterSrc, /\/media\/store\/videos\/physical-notes-economy\/poster\.webp$/);
+    assert.ok(economyVideo.height > economyVideo.width);
+    assert.equal(physicalNotesVideoForProduct("polity")?.id, "physical-notes");
     assert.match(video, /preload="none"/);
     assert.match(video, /prepareTeachingPlayback/);
     assert.doesNotMatch(video, /autoPlay|autoplay/);
@@ -81,7 +106,10 @@ describe("see before you buy", () => {
     assert.ok(catalogueAt > -1 && proofAt > catalogueAt);
     assert.match(pdp, /showProofPreview/);
     assert.match(pdp, /NotesProofSection/);
-    assert.equal(isNotesProofProduct({ slug: "polity", name: "Indian Polity Notes" }), true);
-    assert.equal(isNotesProofProduct({ slug: "economy", name: "Economy", subject: "Economy" }), false);
+    assert.equal(isNotesProofProduct({ slug: "polity" }), true);
+    assert.equal(isNotesProofProduct({ slug: "economy" }), true);
+    assert.equal(isNotesProofProduct({ slug: "modern-history" }), false);
+    assert.match(section, /notesSampleForProduct/);
+    assert.match(pdp, /notesSampleForProduct/);
   });
 });

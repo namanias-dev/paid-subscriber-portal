@@ -7,6 +7,7 @@ import {
   PHYSICAL_NOTES_VIDEO,
   proofAttribution,
   type NotesProofProduct,
+  type PhysicalNotesVideo as PhysicalNotesVideoAsset,
 } from "@/lib/store/notesProof";
 import {
   attachTeachingSource,
@@ -26,12 +27,13 @@ export default function PhysicalNotesVideo({
   product,
   placement,
   onPlayed,
+  video = PHYSICAL_NOTES_VIDEO,
 }: {
   product: NotesProofProduct | null;
   placement: "landing" | "pdp";
   onPlayed?: () => void;
+  video?: PhysicalNotesVideoAsset;
 }) {
-  const video = PHYSICAL_NOTES_VIDEO;
   const wrapRef = useRef<HTMLDivElement>(null);
   const nodeRef = useRef<HTMLVideoElement>(null);
   const marks = useRef(new Set<string>());
