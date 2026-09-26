@@ -77,10 +77,15 @@ export default function CheckoutClient({ course, waLink = null }: { course: Cour
 
   useEffect(() => {
     if (!multiBatch) return;
-    setMethod(emiAvailable ? "installments" : "full");
+    setMethod((current) => {
+      if (current === "installments" && emiAvailable) return "installments";
+      if (current === "full" && fullAvailable) return "full";
+      return emiAvailable ? "installments" : "full";
+    });
     setCount(defaultInstallmentCount(cfg.installmentCounts));
     setSeatInput(cfg.seatAmount ?? seatFloor);
     setAmountOpen(false);
+    setScheduleOpen(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [batchId]);
 
