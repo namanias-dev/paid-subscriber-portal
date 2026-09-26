@@ -52,8 +52,10 @@ export default function ConsentBanner() {
           animate={{ y: 0, opacity: 1 }}
           exit={reduce ? { opacity: 0 } : { y: 24, opacity: 0 }}
           transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
-          className={`fixed inset-x-3 z-[60] mx-auto max-w-2xl rounded-2xl border border-line bg-white/95 p-4 shadow-[0_20px_60px_-20px_rgba(10,26,63,0.45)] backdrop-blur-md sm:p-5 ${
-            checkout ? "bottom-[calc(5.75rem+env(safe-area-inset-bottom))] lg:bottom-3" : "bottom-3"
+          className={`fixed inset-x-3 z-[60] mx-auto max-w-2xl overflow-y-auto rounded-2xl border border-line bg-white/95 p-4 shadow-[0_20px_60px_-20px_rgba(10,26,63,0.45)] backdrop-blur-md sm:p-5 ${
+            checkout
+              ? "bottom-[calc(var(--checkout-paybar-height,5.5rem)+0.75rem)] max-h-[min(46dvh,calc(100dvh-var(--checkout-paybar-height,5.5rem)-1.5rem))] lg:bottom-3 lg:max-h-[46dvh]"
+              : "bottom-3"
           }`}
         >
           <div className="flex flex-col gap-3">

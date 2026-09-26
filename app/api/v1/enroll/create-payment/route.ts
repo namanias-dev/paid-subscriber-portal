@@ -128,11 +128,10 @@ export async function POST(req: Request) {
     } = planned.plan;
     let { firstAmount, firstKind, firstInstallmentNo } = planned.plan;
 
-    // Fresh quotes only. Coupon previews are validated against the course list
-    // price while this route recomputes against the selected plan, so a coupon
-    // checkout must not be rejected for that existing difference. Omitted
-    // expectedAmount (older clients) is also ignored.
-    if (!couponCode && checkoutAmountsDiffer(body.expectedAmount, firstAmount)) {
+    // Fresh quotes only. The public checkout sends the amount it is displaying,
+    // including after a coupon preview planned on this same selected total.
+    // Omitted expectedAmount (older clients) is ignored.
+    if (checkoutAmountsDiffer(body.expectedAmount, firstAmount)) {
       return NextResponse.json(
         {
           ok: false,

@@ -24,6 +24,7 @@ export type EventName =
   | "pay_in_full_selected"
   | "installment_schedule_expanded"
   | "coupon_opened"
+  | "coupon_applied"
   // payment
   | "payment_initiated"
   | "payment_status_changed"
@@ -160,6 +161,7 @@ export const CLIENT_ALLOWED_EVENTS: ReadonlySet<EventName> = new Set<EventName>(
   "pay_in_full_selected",
   "installment_schedule_expanded",
   "coupon_opened",
+  "coupon_applied",
   "click_register_pay",
   "registration_attempt",
   "click_enroll",

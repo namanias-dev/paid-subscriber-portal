@@ -194,9 +194,11 @@ export default function StatusClient({ contact }: { contact: Contact }) {
     ? seatReserved
       ? "Your seat is reserved"
       : enr.remaining <= 0
-        ? "Payment complete — you're all set!"
-        : "Payment received! Welcome aboard."
+        ? "Enrollment confirmed"
+        : "Payment received"
     : "Payment Successful";
+  const planLabel = enr?.planType === "full" ? "Pay-in-full price" : "Installment plan total";
+  const installmentCount = enr ? enr.schedule.filter((s) => s.kind === "installment").length : 0;
 
   return (
     <div className="container-wide section">
@@ -244,16 +246,20 @@ export default function StatusClient({ contact }: { contact: Contact }) {
                   <p className="text-sm font-semibold text-ink">{enr.courseTitle}</p>
                   {seatReserved && (
                     <p className="mt-1 text-sm text-ink2">
-                      Today&apos;s payment is adjusted against your course fee. The remaining balance follows your selected plan.
+                      Paid today is adjusted against your installment plan. The remaining balance follows the schedule.
                     </p>
                   )}
                   <div className="mt-3 space-y-1.5 text-sm">
-                    {enr.batchLabel && <Row label="Batch" value={enr.batchLabel} />}
-                    <Row label="Plan total" value={formatINR(enr.totalFee)} />
-                    {data && data.amount > 0 && <Row label="This payment" value={formatINR(data.amount)} />}
-                    <Row label="Paid so far" value={formatINR(enr.amountPaid)} />
-                    <Row label="Remaining balance" value={enr.remaining <= 0 ? "₹0 — Fully paid ✓" : formatINR(enr.remaining)} />
-                    {nextDue && <Row label="Next installment" value={`${formatINR(nextDue.amount)} · due ${formatISTDate(nextDue.due)}`} />}
+                    {enr.batchLabel && <Row label="Selected batch" value={enr.batchLabel} />}
+                    {enr.planType === "emi" && installmentCount > 0 && (
+                      <Row label="Payment plan" value={`${installmentCount} installment${installmentCount === 1 ? "" : "s"}`} />
+                    )}
+                    <Row label={planLabel} value={formatINR(enr.totalFee)} />
+                    {data && data.amount > 0 && <Row label="Paid today" value={formatINR(data.amount)} />}
+                    <Row label="Remaining balance" value={enr.remaining <= 0 ? "₹0" : formatINR(enr.remaining)} />
+                    {enr.planType === "emi" && nextDue && enr.remaining > 0 && (
+                      <Row label="Next payment" value={`${formatISTDate(nextDue.due)} · ${formatINR(nextDue.amount)}`} />
+                    )}
                   </div>
                   <p className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-primary/10 px-3 py-1.5 text-xs font-semibold text-primary">
                     🎓 Class Hub access unlocked

@@ -2,12 +2,44 @@ import type { CourseBatch } from "./types";
 import { batchModeLabel, batchModes, batchTimingLabel, batchTimings } from "./installments";
 
 /**
- * Existing checkout default: the second configured count when two or more exist
- * (for [3, 6, 10] that is 6), otherwise the only count, otherwise 6.
+ * Existing checkout default. There is no separate "preferred count" field.
+ * `resolveEmiConfig` sorts `installment_counts`, and this helper picks the
+ * second sorted value when two or more exist (configured [3, 6, 10] → 6).
+ * A course that configures a single count uses that count. An empty list
+ * falls back to 6, matching the historical EMI default.
+ *
+ * Technical debt: the position is implicit. Do not scatter `counts[1]`
+ * through the UI — call this helper. A named admin default would replace it
+ * without a migration only if it can be derived from data that already exists.
  */
 export function defaultInstallmentCount(counts: number[]): number {
   if (!counts.length) return 6;
   return counts[Math.min(1, counts.length - 1)] || counts[0] || 6;
+}
+
+export type PublicPaymentMethod = "installments" | "full";
+
+/**
+ * The public checkout offers two journeys. Installments reserves the seat
+ * when the course is configured for it. Pay in Full charges the discounted
+ * full amount now (`bookSeat: false`).
+ *
+ * The planner can still build a seat plus one later full-payment balance.
+ * Other callers may use that. This page does not.
+ */
+export function publicPaymentIntent(input: {
+  method: PublicPaymentMethod;
+  seatConfigured: boolean;
+  allowCustomSeat: boolean;
+  reservationAmount: number;
+}): { plan: "emi" | "full"; bookSeat: boolean; seatAmount?: number } {
+  if (input.method === "full") return { plan: "full", bookSeat: false };
+  const intent: { plan: "emi" | "full"; bookSeat: boolean; seatAmount?: number } = {
+    plan: "emi",
+    bookSeat: input.seatConfigured,
+  };
+  if (input.seatConfigured && input.allowCustomSeat) intent.seatAmount = input.reservationAmount;
+  return intent;
 }
 
 export interface BatchMatrix {
@@ -128,7 +160,11 @@ export interface EnrollmentPaymentBodyInput {
   batchId: string | null;
   couponCode?: string;
   gaClientId?: string | null;
-  /** Omitted when a coupon is applied — coupon preview and server bases can differ by batch. */
+  /**
+   * The amount the page is showing as due today. The server recomputes and
+   * refuses the charge when this disagrees. Coupon checkouts send it too,
+   * after the coupon preview has been planned on the same selected total.
+   */
   expectedAmount?: number;
 }
 
@@ -149,6 +185,6 @@ export function buildEnrollmentPaymentBody(input: EnrollmentPaymentBodyInput): R
     batchId: input.multiBatch ? input.batchId : undefined,
     couponCode: input.couponCode || undefined,
     gaClientId: input.gaClientId || undefined,
-    expectedAmount: input.couponCode ? undefined : input.expectedAmount,
+    expectedAmount: input.expectedAmount,
   };
 }

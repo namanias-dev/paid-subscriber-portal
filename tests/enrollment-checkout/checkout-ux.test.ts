@@ -9,6 +9,7 @@ import {
   buildEnrollmentPaymentBody,
   checkoutAmountsDiffer,
   defaultInstallmentCount,
+  publicPaymentIntent,
   resolveBatchId,
   timingsForMode,
 } from "../../lib/enrollmentCheckout";
@@ -244,9 +245,28 @@ describe("installment default and payment bodies preserve the checkout contract"
       expectedAmount: 2000,
     }))) as Record<string, unknown>;
     assert.equal(couponWire.couponCode, "SAVE10");
-    assert.equal("expectedAmount" in couponWire, false);
+    assert.equal(couponWire.expectedAmount, 2000);
     assert.equal("seatAmount" in couponWire, false);
     assert.equal("discount" in couponWire, false);
+  });
+
+  test("public checkout maps installments to a reservation and pay in full to the amount due now", () => {
+    assert.deepEqual(
+      publicPaymentIntent({ method: "installments", seatConfigured: true, allowCustomSeat: true, reservationAmount: 5000 }),
+      { plan: "emi", bookSeat: true, seatAmount: 5000 },
+    );
+    assert.deepEqual(
+      publicPaymentIntent({ method: "installments", seatConfigured: true, allowCustomSeat: false, reservationAmount: 5000 }),
+      { plan: "emi", bookSeat: true },
+    );
+    assert.deepEqual(
+      publicPaymentIntent({ method: "installments", seatConfigured: false, allowCustomSeat: false, reservationAmount: 5000 }),
+      { plan: "emi", bookSeat: false },
+    );
+    assert.deepEqual(
+      publicPaymentIntent({ method: "full", seatConfigured: true, allowCustomSeat: true, reservationAmount: 5000 }),
+      { plan: "full", bookSeat: false },
+    );
   });
 
   test("a stale quoted amount is a conflict and a missing quote is not", () => {
@@ -275,6 +295,11 @@ describe("checkout UI does not hardcode production prices", () => {
     }
     const client = readFileSync(new URL("../../components/public/CheckoutClient.tsx", import.meta.url), "utf8");
     assert.match(client, /planCourseEnrollment/);
+    assert.match(client, /publicPaymentIntent/);
+    assert.match(client, /Installment plan total/);
+    assert.match(client, /Pay-in-full price/);
+    assert.doesNotMatch(client, /Start the payment plan today/);
+    assert.doesNotMatch(client, /Pay the full /);
     assert.match(client, /\/api\/v1\/enroll\/create-payment/);
     assert.match(client, /\/api\/v1\/coupons\/validate/);
     assert.match(client, /click_enroll/);

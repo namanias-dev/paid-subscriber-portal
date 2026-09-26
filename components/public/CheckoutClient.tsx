@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { trackClient } from "@/lib/analytics/client";
 import { ga4Event, readGaClientId } from "@/lib/analytics/ga4";
@@ -18,8 +18,10 @@ import {
   batchAxis,
   buildEnrollmentPaymentBody,
   defaultInstallmentCount,
+  publicPaymentIntent,
   resolveBatchId,
   timingsForMode,
+  type PublicPaymentMethod,
 } from "@/lib/enrollmentCheckout";
 import type { Course, CourseBatch, InstallmentItem } from "@/lib/types";
 import {
@@ -35,8 +37,6 @@ import {
   StudentDetailsForm,
   TrustLine,
 } from "@/components/public/enrollment/parts";
-
-type Plan = "full" | "emi";
 
 const DETAILS_DRAFT = (slug: string) => `nsa_enroll_details:${slug}`;
 
@@ -63,25 +63,21 @@ export default function CheckoutClient({ course, waLink = null }: { course: Cour
   const cfg = useMemo(() => resolveEmiConfig(ec), [ec]);
   const standardTotal = Math.max(0, Math.round(ec.price));
   const payInFull = useMemo(() => payInFullTotal(ec), [ec]);
-  const fullSavings = Math.max(0, standardTotal - payInFull);
-
   const emiAvailable = cfg.enabled && standardTotal > 1 && cfg.installmentCounts.length > 0;
   const fullAvailable = !cfg.enabled || cfg.allowFull;
   const seatConfigured = cfg.enabled && (cfg.seatAmount != null || cfg.allowCustomSeat);
+  const defaultMethod: PublicPaymentMethod = emiAvailable ? "installments" : "full";
 
-  const [plan, setPlan] = useState<Plan>(emiAvailable ? "emi" : fullAvailable ? "full" : "emi");
-  const [bookSeat, setBookSeat] = useState(true);
+  const [method, setMethod] = useState<PublicPaymentMethod>(defaultMethod);
   const [count, setCount] = useState<number>(defaultInstallmentCount(cfg.installmentCounts));
 
-  const base = plan === "full" ? payInFull : standardTotal;
   const seatFloor = cfg.allowCustomSeat ? (cfg.minSeatAmount ?? cfg.seatAmount ?? 1) : (cfg.seatAmount ?? 1);
   const [seatInput, setSeatInput] = useState<number>(cfg.seatAmount ?? seatFloor);
   const [amountOpen, setAmountOpen] = useState(false);
 
   useEffect(() => {
     if (!multiBatch) return;
-    setPlan(emiAvailable ? "emi" : fullAvailable ? "full" : "emi");
-    setBookSeat(true);
+    setMethod(emiAvailable ? "installments" : "full");
     setCount(defaultInstallmentCount(cfg.installmentCounts));
     setSeatInput(cfg.seatAmount ?? seatFloor);
     setAmountOpen(false);
@@ -93,6 +89,7 @@ export default function CheckoutClient({ course, waLink = null }: { course: Cour
   const [email, setEmail] = useState("");
   const [loading, setLoading] = useState(false);
   const submitting = useRef(false);
+  const paybarRef = useRef<HTMLDivElement>(null);
   const [error, setError] = useState<string | null>(null);
 
   const [couponOpen, setCouponOpen] = useState(false);
@@ -117,40 +114,65 @@ export default function CheckoutClient({ course, waLink = null }: { course: Cour
   }, [course.slug]);
 
   const bookingISO = useMemo(() => new Date().toISOString(), []);
-  const seatActive = bookSeat && seatConfigured;
-
-  const planInput = useMemo(() => ({
-    course: ec,
-    bookSeat: seatActive,
-    seatAmount: seatActive && cfg.allowCustomSeat ? seatInput : null,
-    bookingISO,
-    discountRupees: applied?.discount ?? 0,
-  }), [ec, seatActive, cfg.allowCustomSeat, seatInput, bookingISO, applied]);
+  const installmentIntent = publicPaymentIntent({
+    method: "installments",
+    seatConfigured,
+    allowCustomSeat: cfg.allowCustomSeat,
+    reservationAmount: seatInput,
+  });
+  const selectedIntent = publicPaymentIntent({
+    method,
+    seatConfigured,
+    allowCustomSeat: cfg.allowCustomSeat,
+    reservationAmount: seatInput,
+  });
+  const seatActive = method === "installments" && installmentIntent.bookSeat;
 
   const emiPreview = useMemo(() => {
     if (!emiAvailable) return null;
-    return planCourseEnrollment({ ...planInput, plan: "emi", installmentCount: count });
-  }, [emiAvailable, planInput, count]);
+    return planCourseEnrollment({
+      course: ec,
+      plan: "emi",
+      bookSeat: installmentIntent.bookSeat,
+      seatAmount: installmentIntent.seatAmount ?? null,
+      installmentCount: count,
+      bookingISO,
+      discountRupees: applied?.discount ?? 0,
+    });
+  }, [emiAvailable, ec, installmentIntent.bookSeat, installmentIntent.seatAmount, count, bookingISO, applied]);
 
   const fullPreview = useMemo(() => {
     if (!fullAvailable) return null;
-    return planCourseEnrollment({ ...planInput, plan: "full", installmentCount: null });
-  }, [fullAvailable, planInput]);
+    return planCourseEnrollment({
+      course: ec,
+      plan: "full",
+      bookSeat: false,
+      installmentCount: null,
+      bookingISO,
+      discountRupees: applied?.discount ?? 0,
+    });
+  }, [fullAvailable, ec, bookingISO, applied]);
 
-  const plannedPreview = plan === "emi" ? emiPreview : fullPreview;
+  const plannedPreview = method === "installments" ? emiPreview : fullPreview;
   const schedule: InstallmentItem[] = plannedPreview?.ok ? plannedPreview.plan.schedule : [];
-  const todayItem = schedule[0];
-  const todayAmount = todayItem?.amount ?? 0;
-  const grandTotal = plannedPreview?.ok ? plannedPreview.plan.totalFee : schedule.reduce((a, s) => a + s.amount, 0);
+  const todayAmount = plannedPreview?.ok ? plannedPreview.plan.firstAmount : 0;
+  const grandTotal = plannedPreview?.ok ? plannedPreview.plan.totalFee : 0;
   const remaining = Math.max(0, grandTotal - todayAmount);
   const couponDiscount = plannedPreview?.ok ? plannedPreview.plan.discountAmount : (applied?.discount ?? 0);
-  const originalTotal = plannedPreview?.ok ? plannedPreview.plan.originalTotalFee : base;
+  const originalTotal = plannedPreview?.ok ? plannedPreview.plan.originalTotalFee : (method === "full" ? payInFull : standardTotal);
 
-  const seatTooLow = cfg.allowCustomSeat && seatInput < seatFloor;
-  const seatTooHigh = seatInput >= base;
-  const seatInvalid = seatActive && (seatTooLow || seatTooHigh);
+  const seatTooLow = seatActive && cfg.allowCustomSeat && seatInput < seatFloor;
+  const seatCeiling = emiPreview?.ok ? emiPreview.plan.originalTotalFee : standardTotal;
+  const seatTooHigh = seatActive && cfg.allowCustomSeat && seatInput >= seatCeiling;
+  const seatInvalid = seatTooLow || seatTooHigh || (method === "installments" && !!emiPreview && !emiPreview.ok);
 
-  const offerAmount = seatActive && !seatInvalid ? todayAmount : null;
+  const proposition = method === "full" && fullPreview?.ok
+    ? { kind: "payFull" as const, amount: fullPreview.plan.firstAmount }
+    : seatActive && emiPreview?.ok
+      ? { kind: "reserve" as const, amount: seatInvalid ? (cfg.seatAmount ?? seatFloor) : emiPreview.plan.firstAmount }
+      : method === "installments" && emiPreview?.ok
+        ? { kind: "payToday" as const, amount: emiPreview.plan.firstAmount }
+        : null;
 
   const selectedBatch = multiBatch ? batches.find((b) => b.id === batchId) ?? null : null;
   const selectedAxis = selectedBatch && batchModel.kind === "matrix" ? batchAxis(selectedBatch) : null;
@@ -159,13 +181,12 @@ export default function CheckoutClient({ course, waLink = null }: { course: Cour
     : [];
 
   const firstInstallment = schedule.find((item) => item.kind === "installment" && item.due);
-  const installmentLines = schedule.filter((item) => item.kind === "installment").length;
   const emiPlanTotal = emiPreview?.ok ? emiPreview.plan.totalFee : standardTotal;
   const fullPlanTotal = fullPreview?.ok ? fullPreview.plan.totalFee : payInFull;
   const saveVsInstallments = Math.max(0, emiPlanTotal - fullPlanTotal);
 
-  const payLabel = seatActive
-    ? `Reserve My Seat for ${formatINR(todayAmount)}`
+  const payLabel = seatActive && !seatInvalid
+    ? "Reserve My Seat"
     : `Pay ${formatINR(todayAmount)} Securely`;
 
   function chooseBatch(id: string) {
@@ -186,20 +207,18 @@ export default function CheckoutClient({ course, waLink = null }: { course: Cour
     if (id) chooseBatch(id);
   }
 
-  function choosePlan(next: Plan) {
-    if (next === plan) return;
-    setPlan(next);
+  function chooseMethod(next: PublicPaymentMethod) {
+    if (next === method) return;
+    if (next === "installments" && !emiAvailable) return;
+    if (next === "full" && !fullAvailable) return;
+    setMethod(next);
     setScheduleOpen(false);
-    trackClient(next === "emi" ? "installments_selected" : "pay_in_full_selected", {
+    setAmountOpen(false);
+    trackClient(next === "installments" ? "installments_selected" : "pay_in_full_selected", {
       course_id: course.id,
       course_slug: course.slug,
     });
-  }
-
-  function chooseSeat(on: boolean) {
-    if (on === bookSeat) return;
-    setBookSeat(on);
-    if (on) {
+    if (next === "installments" && seatConfigured) {
       trackClient("seat_booking_selected", { course_id: course.id, course_slug: course.slug });
     }
   }
@@ -216,7 +235,16 @@ export default function CheckoutClient({ course, waLink = null }: { course: Cour
       const res = await fetch("/api/v1/coupons/validate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ itemType: "course", slug: course.slug, code }),
+        body: JSON.stringify({
+          itemType: "course",
+          slug: course.slug,
+          code,
+          plan: selectedIntent.plan,
+          bookSeat: selectedIntent.bookSeat,
+          seatAmount: selectedIntent.seatAmount,
+          installmentCount: selectedIntent.plan === "emi" ? count : undefined,
+          batchId: multiBatch ? batchId : undefined,
+        }),
       });
       const data = await res.json();
       if (!data.ok) {
@@ -226,6 +254,7 @@ export default function CheckoutClient({ course, waLink = null }: { course: Cour
       }
       setApplied({ code: data.code, discount: data.discount });
       setCouponError(null);
+      trackClient("coupon_applied", { course_id: course.id, course_slug: course.slug });
     } catch {
       setApplied(null);
       setCouponError("Could not validate coupon. Try again.");
@@ -263,7 +292,7 @@ export default function CheckoutClient({ course, waLink = null }: { course: Cour
     submitting.current = true;
     setLoading(true);
     trackClient("click_enroll", { course_id: course.id, course_slug: course.slug, item_type: "course", price: ec.price });
-    const productType = seatActive ? "seat_booking" : plan === "emi" ? "installment" : "full_payment";
+    const productType = seatActive ? "seat_booking" : method === "installments" ? "installment" : "full_payment";
     let isRetry = false;
     try {
       const key = `ga4_pay_start:course:${course.slug}:${productType}`;
@@ -299,10 +328,10 @@ export default function CheckoutClient({ course, waLink = null }: { course: Cour
           name,
           email,
           mobile: phone,
-          plan,
-          bookSeat: seatActive,
+          plan: selectedIntent.plan,
+          bookSeat: selectedIntent.bookSeat,
           installmentCount: count,
-          seatAmount: seatInput,
+          seatAmount: selectedIntent.seatAmount ?? seatInput,
           allowCustomSeat: cfg.allowCustomSeat,
           multiBatch,
           batchId,
@@ -338,10 +367,29 @@ export default function CheckoutClient({ course, waLink = null }: { course: Cour
   const cadence = cfg.intervalMonths === 1
     ? `${count} monthly payments`
     : `${count} payments, every ${cfg.intervalMonths} months`;
-  const planNoun = plan === "full" ? "Pay in Full" : `${installmentLines || count} installments`;
+  const laterSchedule = schedule.filter((item) => item.kind === "installment");
+  const emiToday = emiPreview?.ok ? emiPreview.plan.firstAmount : (cfg.seatAmount ?? seatFloor);
+  const fullToday = fullPreview?.ok ? fullPreview.plan.firstAmount : payInFull;
+  const totalLabel = method === "full" ? "Pay-in-full price" : "Installment plan total";
+
+  useLayoutEffect(() => {
+    const el = paybarRef.current;
+    if (!el) return;
+    const apply = () => {
+      const height = Math.ceil(el.getBoundingClientRect().height);
+      document.documentElement.style.setProperty("--checkout-paybar-height", `${height}px`);
+    };
+    apply();
+    const observer = new ResizeObserver(apply);
+    observer.observe(el);
+    return () => {
+      observer.disconnect();
+      document.documentElement.style.removeProperty("--checkout-paybar-height");
+    };
+  }, [todayAmount, payLabel, error]);
 
   return (
-    <div className="bg-[var(--ca-slate-50)] pb-[calc(7.5rem+env(safe-area-inset-bottom))] lg:pb-16">
+    <div className="bg-[var(--ca-slate-50)] pb-[calc(var(--checkout-paybar-height,5.5rem)+1.25rem)] lg:pb-16">
       <div className="container-wide pt-3">
         <Link href={`/courses/${course.slug}`} className="ca-focus inline-flex min-h-11 items-center text-sm font-semibold text-[var(--ca-navy-600)]">
           Back to course
@@ -356,9 +404,8 @@ export default function CheckoutClient({ course, waLink = null }: { course: Cour
             eyebrow={course.badge_label || course.category || null}
             startISO={ec.batch_start}
             gstIncluded={!!course.gst}
-            bookingAmount={offerAmount}
+            proposition={proposition}
             meta={ec.batch_timings?.length && !multiBatch ? ec.batch_timings.join(" · ") : null}
-            showBatchHint={multiBatch}
           />
 
           {multiBatch && (
@@ -366,8 +413,8 @@ export default function CheckoutClient({ course, waLink = null }: { course: Cour
               <h2 className="font-heading text-base font-bold text-[var(--ca-navy-900)]">Choose your batch</h2>
               {batchModel.kind === "matrix" && selectedAxis ? (
                 <div className="mt-3 space-y-3">
-                  <SegmentedRadio label="How would you like to study?" options={batchModel.modes} value={selectedAxis.mode} onChange={chooseMode} />
-                  <SegmentedRadio label="Choose your batch timing" options={visibleTimings} value={selectedAxis.timing} onChange={chooseTiming} />
+                  <SegmentedRadio label="How do you want to study?" options={batchModel.modes} value={selectedAxis.mode} onChange={chooseMode} />
+                  <SegmentedRadio label="Choose your timing" options={visibleTimings} value={selectedAxis.timing} onChange={chooseTiming} />
                 </div>
               ) : (
                 <BatchList
@@ -380,14 +427,7 @@ export default function CheckoutClient({ course, waLink = null }: { course: Cour
                   })}
                 />
               )}
-              {selectedBatch && (
-                <SelectedBatchSummary
-                  batch={selectedBatch}
-                  courseFee={standardTotal}
-                  originalPrice={ec.original_price && ec.original_price > standardTotal ? Math.round(ec.original_price) : null}
-                  gstIncluded={!!course.gst}
-                />
-              )}
+              {selectedBatch && <SelectedBatchSummary batch={selectedBatch} />}
             </section>
           )}
 
@@ -400,129 +440,76 @@ export default function CheckoutClient({ course, waLink = null }: { course: Cour
                 onClick={() => ga4Event("whatsapp_click", { source: "enrollment_help", page_path: `/courses/${course.slug}/enroll` })}
                 className="ca-focus inline-flex min-h-11 items-center text-sm font-semibold text-[var(--ca-navy-600)]"
               >
-                Need help choosing a batch? WhatsApp us
+                Need help choosing a batch? Chat with us on WhatsApp
               </a>
             </div>
           )}
 
-          {seatConfigured && (
-            <section className="border-t border-[var(--ca-slate-200)] px-4 py-4 sm:px-5">
-              <h2 className="font-heading text-base font-bold text-[var(--ca-navy-900)]">Reserve your seat</h2>
-              <div role="radiogroup" aria-label="Reserve your seat" className="mt-3 space-y-2">
-                <ChoiceCard
-                  selected={bookSeat}
-                  title={`Pay ${formatINR(seatActive && !seatInvalid ? todayAmount : (cfg.seatAmount ?? seatFloor))} today`}
-                  badge="Popular"
-                  onSelect={() => chooseSeat(true)}
-                >
-                  Adjusted against your course fee. The rest follows the payment plan you choose.
-                </ChoiceCard>
-                <ChoiceCard
-                  selected={!bookSeat}
-                  title="Start the payment plan today"
-                  onSelect={() => chooseSeat(false)}
-                >
-                  Skip the reservation amount. Your first payment is whatever the selected plan charges today.
-                </ChoiceCard>
-              </div>
-
-              {bookSeat && cfg.allowCustomSeat && (
-                <div className="mt-3">
-                  <button
-                    type="button"
-                    className="ca-focus min-h-11 text-sm font-semibold text-[var(--ca-navy-600)]"
-                    aria-expanded={amountOpen}
-                    aria-controls="booking-amount-editor"
-                    onClick={() => setAmountOpen((v) => !v)}
-                  >
-                    {amountOpen ? "Hide amount" : "Want to pay more today?"}
-                  </button>
-                  {amountOpen && (
-                    <div id="booking-amount-editor" className="mt-2">
-                      <label htmlFor="booking-amount" className="text-sm font-semibold text-[var(--ca-navy-900)]">
-                        Today&apos;s amount
-                      </label>
-                      <div className="mt-1 flex items-center gap-2">
-                        <span className="font-heading text-lg font-bold text-[var(--ca-navy-900)]" aria-hidden="true">₹</span>
-                        <input
-                          id="booking-amount"
-                          type="number"
-                          inputMode="numeric"
-                          aria-invalid={seatInvalid}
-                          className="w-40 rounded-xl border border-[var(--ca-slate-300)] px-3 py-2.5 text-base font-semibold focus:border-[var(--ca-gold)] focus:outline-none"
-                          value={seatInput}
-                          min={seatFloor}
-                          max={Math.max(seatFloor, base - 1)}
-                          onChange={(e) => {
-                            const next = Math.round(Number(e.target.value) || 0);
-                            setSeatInput(next);
-                          }}
-                          onBlur={() => {
-                            setSeatInput((v) => {
-                              const clamped = Math.min(base - 1, Math.max(seatFloor, v));
-                              if (clamped !== (cfg.seatAmount ?? seatFloor)) {
-                                trackClient("booking_amount_changed", {
-                                  course_id: course.id,
-                                  course_slug: course.slug,
-                                  amount: clamped,
-                                });
-                              }
-                              return clamped;
-                            });
-                          }}
-                        />
-                      </div>
-                      <p className={`mt-1 text-xs ${seatInvalid ? "text-red-600" : "text-[var(--ca-slate-700)]"}`} role={seatInvalid ? "alert" : undefined}>
-                        {seatTooHigh ? "Amount must stay below the selected plan total." : `Minimum ${formatINR(seatFloor)}. This replaces the reservation amount due today.`}
-                      </p>
-                    </div>
-                  )}
-                </div>
-              )}
-            </section>
-          )}
-
           {(emiAvailable || fullAvailable) && (
             <section className="border-t border-[var(--ca-slate-200)] px-4 py-4 sm:px-5">
-              <h2 className="font-heading text-base font-bold text-[var(--ca-navy-900)]">
-                {seatActive ? "How would you like to pay the balance?" : "How would you like to pay?"}
-              </h2>
-              <div role="radiogroup" aria-label="Payment plan" className="mt-3 space-y-2">
+              <h2 className="font-heading text-base font-bold text-[var(--ca-navy-900)]">How would you like to pay?</h2>
+              <div role="radiogroup" aria-label="How would you like to pay?" className="mt-3 space-y-2">
                 {emiAvailable && (
                   <ChoiceCard
-                    selected={plan === "emi"}
+                    selected={method === "installments"}
                     title="Installments"
                     badge="Popular"
-                    onSelect={() => choosePlan("emi")}
+                    amount={`${formatINR(emiToday)} today`}
+                    onSelect={() => chooseMethod("installments")}
                   >
-                    <span className="mt-1 block text-xs font-semibold uppercase tracking-wide text-[var(--ca-slate-700)]">Plan total</span>
-                    <span className="font-heading text-xl font-extrabold text-[var(--ca-navy-900)]">{formatINR(emiPlanTotal)}</span>
+                    <span className="block font-medium text-[var(--ca-navy-900)]">
+                      {installmentIntent.bookSeat ? `Then ${cadence}` : `${cadence.charAt(0).toUpperCase()}${cadence.slice(1)}`}
+                    </span>
                     <span className="mt-0.5 block">
-                      {seatActive
-                        ? `After today's reservation, the balance of this plan is split into ${cadence}.`
-                        : `This plan total is split into ${cadence}.`}
+                      {installmentIntent.bookSeat
+                        ? "Reserve your seat today and pay the remaining amount over time."
+                        : "Pay the first installment today. The rest follows the schedule."}
                     </span>
                   </ChoiceCard>
                 )}
                 {fullAvailable && (
                   <ChoiceCard
-                    selected={plan === "full"}
+                    selected={method === "full"}
                     title="Pay in Full"
-                    onSelect={() => choosePlan("full")}
+                    amount={`${formatINR(fullToday)} today`}
+                    onSelect={() => chooseMethod("full")}
                   >
-                    <span className="mt-1 block text-xs font-semibold uppercase tracking-wide text-[var(--ca-slate-700)]">Plan total</span>
-                    <span className="font-heading text-xl font-extrabold text-[var(--ca-navy-900)]">{formatINR(fullPlanTotal)}</span>
                     {saveVsInstallments > 0 && (
-                      <span className="mt-0.5 block font-semibold text-[#16a34a]">
-                        You save {formatINR(saveVsInstallments)} versus the installment plan total
-                      </span>
+                      <span className="block font-semibold text-[#16a34a]">Save {formatINR(saveVsInstallments)} vs installments</span>
                     )}
-                    {saveVsInstallments <= 0 && <span className="mt-0.5 block">Pay the applicable full-payment amount.</span>}
+                    <span className="mt-0.5 block">Pay the complete discounted fee now.</span>
                   </ChoiceCard>
                 )}
               </div>
 
-              {plan === "emi" && emiAvailable && cfg.installmentCounts.length > 1 && (
+              <div className="mt-4 space-y-1.5 border-t border-[var(--ca-slate-200)] pt-3" aria-live="polite">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-[var(--ca-slate-700)]">Your payment</p>
+                <MoneyRow label="Pay today" value={formatINR(todayAmount)} strong />
+                <MoneyRow label={totalLabel} value={formatINR(grandTotal)} />
+                <MoneyRow label="Remaining balance" value={formatINR(remaining)} />
+                {method === "full" && saveVsInstallments > 0 && (
+                  <MoneyRow label="You save" value={`${formatINR(saveVsInstallments)} vs installments`} save />
+                )}
+                {applied && couponDiscount > 0 && (
+                  <MoneyRow label={`Coupon ${applied.code}`} value={`− ${formatINR(couponDiscount)}`} save />
+                )}
+                {applied && (
+                  <p className="text-xs text-[var(--ca-slate-700)]">{totalLabel} before coupon {formatINR(originalTotal)}.</p>
+                )}
+                {method === "installments" && (
+                  <p className="text-sm text-[var(--ca-navy-900)]">
+                    {cadence.charAt(0).toUpperCase()}{cadence.slice(1)}
+                    {firstInstallment?.due ? ` · First due ${formatISTDate(firstInstallment.due)}` : ""}
+                  </p>
+                )}
+                {seatActive && (
+                  <p className="text-sm text-[var(--ca-slate-700)]">
+                    Today&apos;s {formatINR(todayAmount)} is part of the {formatINR(grandTotal)} installment plan, not a separate fee.
+                  </p>
+                )}
+              </div>
+
+              {method === "installments" && emiAvailable && cfg.installmentCounts.length > 1 && (
                 <div className="mt-3">
                   <p className="text-sm font-semibold text-[var(--ca-navy-900)]">Number of installments</p>
                   <div className="mt-2 flex flex-wrap gap-2" role="radiogroup" aria-label="Number of installments">
@@ -546,34 +533,7 @@ export default function CheckoutClient({ course, waLink = null }: { course: Cour
                 </div>
               )}
 
-              <div className="mt-4 space-y-1.5 rounded-xl bg-[var(--ca-slate-50)] px-3 py-3" aria-live="polite">
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-[var(--ca-slate-700)]">Selected</p>
-                <p className="font-semibold text-[var(--ca-navy-900)]">{planNoun}</p>
-                <MoneyRow label="Pay today" value={formatINR(todayAmount)} strong />
-                <MoneyRow label="Plan total" value={formatINR(grandTotal)} />
-                <MoneyRow label="Remaining balance" value={formatINR(remaining)} />
-                {plan === "full" && fullSavings > 0 && !applied && (
-                  <MoneyRow label="You save versus installments" value={formatINR(fullSavings)} save />
-                )}
-                {applied && couponDiscount > 0 && (
-                  <MoneyRow label={`Coupon ${applied.code}`} value={`− ${formatINR(couponDiscount)}`} save />
-                )}
-                {applied && (
-                  <p className="text-xs text-[var(--ca-slate-700)]">Plan total before coupon {formatINR(originalTotal)}.</p>
-                )}
-                {firstInstallment?.due && (
-                  <p className="text-xs text-[var(--ca-slate-700)]">
-                    First installment {formatINR(firstInstallment.amount)} due {formatISTDate(firstInstallment.due)}.
-                  </p>
-                )}
-                {seatActive && (
-                  <p className="text-xs text-[var(--ca-slate-700)]">
-                    Today&apos;s {formatINR(todayAmount)} is part of the {formatINR(grandTotal)} plan total, not a separate fee.
-                  </p>
-                )}
-              </div>
-
-              {schedule.length > 0 && (
+              {method === "installments" && laterSchedule.length > 0 && (
                 <InstallmentScheduleAccordion
                   open={scheduleOpen}
                   onToggle={() => {
@@ -584,19 +544,64 @@ export default function CheckoutClient({ course, waLink = null }: { course: Cour
                       return !open;
                     });
                   }}
-                  schedule={schedule}
+                  schedule={laterSchedule}
                   bookingISO={bookingISO}
                 />
               )}
 
-              {plan === "full" && seatActive && fullPreview?.ok && (
-                <button
-                  type="button"
-                  className="ca-focus mt-3 min-h-11 text-left text-sm font-semibold text-[var(--ca-navy-600)]"
-                  onClick={() => chooseSeat(false)}
-                >
-                  Pay the full {formatINR(fullPlanTotal)} today instead
-                </button>
+              {method === "installments" && seatActive && cfg.allowCustomSeat && (
+                <div className="mt-3">
+                  <button
+                    type="button"
+                    className="ca-focus min-h-11 text-sm font-semibold text-[var(--ca-navy-600)]"
+                    aria-expanded={amountOpen}
+                    aria-controls="booking-amount-editor"
+                    onClick={() => setAmountOpen((v) => !v)}
+                  >
+                    {amountOpen ? "Hide amount" : "Want to pay more today?"}
+                  </button>
+                  {amountOpen && (
+                    <div id="booking-amount-editor" className="mt-2">
+                      <label htmlFor="booking-amount" className="text-sm font-semibold text-[var(--ca-navy-900)]">
+                        Pay today
+                      </label>
+                      <div className="mt-1 flex items-center gap-2">
+                        <span className="font-heading text-lg font-bold text-[var(--ca-navy-900)]" aria-hidden="true">₹</span>
+                        <input
+                          id="booking-amount"
+                          type="number"
+                          inputMode="numeric"
+                          aria-invalid={seatInvalid}
+                          aria-describedby="booking-amount-help"
+                          className="w-40 rounded-xl border border-[var(--ca-slate-300)] px-3 py-2.5 text-base font-semibold focus:border-[var(--ca-gold)] focus:outline-none"
+                          value={seatInput}
+                          min={seatFloor}
+                          max={Math.max(seatFloor, seatCeiling - 1)}
+                          onChange={(e) => {
+                            const next = Math.round(Number(e.target.value) || 0);
+                            setSeatInput(next);
+                          }}
+                          onBlur={() => {
+                            setSeatInput((v) => {
+                              const clamped = Math.min(Math.max(seatFloor, seatCeiling - 1), Math.max(seatFloor, v));
+                              if (clamped !== (cfg.seatAmount ?? seatFloor)) {
+                                trackClient("booking_amount_changed", {
+                                  course_id: course.id,
+                                  course_slug: course.slug,
+                                  amount: clamped,
+                                });
+                              }
+                              return clamped;
+                            });
+                          }}
+                        />
+                      </div>
+                      <p id="booking-amount-help" className={`mt-1 text-sm ${seatInvalid ? "text-red-600" : "text-[var(--ca-slate-700)]"}`} role={seatInvalid ? "alert" : undefined}>
+                        {seatTooHigh ? "Amount must stay below the installment plan total." : `Minimum ${formatINR(seatFloor)}.`}
+                      </p>
+                    </div>
+                  )}
+                </div>
               )}
             </section>
           )}
@@ -640,8 +645,8 @@ export default function CheckoutClient({ course, waLink = null }: { course: Cour
             <h2 className="font-heading text-base font-bold text-[var(--ca-navy-900)]">Enrollment summary</h2>
             <div className="mt-3 space-y-2">
               {selectedBatch && <MoneyRow label="Batch" value={[selectedAxis?.mode, selectedAxis?.timing].filter(Boolean).join(" · ") || selectedBatch.label || "Selected"} />}
-              <MoneyRow label="Plan" value={plan === "emi" ? "Installments" : "Pay in Full"} />
-              <MoneyRow label="Plan total" value={formatINR(grandTotal)} />
+              <MoneyRow label="Plan" value={method === "installments" ? "Installments" : "Pay in Full"} />
+              <MoneyRow label={totalLabel} value={formatINR(grandTotal)} />
               <MoneyRow label="Pay today" value={formatINR(todayAmount)} strong />
               <MoneyRow label="Remaining balance" value={formatINR(remaining)} />
             </div>
@@ -656,7 +661,8 @@ export default function CheckoutClient({ course, waLink = null }: { course: Cour
       </div>
 
       <div
-        className="fixed inset-x-0 bottom-0 z-40 border-t border-[var(--ca-slate-200)] bg-white lg:hidden"
+        ref={paybarRef}
+        className="fixed inset-x-0 bottom-0 z-[70] border-t border-[var(--ca-slate-200)] bg-white lg:hidden"
         style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
       >
         <div className="flex items-center gap-3 px-4 py-2.5">
@@ -665,7 +671,7 @@ export default function CheckoutClient({ course, waLink = null }: { course: Cour
             <p className="font-heading text-lg font-extrabold leading-tight text-[var(--ca-navy-900)]">{formatINR(todayAmount)}</p>
           </div>
           <div className="min-w-0 flex-1">
-            <PayButton label={seatActive ? "Reserve My Seat" : `Pay ${formatINR(todayAmount)} Securely`} loading={loading} disabled={seatInvalid} onClick={() => void proceed()} />
+            <PayButton label={payLabel} loading={loading} disabled={seatInvalid} onClick={() => void proceed()} />
           </div>
         </div>
         {error && <p role="alert" className="px-4 pb-2 text-xs text-red-600">{error}</p>}

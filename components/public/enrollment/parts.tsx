@@ -70,18 +70,16 @@ export function CourseEnrollmentSummary({
   eyebrow,
   startISO,
   gstIncluded,
-  bookingAmount,
+  proposition,
   meta,
-  showBatchHint = false,
 }: {
   title: string;
   image?: string | null;
   eyebrow: string | null;
   startISO: string | null;
   gstIncluded: boolean;
-  bookingAmount: number | null;
+  proposition: { kind: "reserve" | "payFull" | "payToday"; amount: number } | null;
   meta: string | null;
-  showBatchHint?: boolean;
 }) {
   return (
     <section className="bg-white px-4 py-4 sm:px-5">
@@ -99,52 +97,36 @@ export function CourseEnrollmentSummary({
           </p>
         </div>
       </div>
-      {bookingAmount != null && bookingAmount > 0 && (
+      {proposition && proposition.amount > 0 && (
         <div className="mt-4">
-          <p className="font-heading text-xl font-extrabold leading-tight text-[var(--ca-navy-900)] sm:text-2xl">
-            Reserve your seat today for {formatINR(bookingAmount)}
+          <p className="font-heading text-xl font-extrabold leading-tight text-[var(--ca-navy-900)]">
+            {proposition.kind === "reserve"
+              ? `Reserve your seat today for ${formatINR(proposition.amount)}`
+              : `Pay ${formatINR(proposition.amount)} today`}
           </p>
           <p className="mt-1.5 text-sm leading-snug text-[var(--ca-slate-700)]">
-            {formatINR(bookingAmount)} is adjusted against your applicable course fee. Pay the remaining balance according to your selected payment plan.
+            {proposition.kind === "reserve" && (
+              <>{formatINR(proposition.amount)} is adjusted against your installment plan. Pay the remaining balance according to your payment schedule.</>
+            )}
+            {proposition.kind === "payFull" && "This is the complete pay-in-full price. Nothing remains after this payment."}
+            {proposition.kind === "payToday" && "This is the first installment. The rest follows the payment schedule."}
           </p>
-          {showBatchHint && <p className="mt-1 text-xs text-[var(--ca-slate-700)]">Choose your batch below.</p>}
         </div>
       )}
     </section>
   );
 }
 
-export function SelectedBatchSummary({
-  batch,
-  courseFee,
-  originalPrice,
-  gstIncluded,
-}: {
-  batch: CourseBatch;
-  courseFee: number;
-  originalPrice: number | null;
-  gstIncluded: boolean;
-}) {
+export function SelectedBatchSummary({ batch }: { batch: CourseBatch }) {
   const pair = [batchModeLabel(batch), batchTimingLabel(batch)].filter(Boolean).join(" · ");
   const title = pair || batchChoiceLabel(batch);
   const startLabel = batch.start_date ? `Starts ${formatISTDate(batch.start_date)}` : null;
-  const showOriginal = originalPrice != null && originalPrice > courseFee;
   return (
-    <div className="mt-3 rounded-xl border border-[var(--ca-gold)] bg-[rgba(212,175,55,0.08)] px-3 py-3" aria-live="polite">
-      <p className="text-[11px] font-semibold uppercase tracking-wide text-[var(--ca-gold-dark)]">Selected batch</p>
+    <div className="mt-3 border-t border-[var(--ca-slate-200)] pt-3" aria-live="polite">
+      <p className="text-[11px] font-semibold uppercase tracking-wide text-[var(--ca-gold-dark)]">Selected</p>
       <p className="mt-0.5 font-semibold text-[var(--ca-navy-900)]">{title}</p>
       {batchLabelAddsDetail(batch.label, title, startLabel) && <p className="text-xs text-[var(--ca-slate-700)]">{batch.label}</p>}
-      {startLabel && <p className="mt-1 text-sm text-[var(--ca-slate-700)]">{startLabel}</p>}
-      <div className="mt-2 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-        <span className="text-xs font-semibold uppercase tracking-wide text-[var(--ca-slate-700)]">Course fee</span>
-        <span className="font-heading text-lg font-extrabold text-[var(--ca-navy-900)]">{formatINR(courseFee)}</span>
-        {showOriginal && <span className="text-sm text-[var(--ca-slate-400)] line-through">{formatINR(originalPrice)}</span>}
-      </div>
-      <p className="mt-1 text-xs text-[var(--ca-slate-700)]">
-        {gstIncluded ? "GST included. " : ""}
-        {batch.seats_left != null ? `${batch.seats_left} seats listed. ` : ""}
-        Change batch using the choices above.
-      </p>
+      {startLabel && <p className="text-sm text-[var(--ca-slate-700)]">{startLabel}</p>}
     </div>
   );
 }
@@ -184,7 +166,7 @@ export function BatchList({
               {batch.start_date && <span className="mt-0.5 block text-xs text-[var(--ca-slate-700)]">Starts {formatISTDate(batch.start_date)}</span>}
             </span>
             <span className="shrink-0 text-right">
-              <span className="block text-[10px] font-semibold uppercase tracking-wide text-[var(--ca-slate-700)]">Course fee</span>
+              <span className="block text-[10px] font-semibold uppercase tracking-wide text-[var(--ca-slate-700)]">Installment plan</span>
               <span className="font-heading font-bold text-[var(--ca-navy-900)]">{formatINR(fee.courseFee)}</span>
               {fee.original != null && fee.original > fee.courseFee && (
                 <span className="block text-xs text-[var(--ca-slate-400)] line-through">{formatINR(fee.original)}</span>
@@ -201,12 +183,14 @@ export function ChoiceCard({
   selected,
   title,
   badge,
+  amount,
   onSelect,
   children,
 }: {
   selected: boolean;
   title: string;
   badge?: string | null;
+  amount: string;
   onSelect: () => void;
   children: ReactNode;
 }) {
@@ -231,6 +215,7 @@ export function ChoiceCard({
           </span>
         )}
       </span>
+      <span className="mt-1 block font-heading text-lg font-extrabold leading-tight text-[var(--ca-navy-900)]">{amount}</span>
       <span className="mt-1 block text-sm leading-snug text-[var(--ca-slate-700)]">{children}</span>
     </button>
   );
@@ -316,7 +301,7 @@ export function StudentDetailsForm({
             id="enroll-name"
             name="name"
             autoComplete="name"
-            className="mt-1 w-full rounded-xl border border-[var(--ca-slate-300)] px-3 py-2.5 text-base font-medium focus:border-[var(--ca-gold)] focus:outline-none"
+            className="mt-1 w-full scroll-mb-[var(--checkout-paybar-height,5.5rem)] rounded-xl border border-[var(--ca-slate-300)] px-3 py-2.5 text-base font-medium focus:border-[var(--ca-gold)] focus:outline-none"
             value={name}
             onChange={(e) => onName(e.target.value)}
             onFocus={onFocusCapture}
@@ -332,7 +317,7 @@ export function StudentDetailsForm({
             pattern="[0-9]*"
             aria-invalid={phoneInvalid}
             aria-describedby={phoneInvalid ? "enroll-form-error" : undefined}
-            className="mt-1 w-full rounded-xl border border-[var(--ca-slate-300)] px-3 py-2.5 text-base font-medium focus:border-[var(--ca-gold)] focus:outline-none"
+            className="mt-1 w-full scroll-mb-[var(--checkout-paybar-height,5.5rem)] rounded-xl border border-[var(--ca-slate-300)] px-3 py-2.5 text-base font-medium focus:border-[var(--ca-gold)] focus:outline-none"
             value={phone}
             onChange={(e) => onPhone(e.target.value.replace(/\D/g, "").slice(0, 10))}
           />
@@ -346,7 +331,7 @@ export function StudentDetailsForm({
             autoComplete="email"
             inputMode="email"
             aria-invalid={emailInvalid}
-            className="mt-1 w-full rounded-xl border border-[var(--ca-slate-300)] px-3 py-2.5 text-base font-medium focus:border-[var(--ca-gold)] focus:outline-none"
+            className="mt-1 w-full scroll-mb-[var(--checkout-paybar-height,5.5rem)] rounded-xl border border-[var(--ca-slate-300)] px-3 py-2.5 text-base font-medium focus:border-[var(--ca-gold)] focus:outline-none"
             value={email}
             onChange={(e) => onEmail(e.target.value)}
           />
