@@ -14,6 +14,7 @@
  */
 
 import type { FlowId } from "./providers/types";
+import { isEnrollmentCheckoutPath } from "../enrollmentPath";
 
 /* ------------------------------------------------------------------ *
  * TRIGGER TIMING & FREQUENCY (widget behaviour)
@@ -55,6 +56,8 @@ export function isWidgetAllowedPath(pathname: string | null | undefined): boolea
   for (const pre of WIDGET_PRIVATE_PREFIXES) {
     if (p === pre || p.startsWith(`${pre}/`)) return false;
   }
+  // Checkout keeps the page focused. The counsellor launcher is hidden only here.
+  if (isEnrollmentCheckoutPath(p)) return false;
   return true;
 }
 
