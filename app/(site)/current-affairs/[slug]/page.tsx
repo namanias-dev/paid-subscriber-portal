@@ -25,7 +25,13 @@ export const revalidate = 600;
 
 export async function generateStaticParams() {
   const all = await getPublicCaArticles();
-  return all.map((a) => ({ slug: a.slug }));
+  const slugs = new Set<string>();
+  for (const article of all) {
+    if (article.slug) slugs.add(article.slug);
+    const canonical = article.seo?.canonical_slug?.trim();
+    if (canonical) slugs.add(canonical);
+  }
+  return [...slugs].map((slug) => ({ slug }));
 }
 
 const BODY_ID = "ca-article-body";

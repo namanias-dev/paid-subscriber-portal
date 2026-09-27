@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { buildPublicSitemap } from "../../lib/seo/sitemapDocument.ts";
 import { indexableUrl, SEO_ORIGIN, seoUrl, truthfulLastModified } from "../../lib/seoOrigin.ts";
 import { isPublicCourseAvailable } from "../../lib/publicCourse.ts";
+import { isPublicIndexableCaArticle, resolvePublicCaArticle } from "../../lib/publicCaArticle.ts";
 import { notesProductPath } from "../../lib/store/paths.ts";
 import type { CaArticle, Resource } from "../../lib/types.ts";
 
@@ -154,6 +155,7 @@ test("lastModified is a stored timestamp, never generation time", () => {
 test("aggregate lastModified uses member updated_at, not the clock", () => {
   const article = {
     slug: "india-brics",
+    status: "published",
     ca_date: "2026-09-01",
     created_at: "2026-09-01T00:00:00.000Z",
     updated_at: "2026-09-02T08:00:00.000Z",
@@ -174,6 +176,75 @@ test("aggregate lastModified uses member updated_at, not the clock", () => {
   assert.equal(byUrl.get(`${ORIGIN}/current-affairs/monthly/2026-09`)?.lastModified?.toISOString(), "2026-09-02T08:00:00.000Z");
   assert.equal(byUrl.get(`${ORIGIN}/current-affairs/tag/gdp-growth`)?.lastModified?.toISOString(), "2026-09-02T08:00:00.000Z");
   assert.equal(byUrl.get(`${ORIGIN}/resources/books`)?.lastModified?.toISOString(), "2026-02-02T00:00:00.000Z");
+});
+
+test("a non-indexable current-affairs article cannot enter the sitemap", () => {
+  const canonicalAlias = {
+    slug: "radio-tagged-white-rumped-vulture",
+    status: "published",
+    publish_at: "2026-06-30T11:48:00.000Z",
+    ca_date: "2026-06-30",
+    created_at: "2026-06-30T11:49:18.500Z",
+    updated_at: "2026-06-30T11:55:41.328Z",
+    tags: ["vulture"],
+    seo: { canonical_slug: "radio-tagged-white-rumped-vulture-electrocuted" },
+  } as CaArticle;
+  const draft = {
+    slug: "unpublished-note",
+    status: "draft",
+    created_at: "2026-01-01T00:00:00.000Z",
+    tags: ["draft-only-tag"],
+    seo: {},
+  } as CaArticle;
+  const hidden = {
+    slug: "hidden-note",
+    status: "published",
+    created_at: "2026-01-01T00:00:00.000Z",
+    tags: ["hidden-only-tag"],
+    seo: { noindex: true },
+  } as CaArticle;
+  const future = {
+    slug: "future-note",
+    status: "published",
+    publish_at: "2099-01-01T00:00:00.000Z",
+    created_at: "2026-01-01T00:00:00.000Z",
+    tags: ["future-only-tag"],
+    seo: {},
+  } as CaArticle;
+  const articles = [canonicalAlias, draft, hidden, future];
+  const entries = buildPublicSitemap({ caArticles: articles });
+  const list = urls(entries);
+
+  assert.equal(isPublicIndexableCaArticle(draft), false);
+  assert.equal(isPublicIndexableCaArticle(hidden), false);
+  assert.equal(isPublicIndexableCaArticle(future), false);
+  assert.equal(isPublicIndexableCaArticle(canonicalAlias), true);
+  assert.equal(list.includes(`${ORIGIN}/current-affairs/unpublished-note`), false);
+  assert.equal(list.includes(`${ORIGIN}/current-affairs/hidden-note`), false);
+  assert.equal(list.includes(`${ORIGIN}/current-affairs/future-note`), false);
+  assert.equal(list.includes(`${ORIGIN}/current-affairs/tag/draft-only-tag`), false);
+  assert.equal(list.includes(`${ORIGIN}/current-affairs/tag/hidden-only-tag`), false);
+  assert.equal(list.includes(`${ORIGIN}/current-affairs/tag/future-only-tag`), false);
+  assert.ok(list.includes(`${ORIGIN}/current-affairs/radio-tagged-white-rumped-vulture-electrocuted`));
+  assert.equal(list.includes(`${ORIGIN}/current-affairs/radio-tagged-white-rumped-vulture`), false);
+
+  const hubs = new Set([`${ORIGIN}/current-affairs/daily`, `${ORIGIN}/current-affairs/monthly`]);
+  const articleUrls = list.filter((url) => /\/current-affairs\/[^/]+$/.test(url) && !hubs.has(url));
+  for (const url of articleUrls) {
+    const requested = url.slice(url.lastIndexOf("/") + 1);
+    assert.ok(resolvePublicCaArticle(articles, requested), requested);
+  }
+  assert.equal(
+    resolvePublicCaArticle(articles, "radio-tagged-white-rumped-vulture-electrocuted")?.slug,
+    "radio-tagged-white-rumped-vulture",
+  );
+  assert.equal(resolvePublicCaArticle(articles, "unpublished-note"), null);
+
+  const page = read("../../app/(site)/current-affairs/[slug]/page.tsx");
+  const loader = read("../../lib/dataProvider.ts");
+  assert.match(page, /getCaArticleBySlug\(params\.slug\)/);
+  assert.match(loader, /resolvePublicCaArticle/);
+  assert.match(read("../../lib/seo/sitemapDocument.ts"), /isPublicIndexableCaArticle/);
 });
 
 test("robots.txt advertises the www sitemap and does not prefer the apex host", () => {

@@ -1,5 +1,6 @@
 import { caEffectiveDate } from "../caView";
 import { isPublicCourseAvailable } from "../publicCourse";
+import { isPublicIndexableCaArticle, publicCaIndexSlug } from "../publicCaArticle";
 import { RESOURCE_CATEGORIES } from "../resourceConstants";
 import { seoUrl, truthfulLastModified } from "../seoOrigin";
 import { isNotesReservedSlug, notesProductPath } from "../store/paths";
@@ -151,9 +152,9 @@ export function buildPublicSitemap(input: PublicSitemapInput): PublicSitemapEntr
     }),
   );
 
-  const caArticles = (input.caArticles || []).filter((article) => article.seo?.noindex !== true && !!article.slug);
+  const caArticles = (input.caArticles || []).filter((article) => isPublicIndexableCaArticle(article));
   const caArticleRoutes = caArticles.map((article) =>
-    entry(`/current-affairs/${article.seo?.canonical_slug?.trim() || article.slug}`, {
+    entry(`/current-affairs/${publicCaIndexSlug(article)}`, {
       lastModified: truthfulLastModified(article.updated_at),
       changeFrequency: "daily",
       priority: 0.7,

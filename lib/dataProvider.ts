@@ -3,6 +3,7 @@ import { unstable_cache } from "next/cache";
 import { getSupabaseAdmin, getSupabasePublic, getSupabaseDataCache } from "./supabase";
 import { archivedPhoneSet, excludeArchivedRows, isArchivedStudent } from "./archivedStudents";
 import { isPublicCourseAvailable } from "./publicCourse";
+import { isCaPublished as caArticleIsPublished, resolvePublicCaArticle } from "./publicCaArticle";
 import {
   PUBLIC_CACHE_TAGS,
   revalidatePublicCa,
@@ -7567,10 +7568,7 @@ export async function updateImportJob(id: string, patch: Partial<ImportJob>): Pr
 
 /** True when an article is publicly visible (published + not future-scheduled). */
 export function isCaPublished(a: CaArticle | null | undefined): boolean {
-  if (!a) return false;
-  if (a.status !== "published") return false;
-  if (a.publish_at && new Date(a.publish_at).getTime() > Date.now()) return false;
-  return true;
+  return caArticleIsPublished(a);
 }
 
 // ---- Articles ----
@@ -7611,7 +7609,7 @@ export const getPublicCaArticles = unstable_cache(
  */
 export async function getCaArticleBySlug(slug: string): Promise<CaArticle | null> {
   const all = await getPublicCaArticles();
-  return all.find((a) => a.slug === slug) ?? null;
+  return resolvePublicCaArticle(all, slug);
 }
 
 export async function getCaArticleById(id: string): Promise<CaArticle | null> {
