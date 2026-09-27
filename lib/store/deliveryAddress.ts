@@ -82,9 +82,23 @@ export function formatDeliveryAddress(input: DeliveryFields & { name?: string | 
     .join("\n");
 }
 
-/** Standard Maps search URL. No API key and no Maps Platform billing. */
-export function googleMapsSearchUrl(formatted: string): string {
-  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(formatted)}`;
+/**
+ * One-line destination for a Maps search. House, locality, city, state, PIN, India.
+ * The recipient name is not included. This function does not read the academy or pickup address.
+ */
+export function deliveryMapsQuery(input: DeliveryFields): string | null {
+  const canonical = canonicalDelivery(input);
+  if (!canonical.line1 || !/^[1-9][0-9]{5}$/.test(canonical.pincode)) return null;
+  const locality = [canonical.line2, canonical.landmark].filter(Boolean).join(", ");
+  const region = [canonical.city, canonical.state].filter(Boolean).join(", ");
+  return [canonical.line1, locality, region, canonical.pincode, "India"].filter(Boolean).join(", ");
+}
+
+/** Free Google Maps search URL for a delivery destination. No API key. Returns null when the destination is incomplete. */
+export function buildDeliveryGoogleMapsUrl(input: DeliveryFields): string | null {
+  const query = deliveryMapsQuery(input);
+  if (!query) return null;
+  return `https://www.google.com/maps/search/?${new URLSearchParams({ api: "1", query }).toString()}`;
 }
 
 export function confirmationMatches(input: DeliveryFields, hash: string | null | undefined): boolean {

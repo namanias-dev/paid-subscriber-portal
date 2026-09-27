@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { trackClient } from "@/lib/analytics/client";
-import { addressAnalyticsProps, addressFingerprint, canonicalDelivery, formatDeliveryAddress, googleMapsSearchUrl } from "@/lib/store/deliveryAddress";
+import { addressAnalyticsProps, addressFingerprint, buildDeliveryGoogleMapsUrl, canonicalDelivery, formatDeliveryAddress } from "@/lib/store/deliveryAddress";
 import { pinPlaceConflict } from "@/lib/store/address";
 import DiscountCodeField from "@/components/notes/DiscountCodeField";
 
@@ -177,7 +177,7 @@ export default function CheckoutForm() {
   const placeConflict = pinPlaceConflict(form.city, form.state, postal.city, postal.state);
   const canConfirm = pinReady && !placeConflict && form.line1.trim().length > 2 && /^[1-9][0-9]{5}$/.test(form.pincode) && Boolean(form.city.trim()) && Boolean(form.state.trim());
   const confirmed = confirmedHash === fingerprint;
-  const mapsUrl = googleMapsSearchUrl(formatDeliveryAddress({ ...canonical, name: form.name }));
+  const mapsUrl = buildDeliveryGoogleMapsUrl(canonical);
 
   useEffect(() => {
     if (!canConfirm || shownRef.current) return;
@@ -267,10 +267,14 @@ export default function CheckoutForm() {
         {canConfirm && (
           <section className="rounded-2xl border border-[var(--ca-navy)]/10 bg-[#f7f5ef] p-4">
             <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--ca-gold-dark)]">Confirm delivery address</p>
-            <p className="mt-2 whitespace-pre-line text-sm leading-relaxed text-[var(--ca-navy)]">{formatDeliveryAddress({ ...canonical, name: form.name })}</p>
+            <p className="mt-2 whitespace-pre-line text-sm leading-relaxed text-[var(--ca-navy)]">{formatDeliveryAddress(canonical)}</p>
             <p className="mt-2 text-xs text-[var(--ca-navy)]/60">Please confirm this is where you want your Notes delivered.</p>
             <div className="mt-3 flex flex-wrap gap-2">
-              <a href={mapsUrl} target="_blank" rel="noopener noreferrer" onClick={() => trackClient("notes_address_maps_opened", addressAnalyticsProps({}))} className="inline-flex min-h-11 items-center rounded-full border border-[var(--ca-navy)]/15 px-3 text-sm font-semibold text-[var(--ca-navy)]">Open in Google Maps</a>
+              {mapsUrl ? (
+                <a href={mapsUrl} target="_blank" rel="noopener noreferrer" onClick={() => trackClient("notes_address_maps_opened", addressAnalyticsProps({}))} className="inline-flex min-h-11 items-center rounded-full border border-[var(--ca-navy)]/15 px-3 text-sm font-semibold text-[var(--ca-navy)]">Open in Google Maps</a>
+              ) : (
+                <p className="text-xs text-[var(--ca-navy)]/55">Complete the delivery address to open it in Maps.</p>
+              )}
               <button type="button" className="min-h-11 rounded-full border border-[var(--ca-navy)]/15 px-3 text-sm font-semibold" onClick={() => document.getElementById("delivery-line1")?.focus()}>Edit address</button>
             </div>
             <button type="button" className="ca-focus mt-3 inline-flex min-h-11 w-full items-center justify-center rounded-full bg-[var(--ca-navy)] text-sm font-semibold text-white" onClick={() => { setConfirmedHash(fingerprint); trackClient("notes_address_confirmed", addressAnalyticsProps({ itemCount: cart?.item_count })); }}>

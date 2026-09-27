@@ -13,7 +13,8 @@ import {
   confirmationMatches,
   decideAddressChange,
   formatDeliveryAddress,
-  googleMapsSearchUrl,
+  buildDeliveryGoogleMapsUrl,
+  deliveryMapsQuery,
   materialAddressChange,
   oneActiveAwb,
 } from "../../lib/store/deliveryAddress";
@@ -51,12 +52,57 @@ check("confirmation hash changes when the street or PIN changes", () => {
 });
 
 check("maps URL encodes the address and has no API key", () => {
-  const url = new URL(googleMapsSearchUrl(formatDeliveryAddress({ ...base, name: "Aman" })));
+  const url = new URL(buildDeliveryGoogleMapsUrl(base) || "");
   assert.equal(url.origin + url.pathname, "https://www.google.com/maps/search/");
   assert.equal(url.searchParams.get("api"), "1");
-  assert.match(url.searchParams.get("query") || "", /1920/);
+  assert.match(url.searchParams.get("query") || "", /H No\. 1920 P/);
   assert.match(url.searchParams.get("query") || "", /134109/);
   assert.equal(url.searchParams.get("key"), null);
+});
+
+check("checkout maps query is the delivery destination, not the academy", () => {
+  const destination = { line1: "1920-P", line2: "Sector-28", city: "Panchkula", state: "Haryana", pincode: "134116" };
+  const query = deliveryMapsQuery(destination);
+  const card = formatDeliveryAddress(destination);
+  const url = new URL(buildDeliveryGoogleMapsUrl(destination) || "");
+  assert.equal(url.searchParams.get("query"), query);
+  assert.equal(query, "1920-P, Sector-28, Panchkula, Haryana, 134116, India");
+  for (const token of ["1920-P", "Sector-28", "Panchkula", "Haryana", "134116", "India"]) {
+    assert.match(card, new RegExp(token.replace("-", "\\-")));
+    assert.match(query || "", new RegExp(token.replace("-", "\\-")));
+  }
+  assert.equal((query || "").includes("Naman Sharma IAS Academy"), false);
+  assert.equal((query || "").includes("SCO 173"), false);
+  assert.equal((query || "").includes("Sector 17"), false);
+  assert.equal((query || "").includes("160017"), false);
+  assert.equal(deliveryMapsQuery({ ...destination, line1: "1921-P" }), "1921-P, Sector-28, Panchkula, Haryana, 134116, India");
+});
+
+check("a second destination does not reuse the first address", () => {
+  const query = deliveryMapsQuery({ line1: "55", line2: "Sector 8", city: "Chandigarh", state: "Chandigarh", pincode: "160009" });
+  assert.equal(query, "55, Sector 8, Chandigarh, Chandigarh, 160009, India");
+  assert.equal((query || "").includes("1920-P"), false);
+  assert.equal((query || "").includes("134116"), false);
+});
+
+check("maps encoding keeps hyphens, slashes, and apostrophes", () => {
+  const destination = { line1: "12/A O'Brien", line2: "Sector-28", city: "Panchkula", state: "Haryana", pincode: "134116" };
+  const query = deliveryMapsQuery(destination);
+  const url = new URL(buildDeliveryGoogleMapsUrl(destination) || "");
+  assert.equal(url.searchParams.get("query"), query);
+  assert.match(query || "", /12\/A O'Brien/);
+  assert.equal(buildDeliveryGoogleMapsUrl({ line1: "", line2: "Sector-28", city: "Panchkula", state: "Haryana", pincode: "134116" }), null);
+});
+
+check("delivery maps helper does not read the academy address", () => {
+  const src = readFileSync(new URL("../../lib/store/deliveryAddress.ts", import.meta.url), "utf8");
+  assert.match(src, /function buildDeliveryGoogleMapsUrl/);
+  assert.doesNotMatch(src, /Naman Sharma IAS Academy/);
+  assert.doesNotMatch(src, /directionsUrl/);
+  assert.doesNotMatch(src, /SCO 173/);
+  const checkout = readFileSync(new URL("../../components/notes/CheckoutForm.tsx", import.meta.url), "utf8");
+  assert.match(checkout, /buildDeliveryGoogleMapsUrl\(canonical\)/);
+  assert.match(checkout, /formatDeliveryAddress\(canonical\)/);
 });
 
 check("analytics props do not carry the street", () => {

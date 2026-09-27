@@ -19,7 +19,7 @@ import {
 } from "@/lib/store/adminConsole";
 import { DownloadInvoiceButton, ViewInvoiceButton } from "./InvoiceActions";
 import ChangeDeliveryAddress from "./ChangeDeliveryAddress";
-import { formatDeliveryAddress, googleMapsSearchUrl } from "@/lib/store/deliveryAddress";
+import { buildDeliveryGoogleMapsUrl, formatDeliveryAddress } from "@/lib/store/deliveryAddress";
 
 interface Address {
   name?: string;
@@ -255,6 +255,7 @@ export default function OrderDetail({
   }
 
   const address = order.address;
+  const deliveryMapsUrl = address ? buildDeliveryGoogleMapsUrl(address) : null;
   const addressLine = address
     ? [address.line1, address.line2, address.landmark, `${address.city}, ${address.state} ${address.pincode}`].filter(Boolean).join(", ")
     : "";
@@ -382,7 +383,7 @@ export default function OrderDetail({
             </p>
             <p className="mt-1 whitespace-pre-line text-sm leading-relaxed text-[var(--ca-navy)]/80">{address ? formatDeliveryAddress(address) : "No address"}</p>
             <div className="mt-3 flex flex-wrap gap-2">
-              {address && <a href={googleMapsSearchUrl(formatDeliveryAddress(address))} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-11 items-center rounded-full border px-3 text-xs font-semibold">Open in Google Maps</a>}
+              {deliveryMapsUrl && <a href={deliveryMapsUrl} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-11 items-center rounded-full border px-3 text-xs font-semibold">Open in Google Maps</a>}
               <button type="button" onClick={() => setAddressEditor(true)} className="min-h-11 rounded-full border px-3 text-xs font-semibold">Change delivery address</button>
               <button type="button" aria-label="Copy address" onClick={() => copy(addressLine)} className="min-h-11 rounded-full border px-3 text-xs font-semibold">Copy address</button>
               <button type="button" aria-label="Copy phone" onClick={() => copy(order.phone)} className="min-h-11 rounded-full border px-3 text-xs font-semibold">Copy phone</button>
