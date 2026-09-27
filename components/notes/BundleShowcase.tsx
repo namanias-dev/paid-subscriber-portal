@@ -55,7 +55,7 @@ export default function BundleShowcase({
                 {detail?.booklets ? (
                   <p className="mt-1 text-xs text-white/50">{detail.booklets} physical booklet{detail.booklets === 1 ? "" : "s"}</p>
                 ) : null}
-                <Link href={`/notes/products/${b.slug}`} className="ca-btn ca-btn-gold mt-6 rounded-full px-6">
+                <Link href={`/notes/${b.slug}`} className="ca-btn ca-btn-gold mt-6 rounded-full px-6">
                   View bundle
                 </Link>
               </div>

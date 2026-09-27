@@ -1,5 +1,6 @@
 import PublicNav from "@/components/public/PublicNav";
 import PublicFooter from "@/components/public/PublicFooter";
+import EnrollmentFooterGate from "@/components/public/EnrollmentFooterGate";
 import FloatingWhatsApp from "@/components/public/FloatingWhatsApp";
 import AiCounselorMount from "@/components/ai-agent/AiCounselorMount";
 import { mergeSiteSettings } from "@/lib/homeDefaults";
@@ -36,7 +37,9 @@ export default async function SiteLayout({ children }: { children: React.ReactNo
         announcements={[]}
       />
       <main className="flex-1">{children}</main>
-      <PublicFooter brand={settings.brand} />
+      <EnrollmentFooterGate>
+        <PublicFooter brand={settings.brand} />
+      </EnrollmentFooterGate>
       <FloatingWhatsApp waLink={waLink} />
       <AiCounselorMount waLink={waLink} />
     </div>

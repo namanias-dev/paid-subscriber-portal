@@ -284,6 +284,26 @@ export function mergeAttribution(
   return { first_touch: first, last_touch: last };
 }
 
+/**
+ * document.cookie can list the same name twice after a host-only cookie and a
+ * `.namanias.com` cookie both exist. Prefer the copy that still has a campaign
+ * or click id so a stale host-only Direct cookie cannot hide the real visit.
+ */
+export function chooseCookieValue(name: string, cookieHeader: string | null | undefined): string | null {
+  if (!cookieHeader) return null;
+  const matches = cookieHeader.split(";").map((part) => part.trim()).filter((part) => part.startsWith(`${name}=`));
+  if (!matches.length) return null;
+  const valueOf = (part: string) => part.slice(name.length + 1);
+  if (name !== ATTR_COOKIE || matches.length === 1) return valueOf(matches[matches.length - 1]);
+  let best = matches[matches.length - 1];
+  for (const part of matches) {
+    const state = parseAttrCookie(valueOf(part));
+    const touch = state?.last_touch || state?.first_touch;
+    if (touch && touchHasAcquisitionSignal(touch)) best = part;
+  }
+  return valueOf(best);
+}
+
 export function parseAttrCookie(raw: string | null | undefined): AttributionState | null {
   if (!raw) return null;
   try {

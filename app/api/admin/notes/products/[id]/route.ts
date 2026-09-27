@@ -2,9 +2,9 @@ import { NextResponse } from "next/server";
 import { requirePermission } from "@/lib/adminGuard";
 import { storeDb } from "@/lib/store/db";
 import { revalidateTag } from "next/cache";
-import { STORE_CACHE_TAG } from "@/lib/store/catalogue";
+import { STORE_CACHE_TAG, publicStoreMediaUrl } from "@/lib/store/catalogue";
 import { assertActiveSellingPrice, normalizeStoreProductPrices } from "@/lib/store/productPrice";
-import { applyProductContentFields } from "@/lib/store/productAdmin";
+import { applyProductContentFields, publicProductSaveError } from "@/lib/store/productAdmin";
 import { deleteProductMedia, listProductMedia } from "@/lib/store/media/upload";
 import { PREPARATION_STATUSES } from "@/lib/store/availability";
 
@@ -78,6 +78,11 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
       length_mm: p.length_mm,
       width_mm: p.width_mm,
       height_mm: p.height_mm,
+      hsn_code: p.hsn_code,
+      tax_treatment: p.tax_treatment,
+      tax_rate_bps: p.tax_rate_bps,
+      tax_configuration_status: p.tax_configuration_status,
+      tax_configuration_source: p.tax_configuration_source,
       mrp_paise: p.mrp_paise,
       selling_price_paise: p.selling_price_paise,
       availability_mode: p.availability_mode,
@@ -91,6 +96,9 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
       is_bestseller: p.is_bestseller,
       archived: !!p.archived_at,
       cover_image_key: p.cover_image_key,
+      cover_url: publicStoreMediaUrl(p.cover_image_key),
+      store_thumbnail_image_key: p.store_thumbnail_image_key ?? null,
+      store_thumbnail_url: publicStoreMediaUrl(p.store_thumbnail_image_key),
       seo_title: p.seo_title,
       seo_description: p.seo_description,
       paid_demand: paidDemand,
@@ -146,11 +154,19 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
     assertActiveSellingPrice(selling, !!active);
 
     const { error } = await db.from("store_products").update(patch).eq("id", params.id);
-    if (error) return noStore({ ok: false, error: error.message }, 400);
-    revalidateTag(STORE_CACHE_TAG);
+    if (error) {
+      console.error("[notes-product-save]", params.id, error.message);
+      return noStore({ ok: false, error: publicProductSaveError(new Error(error.message)) }, 400);
+    }
+    try {
+      revalidateTag(STORE_CACHE_TAG);
+    } catch (revalidateError) {
+      console.error("[notes-product-save] revalidate", params.id, (revalidateError as Error).message);
+    }
     return noStore({ ok: true });
   } catch (e) {
-    return noStore({ ok: false, error: (e as Error).message }, 400);
+    console.error("[notes-product-save]", params.id, (e as Error).message);
+    return noStore({ ok: false, error: publicProductSaveError(e) }, 400);
   }
 }
 

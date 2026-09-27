@@ -13,6 +13,18 @@ export function dash(n: number | null | undefined): string {
   return String(Math.round(n));
 }
 
+/** Rupees for accounting lines. Whole rupees stay whole. Paise show when the amount is not whole. */
+export function inrExact(n: number | null | undefined): string {
+  if (n == null || !Number.isFinite(n)) return "—";
+  const negative = n < 0;
+  const abs = Math.abs(n);
+  const whole = Math.abs(abs - Math.round(abs)) < 0.001;
+  const formatted = whole
+    ? Math.round(abs).toLocaleString("en-IN")
+    : abs.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return `${negative ? "-" : ""}₹${formatted}`;
+}
+
 export function inr(n: number | null | undefined): string {
   if (n == null || !Number.isFinite(n)) return "—";
   if (Math.abs(n) >= 100_000) {
@@ -99,6 +111,51 @@ export function istNowParts(d = new Date()): {
     label,
     slotKey: `${ymd}T${slotHour}:00+05:30`,
   };
+}
+
+/** Clock only, Asia/Kolkata, e.g. "5:27 PM". */
+export function formatIstClock(iso: string | Date): string {
+  const d = typeof iso === "string" ? new Date(iso) : iso;
+  if (!Number.isFinite(d.getTime())) return "—";
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Kolkata",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  })
+    .format(d)
+    .replace(/\s*([ap])m\s*$/i, (_, ap) => ` ${String(ap).toUpperCase()}M`);
+}
+
+/** Upcoming event line, e.g. "26 Sept · 4:00 PM". */
+export function formatIstEvent(iso: string | Date): string {
+  const d = typeof iso === "string" ? new Date(iso) : iso;
+  if (!Number.isFinite(d.getTime())) return "";
+  const day = new Intl.DateTimeFormat("en-IN", {
+    timeZone: "Asia/Kolkata",
+    day: "numeric",
+    month: "short",
+  }).format(d);
+  return `${day} · ${formatIstClock(d)}`;
+}
+
+/** Date and clock for the executive brief, in Asia/Kolkata. */
+export function istBriefStamp(d = new Date()): { dateLabel: string; timeLabel: string } {
+  const dateLabel = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Kolkata",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  }).format(d);
+  const timeLabel = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Kolkata",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  })
+    .format(d)
+    .replace(/\s*([ap])m\s*$/i, (_, ap) => ` ${String(ap).toUpperCase()}M`);
+  return { dateLabel, timeLabel };
 }
 
 export function formatIstShort(iso: string | Date): string {

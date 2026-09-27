@@ -1,6 +1,7 @@
 import { istYMD, istTodayYMD } from "./dates";
 import { isPaidStatus as isPaid, itemKey, distinctRegistrations } from "./paymentsAgg";
 import type { Payment } from "./types";
+import { normSource, sourceMeta } from "./webinarSource";
 
 /** Timeframe presets shared by every registrations view. */
 export type Frame = "7d" | "30d" | "month" | "year";
@@ -51,6 +52,74 @@ export function filterPaidWebinarForSlug(payments: readonly Payment[], slugOrKey
 /** Distinct paid seats for one webinar — THE shared count. */
 export function paidWebinarRegistrationCount(payments: readonly Payment[], slugOrKey: string): number {
   return distinctRegistrations(filterPaidWebinarForSlug(payments, slugOrKey));
+}
+
+/** Same platform, different spellings on the flat attribution stamp. Not a paid-ad channel. */
+const ATTRIBUTION_ALIAS: Record<string, string> = {
+  fb: "facebook",
+  ig: "instagram",
+  insta: "instagram",
+  wa: "whatsapp",
+  yt: "youtube",
+};
+
+export interface WebinarSourceCount {
+  key: string;
+  label: string;
+  count: number;
+}
+
+/**
+ * Paid seats for one webinar.
+ * paidToday is the first paid receipt created on that IST day, not a later
+ * receipt for a seat that already existed.
+ * Sources are the payment's own attribution_source. Blank stamps stay Unknown.
+ */
+export function webinarRegistrationReport(
+  payments: readonly Payment[],
+  slugOrKey: string,
+  todayYmd: string,
+): {
+  paidTotal: number;
+  paidToday: number;
+  sources: WebinarSourceCount[];
+  hasAttribution: boolean;
+} {
+  const rows = filterPaidWebinarForSlug(payments, slugOrKey);
+  const seats = new Map<string, { at: number; source: string }>();
+  let hasAttribution = false;
+  for (const p of rows) {
+    const seat = `${(p.phone || "").trim()}|${itemKey(p)}`;
+    const at = new Date(p.created_at).getTime();
+    const raw = normSource(p.attribution_source);
+    const source = raw ? ATTRIBUTION_ALIAS[raw] || raw : "";
+    if (source) hasAttribution = true;
+    const prev = seats.get(seat);
+    if (!prev) {
+      seats.set(seat, { at: Number.isFinite(at) ? at : Number.POSITIVE_INFINITY, source });
+      continue;
+    }
+    if (Number.isFinite(at) && at < prev.at) prev.at = at;
+    if (!prev.source && source) prev.source = source;
+  }
+  let paidToday = 0;
+  const counts = new Map<string, number>();
+  for (const seat of seats.values()) {
+    if (Number.isFinite(seat.at) && istYMD(new Date(seat.at).toISOString()) === todayYmd) paidToday++;
+    const key = seat.source || "unknown";
+    counts.set(key, (counts.get(key) || 0) + 1);
+  }
+  const sources = [...counts.entries()]
+    .map(([key, count]) => ({
+      key,
+      label: key === "unknown" ? "Unknown" : sourceMeta(key).label,
+      count,
+    }))
+    .sort((a, b) => {
+      if ((a.key === "unknown") !== (b.key === "unknown")) return a.key === "unknown" ? 1 : -1;
+      return b.count - a.count || a.label.localeCompare(b.label);
+    });
+  return { paidTotal: seats.size, paidToday, sources, hasAttribution };
 }
 
 /**

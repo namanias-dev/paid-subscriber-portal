@@ -86,6 +86,7 @@ export default function AiCounselorWidget({ waLink }: { waLink: string | null })
   const pathname = usePathname() || "";
   const [open, setOpen] = useState(false);
   const [sessionId, setSessionId] = useState<string>("");
+  const [notesDodge, setNotesDodge] = useState(false);
   const autoTriggered = useRef(false);
 
   const allowed = useMemo(() => isWidgetAllowedPath(pathname), [pathname]);
@@ -107,6 +108,21 @@ export default function AiCounselorWidget({ waLink }: { waLink: string | null })
     safeLocalSet(storageKeys.dismissedAt, String(Date.now()));
     if (sessionId) trackAgentEvent(sessionId, "ai_widget_dismissed", { path: pathname });
   }, [sessionId, pathname]);
+
+  useEffect(() => {
+    if (!pathname.startsWith("/notes")) {
+      setNotesDodge(false);
+      return;
+    }
+    const section = document.getElementById("naman-sir-teaches");
+    if (!section) return;
+    const io = new IntersectionObserver(
+      ([entry]) => setNotesDodge(!!entry?.isIntersecting),
+      { threshold: 0.18, rootMargin: "-8% 0px -12% 0px" },
+    );
+    io.observe(section);
+    return () => io.disconnect();
+  }, [pathname]);
 
   // Auto-open trigger (time + scroll), gated by session + dismiss suppression.
   useEffect(() => {
@@ -154,12 +170,13 @@ export default function AiCounselorWidget({ waLink }: { waLink: string | null })
           type="button"
           onClick={openSheet}
           aria-label="Chat with a Naman IAS counsellor"
-          className="group fixed right-4 z-40 flex items-center gap-2.5 rounded-full py-2 pl-2 pr-2.5 text-sm font-semibold text-white outline-none transition-[transform,box-shadow] duration-200 ease-out shadow-[0_4px_10px_-2px_rgba(0,18,54,0.35),0_12px_30px_-8px_rgba(0,40,120,0.5)] focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[var(--gold)] focus-visible:ring-offset-transparent motion-safe:hover:-translate-y-0.5 motion-safe:hover:scale-[1.03] motion-safe:active:scale-95 motion-safe:hover:shadow-[0_8px_16px_-2px_rgba(0,18,54,0.45),0_20px_44px_-8px_rgba(0,50,140,0.6),0_0_22px_-2px_rgba(201,162,39,0.45)] sm:pl-2.5 sm:pr-4"
+          className="ai-counselor-launcher group fixed right-4 z-40 flex items-center gap-2.5 rounded-full py-2 pl-2 pr-2.5 text-sm font-semibold text-white outline-none transition-[transform,box-shadow,top,bottom] duration-200 ease-out shadow-[0_4px_10px_-2px_rgba(0,18,54,0.35),0_12px_30px_-8px_rgba(0,40,120,0.5)] focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[var(--gold)] focus-visible:ring-offset-transparent motion-safe:hover:-translate-y-0.5 motion-safe:hover:scale-[1.03] motion-safe:active:scale-95 motion-safe:hover:shadow-[0_8px_16px_-2px_rgba(0,18,54,0.45),0_20px_44px_-8px_rgba(0,50,140,0.6),0_0_22px_-2px_rgba(201,162,39,0.45)] sm:pl-2.5 sm:pr-4"
+          data-notes-dodge={notesDodge ? "true" : "false"}
           style={{
             bottom: "5rem",
             background: "linear-gradient(145deg, var(--primary) 0%, color-mix(in srgb, var(--primary) 55%, #000) 100%)",
             border: "1px solid color-mix(in srgb, var(--gold) 70%, transparent)",
-            marginBottom: "env(safe-area-inset-bottom)",
+            marginBottom: notesDodge ? 0 : "env(safe-area-inset-bottom)",
           }}
         >
           <span

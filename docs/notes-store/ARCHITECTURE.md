@@ -82,7 +82,7 @@ At checkout, `requestLeadAttribution()` reads first-party `nsa_attr` cookie and 
 
 ## Fulfilment (Phase 1)
 
-Paid → admin queue → manual status advance → manual courier/AWB (`store_shipments`). No Shiprocket. Customer projection hides “Packed” until AWB exists (`lib/store/projection.ts`).
+Paid → admin queue → manual status advance → manual courier/AWB (`store_shipments`). Courier rate quotes are read-only (`lib/store/shipping/compare.ts`) and do not create a label or pickup. Customer tracking shows Packed before the courier has the parcel (`lib/store/projection.ts`).
 
 ## Future shipping boundary
 

@@ -27,6 +27,9 @@ interface BundleOffer {
 export default function CartClient() {
   const [items, setItems] = useState<Item[] | null>(null);
   const [subtotal, setSubtotal] = useState("");
+  const [discount, setDiscount] = useState("");
+  const [total, setTotal] = useState("");
+  const [promo, setPromo] = useState<{ id: string; name: string; label: string } | null>(null);
   const [offer, setOffer] = useState<BundleOffer | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -37,11 +40,21 @@ export default function CartClient() {
     if (!res.ok || json.ok === false) throw new Error(json.error || "Unable to load your cart right now.");
     setItems(json.cart?.items || []);
     setSubtotal(json.cart?.subtotal_label || "");
+    setDiscount(json.cart?.discount_label || "");
+    setTotal(json.cart?.total_label || json.cart?.subtotal_label || "");
+    setPromo(json.cart?.offer || null);
     setOffer(json.cart?.bundle_offer || null);
+    if (json.cart?.offer?.id) {
+      trackClient("notes_offer_cart_applied", { offer_id: json.cart.offer.id });
+    }
   }
 
   useEffect(() => {
-    load().catch((e) => setErr((e as Error).message));
+    trackClient("notes_cart_viewed", { cta_id: "cart_page" });
+    load().catch((e) => {
+      setErr((e as Error).message);
+      trackClient("notes_checkout_api_error", { endpoint: "cart", recoverable: true });
+    });
   }, []);
 
   async function setQty(id: string, qty: number) {
@@ -57,9 +70,13 @@ export default function CartClient() {
       });
       const json = await res.json();
       if (!res.ok || json.ok === false) throw new Error(json.error || "Unable to update your cart right now.");
-      if (qty <= 0) trackClient("notes_removed_from_cart", { item_id: id });
+      if (qty <= 0) trackClient("notes_removed_from_cart", { item_id: id, cta_id: "remove_from_cart" });
+      else trackClient("notes_cart_quantity_changed", { item_id: id, quantity: qty });
       setItems(json.cart?.items || []);
       setSubtotal(json.cart?.subtotal_label || "");
+      setDiscount(json.cart?.discount_label || "");
+      setTotal(json.cart?.total_label || json.cart?.subtotal_label || "");
+      setPromo(json.cart?.offer || null);
       setOffer(json.cart?.bundle_offer || null);
       window.dispatchEvent(new CustomEvent("notes-cart-updated", { detail: { count: json.cart?.item_count } }));
     } catch (e) {
@@ -99,7 +116,7 @@ export default function CartClient() {
             You can save {offer.save_label} with the {offer.name}.
           </p>
           <p className="mt-1 text-xs text-[var(--ca-navy)]/60">Optional — we will not replace your cart. You stay in control.</p>
-          <Link href={`/notes/products/${offer.slug}`} className="mt-3 inline-flex text-sm font-semibold text-[var(--ca-navy)] underline">
+          <Link href={`/notes/${offer.slug}`} className="mt-3 inline-flex text-sm font-semibold text-[var(--ca-navy)] underline">
             View bundle
           </Link>
         </div>
@@ -115,7 +132,7 @@ export default function CartClient() {
             </div>
             <div className="min-w-0 flex-1">
               {it.subject && <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--ca-gold-dark)]">{it.subject}</p>}
-              <Link href={`/notes/products/${it.slug}`} className="font-semibold text-[var(--ca-navy)] hover:underline">
+              <Link href={`/notes/${it.slug}`} className="font-semibold text-[var(--ca-navy)] hover:underline">
                 {it.name}
               </Link>
               <p className="text-sm text-[var(--ca-navy)]/55">
@@ -158,10 +175,20 @@ export default function CartClient() {
           <p className="text-sm text-[var(--ca-navy)]/60">
             Subtotal <span className="font-semibold text-[var(--ca-navy)]">{subtotal}</span>
           </p>
+          {promo && discount && (
+            <p className="text-sm text-[var(--ca-navy)]/60">
+              {promo.name}
+              {promo.label ? ` (${promo.label})` : ""}{" "}
+              <span className="font-semibold text-[var(--ca-navy)]">−{discount}</span>
+            </p>
+          )}
+          <p className="text-sm font-semibold text-[var(--ca-navy)]">
+            Total <span className="tabular-nums">{total}</span>
+          </p>
           <p className="text-xs text-[var(--ca-navy)]/45">Shipping is calculated from your PIN at checkout.</p>
         </div>
-        <Link href="/notes/checkout" className="ca-focus inline-flex min-h-12 items-center rounded-full bg-[var(--ca-navy)] px-6 text-sm font-semibold text-white">
-          Checkout
+        <Link href="/notes/checkout" className="ca-focus ns-buy-now inline-flex min-h-14 w-full items-center justify-center rounded-full px-6 text-[15px] font-bold text-[var(--ca-navy)] sm:w-auto sm:min-w-[14rem]">
+          Proceed to checkout
         </Link>
       </div>
     </>
