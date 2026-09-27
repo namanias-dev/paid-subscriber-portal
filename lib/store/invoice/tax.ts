@@ -154,6 +154,18 @@ export function computeTaxDocument(input: {
 
 export type DocumentType = "TAX_INVOICE" | "BILL_OF_SUPPLY" | "INVOICE";
 
+/**
+ * The order line snapshot is enough when it already froze a real HSN and a
+ * nil or taxable treatment. Exempt placeholders, and lines with no HSN, stay blocked.
+ * A missing live-product "confirmed" flag does not erase that snapshot.
+ */
+export function classificationFromSnapshot(line: { hsn: string | null; taxTreatment?: string | null }): "CONFIRMED" | null {
+  const treatment = (line.taxTreatment || "").toLowerCase();
+  const hsn = (line.hsn || "").trim();
+  if ((treatment === "nil" || treatment === "taxable") && /^\d{4,8}$/.test(hsn)) return "CONFIRMED";
+  return null;
+}
+
 /** Production issuance needs an explicit confirmed nil or taxable HSN. Exempt placeholders stay blocked. */
 export function taxClassificationConfirmed(lines: { hsn: string | null; taxTreatment?: string | null; taxConfigurationStatus?: string | null }[]): boolean {
   return lines.length > 0 && lines.every((line) => {
