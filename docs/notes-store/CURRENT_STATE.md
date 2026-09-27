@@ -41,7 +41,7 @@
 | Real Eazypay transaction | **DEFERRED BY OWNER** | Checklist preserved; not executed |
 | Notifications / DLT send | OUT OF CURRENT PHASE | Templates drafted, **not submitted**; `notes_store_sms` off |
 | Shipping aggregator | OUT OF CURRENT PHASE | See courier rate quote. `notes_store_shiprocket` does not create shipments. |
-| Discount codes | BUILT, RESERVATION-HARDENED | Admin `/admin/notes/discounts`. Checkout entry follows `notes_store_coupons`, which the migration leaves off. A slot is reserved at Pay, not on apply. No live NOTES500 is seeded. |
+| Discount codes | LIVE | Admin `/admin/notes/discounts`. `notes_store_coupons` is on after production smoke. A slot is reserved at Pay, not on apply. No live NOTES500 is seeded. The smoke code was archived. |
 | Bundles composition UI | OUT OF CURRENT PHASE | Schema `store_bundle_items`; limited Phase 1 UX |
 | Reviews | OUT OF CURRENT PHASE | Table exists; flag off; no fake social proof |
 | Invoices / returns portal | NOT BUILT / OUT OF PHASE | Spec later |
