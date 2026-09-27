@@ -20,8 +20,8 @@ import { SESSION_COOKIE, VISITOR_COOKIE } from "@/lib/attribution";
 import { businessChannel } from "@/lib/analytics/notesCommerce";
 import { hashStoreAccessToken, mintStoreAccessToken } from "./accessToken";
 import { holdStoreOffer, offerTraceFromQuote, releaseStoreOfferHold } from "./offers";
-import { couponSnapshot, holdDiscountForOrder } from "./discountCodes";
-import { customerDiscountMessage, settledOrderMoney } from "./discountPricing";
+import { couponSnapshot, holdDiscountForOrder, releaseDiscountForOrder, setCartDiscountCode } from "./discountCodes";
+import { customerDiscountMessage, payTimeDiscountMessage, settledOrderMoney } from "./discountPricing";
 
 export interface CheckoutAddress {
   name: string;
@@ -248,11 +248,14 @@ export async function placeCheckout(cart: CartView, address: CheckoutAddress): P
       orderId: order.id,
       phoneKey: phone,
       amountPaise: quote.coupon_discount_paise,
+      customerId,
+      couponCode: quote.coupon_code,
     });
     if (!reserved.ok) {
+      await setCartDiscountCode(cart.id, null);
       await releaseStoreOfferHold(order.id);
       await db.from("store_orders").update({ status: "PAYMENT_FAILED", updated_at: new Date().toISOString() }).eq("id", order.id);
-      throw new Error(customerDiscountMessage(reserved.reason || "invalid", quote.coupon_code));
+      throw new Error(payTimeDiscountMessage(reserved.reason || "invalid"));
     }
   }
 
@@ -268,6 +271,7 @@ export async function placeCheckout(cart: CartView, address: CheckoutAddress): P
       ttlSeconds: QUOTE_TTL_SECONDS,
     });
     if (!reserved.ok) {
+      await releaseDiscountForOrder(order.id);
       await db.from("store_orders").update({ status: "PAYMENT_FAILED", updated_at: new Date().toISOString() }).eq("id", order.id);
       const names = (reserved.shortfalls || []).map((s) => s.name).filter(Boolean).join(", ");
       throw new Error(names ? `Just sold out: ${names}` : "One of these titles just sold out. Refresh and try again.");
@@ -283,7 +287,11 @@ export async function placeCheckout(cart: CartView, address: CheckoutAddress): P
     status: "INITIATED",
     next_verify_at: new Date(Date.now() + 2 * 60_000).toISOString(),
   });
-  if (payErr) throw new Error(payErr.message);
+  if (payErr) {
+    await releaseDiscountForOrder(order.id);
+    await db.from("store_orders").update({ status: "PAYMENT_FAILED", updated_at: new Date().toISOString() }).eq("id", order.id);
+    throw new Error(payErr.message);
+  }
 
   const paymentUrl = buildStorePaymentUrl({
     referenceNo,
@@ -292,7 +300,11 @@ export async function placeCheckout(cart: CartView, address: CheckoutAddress): P
     email: address.email?.trim() || `${phone}@namanias.invalid`,
     mobile: phone,
   });
-  if (!paymentUrl) throw new Error("Payment gateway is not configured");
+  if (!paymentUrl) {
+    await releaseDiscountForOrder(order.id);
+    await db.from("store_orders").update({ status: "PAYMENT_FAILED", updated_at: new Date().toISOString() }).eq("id", order.id);
+    throw new Error("Payment gateway is not configured");
+  }
 
   await db.from("store_order_events").insert({
     order_id: order.id,

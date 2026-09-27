@@ -31,7 +31,16 @@ interface Detail {
   products: Array<{ id: string; name: string }>;
   orders: Array<{ id: string; order_no: string; status: string; total_paise: number; coupon_discount_paise: number; paid_at: string | null }>;
   events: Array<{ event: string; actor: string | null; created_at: string }>;
-  usage: { captured: number; held: number; discount_paise: number; revenue_paise: number };
+  usage: {
+    redeemed?: number;
+    reserved?: number;
+    available?: number | null;
+    applications?: number;
+    captured: number;
+    held: number;
+    discount_paise: number;
+    revenue_paise: number;
+  };
 }
 
 export default function DiscountCodeDetail({ id }: { id: string }) {
@@ -112,8 +121,11 @@ export default function DiscountCodeDetail({ id }: { id: string }) {
           <div><dt className="text-[11px] uppercase tracking-wide text-[var(--ca-navy)]/45">Applies to</dt><dd>{code.scope === "all_notes" ? "All Notes, including future products" : code.product_ids.map((pid) => names.get(pid) || "Notes").join(", ")}</dd></div>
           <div><dt className="text-[11px] uppercase tracking-wide text-[var(--ca-navy)]/45">Starts</dt><dd>{code.starts_label || "Immediately"}</dd></div>
           <div><dt className="text-[11px] uppercase tracking-wide text-[var(--ca-navy)]/45">Expires</dt><dd>{code.expires_label || "No expiry"}</dd></div>
-          <div><dt className="text-[11px] uppercase tracking-wide text-[var(--ca-navy)]/45">Usage</dt><dd>{detail.usage.captured} captured{code.max_redemptions ? ` of ${code.max_redemptions}` : ""} · {detail.usage.held} in checkout</dd></div>
-          <div><dt className="text-[11px] uppercase tracking-wide text-[var(--ca-navy)]/45">Per customer</dt><dd>{code.per_customer_limit ? "One mobile number" : "No per-customer limit"}</dd></div>
+          <div><dt className="text-[11px] uppercase tracking-wide text-[var(--ca-navy)]/45">Redeemed</dt><dd>{detail.usage.redeemed ?? detail.usage.captured}{code.max_redemptions ? ` / ${code.max_redemptions}` : " · unlimited"}</dd></div>
+          <div><dt className="text-[11px] uppercase tracking-wide text-[var(--ca-navy)]/45">Reserved</dt><dd>{detail.usage.reserved ?? detail.usage.held} payment in progress</dd></div>
+          <div><dt className="text-[11px] uppercase tracking-wide text-[var(--ca-navy)]/45">Available now</dt><dd>{detail.usage.available == null ? "Unlimited" : detail.usage.available}</dd></div>
+          <div><dt className="text-[11px] uppercase tracking-wide text-[var(--ca-navy)]/45">One per customer</dt><dd>{code.per_customer_limit ? "Yes" : "No"}</dd></div>
+          <div><dt className="text-[11px] uppercase tracking-wide text-[var(--ca-navy)]/45">Applications</dt><dd>{detail.usage.applications ?? 0}</dd></div>
           <div><dt className="text-[11px] uppercase tracking-wide text-[var(--ca-navy)]/45">Discount given</dt><dd>{formatPaise(detail.usage.discount_paise)}</dd></div>
           <div><dt className="text-[11px] uppercase tracking-wide text-[var(--ca-navy)]/45">Captured revenue</dt><dd>{formatPaise(detail.usage.revenue_paise)}</dd></div>
           <div><dt className="text-[11px] uppercase tracking-wide text-[var(--ca-navy)]/45">Created</dt><dd>{code.created_by || "—"} · {code.created_at ? new Date(code.created_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }) : "—"}</dd></div>
@@ -159,6 +171,8 @@ function Editor({ detail, onClose }: { detail: Detail; onClose: () => void }) {
   const [name, setName] = useState(code.name);
   const [scope, setScope] = useState(code.scope);
   const [productIds, setProductIds] = useState(code.product_ids);
+  const [maxRedemptions, setMaxRedemptions] = useState(code.max_redemptions == null ? "" : String(code.max_redemptions));
+  const [onePerCustomer, setOnePerCustomer] = useState(code.per_customer_limit === 1);
   const [error, setError] = useState<string | null>(null);
 
   async function save(e: React.FormEvent) {
@@ -175,8 +189,8 @@ function Editor({ detail, onClose }: { detail: Detail; onClose: () => void }) {
         starts_at: code.starts_at,
         expires_at: code.expires_at,
         is_active: code.is_active,
-        max_redemptions: code.max_redemptions,
-        per_customer_limit: code.per_customer_limit,
+        max_redemptions: maxRedemptions.trim() ? Math.round(Number(maxRedemptions)) : null,
+        per_customer_limit: onePerCustomer ? 1 : null,
         discount_value: code.discount_type === "fixed_amount" ? Math.round(Number(amount) * 100) : Math.round(Number(amount)),
       }),
     });
@@ -207,6 +221,9 @@ function Editor({ detail, onClose }: { detail: Detail; onClose: () => void }) {
           ))}
         </ul>
       )}
+      <label className="mt-3 block text-sm">Maximum paid redemptions<input inputMode="numeric" value={maxRedemptions} onChange={(e) => setMaxRedemptions(e.target.value.replace(/\D/g, ""))} placeholder="Unlimited" className="mt-1 min-h-11 w-full rounded-xl border px-3" /></label>
+      <p className="mt-1 text-xs text-[var(--ca-navy)]/55">A redemption is counted only after payment is successfully captured. Leave blank for unlimited.</p>
+      <label className="mt-3 flex min-h-11 items-center gap-2 text-sm"><input type="checkbox" checked={onePerCustomer} onChange={(e) => setOnePerCustomer(e.target.checked)} /> Limit to one successful use per customer</label>
       {error && <p className="mt-2 text-sm text-red-700" role="alert">{error}</p>}
       <button type="submit" className="mt-3 min-h-11 rounded-full bg-[var(--ca-navy)] px-4 text-sm font-semibold text-white">Save changes</button>
     </form>

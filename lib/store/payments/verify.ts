@@ -280,6 +280,11 @@ export async function sweepStoreVerify(opts?: { limit?: number }): Promise<Store
   const db = storeDb();
   if (!db) return out;
 
+  try {
+    const { releaseExpiredDiscountHolds } = await import("@/lib/store/discountCodes");
+    await releaseExpiredDiscountHolds();
+  } catch { /* an expired-hold sweep must not stop payment reconciliation */ }
+
   const { data } = await db
     .from("store_order_payments")
     .select("reference_no")

@@ -197,7 +197,7 @@ export default function DiscountCodesAdmin() {
               <Link href={`/admin/notes/discounts/${code.id}`} className="block rounded-2xl border border-[var(--ca-navy)]/5 px-3 py-3">
                 <span className="flex items-baseline justify-between gap-2"><span className="font-semibold">{code.code}</span><span>{code.discount_type === "percentage" ? `${code.discount_value}% off` : `${formatPaise(code.discount_value)} off`}</span></span>
                 <span className="mt-1 block text-sm text-[var(--ca-navy)]/70">{code.scope === "all_notes" ? "All Notes" : code.product_ids.map((id) => names.get(id) || "Notes").join(" + ")}</span>
-                <span className="mt-1 block text-xs text-[var(--ca-navy)]/55">Used {code.redemption_count} · {code.expires_label || "No expiry"} · {code.status}</span>
+                <span className="mt-1 block text-xs text-[var(--ca-navy)]/55">Redeemed {code.redemption_count}{code.max_redemptions ? ` / ${code.max_redemptions}` : ""} · {code.expires_label || "No expiry"} · {code.status}</span>
               </Link>
             </li>
           ))}
@@ -269,9 +269,11 @@ export default function DiscountCodesAdmin() {
               </div>
             </fieldset>
             <fieldset className="mt-4 space-y-3">
-              <legend className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--ca-gold-dark)]">Limits</legend>
-              <label className="block text-sm">Maximum redemptions<input inputMode="numeric" value={form.max_redemptions} onChange={(e) => setForm({ ...form, max_redemptions: e.target.value.replace(/\D/g, "") })} placeholder="Unlimited" className="mt-1 min-h-11 w-full rounded-xl border px-3" /></label>
-              <label className="flex min-h-11 items-center gap-2 text-sm"><input type="checkbox" checked={form.one_per_customer} onChange={(e) => setForm({ ...form, one_per_customer: e.target.checked })} /> One successful redemption per mobile number</label>
+              <legend className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--ca-gold-dark)]">Usage limits</legend>
+              <label className="block text-sm">Maximum paid redemptions<input inputMode="numeric" value={form.max_redemptions} onChange={(e) => setForm({ ...form, max_redemptions: e.target.value.replace(/\D/g, "") })} placeholder="Unlimited" className="mt-1 min-h-11 w-full rounded-xl border px-3" /></label>
+              <p className="text-xs text-[var(--ca-navy)]/55">Counts only successful paid orders. Applying a code without completing payment does not use a redemption.</p>
+              <label className="flex min-h-11 items-center gap-2 text-sm"><input type="checkbox" checked={form.one_per_customer} onChange={(e) => setForm({ ...form, one_per_customer: e.target.checked })} /> Limit to one successful use per customer</label>
+              <p className="text-xs text-[var(--ca-navy)]/55">A redemption is counted only after payment is successfully captured.</p>
               <label className="flex min-h-11 items-center gap-2 text-sm"><input type="checkbox" checked={form.is_active} onChange={(e) => setForm({ ...form, is_active: e.target.checked })} /> Active</label>
             </fieldset>
             <div className="mt-4 rounded-2xl bg-white p-3 text-sm text-[var(--ca-navy)]">

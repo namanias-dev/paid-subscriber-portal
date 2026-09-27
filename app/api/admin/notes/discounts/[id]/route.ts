@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getActionActor, requirePermission } from "@/lib/adminGuard";
 import { storeDb } from "@/lib/store/db";
 import { archiveDiscountCode, getDiscountCodeById, istPartsForAdmin, updateDiscountCode, type DiscountWriteInput } from "@/lib/store/discountCodes";
-import { istLocalToUtcIso } from "@/lib/store/discountPricing";
+import { discountCapacity, istLocalToUtcIso } from "@/lib/store/discountPricing";
 
 export const dynamic = "force-dynamic";
 
@@ -30,6 +30,10 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
     ? await db.from("store_discount_code_events").select("event,actor,created_at").eq("discount_code_id", code.id).order("created_at", { ascending: false }).limit(20)
     : { data: [] };
   const paid = (orders || []).filter((order) => order.paid_at);
+  const applications = db
+    ? await db.from("store_discount_code_events").select("id", { count: "exact", head: true }).eq("discount_code_id", code.id).eq("event", "applied")
+    : { count: 0 };
+  const capacity = discountCapacity({ max: code.max_redemptions, redeemed: code.redemption_count, reserved: code.held_count });
   return noStore({
     ok: true,
     code,
@@ -38,8 +42,12 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
     orders: orders || [],
     events: events || [],
     usage: {
-      captured: code.redemption_count,
-      held: code.held_count,
+      redeemed: capacity.redeemed,
+      reserved: capacity.reserved,
+      available: capacity.available,
+      applications: applications.count || 0,
+      captured: capacity.redeemed,
+      held: capacity.reserved,
       discount_paise: paid.reduce((sum, order) => sum + (Number(order.coupon_discount_paise) || 0), 0),
       revenue_paise: paid.reduce((sum, order) => sum + (Number(order.total_paise) || 0), 0),
     },

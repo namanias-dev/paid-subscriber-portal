@@ -10,14 +10,19 @@ import { CLIENT_ALLOWED_EVENTS } from "../../lib/analytics/events.ts";
 import { aggregateNotesAnalytics, stripAnalyticsProps, type NotesEventRow, type NotesOrderFact } from "../../lib/analytics/notesCommerce.ts";
 import {
   allocateDiscountPaise,
+  clampDiscountHoldTtl,
   couponDiscountPaise,
   customerDiscountMessage,
+  discountCapacity,
   deriveDiscountStatus,
+  DISCOUNT_HOLD_TTL_DEFAULT_SECONDS,
   formatIstDateTime,
   istLocalToUtcIso,
   judgeDiscountCode,
   normalizeDiscountCode,
+  payTimeDiscountMessage,
   redemptionCaptureIncrements,
+  reservationDecision,
   settledOrderMoney,
   utcIsoToIstParts,
   validateDiscountWrite,
@@ -229,8 +234,57 @@ describe("caps, schedule, and limits", () => {
     assert.equal(open.ok, true);
     const repeat = judgeDiscountCode(rule({ per_customer_limit: 1, customer_uses: 1 }), lines([POLITY, 250_000]), NOW);
     assert.equal(repeat.reason, "customer_limit");
+    assert.equal(repeat.message, "This offer has already been used for this customer.");
     const first = judgeDiscountCode(rule({ per_customer_limit: 1, customer_uses: 0 }), lines([POLITY, 250_000]), NOW);
     assert.equal(first.ok, true);
+  });
+
+  test("a payment reservation is not created by applying a code, and the final slot is exclusive", () => {
+    const open = reservationDecision({
+      maxRedemptions: 10,
+      redeemed: 9,
+      otherActiveHolds: 0,
+      sameCustomerActiveHold: false,
+      capturedByCustomer: 0,
+      perCustomerLimit: 1,
+    });
+    assert.equal(open, "ok");
+    const taken = reservationDecision({
+      maxRedemptions: 10,
+      redeemed: 9,
+      otherActiveHolds: 1,
+      sameCustomerActiveHold: false,
+      capturedByCustomer: 0,
+      perCustomerLimit: 1,
+    });
+    assert.equal(taken, "limit");
+    const sameCustomer = reservationDecision({
+      maxRedemptions: 10,
+      redeemed: 0,
+      otherActiveHolds: 0,
+      sameCustomerActiveHold: true,
+      capturedByCustomer: 0,
+      perCustomerLimit: 1,
+    });
+    assert.equal(sameCustomer, "customer_pending");
+    const used = reservationDecision({
+      maxRedemptions: 10,
+      redeemed: 1,
+      otherActiveHolds: 0,
+      sameCustomerActiveHold: false,
+      capturedByCustomer: 1,
+      perCustomerLimit: 1,
+    });
+    assert.equal(used, "customer_limit");
+    assert.equal(payTimeDiscountMessage("limit"), "This offer is no longer available. Your order total has been updated.");
+    assert.equal(payTimeDiscountMessage("customer_pending"), "A payment for this offer is already in progress. Your order total has been updated.");
+    assert.equal(payTimeDiscountMessage("customer_limit"), "This offer has already been used for this customer.");
+    assert.equal(clampDiscountHoldTtl(undefined), DISCOUNT_HOLD_TTL_DEFAULT_SECONDS);
+    assert.equal(clampDiscountHoldTtl(20 * 60), 20 * 60);
+    assert.equal(clampDiscountHoldTtl(60), DISCOUNT_HOLD_TTL_DEFAULT_SECONDS);
+    const room = discountCapacity({ max: 10, redeemed: 8, reserved: 1 });
+    assert.deepEqual(room, { redeemed: 8, reserved: 1, available: 1 });
+    assert.equal(discountCapacity({ max: null, redeemed: 8, reserved: 1 }).available, null);
   });
 
   test("cart edits that drop the eligible product invalidate the code", () => {
@@ -316,10 +370,25 @@ describe("money identity, invoice, and redemption", () => {
   test("a repeated capture does not increment, and a phone is stored only as a hash", () => {
     assert.equal(redemptionCaptureIncrements("captured"), false);
     assert.equal(redemptionCaptureIncrements("held"), true);
-    assert.equal(redemptionCaptureIncrements("released"), true);
-    assert.equal(redemptionCaptureIncrements("missing"), true);
+    assert.equal(redemptionCaptureIncrements("missing"), false);
+    assert.equal(redemptionCaptureIncrements("released"), false);
+    assert.equal(redemptionCaptureIncrements("released", {
+      redeemed: 9,
+      otherActiveHolds: 0,
+      max: 10,
+      capturedByCustomer: 0,
+      perCustomerLimit: 1,
+    }), true);
+    assert.equal(redemptionCaptureIncrements("released", {
+      redeemed: 10,
+      otherActiveHolds: 0,
+      max: 10,
+      capturedByCustomer: 0,
+      perCustomerLimit: 1,
+    }), false);
     const hash = discountPhoneHash("+91 98765 43210");
     assert.equal(hash, discountPhoneHash("9876543210"));
+    assert.equal(hash, discountPhoneHash("+919876543210"));
     assert.notEqual(hash, "9876543210");
     assert.equal(hash?.length, 64);
     assert.equal(discountPhoneHash("12345"), null);
@@ -367,6 +436,11 @@ describe("admin write rules", () => {
     assert.ok(validateDiscountWrite({ ...base, starts_at: EXPIRY, expires_at: "2026-09-27T00:00:00.000Z" }).length);
     assert.ok(validateDiscountWrite({ ...base, expires_at: "2026-09-27T00:00:00.000Z" }).length);
     assert.ok(validateDiscountWrite({ ...base, max_redemptions: 0 }).length);
+    const lowered = validateDiscountWrite({ ...base, max_redemptions: 5, redeemed_count: 8, reserved_count: 0 });
+    assert.match(lowered[0] || "", /cannot be lower than the 8 redemptions already completed/);
+    const reserved = validateDiscountWrite({ ...base, max_redemptions: 8, redeemed_count: 8, reserved_count: 1 });
+    assert.match(reserved[0] || "", /plus 1 payment in progress/);
+    assert.deepEqual(validateDiscountWrite({ ...base, max_redemptions: 20, redeemed_count: 8, reserved_count: 1 }), []);
   });
 });
 
@@ -383,6 +457,11 @@ describe("analytics and alerts", () => {
         occurred_at: "2026-09-27T12:05:00.000Z",
         props: { coupon_code: "NOTES500" },
       },
+      {
+        event_name: "notes_discount_payment_reserved",
+        occurred_at: "2026-09-27T12:05:00.000Z",
+        props: { coupon_code: "NOTES500", discount_amount: 50_000 },
+      },
     ];
     const orders: NotesOrderFact[] = [{
       id: "order-1",
@@ -397,6 +476,7 @@ describe("analytics and alerts", () => {
     assert.equal(report.discountCodes[0]?.code, "NOTES500");
     assert.equal(report.discountCodes[0]?.applications, 1);
     assert.equal(report.discountCodes[0]?.checkoutStarts, 1);
+    assert.equal(report.discountCodes[0]?.paymentAttempts, 1);
     assert.equal(report.discountCodes[0]?.paidOrders, 1);
     assert.equal(report.discountCodes[0]?.discountPaise, 50_000);
     assert.equal(report.discountCodes[0]?.revenuePaise, 208_000);
@@ -408,6 +488,9 @@ describe("analytics and alerts", () => {
     assert.equal(CLIENT_ALLOWED_EVENTS.has("notes_discount_removed"), true);
     assert.equal(CLIENT_ALLOWED_EVENTS.has("notes_discount_opened"), true);
     assert.equal(CLIENT_ALLOWED_EVENTS.has("notes_purchase_with_discount"), false);
+    assert.equal(CLIENT_ALLOWED_EVENTS.has("notes_discount_payment_reserved"), false);
+    assert.equal(CLIENT_ALLOWED_EVENTS.has("notes_discount_reservation_released"), false);
+    assert.equal(CLIENT_ALLOWED_EVENTS.has("notes_discount_redeemed"), false);
   });
 
   test("Telegram mentions an offer only when one was applied, and the paid amount is the captured total", () => {
@@ -478,6 +561,13 @@ describe("migration safety", () => {
     assert.match(sql, /unique \(order_id\)/);
     assert.match(sql, /redemption_count = redemption_count \+ 1/);
     assert.match(sql, /existing\.status = 'captured'/);
+    assert.match(sql, /existing\.status = 'held'/);
+    assert.match(sql, /expires_at <= now_ts/);
+    assert.match(sql, /customer_pending/);
+    assert.match(sql, /store_discount_redemptions_one_live_hold_uq/);
+    assert.match(sql, /store_release_expired_discount_holds/);
+    assert.match(sql, /on conflict \(key\) do nothing/);
+    assert.doesNotMatch(sql, /enabled = true/);
     assert.doesNotMatch(sql, /insert into public\.store_discount_codes/i);
     assert.doesNotMatch(sql, /drop column/i);
     assert.match(sql, /notes_store_coupons/);

@@ -112,12 +112,12 @@ export default function NotesAnalytics({
 
       <section className="mt-4 overflow-hidden rounded-2xl bg-white">
         <h2 className="px-4 pt-4 font-heading text-lg font-bold text-[var(--ca-navy)]">Discount codes</h2>
-        <p className="px-4 pt-1 text-sm text-[var(--ca-navy)]/60">Purchases using code. These are orders that used the code, not proof the code caused the purchase.</p>
+        <p className="px-4 pt-1 text-sm text-[var(--ca-navy)]/60">Applications are separate from paid redemptions. A code is redeemed only after payment is captured.</p>
         <div className="mt-2 overflow-x-auto">
           <table className="w-full min-w-[40rem] text-left text-sm">
             <thead>
               <tr className="text-[11px] uppercase tracking-wide text-[var(--ca-navy)]/45">
-                {["Code", "Applications", "Checkout starts", "Purchases using code", "Conversion", "Discount given", "Captured revenue"].map((header) => (
+                {["Code", "Applications", "Payment attempts", "Paid redemptions", "Redemption rate", "Discount given", "Captured revenue"].map((header) => (
                   <th key={header} className="px-4 py-2 font-semibold">{header}</th>
                 ))}
               </tr>
@@ -129,7 +129,7 @@ export default function NotesAnalytics({
                 <tr key={row.code} className={`border-t border-[var(--ca-navy)]/5 ${highlightCode && row.code === highlightCode ? "bg-[var(--ca-gold)]/15" : ""}`}>
                   <td className="px-4 py-2 font-semibold text-[var(--ca-navy)]">{row.code}</td>
                   <td className="px-4 py-2 tabular-nums">{row.applications}</td>
-                  <td className="px-4 py-2 tabular-nums">{row.checkoutStarts}</td>
+                  <td className="px-4 py-2 tabular-nums">{row.paymentAttempts}</td>
                   <td className="px-4 py-2 tabular-nums">{row.paidOrders}</td>
                   <td className="px-4 py-2 tabular-nums">{pct(row.conversionPct)}</td>
                   <td className="px-4 py-2 tabular-nums">{money(row.discountPaise)}</td>

@@ -1,5 +1,5 @@
 import { getCartView } from "@/lib/store/cart";
-import { discountCodesEnabled, judgeCartDiscount, publicDiscountSummary, setCartDiscountCode } from "@/lib/store/discountCodes";
+import { discountCodesEnabled, judgeCartDiscount, publicDiscountSummary, recordDiscountApplication, setCartDiscountCode } from "@/lib/store/discountCodes";
 import { customerDiscountMessage, normalizeDiscountCode } from "@/lib/store/discountPricing";
 import { noStoreJson, requireLiveStore } from "@/lib/store/http";
 import { clientIp, storeRateLimited } from "@/lib/store/rateLimit";
@@ -72,6 +72,7 @@ export async function POST(req: Request) {
       });
     }
     await setCartDiscountCode(cart.id, judged.applied.code);
+    void recordDiscountApplication(judged.applied.id);
     const summary = publicDiscountSummary(judged.applied);
     void track("notes_discount_applied", {
       coupon_code: summary.code,

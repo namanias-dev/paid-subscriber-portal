@@ -369,6 +369,7 @@ export interface NotesAnalyticsReport {
     code: string;
     applications: number;
     checkoutStarts: number;
+    paymentAttempts: number;
     paidOrders: number;
     conversionPct: number | null;
     discountPaise: number;
@@ -628,10 +629,10 @@ export function aggregateNotesAnalytics(eventsIn: NotesEventRow[], ordersIn: Not
     browsers.set(browser, (browsers.get(browser) || 0) + 1);
   });
 
-  const discountMap = new Map<string, { applications: number; checkoutStarts: number; paidOrders: number; discountPaise: number; revenuePaise: number }>();
+  const discountMap = new Map<string, { applications: number; checkoutStarts: number; paymentAttempts: number; paidOrders: number; discountPaise: number; revenuePaise: number }>();
   const ensureDiscount = (code: string) => {
     const key = code || "";
-    const row = discountMap.get(key) || { applications: 0, checkoutStarts: 0, paidOrders: 0, discountPaise: 0, revenuePaise: 0 };
+    const row = discountMap.get(key) || { applications: 0, checkoutStarts: 0, paymentAttempts: 0, paidOrders: 0, discountPaise: 0, revenuePaise: 0 };
     discountMap.set(key, row);
     return row;
   };
@@ -640,6 +641,7 @@ export function aggregateNotesAnalytics(eventsIn: NotesEventRow[], ordersIn: Not
     if (!code) continue;
     if (event.event_name === "notes_discount_applied") ensureDiscount(code).applications += 1;
     if (event.event_name === "notes_payment_initiated") ensureDiscount(code).checkoutStarts += 1;
+    if (event.event_name === "notes_discount_payment_reserved") ensureDiscount(code).paymentAttempts += 1;
   }
   for (const order of orders) {
     const code = String(order.coupon_code || "").trim().toUpperCase();
@@ -710,7 +712,7 @@ export function aggregateNotesAnalytics(eventsIn: NotesEventRow[], ordersIn: Not
   discountCodes: [...discountMap.entries()].map(([code, row]) => ({
     code,
     ...row,
-    conversionPct: pct(row.paidOrders, row.checkoutStarts),
+    conversionPct: pct(row.paidOrders, row.applications),
   })).sort((a, b) => b.revenuePaise - a.revenuePaise || b.applications - a.applications),
     revenueByDay: [...days.entries()].map(([day, row]) => ({ day, ...row })).sort((a, b) => a.day.localeCompare(b.day)),
     excludedTestEvents,

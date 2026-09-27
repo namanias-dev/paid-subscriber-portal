@@ -3,12 +3,12 @@
  * The browser may display a quote. It never supplies the discount amount.
  */
 import { createHash } from "node:crypto";
+import type { EventName } from "@/lib/analytics/events";
 import { storeDb } from "./db";
 import { storeFeatureEnabled } from "./flags";
-
-/** Matches the checkout quote lock so a reserved code cannot outlive the payment attempt's creation window. Capture still honors an in-flight order after this. */
-const DISCOUNT_HOLD_TTL_SECONDS = 15 * 60;
+import { normalizeIndianMobile } from "./checkoutLeadLogic";
 import {
+  clampDiscountHoldTtl,
   customerDiscountMessage,
   deriveDiscountStatus,
   formatIstDateTime,
@@ -24,6 +24,12 @@ import {
   type DiscountStatus,
   type DiscountType,
 } from "./discountPricing";
+
+/** 30 minutes by default. NOTES_DISCOUNT_HOLD_TTL_SECONDS may set 15–60 minutes. */
+export function discountHoldTtlSeconds(): number {
+  const raw = Number(process.env.NOTES_DISCOUNT_HOLD_TTL_SECONDS);
+  return clampDiscountHoldTtl(Number.isFinite(raw) && raw > 0 ? raw : undefined);
+}
 
 export type { DiscountStatus, DiscountType, DiscountScope };
 
@@ -70,9 +76,16 @@ export interface DiscountWriteInput {
 }
 
 export function discountPhoneHash(phoneKey: string | null | undefined): string | null {
-  const digits = String(phoneKey || "").replace(/\D/g, "").slice(-10);
-  if (!/^[6-9]\d{9}$/.test(digits)) return null;
+  const digits = normalizeIndianMobile(phoneKey);
+  if (!digits) return null;
   return createHash("sha256").update(`notes-discount:${digits}`).digest("hex");
+}
+
+async function trackDiscount(name: EventName, props: Record<string, unknown>, dedupeKey: string): Promise<void> {
+  try {
+    const { writeEvent } = await import("@/lib/analytics/server");
+    await writeEvent({ event_name: name, props, dedupe_key: dedupeKey });
+  } catch { /* analytics must not block payment */ }
 }
 
 export async function discountCodesEnabled(): Promise<boolean> {
@@ -153,10 +166,13 @@ async function heldCounts(ids: string[]): Promise<Map<string, number>> {
   if (!db) return map;
   const { data } = await db
     .from("store_discount_redemptions")
-    .select("discount_code_id")
+    .select("discount_code_id,expires_at")
     .eq("status", "held")
     .in("discount_code_id", ids);
+  const now = Date.now();
   for (const row of data || []) {
+    const expires = row.expires_at ? new Date(row.expires_at).getTime() : null;
+    if (expires != null && expires <= now) continue;
     map.set(row.discount_code_id, (map.get(row.discount_code_id) || 0) + 1);
   }
   return map;
@@ -171,7 +187,7 @@ async function customerUses(codeId: string, phoneHash: string | null): Promise<n
     .select("id", { count: "exact", head: true })
     .eq("discount_code_id", codeId)
     .eq("phone_hash", phoneHash)
-    .in("status", ["held", "captured"]);
+    .eq("status", "captured");
   return count || 0;
 }
 
@@ -302,6 +318,8 @@ export async function updateDiscountCode(id: string, input: DiscountWriteInput, 
     is_active: !!input.is_active,
     max_redemptions: input.max_redemptions ?? null,
     per_customer_limit: input.per_customer_limit ?? null,
+    redeemed_count: current.redemption_count,
+    reserved_count: current.held_count,
   });
   if (errors.length) throw new Error(errors[0]);
   await assertProducts(productIds);
@@ -389,6 +407,12 @@ export async function judgeCartDiscount(input: {
   }
 }
 
+export async function recordDiscountApplication(codeId: string): Promise<void> {
+  try {
+    await audit(codeId, "applied", null);
+  } catch { /* application analytics must not block checkout */ }
+}
+
 export async function setCartDiscountCode(cartId: string, code: string | null): Promise<void> {
   const db = storeDb();
   if (!db) return;
@@ -416,6 +440,8 @@ export async function holdDiscountForOrder(input: {
   orderId: string;
   phoneKey: string | null;
   amountPaise: number;
+  customerId?: string | null;
+  couponCode?: string | null;
 }): Promise<{ ok: boolean; reason: DiscountRejectReason | null }> {
   const db = storeDb();
   if (!db) return { ok: false, reason: "unavailable" };
@@ -424,13 +450,25 @@ export async function holdDiscountForOrder(input: {
     p_order_id: input.orderId,
     p_phone_hash: discountPhoneHash(input.phoneKey),
     p_amount: input.amountPaise,
-    p_ttl_seconds: DISCOUNT_HOLD_TTL_SECONDS,
+    p_ttl_seconds: discountHoldTtlSeconds(),
+    p_customer_id: input.customerId || null,
   });
   if (error) return { ok: false, reason: "unavailable" };
-  const row = data as { ok?: boolean; reason?: string } | null;
-  if (row?.ok) return { ok: true, reason: null };
+  const row = data as { ok?: boolean; reason?: string; already?: string; changed?: boolean } | null;
+  if (row?.ok) {
+    if (row.changed && input.couponCode) {
+      void trackDiscount(
+        "notes_discount_payment_reserved",
+        { coupon_code: input.couponCode, discount_amount: input.amountPaise },
+        `notes_discount_payment_reserved:${input.orderId}`,
+      );
+    }
+    return { ok: true, reason: null };
+  }
   const reason = row?.reason;
-  if (reason === "expired" || reason === "limit" || reason === "customer_limit") return { ok: false, reason };
+  if (reason === "expired" || reason === "limit" || reason === "customer_limit" || reason === "customer_pending") {
+    return { ok: false, reason };
+  }
   if (reason === "unavailable") return { ok: false, reason: "unavailable" };
   return { ok: false, reason: "invalid" };
 }
@@ -438,13 +476,50 @@ export async function holdDiscountForOrder(input: {
 export async function captureDiscountForOrder(orderId: string): Promise<void> {
   const db = storeDb();
   if (!db) return;
-  await db.rpc("store_capture_discount_code", { p_order_id: orderId });
+  try {
+    const { data } = await db.rpc("store_capture_discount_code", { p_order_id: orderId });
+    const row = data as { changed?: boolean; coupon_code?: string; discount_amount?: number } | null;
+    if (row?.changed && row.coupon_code) {
+      void trackDiscount(
+        "notes_discount_redeemed",
+        { coupon_code: row.coupon_code, discount_amount: row.discount_amount || 0 },
+        `notes_discount_redeemed:${orderId}`,
+      );
+    }
+  } catch { /* a capture bookkeeping failure must not undo a paid order */ }
 }
 
 export async function releaseDiscountForOrder(orderId: string): Promise<void> {
   const db = storeDb();
   if (!db) return;
-  await db.rpc("store_release_discount_code", { p_order_id: orderId });
+  try {
+    const { data } = await db.rpc("store_release_discount_code", { p_order_id: orderId });
+    const row = data as { changed?: boolean; coupon_code?: string; discount_amount?: number } | null;
+    if (row?.changed && row.coupon_code) {
+      void trackDiscount(
+        "notes_discount_reservation_released",
+        { coupon_code: row.coupon_code, discount_amount: row.discount_amount || 0, reason: "payment_failed" },
+        `notes_discount_reservation_released:${orderId}`,
+      );
+    }
+  } catch { /* releasing a slot must not change the payment outcome */ }
+}
+
+export async function releaseExpiredDiscountHolds(): Promise<void> {
+  const db = storeDb();
+  if (!db) return;
+  try {
+    const { data } = await db.rpc("store_release_expired_discount_holds");
+    const row = data as { released?: Array<{ order_id?: string; coupon_code?: string; discount_amount?: number }> } | null;
+    for (const item of row?.released || []) {
+      if (!item?.order_id || !item.coupon_code) continue;
+      void trackDiscount(
+        "notes_discount_reservation_released",
+        { coupon_code: item.coupon_code, discount_amount: item.discount_amount || 0, reason: "expired" },
+        `notes_discount_reservation_released:${item.order_id}`,
+      );
+    }
+  } catch { /* the verify sweep must continue */ }
 }
 
 export function publicDiscountSummary(applied: AppliedDiscount) {

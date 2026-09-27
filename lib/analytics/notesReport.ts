@@ -33,6 +33,9 @@ const EVENT_NAMES = [
   "notes_discount_applied",
   "notes_discount_rejected",
   "notes_discount_removed",
+  "notes_discount_payment_reserved",
+  "notes_discount_reservation_released",
+  "notes_discount_redeemed",
   "notes_purchase_with_discount",
 ];
 

@@ -7,7 +7,7 @@
 | Key | Purpose | Production default |
 |-----|---------|-------------------|
 | `notes_store` | Master kill switch | **off** |
-| `notes_store_coupons` | Checkout discount-code entry. Off, or `kill_switch`, hides the field without a deploy. Existing orders keep their snapshots. Requires the master `notes_store` flag as well. | on, after `2026-09-27-notes-discount-codes.sql` |
+| `notes_store_coupons` | Checkout discount-code entry. Off, or `kill_switch`, hides the field without a deploy. Existing orders keep their snapshots. Requires the master `notes_store` flag as well. The migration inserts it disabled and does not turn it on. | off until production smoke, then enabled |
 | `notes_store_free_shipping` | Free shipping rules | off |
 | `notes_store_reviews` | Reviews | off |
 | `notes_store_shiprocket` | Legacy aggregator flag. It does **not** switch fulfilment onto Shiprocket. | off |
@@ -32,6 +32,7 @@
 | `ICICI_EAZYPAY_AES_KEY` | Encryption |
 | `ICICI_EAZYPAY_RETURN_URL` | Registered return URL (shared) |
 | `NOTES_STORE_SUBMERCHANT_ID` | Optional override (default code `"21"`) |
+| `NOTES_DISCOUNT_HOLD_TTL_SECONDS` | Optional payment-reservation TTL. Clamped to 15–60 minutes. Default 1800 (30 minutes), long enough for an ICICI redirect after the 15-minute quote lock. |
 
 ## Access token pepper
 

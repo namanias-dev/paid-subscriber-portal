@@ -15,7 +15,7 @@
 11. `supabase/migrations/2026-09-21-notes-store-offers.sql` — **additive**: `store_offers` + `store_offer_holds`, hold/consume/release RPCs, `store_orders.offer_id`, merchandised singles → ₹2,999, `notes_store_bundles` flag (off), seed Launch Offer (20% / first 100 / 7-day window, all admin-editable).
 12. `supabase/migrations/2026-09-25-notes-store-invoices.sql` — **additive**: `store_invoice_settings`, `store_invoice_counters`, `store_invoices`, `next_store_invoice_seq`. One invoice row per order. Historical orders are not backfilled.
 13. `supabase/migrations/2026-09-26-notes-store-landing-thumbnail.sql` — **additive**: nullable `store_products.store_thumbnail_image_key`. No backfill. Null keeps the product cover on `/notes`.
-14. `supabase/migrations/2026-09-27-notes-discount-codes.sql` — **additive**: `store_discount_codes`, `store_discount_code_products`, `store_discount_redemptions`, `store_discount_code_events`, hold/capture/release RPCs, nullable order and lead coupon columns. No price or order column is rewritten. No NOTES500 row is inserted. Turns `notes_store_coupons` on.
+14. `supabase/migrations/2026-09-27-notes-discount-codes.sql` — **additive**: `store_discount_codes`, `store_discount_code_products`, `store_discount_redemptions` (held / captured / released, one live hold per customer, one captured use when a per-customer limit is on), `store_discount_code_events`, hold/capture/release/expire RPCs, nullable order and lead coupon columns. No price or order column is rewritten. No NOTES500 row is inserted. Inserts `notes_store_coupons` disabled (`on conflict do nothing`).
 
 ## Tables (`store_*`) — 27
 

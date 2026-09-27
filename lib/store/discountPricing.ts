@@ -17,6 +17,7 @@ export type DiscountRejectReason =
   | "not_applicable"
   | "limit"
   | "customer_limit"
+  | "customer_pending"
   | "unavailable";
 
 export interface DiscountCodeRule {
@@ -59,9 +60,49 @@ export function customerDiscountMessage(reason: DiscountRejectReason, code?: str
   if (reason === "not_applicable") {
     return code ? `${code} no longer applies to your cart.` : "This code doesn’t apply to the items in your cart.";
   }
-  if (reason === "limit" || reason === "customer_limit") return "This offer has reached its usage limit.";
+  if (reason === "customer_limit") return "This offer has already been used for this customer.";
+  if (reason === "customer_pending") return "A payment for this offer is already in progress.";
+  if (reason === "limit") return "This offer has reached its usage limit.";
   if (reason === "unavailable") return "We couldn’t check this code right now. Please try again.";
   return "This code isn’t valid.";
+}
+
+/** Shown when Pay cannot keep a code the customer already saw. Payment is not started. */
+export function payTimeDiscountMessage(reason: DiscountRejectReason): string {
+  if (reason === "customer_limit") return "This offer has already been used for this customer.";
+  if (reason === "customer_pending") return "A payment for this offer is already in progress. Your order total has been updated.";
+  if (reason === "unavailable") return "We couldn’t check this code right now. Please try again.";
+  return "This offer is no longer available. Your order total has been updated.";
+}
+
+/** Default covers an ICICI redirect after the 15-minute quote lock. Override with NOTES_DISCOUNT_HOLD_TTL_SECONDS (15–60 minutes). */
+export const DISCOUNT_HOLD_TTL_DEFAULT_SECONDS = 30 * 60;
+
+export function clampDiscountHoldTtl(raw: number | null | undefined): number {
+  const value = Number(raw);
+  if (Number.isFinite(value) && value >= 15 * 60 && value <= 60 * 60) return Math.round(value);
+  return DISCOUNT_HOLD_TTL_DEFAULT_SECONDS;
+}
+
+export type ReservationDecision = "ok" | "limit" | "customer_limit" | "customer_pending";
+
+/**
+ * Same rules as store_hold_discount_code. Successful captures plus other
+ * customers' live reservations cannot exceed the cap. One live reservation
+ * per customer. Applying a code does not call this.
+ */
+export function reservationDecision(input: {
+  maxRedemptions: number | null;
+  redeemed: number;
+  otherActiveHolds: number;
+  sameCustomerActiveHold: boolean;
+  capturedByCustomer: number;
+  perCustomerLimit: number | null;
+}): ReservationDecision {
+  if (input.sameCustomerActiveHold) return "customer_pending";
+  if (input.perCustomerLimit != null && input.capturedByCustomer >= input.perCustomerLimit) return "customer_limit";
+  if (input.maxRedemptions != null && input.redeemed + input.otherActiveHolds >= input.maxRedemptions) return "limit";
+  return "ok";
 }
 
 export function deriveDiscountStatus(
@@ -219,8 +260,38 @@ export function settledOrderMoney(input: {
 }
 
 /** A repeated capture must not increment. A held, released, or missing row may. */
-export function redemptionCaptureIncrements(status: "held" | "captured" | "released" | "missing"): boolean {
-  return status !== "captured";
+/**
+ * A held reservation always becomes one redemption.
+ * A released reservation increments only when capacity and the per-customer
+ * limit still allow it. A repeat capture or a missing row does not.
+ */
+export function redemptionCaptureIncrements(
+  status: "held" | "captured" | "released" | "missing",
+  capacity?: {
+    redeemed: number;
+    otherActiveHolds: number;
+    max: number | null;
+    capturedByCustomer: number;
+    perCustomerLimit: number | null;
+  },
+): boolean {
+  if (status === "captured" || status === "missing") return false;
+  if (status === "held") return true;
+  if (!capacity) return false;
+  if (capacity.perCustomerLimit != null && capacity.capturedByCustomer >= capacity.perCustomerLimit) return false;
+  if (capacity.max != null && capacity.redeemed + capacity.otherActiveHolds >= capacity.max) return false;
+  return true;
+}
+
+export function discountCapacity(input: { max: number | null; redeemed: number; reserved: number }): {
+  redeemed: number;
+  reserved: number;
+  available: number | null;
+} {
+  const redeemed = Math.max(0, Math.round(input.redeemed || 0));
+  const reserved = Math.max(0, Math.round(input.reserved || 0));
+  if (input.max == null) return { redeemed, reserved, available: null };
+  return { redeemed, reserved, available: Math.max(0, Math.round(input.max) - redeemed - reserved) };
 }
 
 export function istLocalToUtcIso(date: string, time: string): string | null {
@@ -280,6 +351,8 @@ export function validateDiscountWrite(input: {
   is_active: boolean;
   max_redemptions: number | null;
   per_customer_limit: number | null;
+  redeemed_count?: number;
+  reserved_count?: number;
   now?: Date;
 }): string[] {
   const errors: string[] = [];
@@ -296,7 +369,11 @@ export function validateDiscountWrite(input: {
   if (input.scope === "selected_products" && input.product_ids.length === 0) errors.push("Select at least one Notes product.");
   if (input.max_redemptions != null) {
     const cap = Math.round(Number(input.max_redemptions));
+    const redeemed = Math.max(0, Math.round(Number(input.redeemed_count || 0)));
+    const reserved = Math.max(0, Math.round(Number(input.reserved_count || 0)));
     if (!Number.isFinite(cap) || cap < 1) errors.push("Maximum redemptions must be at least 1, or left blank.");
+    else if (cap < redeemed) errors.push(`Maximum redemptions cannot be lower than the ${redeemed} redemptions already completed.`);
+    else if (cap < redeemed + reserved) errors.push(`Maximum redemptions cannot be lower than the ${redeemed} redemptions already completed plus ${reserved} payment${reserved === 1 ? "" : "s"} in progress.`);
   }
   if (input.per_customer_limit != null) {
     const cap = Math.round(Number(input.per_customer_limit));
