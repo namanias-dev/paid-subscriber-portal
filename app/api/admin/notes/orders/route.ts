@@ -9,6 +9,7 @@ import { shippingWritesAuthorized } from "@/lib/store/shipping/config";
 import { BUSINESS_CHANNELS, orderMarketingSummary, type StoredNotesAttribution } from "@/lib/analytics/notesCommerce";
 import { gatewayChargesForStaff } from "@/lib/store/payments/eazypayAmounts";
 import { scheduleStoreInvoice } from "@/lib/store/invoice/issue";
+import { paidRollup } from "@/lib/store/opsBoard";
 
 export const dynamic = "force-dynamic";
 
@@ -68,6 +69,7 @@ export async function GET(req: Request) {
   const actionOnly = url.searchParams.get("action") === "required";
   const acq = url.searchParams.get("acq") || "";
 
+  const paidOnly = bucket === "paid";
   const statuses = BUCKETS[bucket] || ALL_STATUSES;
   const issueFilter = url.searchParams.get("issue") || "";
   const discountCode = (url.searchParams.get("code") || "").trim().toUpperCase();
@@ -100,13 +102,17 @@ export async function GET(req: Request) {
 
   const orderSelect =
     "id,order_no,status,customer_name,phone,email,total_paise,discount_paise,shipping_paise,subtotal_paise,promo_code,discount_trace_json,promised_delivery_date,placed_at,updated_at,paid_at,shipped_at,delivered_at,internal_notes,shipping_address_id,attribution_source,attribution_campaign,attribution_platform,attribution_json";
+  const statusFilter = paidOnly
+    ? ALL_STATUSES.filter((status) => !["PAYMENT_PENDING", "PAYMENT_FAILED", "PAYMENT_EXPIRED", "CANCELLED", "REFUNDED", "PARTIALLY_REFUNDED"].includes(status))
+    : statuses;
   const sortColumn = sort.startsWith("value") ? "total_paise" : sort === "updated" || sort === "action" ? "updated_at" : "placed_at";
   const ascending = sort === "oldest" || sort === "value_asc";
   const scan = actionOnly ? 100 : limit;
   const scanOffset = actionOnly ? 0 : offset;
 
   async function loadOrders(select: string, withCoupon: boolean) {
-    let query = db!.from("store_orders").select(select, { count: "exact" }).in("status", statuses);
+    let query = db!.from("store_orders").select(select, { count: "exact" }).in("status", statusFilter);
+    if (paidOnly) query = query.not("paid_at", "is", null);
     if ((BUSINESS_CHANNELS as readonly string[]).includes(acq)) query = query.eq("attribution_platform", acq);
     if (withCoupon && discountCode) query = query.eq("coupon_code", discountCode);
     if (openIssueOrderIds) query = query.in("id", openIssueOrderIds);
@@ -386,8 +392,16 @@ async function adminCounts(db: NonNullable<ReturnType<typeof storeDb>>) {
     .from("store_order_issues")
     .select("id", { count: "exact", head: true })
     .in("status", [...OPEN_ISSUE_STATUSES]);
+  const { data: paidRows } = await db
+    .from("store_orders")
+    .select("status,paid_at,total_paise")
+    .not("paid_at", "is", null)
+    .limit(5000);
+  const paid = paidRollup(paidRows || []);
   return {
     total,
+    paid: paid.orders,
+    paid_sales_paise: paid.salesPaise,
     new: fresh,
     preparing,
     packed,

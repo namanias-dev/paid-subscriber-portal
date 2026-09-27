@@ -379,6 +379,12 @@ test("a ready invoice is reused and a failed PDF keeps the same identity", () =>
   assert.equal(repair.includes("fireNotesOrderPaidAlert"), false);
   assert.equal(repair.includes("captureDiscountForOrder"), false);
   assert.match(verify, /scheduleStoreInvoice\(orderId\)/);
+  const cron = readFileSync(join(process.cwd(), "app/api/cron/notes-store-verify/route.ts"), "utf8");
+  assert.match(cron, /repairMissingPaidInvoices\(\)/);
+  assert.match(cron, /resumeIncompleteInvoices\(\)/);
+  const ordersRoute = readFileSync(join(process.cwd(), "app/api/admin/notes/orders/route.ts"), "utf8");
+  assert.match(ordersRoute, /scheduleStoreInvoice\(o\.id\)/);
+  assert.match(ordersRoute, /paid \? "PENDING"/);
   const failed = issue.slice(issue.lastIndexOf("} catch (error) {"), issue.indexOf("async function noteInvoiceBlocked"));
   assert.match(failed, /status: "FAILED"/);
   assert.equal(failed.includes("store_order_payments"), false);
