@@ -51,6 +51,13 @@ export interface AdminOrder {
   promo_code?: string | null;
   discount_trace_json?: { offer_name?: string; discount_type?: string; discount_value?: number } | null;
   payment_status: string | null;
+  gateway_charges?: {
+    order_amount_paise: number;
+    processing_fee_paise: number | null;
+    processing_fee_tax_paise: number | null;
+    gateway_fee_paise: number;
+    cardholder_total_paise: number;
+  } | null;
   promised_delivery_date: string | null;
   placed_at: string;
   paid_at?: string | null;
@@ -520,6 +527,19 @@ export default function OrderDetail({
               {(order.shipping_paise || 0) > 0 && <div className="flex justify-between"><dt>Shipping</dt><dd>{formatPaise(order.shipping_paise || 0)}</dd></div>}
               <div className="flex justify-between font-semibold text-[var(--ca-navy)]"><dt>Total</dt><dd>{formatPaise(order.total_paise)}</dd></div>
             </dl>
+            {order.gateway_charges && order.gateway_charges.gateway_fee_paise > 0 && (
+              <dl className="mt-3 space-y-1 border-t border-[var(--ca-navy)]/10 pt-3 text-sm text-[var(--ca-navy)]/70">
+                <div className="flex justify-between"><dt>Order amount</dt><dd>{formatPaise(order.gateway_charges.order_amount_paise)}</dd></div>
+                <div className="flex justify-between"><dt>Gateway fee charged to customer</dt><dd>{formatPaise(order.gateway_charges.gateway_fee_paise)}</dd></div>
+                {order.gateway_charges.processing_fee_paise != null && (
+                  <div className="flex justify-between"><dt>Processing fee</dt><dd>{formatPaise(order.gateway_charges.processing_fee_paise)}</dd></div>
+                )}
+                {order.gateway_charges.processing_fee_tax_paise != null && order.gateway_charges.processing_fee_tax_paise > 0 && (
+                  <div className="flex justify-between"><dt>Tax on processing fee</dt><dd>{formatPaise(order.gateway_charges.processing_fee_tax_paise)}</dd></div>
+                )}
+                <div className="flex justify-between"><dt>Total card charge</dt><dd>{formatPaise(order.gateway_charges.cardholder_total_paise)}</dd></div>
+              </dl>
+            )}
           </section>
 
           <section className="rounded-2xl bg-white p-4">

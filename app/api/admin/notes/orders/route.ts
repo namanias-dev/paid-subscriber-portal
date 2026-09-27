@@ -9,6 +9,7 @@ import { shippingWritesAuthorized } from "@/lib/store/shipping/config";
 import { BUSINESS_CHANNELS, orderMarketingSummary, type StoredNotesAttribution } from "@/lib/analytics/notesCommerce";
 import { paidRollup } from "@/lib/store/opsBoard";
 import { groupMatchesBucket, groupNotesCustomers, isCapturedNotesOrder } from "@/lib/store/customerGroups";
+import { gatewayChargesForStaff } from "@/lib/store/payments/eazypayAmounts";
 
 export const dynamic = "force-dynamic";
 
@@ -195,7 +196,7 @@ export async function GET(req: Request) {
       rate_paise: number | null;
     }
   >();
-  const payByOrder = new Map<string, { status: string; provider: string | null }>();
+  const payByOrder = new Map<string, { status: string; provider: string | null; verify_payload: unknown }>();
   const invoiceByOrder = new Map<string, string>();
   const issueByOrder = new Map<
     string,
@@ -321,11 +322,13 @@ export async function GET(req: Request) {
     }
     const { data: payRows } = await db
       .from("store_order_payments")
-      .select("order_id,status,provider,created_at")
+      .select("order_id,status,provider,created_at,verify_payload")
       .in("order_id", ids)
       .order("created_at", { ascending: false });
     for (const p of payRows || []) {
-      if (!payByOrder.has(p.order_id)) payByOrder.set(p.order_id, { status: p.status, provider: p.provider || null });
+      if (!payByOrder.has(p.order_id)) {
+        payByOrder.set(p.order_id, { status: p.status, provider: p.provider || null, verify_payload: p.verify_payload });
+      }
     }
     const { data: invoiceRows } = await db.from("store_invoices").select("order_id,status").in("order_id", ids);
     for (const row of invoiceRows || []) invoiceByOrder.set(row.order_id, row.status);
@@ -391,6 +394,7 @@ export async function GET(req: Request) {
       action_required: reasons.length > 0,
       action_reasons: reasons,
       payment_status: staffPaymentLabel(payByOrder.get(o.id)?.provider, payByOrder.get(o.id)?.status),
+      gateway_charges: gatewayChargesForStaff(payByOrder.get(o.id)?.verify_payload, Number(o.total_paise) || 0),
       invoice_status: invoiceByOrder.get(o.id) || null,
       issue,
     };
