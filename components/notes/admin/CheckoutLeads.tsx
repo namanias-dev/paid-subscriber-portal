@@ -24,6 +24,7 @@ interface LeadRow {
   sales_note: string | null;
   is_test: boolean;
   last_activity_at: string;
+  sales_alert?: { lines: string[] };
 }
 
 const FILTERS = [
@@ -49,6 +50,14 @@ export default function CheckoutLeads() {
   }, [filter]);
 
   useEffect(() => { void load(); }, [load]);
+
+  useEffect(() => {
+    const id = new URLSearchParams(window.location.search).get("lead");
+    if (!id) return;
+    setOpenId(id);
+    setFilter("all");
+    void load("all");
+  }, [load]);
 
   const open = leads.find((row) => row.id === openId) || null;
 
@@ -123,6 +132,12 @@ export default function CheckoutLeads() {
               <div><dt className="text-[11px] uppercase tracking-wide text-[var(--ca-navy)]/45">Email</dt><dd>{open.email || "—"}</dd></div>
               <div><dt className="text-[11px] uppercase tracking-wide text-[var(--ca-navy)]/45">Address</dt><dd>{open.address_snapshot ? `${open.address_snapshot.line1}, ${open.address_snapshot.city} ${open.address_snapshot.pincode}` : "Not completed"}</dd></div>
               {open.order_id && <div><dt className="text-[11px] uppercase tracking-wide text-[var(--ca-navy)]/45">Order</dt><dd>{open.checkout_stage === "CONVERTED" ? "Converted" : "Payment started"} · {open.order_id.slice(0, 8)}</dd></div>}
+              {!!open.sales_alert?.lines?.length && (
+                <div>
+                  <dt className="text-[11px] uppercase tracking-wide text-[var(--ca-navy)]/45">Activity</dt>
+                  {open.sales_alert.lines.map((line) => <dd key={line}>{line}</dd>)}
+                </div>
+              )}
             </dl>
             <div className="mt-4 flex flex-wrap gap-2">
               {SALES.map((status) => (

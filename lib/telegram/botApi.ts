@@ -35,6 +35,8 @@ export interface SendMessageOpts {
   disable_web_page_preview?: boolean;
   /** Silent post — digests use true; alerts and 6 AM summary use false. */
   disable_notification?: boolean;
+  /** Reply to an earlier message in the same chat. Optional. */
+  reply_to_message_id?: number;
   reply_markup?: {
     inline_keyboard?: InlineKeyboardButton[][];
   };

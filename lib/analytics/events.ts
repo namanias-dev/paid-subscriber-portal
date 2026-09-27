@@ -115,6 +115,7 @@ export type EventName =
   | "notes_checkout_abandoned"
   | "notes_checkout_recovered"
   | "notes_checkout_lead_converted"
+  | "notes_lead_telegram_alert_sent"
   | "notes_checkout_step_viewed"
   | "notes_checkout_validation_error"
   | "notes_checkout_api_error"

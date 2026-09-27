@@ -20,6 +20,10 @@ The WhatsApp/SMS checkbox is optional and unchecked. Shipping a phone number is 
 
 Unconverted leads with no order and no do-not-contact flag leave the active queue after 180 days. Name, email, and address are cleared and the stage becomes `EXPIRED`. Paid order contact data on `store_orders` is not deleted. `DO_NOT_CONTACT` is kept so a later checkout does not open a fresh promotional lead for that phone.
 
+## Sales Telegram
+
+Abandoned leads are not sent when the phone is first saved. The existing sweep is the only abandonment clock: 2 hours without activity for checkout, 6 hours after payment was started. After that transition, one message goes to the existing Sales & Admissions channel. A later payment abandonment can send one hotter update. A paid order suppresses an unsent abandonment alert, and a lead that was already alerted is then marked converted on that same message. Do-not-contact leads are not given a call instruction. Leads that were already due before this alert cutoff are not sent. Telegram failure does not change the lead, the checkout, or the payment.
+
 ## Admin
 
 `/admin/notes/leads` for staff with `store_manage_orders`. The list shows a masked phone. The detail view can call, copy the phone, or copy a recovery link. The recovery URL contains only a random token. `/admin/notes/analytics` adds lead, abandoned, recovered, and recovered-revenue figures without changing the purchase funnel.
