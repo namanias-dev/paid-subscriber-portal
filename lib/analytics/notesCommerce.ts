@@ -254,6 +254,8 @@ export interface NotesOrderFact {
   discount_paise?: number | null;
   paid_at: string | null;
   promo_code?: string | null;
+  coupon_code?: string | null;
+  coupon_discount_paise?: number | null;
   attribution_source?: string | null;
   attribution_platform?: string | null;
   attribution_json?: StoredNotesAttribution | null;
@@ -289,16 +291,35 @@ function orderQa(order: NotesOrderFact): boolean {
   return source === "qa" || clean(order.promo_code) === NOTES_QA_CAMPAIGN;
 }
 
-function actor(event: NotesEventRow, index: number): string {
-  return event.session_id || event.visitor_id || `anon:${index}`;
+/** A person is a browser we can recognise. Events with neither cookie are not people. */
+function actor(event: NotesEventRow): string | null {
+  return event.session_id || event.visitor_id || null;
 }
 
 function people(events: NotesEventRow[], names: Set<string>): number {
+  return peopleMatching(events, (event) => names.has(event.event_name));
+}
+
+function peopleMatching(events: NotesEventRow[], match: (event: NotesEventRow) => boolean): number {
   const ids = new Set<string>();
-  events.forEach((event, index) => {
-    if (names.has(event.event_name)) ids.add(actor(event, index));
-  });
+  for (const event of events) {
+    if (!match(event)) continue;
+    const id = actor(event);
+    if (id) ids.add(id);
+  }
   return ids.size;
+}
+
+/** Pre-gateway checkout catch. The same attempt also used to emit notes_payment_failed. */
+function isCheckoutSubmitTwin(event: NotesEventRow): boolean {
+  return event.event_name === "notes_payment_failed" && String(event.props?.stage || "") === "checkout_submit";
+}
+
+/** ICICI verify outcome. Not a checkout form rejection. */
+function isGatewayFailure(event: NotesEventRow): boolean {
+  if (event.event_name !== "notes_payment_failed" || isCheckoutSubmitTwin(event)) return false;
+  const outcome = String(event.props?.outcome || "");
+  return outcome === "expired" || outcome === "failed" || outcome === "unknown";
 }
 
 function subjectOf(props: Record<string, unknown> | null | undefined): string {
@@ -347,7 +368,8 @@ export interface NotesAnalyticsReport {
   sources: Array<{ channel: string; visitors: number; checkouts: number; paid: number; revenuePaise: number; conversionPct: number | null }>;
   campaigns: Array<{ campaign: string; content: string; visitors: number; paid: number; revenuePaise: number; conversionPct: number | null }>;
   landings: Array<{ path: string; sessions: number; productClicks: number; checkouts: number; purchases: number }>;
-  content: { pdfPeople: number; videoStarts: number; video50: number; videoCompletes: number };
+  content: { pdfPeople: number; videoStarts: number; previewAutoplays: number; video50: number; videoCompletes: number };
+  unidentifiedStoreViews: number;
   ctas: Array<{ id: string; events: number; people: number }>;
   subjects: { polity: { clicks: number; people: number }; economy: { clicks: number; people: number } };
   devices: Array<{ device: string; sessions: number; checkouts: number; purchases: number }>;
@@ -356,6 +378,11 @@ export interface NotesAnalyticsReport {
     paymentAttempts: number;
     paid: number;
     failedPayments: number;
+    shippingQuotes: number;
+    addressConfirmed: number;
+    paymentClicks: number;
+    checkoutSubmitEvents: number;
+    checkoutSubmitPeople: number;
     validationErrors: number;
     shippingErrors: number;
     apiErrors: number;
@@ -363,6 +390,16 @@ export interface NotesAnalyticsReport {
     browsers: Array<{ browser: string; errors: number }>;
   };
   promotions: Array<{ code: string; orders: number; revenuePaise: number }>;
+  discountCodes: Array<{
+    code: string;
+    applications: number;
+    checkoutStarts: number;
+    paymentAttempts: number;
+    paidOrders: number;
+    conversionPct: number | null;
+    discountPaise: number;
+    revenuePaise: number;
+  }>;
   revenueByDay: Array<{ day: string; revenuePaise: number; orders: number }>;
   excludedTestEvents: number;
 }
@@ -430,7 +467,8 @@ export function aggregateNotesAnalytics(eventsIn: NotesEventRow[], ordersIn: Not
   }
 
   const pdf = new Set(["notes_sample_opened"]);
-  const videoStart = new Set(["notes_physical_video_play", "notes_teaching_preview_started"]);
+  const intentionalVideo = new Set(["notes_physical_video_play", "notes_teaching_inline_play"]);
+  const previewVideo = new Set(["notes_teaching_preview_started"]);
   const video50 = new Set(["notes_physical_video_50", "notes_teaching_video_50"]);
   const videoDone = new Set(["notes_physical_video_completed", "notes_teaching_video_completed"]);
 
@@ -443,16 +481,18 @@ export function aggregateNotesAnalytics(eventsIn: NotesEventRow[], ordersIn: Not
     return row;
   };
   const seen = new Set<string>();
-  events.forEach((event, index) => {
+  events.forEach((event) => {
+    const who = actor(event);
+    if (!who) return;
     const key = productKey(event.props);
-    if (key === "unknown" && !product.has(event.event_name) && !pdf.has(event.event_name) && !videoStart.has(event.event_name) && !cart.has(event.event_name)) return;
-    const id = `${event.event_name}:${actor(event, index)}:${key}`;
+    if (key === "unknown" && !product.has(event.event_name) && !pdf.has(event.event_name) && !intentionalVideo.has(event.event_name) && !cart.has(event.event_name)) return;
+    const id = `${event.event_name}:${who}:${key}`;
     if (seen.has(id)) return;
     seen.add(id);
     const row = ensureProduct(key, productLabel(event.props));
     if (product.has(event.event_name)) row.views += 1;
     if (pdf.has(event.event_name)) row.pdfPeople += 1;
-    if (videoStart.has(event.event_name)) row.videoStarts += 1;
+    if (intentionalVideo.has(event.event_name)) row.videoStarts += 1;
     if (cart.has(event.event_name)) row.addToCarts += 1;
   });
   for (const item of items) {
@@ -468,9 +508,10 @@ export function aggregateNotesAnalytics(eventsIn: NotesEventRow[], ordersIn: Not
 
   const sourceVisitors = new Map<string, Set<string>>();
   const sourceCheckouts = new Map<string, Set<string>>();
-  events.forEach((event, index) => {
+  events.forEach((event) => {
     const channel = businessChannel(touchOf(event.attribution));
-    const id = actor(event, index);
+    const id = actor(event);
+    if (!id) return;
     if (store.has(event.event_name)) {
       if (!sourceVisitors.has(channel)) sourceVisitors.set(channel, new Set());
       sourceVisitors.get(channel)!.add(id);
@@ -503,12 +544,14 @@ export function aggregateNotesAnalytics(eventsIn: NotesEventRow[], ordersIn: Not
   }).sort((a, b) => b.revenuePaise - a.revenuePaise || b.visitors - a.visitors);
 
   const campVisitors = new Map<string, Set<string>>();
-  events.forEach((event, index) => {
+  events.forEach((event) => {
     if (!store.has(event.event_name)) return;
+    const id = actor(event);
+    if (!id) return;
     const c = campaignOf(event.attribution);
     const key = `${c.campaign}\u0000${c.content}`;
     if (!campVisitors.has(key)) campVisitors.set(key, new Set());
-    campVisitors.get(key)!.add(actor(event, index));
+    campVisitors.get(key)!.add(id);
   });
   const campPaid = new Map<string, { paid: number; revenuePaise: number }>();
   for (const order of orders) {
@@ -529,9 +572,10 @@ export function aggregateNotesAnalytics(eventsIn: NotesEventRow[], ordersIn: Not
   const landingSessions = new Map<string, Set<string>>();
   const landingClicks = new Map<string, Set<string>>();
   const landingChecks = new Map<string, Set<string>>();
-  events.forEach((event, index) => {
+  events.forEach((event) => {
+    const id = actor(event);
+    if (!id) return;
     const path = touchOf(event.attribution)?.landing_path || event.page_path || "(unknown)";
-    const id = actor(event, index);
     if (store.has(event.event_name) || product.has(event.event_name)) {
       if (!landingSessions.has(path)) landingSessions.set(path, new Set());
       landingSessions.get(path)!.add(id);
@@ -563,28 +607,31 @@ export function aggregateNotesAnalytics(eventsIn: NotesEventRow[], ordersIn: Not
     polity: { clicks: 0, people: new Set<string>() },
     economy: { clicks: 0, people: new Set<string>() },
   };
-  events.forEach((event, index) => {
+  events.forEach((event) => {
     if (event.event_name !== "notes_product_clicked" && event.event_name !== "notes_shop_after_teaching_clicked" && event.event_name !== "notes_added_to_cart" && event.event_name !== "notes_sample_opened" && event.event_name !== "notes_physical_video_play") return;
     const id = String(event.props?.cta_id || event.event_name);
     const row = ctaMap.get(id) || { events: 0, people: new Set<string>() };
     row.events += 1;
-    row.people.add(actor(event, index));
+    const who = actor(event);
+    if (who) row.people.add(who);
     ctaMap.set(id, row);
     if (event.event_name === "notes_product_clicked") {
       const which = subjectOf(event.props);
       if (which === "polity" || which === "economy") {
         subject[which].clicks += 1;
-        subject[which].people.add(actor(event, index));
+        if (who) subject[which].people.add(who);
       }
     }
   });
 
   const deviceMap = new Map<string, { sessions: Set<string>; checkouts: Set<string> }>();
-  events.forEach((event, index) => {
+  events.forEach((event) => {
+    const who = actor(event);
+    if (!who) return;
     const device = event.device?.type || "unknown";
     const row = deviceMap.get(device) || { sessions: new Set<string>(), checkouts: new Set<string>() };
-    if (store.has(event.event_name)) row.sessions.add(actor(event, index));
-    if (checkout.has(event.event_name)) row.checkouts.add(actor(event, index));
+    if (store.has(event.event_name)) row.sessions.add(who);
+    if (checkout.has(event.event_name)) row.checkouts.add(who);
     deviceMap.set(device, row);
   });
   const purchasesByDevice = new Map<string, number>();
@@ -605,17 +652,45 @@ export function aggregateNotesAnalytics(eventsIn: NotesEventRow[], ordersIn: Not
   let shippingErrors = 0;
   let apiErrors = 0;
   let failedPayments = 0;
+  let checkoutSubmitEvents = 0;
   events.forEach((event) => {
     if (event.event_name === "notes_checkout_validation_error") validationErrors += 1;
     if (event.event_name === "notes_shipping_quote_error") shippingErrors += 1;
-    if (event.event_name === "notes_checkout_api_error") apiErrors += 1;
-    if (event.event_name === "notes_payment_failed") failedPayments += 1;
-    if (!event.event_name.includes("error") && event.event_name !== "notes_payment_failed") return;
-    const key = String(event.props?.reason || event.props?.field || event.props?.stage || event.props?.outcome || event.event_name);
+    if (event.event_name === "notes_checkout_api_error") {
+      apiErrors += 1;
+      if (String(event.props?.stage || "") === "order_create" || String(event.props?.endpoint || "") === "checkout") checkoutSubmitEvents += 1;
+    }
+    if (isGatewayFailure(event)) failedPayments += 1;
+    if (isCheckoutSubmitTwin(event)) return;
+    if (!event.event_name.includes("error") && !isGatewayFailure(event)) return;
+    const key = String(event.props?.reason || event.props?.field || event.props?.outcome || event.props?.stage || event.event_name);
     errorCounts.set(key, (errorCounts.get(key) || 0) + 1);
     const browser = [event.device?.browser, event.device?.os].filter(Boolean).join(" ") || "unknown";
     browsers.set(browser, (browsers.get(browser) || 0) + 1);
   });
+
+  const discountMap = new Map<string, { applications: number; checkoutStarts: number; paymentAttempts: number; paidOrders: number; discountPaise: number; revenuePaise: number }>();
+  const ensureDiscount = (code: string) => {
+    const key = code || "";
+    const row = discountMap.get(key) || { applications: 0, checkoutStarts: 0, paymentAttempts: 0, paidOrders: 0, discountPaise: 0, revenuePaise: 0 };
+    discountMap.set(key, row);
+    return row;
+  };
+  for (const event of events) {
+    const code = String(event.props?.coupon_code || "").trim().toUpperCase();
+    if (!code) continue;
+    if (event.event_name === "notes_discount_applied") ensureDiscount(code).applications += 1;
+    if (event.event_name === "notes_payment_initiated") ensureDiscount(code).checkoutStarts += 1;
+    if (event.event_name === "notes_discount_payment_reserved") ensureDiscount(code).paymentAttempts += 1;
+  }
+  for (const order of orders) {
+    const code = String(order.coupon_code || "").trim().toUpperCase();
+    if (!code) continue;
+    const row = ensureDiscount(code);
+    row.paidOrders += 1;
+    row.discountPaise += Math.max(0, Number(order.coupon_discount_paise) || 0);
+    row.revenuePaise += order.total_paise || 0;
+  }
 
   const promos = new Map<string, { orders: number; revenuePaise: number }>();
   const days = new Map<string, { revenuePaise: number; orders: number }>();
@@ -652,10 +727,12 @@ export function aggregateNotesAnalytics(eventsIn: NotesEventRow[], ordersIn: Not
     landings,
     content: {
       pdfPeople: people(events, pdf),
-      videoStarts: people(events, videoStart),
+      videoStarts: people(events, intentionalVideo),
+      previewAutoplays: people(events, previewVideo),
       video50: people(events, video50),
       videoCompletes: people(events, videoDone),
     },
+    unidentifiedStoreViews: events.filter((event) => event.event_name === "notes_store_viewed" && !actor(event)).length,
     ctas: [...ctaMap.entries()].map(([id, row]) => ({ id, events: row.events, people: row.people.size })).sort((a, b) => b.events - a.events),
     subjects: {
       polity: { clicks: subject.polity.clicks, people: subject.polity.people.size },
@@ -667,6 +744,11 @@ export function aggregateNotesAnalytics(eventsIn: NotesEventRow[], ordersIn: Not
       paymentAttempts,
       paid: paidOrders,
       failedPayments,
+      shippingQuotes: peopleMatching(events, (event) => event.event_name === "notes_checkout_step_viewed" && event.props?.step === "shipping_quote"),
+      addressConfirmed: people(events, new Set(["notes_address_confirmed"])),
+      paymentClicks: peopleMatching(events, (event) => event.event_name === "notes_checkout_step_viewed" && event.props?.step === "payment_clicked"),
+      checkoutSubmitEvents,
+      checkoutSubmitPeople: peopleMatching(events, (event) => event.event_name === "notes_checkout_api_error" && (String(event.props?.stage || "") === "order_create" || String(event.props?.endpoint || "") === "checkout")),
       validationErrors,
       shippingErrors,
       apiErrors,
@@ -674,6 +756,11 @@ export function aggregateNotesAnalytics(eventsIn: NotesEventRow[], ordersIn: Not
       browsers: [...browsers.entries()].map(([browser, errors]) => ({ browser, errors })).sort((a, b) => b.errors - a.errors).slice(0, 8),
     },
     promotions: [...promos.entries()].map(([code, row]) => ({ code, ...row })).sort((a, b) => b.revenuePaise - a.revenuePaise),
+  discountCodes: [...discountMap.entries()].map(([code, row]) => ({
+    code,
+    ...row,
+    conversionPct: pct(row.paidOrders, row.applications),
+  })).sort((a, b) => b.revenuePaise - a.revenuePaise || b.applications - a.applications),
     revenueByDay: [...days.entries()].map(([day, row]) => ({ day, ...row })).sort((a, b) => a.day.localeCompare(b.day)),
     excludedTestEvents,
   };

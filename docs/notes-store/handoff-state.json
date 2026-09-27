@@ -16,6 +16,13 @@
   "orderNumberPrefix": "NIAS-N-",
   "codSupported": false,
   "shippingMode": "manual_phase_1",
+  "discountCodes": {
+    "flag": "notes_store_coupons",
+    "migration": "supabase/migrations/2026-09-27-notes-discount-codes.sql",
+    "adminRoute": "/admin/notes/discounts",
+    "seededPromotion": null,
+    "directCouponQuery": false
+  },
   "dltStatus": "drafted_not_submitted",
   "previewEnableEnv": "NOTES_STORE_PREVIEW_ENABLE",
   "testSku": {

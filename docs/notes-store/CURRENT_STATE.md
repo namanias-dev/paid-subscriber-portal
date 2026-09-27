@@ -41,7 +41,7 @@
 | Real Eazypay transaction | **DEFERRED BY OWNER** | Checklist preserved; not executed |
 | Notifications / DLT send | OUT OF CURRENT PHASE | Templates drafted, **not submitted**; `notes_store_sms` off |
 | Shipping aggregator | OUT OF CURRENT PHASE | See courier rate quote. `notes_store_shiprocket` does not create shipments. |
-| Coupons | OUT OF CURRENT PHASE | Flag off; schema may allow later |
+| Discount codes | LIVE | Admin `/admin/notes/discounts`. `notes_store_coupons` is on after production smoke. A slot is reserved at Pay, not on apply. No live NOTES500 is seeded. The smoke code was archived. |
 | Bundles composition UI | OUT OF CURRENT PHASE | Schema `store_bundle_items`; limited Phase 1 UX |
 | Reviews | OUT OF CURRENT PHASE | Table exists; flag off; no fake social proof |
 | Invoices / returns portal | NOT BUILT / OUT OF PHASE | Spec later |
@@ -124,3 +124,7 @@ Baseline re-confirmed green after each commit. Production flag still disabled; n
 ## Real-time paid-order Telegram (2026-09-27)
 
 Additive. After `applyStoreVerify` commits the first transition into `ORDER_CONFIRMED`, `fireNotesOrderPaidAlert` posts one HTML message to the executive-brief channel and one to the existing Sales & Admissions channel (`TELEGRAM_SALES_CHAT_ID`, title-checked). Idempotency is one `telegram_report_snapshots` row per destination: `notes_order_paid:<orderId>:executive` and `notes_order_paid:<orderId>:sales_admissions`. The original `notes_order_paid:<orderId>` row is not rewritten. Qualifying orders already paid more than 15 minutes before the dual-channel cutoff are marked `skipped` / `pre_existing` and are not sent. A one-off updated replay of `NIAS-N-2026-001002` uses `notes_order_manual_replay:<orderId>:customer_details_v2:<destination>` and does not touch payment or fulfillment. Telegram failure does not roll back the order. The 2-hour digest schedule is unchanged.
+
+## Checkout measurement and pay-button guard (2026-09-27)
+
+No price, shipping rate, coupon, gateway mode, or Telegram destination change. Visitor counts ignore store views that have neither a session nor a visitor cookie. Muted teaching previews are reported separately from intentional plays. A failed Pay request is one checkout API error, not an ICICI failure. The admin checkout panel shows PIN quote, address confirmation, and Pay taps. The pay button ignores a second tap while the first request is in flight and says why it is disabled. Historical analytics rows are not rewritten.

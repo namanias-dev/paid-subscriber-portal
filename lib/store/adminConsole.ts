@@ -121,6 +121,7 @@ export interface ActionInput {
   openIssue?: boolean;
   paymentPending?: boolean;
   trackingStale?: boolean;
+  invoiceStatus?: string | null;
 }
 
 export function actionRequiredReasons(input: ActionInput): string[] {
@@ -134,7 +135,13 @@ export function actionRequiredReasons(input: ActionInput): string[] {
   if (input.status.startsWith("RETURN_")) reasons.push("Return action required");
   if (input.status === "REFUND_PENDING") reasons.push("Refund pending");
   if (input.trackingStale) reasons.push("Tracking stale");
+  if (input.invoiceStatus === "FAILED") reasons.push("Invoice needs attention");
   return reasons;
+}
+
+/** The list and detail share this rule. Only a stored ready invoice shows View Invoice. */
+export function showAdminViewInvoice(status: string | null | undefined): boolean {
+  return status === "READY";
 }
 
 export type PrimaryAction =

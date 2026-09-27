@@ -21,6 +21,7 @@
 | POST | `/api/notes/checkout` | cart + body | yes | sets access cookie; strips token from JSON |
 | GET | `/api/notes/offer` | none | no-store | active public offer + `server_now` |
 | GET | `/api/notes/pin` | none | — | serviceability + promised date; returns `quote` (authoritative subtotal/shipping/tax/total/discount via `buildFrozenQuote`) when a live cart is serviceable |
+| POST | `/api/notes/discount/validate` | cart cookie | 30 / 10 min | apply, remove, or recheck one code. Prices come from the cart. |
 | GET | `/api/notes/sample/[id]` | none | — | watermarked only |
 | POST | `/api/notes/track` | phone+order | yes | mints token |
 | POST | `/api/notes/order/[orderNumber]/verify` | access token | yes | triggers Verify |
@@ -29,7 +30,7 @@
 
 | Method | Path | Auth |
 |--------|------|------|
-| GET | `/api/admin/notes/orders` | staff permission — `?bucket=&q=&limit=&offset=` search/filter; returns address, items, shipment, payment_status |
+| GET | `/api/admin/notes/orders` | staff permission — `?bucket=&q=&code=&limit=&offset=` search/filter; returns address, items, shipment, payment_status |
 | POST | `/api/admin/notes/orders/[id]/advance` | staff |
 | POST | `/api/admin/notes/orders/[id]/ship` | staff |
 | POST | `/api/admin/notes/orders/[id]/note` | staff — append internal note / record fulfilment exception (damaged, wrong_item, missing_item, lost_in_transit, duplicate_order) |
@@ -38,6 +39,8 @@
 | GET | `/api/admin/notes/preparation` | `store_manage_orders` — copies-to-prepare (paid, not-yet-dispatched; bundles exploded) |
 | GET | `/api/admin/notes/overview` | `store_manage_orders` — action-required counts + prepare/low-stock lists |
 | GET/POST/PATCH/DELETE | `/api/admin/notes/bundles` | `store_manage_catalogue` — manage bundle components (add/remove/reorder/qty) |
+| GET/POST/PATCH | `/api/admin/notes/discounts` | `store_manage_catalogue` — list, create, and toggle checkout entry |
+| GET/PATCH | `/api/admin/notes/discounts/[id]` | `store_manage_catalogue` — detail, edit, archive |
 | GET/POST | `/api/admin/notes/offers` | `store_manage_catalogue` — list/create campaigns |
 | GET/PATCH | `/api/admin/notes/offers/[id]` | `store_manage_catalogue` — edit, pause, duplicate |
 
@@ -49,6 +52,8 @@
 | `/admin/notes` | `store_manage_orders` — order queue |
 | `/admin/notes/preparation` | `store_manage_orders` — preparation demand |
 | `/admin/notes/products` | `store_manage_catalogue` — catalogue + availability + media |
+| `/admin/notes/discounts` | `store_manage_catalogue` — discount codes |
+| `/admin/notes/analytics` | `store_manage_orders` — includes purchases using a code |
 | `/admin/notes/pick-list` | `store_manage_orders` |
 
 ## Cron

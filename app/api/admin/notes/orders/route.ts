@@ -7,6 +7,8 @@ import { issueCategoryLabel, issueStatusLabel, OPEN_ISSUE_STATUSES } from "@/lib
 import { actionRequiredReasons, pickupFailedActivity, sortAdminOrders } from "@/lib/store/adminConsole";
 import { shippingWritesAuthorized } from "@/lib/store/shipping/config";
 import { BUSINESS_CHANNELS, orderMarketingSummary, type StoredNotesAttribution } from "@/lib/analytics/notesCommerce";
+import { gatewayChargesForStaff } from "@/lib/store/payments/eazypayAmounts";
+import { scheduleStoreInvoice } from "@/lib/store/invoice/issue";
 import { paidRollup } from "@/lib/store/opsBoard";
 
 export const dynamic = "force-dynamic";
@@ -73,6 +75,7 @@ export async function GET(req: Request) {
   const paidOnly = bucket === "paid";
   const statuses = BUCKETS[bucket] || ALL_STATUSES;
   const issueFilter = url.searchParams.get("issue") || "";
+  const discountCode = (url.searchParams.get("code") || "").trim().toUpperCase();
   let openIssueOrderIds: string[] | null = null;
   if (issueFilter === "open") {
     const { data: openRows, error: openError } = await db
@@ -100,37 +103,45 @@ export async function GET(req: Request) {
     if (ids.length) awbOrderIds = ids as string[];
   }
 
-  let query = db
-    .from("store_orders")
-    .select(
-      "id,order_no,status,customer_name,phone,email,total_paise,discount_paise,shipping_paise,subtotal_paise,promo_code,discount_trace_json,promised_delivery_date,placed_at,updated_at,paid_at,shipped_at,delivered_at,internal_notes,shipping_address_id,attribution_source,attribution_campaign,attribution_platform,attribution_json",
-      { count: "exact" },
-    )
-    .in("status", paidOnly ? ALL_STATUSES.filter((status) => !["PAYMENT_PENDING", "PAYMENT_FAILED", "PAYMENT_EXPIRED", "CANCELLED", "REFUNDED", "PARTIALLY_REFUNDED"].includes(status)) : statuses);
-  if (id) query = query.eq("id", id);
-  if (paidOnly) query = query.not("paid_at", "is", null);
-  if ((BUSINESS_CHANNELS as readonly string[]).includes(acq)) query = query.eq("attribution_platform", acq);
-  if (openIssueOrderIds) query = query.in("id", openIssueOrderIds);
-
-  if (q) {
-    const like = `%${q.replace(/[%,]/g, "")}%`;
-    const ors = [
-      `order_no.ilike.${like}`,
-      `customer_name.ilike.${like}`,
-      `phone.ilike.${like}`,
-      `email.ilike.${like}`,
-    ];
-    if (awbOrderIds?.length) ors.push(`id.in.(${awbOrderIds.join(",")})`);
-    query = query.or(ors.join(","));
-  }
-
+  const orderSelect =
+    "id,order_no,status,customer_name,phone,email,total_paise,discount_paise,shipping_paise,subtotal_paise,promo_code,discount_trace_json,promised_delivery_date,placed_at,updated_at,paid_at,shipped_at,delivered_at,internal_notes,shipping_address_id,attribution_source,attribution_campaign,attribution_platform,attribution_json";
+  const statusFilter = paidOnly
+    ? ALL_STATUSES.filter((status) => !["PAYMENT_PENDING", "PAYMENT_FAILED", "PAYMENT_EXPIRED", "CANCELLED", "REFUNDED", "PARTIALLY_REFUNDED"].includes(status))
+    : statuses;
   const sortColumn = sort.startsWith("value") ? "total_paise" : sort === "updated" || sort === "action" ? "updated_at" : "placed_at";
   const ascending = sort === "oldest" || sort === "value_asc";
   const scan = actionOnly ? 100 : limit;
   const scanOffset = actionOnly ? 0 : offset;
-  const { data, count } = await query.order(sortColumn, { ascending }).range(scanOffset, scanOffset + scan - 1);
 
-  const orders = data || [];
+  async function loadOrders(select: string, withCoupon: boolean) {
+    let query = db!.from("store_orders").select(select, { count: "exact" }).in("status", statusFilter);
+    if (paidOnly) query = query.not("paid_at", "is", null);
+    if ((BUSINESS_CHANNELS as readonly string[]).includes(acq)) query = query.eq("attribution_platform", acq);
+    if (id) query = query.eq("id", id);
+    if (withCoupon && discountCode) query = query.eq("coupon_code", discountCode);
+    if (openIssueOrderIds) query = query.in("id", openIssueOrderIds);
+    if (q) {
+      const like = `%${q.replace(/[%,]/g, "")}%`;
+      const ors = [
+        `order_no.ilike.${like}`,
+        `customer_name.ilike.${like}`,
+        `phone.ilike.${like}`,
+        `email.ilike.${like}`,
+      ];
+      if (withCoupon) ors.push(`coupon_code.ilike.${like}`);
+      if (awbOrderIds?.length) ors.push(`id.in.(${awbOrderIds.join(",")})`);
+      query = query.or(ors.join(","));
+    }
+    return query.order(sortColumn, { ascending }).range(scanOffset, scanOffset + scan - 1);
+  }
+
+  let { data, count, error } = await loadOrders(`${orderSelect.replace("promo_code,", "promo_code,coupon_code,coupon_discount_paise,")}`, true);
+  if (error && /coupon_code/i.test(error.message || "")) {
+    ({ data, count, error } = await loadOrders(orderSelect, false));
+  }
+  if (error) return NextResponse.json({ ok: false, error: "Could not load orders." }, { status: 503, headers: { "Cache-Control": "no-store" } });
+
+  const orders = (data || []) as any[];
   const ids = orders.map((o) => o.id);
   const addrIds = [...new Set(orders.map((o) => o.shipping_address_id).filter(Boolean))] as string[];
 
@@ -170,7 +181,7 @@ export async function GET(req: Request) {
       package_source: string | null;
     }
   >();
-  const payByOrder = new Map<string, { status: string; provider: string | null }>();
+  const payByOrder = new Map<string, { status: string; provider: string | null; verify_payload: unknown }>();
   const invoiceByOrder = new Map<string, string>();
   const issueByOrder = new Map<
     string,
@@ -269,11 +280,13 @@ export async function GET(req: Request) {
     }
     const { data: payRows } = await db
       .from("store_order_payments")
-      .select("order_id,status,provider,created_at")
+      .select("order_id,status,provider,created_at,verify_payload")
       .in("order_id", ids)
       .order("created_at", { ascending: false });
     for (const p of payRows || []) {
-      if (!payByOrder.has(p.order_id)) payByOrder.set(p.order_id, { status: p.status, provider: p.provider || null });
+      if (!payByOrder.has(p.order_id)) {
+        payByOrder.set(p.order_id, { status: p.status, provider: p.provider || null, verify_payload: p.verify_payload });
+      }
     }
     const { data: invoiceRows } = await db.from("store_invoices").select("order_id,status").in("order_id", ids);
     for (const row of invoiceRows || []) invoiceByOrder.set(row.order_id, row.status);
@@ -310,6 +323,10 @@ export async function GET(req: Request) {
     const ship = shipByOrder.get(o.id) || null;
     const issue = issueByOrder.get(o.id) || null;
     const { attribution_json, ...safe } = o;
+    const storedInvoice = invoiceByOrder.get(o.id) || null;
+    const paid = Boolean(o.paid_at) && !["PAYMENT_PENDING", "PAYMENT_FAILED", "PAYMENT_EXPIRED", "CANCELLED"].includes(o.status);
+    if (paid && !storedInvoice) scheduleStoreInvoice(o.id);
+    const invoiceStatus = storedInvoice || (paid ? "PENDING" : null);
     const reasons = actionRequiredReasons({
       status: o.status,
       awb: ship?.awb,
@@ -317,6 +334,7 @@ export async function GET(req: Request) {
       addressMismatch: Boolean(ship?.address_mismatch),
       openIssue: Boolean(issue?.open),
       paymentPending: o.status === "PAYMENT_PENDING",
+      invoiceStatus,
     });
     return {
       ...safe,
@@ -337,7 +355,8 @@ export async function GET(req: Request) {
       action_required: reasons.length > 0,
       action_reasons: reasons,
       payment_status: staffPaymentLabel(payByOrder.get(o.id)?.provider, payByOrder.get(o.id)?.status),
-      invoice_status: invoiceByOrder.get(o.id) || null,
+      gateway_charges: gatewayChargesForStaff(payByOrder.get(o.id)?.verify_payload, Number(o.total_paise) || 0),
+      invoice_status: invoiceStatus,
       issue,
     };
   });

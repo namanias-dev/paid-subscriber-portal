@@ -7,25 +7,21 @@
  * see AiCounselorMount). It is lazy and NEVER blocks page load: the heavy chat
  * sheet is code-split via next/dynamic(ssr:false) and only loaded on open.
  *
- * Trigger rules (conversationPolicy.TRIGGER_POLICY):
- *  - NEVER auto-open on initial paint.
- *  - Auto-open after 8–15s OR at 30% scroll, whichever comes first.
- *  - At most once per session; suppressed for 24h after a manual dismiss.
- *  - Excluded entirely from private / payment-internal routes.
+ * The sheet opens only from the launcher click. Timers, scroll depth,
+ * route changes, and page load must not open it. Private routes and
+ * enrollment checkout still hide the launcher entirely.
  *
  * Positioned to avoid the WhatsApp button, mobile sticky payment CTAs, and the
  * bottom nav (raised offset on mobile, below the WhatsApp z-index).
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
 import { usePathname } from "next/navigation";
 import { ensureSession } from "@/lib/analytics/client";
-import { isWidgetAllowedPath, flowForPath, TRIGGER_POLICY } from "@/lib/ai-agent/conversationPolicy";
+import { isWidgetAllowedPath, flowForPath } from "@/lib/ai-agent/conversationPolicy";
 import { trackAgentEvent } from "./agentAnalytics";
 
 const AiChatSheet = dynamic(() => import("./AiChatSheet"), { ssr: false });
-
-const { minDelayMs, maxDelayMs, scrollFraction, dismissSuppressMs, storageKeys } = TRIGGER_POLICY;
 
 /**
  * Launcher glyph selection. Flip this single constant to swap the premium mark:
@@ -67,27 +63,11 @@ function LauncherGlyph() {
   );
 }
 
-function safeLocalGet(key: string): string | null {
-  try {
-    return typeof window !== "undefined" ? window.localStorage.getItem(key) : null;
-  } catch {
-    return null;
-  }
-}
-function safeLocalSet(key: string, value: string): void {
-  try {
-    if (typeof window !== "undefined") window.localStorage.setItem(key, value);
-  } catch {
-    /* ignore */
-  }
-}
-
 export default function AiCounselorWidget({ waLink }: { waLink: string | null }) {
   const pathname = usePathname() || "";
   const [open, setOpen] = useState(false);
   const [sessionId, setSessionId] = useState<string>("");
   const [notesDodge, setNotesDodge] = useState(false);
-  const autoTriggered = useRef(false);
 
   const allowed = useMemo(() => isWidgetAllowedPath(pathname), [pathname]);
   const initialFlow = useMemo(() => flowForPath(pathname), [pathname]);
@@ -100,12 +80,10 @@ export default function AiCounselorWidget({ waLink }: { waLink: string | null })
 
   const openSheet = useCallback(() => {
     setOpen(true);
-    safeLocalSet(storageKeys.openedSession, "1");
   }, []);
 
   const dismiss = useCallback(() => {
     setOpen(false);
-    safeLocalSet(storageKeys.dismissedAt, String(Date.now()));
     if (sessionId) trackAgentEvent(sessionId, "ai_widget_dismissed", { path: pathname });
   }, [sessionId, pathname]);
 
@@ -123,43 +101,6 @@ export default function AiCounselorWidget({ waLink }: { waLink: string | null })
     io.observe(section);
     return () => io.disconnect();
   }, [pathname]);
-
-  // Auto-open trigger (time + scroll), gated by session + dismiss suppression.
-  useEffect(() => {
-    if (!allowed || open || autoTriggered.current) return;
-
-    // Suppression checks.
-    const openedThisSession = safeLocalGet(storageKeys.openedSession) === "1";
-    if (openedThisSession) return;
-    const dismissedAt = Number(safeLocalGet(storageKeys.dismissedAt) || 0);
-    if (dismissedAt && Date.now() - dismissedAt < dismissSuppressMs) return;
-
-    let timer: ReturnType<typeof setTimeout> | null = null;
-
-    const trigger = () => {
-      if (autoTriggered.current) return;
-      autoTriggered.current = true;
-      cleanup();
-      openSheet();
-    };
-
-    const onScroll = () => {
-      const doc = document.documentElement;
-      const scrollable = doc.scrollHeight - doc.clientHeight;
-      if (scrollable <= 0) return;
-      if (doc.scrollTop / scrollable >= scrollFraction) trigger();
-    };
-
-    const delay = minDelayMs + Math.random() * (maxDelayMs - minDelayMs);
-    timer = setTimeout(trigger, delay);
-    window.addEventListener("scroll", onScroll, { passive: true });
-
-    function cleanup() {
-      if (timer) clearTimeout(timer);
-      window.removeEventListener("scroll", onScroll);
-    }
-    return cleanup;
-  }, [allowed, open, openSheet]);
 
   if (!allowed) return null;
 

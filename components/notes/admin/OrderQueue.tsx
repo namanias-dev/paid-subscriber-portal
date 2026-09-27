@@ -8,6 +8,7 @@ import {
   fulfillmentTone,
   formatAdminWhen,
   invoiceStatusLabel,
+  showAdminViewInvoice,
   orderIndexLabel,
   pickupFailedActivity,
   type BadgeTone,
@@ -65,11 +66,12 @@ function readParams() {
     action: params.get("action") === "required",
     acq: params.get("acq") || "",
     offset: Number(params.get("offset") || 0),
+    code: params.get("code") || "",
   };
 }
 
 export default function NotesOrderQueue() {
-  const initial = typeof window === "undefined" ? { bucket: "", q: "", sort: "newest", action: false, acq: "", offset: 0 } : readParams();
+  const initial = typeof window === "undefined" ? { bucket: "", q: "", sort: "newest", action: false, acq: "", offset: 0, code: "" } : readParams();
   const [orders, setOrders] = useState<AdminOrder[]>([]);
   const [counts, setCounts] = useState<Record<string, number>>({});
   const [products, setProducts] = useState<Array<{ name: string; orders: number; units: number }>>([]);
@@ -81,6 +83,7 @@ export default function NotesOrderQueue() {
   const [q, setQ] = useState(initial.q);
   const [sort, setSort] = useState(initial.sort);
   const [offset, setOffset] = useState(initial.offset);
+  const [code, setCode] = useState(initial.code);
   const [openId, setOpenId] = useState<string | null>(null);
   const openOrder = useCallback((id: string) => {
     window.history.pushState({ notesOrder: id }, "", window.location.href);
@@ -99,7 +102,7 @@ export default function NotesOrderQueue() {
   const [filtersOpen, setFiltersOpen] = useState(false);
   const queryRef = useRef(q);
 
-  const writeUrl = useCallback((next: { bucket: string; issue: boolean; action: boolean; acq: string; q: string; sort: string; offset: number }) => {
+  const writeUrl = useCallback((next: { bucket: string; issue: boolean; action: boolean; acq: string; q: string; sort: string; offset: number; code: string }) => {
     const params = new URLSearchParams();
     if (next.issue) params.set("status", "issues");
     else if (next.bucket) params.set("status", next.bucket);
@@ -108,6 +111,7 @@ export default function NotesOrderQueue() {
     if (next.q) params.set("q", next.q);
     if (next.sort && next.sort !== "newest") params.set("sort", next.sort);
     if (next.offset) params.set("offset", String(next.offset));
+    if (next.code) params.set("code", next.code);
     const qs = params.toString();
     window.history.replaceState(null, "", qs ? `/admin/notes?${qs}` : "/admin/notes");
   }, []);
@@ -120,6 +124,7 @@ export default function NotesOrderQueue() {
     if (actionOnly) params.set("action", "required");
     if (acq) params.set("acq", acq);
     if (q.trim()) params.set("q", q.trim());
+    if (code) params.set("code", code);
     if (sort) params.set("sort", sort);
     params.set("limit", "25");
     params.set("offset", String(offset));
@@ -132,7 +137,7 @@ export default function NotesOrderQueue() {
     setTotal(json.total || rows.length);
     setWrites(Boolean(json.writes_authorized));
     setLoading(false);
-  }, [bucket, issueOnly, actionOnly, acq, q, sort, offset]);
+  }, [bucket, issueOnly, actionOnly, acq, q, sort, offset, code]);
 
   useEffect(() => {
     void load();
@@ -144,7 +149,7 @@ export default function NotesOrderQueue() {
     setBucket(issues ? "" : key);
     setActionOnly(false);
     setOffset(0);
-    writeUrl({ bucket: issues ? "" : key, issue: issues, action: false, acq, q, sort, offset: 0 });
+    writeUrl({ bucket: issues ? "" : key, issue: issues, action: false, acq, q, sort, offset: 0, code });
   }
 
   const open = orders.find((row) => row.id === openId) || null;
@@ -226,7 +231,7 @@ export default function NotesOrderQueue() {
             e.preventDefault();
             setOffset(0);
             queryRef.current = q;
-            writeUrl({ bucket, issue: issueOnly, action: actionOnly, acq, q, sort, offset: 0 });
+            writeUrl({ bucket, issue: issueOnly, action: actionOnly, acq, q, sort, offset: 0, code });
             void load();
           }}
         >
@@ -246,7 +251,7 @@ export default function NotesOrderQueue() {
           onChange={(e) => {
             setSort(e.target.value);
             setOffset(0);
-            writeUrl({ bucket, issue: issueOnly, action: actionOnly, acq, q, sort: e.target.value, offset: 0 });
+            writeUrl({ bucket, issue: issueOnly, action: actionOnly, acq, q, sort: e.target.value, offset: 0, code });
           }}
           className="min-h-11 rounded-full border bg-white px-3 text-sm"
         >
@@ -279,7 +284,7 @@ export default function NotesOrderQueue() {
           onClick={() => {
             setActionOnly((v) => !v);
             setOffset(0);
-            writeUrl({ bucket, issue: issueOnly, action: !actionOnly, acq, q, sort, offset: 0 });
+            writeUrl({ bucket, issue: issueOnly, action: !actionOnly, acq, q, sort, offset: 0, code });
           }}
           className={`min-h-10 rounded-full px-3 text-sm font-semibold ${actionOnly ? "bg-amber-800 text-white" : "bg-white text-[var(--ca-navy)]"}`}
         >
@@ -291,7 +296,7 @@ export default function NotesOrderQueue() {
           onChange={(e) => {
             setAcq(e.target.value);
             setOffset(0);
-            writeUrl({ bucket, issue: issueOnly, action: actionOnly, acq: e.target.value, q, sort, offset: 0 });
+            writeUrl({ bucket, issue: issueOnly, action: actionOnly, acq: e.target.value, q, sort, offset: 0, code });
           }}
           className="min-h-10 rounded-full border bg-white px-3 text-sm"
         >
@@ -302,6 +307,13 @@ export default function NotesOrderQueue() {
         </select>
       </div>
 
+      {code && (
+        <p className="mb-3 flex items-center justify-between gap-3 rounded-xl bg-white px-3 py-2 text-sm text-[var(--ca-navy)]">
+          <span>Discount code {code}</span>
+          <button type="button" className="min-h-11 font-semibold" onClick={() => { setCode(""); setOffset(0); writeUrl({ bucket, issue: issueOnly, action: actionOnly, acq, q, sort, offset: 0, code: "" }); }}>Clear</button>
+        </p>
+      )}
+
       {msg && <p className="mb-3 rounded-xl bg-white px-3 py-2 text-sm text-[var(--ca-navy)]">{msg}</p>}
 
       {loading ? (
@@ -311,7 +323,7 @@ export default function NotesOrderQueue() {
         </div>
       ) : orders.length === 0 ? (
         <p className="rounded-2xl bg-white p-8 text-center text-sm text-[var(--ca-navy)]/60">
-          {q || bucket || issueOnly || actionOnly || acq ? "No orders match these filters." : "No orders yet."}
+          {q || bucket || issueOnly || actionOnly || acq || code ? "No orders match these filters." : "No orders yet."}
         </p>
       ) : (
         <>
@@ -328,13 +340,13 @@ export default function NotesOrderQueue() {
                     </button>
                     <span className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-[var(--ca-navy)]/45">
                       {invoiceStatusLabel(order.invoice_status)}
-                      {order.invoice_status === "READY" && <ViewInvoiceButton orderId={order.id} />}
+                      {showAdminViewInvoice(order.invoice_status) && <ViewInvoiceButton orderId={order.id} />}
                     </span>
                   </div>
                   <div>
                     <span className="block text-sm text-[var(--ca-navy)]/80">{product}</span>
                     <span className="mt-1 block text-sm font-semibold tabular-nums text-[var(--ca-navy)]">{formatPaise(order.total_paise)}</span>
-                    {order.promo_code && <span className="block text-[11px] text-[var(--ca-navy)]/45">{order.promo_code}</span>}
+                    {(order.coupon_code || order.promo_code) && <span className="block text-[11px] text-[var(--ca-navy)]/45">{order.coupon_code || order.promo_code}</span>}
                   </div>
                   <span className={`w-fit rounded-full px-2 py-1 text-[11px] font-semibold ${order.payment_status === "CAPTURED" ? TONE.green : TONE[fulfillmentTone(order.status, failed)]}`}>{order.payment_status === "CAPTURED" ? "Paid" : order.payment_status || "Payment pending"}</span>
                   <div>
@@ -358,7 +370,7 @@ export default function NotesOrderQueue() {
                         <span className="mt-1 block text-sm">{order.customer_name}</span>
                         <span className="mt-1 block text-sm text-[var(--ca-navy)]/70">{productSummary(order.items)}</span>
                       </span>
-                      <span className="text-sm font-semibold tabular-nums">{formatPaise(order.total_paise)}</span>
+                      <span className="text-right text-sm font-semibold tabular-nums">{formatPaise(order.total_paise)}{order.coupon_code ? <span className="mt-0.5 block text-[11px] font-medium text-[var(--ca-navy)]/50">{order.coupon_code}</span> : null}</span>
                     </span>
                     <span className="mt-3 block">{showsFulfillmentTimeline(order.status) ? <FulfillmentTimeline status={order.status} compact /> : null}</span>
                     <span className="mt-2 flex items-center justify-between gap-2">
@@ -366,8 +378,11 @@ export default function NotesOrderQueue() {
                       <span className="text-xs text-[var(--ca-navy)]/55">{order.payment_status === "CAPTURED" ? "Paid" : order.payment_status || "Payment pending"}</span>
                     </span>
                   </button>
+                  {(order.invoice_status === "PENDING" || order.invoice_status === "GENERATING" || order.invoice_status === "FAILED") && (
+                    <p className="mt-3 text-[11px] text-[var(--ca-navy)]/55">{invoiceStatusLabel(order.invoice_status)}</p>
+                  )}
                   <div className="mt-3 flex flex-wrap items-center gap-2">
-                    {order.invoice_status === "READY" && <ViewInvoiceButton orderId={order.id} />}
+                    {showAdminViewInvoice(order.invoice_status) && <ViewInvoiceButton orderId={order.id} />}
                     <Link href={`/admin/notes/orders/${order.id}`} className="inline-flex min-h-11 items-center rounded-full bg-[var(--ca-navy)] px-4 text-sm font-semibold text-white">View details</Link>
                   </div>
                 </li>

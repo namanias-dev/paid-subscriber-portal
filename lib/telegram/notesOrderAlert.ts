@@ -273,6 +273,21 @@ async function deliverOne(
 
     const paidAt = input.paidAt || self?.paidAt || new Date(deps.now()).toISOString();
     const counts = notesPaidAlertCounts(orders, input.orderId, paidAt);
+    let couponCode: string | null = null;
+    let couponDiscountPaise = 0;
+    try {
+      const { storeDb } = await import("@/lib/store/db");
+      const db = storeDb();
+      if (db) {
+        const coupon = await db.from("store_orders").select("coupon_code,coupon_discount_paise").eq("id", input.orderId).maybeSingle();
+        if (!coupon.error && coupon.data?.coupon_code && Number(coupon.data.coupon_discount_paise) > 0) {
+          couponCode = String(coupon.data.coupon_code);
+          couponDiscountPaise = Number(coupon.data.coupon_discount_paise) || 0;
+        }
+      }
+    } catch {
+      couponCode = null;
+    }
     const again = await deps.getOutbox(opts.slotKey);
     const html =
       again?.html ||
@@ -287,6 +302,8 @@ async function deliverOne(
         totalCount: counts.total,
         customer: opts.customer,
         variant: opts.variant,
+        couponCode,
+        couponDiscountPaise,
       });
     let attempts = claimed.row.attempts;
     let lastError: string | null = null;

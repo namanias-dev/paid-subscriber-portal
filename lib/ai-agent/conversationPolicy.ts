@@ -7,7 +7,7 @@
  *
  *  - Free-text is mapped to a flow by simple keyword matching (no LLM).
  *  - Page path is mapped to a sensible default flow / greeting.
- *  - Trigger timing + frequency caps are defined here (single source of truth).
+ *  - Automatic opening is disabled. The launcher is the only open path.
  *  - A guardrail linter (assertSafeCopy) rejects any agent copy that promises
  *    selection, uses fake scarcity, or invents offer facts — defense-in-depth so
  *    a bad edit to the copy library can be caught in tests / dev.
@@ -17,24 +17,18 @@ import type { FlowId } from "./providers/types";
 import { isEnrollmentCheckoutPath } from "../enrollmentPath";
 
 /* ------------------------------------------------------------------ *
- * TRIGGER TIMING & FREQUENCY (widget behaviour)
+ * AUTOMATIC OPENING IS OFF FOR THE WHOLE PORTAL
+ *
+ * The counsellor opens only when a visitor clicks its launcher.
+ * Nothing may schedule a timer, scroll listener, route change, page
+ * load, inactivity timer, or intersection observer to open it.
  * ------------------------------------------------------------------ */
 
-export const TRIGGER_POLICY = {
-  /** Earliest auto-open, ms after load. */
-  minDelayMs: 8_000,
-  /** Latest auto-open, ms after load (if scroll threshold not hit sooner). */
-  maxDelayMs: 15_000,
-  /** Scroll fraction (0-1) that can trigger an earlier open. */
-  scrollFraction: 0.3,
-  /** Suppress auto-open for this long after a manual dismiss (24h). */
-  dismissSuppressMs: 24 * 60 * 60 * 1000,
-  /** localStorage keys (client-only). */
-  storageKeys: {
-    dismissedAt: "nsa_ai_dismissed_at",
-    openedSession: "nsa_ai_opened_session",
-  },
-} as const;
+export const COUNSELLOR_AUTO_OPEN = false as const;
+
+export function shouldAutoOpenCounsellor(): boolean {
+  return COUNSELLOR_AUTO_OPEN;
+}
 
 /**
  * Route prefixes where the PUBLIC widget must NEVER mount, even if the flag is on.

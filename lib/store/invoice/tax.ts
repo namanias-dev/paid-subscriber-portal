@@ -53,6 +53,8 @@ export interface TaxDocument {
   grandTotalPaise: number;
   interstate: boolean;
   anyTaxable: boolean;
+  couponCode?: string | null;
+  couponDiscountPaise?: number;
 }
 
 /** Union territories without a legislature. Local tax is UTGST, not SGST. */
@@ -92,6 +94,8 @@ export function computeTaxDocument(input: {
   supplierStateCode: string | null;
   placeOfSupplyCode: string | null;
   chargedTotalPaise: number;
+  couponCode?: string | null;
+  couponDiscountPaise?: number;
 }): TaxDocument {
   const supplier = (input.supplierStateCode || "").trim();
   const place = (input.placeOfSupplyCode || "").trim();
@@ -123,8 +127,9 @@ export function computeTaxDocument(input: {
   const subtotal = lines.reduce((n, line) => n + line.totalPaise + (input.pricesIncludeTax ? 0 : 0), 0);
   const discount = lines.reduce((n, line) => n + line.discountPaise, 0);
   const shipping = Math.max(0, Math.round(input.shippingPaise || 0));
+  const couponDiscountPaise = Math.max(0, Math.round(input.couponDiscountPaise || 0));
   const goods = lines.reduce((n, line) => n + (input.pricesIncludeTax ? line.totalPaise : line.totalPaise), 0);
-  const computed = goods + (input.pricesIncludeTax ? shipping : shipping);
+  const computed = goods - couponDiscountPaise + (input.pricesIncludeTax ? shipping : shipping);
   const charged = Math.max(0, Math.round(input.chargedTotalPaise || computed));
   const rounding = charged - computed;
   return {
@@ -142,10 +147,24 @@ export function computeTaxDocument(input: {
     grandTotalPaise: charged,
     interstate,
     anyTaxable: lines.some((line) => line.rateBps > 0),
+    couponCode: input.couponCode || null,
+    couponDiscountPaise,
   };
 }
 
 export type DocumentType = "TAX_INVOICE" | "BILL_OF_SUPPLY" | "INVOICE";
+
+/**
+ * The order line snapshot is enough when it already froze a real HSN and a
+ * nil or taxable treatment. Exempt placeholders, and lines with no HSN, stay blocked.
+ * A missing live-product "confirmed" flag does not erase that snapshot.
+ */
+export function classificationFromSnapshot(line: { hsn: string | null; taxTreatment?: string | null }): "CONFIRMED" | null {
+  const treatment = (line.taxTreatment || "").toLowerCase();
+  const hsn = (line.hsn || "").trim();
+  if ((treatment === "nil" || treatment === "taxable") && /^\d{4,8}$/.test(hsn)) return "CONFIRMED";
+  return null;
+}
 
 /** Production issuance needs an explicit confirmed nil or taxable HSN. Exempt placeholders stay blocked. */
 export function taxClassificationConfirmed(lines: { hsn: string | null; taxTreatment?: string | null; taxConfigurationStatus?: string | null }[]): boolean {

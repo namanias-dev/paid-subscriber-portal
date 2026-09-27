@@ -9,6 +9,7 @@ import { getCartView, writeCartId, type CartView } from "./cart";
 import { requestLeadAttribution } from "@/lib/marketing/requestAttribution";
 import { businessChannel, isQaState } from "@/lib/analytics/notesCommerce";
 import { SESSION_COOKIE, VISITOR_COOKIE } from "@/lib/attribution";
+import { judgeCartDiscount } from "./discountCodes";
 import {
   completeAddress,
   isOpenStage,
@@ -93,6 +94,25 @@ export async function saveCheckoutLead(input: {
     const address = completeAddress(input.address);
     const stage = stageForDraft({ name: input.name, address });
     const snap = snapshot(cart);
+    let couponCode: string | null = null;
+    let couponDiscount = 0;
+    let beforeDiscount = snap.lines.reduce((sum, line) => sum + Math.max(0, Number(line.line_total_paise) || 0), 0);
+    let afterDiscount = beforeDiscount;
+    try {
+      if (cart.discount_code) {
+        const judged = await judgeCartDiscount({
+          rawCode: cart.discount_code,
+          lines: cart.items.map((item) => ({ product_id: item.product_id, merchandise_paise: item.line_total_paise })),
+          phoneKey: phone,
+        });
+        if (judged.applied) {
+          couponCode = judged.applied.code;
+          couponDiscount = judged.applied.discount_paise;
+          beforeDiscount = judged.applied.merchandise_before_paise;
+          afterDiscount = Math.max(0, beforeDiscount - couponDiscount);
+        }
+      }
+    } catch { /* lead capture must not depend on the discount service */ }
     const attr = requestLeadAttribution();
     const touch = attr.attribution?.last_touch || attr.attribution?.first_touch || null;
     const now = new Date().toISOString();
@@ -140,6 +160,14 @@ export async function saveCheckoutLead(input: {
       session_id: sessionId,
       address_snapshot: address,
       address_confirmed: input.addressConfirmed === true,
+      ...(couponCode
+        ? {
+            coupon_code: couponCode,
+            coupon_discount_paise: couponDiscount,
+            cart_before_discount_paise: beforeDiscount,
+            cart_after_discount_paise: afterDiscount,
+          }
+        : {}),
       is_test: isQaState(attr.attribution),
       last_activity_at: now,
       updated_at: now,
@@ -157,7 +185,14 @@ export async function saveCheckoutLead(input: {
       if (abandoned || existing.was_abandoned) patch.was_abandoned = true;
       if (existing.sales_status === "DO_NOT_CONTACT") delete patch.checkout_stage;
       const { error } = await db.from("store_checkout_leads").update(patch).eq("id", existing.id);
-      if (error) return { ok: true, skipped: "update_failed" };
+      if (error && couponCode) {
+        delete patch.coupon_code;
+        delete patch.coupon_discount_paise;
+        delete patch.cart_before_discount_paise;
+        delete patch.cart_after_discount_paise;
+        const retry = await db.from("store_checkout_leads").update(patch).eq("id", existing.id);
+        if (retry.error) return { ok: true, skipped: "update_failed" };
+      } else if (error) return { ok: true, skipped: "update_failed" };
       writeLeadCookie(existing.id);
       return { ok: true };
     }
@@ -399,17 +434,19 @@ export async function listCheckoutLeads(filter: string): Promise<Array<Record<st
   const db = storeDb();
   if (!db) return [];
   await sweepCheckoutLeads();
-  let query = db
-    .from("store_checkout_leads")
-    .select("id,name,phone,email,cart_snapshot,cart_value_paise,checkout_stage,sales_status,was_abandoned,landing_path,attribution_json,marketing_consent,marketing_consent_at,address_snapshot,order_id,converted_at,converted_value_paise,sales_note,is_test,last_activity_at,created_at")
-    .order("last_activity_at", { ascending: false })
-    .limit(100);
-  if (filter === "abandoned") query = query.in("checkout_stage", ["CHECKOUT_ABANDONED", "PAYMENT_ABANDONED"]);
-  else if (filter === "payment") query = query.in("checkout_stage", ["PAYMENT_INITIATED", "PAYMENT_ABANDONED"]);
-  else if (filter === "converted") query = query.eq("checkout_stage", "CONVERTED");
-  else if (filter !== "all") query = query.not("checkout_stage", "in", "(CONVERTED,EXPIRED)");
-  const { data } = await query;
-  return data || [];
+  const baseCols = "id,name,phone,email,cart_snapshot,cart_value_paise,checkout_stage,sales_status,was_abandoned,landing_path,attribution_json,marketing_consent,marketing_consent_at,address_snapshot,order_id,converted_at,converted_value_paise,sales_note,is_test,last_activity_at,created_at";
+  const load = (cols: string) => {
+    let query = db.from("store_checkout_leads").select(cols).order("last_activity_at", { ascending: false }).limit(100);
+    if (filter === "abandoned") query = query.in("checkout_stage", ["CHECKOUT_ABANDONED", "PAYMENT_ABANDONED"]);
+    else if (filter === "payment") query = query.in("checkout_stage", ["PAYMENT_INITIATED", "PAYMENT_ABANDONED"]);
+    else if (filter === "converted") query = query.eq("checkout_stage", "CONVERTED");
+    else if (filter !== "all") query = query.not("checkout_stage", "in", "(CONVERTED,EXPIRED)");
+    return query;
+  };
+  const first = await load(`${baseCols},coupon_code,coupon_discount_paise,cart_before_discount_paise,cart_after_discount_paise`);
+  if (!first.error) return (first.data || []) as unknown as Array<Record<string, unknown>>;
+  const second = await load(baseCols);
+  return (second.data || []) as unknown as Array<Record<string, unknown>>;
 }
 
 export async function updateCheckoutLeadSales(id: string, salesStatus: SalesStatus, note?: string): Promise<boolean> {

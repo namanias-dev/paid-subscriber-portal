@@ -19,7 +19,9 @@ import { requestLeadAttribution } from "@/lib/marketing/requestAttribution";
 import { SESSION_COOKIE, VISITOR_COOKIE } from "@/lib/attribution";
 import { businessChannel } from "@/lib/analytics/notesCommerce";
 import { hashStoreAccessToken, mintStoreAccessToken } from "./accessToken";
-import { holdStoreOffer, offerTraceFromQuote } from "./offers";
+import { holdStoreOffer, offerTraceFromQuote, releaseStoreOfferHold } from "./offers";
+import { couponSnapshot, holdDiscountForOrder, releaseDiscountForOrder, setCartDiscountCode } from "./discountCodes";
+import { customerDiscountMessage, payTimeDiscountMessage, settledOrderMoney } from "./discountPricing";
 
 export interface CheckoutAddress {
   name: string;
@@ -153,9 +155,16 @@ export async function placeCheckout(cart: CartView, address: CheckoutAddress): P
     device_browser: deviceBrowser,
     device_os: deviceOs,
   };
-  const { data: order, error: orderErr } = await db
-    .from("store_orders")
-    .insert({
+  const money = settledOrderMoney({
+    subtotalPaise: quote.subtotal_paise,
+    offerDiscountPaise: quote.discount_paise,
+    couponDiscountPaise: quote.coupon_discount_paise || 0,
+    taxPaise: quote.tax_paise,
+    shippingPaise: quote.shipping_paise,
+  });
+  const trace = offerTraceFromQuote(quote) || {};
+  const couponTrace = quote.coupon ? couponSnapshot(quote.coupon) : null;
+  const orderInsert: Record<string, unknown> = {
       order_no: orderNo,
       status: "PAYMENT_PENDING",
       customer_id: customerId,
@@ -166,13 +175,13 @@ export async function placeCheckout(cart: CartView, address: CheckoutAddress): P
       shipping_address_id: addr.id,
       billing_address_id: addr.id,
       subtotal_paise: quote.subtotal_paise,
-      discount_paise: quote.discount_paise,
+      discount_paise: money.discountPaise,
       shipping_paise: quote.shipping_paise,
       tax_paise: quote.tax_paise,
-      total_paise: quote.total_paise,
+      total_paise: money.totalPaise,
       promo_code: quote.offer_slug || null,
       offer_id: quote.offer_id || null,
-      discount_trace_json: offerTraceFromQuote(quote),
+      discount_trace_json: couponTrace ? { ...trace, coupon: couponTrace } : offerTraceFromQuote(quote),
       quote_json: quote,
       promised_delivery_date: quote.promised_delivery_date,
       tracking_token: null,
@@ -184,10 +193,24 @@ export async function placeCheckout(cart: CartView, address: CheckoutAddress): P
       attribution_adset_id: touch?.adset_id || null,
       attribution_ad_id: touch?.ad_id || null,
       attribution_platform: businessChannel(touch),
-    })
+  };
+  if (quote.coupon_code && quote.coupon_discount_paise > 0) {
+    orderInsert.coupon_code = quote.coupon_code;
+    orderInsert.coupon_id = quote.coupon_id;
+    orderInsert.coupon_discount_paise = quote.coupon_discount_paise;
+    orderInsert.coupon_snapshot = couponTrace;
+  }
+  const { data: order, error: orderErr } = await db
+    .from("store_orders")
+    .insert(orderInsert)
     .select("id,order_no")
     .single();
-  if (orderErr || !order) throw new Error(orderErr?.message || "could not create order");
+  if (orderErr || !order) {
+    if (quote.coupon_code && /coupon_/i.test(orderErr?.message || "")) {
+      throw new Error(customerDiscountMessage("unavailable"));
+    }
+    throw new Error(orderErr?.message || "could not create order");
+  }
 
   const itemRows = quote.items.map((i) => ({
     order_id: order.id,
@@ -219,6 +242,23 @@ export async function placeCheckout(cart: CartView, address: CheckoutAddress): P
     }
   }
 
+  if (quote.coupon && quote.coupon_discount_paise > 0) {
+    const reserved = await holdDiscountForOrder({
+      codeId: quote.coupon.id,
+      orderId: order.id,
+      phoneKey: phone,
+      amountPaise: quote.coupon_discount_paise,
+      customerId,
+      couponCode: quote.coupon_code,
+    });
+    if (!reserved.ok) {
+      await setCartDiscountCode(cart.id, null);
+      await releaseStoreOfferHold(order.id);
+      await db.from("store_orders").update({ status: "PAYMENT_FAILED", updated_at: new Date().toISOString() }).eq("id", order.id);
+      throw new Error(payTimeDiscountMessage(reserved.reason || "invalid"));
+    }
+  }
+
   // Only ready_stock lines reserve/decrement inventory. on_demand titles are
   // printed per order and carry no stock counter, so they never reserve.
   const reservableItems = quote.items
@@ -231,6 +271,7 @@ export async function placeCheckout(cart: CartView, address: CheckoutAddress): P
       ttlSeconds: QUOTE_TTL_SECONDS,
     });
     if (!reserved.ok) {
+      await releaseDiscountForOrder(order.id);
       await db.from("store_orders").update({ status: "PAYMENT_FAILED", updated_at: new Date().toISOString() }).eq("id", order.id);
       const names = (reserved.shortfalls || []).map((s) => s.name).filter(Boolean).join(", ");
       throw new Error(names ? `Just sold out: ${names}` : "One of these titles just sold out. Refresh and try again.");
@@ -246,7 +287,11 @@ export async function placeCheckout(cart: CartView, address: CheckoutAddress): P
     status: "INITIATED",
     next_verify_at: new Date(Date.now() + 2 * 60_000).toISOString(),
   });
-  if (payErr) throw new Error(payErr.message);
+  if (payErr) {
+    await releaseDiscountForOrder(order.id);
+    await db.from("store_orders").update({ status: "PAYMENT_FAILED", updated_at: new Date().toISOString() }).eq("id", order.id);
+    throw new Error(payErr.message);
+  }
 
   const paymentUrl = buildStorePaymentUrl({
     referenceNo,
@@ -255,7 +300,11 @@ export async function placeCheckout(cart: CartView, address: CheckoutAddress): P
     email: address.email?.trim() || `${phone}@namanias.invalid`,
     mobile: phone,
   });
-  if (!paymentUrl) throw new Error("Payment gateway is not configured");
+  if (!paymentUrl) {
+    await releaseDiscountForOrder(order.id);
+    await db.from("store_orders").update({ status: "PAYMENT_FAILED", updated_at: new Date().toISOString() }).eq("id", order.id);
+    throw new Error("Payment gateway is not configured");
+  }
 
   await db.from("store_order_events").insert({
     order_id: order.id,
@@ -292,6 +341,9 @@ export async function placeCheckout(cart: CartView, address: CheckoutAddress): P
       attribution: attr.attribution,
       visitorId,
       sessionId,
+      couponCode: quote.coupon_code,
+      couponDiscountPaise: quote.coupon_discount_paise || 0,
+      productIds: quote.items.map((item) => item.product_id),
     }))
     .catch(() => {});
 

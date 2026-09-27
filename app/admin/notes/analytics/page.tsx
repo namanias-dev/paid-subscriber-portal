@@ -14,12 +14,13 @@ const KEYS = new Set(["today", "yesterday", "7d", "30d", "month", "custom"]);
 export default async function NotesAnalyticsPage({
   searchParams,
 }: {
-  searchParams: { range?: string; from?: string; to?: string };
+  searchParams: { range?: string; from?: string; to?: string; code?: string };
 }) {
   if (!(await requirePermission("store_manage_orders"))) notFound();
   const key = (KEYS.has(searchParams.range || "") ? searchParams.range : "7d") as NotesRangeKey;
   const bounds = notesRangeBounds(key, new Date(), { from: searchParams.from, to: searchParams.to });
   const report = await loadNotesAnalytics({ key, from: searchParams.from, to: searchParams.to });
   const leads = await loadCheckoutLeadReport(bounds.start, bounds.end);
-  return <NotesAnalytics report={report} range={key} label={bounds.label} leads={leads} />;
+  const highlightCode = (searchParams.code || "").trim().toUpperCase();
+  return <NotesAnalytics report={report} range={key} label={bounds.label} leads={leads} highlightCode={highlightCode} />;
 }

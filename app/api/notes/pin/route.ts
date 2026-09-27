@@ -3,6 +3,7 @@ import { getCartView } from "@/lib/store/cart";
 import { buildFrozenQuote } from "@/lib/store/quote";
 import { noStoreJson, requireLiveStore } from "@/lib/store/http";
 import { formatPaise } from "@/lib/store/money";
+import { discountCodesEnabled } from "@/lib/store/discountCodes";
 
 export const dynamic = "force-dynamic";
 
@@ -34,6 +35,10 @@ export async function GET(req: Request) {
     offer_id: string | null;
     discount_value: number | null;
     discount_type: string | null;
+    coupon_code: string | null;
+    coupon_label: string | null;
+    coupon_notice: string | null;
+    discount_codes_enabled: boolean;
   } | null = null;
   if (cart && cart.items.length && result.serviceable) {
     try {
@@ -53,6 +58,10 @@ export async function GET(req: Request) {
         offer_id: q.offer_id,
         discount_value: q.discount_value,
         discount_type: q.discount_type,
+        coupon_code: q.coupon_code,
+        coupon_label: q.coupon_discount_paise > 0 ? formatPaise(q.coupon_discount_paise) : null,
+        coupon_notice: q.coupon_notice,
+        discount_codes_enabled: await discountCodesEnabled(),
       };
     } catch {
       /* leave quote null — shipping_paise below is still accurate */

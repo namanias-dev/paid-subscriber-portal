@@ -11,16 +11,27 @@
  *  - Every terminal write is conditional on the row still being open, so a
  *    duplicate callback, a retried cron and a customer refreshing the order page
  *    at the same moment produce exactly one capture between them.
- *  - A paid response whose amount does not match the order is NOT captured. It is
- *    alerted. An amount mismatch means either a tampered checkout or a bug, and
- *    guessing which is not something code should do.
+ *  - A paid response whose MERCHANT amount does not exactly equal the order
+ *    total, in integer paise, is NOT captured. The cardholder total may be
+ *    higher when ICICI adds a processing fee. That fee is recorded and is not
+ *    the order amount. A missing merchant amount fails closed.
  */
 import { storeDb } from "@/lib/store/db";
+import { formatPaise } from "@/lib/store/money";
 import { storeOpsAlert } from "@/lib/store/alerts";
 import { holdReservationsUntilShip, releaseReservations } from "@/lib/store/inventory";
 import { consumeStoreOfferHold, releaseStoreOfferHold } from "@/lib/store/offers";
+import { captureDiscountForOrder, releaseDiscountForOrder } from "@/lib/store/discountCodes";
 import { isStoreReference, STORE_REFERENCE_SQL_LIKE } from "@/lib/store/references";
-import { storeEazypayVerify, paiseToGatewayAmount } from "./eazypay";
+import { storeEazypayVerify } from "./eazypay";
+import {
+  formatReconciledPaymentAlert,
+  merchantAmountDecision,
+  normalizeEazypayVerifyAmounts,
+  verifyAmountPayload,
+  type EazypayNormalizedAmounts,
+  type SignedCallbackAmounts,
+} from "./eazypayAmounts";
 import {
   mapStoreVerifyStatus,
   nextVerifyDelayMs,
@@ -54,7 +65,7 @@ export async function applyStoreVerify(
 
   const { data: row } = await db
     .from("store_order_payments")
-    .select("id,order_id,reference_no,status,amount_paise,gateway_ref,verify_attempts")
+    .select("id,order_id,reference_no,status,amount_paise,gateway_ref,verify_attempts,verify_payload,callback_payload,verified_signature")
     .eq("reference_no", referenceNo)
     .maybeSingle();
 
@@ -98,10 +109,16 @@ export async function applyStoreVerify(
     };
   }
 
-  // A paid answer must agree with what we asked for, to the paisa.
-  if (outcome === "paid" && result.amount != null) {
-    const expected = paiseToGatewayAmount(row.amount_paise);
-    if (Number(result.amount) !== Number(expected)) {
+  // A paid answer must agree with the merchant amount, in integer paise.
+  // `amount` on the verify packet is the cardholder total and is not compared.
+  const normalized = normalizeEazypayVerifyAmounts({
+    packet: result.packet,
+    expectedReference: referenceNo,
+    signedCallback: signedCallbackAmounts(row),
+  });
+  if (outcome === "paid") {
+    const decision = merchantAmountDecision(normalized, row.amount_paise);
+    if (decision !== "accept") {
       await db
         .from("store_order_payments")
         .update({
@@ -109,20 +126,18 @@ export async function applyStoreVerify(
           last_verify_at: nowIso,
           next_verify_at: null,
           raw_verify_status: result.rawStatus,
-          verify_payload: { amount_mismatch: true, gateway_amount: result.amount, expected },
+          verify_payload: verifyAmountPayload({
+            normalized,
+            rawStatus: result.rawStatus,
+            httpStatus: result.httpStatus,
+            amountMismatch: true,
+            expectedPaise: row.amount_paise,
+          }),
           updated_at: nowIso,
         })
         .eq("id", row.id)
         .in("status", STORE_OPEN_STATUSES);
-      await storeOpsAlert(
-        [
-          "🚨 <b>Notes Store amount mismatch — NOT captured</b>",
-          `reference: <code>${referenceNo}</code>`,
-          `gateway said: <b>₹${result.amount}</b>`,
-          `order expects: <b>₹${expected}</b>`,
-          "Payment left open deliberately. Resolve by hand.",
-        ].join("\n"),
-      );
+      await storeOpsAlert(amountGuardAlert(referenceNo, row.amount_paise, normalized, decision));
       return { outcome: "amount_mismatch", status: row.status, changed: false, rawStatus: result.rawStatus };
     }
   }
@@ -139,7 +154,11 @@ export async function applyStoreVerify(
       settlement: outcome === "paid" ? storeSettlementFor(result.rawStatus) : null,
       gateway_ref: result.gatewayRef || row.gateway_ref,
       raw_verify_status: result.rawStatus,
-      verify_payload: { status: result.rawStatus, amount: result.amount, http: result.httpStatus },
+      verify_payload: verifyAmountPayload({
+        normalized,
+        rawStatus: result.rawStatus,
+        httpStatus: result.httpStatus,
+      }),
       verify_attempts: attempts,
       last_verify_at: nowIso,
       next_verify_at: null,
@@ -156,6 +175,16 @@ export async function applyStoreVerify(
   }
 
   const orderNo = await applyOrderTerminal(db, row.order_id, outcome, row.amount_paise, referenceNo);
+  if (outcome === "paid" && changed && priorAmountMismatch(row.verify_payload) && orderNo) {
+    const fee = normalized.cardholder_total_paise != null && normalized.merchant_amount_paise != null
+      ? normalized.cardholder_total_paise - normalized.merchant_amount_paise
+      : null;
+    void storeOpsAlert(formatReconciledPaymentAlert({
+      orderNo,
+      orderAmountPaise: row.amount_paise,
+      gatewayFeePaise: fee,
+    })).catch(() => {});
+  }
 
   console.info(
     `[store/verify] ref=${referenceNo} raw=${result.rawStatus} -> ${nextStatus} source=${opts?.source || "unknown"}`,
@@ -216,6 +245,7 @@ async function applyOrderTerminal(
     }
     if (data?.length) {
       await consumeStoreOfferHold(orderId);
+      await captureDiscountForOrder(orderId);
       const { scheduleStoreInvoice } = await import("../invoice/issue");
       scheduleStoreInvoice(orderId);
       void import("@/lib/analytics/notesPurchase")
@@ -248,6 +278,7 @@ async function applyOrderTerminal(
   }
   if (data?.length) {
     await releaseStoreOfferHold(orderId);
+    await releaseDiscountForOrder(orderId);
     void import("@/lib/analytics/notesPurchase")
       .then((m) => m.recordNotesPaymentFailed(orderId, outcome))
       .catch(() => {});
@@ -277,6 +308,11 @@ export async function sweepStoreVerify(opts?: { limit?: number }): Promise<Store
   const db = storeDb();
   if (!db) return out;
 
+  try {
+    const { releaseExpiredDiscountHolds } = await import("@/lib/store/discountCodes");
+    await releaseExpiredDiscountHolds();
+  } catch { /* an expired-hold sweep must not stop payment reconciliation */ }
+
   const { data } = await db
     .from("store_order_payments")
     .select("reference_no")
@@ -302,4 +338,52 @@ export async function sweepStoreVerify(opts?: { limit?: number }): Promise<Store
     await new Promise((r) => setTimeout(r, 200));
   }
   return out;
+}
+
+function signedCallbackAmounts(row: {
+  verified_signature?: boolean | null;
+  callback_payload?: unknown;
+}): SignedCallbackAmounts | null {
+  if (row.verified_signature !== true || !row.callback_payload || typeof row.callback_payload !== "object") return null;
+  const fields = row.callback_payload as Record<string, unknown>;
+  const text = (key: string) => (typeof fields[key] === "string" ? fields[key] : null);
+  return {
+    transactionAmount: text("Transaction Amount"),
+    serviceTaxAmount: text("Service Tax Amount"),
+  };
+}
+
+function priorAmountMismatch(payload: unknown): boolean {
+  return !!payload && typeof payload === "object" && (payload as { amount_mismatch?: unknown }).amount_mismatch === true;
+}
+
+function amountGuardAlert(
+  referenceNo: string,
+  expectedPaise: number,
+  normalized: EazypayNormalizedAmounts,
+  decision: "mismatch" | "untrusted",
+): string {
+  const reference = referenceNo.replace(/[<>&]/g, "");
+  if (decision === "mismatch" && normalized.merchant_amount_paise != null) {
+    const lines = [
+      "🚨 <b>Notes Store amount mismatch — NOT captured</b>",
+      `reference: <code>${reference}</code>`,
+      `merchant amount: <b>${formatPaise(normalized.merchant_amount_paise)}</b>`,
+      `order expects: <b>${formatPaise(expectedPaise)}</b>`,
+    ];
+    if (
+      normalized.cardholder_total_paise != null &&
+      normalized.cardholder_total_paise !== normalized.merchant_amount_paise
+    ) {
+      lines.push(`cardholder total: ${formatPaise(normalized.cardholder_total_paise)} (gateway fee, not the order)`);
+    }
+    lines.push("Payment left open deliberately. Resolve by hand.");
+    return lines.join("\n");
+  }
+  return [
+    "🚨 <b>Notes Store amount unverified — NOT captured</b>",
+    `reference: <code>${reference}</code>`,
+    "ICICI did not return a trustworthy merchant amount.",
+    "Payment left open deliberately. Resolve by hand.",
+  ].join("\n");
 }

@@ -30,8 +30,9 @@ async function run(req: Request) {
     const result = await sweepStoreVerify({ limit: 200 });
     const { autoPreparePaidOrders } = await import("@/lib/store/autoPrepare");
     const autoPrepare = await autoPreparePaidOrders();
-    const { resumeIncompleteInvoices } = await import("@/lib/store/invoice/issue");
+    const { resumeIncompleteInvoices, repairMissingPaidInvoices } = await import("@/lib/store/invoice/issue");
     const invoicesResumed = await resumeIncompleteInvoices();
+    const invoicesRepaired = await repairMissingPaidInvoices();
     const db = (await import("@/lib/store/db")).storeDb();
     let expiredReservations = 0;
     if (db) {
@@ -39,7 +40,7 @@ async function run(req: Request) {
       expiredReservations = Number(data || 0);
     }
     const misroute = await storeMisrouteProbe();
-    return NextResponse.json({ ok: true, result, autoPrepare, expiredReservations, invoicesResumed, misroute, ts: Date.now() });
+    return NextResponse.json({ ok: true, result, autoPrepare, expiredReservations, invoicesResumed, invoicesRepaired, misroute, ts: Date.now() });
   } catch (e) {
     console.error("[cron/notes-store-verify] failed:", (e as Error).message);
     return NextResponse.json({ ok: false, error: (e as Error).message }, { status: 500 });

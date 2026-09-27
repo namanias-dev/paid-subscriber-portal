@@ -131,14 +131,20 @@ export interface StoreVerifyResult {
   rawStatus: string | null;
   /** ICICI's transaction id, when present. */
   gatewayRef: string | null;
-  /** Amount echoed back, in rupees, when present. */
+  /**
+   * Cardholder total from the verify `amount` field, in rupees, when present.
+   * This is NOT the merchant amount when ICICI adds a card processing fee.
+   * Order comparison uses `BA` via normalizeEazypayVerifyAmounts.
+   */
   amount: number | null;
+  /** Lower-cased verify pairs. Null when ICICI returned no packet. */
+  packet: Record<string, string> | null;
   httpStatus: number | null;
   error?: string;
 }
 
 /** Parse the plaintext `key=value&key=value` packet ICICI returns. */
-function parseVerifyPacket(body: string): Record<string, string> {
+export function parseVerifyPacket(body: string): Record<string, string> {
   const out: Record<string, string> = {};
   for (const part of (body || "").split(/[&\r\n]+/)) {
     const eq = part.indexOf("=");
@@ -202,6 +208,7 @@ export async function storeEazypayVerify(
     rawStatus: null,
     gatewayRef: null,
     amount: null,
+    packet: null,
     httpStatus: httpStatus ?? null,
     error,
   });
@@ -237,7 +244,7 @@ export async function storeEazypayVerify(
     if (rawStatus === null && Object.keys(packet).length === 0) {
       // A body with no recognisable pairs means ICICI does not know this
       // reference yet. Not an answer.
-      return { reachable: true, rawStatus: null, gatewayRef: null, amount: null, httpStatus: res.status };
+      return { reachable: true, rawStatus: null, gatewayRef: null, amount: null, packet: null, httpStatus: res.status };
     }
 
     // ICICI writes literal "NA" / "null" placeholders for empty fields.
@@ -253,6 +260,7 @@ export async function storeEazypayVerify(
       rawStatus,
       gatewayRef: clean(packet["ezpaytranid"]) || null,
       amount,
+      packet,
       httpStatus: res.status,
     };
   } catch (e) {

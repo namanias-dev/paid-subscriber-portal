@@ -116,32 +116,50 @@ export function captureAttribution(): void {
   } catch { /* ignore */ }
 }
 
-/** Fire an event to the first-party beacon. Never throws; non-blocking. */
+function emitBeacon(event: EventName, props: Record<string, unknown>): void {
+  const safe = stripAnalyticsProps(props);
+  if (event.startsWith("notes_") && safe.schema_version == null) safe.schema_version = NOTES_SCHEMA_VERSION;
+  const attr = parseAttrCookie(readCookie(ATTR_COOKIE));
+  if (event.startsWith("notes_") && isQaState(attr)) safe.is_test = true;
+  const payload = JSON.stringify({
+    event_name: event,
+    props: safe,
+    page_path: location.pathname,
+    referrer: document.referrer || null,
+    visitor_id: readCookie(VISITOR_COOKIE),
+    session_id: readCookie(SESSION_COOKIE),
+  });
+  const url = "/api/track";
+  if (navigator.sendBeacon) {
+    navigator.sendBeacon(url, new Blob([payload], { type: "application/json" }));
+  } else {
+    void fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: payload, keepalive: true }).catch(() => {});
+  }
+  if (event.startsWith("notes_")) dispatchNotesProviders(event, safe);
+  if (localStorage.getItem("nsa_analytics_debug") === "1") {
+    console.info("[notes-analytics]", event, safe);
+  }
+}
+
+/**
+ * Fire an event to the first-party beacon. Never throws; non-blocking.
+ * Identity cookies are written before the payload is read. Page effects run
+ * before the layout tracker, so the first store view used to leave with no id.
+ */
 export function trackClient(event: EventName, props: Record<string, unknown> = {}): void {
   if (!isBrowser()) return;
   try {
-    const safe = stripAnalyticsProps(props);
-    if (event.startsWith("notes_") && safe.schema_version == null) safe.schema_version = NOTES_SCHEMA_VERSION;
-    const attr = parseAttrCookie(readCookie(ATTR_COOKIE));
-    if (event.startsWith("notes_") && isQaState(attr)) safe.is_test = true;
-    const payload = JSON.stringify({
-      event_name: event,
-      props: safe,
-      page_path: location.pathname,
-      referrer: document.referrer || null,
-      visitor_id: readCookie(VISITOR_COOKIE),
-      session_id: readCookie(SESSION_COOKIE),
-    });
-    const url = "/api/track";
-    if (navigator.sendBeacon) {
-      navigator.sendBeacon(url, new Blob([payload], { type: "application/json" }));
-    } else {
-      void fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: payload, keepalive: true }).catch(() => {});
+    ensureVisitorId();
+    const session = ensureSession();
+    if (!readCookie(ATTR_COOKIE)) captureAttribution();
+    if (session?.isNew && event !== "session_start") {
+      emitBeacon("session_start", {
+        entry_path: location.pathname,
+        is_new_visitor: !document.referrer || !document.referrer.includes(location.hostname),
+        utm_present: /utm_/.test(location.search),
+      });
     }
-    if (event.startsWith("notes_")) dispatchNotesProviders(event, safe);
-    if (localStorage.getItem("nsa_analytics_debug") === "1") {
-      console.info("[notes-analytics]", event, safe);
-    }
+    emitBeacon(event, props);
   } catch { /* ignore */ }
 }
 

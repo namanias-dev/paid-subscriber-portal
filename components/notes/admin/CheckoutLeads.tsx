@@ -13,6 +13,10 @@ interface LeadRow {
   email: string | null;
   cart_snapshot: Array<{ name?: string; qty?: number; sku?: string }>;
   cart_value_paise: number;
+  coupon_code?: string | null;
+  coupon_discount_paise?: number | null;
+  cart_before_discount_paise?: number | null;
+  cart_after_discount_paise?: number | null;
   checkout_stage: CheckoutStage;
   sales_status: SalesStatus;
   was_abandoned: boolean;
@@ -101,7 +105,7 @@ export default function CheckoutLeads() {
                 <span className="font-semibold text-[var(--ca-navy)]">{lead.name || "Checkout"} · {maskPhone(lead.phone)}{lead.is_test ? " · QA" : ""}</span>
                 <span className="text-sm text-[var(--ca-navy)]/60">{formatPaise(lead.cart_value_paise || 0)}</span>
               </span>
-              <span className="mt-1 block text-sm text-[var(--ca-navy)]/70">{product} · {lead.checkout_stage.replaceAll("_", " ")} · {businessChannel(touch)} · {leadPriority(lead.checkout_stage)}</span>
+              <span className="mt-1 block text-sm text-[var(--ca-navy)]/70">{product} · {lead.checkout_stage.replaceAll("_", " ")} · {businessChannel(touch)} · {leadPriority(lead.checkout_stage)}{lead.coupon_code ? ` · ${lead.coupon_code}` : ""}</span>
             </button>
           );
         })}
@@ -126,6 +130,13 @@ export default function CheckoutLeads() {
             <dl className="mt-4 space-y-2 text-sm text-[var(--ca-navy)]">
               <div><dt className="text-[11px] uppercase tracking-wide text-[var(--ca-navy)]/45">Stage</dt><dd>{open.checkout_stage}</dd></div>
               <div><dt className="text-[11px] uppercase tracking-wide text-[var(--ca-navy)]/45">Cart</dt><dd>{(open.cart_snapshot || []).map((line) => `${line.name} × ${line.qty}`).join(", ") || "—"}</dd></div>
+              {open.coupon_code && (
+                <>
+                  <div><dt className="text-[11px] uppercase tracking-wide text-[var(--ca-navy)]/45">Code</dt><dd>{open.coupon_code}</dd></div>
+                  <div><dt className="text-[11px] uppercase tracking-wide text-[var(--ca-navy)]/45">Offer</dt><dd>− {formatPaise(open.coupon_discount_paise || 0)}</dd></div>
+                  <div><dt className="text-[11px] uppercase tracking-wide text-[var(--ca-navy)]/45">Checkout total</dt><dd>{formatPaise(open.cart_after_discount_paise ?? open.cart_value_paise)} + shipping</dd></div>
+                </>
+              )}
               <div><dt className="text-[11px] uppercase tracking-wide text-[var(--ca-navy)]/45">Source</dt><dd>{businessChannel(open.attribution_json?.last_touch as AttributionTouch | undefined)} · {open.attribution_json?.last_touch?.campaign || "—"} · {open.attribution_json?.last_touch?.content || ""}</dd></div>
               <div><dt className="text-[11px] uppercase tracking-wide text-[var(--ca-navy)]/45">First touch</dt><dd>{businessChannel(open.attribution_json?.first_touch as AttributionTouch | undefined)} · {open.attribution_json?.first_touch?.campaign || "—"}</dd></div>
               <div><dt className="text-[11px] uppercase tracking-wide text-[var(--ca-navy)]/45">Consent</dt><dd>{open.marketing_consent ? "Updates and offers allowed" : "No promotional consent"}</dd></div>

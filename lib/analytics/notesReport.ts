@@ -19,10 +19,13 @@ const EVENT_NAMES = [
   "notes_physical_video_50",
   "notes_physical_video_completed",
   "notes_teaching_preview_started",
+  "notes_teaching_inline_play",
   "notes_teaching_video_50",
   "notes_teaching_video_completed",
   "notes_added_to_cart",
   "notes_checkout_started",
+  "notes_checkout_step_viewed",
+  "notes_address_confirmed",
   "notes_payment_initiated",
   "notes_payment_failed",
   "notes_checkout_validation_error",
@@ -30,6 +33,13 @@ const EVENT_NAMES = [
   "notes_shipping_quote_error",
   "notes_shop_after_teaching_clicked",
   "notes_purchase",
+  "notes_discount_applied",
+  "notes_discount_rejected",
+  "notes_discount_removed",
+  "notes_discount_payment_reserved",
+  "notes_discount_reservation_released",
+  "notes_discount_redeemed",
+  "notes_purchase_with_discount",
 ];
 
 export async function loadNotesAnalytics(input: { key: NotesRangeKey; from?: string; to?: string }): Promise<NotesAnalyticsReport> {
@@ -54,13 +64,23 @@ export async function loadNotesAnalytics(input: { key: NotesRangeKey; from?: str
     events.push(...rows);
     if (rows.length < 1000) break;
   }
-  const { data: orderRows } = await db
+  const orderSelect = "id,status,total_paise,discount_paise,paid_at,promo_code,attribution_source,attribution_platform,attribution_json,coupon_code,coupon_discount_paise";
+  const orderQuery = await db
     .from("store_orders")
-    .select("id,status,total_paise,discount_paise,paid_at,promo_code,attribution_source,attribution_platform,attribution_json")
+    .select(orderSelect)
     .not("paid_at", "is", null)
     .gte("paid_at", start)
     .lt("paid_at", end)
     .limit(2000);
+  const orderRows = orderQuery.error
+    ? (await db
+      .from("store_orders")
+      .select("id,status,total_paise,discount_paise,paid_at,promo_code,attribution_source,attribution_platform,attribution_json")
+      .not("paid_at", "is", null)
+      .gte("paid_at", start)
+      .lt("paid_at", end)
+      .limit(2000)).data
+    : orderQuery.data;
   const orders = (orderRows || []) as NotesOrderFact[];
   const ids = orders.map((order) => order.id);
   let items: NotesItemFact[] = [];

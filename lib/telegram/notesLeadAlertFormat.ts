@@ -38,6 +38,9 @@ export interface NotesLeadAlertRecord {
   salesStatus: SalesStatus;
   cart: NotesLeadCartLine[];
   cartValuePaise: number;
+  couponCode?: string | null;
+  couponDiscountPaise?: number | null;
+  cartAfterDiscountPaise?: number | null;
   lastActivityAt: string;
   marketingConsent: boolean;
   touch: NotesLeadTouch | null;
@@ -213,7 +216,10 @@ export function formatNotesLeadAlertHtml(input: {
     `📞 <b>Phone:</b> ${escapeHtml(formatNotesAlertPhone(lead.phone, "IN"))}`,
     "",
     productBlock(lead.cart),
-    `💰 <b>Cart:</b> ${escapeHtml(inrExact(paiseToRupees(lead.cartValuePaise)))}`,
+    `💰 <b>Cart:</b> ${escapeHtml(inrExact(paiseToRupees(lead.cartAfterDiscountPaise ?? lead.cartValuePaise)))}`,
+    ...(lead.couponCode && (lead.couponDiscountPaise || 0) > 0
+      ? [`Offer: ${escapeHtml(lead.couponCode)} · ${escapeHtml(inrExact(paiseToRupees(lead.couponDiscountPaise || 0)))} off`]
+      : []),
     "",
     `<b>Stage:</b> ${escapeHtml(stage)}`,
     `<b>Last activity:</b> ${escapeHtml(formatNotesAlertStamp(lead.lastActivityAt))}`,

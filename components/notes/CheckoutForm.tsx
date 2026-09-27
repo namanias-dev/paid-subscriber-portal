@@ -2,13 +2,18 @@
 
 import { useEffect, useRef, useState } from "react";
 import { trackClient } from "@/lib/analytics/client";
+import { checkoutFailureReason } from "@/lib/analytics/checkoutFailure";
 import { addressAnalyticsProps, addressFingerprint, buildDeliveryGoogleMapsUrl, canonicalDelivery, formatDeliveryAddress } from "@/lib/store/deliveryAddress";
 import { pinPlaceConflict } from "@/lib/store/address";
+import DiscountCodeField from "@/components/notes/DiscountCodeField";
 
 interface CartJson {
   item_count: number;
   subtotal_label: string;
   items: { name: string; qty: number; line_label: string }[];
+  discount_codes_enabled?: boolean;
+  discount_code?: string | null;
+  coupon_label?: string | null;
 }
 
 interface QuoteJson {
@@ -20,10 +25,15 @@ interface QuoteJson {
   total_label: string;
   offer_name?: string | null;
   offer_id?: string | null;
+  coupon_code?: string | null;
+  coupon_label?: string | null;
+  coupon_notice?: string | null;
+  discount_codes_enabled?: boolean;
 }
 
 export default function CheckoutForm() {
   const [cart, setCart] = useState<CartJson | null>(null);
+  const [cartStatus, setCartStatus] = useState<"loading" | "ready" | "error">("loading");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [pinInfo, setPinInfo] = useState<string | null>(null);
@@ -32,8 +42,12 @@ export default function CheckoutForm() {
   const [postal, setPostal] = useState<{ city: string | null; state: string | null }>({ city: null, state: null });
   const [confirmedHash, setConfirmedHash] = useState<string | null>(null);
   const shownRef = useRef(false);
+  const confirmRef = useRef<HTMLElement>(null);
   const editedRef = useRef(false);
+  const submitLock = useRef(false);
   const [marketingConsent, setMarketingConsent] = useState(false);
+  const [discountEnabled, setDiscountEnabled] = useState(false);
+  const [couponNotice, setCouponNotice] = useState<string | null>(null);
   const phoneTouched = useRef(false);
   const [form, setForm] = useState({
     name: "",
@@ -93,8 +107,15 @@ export default function CheckoutForm() {
     trackClient("notes_checkout_step_viewed", { step: "address" });
     fetch("/api/notes/cart", { cache: "no-store", credentials: "same-origin" })
       .then((r) => r.json())
-      .then((j) => setCart(j.cart))
-      .catch(() => trackClient("notes_checkout_api_error", { endpoint: "cart", recoverable: true }));
+      .then((j) => {
+        setCart(j.cart);
+        setCartStatus("ready");
+        setDiscountEnabled(Boolean(j.cart?.discount_codes_enabled));
+      })
+      .catch(() => {
+        setCartStatus("error");
+        trackClient("notes_checkout_api_error", { endpoint: "cart", recoverable: true, reason: "network" });
+      });
   }, []);
 
   async function lookupPin(pin: string) {
@@ -119,6 +140,8 @@ export default function CheckoutForm() {
     setPinReady(true);
     setForm((f) => ({ ...f, city: f.city || json.city || "", state: f.state || json.state || "" }));
     setQuote(json.quote || null);
+    setCouponNotice(json.quote?.coupon_notice || null);
+    if (typeof json.quote?.discount_codes_enabled === "boolean") setDiscountEnabled(json.quote.discount_codes_enabled);
     setPinInfo(`Delivered by ${json.promised_label}.`);
     trackClient("notes_checkout_step_viewed", { step: "shipping_quote" });
   }
@@ -168,6 +191,12 @@ export default function CheckoutForm() {
     if (!canConfirm || shownRef.current) return;
     shownRef.current = true;
     trackClient("notes_address_confirmation_shown", addressAnalyticsProps({ itemCount: cart?.item_count }));
+    if (window.matchMedia("(max-width: 1023px)").matches) {
+      // Scroll the confirm control, not the whole card. A bottom cookie sheet
+      // covers the last ~20rem; scroll-margin keeps the button above it.
+      const target = confirmRef.current?.querySelector("[data-confirm-delivery]");
+      (target instanceof HTMLElement ? target : confirmRef.current)?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
   }, [canConfirm, cart?.item_count]);
 
   useEffect(() => {
@@ -181,6 +210,7 @@ export default function CheckoutForm() {
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (submitLock.current) return;
     if (confirmedHash !== addressFingerprint(canonicalDelivery(form))) {
       setErr("Confirm the delivery address before paying.");
       trackClient("notes_address_validation_error", addressAnalyticsProps({ reason: "unconfirmed" }));
@@ -195,6 +225,7 @@ export default function CheckoutForm() {
     if (!form.line1.trim()) {
       trackClient("notes_checkout_validation_error", { field: "address", reason: "required" });
     }
+    submitLock.current = true;
     setBusy(true);
     setErr(null);
     trackClient("notes_checkout_step_viewed", { step: "payment_clicked", item_count: cart?.item_count ?? 0 });
@@ -209,17 +240,41 @@ export default function CheckoutForm() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ ...form, address_hash: confirmedHash }),
       });
-      const json = await res.json();
-      if (!json.ok) throw new Error(json.error || "Payment could not be started.");
+      const json = await res.json().catch(() => null);
+      if (!json || typeof json !== "object") throw new Error("Payment response was not valid JSON.");
+      if (!json.ok || typeof json.payment_url !== "string" || !json.payment_url) {
+        throw new Error(typeof json.error === "string" && json.error ? json.error : "Payment could not be started.");
+      }
       trackClient("notes_payment_gateway_opened", { cta_id: "pay_securely", item_count: cart?.item_count ?? 0 });
       window.location.href = json.payment_url;
     } catch (e2) {
-      trackClient("notes_checkout_api_error", { endpoint: "checkout", recoverable: true, stage: "order_create" });
-      trackClient("notes_payment_failed", { stage: "checkout_submit" });
-      setErr((e2 as Error).message);
+      const message = e2 instanceof Error ? e2.message : "Payment could not be started.";
+      trackClient("notes_checkout_api_error", {
+        endpoint: "checkout",
+        recoverable: true,
+        stage: "order_create",
+        reason: checkoutFailureReason(message),
+      });
+      setErr(message);
+      if (form.pincode.length === 6) void lookupPin(form.pincode);
+      submitLock.current = false;
       setBusy(false);
     }
   }
+
+  const payBlocked = cartStatus === "loading"
+    ? "Loading your cart."
+    : cartStatus === "error" || !cart
+      ? "Cart could not be loaded. Refresh the page and try again."
+      : !cart.item_count
+        ? "Your cart is empty."
+        : !quote || !pinReady
+          ? "Enter a delivery PIN to calculate shipping and the payable total."
+          : placeConflict
+            ? placeConflict
+            : !confirmed
+              ? "Tap “Yes, deliver here” before payment."
+              : null;
 
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
     setForm((f) => ({ ...f, [k]: e.target.value }));
@@ -249,7 +304,7 @@ export default function CheckoutForm() {
         </label>
         {placeConflict && <p className="text-sm text-red-700" role="alert">{placeConflict}</p>}
         {canConfirm && (
-          <section className="rounded-2xl border border-[var(--ca-navy)]/10 bg-[#f7f5ef] p-4">
+          <section ref={confirmRef} className="rounded-2xl border border-[var(--ca-navy)]/10 bg-[#f7f5ef] p-4">
             <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--ca-gold-dark)]">Confirm delivery address</p>
             <p className="mt-2 whitespace-pre-line text-sm leading-relaxed text-[var(--ca-navy)]">{formatDeliveryAddress(canonical)}</p>
             <p className="mt-2 text-xs text-[var(--ca-navy)]/60">Please confirm this is where you want your Notes delivered.</p>
@@ -261,7 +316,7 @@ export default function CheckoutForm() {
               )}
               <button type="button" className="min-h-11 rounded-full border border-[var(--ca-navy)]/15 px-3 text-sm font-semibold" onClick={() => document.getElementById("delivery-line1")?.focus()}>Edit address</button>
             </div>
-            <button type="button" className="ca-focus mt-3 inline-flex min-h-11 w-full items-center justify-center rounded-full bg-[var(--ca-navy)] text-sm font-semibold text-white" onClick={() => { setConfirmedHash(fingerprint); trackClient("notes_address_confirmed", addressAnalyticsProps({ itemCount: cart?.item_count })); }}>
+            <button type="button" data-confirm-delivery className="ca-focus mt-3 inline-flex min-h-11 w-full scroll-mb-[20rem] items-center justify-center rounded-full bg-[var(--ca-navy)] text-sm font-semibold text-white lg:scroll-mb-0" onClick={() => { setConfirmedHash(fingerprint); trackClient("notes_address_confirmed", addressAnalyticsProps({ itemCount: cart?.item_count })); }}>
               {confirmed ? "Delivering here" : "Yes, deliver here"}
             </button>
           </section>
@@ -293,6 +348,29 @@ export default function CheckoutForm() {
               <span className="tabular-nums font-medium">−{quote.discount_label}</span>
             </p>
           )}
+          {(discountEnabled || quote?.coupon_code || couponNotice) && (
+            <div className="py-1">
+              <DiscountCodeField
+                enabled={discountEnabled}
+                appliedCode={quote ? quote.coupon_code || null : cart?.discount_code || null}
+                appliedLabel={quote ? quote.coupon_label || null : cart?.coupon_label || null}
+                notice={couponNotice}
+                onChanged={() => {
+                  void fetch("/api/notes/cart", { cache: "no-store", credentials: "same-origin" })
+                    .then((r) => r.json())
+                    .then((j) => setCart(j.cart))
+                    .catch(() => {});
+                  if (form.pincode.length === 6) void lookupPin(form.pincode);
+                }}
+              />
+            </div>
+          )}
+          {quote?.coupon_code && quote.coupon_label && (
+            <p className="flex justify-between">
+              <span className="text-[var(--ca-navy)]/70">Discount · {quote.coupon_code}</span>
+              <span className="tabular-nums font-medium">−{quote.coupon_label}</span>
+            </p>
+          )}
           <p className="flex justify-between">
             <span className="text-[var(--ca-navy)]/70">Shipping</span>
             <span className="tabular-nums font-medium">
@@ -322,10 +400,14 @@ export default function CheckoutForm() {
         <button
           type="submit"
           disabled={busy || !cart?.item_count || !confirmed}
+          aria-describedby={payBlocked ? "checkout-pay-status" : undefined}
           className="ca-focus ns-press mt-5 inline-flex min-h-12 w-full items-center justify-center rounded-full bg-[var(--ca-navy)] text-sm font-semibold text-white disabled:opacity-50"
         >
           {busy ? "Redirecting to ICICI…" : quote ? `Pay ${quote.total_label} securely` : "Pay securely"}
         </button>
+        {payBlocked && !busy && (
+          <p id="checkout-pay-status" className="mt-2 text-sm text-[var(--ca-navy)]/70">{payBlocked}</p>
+        )}
         <p className="mt-3 text-xs text-[var(--ca-navy)]/50">
           Full-page redirect to ICICI Eazypay. We never mark an order paid from this page — ICICI confirmation does.
         </p>

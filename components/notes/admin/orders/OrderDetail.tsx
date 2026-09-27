@@ -11,6 +11,7 @@ import {
   hasActiveShipment,
   nextPreparationStatus,
   orderIndexLabel,
+  showAdminViewInvoice,
   pickupFailedActivity,
   primaryAction,
   shipmentPickupLabel,
@@ -49,8 +50,17 @@ export interface AdminOrder {
   discount_paise?: number;
   shipping_paise?: number;
   promo_code?: string | null;
+  coupon_code?: string | null;
+  coupon_discount_paise?: number | null;
   discount_trace_json?: { offer_name?: string; discount_type?: string; discount_value?: number } | null;
   payment_status: string | null;
+  gateway_charges?: {
+    order_amount_paise: number;
+    processing_fee_paise: number | null;
+    processing_fee_tax_paise: number | null;
+    gateway_fee_paise: number;
+    cardholder_total_paise: number;
+  } | null;
   promised_delivery_date: string | null;
   placed_at: string;
   paid_at?: string | null;
@@ -346,7 +356,7 @@ export default function OrderDetail({
               <p className="mt-2 text-xs text-[var(--ca-navy)]/55">Auto-prepares after 5 min</p>
             )}
           </section>
-          {order.invoice_status === "READY" && !(active && ship) && (
+          {showAdminViewInvoice(order.invoice_status) && !(active && ship) && (
             <section className="rounded-2xl bg-white p-4">
               <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--ca-gold-dark)]">Invoice</p>
               <div className="mt-3 grid grid-cols-2 gap-2">
@@ -415,8 +425,8 @@ export default function OrderDetail({
                 <button type="button" onClick={() => void refreshTrack()} className="min-h-11 rounded-full border border-[var(--ca-navy)]/15 px-4 text-sm font-semibold text-[var(--ca-navy)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2">
                   View Tracking
                 </button>
-                {order.invoice_status === "READY" && <ViewInvoiceButton orderId={order.id} prominent />}
-                {order.invoice_status === "READY" && <DownloadInvoiceButton orderId={order.id} />}
+                {showAdminViewInvoice(order.invoice_status) && <ViewInvoiceButton orderId={order.id} prominent />}
+                {showAdminViewInvoice(order.invoice_status) && <DownloadInvoiceButton orderId={order.id} />}
               </div>
             </section>
           )}
@@ -462,12 +472,28 @@ export default function OrderDetail({
             </ul>
             <dl className="mt-2 space-y-1 text-sm text-[var(--ca-navy)]/70">
               {order.subtotal_paise != null && <div className="flex justify-between"><dt>Subtotal</dt><dd>{formatPaise(order.subtotal_paise)}</dd></div>}
-              {(order.discount_paise || 0) > 0 && (
-                <div className="flex justify-between"><dt>{order.discount_trace_json?.offer_name || order.promo_code || "Offer"}</dt><dd>− {formatPaise(order.discount_paise || 0)}</dd></div>
+              {Math.max(0, (order.discount_paise || 0) - (order.coupon_discount_paise || 0)) > 0 && (
+                <div className="flex justify-between"><dt>{order.discount_trace_json?.offer_name || order.promo_code || "Offer"}</dt><dd>− {formatPaise((order.discount_paise || 0) - (order.coupon_discount_paise || 0))}</dd></div>
+              )}
+              {(order.coupon_discount_paise || 0) > 0 && (
+                <div className="flex justify-between"><dt>Promotion · {order.coupon_code || "Code"}</dt><dd>− {formatPaise(order.coupon_discount_paise || 0)}</dd></div>
               )}
               {(order.shipping_paise || 0) > 0 && <div className="flex justify-between"><dt>Shipping</dt><dd>{formatPaise(order.shipping_paise || 0)}</dd></div>}
               <div className="flex justify-between font-semibold text-[var(--ca-navy)]"><dt>Total</dt><dd>{formatPaise(order.total_paise)}</dd></div>
             </dl>
+            {order.gateway_charges && order.gateway_charges.gateway_fee_paise > 0 && (
+              <dl className="mt-3 space-y-1 border-t border-[var(--ca-navy)]/10 pt-3 text-sm text-[var(--ca-navy)]/70">
+                <div className="flex justify-between"><dt>Order amount</dt><dd>{formatPaise(order.gateway_charges.order_amount_paise)}</dd></div>
+                <div className="flex justify-between"><dt>Gateway fee charged to customer</dt><dd>{formatPaise(order.gateway_charges.gateway_fee_paise)}</dd></div>
+                {order.gateway_charges.processing_fee_paise != null && (
+                  <div className="flex justify-between"><dt>Processing fee</dt><dd>{formatPaise(order.gateway_charges.processing_fee_paise)}</dd></div>
+                )}
+                {order.gateway_charges.processing_fee_tax_paise != null && order.gateway_charges.processing_fee_tax_paise > 0 && (
+                  <div className="flex justify-between"><dt>Tax on processing fee</dt><dd>{formatPaise(order.gateway_charges.processing_fee_tax_paise)}</dd></div>
+                )}
+                <div className="flex justify-between"><dt>Total card charge</dt><dd>{formatPaise(order.gateway_charges.cardholder_total_paise)}</dd></div>
+              </dl>
+            )}
           </section>
 
           <section className="rounded-2xl bg-white p-4">
