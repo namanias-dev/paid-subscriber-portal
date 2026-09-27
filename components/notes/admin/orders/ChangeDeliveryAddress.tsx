@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { addressFingerprint, canonicalDelivery, formatDeliveryAddress, googleMapsSearchUrl, materialAddressChange } from "@/lib/store/deliveryAddress";
+import { addressFingerprint, buildDeliveryGoogleMapsUrl, canonicalDelivery, formatDeliveryAddress, materialAddressChange } from "@/lib/store/deliveryAddress";
 
 interface CurrentAddress {
   name?: string;
@@ -60,7 +60,7 @@ export default function ChangeDeliveryAddress({
     pincode: current?.pincode || "",
   });
   const material = materialAddressChange(currentFields, next);
-  const mapsUrl = googleMapsSearchUrl(formatDeliveryAddress({ ...next, name: form.name }));
+  const mapsUrl = buildDeliveryGoogleMapsUrl(next);
   const changes = useMemo(() => {
     const rows = [
       ["Street", current?.line1 || "", form.line1],
@@ -137,7 +137,11 @@ export default function ChangeDeliveryAddress({
             {changes.map(([label, from, to]) => <li key={label}>{label}: {from || "—"} → {to || "—"}</li>)}
           </ul>
         )}
-        <a href={mapsUrl} target="_blank" rel="noopener noreferrer" className="mt-3 inline-flex min-h-11 items-center text-sm font-semibold text-[var(--ca-navy)]">Open new address in Google Maps</a>
+        {mapsUrl ? (
+          <a href={mapsUrl} target="_blank" rel="noopener noreferrer" className="mt-3 inline-flex min-h-11 items-center text-sm font-semibold text-[var(--ca-navy)]">Open new address in Google Maps</a>
+        ) : (
+          <p className="mt-3 text-xs text-[var(--ca-navy)]/55">Complete the delivery address to open it in Maps.</p>
+        )}
         {message && <p className="mt-3 text-sm text-[var(--ca-navy)]" role="status">{message}</p>}
         {shipmentStatus && <p className="mt-2 text-xs text-[var(--ca-navy)]/50">Shipment: {shipmentStatus}{material ? " · PIN, city, or state changed" : ""}</p>}
         <div className="mt-4 flex flex-wrap gap-2">
