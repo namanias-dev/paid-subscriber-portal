@@ -131,7 +131,7 @@ export async function GET(req: Request) {
   if (addrIds.length) {
     const { data: addrs } = await db
       .from("store_addresses")
-      .select("id,name,phone,line1,line2,city,state,pincode,landmark,delivery_instructions")
+      .select("id,name,phone,line1,line2,city,state,pincode,landmark,delivery_instructions,confirmation_status,address_hash")
       .in("id", addrIds);
     for (const a of addrs || []) addrMap.set(a.id, a);
   }

@@ -18,6 +18,8 @@ import {
   type BadgeTone,
 } from "@/lib/store/adminConsole";
 import { DownloadInvoiceButton, ViewInvoiceButton } from "./InvoiceActions";
+import ChangeDeliveryAddress from "./ChangeDeliveryAddress";
+import { formatDeliveryAddress, googleMapsSearchUrl } from "@/lib/store/deliveryAddress";
 
 interface Address {
   name?: string;
@@ -28,6 +30,8 @@ interface Address {
   state: string;
   pincode: string;
   landmark: string | null;
+  confirmation_status?: string | null;
+  address_hash?: string | null;
 }
 
 export interface AdminOrder {
@@ -163,6 +167,7 @@ export default function OrderDetail({
   const [awb, setAwb] = useState("");
   const [courier, setCourier] = useState("");
   const [note, setNote] = useState("");
+  const [addressEditor, setAddressEditor] = useState(false);
   const [issueStatus, setIssueStatus] = useState(order.issue?.status || "OPEN");
   const [issueAdmin, setIssueAdmin] = useState("");
   const [issueCustomer, setIssueCustomer] = useState("");
@@ -369,9 +374,14 @@ export default function OrderDetail({
               <Field label="Phone" value={order.phone} />
               <Field label="Email" value={order.email} />
             </dl>
-            <h3 className="mt-4 text-sm font-semibold text-[var(--ca-navy)]">Shipping</h3>
-            <p className="mt-1 text-sm leading-relaxed text-[var(--ca-navy)]/80">{addressLine || "No address"}</p>
-            <div className="mt-3 flex gap-2">
+            <h3 className="mt-4 text-sm font-semibold text-[var(--ca-navy)]">Delivery address</h3>
+            <p className="mt-1 text-xs font-semibold uppercase tracking-wide text-[var(--ca-navy)]/45">
+              {address?.confirmation_status === "CUSTOMER_CONFIRMED" ? "Customer confirmed" : address?.confirmation_status === "ADMIN_CONFIRMED" ? "Admin confirmed" : address?.confirmation_status === "ADMIN_UPDATED_CUSTOMER_CONFIRMED" ? "Admin updated" : "Legacy order / not recorded"}
+            </p>
+            <p className="mt-1 whitespace-pre-line text-sm leading-relaxed text-[var(--ca-navy)]/80">{address ? formatDeliveryAddress(address) : "No address"}</p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {address && <a href={googleMapsSearchUrl(formatDeliveryAddress(address))} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-11 items-center rounded-full border px-3 text-xs font-semibold">Open in Google Maps</a>}
+              <button type="button" onClick={() => setAddressEditor(true)} className="min-h-11 rounded-full border px-3 text-xs font-semibold">Change delivery address</button>
               <button type="button" aria-label="Copy address" onClick={() => copy(addressLine)} className="min-h-11 rounded-full border px-3 text-xs font-semibold">Copy address</button>
               <button type="button" aria-label="Copy phone" onClick={() => copy(order.phone)} className="min-h-11 rounded-full border px-3 text-xs font-semibold">Copy phone</button>
             </div>
@@ -637,6 +647,15 @@ export default function OrderDetail({
           {toast && <p className="mt-1 text-center text-xs text-[var(--ca-navy)]/70">{toast}</p>}
         </div>
       </article>
+      {addressEditor && (
+        <ChangeDeliveryAddress
+          orderId={order.id}
+          current={address}
+          shipmentStatus={ship?.status || null}
+          onClose={() => setAddressEditor(false)}
+          onSaved={() => { setAddressEditor(false); onRefresh(); }}
+        />
+      )}
     </div>
   );
 }

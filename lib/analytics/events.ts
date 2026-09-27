@@ -118,6 +118,13 @@ export type EventName =
   | "notes_lead_telegram_alert_sent"
   | "notes_checkout_step_viewed"
   | "notes_checkout_validation_error"
+  | "notes_address_confirmation_shown"
+  | "notes_address_maps_opened"
+  | "notes_address_confirmed"
+  | "notes_address_edited_after_confirmation"
+  | "notes_address_validation_error"
+  | "notes_order_address_changed"
+  | "notes_order_address_rebooked"
   | "notes_checkout_api_error"
   | "notes_shipping_quote_error"
   | "notes_cart_viewed"
@@ -251,6 +258,11 @@ export const CLIENT_ALLOWED_EVENTS: ReadonlySet<EventName> = new Set<EventName>(
   "notes_checkout_started",
   "notes_checkout_step_viewed",
   "notes_checkout_validation_error",
+  "notes_address_confirmation_shown",
+  "notes_address_maps_opened",
+  "notes_address_confirmed",
+  "notes_address_edited_after_confirmation",
+  "notes_address_validation_error",
   "notes_checkout_api_error",
   "notes_shipping_quote_error",
   "notes_cart_viewed",

@@ -1,5 +1,6 @@
 import { storeDb } from "./db";
 import { customerShipTo } from "./address";
+import { activeCustomerShipment } from "./deliveryAddress";
 import { projectCustomerStage, customerStageLabel, trackingSteps, type CustomerStage } from "./projection";
 import { formatPaise } from "./money";
 import { verifyRawTokenAgainstHash } from "./accessToken";
@@ -80,7 +81,7 @@ export async function getPublicOrder(
     .select("awb,courier_name,status,provider_payload,tracking_url")
     .eq("order_id", order.id)
     .order("created_at", { ascending: false });
-  const ship = (shipRows || []).find((row) => row.status !== "cancelled" && row.status !== "failed") || null;
+  const ship = activeCustomerShipment(shipRows || []);
   let shipTo: string | null = null;
   if (order.shipping_address_id) {
     const { data: addr } = await db

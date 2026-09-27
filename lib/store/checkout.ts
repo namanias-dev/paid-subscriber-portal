@@ -9,6 +9,7 @@ import { storeDb } from "./db";
 import { makeStoreReference } from "./references";
 import { buildStorePaymentUrl, storeSubMerchantId } from "./payments/eazypay";
 import { pinPlaceConflict } from "./address";
+import { addressFingerprint, canonicalDelivery } from "./deliveryAddress";
 import { lockQuote, QUOTE_TTL_SECONDS, type FrozenQuote } from "./quote";
 import { reserveStock } from "./inventory";
 import type { CartView } from "./cart";
@@ -31,6 +32,7 @@ export interface CheckoutAddress {
   state: string;
   pincode: string;
   delivery_instructions?: string;
+  address_hash?: string;
 }
 
 export interface CheckoutResult {
@@ -63,6 +65,16 @@ export async function placeCheckout(cart: CartView, address: CheckoutAddress): P
   if (!city || !state) throw new Error("Enter city and state");
   const conflict = pinPlaceConflict(city, state, quote.city, quote.state);
   if (conflict) throw new Error(conflict);
+  const canonical = canonicalDelivery({
+    line1: address.line1,
+    line2: address.line2,
+    city,
+    state,
+    pincode: quote.pincode,
+  });
+  if (!address.address_hash || address.address_hash !== addressFingerprint(canonical)) {
+    throw new Error("Confirm the delivery address before paying.");
+  }
 
   // Upsert the store customer by phone_key. This is NOT an academy identity.
   const { data: existing } = await db
@@ -95,12 +107,21 @@ export async function placeCheckout(cart: CartView, address: CheckoutAddress): P
       kind: "shipping",
       name,
       phone: address.phone.trim(),
-      line1: address.line1.trim(),
-      line2: address.line2?.trim() || null,
+      line1: canonical.line1,
+      line2: canonical.line2,
       landmark: address.landmark?.trim() || null,
-      city,
-      state,
+      city: canonical.city,
+      state: canonical.state,
       pincode: quote.pincode,
+      raw_line1: address.line1,
+      raw_line2: address.line2 || null,
+      raw_city: address.city,
+      raw_state: address.state,
+      confirmation_status: "CUSTOMER_CONFIRMED",
+      confirmed_at: new Date().toISOString(),
+      confirmed_by: "customer",
+      verification_method: "pin_and_customer",
+      address_hash: address.address_hash,
       delivery_instructions: address.delivery_instructions?.trim() || null,
     })
     .select("id")

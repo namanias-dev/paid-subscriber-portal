@@ -82,6 +82,7 @@ export async function saveCheckoutLead(input: {
   email?: string | null;
   marketingConsent?: boolean;
   address?: Partial<LeadAddress> | null;
+  addressConfirmed?: boolean;
 }): Promise<{ ok: true; skipped?: string }> {
   try {
     const phone = normalizeIndianMobile(input.phone);
@@ -138,6 +139,7 @@ export async function saveCheckoutLead(input: {
       visitor_id: visitorId,
       session_id: sessionId,
       address_snapshot: address,
+      address_confirmed: input.addressConfirmed === true,
       is_test: isQaState(attr.attribution),
       last_activity_at: now,
       updated_at: now,

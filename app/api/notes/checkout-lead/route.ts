@@ -34,6 +34,7 @@ export async function POST(req: Request) {
     email: typeof body.email === "string" ? body.email : null,
     marketingConsent: body.marketing_consent === true,
     address: body.address && typeof body.address === "object" ? body.address : null,
+    addressConfirmed: body.address_confirmed === true,
   });
   return noStoreJson({ ok: true });
 }
