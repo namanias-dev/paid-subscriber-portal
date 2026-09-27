@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requirePermission, getActionActor } from "@/lib/adminGuard";
 import { storeDb } from "@/lib/store/db";
+import { runAutoFulfillment } from "@/lib/store/shipping/autoFulfillRun";
 
 export const dynamic = "force-dynamic";
 
@@ -33,8 +34,16 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   }
 
   const now = new Date().toISOString();
-  const { error } = await db.from("store_orders").update({ status: next, updated_at: now }).eq("id", order.id);
+  const { data: updated, error } = await db
+    .from("store_orders")
+    .update({ status: next, updated_at: now })
+    .eq("id", order.id)
+    .eq("status", order.status)
+    .select("id");
   if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 400 });
+  if (!updated?.length) {
+    return NextResponse.json({ ok: false, error: "This order already moved. Refresh and try the next step." }, { status: 409 });
+  }
 
   await db.from("store_order_events").insert({
     order_id: order.id,
@@ -46,5 +55,10 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     actor_name: actor?.name,
   });
 
-  return NextResponse.json({ ok: true, status: next }, { headers: { "Cache-Control": "no-store" } });
+  let fulfillment: { ok: boolean; blocked: string | null; awb: string | null } | null = null;
+  if (next === "PACKED") {
+    fulfillment = await runAutoFulfillment(order.id);
+  }
+
+  return NextResponse.json({ ok: true, status: next, fulfillment }, { headers: { "Cache-Control": "no-store" } });
 }

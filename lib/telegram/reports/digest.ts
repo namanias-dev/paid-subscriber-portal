@@ -1,6 +1,7 @@
 /**
  * Build + send Telegram CEO digests.
- * Metrics reuse getExecutivePulse where possible — no alternate revenue definitions.
+ * Cash collected is computeCollections on successful payments.amount.
+ * Executive pulse supplies non-cash morning context only (leads, seat counts).
  */
 import { SITE_URL } from "../../config";
 import { getExecutivePulse, type MetricDelta } from "../../analytics/executiveOverview";
@@ -10,7 +11,25 @@ import {
   getPayments,
   getWebinars,
 } from "../../dataProvider";
-import { istYMD, istTodayYMD } from "../../dates";
+import { istYMD, istTodayYMD, istYMDToMs } from "../../dates";
+import {
+  computeAdmissions,
+  computeCollections,
+  DAY_MS,
+  istDayWindow,
+  istMonthToDateWindow,
+  type CollectionMetrics,
+} from "../../analytics/businessMetrics";
+import { loadPeopleMetrics, loadReportExclusions } from "../../analytics/loadBusinessMetrics";
+import {
+  digestSnapshotSlot,
+  executiveBriefLines,
+  packTelegramMessages,
+  type CourseBrief,
+  type FailedBrief,
+} from "./businessFormat";
+import { loadSmsDelivery } from "../../analytics/loadSmsDelivery";
+import type { SmsDeliveryMetrics } from "../../analytics/smsDelivery";
 import {
   batchModes,
   batchTimings,
@@ -23,12 +42,15 @@ import { isPaidStatus } from "../../paymentsAgg";
 import {
   paidWebinarRegistrationCount,
   pendingWebinarCheckoutCount,
+  webinarRegistrationReport,
 } from "../../webinarReg";
 import type { Course, CourseBatch, CourseEnrollment, LearningMode, Payment } from "../../types";
-import { normalizeIndianMobile } from "../../phone";
 import { buildKeyboard, sendMessage } from "../botApi";
 import { tgLog } from "../log";
-import { escapeHtml, formatIstShort, inr, istNowParts } from "./format";
+import { formatIstClock, formatIstEvent, inrExact, istBriefStamp, istNowParts } from "./format";
+import { ensureReportingReference } from "./definitions";
+import { withNotesCash } from "./businessFormat";
+import { loadNotesStoreReport } from "../../store/loadStoreReport";
 import { resolveLoginAverages } from "./loginAvg";
 import {
   getReportSettings,
@@ -42,32 +64,14 @@ import {
 import { getPreviousSnapshot, getSnapshotBySlot, saveSnapshot, type SnapshotMetrics } from "./snapshots";
 import { assertReportsChannel } from "./channelGuard";
 
-function mVal(m: MetricDelta | null | undefined): number | null {
-  if (!m || m.value == null || !Number.isFinite(m.value)) return null;
-  return m.value;
-}
 function mPrev(m: MetricDelta | null | undefined): number | null {
   if (!m || m.prev == null || !Number.isFinite(m.prev)) return null;
   return m.prev;
 }
 
-/**
- * Meaningful period delta only when there is a real non-zero base.
- * Suppresses zero-vs-zero and 0→N “100%” noise.
- */
-function meaningfulDeltaPct(curr: number | null, prev: number | null): number | null {
-  if (curr == null || prev == null) return null;
-  if (!Number.isFinite(curr) || !Number.isFinite(prev)) return null;
-  if (prev === 0) return null;
-  return ((curr - prev) / prev) * 100;
-}
-
-function deltaLabel(curr: number | null, prev: number | null): string | null {
-  const pct = meaningfulDeltaPct(curr, prev);
-  if (pct == null) return null;
-  const abs = Math.abs(Math.round(pct));
-  if (abs === 0) return null;
-  return pct > 0 ? `▲ ${abs}%` : `▼ ${abs}%`;
+/** Previous IST calendar day as YYYY-MM-DD. */
+function previousIstYmd(ymd: string): string {
+  return istYMD(new Date(istYMDToMs(ymd) - 1)) || ymd;
 }
 
 type ModeBucket = "online" | "offline";
@@ -344,8 +348,10 @@ async function pickUpcomingWebinar(payments: Payment[]): Promise<{
   title: string;
   dateLabel: string;
   registered: number;
+  newToday: number | null;
   pendingCheckout: number;
   attendedLastPct: number | null;
+  sources: { label: string; count: number }[] | null;
   webinarId: string;
   slug: string;
 } | null> {
@@ -360,9 +366,15 @@ async function pickUpcomingWebinar(payments: Payment[]): Promise<{
     if (!upcoming) return null;
 
     const price = Number(upcoming.price) || 0;
+    const todayYmd = istTodayYMD();
     let registered = 0;
+    let newToday: number | null = null;
+    let sources: { label: string; count: number }[] | null = null;
     if (price > 0) {
-      registered = paidWebinarRegistrationCount(payments, upcoming.slug);
+      const report = webinarRegistrationReport(payments, upcoming.slug, todayYmd);
+      registered = report.paidTotal || paidWebinarRegistrationCount(payments, upcoming.slug);
+      newToday = report.paidToday;
+      sources = report.hasAttribution ? report.sources : null;
     } else {
       const { getAllWebinarRegistrations } = await import("../../dataProvider");
       const regs = await getAllWebinarRegistrations();
@@ -373,10 +385,12 @@ async function pickUpcomingWebinar(payments: Payment[]): Promise<{
 
     return {
       title: upcoming.title,
-      dateLabel: formatIstShort(upcoming.datetime),
+      dateLabel: formatIstEvent(upcoming.datetime),
       registered,
+      newToday,
       pendingCheckout,
       attendedLastPct: null,
+      sources,
       webinarId: upcoming.id,
       slug: upcoming.slug,
     };
@@ -411,12 +425,6 @@ function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<T
       },
     );
   });
-}
-
-function displayPhone(raw: string | null | undefined): string {
-  const n = normalizeIndianMobile(raw);
-  if (n.ok && n.display) return n.display;
-  return String(raw || "").trim() || "—";
 }
 
 function paymentKindLabel(p: Payment): string {
@@ -464,15 +472,9 @@ function failureReasonShort(p: Payment): string | null {
   return raw;
 }
 
-function pushSection(lines: string[], header: string, body: string[]): void {
-  if (!body.length) return;
-  if (lines.length && lines[lines.length - 1] !== "") lines.push("");
-  lines.push(header);
-  for (const row of body) lines.push(row);
-}
-
 export interface DigestBuildResult {
   html: string;
+  parts: string[];
   metrics: SnapshotMetrics;
   isMorningSummary: boolean;
   silent: boolean;
@@ -494,22 +496,27 @@ export async function buildDigest(opts?: {
   let webinar: Awaited<ReturnType<typeof pickUpcomingWebinar>> = null;
   let failedRows: Payment[] = [];
   let allPayments: Payment[] = [];
+  let paymentsOk = false;
+  let enrollmentsOk = false;
   let loginAvg: number | null = null;
   let loginAvg30: number | null = null;
+  let loginAvg90: number | null = null;
   let loginsToday: number | null = null;
   let loginsYday: number | null = null;
 
   const prev = opts?.previous || null;
   const emptyLogins = {
-    allTimeAvg: prev?.logins_avg != null ? Number(prev.logins_avg) : null,
-    rolling30Avg: prev?.logins_avg_30d != null ? Number(prev.logins_avg_30d) : null,
-    today: prev?.logins_today != null ? Number(prev.logins_today) : 0,
-    yesterday: prev?.logins_yday != null ? Number(prev.logins_yday) : 0,
+    allTimeAvg: null as number | null,
+    rolling30Avg: null as number | null,
+    rolling90Avg: null as number | null,
+    today: null as number | null,
+    yesterday: null as number | null,
     activeDays: 0,
     uniqueSum: 0,
     firstActiveYmd: null as string | null,
-    method: "active_days" as const,
+    method: "tracked_days" as const,
   };
+  void prev;
 
   try {
     // One payments fetch shared by failed-today + upcoming webinar (was double-scanned).
@@ -520,13 +527,17 @@ export async function buildDigest(opts?: {
       getAllCourses(),
       getAllCourseEnrollments(),
       paymentsPromise,
-      withTimeout(resolveLoginAverages(), 8_000, emptyLogins),
+      withTimeout(resolveLoginAverages(), 60_000, emptyLogins),
     ]);
     if (settled[0].status === "fulfilled") pulseToday = settled[0].value;
     if (settled[1].status === "fulfilled") pulseMtd = settled[1].value;
     if (settled[2].status === "fulfilled") courses = settled[2].value;
-    if (settled[3].status === "fulfilled") enrollments = settled[3].value;
+    if (settled[3].status === "fulfilled") {
+      enrollments = settled[3].value;
+      enrollmentsOk = true;
+    }
     if (settled[4].status === "fulfilled") {
+      paymentsOk = true;
       allPayments = settled[4].value;
       const today = istTodayYMD();
       failedRows = allPayments
@@ -542,6 +553,7 @@ export async function buildDigest(opts?: {
     if (settled[5].status === "fulfilled") {
       loginAvg = settled[5].value.allTimeAvg;
       loginAvg30 = settled[5].value.rolling30Avg;
+      loginAvg90 = settled[5].value.rolling90Avg;
       loginsToday = settled[5].value.today;
       loginsYday = settled[5].value.yesterday;
     }
@@ -553,201 +565,194 @@ export async function buildDigest(opts?: {
   const courseBlocks = courseBreakdown(courses, enrollments);
   const collections = collectionsStats(enrollments);
 
-  const revenueToday = pulseToday
-    ? (mVal(pulseToday.pulse.courseRevenue) || 0) + (mVal(pulseToday.pulse.webinarRevenue) || 0)
-    : null;
-  const revenueMtd = pulseMtd
-    ? (mVal(pulseMtd.pulse.courseRevenue) || 0) + (mVal(pulseMtd.pulse.webinarRevenue) || 0)
-    : null;
-  const revenueYday = pulseToday
-    ? (mPrev(pulseToday.pulse.courseRevenue) || 0) + (mPrev(pulseToday.pulse.webinarRevenue) || 0)
-    : null;
+  let todayMoney: CollectionMetrics | null = null;
+  let ydayMoney: CollectionMetrics | null = null;
+  let mtdMoney: CollectionMetrics | null = null;
+  let weekMoney: CollectionMetrics | null = null;
+  const todayYmd = istTodayYMD();
+  const ydayYmd = previousIstYmd(todayYmd);
+
+  let people: Awaited<ReturnType<typeof loadPeopleMetrics>> | null = null;
+  let todayAdmissions: ReturnType<typeof computeAdmissions> | null = null;
+  let sms: SmsDeliveryMetrics | null = null;
+  if (paymentsOk || enrollmentsOk) {
+    try {
+      const exclusions = await withTimeout(
+        loadReportExclusions(),
+        4_000,
+        { staffPhones: new Set<string>(), leadPhones: new Set<string>() },
+      );
+      const [peopleLoaded, smsLoaded] = await Promise.all([
+        withTimeout(loadPeopleMetrics(istDayWindow(todayYmd), exclusions), 8_000, null),
+        withTimeout(loadSmsDelivery(istDayWindow(todayYmd), exclusions.staffPhones), 8_000, null),
+      ]);
+      people = peopleLoaded;
+      sms = smsLoaded;
+      if (paymentsOk) {
+        const staff = exclusions.staffPhones;
+        todayMoney = computeCollections(allPayments, istDayWindow(todayYmd), staff);
+        ydayMoney = computeCollections(allPayments, istDayWindow(ydayYmd), staff);
+        mtdMoney = computeCollections(allPayments, istMonthToDateWindow(todayYmd), staff);
+        if (isMorningSummary) {
+          weekMoney = computeCollections(
+            allPayments,
+            { fromMs: istYMDToMs(todayYmd) - 6 * DAY_MS, toMs: istDayWindow(todayYmd).toMs },
+            staff,
+          );
+        }
+      }
+      if (enrollmentsOk) {
+        todayAdmissions = computeAdmissions(enrollments, istDayWindow(todayYmd), exclusions.staffPhones);
+      }
+    } catch {
+      people = null;
+    }
+  }
+
+  const todayWindow = istDayWindow(todayYmd);
+  const ydayWindow = istDayWindow(ydayYmd);
+  const mtdWindow = istMonthToDateWindow(todayYmd);
+  let notes: Awaited<ReturnType<typeof loadNotesStoreReport>> = null;
+  try {
+    notes = await withTimeout(
+      loadNotesStoreReport({
+        today: todayWindow,
+        yesterday: ydayWindow,
+        mtd: mtdWindow,
+        nowMs: Date.now(),
+      }),
+      8_000,
+      null,
+    );
+  } catch {
+    notes = null;
+  }
+  if (notes) {
+    if (todayMoney) todayMoney = withNotesCash(todayMoney, notes.today.cashRupees);
+    if (ydayMoney) ydayMoney = withNotesCash(ydayMoney, notes.yesterday.cashRupees);
+    if (mtdMoney) mtdMoney = withNotesCash(mtdMoney, notes.mtd.cashRupees);
+    const academyMtd = (mtdMoney?.netCollection || 0) - notes.mtd.cashRupees;
+    const purpose = (mtdMoney?.categories || []).reduce((sum, row) => sum + row.amount, 0);
+    const online = mtdMoney?.sources.find((row) => row.key === "online")?.amount || 0;
+    const staff = mtdMoney?.sources.find((row) => row.key === "manual")?.amount || 0;
+    const other = mtdMoney?.sources.find((row) => row.key === "other")?.amount || 0;
+    const sourceSum = Math.round((online + staff + other) * 100) / 100;
+    const purposeSum = Math.round((purpose + notes.mtd.cashRupees) * 100) / 100;
+    if (mtdMoney && (sourceSum !== mtdMoney.grossCollection || purposeSum !== mtdMoney.grossCollection)) {
+      tgLog("notes_collection_mismatch", { sourceSum, purposeSum, gross: mtdMoney.grossCollection, academyMtd }, "error");
+    }
+  }
+
+  if (people?.uniqueLoginUsers != null && loginsToday != null && people.uniqueLoginUsers !== loginsToday) {
+    tgLog(
+      "login_trend_mismatch",
+      { unique: people.uniqueLoginUsers, trend: loginsToday },
+      "warn",
+    );
+  }
 
   const metrics: SnapshotMetrics = {
-    logins_today: loginsToday,
+    logins_today: people?.uniqueLoginUsers ?? loginsToday,
     logins_yday: loginsYday,
     logins_avg: loginAvg,
     logins_avg_30d: loginAvg30,
-    revenue_today: revenueToday,
-    revenue_mtd: revenueMtd,
-    revenue_yday: revenueYday,
+    logins_avg_90d: loginAvg90,
+    revenue_today: todayMoney?.netCollection ?? null,
+    revenue_mtd: mtdMoney?.netCollection ?? null,
+    revenue_yday: ydayMoney?.netCollection ?? null,
     overdue_count: collections.overdueCount,
     overdue_amount: collections.overdueAmount,
     due_7d_amount: collections.due7dAmount,
     webinar_registered: webinar?.registered ?? null,
     webinar_id: webinar?.webinarId ?? null,
     failed_today: failedToday,
+    notes_orders_today: notes?.today.orders ?? null,
+    notes_cash_today: notes?.today.cashRupees ?? null,
+    notes_orders_mtd: notes?.mtd.orders ?? null,
+    notes_cash_mtd: notes?.mtd.cashRupees ?? null,
+    notes_open: notes?.fulfillment.open ?? null,
   };
   for (const c of courseBlocks) {
     metrics[`course:${c.title}:total`] = c.total;
   }
+  void pulseMtd;
 
-  const lines: string[] = [];
-  const headerLabel = parts.label.replace(/\b(am|pm)\b/i, (m) => m.toUpperCase());
-  lines.push(`📊 <b><u>NAMAN IAS</u> · ${escapeHtml(headerLabel)}</b>`);
-  lines.push("");
-
-  // ── WEBINAR ──
-  if (webinar && (webinar.registered > 0 || webinar.pendingCheckout > 0)) {
-    const body: string[] = [
-      `<b>${escapeHtml(webinar.title)}</b>`,
-      webinar.dateLabel ? `<i>${escapeHtml(webinar.dateLabel)}</i>` : "",
-      `Registered <b>${webinar.registered}</b> (paid)`,
-    ].filter(Boolean);
-    if (webinar.pendingCheckout > 0) {
-      body.push(`Pending checkout <b>${webinar.pendingCheckout}</b>`);
-    }
-    if (webinar.attendedLastPct != null) {
-      body.push(`Last attendance <b>${webinar.attendedLastPct}%</b>`);
-    }
-    pushSection(lines, `📣 <b>WEBINAR</b>`, body);
-  }
-
-  // ── ADMISSIONS (per course) ──
-  for (const c of courseBlocks.filter((x) => x.total > 0).slice(0, 3)) {
-    const body: string[] = [];
-    const seats =
-      c.capacity != null && c.capacity > 0
-        ? `Total <b>${c.total}</b> · Seats <b>${c.total}/${c.capacity}</b>`
-        : `Total <b>${c.total}</b>`;
-    body.push(seats);
-
-    if (c.modeOk) {
-      body.push(`Online <b>${c.online}</b> · Offline <b>${c.offline}</b>`);
-    } else if (!c.modeEmpty) {
+  const coursesForBrief: CourseBrief[] = courseBlocks.map((c) => ({ ...c }));
+  for (const c of coursesForBrief) {
+    if (!c.modeOk && !c.modeEmpty) {
       tgLog("digest_admissions_mode_render_fail", { course: c.title, online: c.online, offline: c.offline, total: c.total }, "error");
-      // Still show counted numbers when partial — never a fake ⚠ placeholder that hides real splits.
-      body.push(`Online <b>${c.online}</b> · Offline <b>${c.offline}</b> · Unmapped <b>${c.total - c.online - c.offline}</b>`);
-    }
-
-    if (c.timingOk) {
-      body.push(`Morning <b>${c.morning}</b> · Evening <b>${c.evening}</b>`);
-    } else if (!c.timingEmpty) {
-      body.push(
-        `Morning <b>${c.morning}</b> · Evening <b>${c.evening}</b> · Unmapped <b>${c.total - c.morning - c.evening}</b>`,
-      );
-    }
-
-    const payBits = [
-      `Full paid <b>${c.fullPaid}</b>`,
-      `Partial <b>${c.partial}</b>`,
-      c.unpaid > 0 ? `Unpaid <b>${c.unpaid}</b>` : null,
-    ].filter(Boolean);
-    body.push(payBits.join(" · "));
-
-    pushSection(lines, `🎓 <b>ADMISSIONS — ${escapeHtml(c.title)}</b>`, body);
-  }
-
-  // ── LOGINS ──
-  {
-    const hasToday = loginsToday != null;
-    const hasYday = loginsYday != null;
-    const hasAvg = loginAvg != null && loginAvg > 0;
-    const has30 = loginAvg30 != null && loginAvg30 > 0;
-    if ((hasToday && (loginsToday ?? 0) > 0) || (hasYday && (loginsYday ?? 0) > 0) || hasAvg || has30) {
-      const row1: string[] = [];
-      if (loginsToday != null) row1.push(`Today <b>${loginsToday}</b>`);
-      if (loginsYday != null) row1.push(`Yesterday <b>${loginsYday}</b>`);
-      const row2: string[] = [];
-      if (has30) row2.push(`30-day avg <b>${loginAvg30}</b>`);
-      if (hasAvg) row2.push(`All-time avg <b>${loginAvg}</b>`);
-      const body = [row1.join(" · "), row2.join(" · ")].filter(Boolean);
-      pushSection(lines, `👥 <b>LOGINS</b>`, body);
     }
   }
 
-  // ── REVENUE ──
-  if (revenueToday != null || revenueMtd != null || (revenueYday != null && revenueYday > 0)) {
-    const body: string[] = [
-      `Today <b>${inr(revenueToday)}</b> · MTD <b>${inr(revenueMtd)}</b>`,
-    ];
-    if (revenueYday != null && revenueYday > 0) {
-      body.push(`Yesterday <b>${inr(revenueYday)}</b>`);
-    }
-    const d = deltaLabel(revenueToday, revenueYday);
-    if (d) body.push(`<b>${d}</b>`);
-    pushSection(lines, `💰 <b>REVENUE</b>`, body);
-  }
+  const failed: FailedBrief[] = failedRows.map((p) => ({
+    name: p.student_name || "Student",
+    amount: p.amount,
+    item: `${paymentKindLabel(p)} — ${fullItemName(p)}`,
+    when: formatIstClock(p.created_at),
+    reason: failureReasonShort(p),
+    recovered: laterPaidSameItem(p, allPayments),
+  }));
 
-  // ── COLLECTIONS ──
-  if (collections.overdueCount > 0 || collections.due7dAmount > 0) {
-    const body: string[] = [];
-    if (collections.overdueCount > 0) {
-      body.push(
-        `<b>${inr(collections.overdueAmount)}</b> overdue · <b>${collections.overdueCount}</b> students`,
-      );
-    }
-    if (collections.due7dAmount > 0) {
-      body.push(`Due this week <b>${inr(collections.due7dAmount)}</b>`);
-    }
-    pushSection(lines, `⚠️ <b>COLLECTIONS</b>`, body);
-  }
-
-  // ── FAILED PAYMENTS (named detail — spacious, no truncation) ──
-  if (failedRows.length > 0) {
-    if (lines.length && lines[lines.length - 1] !== "") lines.push("");
-    lines.push(
-      `🚨 <b>${failedRows.length} payment${failedRows.length === 1 ? "" : "s"} failed today</b>`,
-    );
-
-    failedRows.slice(0, 8).forEach((p, idx) => {
-      const name = escapeHtml(p.student_name || "Student");
-      const phone = escapeHtml(displayPhone(p.phone));
-      const kind = escapeHtml(paymentKindLabel(p));
-      const item = escapeHtml(fullItemName(p));
-      const when = escapeHtml(formatIstShort(p.created_at));
-      const reason = failureReasonShort(p);
-      const recovered = laterPaidSameItem(p, allPayments);
-      const status = recovered ? "✅ Later paid successfully" : "❌ Still failed — no later payment";
-
-      lines.push("");
-      lines.push(`<b>${idx + 1}. ${name}</b>`);
-      lines.push(`Phone: ${phone}`);
-      lines.push(`Type: ${kind}`);
-      lines.push(`Item: <b>${item}</b>`);
-      lines.push(`Amount: <b>${inr(p.amount)}</b>`);
-      lines.push(`When: ${when}`);
-      if (reason) lines.push(`Reason: ${escapeHtml(reason)}`);
-      lines.push(`Status: <b>${status}</b>`);
-    });
-
-    if (failedRows.length > 8) {
-      lines.push("");
-      lines.push(`…and <b>${failedRows.length - 8}</b> more failed today`);
-    }
-  }
-
-  // ── 6 AM only ──
+  let morningNote: string | null = null;
   if (isMorningSummary && pulseToday) {
-    const yBody: string[] = [];
+    const bits: string[] = [];
     const yLeads = mPrev(pulseToday.pulse.leadsToday);
     const yAdm = mPrev(pulseToday.pulse.seatBookingsToday);
-    const yRev =
-      (mPrev(pulseToday.pulse.courseRevenue) || 0) + (mPrev(pulseToday.pulse.webinarRevenue) || 0);
-    if (yLeads != null || yAdm != null || yRev) {
-      yBody.push(
-        `Leads ${yLeads ?? "—"} · Admissions ${yAdm ?? "—"} · Revenue ${inr(yRev || null)}`.replace(
-          / · —/g,
-          "",
-        ),
-      );
-    }
-    if (yBody.length) pushSection(lines, `🗓 <b>YESTERDAY CLOSE</b>`, yBody);
-
+    if (yLeads != null) bits.push(`Leads ${yLeads}`);
+    if (yAdm != null) bits.push(`Admissions ${yAdm}`);
     const leadSum = pulseToday.history.leads.slice(-7).reduce((s, p) => s + (p.value || 0), 0);
     const seatSum = pulseToday.history.seatBookings.slice(-7).reduce((s, p) => s + (p.value || 0), 0);
-    const revSum =
-      pulseToday.history.courseRevenue.slice(-7).reduce((s, p) => s + (p.value || 0), 0) +
-      pulseToday.history.webinarRevenue.slice(-7).reduce((s, p) => s + (p.value || 0), 0);
-    if (leadSum || seatSum || revSum) {
-      pushSection(lines, `📉 <b>7-DAY TREND</b>`, [
-        `Leads ${leadSum} · Admissions ${seatSum} · Revenue ${inr(revSum || null)}`,
-      ]);
-    }
+    const collectedSum = weekMoney?.netCollection ?? null;
+    const linesNote = [
+      bits.length ? `Yesterday close  ${bits.join(" · ")}` : "",
+      leadSum || seatSum || collectedSum
+        ? `7-day trend  Leads ${leadSum} · Admissions ${seatSum} · Collected ${inrExact(collectedSum)}`
+        : "",
+    ].filter(Boolean);
+    morningNote = linesNote.join("\n") || null;
   }
+
+  const stamp = istBriefStamp();
+  const lines = executiveBriefLines({
+    dateLabel: stamp.dateLabel,
+    timeLabel: stamp.timeLabel,
+    people,
+    login: {
+      todayFallback: people?.uniqueLoginUsers == null ? loginsToday : null,
+      yesterday: loginsYday,
+      avg30: loginAvg30,
+      avg90: loginAvg90,
+    },
+    today: todayMoney,
+    yesterday: ydayMoney,
+    mtd: mtdMoney,
+    todayAdmissions,
+    sms,
+    webinar: webinar
+      ? {
+          title: webinar.title,
+          dateLabel: webinar.dateLabel,
+          registered: webinar.registered,
+          newToday: webinar.newToday,
+          pendingCheckout: webinar.pendingCheckout,
+          attendedLastPct: webinar.attendedLastPct,
+          sources: webinar.sources,
+        }
+      : null,
+    courses: coursesForBrief,
+    outstanding: {
+      overdueCount: collections.overdueCount,
+      overdueAmount: collections.overdueAmount,
+      due7dAmount: collections.due7dAmount,
+    },
+    failed,
+    notes,
+    morningNote,
+  });
 
   return {
     html: lines.join("\n"),
+    parts: packTelegramMessages(lines),
     metrics,
     isMorningSummary,
     silent: !isMorningSummary,
@@ -813,7 +818,7 @@ export async function sendDigestNow(opts?: {
   const guarded = await assertReportsChannel(resolved);
   if (!guarded.ok || !guarded.id) {
     const reason = guarded.error || "channel_not_configured";
-    await markDigestResult(false, reason);
+    if (!opts?.skipIdempotency) await markDigestResult(false, reason);
     return {
       ok: false,
       reason,
@@ -835,6 +840,7 @@ export async function sendDigestNow(opts?: {
     }
     built = {
       html: overrideHtml,
+      parts: [overrideHtml],
       metrics: {},
       isMorningSummary: false,
       silent: false,
@@ -848,43 +854,63 @@ export async function sendDigestNow(opts?: {
       });
     } catch (e) {
       const msg = (e as Error).message || "build_failed";
-      await markDigestResult(false, msg);
+      if (!opts?.skipIdempotency) await markDigestResult(false, msg);
       return { ok: false, reason: msg, channelMasked: maskChannelId(channel) };
     }
   }
 
   const base = SITE_URL.replace(/\/$/, "") || "https://www.namanias.com";
   const silent = built.isMorningSummary ? false : built.silent;
-  const sent = await sendWithRetry(channel, built.html, {
-    silent: opts?.html ? false : silent,
-    buttons: [
-      { label: "Dashboard", url: `${base}/admin` },
-      { label: "Collections", url: `${base}/admin/at-risk` },
-      { label: "Admissions", url: `${base}/admin/course-payments` },
-    ],
-  });
+  const messages = built.parts?.length ? built.parts : [built.html];
+  const messageIds: number[] = [];
+  let sendError: string | undefined;
+  for (let i = 0; i < messages.length; i++) {
+    const sent = await sendWithRetry(channel, messages[i], {
+      silent: opts?.html ? false : silent,
+      buttons:
+        i === 0
+          ? [
+              { label: "Dashboard", url: `${base}/admin` },
+              { label: "Outstanding fees", url: `${base}/admin/at-risk` },
+              { label: "Admissions", url: `${base}/admin/course-payments` },
+            ]
+          : [],
+    });
+    if (!sent.ok) {
+      sendError = sent.error || "send_failed";
+      break;
+    }
+    if (sent.messageId != null) messageIds.push(sent.messageId);
+  }
 
-  if (!sent.ok) {
-    await markDigestResult(false, sent.error || "send_failed");
+  if (sendError || !messageIds.length) {
+    if (!opts?.skipIdempotency) await markDigestResult(false, sendError || "send_failed");
     return {
       ok: false,
-      reason: sent.error || "send_failed",
+      reason: sendError || "send_failed",
       html: built.html,
+      messageId: messageIds[0],
       channelMasked: maskChannelId(channel),
     };
   }
 
+  const manual = opts?.skipIdempotency === true;
   await saveSnapshot({
-    slotKey: opts?.skipIdempotency ? `${slotKey}:manual:${Date.now()}` : slotKey,
+    slotKey: digestSnapshotSlot(slotKey, manual, Date.now()),
     kind: built.isMorningSummary ? "daily_summary" : "digest",
-    metrics: { ...built.metrics, message_id: sent.messageId ?? null },
+    metrics: {
+      ...built.metrics,
+      message_id: messageIds[0] ?? null,
+      message_id_2: messageIds[1] ?? null,
+    },
     messageHtml: built.html,
   });
-  await markDigestResult(true);
+  if (!manual) await markDigestResult(true);
+  await ensureReportingReference(channel);
   return {
     ok: true,
     html: built.html,
-    messageId: sent.messageId,
+    messageId: messageIds[0],
     channelMasked: maskChannelId(channel),
   };
 }

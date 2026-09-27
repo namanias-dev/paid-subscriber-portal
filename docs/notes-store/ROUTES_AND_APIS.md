@@ -4,9 +4,9 @@
 
 | Path | File | Auth | Cache | Flag |
 |------|------|------|-------|------|
-| `/notes` | `app/(site)/notes/page.tsx` | public | ISR | dark → 404 |
-| `/notes/[subject]` | `…/[subject]/page.tsx` | public | ISR | dark → 404 |
-| `/notes/products/[slug]` | `…/products/[slug]/page.tsx` | public | ISR | dark → 404 |
+| `/notes` | `app/(site)/notes/page.tsx` | public | dynamic (offers) | dark → 404 |
+| `/notes/[subject]` | `…/[subject]/page.tsx` | public | dynamic (offers) | dark → 404 |
+| `/notes/products/[slug]` | `…/products/[slug]/page.tsx` | public | dynamic (offers) | dark → 404 |
 | `/notes/cart` | `…/cart/page.tsx` | guest cookie | no-store | |
 | `/notes/checkout` | `…/checkout/page.tsx` | guest | no-store | |
 | `/notes/order/[orderNumber]` | `…/order/[orderNumber]/page.tsx` | token/cookie | no-store | noindex |
@@ -19,7 +19,8 @@
 | GET | `/api/notes/status` | none | — | `{ok, enabled}` for nav |
 | GET/POST/PATCH/DELETE | `/api/notes/cart` | cart cookie | — | |
 | POST | `/api/notes/checkout` | cart + body | yes | sets access cookie; strips token from JSON |
-| GET | `/api/notes/pin` | none | — | serviceability + promised date; returns `quote` (authoritative subtotal/shipping/tax/total via `buildFrozenQuote`) when a live cart is serviceable |
+| GET | `/api/notes/offer` | none | no-store | active public offer + `server_now` |
+| GET | `/api/notes/pin` | none | — | serviceability + promised date; returns `quote` (authoritative subtotal/shipping/tax/total/discount via `buildFrozenQuote`) when a live cart is serviceable |
 | GET | `/api/notes/sample/[id]` | none | — | watermarked only |
 | POST | `/api/notes/track` | phone+order | yes | mints token |
 | POST | `/api/notes/order/[orderNumber]/verify` | access token | yes | triggers Verify |
@@ -37,6 +38,8 @@
 | GET | `/api/admin/notes/preparation` | `store_manage_orders` — copies-to-prepare (paid, not-yet-dispatched; bundles exploded) |
 | GET | `/api/admin/notes/overview` | `store_manage_orders` — action-required counts + prepare/low-stock lists |
 | GET/POST/PATCH/DELETE | `/api/admin/notes/bundles` | `store_manage_catalogue` — manage bundle components (add/remove/reorder/qty) |
+| GET/POST | `/api/admin/notes/offers` | `store_manage_catalogue` — list/create campaigns |
+| GET/PATCH | `/api/admin/notes/offers/[id]` | `store_manage_catalogue` — edit, pause, duplicate |
 
 ## Admin pages
 

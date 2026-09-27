@@ -1,21 +1,25 @@
 import { NextResponse } from "next/server";
-import { getObject, publicCdnUrl, r2Configured } from "@/lib/r2";
+import { getObject, headObject, publicCdnUrl, r2Configured } from "@/lib/r2";
+import { mediaObjectKey, mediaResponseHeaders } from "@/lib/mediaDelivery";
 
 /**
  * Public, unsigned media origin for R2 keys under `media/*`.
  * Stable URL → next/image cache key stays fixed (no 24h presigned churn).
  * When a CDN base is configured, 308 there so bytes leave Vercel entirely.
+ *
+ * Video playback depends on this remaining a streaming Range proxy:
+ * forward `Range` to R2, return 206 + Content-Range, and stream the body
+ * instead of materializing the object in the serverless isolate.
  */
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const preferredRegion = ["bom1"];
 
-const LONG_CACHE = "public, max-age=31536000, immutable";
-
-export async function GET(_req: Request, { params }: { params: { path: string[] } }) {
-  const parts = params.path || [];
-  if (!parts.length || parts.some((p) => !p || p === "." || p === "..")) {
+export async function GET(req: Request, { params }: { params: { path: string[] } }) {
+  const key = mediaObjectKey(params.path);
+  if (!key) {
     return NextResponse.json({ ok: false, error: "Not found" }, { status: 404 });
   }
-  const key = `media/${parts.join("/")}`;
 
   const cdn = publicCdnUrl(key);
   if (cdn) {
@@ -29,17 +33,40 @@ export async function GET(_req: Request, { params }: { params: { path: string[] 
     return NextResponse.json({ ok: false, error: "Storage not configured" }, { status: 503 });
   }
 
-  const obj = await getObject(key);
+  const range = req.headers.get("range") || undefined;
+  const obj = await getObject(key, { range });
   if (!obj) {
     return NextResponse.json({ ok: false, error: "Not found" }, { status: 404 });
   }
 
-  const headers = new Headers();
-  headers.set("Cache-Control", LONG_CACHE);
-  headers.set("CDN-Cache-Control", LONG_CACHE);
-  headers.set("Content-Type", obj.contentType || "application/octet-stream");
-  if (obj.contentLength != null) headers.set("Content-Length", String(obj.contentLength));
-  if (obj.etag) headers.set("ETag", obj.etag);
+  return new NextResponse(obj.body.transformToWebStream(), {
+    status: obj.status,
+    headers: mediaResponseHeaders(obj),
+  });
+}
 
-  return new NextResponse(obj.body.transformToWebStream(), { status: 200, headers });
+export async function HEAD(_req: Request, { params }: { params: { path: string[] } }) {
+  const key = mediaObjectKey(params.path);
+  if (!key) {
+    return new NextResponse(null, { status: 404 });
+  }
+
+  const cdn = publicCdnUrl(key);
+  if (cdn) {
+    return NextResponse.redirect(cdn, {
+      status: 308,
+      headers: { "Cache-Control": "public, max-age=86400" },
+    });
+  }
+
+  if (!r2Configured()) {
+    return new NextResponse(null, { status: 503 });
+  }
+
+  const obj = await headObject(key);
+  if (!obj) {
+    return new NextResponse(null, { status: 404 });
+  }
+
+  return new NextResponse(null, { status: 200, headers: mediaResponseHeaders(obj) });
 }

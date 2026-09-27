@@ -7,7 +7,9 @@ import {
   MAX_MEDIA_BYTES,
   MAX_PDF_BYTES,
   deleteProductMedia,
+  clearStoreThumbnail,
   generateSamplesFromPdf,
+  getProductImageSlots,
   listProductMedia,
   normalizeExt,
   reorderProductMedia,
@@ -15,6 +17,7 @@ import {
   uploadProductPhoto,
   uploadSamplePage,
   uploadSamplePdf,
+  uploadStoreThumbnail,
 } from "@/lib/store/media/upload";
 import { MAX_SAMPLE_PAGES } from "@/lib/store/media/pdf";
 
@@ -35,7 +38,7 @@ export async function GET(req: Request) {
   const productId = new URL(req.url).searchParams.get("product_id") || "";
   if (!productId) return noStore({ ok: false, error: "product_id required" }, 400);
   try {
-    return noStore({ ok: true, media: await listProductMedia(productId) });
+    return noStore({ ok: true, media: await listProductMedia(productId), ...(await getProductImageSlots(productId)) });
   } catch (e) {
     return noStore({ ok: false, error: (e as Error).message }, 500);
   }
@@ -51,8 +54,8 @@ export async function POST(req: Request) {
   const kind = String(form.get("kind") || "").trim();
   const file = form.get("file");
   if (!productId) return noStore({ ok: false, error: "product_id required" }, 400);
-  if (kind !== "photo" && kind !== "sample" && kind !== "sample_pdf") {
-    return noStore({ ok: false, error: "kind must be photo, sample or sample_pdf" }, 400);
+  if (kind !== "photo" && kind !== "sample" && kind !== "sample_pdf" && kind !== "store_thumbnail") {
+    return noStore({ ok: false, error: "kind must be photo, sample, sample_pdf or store_thumbnail" }, 400);
   }
   if (!(file instanceof File)) return noStore({ ok: false, error: "file required" }, 400);
 
@@ -74,6 +77,11 @@ export async function POST(req: Request) {
       return noStore({ ok: false, error: "Only JPG, PNG or WebP images are accepted." }, 415);
     }
     const buffer = Buffer.from(await file.arrayBuffer());
+    if (kind === "store_thumbnail") {
+      const thumbnail = await uploadStoreThumbnail(productId, buffer);
+      revalidateTag(STORE_CACHE_TAG);
+      return noStore({ ok: true, thumbnail });
+    }
     const row =
       kind === "sample"
         ? await uploadSamplePage(productId, buffer, ext, {
@@ -81,7 +89,10 @@ export async function POST(req: Request) {
             alt: (form.get("alt") as string) || null,
             contentType: file.type || undefined,
           })
-        : await uploadProductPhoto(productId, buffer, { alt: (form.get("alt") as string) || null });
+        : await uploadProductPhoto(productId, buffer, {
+            alt: (form.get("alt") as string) || null,
+            makeCover: form.get("make_cover") === "1",
+          });
     revalidateTag(STORE_CACHE_TAG);
     return noStore({ ok: true, media: row });
   } catch (e) {
@@ -102,6 +113,8 @@ export async function PATCH(req: Request) {
       await reorderProductMedia(productId, kind, (body.order || []).map(String));
     } else if (body.action === "set_cover") {
       await setProductCover(productId, body.media_id ? String(body.media_id) : null);
+    } else if (body.action === "clear_store_thumbnail") {
+      await clearStoreThumbnail(productId);
     } else if (body.action === "generate_pdf_samples") {
       const pages = Array.isArray(body.pages) ? body.pages.map(Number) : [];
       const media = await generateSamplesFromPdf(productId, String(body.pdf_key || ""), pages);

@@ -1,7 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { trackClient } from "@/lib/analytics/client";
+import { addressAnalyticsProps, addressFingerprint, buildDeliveryGoogleMapsUrl, canonicalDelivery, formatDeliveryAddress } from "@/lib/store/deliveryAddress";
+import { pinPlaceConflict } from "@/lib/store/address";
 
 interface CartJson {
   item_count: number;
@@ -11,10 +13,13 @@ interface CartJson {
 
 interface QuoteJson {
   subtotal_label: string;
+  discount_label?: string | null;
   shipping_label: string;
   tax_paise: number;
   tax_label: string;
   total_label: string;
+  offer_name?: string | null;
+  offer_id?: string | null;
 }
 
 export default function CheckoutForm() {
@@ -23,6 +28,13 @@ export default function CheckoutForm() {
   const [err, setErr] = useState<string | null>(null);
   const [pinInfo, setPinInfo] = useState<string | null>(null);
   const [quote, setQuote] = useState<QuoteJson | null>(null);
+  const [pinReady, setPinReady] = useState(false);
+  const [postal, setPostal] = useState<{ city: string | null; state: string | null }>({ city: null, state: null });
+  const [confirmedHash, setConfirmedHash] = useState<string | null>(null);
+  const shownRef = useRef(false);
+  const editedRef = useRef(false);
+  const [marketingConsent, setMarketingConsent] = useState(false);
+  const phoneTouched = useRef(false);
   const [form, setForm] = useState({
     name: "",
     phone: "",
@@ -36,9 +48,53 @@ export default function CheckoutForm() {
   });
 
   useEffect(() => {
+    void fetch("/api/notes/checkout-lead", { cache: "no-store", credentials: "same-origin" })
+      .then((r) => r.json())
+      .then((json) => {
+        const draft = json?.draft;
+        const prefill = json?.prefill;
+        setForm((current) => ({
+          ...current,
+          name: current.name || draft?.name || prefill?.name || "",
+          phone: current.phone || draft?.phone || prefill?.phone || "",
+          email: current.email || draft?.email || "",
+        }));
+        if (draft?.marketing_consent) setMarketingConsent(true);
+      })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (!phoneTouched.current || !/^[6-9]\d{9}$/.test(form.phone)) return;
+    const timer = window.setTimeout(() => {
+      const address = form.line1.trim() && /^[1-9][0-9]{5}$/.test(form.pincode) && form.city.trim() && form.state.trim()
+        ? { line1: form.line1, city: form.city, state: form.state, pincode: form.pincode }
+        : undefined;
+      void fetch("/api/notes/checkout-lead", {
+        method: "POST",
+        cache: "no-store",
+        credentials: "same-origin",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          name: form.name,
+          phone: form.phone,
+          email: form.email,
+          marketing_consent: marketingConsent,
+          address,
+          address_confirmed: Boolean(confirmedHash) && confirmedHash === addressFingerprint(canonicalDelivery(form)),
+        }),
+      }).catch(() => {});
+    }, 800);
+    return () => window.clearTimeout(timer);
+  }, [form, marketingConsent, confirmedHash]);
+
+  useEffect(() => {
+    trackClient("notes_checkout_started", { cta_id: "checkout_page" });
+    trackClient("notes_checkout_step_viewed", { step: "address" });
     fetch("/api/notes/cart", { cache: "no-store", credentials: "same-origin" })
       .then((r) => r.json())
-      .then((j) => setCart(j.cart));
+      .then((j) => setCart(j.cart))
+      .catch(() => trackClient("notes_checkout_api_error", { endpoint: "cart", recoverable: true }));
   }, []);
 
   async function lookupPin(pin: string) {
@@ -46,18 +102,25 @@ export default function CheckoutForm() {
     const res = await fetch(`/api/notes/pin?pin=${pin}`, { cache: "no-store" });
     const json = await res.json();
     if (!json.ok) {
+      setPinReady(false);
       setPinInfo(json.error);
       setQuote(null);
+      trackClient("notes_checkout_validation_error", { field: "pin", reason: "invalid_pin" });
       return;
     }
     if (!json.serviceable) {
+      setPinReady(false);
       setPinInfo("We don't currently deliver to this PIN.");
       setQuote(null);
+      trackClient("notes_shipping_quote_error", { field: "serviceability", reason: "no_shipping_quote", recoverable: true });
       return;
     }
+    setPostal({ city: json.city || null, state: json.state || null });
+    setPinReady(true);
     setForm((f) => ({ ...f, city: f.city || json.city || "", state: f.state || json.state || "" }));
     setQuote(json.quote || null);
     setPinInfo(`Delivered by ${json.promised_label}.`);
+    trackClient("notes_checkout_step_viewed", { step: "shipping_quote" });
   }
 
   async function onPinBlur() {
@@ -73,23 +136,85 @@ export default function CheckoutForm() {
     }
   }
 
+  function persistLead() {
+    if (!/^[6-9]\d{9}$/.test(form.phone)) return;
+    const address = form.line1.trim() && /^[1-9][0-9]{5}$/.test(form.pincode) && form.city.trim() && form.state.trim()
+      ? { line1: form.line1, city: form.city, state: form.state, pincode: form.pincode }
+      : undefined;
+    void fetch("/api/notes/checkout-lead", {
+      method: "POST",
+      cache: "no-store",
+      credentials: "same-origin",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        name: form.name,
+        phone: form.phone,
+        email: form.email,
+        marketing_consent: marketingConsent,
+        address,
+        address_confirmed: Boolean(confirmedHash) && confirmedHash === addressFingerprint(canonicalDelivery(form)),
+      }),
+    }).catch(() => {});
+  }
+
+  const canonical = canonicalDelivery(form);
+  const fingerprint = addressFingerprint(canonical);
+  const placeConflict = pinPlaceConflict(form.city, form.state, postal.city, postal.state);
+  const canConfirm = pinReady && !placeConflict && form.line1.trim().length > 2 && /^[1-9][0-9]{5}$/.test(form.pincode) && Boolean(form.city.trim()) && Boolean(form.state.trim());
+  const confirmed = confirmedHash === fingerprint;
+  const mapsUrl = buildDeliveryGoogleMapsUrl(canonical);
+
+  useEffect(() => {
+    if (!canConfirm || shownRef.current) return;
+    shownRef.current = true;
+    trackClient("notes_address_confirmation_shown", addressAnalyticsProps({ itemCount: cart?.item_count }));
+  }, [canConfirm, cart?.item_count]);
+
+  useEffect(() => {
+    if (confirmedHash && confirmedHash !== fingerprint) {
+      if (!editedRef.current) trackClient("notes_address_edited_after_confirmation", addressAnalyticsProps({}));
+      editedRef.current = true;
+      return;
+    }
+    editedRef.current = false;
+  }, [confirmedHash, fingerprint]);
+
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (confirmedHash !== addressFingerprint(canonicalDelivery(form))) {
+      setErr("Confirm the delivery address before paying.");
+      trackClient("notes_address_validation_error", addressAnalyticsProps({ reason: "unconfirmed" }));
+      return;
+    }
+    if (!/^[6-9]\d{9}$/.test(form.phone)) {
+      trackClient("notes_checkout_validation_error", { field: "phone", reason: "invalid_phone" });
+    }
+    if (!/^[1-9][0-9]{5}$/.test(form.pincode)) {
+      trackClient("notes_checkout_validation_error", { field: "pin", reason: "invalid_pin" });
+    }
+    if (!form.line1.trim()) {
+      trackClient("notes_checkout_validation_error", { field: "address", reason: "required" });
+    }
     setBusy(true);
     setErr(null);
-    trackClient("notes_checkout_started", { item_count: cart?.item_count ?? 0 });
+    trackClient("notes_checkout_step_viewed", { step: "payment_clicked", item_count: cart?.item_count ?? 0 });
+    if (quote?.offer_id) {
+      trackClient("notes_offer_checkout_started", { offer_id: quote.offer_id });
+    }
     try {
       const res = await fetch("/api/notes/checkout", {
         method: "POST",
         cache: "no-store",
         credentials: "same-origin",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify(form),
+        body: JSON.stringify({ ...form, address_hash: confirmedHash }),
       });
       const json = await res.json();
       if (!json.ok) throw new Error(json.error || "Payment could not be started.");
+      trackClient("notes_payment_gateway_opened", { cta_id: "pay_securely", item_count: cart?.item_count ?? 0 });
       window.location.href = json.payment_url;
     } catch (e2) {
+      trackClient("notes_checkout_api_error", { endpoint: "checkout", recoverable: true, stage: "order_create" });
       trackClient("notes_payment_failed", { stage: "checkout_submit" });
       setErr((e2 as Error).message);
       setBusy(false);
@@ -104,9 +229,13 @@ export default function CheckoutForm() {
       <div className="space-y-3 rounded-3xl bg-white p-5 ns-elev-1">
         <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--ca-gold-dark)]">1 · Address</p>
         <Field label="Full name" autoComplete="name" value={form.name} onChange={set("name")} required />
-        <Field label="Mobile" autoComplete="tel" inputMode="numeric" pattern="[0-9]{10}" maxLength={10} value={form.phone} onChange={set("phone")} required />
+        <Field label="Mobile" autoComplete="tel" inputMode="numeric" pattern="[0-9]{10}" maxLength={10} value={form.phone} onChange={(e) => { phoneTouched.current = true; set("phone")(e); }} onBlur={() => { phoneTouched.current = true; persistLead(); }} required />
         <Field label="Email (optional)" autoComplete="email" type="email" value={form.email} onChange={set("email")} />
-        <Field label="Address line 1" autoComplete="address-line1" value={form.line1} onChange={set("line1")} onPaste={onLine1Paste} required />
+        <label className="flex items-start gap-2 text-sm text-[var(--ca-navy)]/80">
+          <input type="checkbox" className="mt-1" checked={marketingConsent} onChange={(e) => { phoneTouched.current = true; setMarketingConsent(e.target.checked); }} />
+          <span>Send me useful UPSC notes updates and offers on WhatsApp/SMS.</span>
+        </label>
+        <Field id="delivery-line1" label="Address line 1" autoComplete="address-line1" value={form.line1} onChange={set("line1")} onPaste={onLine1Paste} required />
         <Field label="Apartment / landmark (optional)" autoComplete="address-line2" value={form.line2} onChange={set("line2")} />
         <Field label="PIN code" autoComplete="postal-code" inputMode="numeric" maxLength={6} value={form.pincode} onChange={set("pincode")} onBlur={onPinBlur} required />
         {pinInfo && <p className="text-sm text-[var(--ca-navy)]/70">{pinInfo}</p>}
@@ -118,6 +247,25 @@ export default function CheckoutForm() {
           <span className="mb-1 block font-medium text-[var(--ca-navy)]">Delivery instructions (optional)</span>
           <textarea value={form.delivery_instructions} onChange={set("delivery_instructions")} rows={2} className="w-full rounded-xl border border-[var(--ca-navy)]/15 px-3 py-2" />
         </label>
+        {placeConflict && <p className="text-sm text-red-700" role="alert">{placeConflict}</p>}
+        {canConfirm && (
+          <section className="rounded-2xl border border-[var(--ca-navy)]/10 bg-[#f7f5ef] p-4">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--ca-gold-dark)]">Confirm delivery address</p>
+            <p className="mt-2 whitespace-pre-line text-sm leading-relaxed text-[var(--ca-navy)]">{formatDeliveryAddress(canonical)}</p>
+            <p className="mt-2 text-xs text-[var(--ca-navy)]/60">Please confirm this is where you want your Notes delivered.</p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {mapsUrl ? (
+                <a href={mapsUrl} target="_blank" rel="noopener noreferrer" onClick={() => trackClient("notes_address_maps_opened", addressAnalyticsProps({}))} className="inline-flex min-h-11 items-center rounded-full border border-[var(--ca-navy)]/15 px-3 text-sm font-semibold text-[var(--ca-navy)]">Open in Google Maps</a>
+              ) : (
+                <p className="text-xs text-[var(--ca-navy)]/55">Complete the delivery address to open it in Maps.</p>
+              )}
+              <button type="button" className="min-h-11 rounded-full border border-[var(--ca-navy)]/15 px-3 text-sm font-semibold" onClick={() => document.getElementById("delivery-line1")?.focus()}>Edit address</button>
+            </div>
+            <button type="button" className="ca-focus mt-3 inline-flex min-h-11 w-full items-center justify-center rounded-full bg-[var(--ca-navy)] text-sm font-semibold text-white" onClick={() => { setConfirmedHash(fingerprint); trackClient("notes_address_confirmed", addressAnalyticsProps({ itemCount: cart?.item_count })); }}>
+              {confirmed ? "Delivering here" : "Yes, deliver here"}
+            </button>
+          </section>
+        )}
       </div>
       <aside className="h-fit rounded-3xl bg-white p-5 ns-elev-2">
         <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--ca-gold-dark)]">2 · Pay securely</p>
@@ -137,6 +285,14 @@ export default function CheckoutForm() {
             <span className="text-[var(--ca-navy)]/70">Subtotal</span>
             <span className="tabular-nums font-medium">{quote?.subtotal_label ?? cart?.subtotal_label}</span>
           </p>
+          {quote?.discount_label && (
+            <p className="flex justify-between">
+              <span className="text-[var(--ca-navy)]/70">
+                {quote.offer_name ? `Offer applied: ${quote.offer_name}` : "Offer"}
+              </span>
+              <span className="tabular-nums font-medium">−{quote.discount_label}</span>
+            </p>
+          )}
           <p className="flex justify-between">
             <span className="text-[var(--ca-navy)]/70">Shipping</span>
             <span className="tabular-nums font-medium">
@@ -165,7 +321,7 @@ export default function CheckoutForm() {
         )}
         <button
           type="submit"
-          disabled={busy || !cart?.item_count}
+          disabled={busy || !cart?.item_count || !confirmed}
           className="ca-focus ns-press mt-5 inline-flex min-h-12 w-full items-center justify-center rounded-full bg-[var(--ca-navy)] text-sm font-semibold text-white disabled:opacity-50"
         >
           {busy ? "Redirecting to ICICI…" : quote ? `Pay ${quote.total_label} securely` : "Pay securely"}

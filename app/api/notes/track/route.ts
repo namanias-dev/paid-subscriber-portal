@@ -61,7 +61,7 @@ export async function POST(req: Request) {
   cookies().set(
     STORE_ORDER_ACCESS_COOKIE,
     encodeOrderAccessCookie(order.order_no, raw),
-    storeOrderAccessCookieOptions(),
+    storeOrderAccessCookieOptions(new URL(req.url).hostname),
   );
 
   const publicOrder = await getPublicOrder(order.order_no, { trackingToken: raw });

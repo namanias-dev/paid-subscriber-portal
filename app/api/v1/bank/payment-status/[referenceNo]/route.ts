@@ -37,6 +37,7 @@ async function emiExtras(referenceNo: string) {
       remaining: fee.outstanding,
       status: enrollment.status,
       schedule: enrollment.schedule,
+      batchLabel: enrollment.batch_label,
     },
   };
 }

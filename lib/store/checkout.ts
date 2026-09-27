@@ -8,11 +8,18 @@
 import { storeDb } from "./db";
 import { makeStoreReference } from "./references";
 import { buildStorePaymentUrl, storeSubMerchantId } from "./payments/eazypay";
+import { pinPlaceConflict } from "./address";
+import { addressFingerprint, canonicalDelivery } from "./deliveryAddress";
 import { lockQuote, QUOTE_TTL_SECONDS, type FrozenQuote } from "./quote";
 import { reserveStock } from "./inventory";
 import type { CartView } from "./cart";
+import { cookies, headers } from "next/headers";
+import { parseDevice } from "@/lib/analytics/server";
 import { requestLeadAttribution } from "@/lib/marketing/requestAttribution";
+import { SESSION_COOKIE, VISITOR_COOKIE } from "@/lib/attribution";
+import { businessChannel } from "@/lib/analytics/notesCommerce";
 import { hashStoreAccessToken, mintStoreAccessToken } from "./accessToken";
+import { holdStoreOffer, offerTraceFromQuote } from "./offers";
 
 export interface CheckoutAddress {
   name: string;
@@ -25,6 +32,7 @@ export interface CheckoutAddress {
   state: string;
   pincode: string;
   delivery_instructions?: string;
+  address_hash?: string;
 }
 
 export interface CheckoutResult {
@@ -55,6 +63,18 @@ export async function placeCheckout(cart: CartView, address: CheckoutAddress): P
   const city = address.city.trim() || quote.city || "";
   const state = address.state.trim() || quote.state || "";
   if (!city || !state) throw new Error("Enter city and state");
+  const conflict = pinPlaceConflict(city, state, quote.city, quote.state);
+  if (conflict) throw new Error(conflict);
+  const canonical = canonicalDelivery({
+    line1: address.line1,
+    line2: address.line2,
+    city,
+    state,
+    pincode: quote.pincode,
+  });
+  if (!address.address_hash || address.address_hash !== addressFingerprint(canonical)) {
+    throw new Error("Confirm the delivery address before paying.");
+  }
 
   // Upsert the store customer by phone_key. This is NOT an academy identity.
   const { data: existing } = await db
@@ -87,12 +107,21 @@ export async function placeCheckout(cart: CartView, address: CheckoutAddress): P
       kind: "shipping",
       name,
       phone: address.phone.trim(),
-      line1: address.line1.trim(),
-      line2: address.line2?.trim() || null,
+      line1: canonical.line1,
+      line2: canonical.line2,
       landmark: address.landmark?.trim() || null,
-      city,
-      state,
+      city: canonical.city,
+      state: canonical.state,
       pincode: quote.pincode,
+      raw_line1: address.line1,
+      raw_line2: address.line2 || null,
+      raw_city: address.city,
+      raw_state: address.state,
+      confirmation_status: "CUSTOMER_CONFIRMED",
+      confirmed_at: new Date().toISOString(),
+      confirmed_by: "customer",
+      verification_method: "pin_and_customer",
+      address_hash: address.address_hash,
       delivery_instructions: address.delivery_instructions?.trim() || null,
     })
     .select("id")
@@ -108,7 +137,22 @@ export async function placeCheckout(cart: CartView, address: CheckoutAddress): P
   const orderTokenHash = hashStoreAccessToken(orderToken);
   // Freeze first-party nsa_attr at checkout — same cookie as academy leads, store tables only.
   const attr = requestLeadAttribution();
-  const touch = attr.attribution?.first_touch || attr.attribution?.last_touch || null;
+  const touch = attr.attribution?.last_touch || attr.attribution?.first_touch || null;
+  let deviceCategory: string | null = null;
+  let deviceBrowser: string | null = null;
+  let deviceOs: string | null = null;
+  try {
+    const device = parseDevice(headers().get("user-agent"));
+    deviceCategory = device.type;
+    deviceBrowser = device.browser;
+    deviceOs = device.os;
+  } catch { /* device lookup must not block checkout */ }
+  const attributionJson = {
+    ...(attr.attribution || { first_touch: null, last_touch: null }),
+    device_category: deviceCategory,
+    device_browser: deviceBrowser,
+    device_os: deviceOs,
+  };
   const { data: order, error: orderErr } = await db
     .from("store_orders")
     .insert({
@@ -126,17 +170,20 @@ export async function placeCheckout(cart: CartView, address: CheckoutAddress): P
       shipping_paise: quote.shipping_paise,
       tax_paise: quote.tax_paise,
       total_paise: quote.total_paise,
+      promo_code: quote.offer_slug || null,
+      offer_id: quote.offer_id || null,
+      discount_trace_json: offerTraceFromQuote(quote),
       quote_json: quote,
       promised_delivery_date: quote.promised_delivery_date,
       tracking_token: null,
       tracking_token_hash: orderTokenHash,
-      attribution_json: attr.attribution,
-      attribution_source: attr.channel || attr.utm_source,
+      attribution_json: attributionJson,
+      attribution_source: attr.utm_source || touch?.source || attr.channel,
       attribution_campaign: attr.utm_campaign,
       attribution_campaign_id: touch?.campaign_id || null,
       attribution_adset_id: touch?.adset_id || null,
       attribution_ad_id: touch?.ad_id || null,
-      attribution_platform: attr.channel,
+      attribution_platform: businessChannel(touch),
     })
     .select("id,order_no")
     .single();
@@ -149,6 +196,7 @@ export async function placeCheckout(cart: CartView, address: CheckoutAddress): P
     sku_snapshot: i.sku,
     qty: i.qty,
     unit_price_paise: i.unit_price_paise,
+    line_discount_paise: i.line_discount_paise || 0,
     line_total_paise: i.line_total_paise,
     tax_treatment_snapshot: i.tax_treatment,
     tax_rate_bps_snapshot: i.tax_rate_bps,
@@ -158,6 +206,18 @@ export async function placeCheckout(cart: CartView, address: CheckoutAddress): P
   }));
   const { error: itemsErr } = await db.from("store_order_items").insert(itemRows);
   if (itemsErr) throw new Error(itemsErr.message);
+
+  if (quote.offer_id && quote.discount_paise > 0) {
+    const held = await holdStoreOffer({
+      offerId: quote.offer_id,
+      orderId: order.id,
+      ttlSeconds: QUOTE_TTL_SECONDS,
+    });
+    if (!held.ok) {
+      await db.from("store_orders").update({ status: "PAYMENT_FAILED", updated_at: new Date().toISOString() }).eq("id", order.id);
+      throw new Error("This offer is no longer available. Please review the updated price and try again.");
+    }
+  }
 
   // Only ready_stock lines reserve/decrement inventory. on_demand titles are
   // printed per order and carry no stock counter, so they never reserve.
@@ -206,6 +266,34 @@ export async function placeCheckout(cart: CartView, address: CheckoutAddress): P
   });
 
   await db.from("store_carts").update({ status: "converted", updated_at: new Date().toISOString() }).eq("id", cart.id);
+
+  let visitorId: string | null = null;
+  let sessionId: string | null = null;
+  try {
+    const jar = cookies();
+    visitorId = jar.get(VISITOR_COOKIE)?.value || null;
+    sessionId = jar.get(SESSION_COOKIE)?.value || null;
+  } catch { /* analytics must not block payment */ }
+  void import("@/lib/store/checkoutLeads")
+    .then((m) => m.markLeadPaymentInitiated({
+      phone,
+      name,
+      email: address.email,
+      cartId: cart.id,
+      orderId: order.id,
+      totalPaise: quote.total_paise,
+    }))
+    .catch(() => {});
+  void import("@/lib/analytics/notesPurchase")
+    .then((m) => m.recordNotesPaymentInitiated({
+      orderId: order.id,
+      totalPaise: quote.total_paise,
+      itemCount: quote.items.length,
+      attribution: attr.attribution,
+      visitorId,
+      sessionId,
+    }))
+    .catch(() => {});
 
   return {
     order_no: order.order_no,

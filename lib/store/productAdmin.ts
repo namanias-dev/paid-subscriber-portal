@@ -7,6 +7,7 @@
  * storage. Nothing here touches money/identity tables — catalogue only.
  */
 import { isAvailabilityMode } from "./availability";
+import { validateProductPackage } from "./packageProfile";
 
 export const STAGES = new Set(["prelims", "mains", "both"]);
 
@@ -57,6 +58,15 @@ export function applyProductContentFields(patch: Record<string, unknown>, body: 
   if (body.length_mm !== undefined) patch.length_mm = intOrNull(body.length_mm);
   if (body.width_mm !== undefined) patch.width_mm = intOrNull(body.width_mm);
   if (body.height_mm !== undefined) patch.height_mm = intOrNull(body.height_mm);
+  if (body.weight_grams !== undefined || body.length_mm !== undefined || body.width_mm !== undefined || body.height_mm !== undefined) {
+    const invalid = validateProductPackage({
+      weightGrams: (patch.weight_grams as number | null) ?? null,
+      lengthMm: (patch.length_mm as number | null) ?? null,
+      widthMm: (patch.width_mm as number | null) ?? null,
+      heightMm: (patch.height_mm as number | null) ?? null,
+    });
+    if (invalid) throw new Error(invalid);
+  }
   if (body.dispatch_days != null && body.dispatch_days !== "") patch.dispatch_days = Math.max(0, Math.round(Number(body.dispatch_days)));
   if (body.max_quantity_per_order != null && body.max_quantity_per_order !== "")
     patch.max_quantity_per_order = Math.max(1, Math.round(Number(body.max_quantity_per_order)));
@@ -74,4 +84,61 @@ export function applyProductContentFields(patch: Record<string, unknown>, body: 
   if (body.ideal_for !== undefined) patch.ideal_for_json = cleanStringArray(body.ideal_for);
   if (body.topics !== undefined) patch.topics_json = cleanStringArray(body.topics);
   if (body.category_id !== undefined) patch.category_id = body.category_id || null;
+
+  if (body.hsn_code !== undefined) {
+    const hsn = String(body.hsn_code || "").replace(/\s/g, "");
+    if (hsn && !/^\d{4,8}$/.test(hsn)) throw new Error("HSN must be 4 to 8 digits.");
+    patch.hsn_code = hsn || null;
+  }
+  if (body.tax_treatment !== undefined) {
+    const treatment = String(body.tax_treatment);
+    if (treatment !== "exempt" && treatment !== "nil" && treatment !== "taxable") throw new Error("Invalid tax treatment.");
+    patch.tax_treatment = treatment;
+  }
+  if (body.tax_rate_bps !== undefined) {
+    const bps = Math.round(Number(body.tax_rate_bps));
+    if (!Number.isFinite(bps) || bps < 0 || bps > 4000) throw new Error("GST rate is out of range.");
+    patch.tax_rate_bps = bps;
+  }
+  if (body.tax_configuration_status !== undefined) {
+    const status = body.tax_configuration_status == null ? "" : String(body.tax_configuration_status);
+    if (status && status !== "CONFIRMED" && status !== "UNCONFIRMED") throw new Error("Invalid tax configuration status.");
+    patch.tax_configuration_status = status || null;
+  }
+  if (body.tax_configuration_source !== undefined) {
+    patch.tax_configuration_source = body.tax_configuration_source == null ? null : String(body.tax_configuration_source).slice(0, 40) || null;
+  }
+}
+
+/** Client-side gate so the editor explains a refusal before the request. */
+export function productEditorSaveBlocker(input: {
+  mrpPaise: number;
+  sellingPaise: number;
+  isActive: boolean;
+  weightGrams: number | null;
+  lengthMm: number | null;
+  widthMm: number | null;
+  heightMm: number | null;
+}): string | null {
+  if (!Number.isFinite(input.mrpPaise) || !Number.isFinite(input.sellingPaise)) return "Could not save pricing";
+  if (input.sellingPaise > input.mrpPaise) return "Selling price cannot exceed MRP.";
+  if (input.isActive && input.sellingPaise <= 0) return "A live product needs a selling price above ₹0.";
+  return validateProductPackage({
+    weightGrams: input.weightGrams,
+    lengthMm: input.lengthMm,
+    widthMm: input.widthMm,
+    heightMm: input.heightMm,
+  });
+}
+
+/** Safe text for the admin editor. Raw database errors stay in the server log. */
+export function publicProductSaveError(error: unknown): string {
+  const message = (error instanceof Error ? error.message : "").trim();
+  if (!message) return "Product update failed";
+  if (/check constraint|violates|duplicate key|syntax error|service_role|password|bearer /i.test(message)) {
+    if (/price_not_above_mrp/i.test(message)) return "Selling price cannot exceed MRP.";
+    return "Product update failed";
+  }
+  if (message.length > 180) return "Product update failed";
+  return message;
 }

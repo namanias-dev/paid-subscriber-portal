@@ -5,7 +5,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
 import {
-  Menu, X, ArrowRight, LogOut, LogIn, LayoutDashboard, UserCircle,
+  Menu, X, ArrowRight, ArrowLeft, LogOut, LogIn, LayoutDashboard, UserCircle,
   BookOpen, Newspaper, ListChecks, Trophy, Video, Gift, Info, Phone, Sparkles, GraduationCap, NotebookPen,
   type LucideIcon,
 } from "lucide-react";
@@ -16,6 +16,7 @@ import { ACADEMY } from "@/lib/config";
 import { DEFAULT_NAV_TABS, type NavTab } from "@/lib/navConfig";
 import { requestLogout } from "@/lib/welcome";
 import { toPublicImageSrc } from "@/lib/publicMediaUrl";
+import { enrollmentBackHref } from "@/lib/enrollmentPath";
 
 // Route logout through the global LogoutFlow (confirm + farewell + true logout).
 function doLogout() { requestLogout("/api/auth/logout", "/"); }
@@ -221,6 +222,8 @@ export default function PublicNav({
     </Link>
   );
 
+  const backHref = enrollmentBackHref(pathname);
+
   return (
     <>
     <header
@@ -231,6 +234,18 @@ export default function PublicNav({
           : "border-white/10 bg-[rgba(10,26,63,0.86)]"
       }`}
     >
+      {backHref ? (
+        <div className="container-wide flex h-14 items-center gap-3">
+          <Link href={backHref} className="ca-focus inline-flex min-h-11 items-center gap-1.5 text-sm font-semibold text-white" aria-label="Back to course">
+            <ArrowLeft size={18} aria-hidden="true" />
+            Back
+          </Link>
+          <div className="min-w-0 leading-tight">
+            <p className="truncate font-heading text-sm font-bold text-white">{ACADEMY.name}</p>
+            <p className="text-[11px] font-semibold text-[var(--ca-gold-bright)]">Secure enrollment</p>
+          </div>
+        </div>
+      ) : (
       <div className={`container-wide flex items-center justify-between transition-all duration-300 motion-reduce:transition-none ${scrolled ? "py-2" : "py-3"}`}>
         {LogoMark}
 
@@ -298,17 +313,19 @@ export default function PublicNav({
           <X size={22} className={`absolute transition-all duration-200 motion-reduce:transition-none ${open ? "rotate-0 opacity-100" : "-rotate-90 opacity-0"}`} aria-hidden="true" />
         </button>
       </div>
+      )}
 
       {/* Slim global "What's New" ticker — pinned directly under the nav on every
-          public page because it lives inside this sticky, in-flow header block. */}
-      <GlobalAnnouncementBar items={announcements} />
+          public page because it lives inside this sticky, in-flow header block.
+          Hidden on enrollment checkout so the payment path stays compact. */}
+      {!backHref && <GlobalAnnouncementBar items={announcements} />}
     </header>
 
       {/* Mobile drawer — rendered OUTSIDE <header> because the header's backdrop-filter
           would otherwise become the containing block for this fixed element (shrinking
           inset-0 to the header bar and hiding the menu). Outer is fixed inset-0 +
           overflow-hidden so the off-canvas panel is clipped and never adds page width. */}
-      <div
+      {!backHref && <div
         id="mobile-drawer"
         role="dialog"
         aria-modal="true"
@@ -397,7 +414,7 @@ export default function PublicNav({
             )}
           </div>
         </div>
-      </div>
+      </div>}
     </>
   );
 }
