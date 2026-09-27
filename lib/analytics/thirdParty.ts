@@ -255,6 +255,7 @@ export async function sendNotesMetaPurchase(input: {
   fbc?: string | null;
   fbp?: string | null;
   contentName?: string | null;
+  coupon?: string | null;
 }): Promise<void> {
   await sendMetaEvent("Purchase", `notes_purchase_${input.orderId}`, {
     value: input.valueInr,
@@ -266,6 +267,7 @@ export async function sendNotesMetaPurchase(input: {
       content_type: "product",
       content_name: input.contentName || "UPSC Notes",
       order_id: input.orderNo,
+      ...(input.coupon ? { coupon: input.coupon } : {}),
     },
   });
 }

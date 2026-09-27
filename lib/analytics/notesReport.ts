@@ -30,6 +30,10 @@ const EVENT_NAMES = [
   "notes_shipping_quote_error",
   "notes_shop_after_teaching_clicked",
   "notes_purchase",
+  "notes_discount_applied",
+  "notes_discount_rejected",
+  "notes_discount_removed",
+  "notes_purchase_with_discount",
 ];
 
 export async function loadNotesAnalytics(input: { key: NotesRangeKey; from?: string; to?: string }): Promise<NotesAnalyticsReport> {
@@ -54,13 +58,23 @@ export async function loadNotesAnalytics(input: { key: NotesRangeKey; from?: str
     events.push(...rows);
     if (rows.length < 1000) break;
   }
-  const { data: orderRows } = await db
+  const orderSelect = "id,status,total_paise,discount_paise,paid_at,promo_code,attribution_source,attribution_platform,attribution_json,coupon_code,coupon_discount_paise";
+  const orderQuery = await db
     .from("store_orders")
-    .select("id,status,total_paise,discount_paise,paid_at,promo_code,attribution_source,attribution_platform,attribution_json")
+    .select(orderSelect)
     .not("paid_at", "is", null)
     .gte("paid_at", start)
     .lt("paid_at", end)
     .limit(2000);
+  const orderRows = orderQuery.error
+    ? (await db
+      .from("store_orders")
+      .select("id,status,total_paise,discount_paise,paid_at,promo_code,attribution_source,attribution_platform,attribution_json")
+      .not("paid_at", "is", null)
+      .gte("paid_at", start)
+      .lt("paid_at", end)
+      .limit(2000)).data
+    : orderQuery.data;
   const orders = (orderRows || []) as NotesOrderFact[];
   const ids = orders.map((order) => order.id);
   let items: NotesItemFact[] = [];

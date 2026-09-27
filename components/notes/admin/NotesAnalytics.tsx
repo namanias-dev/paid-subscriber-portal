@@ -25,11 +25,13 @@ export default function NotesAnalytics({
   range,
   label,
   leads,
+  highlightCode = "",
 }: {
   report: NotesAnalyticsReport;
   range: string;
   label: string;
   leads: CheckoutLeadReport;
+  highlightCode?: string;
 }) {
   const k = report.kpis;
   return (
@@ -42,12 +44,13 @@ export default function NotesAnalytics({
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {RANGES.map(([key, text]) => (
-            <Link key={key} href={`/admin/notes/analytics?range=${key}`} className={`min-h-10 rounded-full px-3 py-2 text-sm font-semibold ${range === key ? "bg-[var(--ca-navy)] text-white" : "bg-white text-[var(--ca-navy)]"}`}>
+            <Link key={key} href={rangeHref(key, highlightCode)} className={`min-h-10 rounded-full px-3 py-2 text-sm font-semibold ${range === key ? "bg-[var(--ca-navy)] text-white" : "bg-white text-[var(--ca-navy)]"}`}>
               {text}
             </Link>
           ))}
           <form action="/admin/notes/analytics" className="flex flex-wrap items-center gap-2">
             <input type="hidden" name="range" value="custom" />
+            {highlightCode ? <input type="hidden" name="code" value={highlightCode} /> : null}
             <input type="date" name="from" aria-label="From" className="min-h-10 rounded-full border border-[var(--ca-navy)]/10 bg-white px-3 text-sm" />
             <input type="date" name="to" aria-label="To" className="min-h-10 rounded-full border border-[var(--ca-navy)]/10 bg-white px-3 text-sm" />
             <button type="submit" className={`min-h-10 rounded-full px-3 text-sm font-semibold ${range === "custom" ? "bg-[var(--ca-navy)] text-white" : "bg-white text-[var(--ca-navy)]"}`}>Custom</button>
@@ -106,6 +109,37 @@ export default function NotesAnalytics({
       <div className="mt-4">
         <Table title="Products" headers={["Product", "Views", "PDF", "Video", "Cart", "Orders", "Conv.", "Revenue"]} rows={report.products.map((row) => [row.label, row.views, row.pdfPeople, row.videoStarts, row.addToCarts, row.orders, pct(row.conversionPct), money(row.revenuePaise)])} />
       </div>
+
+      <section className="mt-4 overflow-hidden rounded-2xl bg-white">
+        <h2 className="px-4 pt-4 font-heading text-lg font-bold text-[var(--ca-navy)]">Discount codes</h2>
+        <p className="px-4 pt-1 text-sm text-[var(--ca-navy)]/60">Purchases using code. These are orders that used the code, not proof the code caused the purchase.</p>
+        <div className="mt-2 overflow-x-auto">
+          <table className="w-full min-w-[40rem] text-left text-sm">
+            <thead>
+              <tr className="text-[11px] uppercase tracking-wide text-[var(--ca-navy)]/45">
+                {["Code", "Applications", "Checkout starts", "Purchases using code", "Conversion", "Discount given", "Captured revenue"].map((header) => (
+                  <th key={header} className="px-4 py-2 font-semibold">{header}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {report.discountCodes.length === 0 ? (
+                <tr><td className="px-4 py-4 text-[var(--ca-navy)]/50" colSpan={7}>No discount codes used in this range yet.</td></tr>
+              ) : report.discountCodes.map((row) => (
+                <tr key={row.code} className={`border-t border-[var(--ca-navy)]/5 ${highlightCode && row.code === highlightCode ? "bg-[var(--ca-gold)]/15" : ""}`}>
+                  <td className="px-4 py-2 font-semibold text-[var(--ca-navy)]">{row.code}</td>
+                  <td className="px-4 py-2 tabular-nums">{row.applications}</td>
+                  <td className="px-4 py-2 tabular-nums">{row.checkoutStarts}</td>
+                  <td className="px-4 py-2 tabular-nums">{row.paidOrders}</td>
+                  <td className="px-4 py-2 tabular-nums">{pct(row.conversionPct)}</td>
+                  <td className="px-4 py-2 tabular-nums">{money(row.discountPaise)}</td>
+                  <td className="px-4 py-2 tabular-nums">{money(row.revenuePaise)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
 
       <div className="mt-4 grid gap-4 lg:grid-cols-2">
         <section className="rounded-2xl bg-white p-4">
@@ -199,6 +233,12 @@ export default function NotesAnalytics({
       )}
     </div>
   );
+}
+
+function rangeHref(key: string, code: string): string {
+  const params = new URLSearchParams({ range: key });
+  if (code) params.set("code", code);
+  return `/admin/notes/analytics?${params}`;
 }
 
 function Table({ title, headers, rows }: { title: string; headers: string[]; rows: Array<Array<string | number>> }) {

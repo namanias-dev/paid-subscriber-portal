@@ -4,11 +4,15 @@ import { useEffect, useRef, useState } from "react";
 import { trackClient } from "@/lib/analytics/client";
 import { addressAnalyticsProps, addressFingerprint, canonicalDelivery, formatDeliveryAddress, googleMapsSearchUrl } from "@/lib/store/deliveryAddress";
 import { pinPlaceConflict } from "@/lib/store/address";
+import DiscountCodeField from "@/components/notes/DiscountCodeField";
 
 interface CartJson {
   item_count: number;
   subtotal_label: string;
   items: { name: string; qty: number; line_label: string }[];
+  discount_codes_enabled?: boolean;
+  discount_code?: string | null;
+  coupon_label?: string | null;
 }
 
 interface QuoteJson {
@@ -20,6 +24,10 @@ interface QuoteJson {
   total_label: string;
   offer_name?: string | null;
   offer_id?: string | null;
+  coupon_code?: string | null;
+  coupon_label?: string | null;
+  coupon_notice?: string | null;
+  discount_codes_enabled?: boolean;
 }
 
 export default function CheckoutForm() {
@@ -34,6 +42,8 @@ export default function CheckoutForm() {
   const shownRef = useRef(false);
   const editedRef = useRef(false);
   const [marketingConsent, setMarketingConsent] = useState(false);
+  const [discountEnabled, setDiscountEnabled] = useState(false);
+  const [couponNotice, setCouponNotice] = useState<string | null>(null);
   const phoneTouched = useRef(false);
   const [form, setForm] = useState({
     name: "",
@@ -93,7 +103,10 @@ export default function CheckoutForm() {
     trackClient("notes_checkout_step_viewed", { step: "address" });
     fetch("/api/notes/cart", { cache: "no-store", credentials: "same-origin" })
       .then((r) => r.json())
-      .then((j) => setCart(j.cart))
+      .then((j) => {
+        setCart(j.cart);
+        setDiscountEnabled(Boolean(j.cart?.discount_codes_enabled));
+      })
       .catch(() => trackClient("notes_checkout_api_error", { endpoint: "cart", recoverable: true }));
   }, []);
 
@@ -119,6 +132,8 @@ export default function CheckoutForm() {
     setPinReady(true);
     setForm((f) => ({ ...f, city: f.city || json.city || "", state: f.state || json.state || "" }));
     setQuote(json.quote || null);
+    setCouponNotice(json.quote?.coupon_notice || null);
+    if (typeof json.quote?.discount_codes_enabled === "boolean") setDiscountEnabled(json.quote.discount_codes_enabled);
     setPinInfo(`Delivered by ${json.promised_label}.`);
     trackClient("notes_checkout_step_viewed", { step: "shipping_quote" });
   }
@@ -217,6 +232,7 @@ export default function CheckoutForm() {
       trackClient("notes_checkout_api_error", { endpoint: "checkout", recoverable: true, stage: "order_create" });
       trackClient("notes_payment_failed", { stage: "checkout_submit" });
       setErr((e2 as Error).message);
+      if (form.pincode.length === 6) void lookupPin(form.pincode);
       setBusy(false);
     }
   }
@@ -287,6 +303,29 @@ export default function CheckoutForm() {
                 {quote.offer_name ? `Offer applied: ${quote.offer_name}` : "Offer"}
               </span>
               <span className="tabular-nums font-medium">−{quote.discount_label}</span>
+            </p>
+          )}
+          {(discountEnabled || quote?.coupon_code || couponNotice) && (
+            <div className="py-1">
+              <DiscountCodeField
+                enabled={discountEnabled}
+                appliedCode={quote ? quote.coupon_code || null : cart?.discount_code || null}
+                appliedLabel={quote ? quote.coupon_label || null : cart?.coupon_label || null}
+                notice={couponNotice}
+                onChanged={() => {
+                  void fetch("/api/notes/cart", { cache: "no-store", credentials: "same-origin" })
+                    .then((r) => r.json())
+                    .then((j) => setCart(j.cart))
+                    .catch(() => {});
+                  if (form.pincode.length === 6) void lookupPin(form.pincode);
+                }}
+              />
+            </div>
+          )}
+          {quote?.coupon_code && quote.coupon_label && (
+            <p className="flex justify-between">
+              <span className="text-[var(--ca-navy)]/70">Discount · {quote.coupon_code}</span>
+              <span className="tabular-nums font-medium">−{quote.coupon_label}</span>
             </p>
           )}
           <p className="flex justify-between">

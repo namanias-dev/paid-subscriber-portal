@@ -254,6 +254,8 @@ export interface NotesOrderFact {
   discount_paise?: number | null;
   paid_at: string | null;
   promo_code?: string | null;
+  coupon_code?: string | null;
+  coupon_discount_paise?: number | null;
   attribution_source?: string | null;
   attribution_platform?: string | null;
   attribution_json?: StoredNotesAttribution | null;
@@ -363,6 +365,15 @@ export interface NotesAnalyticsReport {
     browsers: Array<{ browser: string; errors: number }>;
   };
   promotions: Array<{ code: string; orders: number; revenuePaise: number }>;
+  discountCodes: Array<{
+    code: string;
+    applications: number;
+    checkoutStarts: number;
+    paidOrders: number;
+    conversionPct: number | null;
+    discountPaise: number;
+    revenuePaise: number;
+  }>;
   revenueByDay: Array<{ day: string; revenuePaise: number; orders: number }>;
   excludedTestEvents: number;
 }
@@ -617,6 +628,28 @@ export function aggregateNotesAnalytics(eventsIn: NotesEventRow[], ordersIn: Not
     browsers.set(browser, (browsers.get(browser) || 0) + 1);
   });
 
+  const discountMap = new Map<string, { applications: number; checkoutStarts: number; paidOrders: number; discountPaise: number; revenuePaise: number }>();
+  const ensureDiscount = (code: string) => {
+    const key = code || "";
+    const row = discountMap.get(key) || { applications: 0, checkoutStarts: 0, paidOrders: 0, discountPaise: 0, revenuePaise: 0 };
+    discountMap.set(key, row);
+    return row;
+  };
+  for (const event of events) {
+    const code = String(event.props?.coupon_code || "").trim().toUpperCase();
+    if (!code) continue;
+    if (event.event_name === "notes_discount_applied") ensureDiscount(code).applications += 1;
+    if (event.event_name === "notes_payment_initiated") ensureDiscount(code).checkoutStarts += 1;
+  }
+  for (const order of orders) {
+    const code = String(order.coupon_code || "").trim().toUpperCase();
+    if (!code) continue;
+    const row = ensureDiscount(code);
+    row.paidOrders += 1;
+    row.discountPaise += Math.max(0, Number(order.coupon_discount_paise) || 0);
+    row.revenuePaise += order.total_paise || 0;
+  }
+
   const promos = new Map<string, { orders: number; revenuePaise: number }>();
   const days = new Map<string, { revenuePaise: number; orders: number }>();
   for (const order of orders) {
@@ -674,6 +707,11 @@ export function aggregateNotesAnalytics(eventsIn: NotesEventRow[], ordersIn: Not
       browsers: [...browsers.entries()].map(([browser, errors]) => ({ browser, errors })).sort((a, b) => b.errors - a.errors).slice(0, 8),
     },
     promotions: [...promos.entries()].map(([code, row]) => ({ code, ...row })).sort((a, b) => b.revenuePaise - a.revenuePaise),
+  discountCodes: [...discountMap.entries()].map(([code, row]) => ({
+    code,
+    ...row,
+    conversionPct: pct(row.paidOrders, row.checkoutStarts),
+  })).sort((a, b) => b.revenuePaise - a.revenuePaise || b.applications - a.applications),
     revenueByDay: [...days.entries()].map(([day, row]) => ({ day, ...row })).sort((a, b) => a.day.localeCompare(b.day)),
     excludedTestEvents,
   };

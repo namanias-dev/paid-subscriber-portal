@@ -30,5 +30,6 @@ Dated accepted decisions. Do not silently reverse.
 | 2026-09-21 | Limited-time offers are a real `store_offers` campaign with atomic holds; `calculateStorePrice` is the only discount formula | No frontend-only sale price; first-N orders counted on CAPTURED only |
 | 2026-09-21 | Bundles stay in schema/admin; storefront merchandising gated by `notes_store_bundles` (off) | Re-enable later without a rewrite |
 | 2026-09-21 | Merchandised individual subjects sell at ₹2,999 incl. GST; ₹1 TEST-NOTES-POLITY-001 untouched | Canonical catalogue price; payment-test SKU preserved |
+| 2026-09-27 | Entered Notes codes are a separate once-per-order layer on the post-offer eligible merchandise. `store_offers` stay automatic and per line. Shipping is not discounted. One code per order. `all_notes` includes future products; `selected_products` uses product ids. A valid `PAYMENT_PENDING` snapshot is honored if the code expires during ICICI. New checkouts after expiry are refused. Redemptions count on capture only, with a row lock at hold time. | Catalog price remains `selling_price_paise`. MRP is compare-at only. Historical orders keep `coupon_snapshot`. |
 
 Canonical product requirements remain in `docs/notes-store-spec.md`.

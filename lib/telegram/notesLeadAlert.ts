@@ -529,6 +529,9 @@ function recordFromRow(row: Record<string, unknown>, order?: { paid: boolean; or
       line_total_paise: line.line_total_paise,
     })),
     cartValuePaise: Number(row.cart_value_paise) || 0,
+    couponCode: typeof row.coupon_code === "string" ? row.coupon_code : null,
+    couponDiscountPaise: Number(row.coupon_discount_paise) || 0,
+    cartAfterDiscountPaise: row.cart_after_discount_paise == null ? null : Number(row.cart_after_discount_paise) || 0,
     lastActivityAt: typeof row.last_activity_at === "string" ? row.last_activity_at : new Date().toISOString(),
     marketingConsent: row.marketing_consent === true,
     touch: touchOf(attribution?.last_touch) || touchOf(attribution?.first_touch),
@@ -560,7 +563,7 @@ async function productionReload(leadId: string): Promise<NotesLeadAlertRecord | 
   if (!db) return null;
   const { data } = await db
     .from("store_checkout_leads")
-    .select("id,name,phone,checkout_stage,sales_status,cart_snapshot,cart_value_paise,last_activity_at,marketing_consent,attribution_json,order_id,is_test,converted_value_paise")
+    .select("id,name,phone,checkout_stage,sales_status,cart_snapshot,cart_value_paise,last_activity_at,marketing_consent,attribution_json,order_id,is_test,converted_value_paise,coupon_code,coupon_discount_paise,cart_after_discount_paise")
     .eq("id", leadId)
     .maybeSingle();
   if (!data) return null;
@@ -573,7 +576,7 @@ async function productionLoadAbandoned(): Promise<NotesLeadAlertRecord[]> {
   if (!db) return [];
   const { data } = await db
     .from("store_checkout_leads")
-    .select("id,name,phone,checkout_stage,sales_status,cart_snapshot,cart_value_paise,last_activity_at,marketing_consent,attribution_json,order_id,is_test,converted_value_paise")
+    .select("id,name,phone,checkout_stage,sales_status,cart_snapshot,cart_value_paise,last_activity_at,marketing_consent,attribution_json,order_id,is_test,converted_value_paise,coupon_code,coupon_discount_paise,cart_after_discount_paise")
     .in("checkout_stage", ["CHECKOUT_ABANDONED", "PAYMENT_ABANDONED"])
     .order("updated_at", { ascending: false })
     .limit(120);

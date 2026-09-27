@@ -165,6 +165,17 @@ export async function ensureStoreInvoice(orderId: string, opts?: { namespace?: "
     console.info(`[store/invoice] classification_unconfirmed order=${order.order_no}`);
     return { ok: false, status: "UNCONFIRMED", invoiceNumber: null };
   }
+  let couponCode: string | null = null;
+  let couponPaise = 0;
+  try {
+    const couponLookup = await db.from("store_orders").select("coupon_code,coupon_discount_paise").eq("id", orderId).maybeSingle();
+    if (!couponLookup.error && couponLookup.data?.coupon_code && Number(couponLookup.data.coupon_discount_paise) > 0) {
+      couponCode = String(couponLookup.data.coupon_code);
+      couponPaise = Number(couponLookup.data.coupon_discount_paise) || 0;
+    }
+  } catch {
+    couponCode = null;
+  }
   const inclusive = (settings?.price_tax_mode || "inclusive") !== "exclusive";
   const placeCode = stateCodeFromName(address?.state);
   const tax = computeTaxDocument({
@@ -174,6 +185,8 @@ export async function ensureStoreInvoice(orderId: string, opts?: { namespace?: "
     supplierStateCode: settings?.state_code || null,
     placeOfSupplyCode: placeCode,
     chargedTotalPaise: order.total_paise,
+    couponCode,
+    couponDiscountPaise: couponPaise,
   });
   const chosen = chooseDocumentType({
     gstin: settings?.gstin || null,

@@ -15,8 +15,9 @@
 11. `supabase/migrations/2026-09-21-notes-store-offers.sql` — **additive**: `store_offers` + `store_offer_holds`, hold/consume/release RPCs, `store_orders.offer_id`, merchandised singles → ₹2,999, `notes_store_bundles` flag (off), seed Launch Offer (20% / first 100 / 7-day window, all admin-editable).
 12. `supabase/migrations/2026-09-25-notes-store-invoices.sql` — **additive**: `store_invoice_settings`, `store_invoice_counters`, `store_invoices`, `next_store_invoice_seq`. One invoice row per order. Historical orders are not backfilled.
 13. `supabase/migrations/2026-09-26-notes-store-landing-thumbnail.sql` — **additive**: nullable `store_products.store_thumbnail_image_key`. No backfill. Null keeps the product cover on `/notes`.
+14. `supabase/migrations/2026-09-27-notes-discount-codes.sql` — **additive**: `store_discount_codes`, `store_discount_code_products`, `store_discount_redemptions`, `store_discount_code_events`, hold/capture/release RPCs, nullable order and lead coupon columns. No price or order column is rewritten. No NOTES500 row is inserted. Turns `notes_store_coupons` on.
 
-## Tables (`store_*`) — 23
+## Tables (`store_*`) — 27
 
 | Table | Purpose |
 |-------|---------|
@@ -44,12 +45,16 @@
 | `store_invoice_settings` | Legal supplier and document mode. Empty GSTIN is left empty. |
 | `store_invoice_counters` | Financial-year sequences. Production and test namespaces are separate. |
 | `store_invoices` | Immutable issued snapshot, PDF key, and credit-note status |
+| `store_discount_codes` | Entered promo codes. Fixed amount or percentage. Scope is all Notes or selected product ids. |
+| `store_discount_code_products` | Product ids for `selected_products` scope |
+| `store_discount_redemptions` | One row per order: held, captured, or released. Unique on `order_id`. |
+| `store_discount_code_events` | Created, updated, activated, deactivated, archived |
 
 **No FKs** from these tables into Academy `payments` / `students` / `buyers` / `leads` / enrollments.
 
 ## Important `store_orders` columns
 
-- Money: `*_paise`, `quote_json`, `promo_code` (future)
+- Money: `*_paise`, `quote_json`, `promo_code` (automatic offer slug), `coupon_code`, `coupon_id`, `coupon_discount_paise`, `coupon_snapshot`
 - Access: `tracking_token` (**deprecated null**), `tracking_token_hash`
 - Attribution: `attribution_json`, `attribution_source`, `attribution_campaign`, ids, `attribution_platform`
 - `phone_key` generated from phone

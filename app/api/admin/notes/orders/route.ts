@@ -68,6 +68,7 @@ export async function GET(req: Request) {
 
   const statuses = BUCKETS[bucket] || ALL_STATUSES;
   const issueFilter = url.searchParams.get("issue") || "";
+  const discountCode = (url.searchParams.get("code") || "").trim().toUpperCase();
   let openIssueOrderIds: string[] | null = null;
   if (issueFilter === "open") {
     const { data: openRows, error: openError } = await db
@@ -95,35 +96,40 @@ export async function GET(req: Request) {
     if (ids.length) awbOrderIds = ids as string[];
   }
 
-  let query = db
-    .from("store_orders")
-    .select(
-      "id,order_no,status,customer_name,phone,email,total_paise,discount_paise,shipping_paise,subtotal_paise,promo_code,discount_trace_json,promised_delivery_date,placed_at,updated_at,paid_at,shipped_at,delivered_at,internal_notes,shipping_address_id,attribution_source,attribution_campaign,attribution_platform,attribution_json",
-      { count: "exact" },
-    )
-    .in("status", statuses);
-  if ((BUSINESS_CHANNELS as readonly string[]).includes(acq)) query = query.eq("attribution_platform", acq);
-  if (openIssueOrderIds) query = query.in("id", openIssueOrderIds);
-
-  if (q) {
-    const like = `%${q.replace(/[%,]/g, "")}%`;
-    const ors = [
-      `order_no.ilike.${like}`,
-      `customer_name.ilike.${like}`,
-      `phone.ilike.${like}`,
-      `email.ilike.${like}`,
-    ];
-    if (awbOrderIds?.length) ors.push(`id.in.(${awbOrderIds.join(",")})`);
-    query = query.or(ors.join(","));
-  }
-
+  const orderSelect =
+    "id,order_no,status,customer_name,phone,email,total_paise,discount_paise,shipping_paise,subtotal_paise,promo_code,discount_trace_json,promised_delivery_date,placed_at,updated_at,paid_at,shipped_at,delivered_at,internal_notes,shipping_address_id,attribution_source,attribution_campaign,attribution_platform,attribution_json";
   const sortColumn = sort.startsWith("value") ? "total_paise" : sort === "updated" || sort === "action" ? "updated_at" : "placed_at";
   const ascending = sort === "oldest" || sort === "value_asc";
   const scan = actionOnly ? 100 : limit;
   const scanOffset = actionOnly ? 0 : offset;
-  const { data, count } = await query.order(sortColumn, { ascending }).range(scanOffset, scanOffset + scan - 1);
 
-  const orders = data || [];
+  async function loadOrders(select: string, withCoupon: boolean) {
+    let query = db!.from("store_orders").select(select, { count: "exact" }).in("status", statuses);
+    if ((BUSINESS_CHANNELS as readonly string[]).includes(acq)) query = query.eq("attribution_platform", acq);
+    if (withCoupon && discountCode) query = query.eq("coupon_code", discountCode);
+    if (openIssueOrderIds) query = query.in("id", openIssueOrderIds);
+    if (q) {
+      const like = `%${q.replace(/[%,]/g, "")}%`;
+      const ors = [
+        `order_no.ilike.${like}`,
+        `customer_name.ilike.${like}`,
+        `phone.ilike.${like}`,
+        `email.ilike.${like}`,
+      ];
+      if (withCoupon) ors.push(`coupon_code.ilike.${like}`);
+      if (awbOrderIds?.length) ors.push(`id.in.(${awbOrderIds.join(",")})`);
+      query = query.or(ors.join(","));
+    }
+    return query.order(sortColumn, { ascending }).range(scanOffset, scanOffset + scan - 1);
+  }
+
+  let { data, count, error } = await loadOrders(`${orderSelect.replace("promo_code,", "promo_code,coupon_code,coupon_discount_paise,")}`, true);
+  if (error && /coupon_code/i.test(error.message || "")) {
+    ({ data, count, error } = await loadOrders(orderSelect, false));
+  }
+  if (error) return NextResponse.json({ ok: false, error: "Could not load orders." }, { status: 503, headers: { "Cache-Control": "no-store" } });
+
+  const orders = (data || []) as any[];
   const ids = orders.map((o) => o.id);
   const addrIds = [...new Set(orders.map((o) => o.shipping_address_id).filter(Boolean))] as string[];
 

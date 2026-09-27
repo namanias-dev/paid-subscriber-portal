@@ -36,6 +36,8 @@ export interface CartView {
   offer_slug: string | null;
   discount_type: StoreOfferDiscountType | null;
   discount_value: number | null;
+  /** Entered discount code stored on the cart. Null when the customer has not applied one. */
+  discount_code: string | null;
 }
 
 function cookieOpts() {
@@ -79,7 +81,7 @@ export async function getCartView(cartId?: string | null): Promise<CartView | nu
   const id = cartId || readCartId();
   const db = storeDb();
   if (!id || !db) return null;
-  const { data: cart } = await db.from("store_carts").select("id,status").eq("id", id).maybeSingle();
+  const { data: cart } = await db.from("store_carts").select("id,status,promo_code").eq("id", id).maybeSingle();
   if (!cart || cart.status !== "open") return null;
   const { data: items } = await db
     .from("store_cart_items")
@@ -133,6 +135,7 @@ export async function getCartView(cartId?: string | null): Promise<CartView | nu
     offer_slug: priced.offer_slug,
     discount_type: priced.discount_type,
     discount_value: priced.discount_value,
+    discount_code: cart.promo_code ? String(cart.promo_code) : null,
   };
 }
 

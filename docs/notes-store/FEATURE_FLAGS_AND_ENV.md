@@ -7,7 +7,7 @@
 | Key | Purpose | Production default |
 |-----|---------|-------------------|
 | `notes_store` | Master kill switch | **off** |
-| `notes_store_coupons` | Coupons | off |
+| `notes_store_coupons` | Checkout discount-code entry. Off, or `kill_switch`, hides the field without a deploy. Existing orders keep their snapshots. Requires the master `notes_store` flag as well. | on, after `2026-09-27-notes-discount-codes.sql` |
 | `notes_store_free_shipping` | Free shipping rules | off |
 | `notes_store_reviews` | Reviews | off |
 | `notes_store_shiprocket` | Legacy aggregator flag. It does **not** switch fulfilment onto Shiprocket. | off |

@@ -5,6 +5,7 @@ import { computeBundleOffer } from "@/lib/store/bundleOffer";
 import { getProductBySlug, listActiveProducts } from "@/lib/store/catalogue";
 import { storeFeatureEnabled } from "@/lib/store/flags";
 import { offerDiscountLabel } from "@/lib/store/pricing";
+import { discountCodesEnabled, judgeCartDiscount } from "@/lib/store/discountCodes";
 
 export const dynamic = "force-dynamic";
 
@@ -71,6 +72,17 @@ async function serialize(view: Awaited<ReturnType<typeof getCartView>>) {
   } catch {
     bundle_offer = null;
   }
+  let coupon: { code: string; label: string } | null = null;
+  const discount_codes_enabled = view ? await discountCodesEnabled() : false;
+  if (view?.discount_code && discount_codes_enabled) {
+    try {
+      const judged = await judgeCartDiscount({
+        rawCode: view.discount_code,
+        lines: view.items.map((item) => ({ product_id: item.product_id, merchandise_paise: item.line_total_paise })),
+      });
+      if (judged.applied) coupon = { code: judged.applied.code, label: formatPaise(judged.applied.discount_paise) };
+    } catch { coupon = null; }
+  }
   return {
     ok: true,
     cart: {
@@ -97,6 +109,9 @@ async function serialize(view: Awaited<ReturnType<typeof getCartView>>) {
       max_dispatch_days: view.max_dispatch_days,
       items,
       bundle_offer,
+      discount_codes_enabled,
+      discount_code: coupon?.code || null,
+      coupon_label: coupon?.label || null,
     },
   };
 }

@@ -157,6 +157,8 @@ export function formatNotesOrderAlertHtml(input: {
   totalCount: number;
   customer: NotesAlertCustomer;
   variant?: "new" | "updated";
+  couponCode?: string | null;
+  couponDiscountPaise?: number | null;
 }): string {
   const subject = formatNotesSubjectLine(input.items);
   const paid = inrExact(paiseToRupees(input.paidPaise));
@@ -179,6 +181,9 @@ export function formatNotesOrderAlertHtml(input: {
     "",
     `📚 <b>${escapeHtml(subject.text)}</b>`,
     `💰 Paid <b>${escapeHtml(paid)}</b>`,
+    ...(input.couponCode && (input.couponDiscountPaise || 0) > 0
+      ? [`Offer: ${escapeHtml(input.couponCode)} · ${escapeHtml(inrExact(paiseToRupees(input.couponDiscountPaise || 0)))} off`]
+      : []),
     "",
     `👤 <b>Customer:</b> ${escapeHtml(customer.name)}`,
     `📞 <b>Phone:</b> ${escapeHtml(customer.phone)}`,

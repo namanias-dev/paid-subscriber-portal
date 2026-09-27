@@ -88,6 +88,7 @@ export async function sendGa4NotesPurchase(input: {
   orderId: string;
   orderNo: string;
   valueInr: number;
+  coupon?: string | null;
   items: Array<{ item_id: string; item_name: string; price: number; quantity: number }>;
 }): Promise<void> {
   try {
@@ -107,6 +108,7 @@ export async function sendGa4NotesPurchase(input: {
             transaction_id: input.orderNo,
             value: input.valueInr,
             currency: "INR",
+            ...(input.coupon ? { coupon: input.coupon } : {}),
             items: input.items,
             engagement_time_msec: 1,
           },

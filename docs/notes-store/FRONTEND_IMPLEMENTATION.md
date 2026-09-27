@@ -64,5 +64,5 @@ Compose toward Academy gold standards (`CourseCard`, `CaPageHeader`, navy/gold t
 ## Known limitations
 
 - Test product may lack cover/sample media.  
-- Bundles/coupons UI not Phase 1 complete.  
+- Bundle merchandising stays behind `notes_store_bundles`. Discount entry lives in checkout Order Summary when `notes_store_coupons` is on.  
 - No Playwright; visual QA needs authenticated preview or local.

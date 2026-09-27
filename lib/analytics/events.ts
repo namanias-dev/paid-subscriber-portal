@@ -130,6 +130,11 @@ export type EventName =
   | "notes_cart_viewed"
   | "notes_cart_quantity_changed"
   | "notes_coupon_applied"
+  | "notes_discount_opened"
+  | "notes_discount_applied"
+  | "notes_discount_rejected"
+  | "notes_discount_removed"
+  | "notes_purchase_with_discount"
   | "notes_payment_initiated"
   | "notes_payment_gateway_opened"
   | "notes_payment_returned"
@@ -268,6 +273,10 @@ export const CLIENT_ALLOWED_EVENTS: ReadonlySet<EventName> = new Set<EventName>(
   "notes_cart_viewed",
   "notes_cart_quantity_changed",
   "notes_coupon_applied",
+  "notes_discount_opened",
+  "notes_discount_applied",
+  "notes_discount_rejected",
+  "notes_discount_removed",
   "notes_payment_gateway_opened",
   "notes_payment_returned",
   "notes_payment_failed",

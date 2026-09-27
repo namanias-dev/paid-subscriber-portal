@@ -198,7 +198,10 @@ export async function renderInvoicePdf(model: InvoicePdfModel): Promise<Uint8Arr
   const summary: Array<[string, string]> = [
     ["Subtotal", money(gross)],
     ["Discount", model.tax.discountPaise > 0 ? `−${money(model.tax.discountPaise)}` : money(0)],
-    ["Net goods", money(net)],
+    ...(model.tax.couponDiscountPaise
+      ? [[`Discount (${model.tax.couponCode || "code"})`, `−${money(model.tax.couponDiscountPaise)}`] as [string, string]]
+      : []),
+    ["Net goods", money(Math.max(0, net - (model.tax.couponDiscountPaise || 0)))],
     ["Shipping", money(model.tax.shippingPaise)],
     ["GST", money(model.tax.taxPaise)],
   ];

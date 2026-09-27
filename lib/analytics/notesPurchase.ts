@@ -28,6 +28,9 @@ export async function recordNotesPaymentInitiated(input: {
   attribution?: AttributionState | null;
   visitorId?: string | null;
   sessionId?: string | null;
+  couponCode?: string | null;
+  couponDiscountPaise?: number;
+  productIds?: string[];
 }): Promise<void> {
   const touch = touchOf(input.attribution || null);
   await writeEvent({
@@ -47,6 +50,13 @@ export async function recordNotesPaymentInitiated(input: {
       content: touch?.content || null,
       channel: businessChannel(touch),
       is_test: isQaTouch(touch),
+      ...(input.couponCode
+        ? {
+            coupon_code: input.couponCode,
+            discount_amount: input.couponDiscountPaise || 0,
+            product_ids: input.productIds || [],
+          }
+        : {}),
     },
   });
 }
@@ -68,6 +78,24 @@ export async function recordNotesPurchase(orderId: string): Promise<boolean> {
     .eq("id", orderId)
     .maybeSingle();
   if (!order?.paid_at || !order.order_no) return false;
+  let couponCode: string | null = null;
+  let couponDiscount = 0;
+  let cartBefore: number | null = null;
+  try {
+    const { data: couponRow, error } = await db
+      .from("store_orders")
+      .select("coupon_code,coupon_discount_paise,subtotal_paise,coupon_snapshot")
+      .eq("id", orderId)
+      .maybeSingle();
+    if (!error && couponRow?.coupon_code) {
+      couponCode = String(couponRow.coupon_code);
+      couponDiscount = Number(couponRow.coupon_discount_paise) || 0;
+      const snap = couponRow.coupon_snapshot as { merchandise_before_paise?: number } | null;
+      cartBefore = snap?.merchandise_before_paise ?? (Number(couponRow.subtotal_paise) || null);
+    }
+  } catch {
+    couponCode = null;
+  }
   const { data: items } = await db
     .from("store_order_items")
     .select("product_id,name_snapshot,sku_snapshot,qty,unit_price_paise")
@@ -100,14 +128,43 @@ export async function recordNotesPurchase(orderId: string): Promise<boolean> {
       channel: businessChannel(touch),
       is_test: isQaTouch(touch),
       items: safeItems,
+      ...(couponCode
+        ? {
+            coupon_code: couponCode,
+            discount_amount: couponDiscount,
+            product_ids: safeItems.map((item) => item.product_id),
+            cart_value_before: cartBefore,
+            cart_value_after: Math.max(0, (cartBefore || 0) - couponDiscount),
+          }
+        : {}),
     },
   });
   if (!wrote) return false;
+  if (couponCode) {
+    await writeEvent({
+      event_name: "notes_purchase_with_discount",
+      dedupe_key: `notes_purchase_with_discount:${orderId}`,
+      attribution: attr,
+      props: {
+        schema_version: NOTES_SCHEMA_VERSION,
+        coupon_code: couponCode,
+        discount_amount: couponDiscount,
+        product_ids: safeItems.map((item) => item.product_id),
+        cart_value_before: cartBefore,
+        cart_value_after: Math.max(0, (cartBefore || 0) - couponDiscount),
+        value_paise: order.total_paise,
+        source: touch?.source || null,
+        campaign: touch?.campaign || null,
+        currency: "INR",
+      },
+    });
+  }
   const valueInr = Number(order.total_paise || 0) / 100;
   await sendGa4NotesPurchase({
     orderId,
     orderNo: String(order.order_no),
     valueInr,
+    coupon: couponCode,
     items: safeItems.map((item) => ({
       item_id: String(item.sku || item.product_id || "notes"),
       item_name: String(item.product_name || "UPSC Notes").slice(0, 80),
@@ -122,6 +179,7 @@ export async function recordNotesPurchase(orderId: string): Promise<boolean> {
     fbc: touch?.fbc,
     fbp: touch?.fbp,
     contentName: safeItems.map((item) => item.product_name).filter(Boolean).join(", ").slice(0, 80) || "UPSC Notes",
+    coupon: couponCode,
   });
   return true;
 }

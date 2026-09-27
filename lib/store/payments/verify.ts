@@ -19,6 +19,7 @@ import { storeDb } from "@/lib/store/db";
 import { storeOpsAlert } from "@/lib/store/alerts";
 import { holdReservationsUntilShip, releaseReservations } from "@/lib/store/inventory";
 import { consumeStoreOfferHold, releaseStoreOfferHold } from "@/lib/store/offers";
+import { captureDiscountForOrder, releaseDiscountForOrder } from "@/lib/store/discountCodes";
 import { isStoreReference, STORE_REFERENCE_SQL_LIKE } from "@/lib/store/references";
 import { storeEazypayVerify, paiseToGatewayAmount } from "./eazypay";
 import {
@@ -216,6 +217,7 @@ async function applyOrderTerminal(
     }
     if (data?.length) {
       await consumeStoreOfferHold(orderId);
+      await captureDiscountForOrder(orderId);
       const { scheduleStoreInvoice } = await import("../invoice/issue");
       scheduleStoreInvoice(orderId);
       void import("@/lib/analytics/notesPurchase")
@@ -248,6 +250,7 @@ async function applyOrderTerminal(
   }
   if (data?.length) {
     await releaseStoreOfferHold(orderId);
+    await releaseDiscountForOrder(orderId);
     void import("@/lib/analytics/notesPurchase")
       .then((m) => m.recordNotesPaymentFailed(orderId, outcome))
       .catch(() => {});

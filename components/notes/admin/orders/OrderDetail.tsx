@@ -46,6 +46,8 @@ export interface AdminOrder {
   discount_paise?: number;
   shipping_paise?: number;
   promo_code?: string | null;
+  coupon_code?: string | null;
+  coupon_discount_paise?: number | null;
   discount_trace_json?: { offer_name?: string; discount_type?: string; discount_value?: number } | null;
   payment_status: string | null;
   promised_delivery_date: string | null;
@@ -399,8 +401,11 @@ export default function OrderDetail({
             </ul>
             <dl className="mt-2 space-y-1 text-sm text-[var(--ca-navy)]/70">
               {order.subtotal_paise != null && <div className="flex justify-between"><dt>Subtotal</dt><dd>{formatPaise(order.subtotal_paise)}</dd></div>}
-              {(order.discount_paise || 0) > 0 && (
-                <div className="flex justify-between"><dt>{order.discount_trace_json?.offer_name || order.promo_code || "Offer"}</dt><dd>− {formatPaise(order.discount_paise || 0)}</dd></div>
+              {Math.max(0, (order.discount_paise || 0) - (order.coupon_discount_paise || 0)) > 0 && (
+                <div className="flex justify-between"><dt>{order.discount_trace_json?.offer_name || order.promo_code || "Offer"}</dt><dd>− {formatPaise((order.discount_paise || 0) - (order.coupon_discount_paise || 0))}</dd></div>
+              )}
+              {(order.coupon_discount_paise || 0) > 0 && (
+                <div className="flex justify-between"><dt>Promotion · {order.coupon_code || "Code"}</dt><dd>− {formatPaise(order.coupon_discount_paise || 0)}</dd></div>
               )}
               {(order.shipping_paise || 0) > 0 && <div className="flex justify-between"><dt>Shipping</dt><dd>{formatPaise(order.shipping_paise || 0)}</dd></div>}
               <div className="flex justify-between font-semibold text-[var(--ca-navy)]"><dt>Total</dt><dd>{formatPaise(order.total_paise)}</dd></div>

@@ -9,7 +9,7 @@ media upload · availability model (Ready Stock / On Demand / Coming Soon / Unav
 · preparation-demand queue · operational order management (search/buckets/copy/exceptions)
 · admin overview · **bundles (admin components + storefront detail + savings)** ·
 **Notes commerce analytics events** · **shipping-provider abstraction (manual + Shiprocket boundary)**
-· **notification boundary (order confirmed/shipped, gated)**. Availability migration
+· **notification boundary (order confirmed/shipped, gated)** · **entered discount codes** (`/admin/notes/discounts`, one code per order, no seeded NOTES500). Availability migration
 applied + demo catalogue seeded on the Academy DB.
 
 ## Blocked ONLY by owner-side external access (not code)
