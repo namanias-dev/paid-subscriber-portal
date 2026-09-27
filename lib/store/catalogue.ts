@@ -53,6 +53,8 @@ export interface StoreProductCard {
   max_quantity_per_order: number;
   availability_mode: AvailabilityMode;
   availability: AvailabilityView;
+  /** Catalogue row timestamp. Sitemap lastmod only; not rendered. */
+  updated_at?: string | null;
 }
 
 export interface StoreProductMedia {
@@ -154,6 +156,7 @@ function toCard(row: Record<string, unknown>, category?: { slug: string; name: s
     max_quantity_per_order: Number(row.max_quantity_per_order || 5),
     availability_mode: availabilityMode,
     availability: resolveAvailability(availabilityMode, sellable, lowStockThreshold, isActive),
+    updated_at: typeof row.updated_at === "string" ? row.updated_at : null,
   };
 }
 
@@ -191,7 +194,7 @@ export async function getCategoryBySlug(slug: string): Promise<StoreCategory | n
 }
 
 const PRODUCT_LIST_COLS =
-  "id,sku,slug,kind,name,short_name,subject,stage,language,edition,page_count,mrp_paise,selling_price_paise,cover_image_key,store_thumbnail_image_key,is_featured,is_bestseller,dispatch_days,on_hand,reserved,low_stock_threshold,availability_mode,is_active,max_quantity_per_order,category_id,position,short_description";
+  "id,sku,slug,kind,name,short_name,subject,stage,language,edition,page_count,mrp_paise,selling_price_paise,cover_image_key,store_thumbnail_image_key,is_featured,is_bestseller,dispatch_days,on_hand,reserved,low_stock_threshold,availability_mode,is_active,max_quantity_per_order,category_id,position,short_description,updated_at";
 
 /** Live individual subject notes for the public Shop by Subject rail. */
 export async function listStorefrontProducts(): Promise<StoreProductCard[]> {

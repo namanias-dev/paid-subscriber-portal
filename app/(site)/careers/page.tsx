@@ -3,7 +3,8 @@ import { Briefcase } from "lucide-react";
 import CareersList, { type PositionCardData } from "@/components/public/careers/CareersList";
 import { listOpenPositions, getCareersSettings } from "@/lib/careers/store";
 import { formatSalaryRange, JOB_TYPE_LABELS, ROLE_TYPE_LABELS } from "@/lib/careers/config";
-import { SITE_URL, ACADEMY } from "@/lib/config";
+import { ACADEMY } from "@/lib/config";
+import { SEO_ORIGIN } from "@/lib/seoOrigin";
 
 export const revalidate = 600;
 
@@ -11,11 +12,11 @@ export const metadata: Metadata = {
   title: "Careers — Join Naman IAS Academy",
   description:
     "Work with one of Chandigarh's top IAS academies. Explore open roles for faculty, video editors and more — and help make UPSC education affordable.",
-  alternates: { canonical: `${SITE_URL}/careers` },
+  alternates: { canonical: `${SEO_ORIGIN}/careers` },
   openGraph: {
     title: "Careers — Join Naman IAS Academy",
     description: "Explore open roles at Naman IAS Academy and help make UPSC education affordable.",
-    url: `${SITE_URL}/careers`,
+    url: `${SEO_ORIGIN}/careers`,
     type: "website",
     siteName: ACADEMY.name,
   },

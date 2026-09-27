@@ -2,10 +2,14 @@ import type { LucideIcon } from "lucide-react";
 import { Newspaper, PenLine, FileDown, Map as MapIcon, PlaySquare, Send } from "lucide-react";
 import Reveal, { Stagger, StaggerItem } from "@/components/ui/Reveal";
 import { ACADEMY } from "@/lib/config";
+import { seoUrl } from "@/lib/seoOrigin";
 
 export const revalidate = 3600;
 
-export const metadata = { title: "Free Resources — Naman Sharma IAS Academy" };
+export const metadata = {
+  title: "Free Resources — Naman Sharma IAS Academy",
+  alternates: { canonical: seoUrl("/free-resources") },
+};
 
 const RES: { icon: LucideIcon; title: string; desc: string; href: string; cta: string }[] = [
   { icon: Newspaper, title: "Daily Current Affairs", desc: "Exam-ready daily CA with crisp analysis.", href: ACADEMY.telegram, cta: "Get on Telegram" },

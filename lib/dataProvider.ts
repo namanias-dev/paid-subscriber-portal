@@ -2,6 +2,8 @@ import { cache } from "react";
 import { unstable_cache } from "next/cache";
 import { getSupabaseAdmin, getSupabasePublic, getSupabaseDataCache } from "./supabase";
 import { archivedPhoneSet, excludeArchivedRows, isArchivedStudent } from "./archivedStudents";
+import { isPublicCourseAvailable } from "./publicCourse";
+import { isCaPublished as caArticleIsPublished, resolvePublicCaArticle } from "./publicCaArticle";
 import {
   PUBLIC_CACHE_TAGS,
   revalidatePublicCa,
@@ -1542,12 +1544,12 @@ export async function getAllCourses(): Promise<Course[]> {
 // unchanged; outside a request scope it is a transparent passthrough.
 const loadPublishedCourses = unstable_cache(
   async (): Promise<Course[]> => {
-    if (demoMode()) return sortCoursesByOrder(mock.courses).filter((c) => c.status === "published" && c.active !== false);
+    if (demoMode()) return sortCoursesByOrder(mock.courses).filter((c) => isPublicCourseAvailable(c));
     const db = getSupabaseDataCache();
-    if (!db) return sortCoursesByOrder(mock.courses).filter((c) => c.status === "published" && c.active !== false);
+    if (!db) return sortCoursesByOrder(mock.courses).filter((c) => isPublicCourseAvailable(c));
     const { data } = await db.from("courses").select("*").order("created_at", { ascending: false });
     const rows = (data as Course[]) ?? [];
-    return sortCoursesByOrder(rows.length ? rows : [...mock.courses]).filter((c) => c.status === "published" && c.active !== false);
+    return sortCoursesByOrder(rows.length ? rows : [...mock.courses]).filter((c) => isPublicCourseAvailable(c));
   },
   ["public-published-courses"],
   { revalidate: 600, tags: [PUBLIC_CACHE_TAGS.courses] },
@@ -7566,10 +7568,7 @@ export async function updateImportJob(id: string, patch: Partial<ImportJob>): Pr
 
 /** True when an article is publicly visible (published + not future-scheduled). */
 export function isCaPublished(a: CaArticle | null | undefined): boolean {
-  if (!a) return false;
-  if (a.status !== "published") return false;
-  if (a.publish_at && new Date(a.publish_at).getTime() > Date.now()) return false;
-  return true;
+  return caArticleIsPublished(a);
 }
 
 // ---- Articles ----
@@ -7610,7 +7609,7 @@ export const getPublicCaArticles = unstable_cache(
  */
 export async function getCaArticleBySlug(slug: string): Promise<CaArticle | null> {
   const all = await getPublicCaArticles();
-  return all.find((a) => a.slug === slug) ?? null;
+  return resolvePublicCaArticle(all, slug);
 }
 
 export async function getCaArticleById(id: string): Promise<CaArticle | null> {

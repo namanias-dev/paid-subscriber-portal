@@ -1,5 +1,6 @@
 import { getPublicResources } from "@/lib/dataProvider";
-import { SITE_URL, ACADEMY } from "@/lib/config";
+import { ACADEMY } from "@/lib/config";
+import { SEO_ORIGIN } from "@/lib/seoOrigin";
 
 export const dynamic = "force-dynamic";
 
@@ -13,7 +14,7 @@ export async function GET() {
   let resources = await getPublicResources().catch(() => []);
   resources = resources.filter((r) => r.seo?.noindex !== true).slice(0, 30);
 
-  const base = `${SITE_URL}/resources`;
+  const base = `${SEO_ORIGIN}/resources`;
   const items = resources
     .map((r) => {
       const url = `${base}/${r.slug}`;

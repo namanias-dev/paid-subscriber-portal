@@ -11,7 +11,8 @@ import {
   listOpenPositions,
 } from "@/lib/careers/store";
 import { formatSalaryRange, JOB_TYPE_LABELS, ROLE_TYPE_LABELS } from "@/lib/careers/config";
-import { SITE_URL, ACADEMY } from "@/lib/config";
+import { ACADEMY } from "@/lib/config";
+import { SEO_ORIGIN } from "@/lib/seoOrigin";
 
 export const revalidate = 600;
 
@@ -23,7 +24,7 @@ export async function generateStaticParams() {
 export async function generateMetadata({ params }: { params: { slug: string } }): Promise<Metadata> {
   const p = await getPositionBySlug(params.slug);
   if (!p || p.status === "draft") return { title: "Position not found" };
-  const url = `${SITE_URL}/careers/${p.slug}`;
+  const url = `${SEO_ORIGIN}/careers/${p.slug}`;
   const title = `${p.title} — Careers at ${ACADEMY.shortName}`;
   const desc = (p.summary || `Apply for ${p.title} at ${ACADEMY.name}.`).slice(0, 170);
   return {
@@ -54,7 +55,7 @@ export default async function PositionDetail({ params }: { params: { slug: strin
     description: position.description_html || position.summary || position.title,
     datePosted: position.created_at || undefined,
     employmentType: (JOB_TYPE_LABELS[position.job_type] || position.job_type).toUpperCase().replace(/[^A-Z]/g, "_"),
-    hiringOrganization: { "@type": "Organization", name: ACADEMY.name, sameAs: SITE_URL },
+    hiringOrganization: { "@type": "Organization", name: ACADEMY.name, sameAs: SEO_ORIGIN },
     jobLocation: {
       "@type": "Place",
       address: {

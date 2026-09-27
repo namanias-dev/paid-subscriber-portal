@@ -1,7 +1,11 @@
 import Reveal from "@/components/ui/Reveal";
 import LeadForm from "@/components/public/LeadForm";
+import { seoUrl } from "@/lib/seoOrigin";
 
-export const metadata = { title: "Book a Free Demo — Naman Sharma IAS Academy" };
+export const metadata = {
+  title: "Book a Free Demo — Naman Sharma IAS Academy",
+  alternates: { canonical: seoUrl("/demo") },
+};
 
 export default function DemoPage() {
   return (

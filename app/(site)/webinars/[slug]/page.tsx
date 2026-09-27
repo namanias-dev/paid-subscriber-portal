@@ -17,7 +17,8 @@ import type { Webinar } from "@/lib/types";
 import { getPurchaseSnapshot, webinarStatus } from "@/lib/purchaseStatus";
 import { buildLandingView } from "@/lib/landingView";
 import { formatINR, formatISTRange } from "@/lib/dates";
-import { SITE_URL, ACADEMY } from "@/lib/config";
+import { ACADEMY } from "@/lib/config";
+import { SEO_ORIGIN } from "@/lib/seoOrigin";
 import { whatsappLink } from "@/lib/phone";
 
 export const revalidate = 300;
@@ -79,7 +80,7 @@ function endedMetadata(w: Webinar, hasNext: boolean): Metadata {
   const description = hasNext
     ? "This masterclass has ended. Registration for the next live session with Naman Sir is open."
     : "This masterclass has ended. The next live session with Naman Sir will be announced soon.";
-  const url = `${SITE_URL}/webinars/${w.slug}`;
+  const url = `${SEO_ORIGIN}/webinars/${w.slug}`;
   const ogImage = w.seo?.og_image?.trim() || w.cover_image_url || undefined;
   const images = ogImage ? [{ url: ogImage, width: 1200, height: 630, alt: w.title }] : [];
   return {
@@ -101,7 +102,7 @@ export async function generateMetadata({ params }: { params: { slug: string } })
     const w = loaded.webinar;
     const seo = w.seo || {};
     const canonicalSlug = seo.canonical_slug?.trim() || w.slug;
-    const url = `${SITE_URL}/webinars/${canonicalSlug}`;
+    const url = `${SEO_ORIGIN}/webinars/${canonicalSlug}`;
     const priceLabel = w.price === 0 ? "Free" : formatINR(w.price);
     const title = seo.title?.trim() || `${w.title} — ${priceLabel} ${w.status === "completed" ? "Recording" : "Webinar"}`;
     const desc = (seo.description?.trim() || w.description || `Register for ${w.title} with ${ACADEMY.name}.`).slice(0, 170);
@@ -205,14 +206,14 @@ export default async function WebinarDetail({ params }: { params: { slug: string
     eventAttendanceMode: "https://schema.org/OnlineEventAttendanceMode",
     eventStatus: "https://schema.org/EventScheduled",
     image: (w.seo?.og_image || w.cover_image_url) ? [w.seo?.og_image || w.cover_image_url] : undefined,
-    organizer: { "@type": "Organization", name: ACADEMY.name, url: SITE_URL },
+    organizer: { "@type": "Organization", name: ACADEMY.name, url: SEO_ORIGIN },
     performer: view.mentor?.name ? { "@type": "Person", name: view.mentor.name } : undefined,
     offers: {
       "@type": "Offer",
       price: w.price,
       priceCurrency: "INR",
       availability: "https://schema.org/InStock",
-      url: `${SITE_URL}/webinars/${w.slug}`,
+      url: `${SEO_ORIGIN}/webinars/${w.slug}`,
     },
     ...(view.ratingAvg && view.ratingCount
       ? { aggregateRating: { "@type": "AggregateRating", ratingValue: view.ratingAvg, reviewCount: view.ratingCount } }

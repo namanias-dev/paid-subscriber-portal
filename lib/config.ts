@@ -39,7 +39,14 @@ export const SUPPORT = {
   email: process.env.SUPPORT_EMAIL || "support@example.com",
 };
 
-/** Canonical site origin (no trailing slash) — used for SEO/OG absolute URLs. */
+/**
+ * Shared origin for non-SEO links (SMS login URLs, WhatsApp/DLT bodies, Telegram
+ * operational links, analytics event_source_url, careers admin email).
+ *
+ * The fallback stays the apex host. Those consumers must not change when the
+ * indexable origin moves to www. Public canonicals, Open Graph URLs, the sitemap
+ * and robots.txt use `SEO_ORIGIN` in lib/seoOrigin.ts.
+ */
 export const SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL || "https://namanias.com").replace(/\/$/, "");
 
 export const ACADEMY = {

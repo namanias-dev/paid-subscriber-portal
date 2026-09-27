@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Quote } from "lucide-react";
 import { getPublicQuizzes, getSiteSettings, getAllCourses } from "@/lib/dataProvider";
-import { SITE_URL } from "@/lib/config";
+import { SEO_ORIGIN } from "@/lib/seoOrigin";
 import { DEFAULT_CONTENT } from "@/lib/homeDefaults";
 import { resolveLearner, gateQuiz } from "@/lib/entitlements";
 import { getAttemptStatusForLearner } from "@/lib/quizAttemptStatus";
@@ -14,11 +14,11 @@ export const metadata: Metadata = {
   title: "UPSC Prelims-style Quizzes & MCQ Practice Tests | Naman IAS Academy",
   description:
     "Free daily UPSC Prelims-style MCQ practice tests for IAS/CSE aspirants — Polity, History, Geography, Economy, Environment, Current Affairs and CSAT. Instant results, explanations and analysis.",
-  alternates: { canonical: `${SITE_URL}/quizzes` },
+  alternates: { canonical: `${SEO_ORIGIN}/quizzes` },
   openGraph: {
     title: "UPSC Prelims-style Quizzes & MCQ Practice Tests",
     description: "Practice daily UPSC CSE-pattern MCQs with instant server-scored results and explanations.",
-    url: `${SITE_URL}/quizzes`,
+    url: `${SEO_ORIGIN}/quizzes`,
     type: "website",
   },
 };
@@ -47,7 +47,7 @@ export default async function QuizzesLanding() {
     "@type": "CollectionPage",
     name: "UPSC Prelims-style Quizzes",
     description: "Daily UPSC Pattern MCQ Practice tests by Naman IAS Academy.",
-    url: `${SITE_URL}/quizzes`,
+    url: `${SEO_ORIGIN}/quizzes`,
   };
 
   return (

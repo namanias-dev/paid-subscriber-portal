@@ -3,8 +3,12 @@ import Counter from "@/components/ui/Counter";
 import Link from "next/link";
 import { getSiteSettings } from "@/lib/dataProvider";
 import { DEFAULT_ABOUT } from "@/lib/homeDefaults";
+import { seoUrl } from "@/lib/seoOrigin";
 
-export const metadata = { title: "About — Naman Sharma IAS Academy" };
+export const metadata = {
+  title: "About — Naman Sharma IAS Academy",
+  alternates: { canonical: seoUrl("/about") },
+};
 export const revalidate = 3600;
 
 export default async function AboutPage() {

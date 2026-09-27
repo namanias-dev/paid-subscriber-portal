@@ -4,18 +4,20 @@ import CourseDetail from "@/components/public/CourseDetail";
 import { getCourseBySlug, getPublishedCourses, getLibraryDocsByIds } from "@/lib/dataProvider";
 import { getPurchaseSnapshot, coursePurchaseView } from "@/lib/purchaseStatus";
 import { buildLandingView } from "@/lib/landingView";
-import { SITE_URL, ACADEMY } from "@/lib/config";
+import { ACADEMY } from "@/lib/config";
+import { isPublicCourseAvailable } from "@/lib/publicCourse";
+import { SEO_ORIGIN } from "@/lib/seoOrigin";
 
 export const dynamic = "force-dynamic";
 
 export async function generateMetadata({ params }: { params: { slug: string } }): Promise<Metadata> {
   const course = await getCourseBySlug(params.slug);
-  if (!course || course.status !== "published" || course.active === false) {
+  if (!course || !isPublicCourseAvailable(course)) {
     return { title: "Course not found" };
   }
   const seo = course.seo || {};
   const canonicalSlug = seo.canonical_slug?.trim() || course.slug;
-  const url = `${SITE_URL}/courses/${canonicalSlug}`;
+  const url = `${SEO_ORIGIN}/courses/${canonicalSlug}`;
   const title = seo.title?.trim() || `${course.title} — ${course.category} | ${ACADEMY.shortName}`;
   const desc = (seo.description?.trim() || course.description || `Join ${course.title} at ${ACADEMY.name}.`).slice(0, 170);
   const cover = seo.og_image?.trim() || course.cover_image_url || course.image;
@@ -32,7 +34,7 @@ export async function generateMetadata({ params }: { params: { slug: string } })
 
 export default async function CoursePage({ params }: { params: { slug: string } }) {
   const course = await getCourseBySlug(params.slug);
-  if (!course || course.status !== "published" || course.active === false) notFound();
+  if (!course || !isPublicCourseAvailable(course)) notFound();
 
   const all = await getPublishedCourses();
   const related = all.filter((c) => c.category === course.category && c.id !== course.id).slice(0, 2);
@@ -50,13 +52,13 @@ export default async function CoursePage({ params }: { params: { slug: string } 
     name: course.title,
     description: course.description || undefined,
     image: course.seo?.og_image || course.cover_image_url || course.image || undefined,
-    provider: { "@type": "Organization", name: ACADEMY.name, sameAs: SITE_URL },
+    provider: { "@type": "Organization", name: ACADEMY.name, sameAs: SEO_ORIGIN },
     offers: {
       "@type": "Offer",
       price: course.price,
       priceCurrency: "INR",
       availability: "https://schema.org/InStock",
-      url: `${SITE_URL}/courses/${course.slug}`,
+      url: `${SEO_ORIGIN}/courses/${course.slug}`,
       category: course.category,
     },
     ...(course.price > 0 ? { hasCourseInstance: { "@type": "CourseInstance", courseMode: course.modes.join(", ") } } : {}),

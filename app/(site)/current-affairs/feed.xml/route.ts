@@ -1,5 +1,6 @@
 import { getPublicCaArticles } from "@/lib/dataProvider";
-import { SITE_URL, ACADEMY } from "@/lib/config";
+import { ACADEMY } from "@/lib/config";
+import { SEO_ORIGIN } from "@/lib/seoOrigin";
 
 export const dynamic = "force-dynamic";
 
@@ -13,7 +14,7 @@ export async function GET() {
   let articles = await getPublicCaArticles().catch(() => []);
   articles = articles.filter((a) => a.seo?.noindex !== true).slice(0, 30);
 
-  const base = `${SITE_URL}/current-affairs`;
+  const base = `${SEO_ORIGIN}/current-affairs`;
   const items = articles
     .map((a) => {
       const url = `${base}/${a.seo?.canonical_slug?.trim() || a.slug}`;

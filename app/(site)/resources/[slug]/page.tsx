@@ -22,7 +22,8 @@ import {
 import { resourceMetadata, computeRelatedResources, journeyResources } from "@/lib/resourceView";
 import { resourceCategoryName, resourceCategoryMeta, RESERVED_RESOURCE_SLUGS } from "@/lib/resourceConstants";
 import { formatISTDate } from "@/lib/dates";
-import { SITE_URL, ACADEMY } from "@/lib/config";
+import { ACADEMY } from "@/lib/config";
+import { SEO_ORIGIN } from "@/lib/seoOrigin";
 import type { CaPdf } from "@/lib/types";
 
 export const revalidate = 600;
@@ -86,9 +87,9 @@ async function CategoryPage({ slug }: { slug: string }) {
     "@context": "https://schema.org",
     "@type": "BreadcrumbList",
     itemListElement: [
-      { "@type": "ListItem", position: 1, name: "Home", item: SITE_URL },
-      { "@type": "ListItem", position: 2, name: "Resources", item: `${SITE_URL}/resources` },
-      { "@type": "ListItem", position: 3, name: cat.name, item: `${SITE_URL}/resources/${cat.slug}` },
+      { "@type": "ListItem", position: 1, name: "Home", item: SEO_ORIGIN },
+      { "@type": "ListItem", position: 2, name: "Resources", item: `${SEO_ORIGIN}/resources` },
+      { "@type": "ListItem", position: 3, name: cat.name, item: `${SEO_ORIGIN}/resources/${cat.slug}` },
     ],
   };
 
@@ -161,16 +162,16 @@ async function ArticlePage({ slug }: { slug: string }) {
     dateModified: article.updated_at,
     image: article.featured_image ? [article.featured_image] : undefined,
     author: { "@type": article.author ? "Person" : "Organization", name: article.author || ACADEMY.name },
-    publisher: { "@type": "Organization", name: ACADEMY.name, url: SITE_URL },
-    mainEntityOfPage: { "@type": "WebPage", "@id": `${SITE_URL}${articlePath}` },
+    publisher: { "@type": "Organization", name: ACADEMY.name, url: SEO_ORIGIN },
+    mainEntityOfPage: { "@type": "WebPage", "@id": `${SEO_ORIGIN}${articlePath}` },
   };
   const breadcrumb = {
     "@context": "https://schema.org",
     "@type": "BreadcrumbList",
     itemListElement: [
-      { "@type": "ListItem", position: 1, name: "Home", item: SITE_URL },
-      { "@type": "ListItem", position: 2, name: "Resources", item: `${SITE_URL}/resources` },
-      ...(article.category ? [{ "@type": "ListItem", position: 3, name: resourceCategoryName(article.category), item: `${SITE_URL}/resources/${article.category}` }] : []),
+      { "@type": "ListItem", position: 1, name: "Home", item: SEO_ORIGIN },
+      { "@type": "ListItem", position: 2, name: "Resources", item: `${SEO_ORIGIN}/resources` },
+      ...(article.category ? [{ "@type": "ListItem", position: 3, name: resourceCategoryName(article.category), item: `${SEO_ORIGIN}/resources/${article.category}` }] : []),
     ],
   };
   const faqJsonLd = article.seo?.faq_schema_enabled !== false && (article.faq?.length || 0) > 0
@@ -185,7 +186,7 @@ async function ArticlePage({ slug }: { slug: string }) {
         "@context": "https://schema.org",
         "@type": "EducationalOrganization",
         name: ACADEMY.name,
-        url: SITE_URL,
+        url: SEO_ORIGIN,
         address: { "@type": "PostalAddress", streetAddress: ACADEMY.address, addressLocality: "Chandigarh", addressRegion: "Chandigarh", addressCountry: "IN" },
         areaServed: ACADEMY.citiesServed,
         sameAs: [ACADEMY.instagram, ACADEMY.youtube].filter(Boolean),

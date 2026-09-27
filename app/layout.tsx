@@ -12,6 +12,7 @@ import ConsentBanner from "@/components/analytics/ConsentBanner";
 import ThirdParty from "@/components/analytics/ThirdParty";
 import GoogleAnalytics from "@/components/analytics/GoogleAnalytics";
 import ClientHealth from "@/components/system/ClientHealth";
+import { SEO_ORIGIN } from "@/lib/seoOrigin";
 
 const sora = Sora({
   subsets: ["latin"],
@@ -28,6 +29,7 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
+  metadataBase: new URL(SEO_ORIGIN),
   title: "Naman Sharma IAS Academy — Crack UPSC the Right Way",
   description:
     "Chandigarh's most personal UPSC academy. Foundation, Optionals, Test Series & Mentorship — Online, Offline & Hybrid. Daily current affairs, MCQs, PYQs and live classes by Naman Sir.",
