@@ -253,6 +253,16 @@ export async function placeCheckout(cart: CartView, address: CheckoutAddress): P
     visitorId = jar.get(VISITOR_COOKIE)?.value || null;
     sessionId = jar.get(SESSION_COOKIE)?.value || null;
   } catch { /* analytics must not block payment */ }
+  void import("@/lib/store/checkoutLeads")
+    .then((m) => m.markLeadPaymentInitiated({
+      phone,
+      name,
+      email: address.email,
+      cartId: cart.id,
+      orderId: order.id,
+      totalPaise: quote.total_paise,
+    }))
+    .catch(() => {});
   void import("@/lib/analytics/notesPurchase")
     .then((m) => m.recordNotesPaymentInitiated({
       orderId: order.id,

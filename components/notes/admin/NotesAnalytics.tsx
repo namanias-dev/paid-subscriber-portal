@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { formatPaise } from "@/lib/store/money";
 import type { NotesAnalyticsReport } from "@/lib/analytics/notesCommerce";
+import type { CheckoutLeadReport } from "@/lib/store/checkoutLeadLogic";
 import CampaignLinkBuilder from "./CampaignLinkBuilder";
 
 function money(paise: number): string {
@@ -23,10 +24,12 @@ export default function NotesAnalytics({
   report,
   range,
   label,
+  leads,
 }: {
   report: NotesAnalyticsReport;
   range: string;
   label: string;
+  leads: CheckoutLeadReport;
 }) {
   const k = report.kpis;
   return (
@@ -167,6 +170,27 @@ export default function NotesAnalytics({
         </div>
       )}
 
+      <section className="mt-4 rounded-2xl bg-white p-4">
+        <h2 className="font-heading text-lg font-bold text-[var(--ca-navy)]">Checkout leads</h2>
+        <p className="mt-1 text-sm text-[var(--ca-navy)]/55">Separate from the purchase funnel above. QA leads are excluded.</p>
+        <div className="mt-3 grid grid-cols-2 gap-2 md:grid-cols-5">
+          {[
+            ["Leads", String(leads.leads)],
+            ["Abandoned", String(leads.abandoned)],
+            ["Recovered", String(leads.recovered)],
+            ["Lead → paid", pct(leads.leadToPaidPct)],
+            ["Recovered revenue", money(leads.recoveredRevenuePaise)],
+          ].map(([labelText, value]) => (
+            <div key={labelText}>
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-[var(--ca-navy)]/45">{labelText}</p>
+              <p className="mt-1 font-heading text-xl font-bold text-[var(--ca-navy)]">{value}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+      <div className="mt-4">
+        <Table title="Lead sources" headers={["Source", "Leads", "Abandoned", "Recovered", "Paid", "Recovered revenue"]} rows={leads.sources.map((row) => [row.source, row.leads, row.abandoned, row.recovered, row.paid, money(row.revenuePaise)])} />
+      </div>
       <div className="mt-4">
         <CampaignLinkBuilder />
       </div>

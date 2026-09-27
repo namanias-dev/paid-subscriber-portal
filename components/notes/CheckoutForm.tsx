@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { trackClient } from "@/lib/analytics/client";
 
 interface CartJson {
@@ -26,6 +26,8 @@ export default function CheckoutForm() {
   const [err, setErr] = useState<string | null>(null);
   const [pinInfo, setPinInfo] = useState<string | null>(null);
   const [quote, setQuote] = useState<QuoteJson | null>(null);
+  const [marketingConsent, setMarketingConsent] = useState(false);
+  const phoneTouched = useRef(false);
   const [form, setForm] = useState({
     name: "",
     phone: "",
@@ -37,6 +39,46 @@ export default function CheckoutForm() {
     state: "",
     delivery_instructions: "",
   });
+
+  useEffect(() => {
+    void fetch("/api/notes/checkout-lead", { cache: "no-store", credentials: "same-origin" })
+      .then((r) => r.json())
+      .then((json) => {
+        const draft = json?.draft;
+        const prefill = json?.prefill;
+        setForm((current) => ({
+          ...current,
+          name: current.name || draft?.name || prefill?.name || "",
+          phone: current.phone || draft?.phone || prefill?.phone || "",
+          email: current.email || draft?.email || "",
+        }));
+        if (draft?.marketing_consent) setMarketingConsent(true);
+      })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (!phoneTouched.current || !/^[6-9]\d{9}$/.test(form.phone)) return;
+    const timer = window.setTimeout(() => {
+      const address = form.line1.trim() && /^[1-9][0-9]{5}$/.test(form.pincode) && form.city.trim() && form.state.trim()
+        ? { line1: form.line1, city: form.city, state: form.state, pincode: form.pincode }
+        : undefined;
+      void fetch("/api/notes/checkout-lead", {
+        method: "POST",
+        cache: "no-store",
+        credentials: "same-origin",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          name: form.name,
+          phone: form.phone,
+          email: form.email,
+          marketing_consent: marketingConsent,
+          address,
+        }),
+      }).catch(() => {});
+    }, 800);
+    return () => window.clearTimeout(timer);
+  }, [form.phone, form.name, form.email, form.line1, form.pincode, form.city, form.state, marketingConsent]);
 
   useEffect(() => {
     trackClient("notes_checkout_started", { cta_id: "checkout_page" });
@@ -80,6 +122,26 @@ export default function CheckoutForm() {
       setForm((f) => ({ ...f, pincode: pin[0] }));
       void lookupPin(pin[0]);
     }
+  }
+
+  function persistLead() {
+    if (!/^[6-9]\d{9}$/.test(form.phone)) return;
+    const address = form.line1.trim() && /^[1-9][0-9]{5}$/.test(form.pincode) && form.city.trim() && form.state.trim()
+      ? { line1: form.line1, city: form.city, state: form.state, pincode: form.pincode }
+      : undefined;
+    void fetch("/api/notes/checkout-lead", {
+      method: "POST",
+      cache: "no-store",
+      credentials: "same-origin",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        name: form.name,
+        phone: form.phone,
+        email: form.email,
+        marketing_consent: marketingConsent,
+        address,
+      }),
+    }).catch(() => {});
   }
 
   async function onSubmit(e: React.FormEvent) {
@@ -127,8 +189,12 @@ export default function CheckoutForm() {
       <div className="space-y-3 rounded-3xl bg-white p-5 ns-elev-1">
         <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--ca-gold-dark)]">1 · Address</p>
         <Field label="Full name" autoComplete="name" value={form.name} onChange={set("name")} required />
-        <Field label="Mobile" autoComplete="tel" inputMode="numeric" pattern="[0-9]{10}" maxLength={10} value={form.phone} onChange={set("phone")} required />
+        <Field label="Mobile" autoComplete="tel" inputMode="numeric" pattern="[0-9]{10}" maxLength={10} value={form.phone} onChange={(e) => { phoneTouched.current = true; set("phone")(e); }} onBlur={() => { phoneTouched.current = true; persistLead(); }} required />
         <Field label="Email (optional)" autoComplete="email" type="email" value={form.email} onChange={set("email")} />
+        <label className="flex items-start gap-2 text-sm text-[var(--ca-navy)]/80">
+          <input type="checkbox" className="mt-1" checked={marketingConsent} onChange={(e) => { phoneTouched.current = true; setMarketingConsent(e.target.checked); }} />
+          <span>Send me useful UPSC notes updates and offers on WhatsApp/SMS.</span>
+        </label>
         <Field label="Address line 1" autoComplete="address-line1" value={form.line1} onChange={set("line1")} onPaste={onLine1Paste} required />
         <Field label="Apartment / landmark (optional)" autoComplete="address-line2" value={form.line2} onChange={set("line2")} />
         <Field label="PIN code" autoComplete="postal-code" inputMode="numeric" maxLength={6} value={form.pincode} onChange={set("pincode")} onBlur={onPinBlur} required />

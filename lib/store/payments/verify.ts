@@ -221,6 +221,9 @@ async function applyOrderTerminal(
       void import("@/lib/analytics/notesPurchase")
         .then((m) => m.recordNotesPurchase(orderId))
         .catch(() => {});
+      void import("@/lib/store/checkoutLeads")
+        .then((m) => m.markLeadConverted(orderId, amountPaise))
+        .catch(() => {});
     }
     await holdReservationsUntilShip(orderId);
     return orderNo;

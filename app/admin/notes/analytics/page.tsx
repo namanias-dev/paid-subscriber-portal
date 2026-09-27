@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { requirePermission } from "@/lib/adminGuard";
 import NotesAnalytics from "@/components/notes/admin/NotesAnalytics";
 import { loadNotesAnalytics } from "@/lib/analytics/notesReport";
+import { loadCheckoutLeadReport } from "@/lib/store/checkoutLeads";
 import { notesRangeBounds, type NotesRangeKey } from "@/lib/analytics/notesCommerce";
 
 export const dynamic = "force-dynamic";
@@ -19,5 +20,6 @@ export default async function NotesAnalyticsPage({
   const key = (KEYS.has(searchParams.range || "") ? searchParams.range : "7d") as NotesRangeKey;
   const bounds = notesRangeBounds(key, new Date(), { from: searchParams.from, to: searchParams.to });
   const report = await loadNotesAnalytics({ key, from: searchParams.from, to: searchParams.to });
-  return <NotesAnalytics report={report} range={key} label={bounds.label} />;
+  const leads = await loadCheckoutLeadReport(bounds.start, bounds.end);
+  return <NotesAnalytics report={report} range={key} label={bounds.label} leads={leads} />;
 }
