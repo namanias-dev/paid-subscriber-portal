@@ -12,7 +12,8 @@ import { formatRegisteredAddress, normalizeCertificateFloor } from "../../lib/st
 import { clericalCorrectionAllowed, correctedSellerDisplay, SELLER_DISPLAY_CORRECTION_REASON } from "../../lib/store/invoice/correct";
 import { GST_STATE_NAME, validateGstin } from "../../lib/store/invoice/gstin";
 import { prepareInvoiceLogo } from "../../lib/store/invoice/logo";
-import { amountInWords, chooseDocumentType, computeTaxDocument, localTaxKind, splitTax, taxClassificationConfirmed, taxOnAmount } from "../../lib/store/invoice/tax";
+import { amountInWords, chooseDocumentType, classificationFromSnapshot, computeTaxDocument, localTaxKind, splitTax, taxClassificationConfirmed, taxOnAmount } from "../../lib/store/invoice/tax";
+import { showAdminViewInvoice } from "../../lib/store/adminConsole";
 
 test("invoice numbers reset with the Indian financial year and never reuse a width", () => {
   assert.equal(financialYearLabel(new Date("2026-09-25T00:00:00+05:30")), "26-27");
@@ -336,6 +337,54 @@ test("a clerical correction keeps the invoice number and only replaces seller di
   ]);
   assert.equal(SELLER_DISPLAY_CORRECTION_REASON.includes("address"), true);
   assert.equal(next.lines.join(" ").includes("160017"), false);
+});
+
+test("order #1011 snapshot can be invoiced without the live product confirmed flag", () => {
+  const snapshot = { hsn: "49011010", taxTreatment: "nil" };
+  assert.equal(classificationFromSnapshot(snapshot), "CONFIRMED");
+  assert.equal(taxClassificationConfirmed([{ ...snapshot, taxConfigurationStatus: classificationFromSnapshot(snapshot) }]), true);
+  assert.equal(classificationFromSnapshot({ hsn: null, taxTreatment: "exempt" }), null);
+  assert.equal(taxClassificationConfirmed([{ hsn: null, taxTreatment: "exempt", taxConfigurationStatus: null }]), false);
+  const doc = computeTaxDocument({
+    lines: [{ name: "Indian Economy Notes", sku: "NOTES-ECONOMY", hsn: "49011010", qty: 1, lineTotalPaise: 250_000, discountPaise: 0, taxTreatment: "nil", taxRateBps: 0 }],
+    shippingPaise: 5_900,
+    pricesIncludeTax: true,
+    supplierStateCode: "04",
+    placeOfSupplyCode: "04",
+    chargedTotalPaise: 205_900,
+    couponCode: "NOTES500",
+    couponDiscountPaise: 50_000,
+  });
+  assert.equal(doc.couponCode, "NOTES500");
+  assert.equal(doc.couponDiscountPaise, 50_000);
+  assert.equal(doc.shippingPaise, 5_900);
+  assert.equal(doc.lines[0].totalPaise, 250_000);
+  assert.equal(doc.grandTotalPaise, 205_900);
+  assert.equal(doc.grandTotalPaise === 207_877, false);
+  assert.equal(paymentAllowsInvoice({ paid: true, paymentStatus: "CAPTURED", paymentAmountPaise: 205_900, orderTotalPaise: 205_900 }), "ok");
+  assert.equal(paymentAllowsInvoice({ paid: true, paymentStatus: "CAPTURED", paymentAmountPaise: 207_877, orderTotalPaise: 205_900 }), "mismatch");
+  assert.equal(paymentAllowsInvoice({ paid: false, paymentStatus: "UNCONFIRMED", paymentAmountPaise: 205_900, orderTotalPaise: 205_900 }), "unpaid");
+});
+
+test("a ready invoice is reused and a failed PDF keeps the same identity", () => {
+  assert.equal(invoiceWorkPlan({ status: "READY", updatedAt: new Date().toISOString(), hasKey: true }), "return");
+  assert.equal(invoiceWorkPlan({ status: "FAILED", updatedAt: new Date().toISOString(), hasKey: false }), "render");
+  assert.equal(showAdminViewInvoice("READY"), true);
+  assert.equal(showAdminViewInvoice("PENDING"), false);
+  assert.equal(showAdminViewInvoice(null), false);
+  const issue = readFileSync(join(process.cwd(), "lib/store/invoice/issue.ts"), "utf8");
+  const verify = readFileSync(join(process.cwd(), "lib/store/payments/verify.ts"), "utf8");
+  const repair = issue.slice(issue.indexOf("export async function repairMissingPaidInvoices"));
+  assert.equal(repair.includes("recordNotesPurchase"), false);
+  assert.equal(repair.includes("fireNotesOrderPaidAlert"), false);
+  assert.equal(repair.includes("captureDiscountForOrder"), false);
+  assert.match(verify, /scheduleStoreInvoice\(orderId\)/);
+  const failed = issue.slice(issue.lastIndexOf("} catch (error) {"), issue.indexOf("async function noteInvoiceBlocked"));
+  assert.match(failed, /status: "FAILED"/);
+  assert.equal(failed.includes("store_order_payments"), false);
+  assert.equal(failed.includes("store_orders"), false);
+  assert.match(issue, /let invoiceNumber = existing\?\.invoice_number \|\| null/);
+  assert.match(issue, /if \(!existing\)/);
 });
 
 function linesForLogo(): string[] {

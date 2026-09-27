@@ -7,6 +7,7 @@ import {
   fulfillmentTone,
   formatAdminWhen,
   invoiceStatusLabel,
+  showAdminViewInvoice,
   orderIndexLabel,
   pickupFailedActivity,
   primaryAction,
@@ -294,7 +295,7 @@ export default function NotesOrderQueue() {
                     </button>
                     <span className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-[var(--ca-navy)]/45">
                       {invoiceStatusLabel(order.invoice_status)}
-                      {order.invoice_status === "READY" && <ViewInvoiceButton orderId={order.id} />}
+                      {showAdminViewInvoice(order.invoice_status) && <ViewInvoiceButton orderId={order.id} />}
                     </span>
                   </div>
                   <span className="text-sm text-[var(--ca-navy)]/75">{order.items[0] ? `${order.items[0].name} × ${order.items[0].qty}` : "—"}</span>
@@ -326,7 +327,7 @@ export default function NotesOrderQueue() {
                       <span className="text-xs text-[var(--ca-navy)]/55">{order.items.length} item{order.items.length === 1 ? "" : "s"}</span>
                     </span>
                   </button>
-                  {order.invoice_status === "READY" && (
+                  {showAdminViewInvoice(order.invoice_status) && (
                     <div className="mt-3">
                       <ViewInvoiceButton orderId={order.id} />
                     </div>

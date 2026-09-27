@@ -11,6 +11,7 @@ import {
   hasActiveShipment,
   nextPreparationStatus,
   orderIndexLabel,
+  showAdminViewInvoice,
   pickupFailedActivity,
   primaryAction,
   shipmentPickupLabel,
@@ -293,7 +294,7 @@ export default function OrderDetail({
         </header>
 
         <div className="space-y-3 px-4 py-4">
-          {order.invoice_status === "READY" && !(active && ship) && (
+          {showAdminViewInvoice(order.invoice_status) && !(active && ship) && (
             <section className="rounded-2xl bg-white p-4">
               <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--ca-gold-dark)]">Invoice</p>
               <div className="mt-3 grid grid-cols-2 gap-2">
@@ -362,8 +363,8 @@ export default function OrderDetail({
                 <button type="button" onClick={() => void refreshTrack()} className="min-h-11 rounded-full border border-[var(--ca-navy)]/15 px-4 text-sm font-semibold text-[var(--ca-navy)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2">
                   View Tracking
                 </button>
-                {order.invoice_status === "READY" && <ViewInvoiceButton orderId={order.id} prominent />}
-                {order.invoice_status === "READY" && <DownloadInvoiceButton orderId={order.id} />}
+                {showAdminViewInvoice(order.invoice_status) && <ViewInvoiceButton orderId={order.id} prominent />}
+                {showAdminViewInvoice(order.invoice_status) && <DownloadInvoiceButton orderId={order.id} />}
               </div>
             </section>
           )}
