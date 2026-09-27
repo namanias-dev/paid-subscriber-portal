@@ -40,7 +40,7 @@ export const NOTES_CURRICULUM: Record<string, NotesCurriculum> = {
     seoDescription:
       "Handwritten Indian Polity notes for UPSC Prelims and Mains — Constitution, governance and institutions, connected to current affairs. Printed hard copies delivered pan-India.",
     subheading:
-      "Build a strong command over the Constitution, governance and institutions — with static concepts connected to current affairs.",
+      "Naman Sir’s complete handwritten Polity notes — full UPSC syllabus with static concepts + integrated current affairs for Prelims & Mains.",
     mentorIntro:
       "Polity is one of the most consistent areas of UPSC preparation because the Constitution and institutions form the static base, while judgments, legislation, governance issues and institutional developments keep the subject current.",
     why: "UPSC returns to the same constitutional grammar every year: rights, federalism, Parliament, the executive and the courts. Once those structures are clear, current affairs stop feeling like a separate subject.",
@@ -191,7 +191,7 @@ export const NOTES_CURRICULUM: Record<string, NotesCurriculum> = {
     seoDescription:
       "Handwritten Indian Economy notes for UPSC — growth, inflation, banking, Budget and development, linked to current policy. Printed hard copies delivered pan-India.",
     subheading:
-      "Master the concepts behind growth, inflation, banking, Budget and the issues shaping India’s economy.",
+      "Naman Sir’s complete handwritten Economy notes — full UPSC syllabus with core concepts + current economic developments for Prelims & Mains.",
     mentorIntro:
       "Economy is easier when concepts are connected to real developments. UPSC can test the same idea as a definition in Prelims, a policy development in current affairs, and an analytical question in Mains.",
     why: "The paper rewards students who can move from a definition to a live number or a policy choice. These notes keep the concept short and leave room to attach the latest Survey, Budget or RBI decision.",

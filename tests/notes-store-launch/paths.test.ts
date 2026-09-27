@@ -29,6 +29,15 @@ test("reserved notes routes are not treated as products", () => {
 test("launch curriculum covers the three subjects only", () => {
   assert.deepEqual(Object.keys(NOTES_CURRICULUM).sort(), ["economy", "modern-history", "polity"]);
   assert.equal(getNotesCurriculum("polity")?.title, "Indian Polity Notes");
+  assert.equal(
+    getNotesCurriculum("polity")?.subheading,
+    "Naman Sir’s complete handwritten Polity notes — full UPSC syllabus with static concepts + integrated current affairs for Prelims & Mains.",
+  );
+  assert.equal(getNotesCurriculum("economy")?.title, "Indian Economy Notes");
+  assert.equal(
+    getNotesCurriculum("economy")?.subheading,
+    "Naman Sir’s complete handwritten Economy notes — full UPSC syllabus with core concepts + current economic developments for Prelims & Mains.",
+  );
   assert.equal(getNotesCurriculum("ethics"), null);
 });
 
