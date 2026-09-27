@@ -8,13 +8,19 @@
  * site's essential analytics — no new tracking script, no PII.
  */
 import { cookies } from "next/headers";
-import { ATTR_COOKIE, parseAttrCookie } from "@/lib/attribution";
+import { ATTR_COOKIE, parseAttrCookie, touchHasAcquisitionSignal } from "@/lib/attribution";
 import { leadAttributionFromState, type LeadAttribution } from "./leadAttribution";
 
 /** Lead attribution derived from the request's nsa_attr cookie (empty when absent). */
 export function requestLeadAttribution(): LeadAttribution {
   try {
-    const raw = cookies().get(ATTR_COOKIE)?.value;
+    const all = cookies().getAll(ATTR_COOKIE);
+    let raw = all[0]?.value;
+    for (const cookie of all) {
+      const state = parseAttrCookie(cookie.value);
+      const touch = state?.last_touch || state?.first_touch;
+      if (touch && touchHasAcquisitionSignal(touch)) raw = cookie.value;
+    }
     return leadAttributionFromState(parseAttrCookie(raw));
   } catch {
     return leadAttributionFromState(null);

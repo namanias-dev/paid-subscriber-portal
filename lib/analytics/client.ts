@@ -10,6 +10,7 @@ import {
   SESSION_COOKIE,
   ATTR_COOKIE,
   buildTouch,
+  chooseCookieValue,
   mergeAttribution,
   parseAttrCookie,
   serializeAttr,
@@ -28,17 +29,20 @@ function isBrowser(): boolean {
 
 function readCookie(name: string): string | null {
   if (!isBrowser()) return null;
-  const m = document.cookie.match(new RegExp(`(?:^|; )${name}=([^;]*)`));
-  return m ? m[1] : null;
+  return chooseCookieValue(name, document.cookie);
 }
 
 function writeCookie(name: string, value: string, maxAge: number): void {
   if (!isBrowser()) return;
   const secure = location.protocol === "https:" ? "; secure" : "";
-  const domain = location.hostname === "namanias.com" || location.hostname.endsWith(".namanias.com")
-    ? "; domain=.namanias.com"
-    : "";
-  document.cookie = `${name}=${value}; path=/; max-age=${maxAge}; samesite=lax${secure}${domain}`;
+  const shared = location.hostname === "namanias.com" || location.hostname.endsWith(".namanias.com");
+  if (shared) {
+    // Expire a host-only cookie so it cannot shadow the shared www/apex cookie.
+    document.cookie = `${name}=; path=/; max-age=0`;
+    document.cookie = `${name}=${value}; path=/; max-age=${maxAge}; samesite=lax${secure}; domain=.namanias.com`;
+    return;
+  }
+  document.cookie = `${name}=${value}; path=/; max-age=${maxAge}; samesite=lax${secure}`;
 }
 
 function uuid(): string {

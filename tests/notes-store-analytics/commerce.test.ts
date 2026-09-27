@@ -7,7 +7,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-import { buildTouch, deriveChannel, mergeAttribution, type AttributionTouch } from "../../lib/attribution";
+import { buildTouch, chooseCookieValue, deriveChannel, mergeAttribution, serializeAttr, type AttributionTouch } from "../../lib/attribution";
 import { CLIENT_ALLOWED_EVENTS } from "../../lib/analytics/events";
 import {
   aggregateNotesAnalytics,
@@ -114,6 +114,24 @@ describe("privacy", () => {
     assert.equal(encoded.includes("fb-secret"), false);
     assert.equal(encoded.includes("fb-last"), false);
     assert.equal(encoded.includes("fbclid"), false);
+  });
+});
+
+describe("shared host cookies", () => {
+  it("prefers the campaign cookie when a stale host-only Direct cookie is also present", () => {
+    const stale = serializeAttr({
+      first_touch: { ...touch({}), first_seen_at: "2026-09-01T00:00:00.000Z" },
+      last_touch: { ...touch({}), last_seen_at: "2026-09-01T00:00:00.000Z" },
+    });
+    const current = serializeAttr({
+      first_touch: { ...touch({ utm_source: "instagram", utm_medium: "story", utm_campaign: "notes_launch" }), first_seen_at: "2026-09-27T00:00:00.000Z" },
+      last_touch: { ...touch({ utm_source: "instagram", utm_medium: "autodm", utm_campaign: "notes_launch", utm_content: "reel_01" }), last_seen_at: "2026-09-27T01:00:00.000Z" },
+    });
+    const header = `nsa_attr=${stale}; nsa_sid=old; nsa_attr=${current}`;
+    const chosen = chooseCookieValue("nsa_attr", header);
+    const state = JSON.parse(decodeURIComponent(chosen || ""));
+    assert.equal(state.last_touch.medium, "autodm");
+    assert.equal(state.last_touch.campaign, "notes_launch");
   });
 });
 
