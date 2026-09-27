@@ -120,3 +120,7 @@ Baseline re-confirmed green after each commit. Production flag still disabled; n
 
 1. `notes-store-release-hardening` has **no common git history with `main`** (disjoint). Deployment runbook names `master` as production track; `main` is the GitHub default branch.
 2. `handoff-state.json` `headCommit`/`treeHash` self-reference earlier commits (documented as expected); the annotated tag `notes-store-handoff-2026-09-19` is authoritative and verified (commit `2c1a440`, tree `6f970eb`).
+
+## Real-time paid-order Telegram (2026-09-27)
+
+Additive. After `applyStoreVerify` commits the first transition into `ORDER_CONFIRMED`, `fireNotesOrderPaidAlert` posts one HTML message to the existing executive-brief channel. Idempotency is one `telegram_report_snapshots` row, `slot_key = notes_order_paid:<orderId>`. Qualifying orders already paid more than 15 minutes before the first run are marked `skipped` / `pre_existing` and are not sent. Telegram failure does not roll back the order. The 2-hour digest schedule is unchanged. No new table.
