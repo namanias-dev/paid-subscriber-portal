@@ -192,7 +192,10 @@ export default function CheckoutForm() {
     shownRef.current = true;
     trackClient("notes_address_confirmation_shown", addressAnalyticsProps({ itemCount: cart?.item_count }));
     if (window.matchMedia("(max-width: 1023px)").matches) {
-      confirmRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      // Scroll the confirm control, not the whole card. A bottom cookie sheet
+      // covers the last ~20rem; scroll-margin keeps the button above it.
+      const target = confirmRef.current?.querySelector("[data-confirm-delivery]");
+      (target instanceof HTMLElement ? target : confirmRef.current)?.scrollIntoView({ behavior: "smooth", block: "nearest" });
     }
   }, [canConfirm, cart?.item_count]);
 
@@ -313,7 +316,7 @@ export default function CheckoutForm() {
               )}
               <button type="button" className="min-h-11 rounded-full border border-[var(--ca-navy)]/15 px-3 text-sm font-semibold" onClick={() => document.getElementById("delivery-line1")?.focus()}>Edit address</button>
             </div>
-            <button type="button" className="ca-focus mt-3 inline-flex min-h-11 w-full items-center justify-center rounded-full bg-[var(--ca-navy)] text-sm font-semibold text-white" onClick={() => { setConfirmedHash(fingerprint); trackClient("notes_address_confirmed", addressAnalyticsProps({ itemCount: cart?.item_count })); }}>
+            <button type="button" data-confirm-delivery className="ca-focus mt-3 inline-flex min-h-11 w-full scroll-mb-[20rem] items-center justify-center rounded-full bg-[var(--ca-navy)] text-sm font-semibold text-white lg:scroll-mb-0" onClick={() => { setConfirmedHash(fingerprint); trackClient("notes_address_confirmed", addressAnalyticsProps({ itemCount: cart?.item_count })); }}>
               {confirmed ? "Delivering here" : "Yes, deliver here"}
             </button>
           </section>
