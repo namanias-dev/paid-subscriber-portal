@@ -18,6 +18,8 @@ import {
   type BadgeTone,
 } from "@/lib/store/adminConsole";
 import { DownloadInvoiceButton, ViewInvoiceButton } from "./InvoiceActions";
+import { FulfillmentTimeline } from "./FulfillmentTimeline";
+import { showsFulfillmentTimeline, TIMELINE, timelineIndex } from "@/lib/store/opsBoard";
 import ChangeDeliveryAddress from "./ChangeDeliveryAddress";
 import { buildDeliveryGoogleMapsUrl, formatDeliveryAddress } from "@/lib/store/deliveryAddress";
 
@@ -50,6 +52,7 @@ export interface AdminOrder {
   payment_status: string | null;
   promised_delivery_date: string | null;
   placed_at: string;
+  paid_at?: string | null;
   updated_at?: string | null;
   internal_notes: string | null;
   address: Address | null;
@@ -278,12 +281,38 @@ export default function OrderDetail({
             </div>
           </div>
           <div className="mt-3 flex flex-wrap gap-2">
-            {order.payment_status && <Badge tone={order.payment_status === "CAPTURED" ? "green" : "neutral"}>{order.payment_status}</Badge>}
+            {order.payment_status && <Badge tone={order.payment_status === "CAPTURED" ? "green" : "neutral"}>{order.payment_status === "CAPTURED" ? "Paid" : order.payment_status}</Badge>}
             <Badge tone={fulfillmentTone(order.status, failed)}>{fulfillmentLabel(order.status, failed)}</Badge>
           </div>
         </header>
 
         <div className="space-y-3 px-4 py-4">
+          <section className="rounded-2xl bg-white p-4">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--ca-gold-dark)]">Fulfillment</p>
+            {showsFulfillmentTimeline(order.status) ? (
+              <div className="mt-3 overflow-x-auto">
+                <FulfillmentTimeline status={order.status} />
+              </div>
+            ) : (
+              <p className="mt-2 text-sm font-semibold text-[var(--ca-navy)]">{fulfillmentLabel(order.status, failed)}</p>
+            )}
+            <p className="mt-3 text-sm text-[var(--ca-navy)]">
+              Current: <span className="font-semibold">{showsFulfillmentTimeline(order.status) ? TIMELINE[timelineIndex(order.status) || 0].label : fulfillmentLabel(order.status, failed)}</span>
+            </p>
+            {next && (action === "prepare" || action === "pack") && (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => act(() => fetch(`/api/admin/notes/orders/${order.id}/advance`, { method: "POST" }), `Moved to ${fulfillmentLabel(next, false)}`)}
+                className="mt-3 min-h-11 rounded-full bg-[var(--ca-navy)] px-4 text-sm font-semibold text-white disabled:opacity-50"
+              >
+                {busy ? "Saving…" : order.status === "ORDER_CONFIRMED" || order.status === "PAYMENT_CONFIRMED" ? "Start preparing" : `Mark ${fulfillmentLabel(next, false).toLowerCase()}`}
+              </button>
+            )}
+            {(order.status === "ORDER_CONFIRMED" || order.status === "PAYMENT_CONFIRMED") && order.paid_at && (
+              <p className="mt-2 text-xs text-[var(--ca-navy)]/55">Auto-prepares after 5 min</p>
+            )}
+          </section>
           {order.invoice_status === "READY" && !(active && ship) && (
             <section className="rounded-2xl bg-white p-4">
               <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--ca-gold-dark)]">Invoice</p>

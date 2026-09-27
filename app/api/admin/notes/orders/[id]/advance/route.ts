@@ -34,8 +34,16 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   }
 
   const now = new Date().toISOString();
-  const { error } = await db.from("store_orders").update({ status: next, updated_at: now }).eq("id", order.id);
+  const { data: updated, error } = await db
+    .from("store_orders")
+    .update({ status: next, updated_at: now })
+    .eq("id", order.id)
+    .eq("status", order.status)
+    .select("id");
   if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 400 });
+  if (!updated?.length) {
+    return NextResponse.json({ ok: false, error: "This order already moved. Refresh and try the next step." }, { status: 409 });
+  }
 
   await db.from("store_order_events").insert({
     order_id: order.id,
