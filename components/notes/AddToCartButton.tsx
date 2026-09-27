@@ -40,7 +40,7 @@ export default function AddToCartButton({
       });
       const json = await res.json();
       if (!res.ok || !json.ok) throw new Error(json.error || "Unable to add Notes right now.");
-      trackClient("notes_added_to_cart", { product_id: productId, buy_now: buyNow });
+      trackClient("notes_added_to_cart", { product_id: productId, buy_now: buyNow, cta_id: buyNow ? "buy_now" : "add_to_cart", quantity: 1 });
       window.dispatchEvent(new CustomEvent("notes-cart-updated", { detail: { count: json.cart?.item_count } }));
       if (buyNow) {
         setMsg("Preparing checkout");
@@ -55,6 +55,7 @@ export default function AddToCartButton({
         setTone(null);
       }, 1600);
     } catch (e) {
+      trackClient("notes_checkout_api_error", { endpoint: "cart", recoverable: true, stage: "add_to_cart" });
       setTone("err");
       setMsg((e as Error).message);
     } finally {

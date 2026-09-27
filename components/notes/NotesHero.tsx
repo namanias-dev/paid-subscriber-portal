@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import Link from "next/link";
 import { motion, useReducedMotion } from "framer-motion";
 import HeroNotebook from "./HeroNotebook";
+import { trackClient } from "@/lib/analytics/client";
 
 function TrustMark() {
   return (
@@ -43,7 +44,7 @@ function TrustMark() {
 function ShopCta() {
   return (
     <div className="flex items-center justify-center lg:justify-start">
-      <Link href="#catalogue" className="ca-btn ca-btn-gold ca-focus ns-press ns-hero-cta-primary group rounded-full">
+      <Link href="#catalogue" onClick={() => trackClient("notes_product_clicked", { cta_id: "hero_shop", placement: "hero" })} className="ca-btn ca-btn-gold ca-focus ns-press ns-hero-cta-primary group rounded-full">
         Shop UPSC Notes
         <span aria-hidden="true" className="inline-block transition-transform duration-200 group-hover:translate-x-1">
           →

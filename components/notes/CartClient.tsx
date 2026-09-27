@@ -50,7 +50,11 @@ export default function CartClient() {
   }
 
   useEffect(() => {
-    load().catch((e) => setErr((e as Error).message));
+    trackClient("notes_cart_viewed", { cta_id: "cart_page" });
+    load().catch((e) => {
+      setErr((e as Error).message);
+      trackClient("notes_checkout_api_error", { endpoint: "cart", recoverable: true });
+    });
   }, []);
 
   async function setQty(id: string, qty: number) {
@@ -66,7 +70,8 @@ export default function CartClient() {
       });
       const json = await res.json();
       if (!res.ok || json.ok === false) throw new Error(json.error || "Unable to update your cart right now.");
-      if (qty <= 0) trackClient("notes_removed_from_cart", { item_id: id });
+      if (qty <= 0) trackClient("notes_removed_from_cart", { item_id: id, cta_id: "remove_from_cart" });
+      else trackClient("notes_cart_quantity_changed", { item_id: id, quantity: qty });
       setItems(json.cart?.items || []);
       setSubtotal(json.cart?.subtotal_label || "");
       setDiscount(json.cart?.discount_label || "");

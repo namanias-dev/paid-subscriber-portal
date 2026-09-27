@@ -105,7 +105,7 @@ export default function PhysicalNotesVideo({
     for (const [mark, name] of MARKS) {
       if (ratio >= mark && !marks.current.has(name)) {
         marks.current.add(name);
-        trackClient(name, props);
+        trackClient(name, { ...props, progress_percent: Math.round(mark * 100) });
       }
     }
   }
@@ -131,7 +131,10 @@ export default function PhysicalNotesVideo({
           }
         }}
         onTimeUpdate={(e) => onTime(e.currentTarget)}
-        onError={() => setPhase("error")}
+        onError={() => {
+          setPhase("error");
+          trackClient("notes_media_error", { kind: "video", video_id: video.id, placement });
+        }}
       />
       {!userPlayback && (
         <button type="button" className="ns-proof-play ca-focus" onClick={play} aria-label="Play the printed notes walkthrough">

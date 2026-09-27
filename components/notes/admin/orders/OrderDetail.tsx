@@ -76,6 +76,17 @@ export interface AdminOrder {
     package_source?: string | null;
   } | null;
   invoice_status?: string | null;
+  marketing?: {
+    channel: string;
+    source: string | null;
+    medium: string | null;
+    campaign: string | null;
+    content: string | null;
+    landing_page: string | null;
+    first_channel: string;
+    last_channel: string;
+    device: string | null;
+  } | null;
   issue?: {
     id: string;
     reference: string;
@@ -275,6 +286,21 @@ export default function OrderDetail({
                 <DownloadInvoiceButton orderId={order.id} />
               </div>
             </section>
+          )}
+          {order.marketing && (
+            <details className="rounded-2xl bg-white p-4">
+              <summary className="cursor-pointer text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--ca-gold-dark)]">Marketing attribution</summary>
+              <dl className="mt-3 grid grid-cols-2 gap-3">
+                <Field label="Channel" value={order.marketing.channel} />
+                <Field label="Source" value={order.marketing.source} />
+                <Field label="Medium" value={order.marketing.medium} />
+                <Field label="Campaign" value={order.marketing.campaign} />
+                <Field label="Content" value={order.marketing.content} />
+                <Field label="Landing page" value={order.marketing.landing_page} />
+                <Field label="First touch" value={order.marketing.first_channel} />
+                <Field label="Last touch" value={order.marketing.last_channel} />
+              </dl>
+            </details>
           )}
           {reasons.length > 0 && (
             <section className="rounded-2xl border border-amber-200 bg-amber-50 p-4">

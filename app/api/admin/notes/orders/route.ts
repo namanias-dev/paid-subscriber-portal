@@ -6,6 +6,7 @@ import { fulfilmentAttention } from "@/lib/store/shipping/dispatch";
 import { issueCategoryLabel, issueStatusLabel, OPEN_ISSUE_STATUSES } from "@/lib/store/issues";
 import { actionRequiredReasons, pickupFailedActivity, sortAdminOrders } from "@/lib/store/adminConsole";
 import { shippingWritesAuthorized } from "@/lib/store/shipping/config";
+import { BUSINESS_CHANNELS, orderMarketingSummary, type StoredNotesAttribution } from "@/lib/analytics/notesCommerce";
 
 export const dynamic = "force-dynamic";
 
@@ -63,6 +64,7 @@ export async function GET(req: Request) {
   const offset = Math.max(0, Number(url.searchParams.get("offset") || 0));
   const sort = url.searchParams.get("sort") || "newest";
   const actionOnly = url.searchParams.get("action") === "required";
+  const acq = url.searchParams.get("acq") || "";
 
   const statuses = BUCKETS[bucket] || ALL_STATUSES;
   const issueFilter = url.searchParams.get("issue") || "";
@@ -96,10 +98,11 @@ export async function GET(req: Request) {
   let query = db
     .from("store_orders")
     .select(
-      "id,order_no,status,customer_name,phone,email,total_paise,discount_paise,shipping_paise,subtotal_paise,promo_code,discount_trace_json,promised_delivery_date,placed_at,updated_at,paid_at,shipped_at,delivered_at,internal_notes,shipping_address_id",
+      "id,order_no,status,customer_name,phone,email,total_paise,discount_paise,shipping_paise,subtotal_paise,promo_code,discount_trace_json,promised_delivery_date,placed_at,updated_at,paid_at,shipped_at,delivered_at,internal_notes,shipping_address_id,attribution_source,attribution_campaign,attribution_platform,attribution_json",
       { count: "exact" },
     )
     .in("status", statuses);
+  if ((BUSINESS_CHANNELS as readonly string[]).includes(acq)) query = query.eq("attribution_platform", acq);
   if (openIssueOrderIds) query = query.in("id", openIssueOrderIds);
 
   if (q) {
@@ -299,6 +302,7 @@ export async function GET(req: Request) {
   const mapped = orders.map((o) => {
     const ship = shipByOrder.get(o.id) || null;
     const issue = issueByOrder.get(o.id) || null;
+    const { attribution_json, ...safe } = o;
     const reasons = actionRequiredReasons({
       status: o.status,
       awb: ship?.awb,
@@ -308,7 +312,12 @@ export async function GET(req: Request) {
       paymentPending: o.status === "PAYMENT_PENDING",
     });
     return {
-      ...o,
+      ...safe,
+      marketing: orderMarketingSummary({
+        attribution_source: o.attribution_source,
+        attribution_platform: o.attribution_platform,
+        attribution_json: (attribution_json || null) as StoredNotesAttribution | null,
+      }),
       address: o.shipping_address_id ? addrMap.get(o.shipping_address_id) || null : null,
       items: itemsByOrder.get(o.id) || [],
       shipment: ship,

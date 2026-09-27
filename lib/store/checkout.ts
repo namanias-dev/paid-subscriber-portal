@@ -12,7 +12,11 @@ import { pinPlaceConflict } from "./address";
 import { lockQuote, QUOTE_TTL_SECONDS, type FrozenQuote } from "./quote";
 import { reserveStock } from "./inventory";
 import type { CartView } from "./cart";
+import { cookies, headers } from "next/headers";
+import { parseDevice } from "@/lib/analytics/server";
 import { requestLeadAttribution } from "@/lib/marketing/requestAttribution";
+import { SESSION_COOKIE, VISITOR_COOKIE } from "@/lib/attribution";
+import { businessChannel } from "@/lib/analytics/notesCommerce";
 import { hashStoreAccessToken, mintStoreAccessToken } from "./accessToken";
 import { holdStoreOffer, offerTraceFromQuote } from "./offers";
 
@@ -112,7 +116,22 @@ export async function placeCheckout(cart: CartView, address: CheckoutAddress): P
   const orderTokenHash = hashStoreAccessToken(orderToken);
   // Freeze first-party nsa_attr at checkout — same cookie as academy leads, store tables only.
   const attr = requestLeadAttribution();
-  const touch = attr.attribution?.first_touch || attr.attribution?.last_touch || null;
+  const touch = attr.attribution?.last_touch || attr.attribution?.first_touch || null;
+  let deviceCategory: string | null = null;
+  let deviceBrowser: string | null = null;
+  let deviceOs: string | null = null;
+  try {
+    const device = parseDevice(headers().get("user-agent"));
+    deviceCategory = device.type;
+    deviceBrowser = device.browser;
+    deviceOs = device.os;
+  } catch { /* device lookup must not block checkout */ }
+  const attributionJson = {
+    ...(attr.attribution || { first_touch: null, last_touch: null }),
+    device_category: deviceCategory,
+    device_browser: deviceBrowser,
+    device_os: deviceOs,
+  };
   const { data: order, error: orderErr } = await db
     .from("store_orders")
     .insert({
@@ -137,13 +156,13 @@ export async function placeCheckout(cart: CartView, address: CheckoutAddress): P
       promised_delivery_date: quote.promised_delivery_date,
       tracking_token: null,
       tracking_token_hash: orderTokenHash,
-      attribution_json: attr.attribution,
-      attribution_source: attr.channel || attr.utm_source,
+      attribution_json: attributionJson,
+      attribution_source: attr.utm_source || touch?.source || attr.channel,
       attribution_campaign: attr.utm_campaign,
       attribution_campaign_id: touch?.campaign_id || null,
       attribution_adset_id: touch?.adset_id || null,
       attribution_ad_id: touch?.ad_id || null,
-      attribution_platform: attr.channel,
+      attribution_platform: businessChannel(touch),
     })
     .select("id,order_no")
     .single();
@@ -226,6 +245,24 @@ export async function placeCheckout(cart: CartView, address: CheckoutAddress): P
   });
 
   await db.from("store_carts").update({ status: "converted", updated_at: new Date().toISOString() }).eq("id", cart.id);
+
+  let visitorId: string | null = null;
+  let sessionId: string | null = null;
+  try {
+    const jar = cookies();
+    visitorId = jar.get(VISITOR_COOKIE)?.value || null;
+    sessionId = jar.get(SESSION_COOKIE)?.value || null;
+  } catch { /* analytics must not block payment */ }
+  void import("@/lib/analytics/notesPurchase")
+    .then((m) => m.recordNotesPaymentInitiated({
+      orderId: order.id,
+      totalPaise: quote.total_paise,
+      itemCount: quote.items.length,
+      attribution: attr.attribution,
+      visitorId,
+      sessionId,
+    }))
+    .catch(() => {});
 
   return {
     order_no: order.order_no,

@@ -110,8 +110,19 @@ export type EventName =
   | "notes_added_to_cart"
   | "notes_removed_from_cart"
   | "notes_checkout_started"
+  | "notes_checkout_step_viewed"
+  | "notes_checkout_validation_error"
+  | "notes_checkout_api_error"
+  | "notes_shipping_quote_error"
+  | "notes_cart_viewed"
+  | "notes_cart_quantity_changed"
   | "notes_coupon_applied"
+  | "notes_payment_initiated"
+  | "notes_payment_gateway_opened"
+  | "notes_payment_returned"
   | "notes_payment_failed"
+  | "notes_purchase"
+  | "notes_media_error"
   | "notes_order_completed"
   | "notes_interest_submitted"
   | "notes_interest_section_viewed"
@@ -232,8 +243,17 @@ export const CLIENT_ALLOWED_EVENTS: ReadonlySet<EventName> = new Set<EventName>(
   "notes_added_to_cart",
   "notes_removed_from_cart",
   "notes_checkout_started",
+  "notes_checkout_step_viewed",
+  "notes_checkout_validation_error",
+  "notes_checkout_api_error",
+  "notes_shipping_quote_error",
+  "notes_cart_viewed",
+  "notes_cart_quantity_changed",
   "notes_coupon_applied",
+  "notes_payment_gateway_opened",
+  "notes_payment_returned",
   "notes_payment_failed",
+  "notes_media_error",
   "notes_order_completed",
   "notes_interest_submitted",
   "notes_interest_section_viewed",

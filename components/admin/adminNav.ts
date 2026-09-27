@@ -94,6 +94,7 @@ export const ADMIN_NAV: AdminNavItem[] = [
   },
   { href: "/admin/payments", label: "Payments", icon: "payments", group: "Admissions & Payments", perm: "view_revenue" },
   { href: "/admin/notes/overview", label: "Notes overview", icon: "reports", group: "Notes Store", perm: "store_manage_orders" },
+  { href: "/admin/notes/analytics", label: "Notes analytics", icon: "reports", group: "Notes Store", perm: "store_manage_orders" },
   { href: "/admin/notes/interest", label: "Notes demand", icon: "reports", group: "Notes Store", perm: "store_manage_orders" },
   { href: "/admin/notes", label: "Notes orders", icon: "payments", group: "Notes Store", perm: "store_manage_orders" },
   { href: "/admin/notes/preparation", label: "Preparation queue", icon: "reports", group: "Notes Store", perm: "store_manage_orders" },
