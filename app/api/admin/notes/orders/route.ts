@@ -8,6 +8,7 @@ import { actionRequiredReasons, pickupFailedActivity, sortAdminOrders } from "@/
 import { shippingWritesAuthorized } from "@/lib/store/shipping/config";
 import { BUSINESS_CHANNELS, orderMarketingSummary, type StoredNotesAttribution } from "@/lib/analytics/notesCommerce";
 import { paidRollup } from "@/lib/store/opsBoard";
+import { groupMatchesBucket, groupNotesCustomers, isCapturedNotesOrder } from "@/lib/store/customerGroups";
 
 export const dynamic = "force-dynamic";
 
@@ -103,12 +104,12 @@ export async function GET(req: Request) {
   let query = db
     .from("store_orders")
     .select(
-      "id,order_no,status,customer_name,phone,email,total_paise,discount_paise,shipping_paise,subtotal_paise,promo_code,discount_trace_json,promised_delivery_date,placed_at,updated_at,paid_at,shipped_at,delivered_at,internal_notes,shipping_address_id,attribution_source,attribution_campaign,attribution_platform,attribution_json",
+      "id,order_no,status,customer_id,customer_name,phone,phone_key,email,total_paise,discount_paise,shipping_paise,subtotal_paise,promo_code,discount_trace_json,promised_delivery_date,placed_at,updated_at,paid_at,shipped_at,delivered_at,internal_notes,shipping_address_id,attribution_source,attribution_campaign,attribution_platform,attribution_json",
       { count: "exact" },
     )
-    .in("status", paidOnly ? ALL_STATUSES.filter((status) => !["PAYMENT_PENDING", "PAYMENT_FAILED", "PAYMENT_EXPIRED", "CANCELLED", "REFUNDED", "PARTIALLY_REFUNDED"].includes(status)) : statuses);
+    .in("status", !id ? ALL_STATUSES : paidOnly ? ALL_STATUSES.filter((status) => !["PAYMENT_PENDING", "PAYMENT_FAILED", "PAYMENT_EXPIRED", "CANCELLED", "REFUNDED", "PARTIALLY_REFUNDED"].includes(status)) : statuses);
   if (id) query = query.eq("id", id);
-  if (paidOnly) query = query.not("paid_at", "is", null);
+  if (paidOnly && id) query = query.not("paid_at", "is", null);
   if ((BUSINESS_CHANNELS as readonly string[]).includes(acq)) query = query.eq("attribution_platform", acq);
   if (openIssueOrderIds) query = query.in("id", openIssueOrderIds);
 
@@ -126,8 +127,25 @@ export async function GET(req: Request) {
 
   const sortColumn = sort.startsWith("value") ? "total_paise" : sort === "updated" || sort === "action" ? "updated_at" : "placed_at";
   const ascending = sort === "oldest" || sort === "value_asc";
-  const scan = actionOnly ? 100 : limit;
-  const scanOffset = actionOnly ? 0 : offset;
+  const grouped = !id;
+  if (grouped && (q || awbOrderIds?.length)) {
+    const keys = await customerKeysForSearch(db, q, awbOrderIds);
+    if (!keys.phones.length && !keys.ids.length) {
+      const counts = await adminCounts(db);
+      return NextResponse.json({ ok: true, total: 0, limit, offset, customers: [], orders: [], counts, writes_authorized: shippingWritesAuthorized() }, { headers: { "Cache-Control": "no-store" } });
+    }
+    const ors = [];
+    if (keys.phones.length) ors.push(`phone_key.in.(${keys.phones.join(",")})`);
+    if (keys.ids.length) ors.push(`id.in.(${keys.ids.join(",")})`);
+    query = db
+      .from("store_orders")
+      .select(
+        "id,order_no,status,customer_id,customer_name,phone,phone_key,email,total_paise,discount_paise,shipping_paise,subtotal_paise,promo_code,discount_trace_json,promised_delivery_date,placed_at,updated_at,paid_at,shipped_at,delivered_at,internal_notes,shipping_address_id,attribution_source,attribution_campaign,attribution_platform,attribution_json",
+      )
+      .or(ors.join(","));
+  }
+  const scan = grouped ? 2000 : actionOnly ? 100 : limit;
+  const scanOffset = grouped || actionOnly ? 0 : offset;
   const { data, count } = await query.order(sortColumn, { ascending }).range(scanOffset, scanOffset + scan - 1);
 
   const orders = data || [];
@@ -341,9 +359,52 @@ export async function GET(req: Request) {
       issue,
     };
   });
+  const counts = await adminCounts(db);
+  if (id && mapped[0]?.phone_key) {
+    const { data: siblings } = await db
+      .from("store_orders")
+      .select("id,order_no,status,total_paise,placed_at,paid_at")
+      .eq("phone_key", mapped[0].phone_key)
+      .order("placed_at", { ascending: false })
+      .limit(40);
+    (mapped[0] as { attempts?: unknown }).attempts = (siblings || []).map((row) => ({ ...row, captured: isCapturedNotesOrder(row) }));
+  }
+  if (!id) {
+    const needle = q.toLowerCase();
+    const groups = groupNotesCustomers(mapped, q ? (order) => `${order.order_no} ${order.customer_name || ""} ${order.phone || ""} ${order.phone_key || ""} ${order.email || ""}`.toLowerCase().includes(needle) : undefined);
+    const filtered = groups.filter((group) => groupMatchesBucket(group, issueFilter === "open" || actionOnly ? "issues" : bucket));
+    const customers = filtered.slice(offset, offset + limit);
+    return NextResponse.json(
+      {
+        ok: true,
+        total: filtered.length,
+        limit,
+        offset,
+        writes_authorized: shippingWritesAuthorized(),
+        counts,
+        customers,
+        orders: customers.map((group) => ({
+          ...group.primary,
+          group: {
+            attempts: group.attempts,
+            paid_count: group.paid_count,
+            paid_total_paise: group.paid_total_paise,
+            masked_phone: group.masked_phone,
+            matched_order_no: group.matched_order_no,
+            active: group.active.map((order) => ({
+              id: order.id,
+              order_no: order.order_no,
+              status: order.status,
+              items: "items" in order ? order.items : [],
+            })),
+          },
+        })),
+      },
+      { headers: { "Cache-Control": "no-store" } },
+    );
+  }
   const visible = sortAdminOrders(actionOnly ? mapped.filter((row) => row.action_required) : mapped, sort === "action" ? "action" : "newest");
   const page = actionOnly ? visible.slice(offset, offset + limit) : sort === "action" ? visible : mapped;
-  const counts = await adminCounts(db);
 
   return NextResponse.json(
     {
@@ -357,6 +418,22 @@ export async function GET(req: Request) {
     },
     { headers: { "Cache-Control": "no-store" } },
   );
+}
+
+async function customerKeysForSearch(db: NonNullable<ReturnType<typeof storeDb>>, q: string, awbOrderIds: string[] | null) {
+  let lookup = db.from("store_orders").select("id,phone_key").limit(200);
+  if (q) {
+    const like = `%${q.replace(/[%,]/g, "")}%`;
+    const ors = [`order_no.ilike.${like}`, `customer_name.ilike.${like}`, `phone.ilike.${like}`, `email.ilike.${like}`];
+    if (awbOrderIds?.length) ors.push(`id.in.(${awbOrderIds.join(",")})`);
+    lookup = lookup.or(ors.join(","));
+  } else if (awbOrderIds?.length) {
+    lookup = lookup.in("id", awbOrderIds);
+  }
+  const { data } = await lookup;
+  const phones = [...new Set((data || []).map((row) => row.phone_key).filter(Boolean))] as string[];
+  const ids = (data || []).filter((row) => !row.phone_key).map((row) => row.id) as string[];
+  return { phones, ids };
 }
 
 async function adminCounts(db: NonNullable<ReturnType<typeof storeDb>>) {
@@ -386,8 +463,13 @@ async function adminCounts(db: NonNullable<ReturnType<typeof storeDb>>) {
   const captured = (paidRows || []).filter((row) => row.paid_at && !["PAYMENT_PENDING", "PAYMENT_FAILED", "PAYMENT_EXPIRED", "CANCELLED", "REFUNDED", "PARTIALLY_REFUNDED"].includes(row.status));
   const paid = paidRollup(captured);
   const products = await paidProductSplit(db, captured.map((row) => row.id));
+  const { data: heads } = await db.from("store_orders").select("id,order_no,status,paid_at,phone,phone_key,customer_id,customer_name,placed_at").limit(5000);
+  const groups = groupNotesCustomers((heads || []) as Array<{ id: string; order_no: string; status: string; paid_at: string | null; phone: string | null; phone_key: string | null; customer_id: string | null; customer_name: string | null; placed_at: string | null }>);
   return {
     total,
+    attempts: (heads || []).length,
+    customers: groups.length,
+    paid_customers: groups.filter((group) => group.paid_count > 0).length,
     paid: paid.orders,
     paid_sales_paise: paid.salesPaise,
     products,

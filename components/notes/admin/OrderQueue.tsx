@@ -21,8 +21,8 @@ import { showsFulfillmentTimeline } from "@/lib/store/opsBoard";
 import { productSummary } from "@/lib/store/stages";
 
 const FILTERS = [
-  { key: "", label: "All orders", count: "total" },
-  { key: "paid", label: "Paid", count: "paid" },
+  { key: "", label: "All customers", count: "customers" },
+  { key: "paid", label: "Paid customers", count: "paid_customers" },
   { key: "new", label: "New", count: "new" },
   { key: "preparing", label: "Preparing", count: "preparing" },
   { key: "printing", label: "Printing", count: "printing" },
@@ -171,6 +171,9 @@ export default function NotesOrderQueue() {
         <div>
           <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--ca-gold-dark)]">Notes Store</p>
           <h1 className="font-heading text-3xl font-bold text-[var(--ca-navy)]">Orders</h1>
+          <p className="mt-1 text-xs text-[var(--ca-navy)]/55">
+            {counts.paid ?? "–"} paid orders · {counts.paid_customers ?? "–"} paid customers · {counts.attempts ?? "–"} payment attempts
+          </p>
         </div>
         <div className="flex gap-2">
           <Link href="/admin/notes/analytics" className="inline-flex min-h-10 items-center rounded-full border border-[var(--ca-navy)]/15 bg-white px-4 text-sm font-semibold text-[var(--ca-navy)]">Analytics</Link>
@@ -213,7 +216,7 @@ export default function NotesOrderQueue() {
           {products.map((product) => (
             <div key={product.name} className="min-w-[9rem] shrink-0 rounded-2xl border border-[var(--ca-navy)]/10 bg-white px-3 py-2">
               <span className="block truncate text-sm font-semibold text-[var(--ca-navy)]">{product.name.replace(/ notes$/i, "")}</span>
-              <span className="mt-0.5 block text-xs text-[var(--ca-navy)]/55">{product.orders} orders · {product.units} units</span>
+              <span className="mt-0.5 block text-xs text-[var(--ca-navy)]/55" title="An order with more than one subject is counted in each subject. These numbers do not have to add up to paid orders.">{product.units} units · {product.orders} orders</span>
             </div>
           ))}
         </div>
@@ -320,26 +323,35 @@ export default function NotesOrderQueue() {
               const failed = pickupFailedActivity(order.shipment?.tracking_activity);
               const product = productSummary(order.items);
               return (
-                <li key={order.id} className={`grid grid-cols-[1.2fr_0.9fr_0.7fr_1.3fr_auto] items-center gap-3 border-b border-l-2 border-[var(--ca-navy)]/5 px-4 py-3 ${rowAccent(order.status, Boolean(order.action_required))}`}>
+                <li key={order.id} className={`grid grid-cols-[1.2fr_0.9fr_0.7fr_1.3fr_auto] items-center gap-3 border-b border-l-2 border-[var(--ca-navy)]/5 px-4 py-3 ${order.group && !order.group.paid_count ? "border-l-transparent" : rowAccent(order.status, Boolean(order.action_required && order.group?.paid_count !== 0))}`}>
                   <div>
-                    <button type="button" onClick={() => openOrder(order.id)} className="text-left">
-                      <span className="block font-heading text-base font-bold text-[var(--ca-navy)]">{orderIndexLabel(order.order_no) || order.order_no}</span>
-                      <span className="block text-sm text-[var(--ca-navy)]">{order.customer_name}</span>
-                    </button>
+                    <Link href={`/admin/notes/orders/${order.id}`} className="text-left">
+                      <span className="block font-heading text-base font-bold text-[var(--ca-navy)]">{order.customer_name}</span>
+                      <span className="block text-sm text-[var(--ca-navy)]/70">{order.group?.masked_phone || orderIndexLabel(order.order_no)}</span>
+                    </Link>
                     <span className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-[var(--ca-navy)]/45">
-                      {invoiceStatusLabel(order.invoice_status)}
-                      {order.invoice_status === "READY" && <ViewInvoiceButton orderId={order.id} />}
+                      {(!order.group || order.group.paid_count === 1) && invoiceStatusLabel(order.invoice_status)}
+                      {(!order.group || order.group.paid_count === 1) && order.invoice_status === "READY" && <ViewInvoiceButton orderId={order.id} />}
                     </span>
                   </div>
                   <div>
-                    <span className="block text-sm text-[var(--ca-navy)]/80">{product}</span>
-                    <span className="mt-1 block text-sm font-semibold tabular-nums text-[var(--ca-navy)]">{formatPaise(order.total_paise)}</span>
-                    {order.promo_code && <span className="block text-[11px] text-[var(--ca-navy)]/45">{order.promo_code}</span>}
+                    {order.group && !order.group.paid_count ? (
+                      <span className="block text-sm text-[var(--ca-navy)]/70">No paid order</span>
+                    ) : order.group && order.group.active.length > 1 ? (
+                      order.group.active.map((item) => (
+                        <span key={item.id} className="block text-sm text-[var(--ca-navy)]/80">{productSummary(item.items || [])} · {fulfillmentLabel(item.status, false)}</span>
+                      ))
+                    ) : (
+                      <span className="block text-sm text-[var(--ca-navy)]/80">{product}</span>
+                    )}
+                    {order.group?.paid_count ? <span className="mt-1 block text-sm font-semibold tabular-nums text-[var(--ca-navy)]">{formatPaise(order.group.paid_total_paise)}</span> : null}
+                    {!order.group && <span className="mt-1 block text-sm font-semibold tabular-nums text-[var(--ca-navy)]">{formatPaise(order.total_paise)}</span>}
+                    {order.group?.matched_order_no && <span className="block text-[11px] text-[var(--ca-navy)]/55">Matched attempt {order.group.matched_order_no}</span>}
                   </div>
-                  <span className={`w-fit rounded-full px-2 py-1 text-[11px] font-semibold ${order.payment_status === "CAPTURED" ? TONE.green : TONE[fulfillmentTone(order.status, failed)]}`}>{order.payment_status === "CAPTURED" ? "Paid" : order.payment_status || "Payment pending"}</span>
+                  <span className={`w-fit rounded-full px-2 py-1 text-[11px] font-semibold ${order.group?.paid_count || order.payment_status === "CAPTURED" ? TONE.green : TONE.neutral}`}>{order.group ? (order.group.paid_count ? "Paid" : fulfillmentLabel(order.status, failed)) : order.payment_status === "CAPTURED" ? "Paid" : order.payment_status || "Payment pending"}</span>
                   <div>
-                    {showsFulfillmentTimeline(order.status) ? <FulfillmentTimeline status={order.status} compact /> : <span className="text-xs font-semibold text-amber-900">{order.action_required ? "Action required" : fulfillmentLabel(order.status, failed)}</span>}
-                    <span className="mt-1 block text-[11px] text-[var(--ca-navy)]/50">{fulfillmentLabel(order.status, failed)} · {formatAdminWhen(order.placed_at)}</span>
+                    {order.group?.paid_count && showsFulfillmentTimeline(order.status) ? <FulfillmentTimeline status={order.status} compact /> : <span className="text-xs text-[var(--ca-navy)]/60">{order.group?.paid_count ? fulfillmentLabel(order.status, failed) : "Previous attempt"}</span>}
+                    <span className="mt-1 block text-[11px] text-[var(--ca-navy)]/50">{order.group ? `${order.group.attempts} attempts · ${order.group.paid_count} paid` : formatAdminWhen(order.placed_at)}</span>
                   </div>
                   <Link href={`/admin/notes/orders/${order.id}`} className="inline-flex min-h-11 items-center rounded-full bg-[var(--ca-navy)] px-3 text-sm font-semibold text-white">View details</Link>
                 </li>
@@ -350,22 +362,23 @@ export default function NotesOrderQueue() {
             {orders.map((order) => {
               const failed = pickupFailedActivity(order.shipment?.tracking_activity);
               return (
-                <li key={order.id} className={`rounded-2xl border-l-2 bg-white p-4 ${rowAccent(order.status, Boolean(order.action_required))}`}>
-                  <button type="button" onClick={() => openOrder(order.id)} className="w-full text-left">
+                <li key={order.id} className={`rounded-2xl border-l-2 bg-white p-4 ${order.group && !order.group.paid_count ? "border-l-transparent" : rowAccent(order.status, false)}`}>
+                  <Link href={`/admin/notes/orders/${order.id}`} className="block text-left">
                     <span className="flex items-start justify-between gap-3">
                       <span>
-                        <span className="block font-heading text-lg font-bold">{orderIndexLabel(order.order_no) || order.order_no}</span>
-                        <span className="mt-1 block text-sm">{order.customer_name}</span>
-                        <span className="mt-1 block text-sm text-[var(--ca-navy)]/70">{productSummary(order.items)}</span>
+                        <span className="block font-heading text-lg font-bold">{order.customer_name}</span>
+                        <span className="mt-1 block text-sm text-[var(--ca-navy)]/60">{order.group?.masked_phone}</span>
+                        <span className="mt-1 block text-sm text-[var(--ca-navy)]/70">{order.group && !order.group.paid_count ? "No paid order" : productSummary(order.items)}</span>
                       </span>
-                      <span className="text-sm font-semibold tabular-nums">{formatPaise(order.total_paise)}</span>
+                      <span className="text-sm font-semibold tabular-nums">{order.group?.paid_count ? formatPaise(order.group.paid_total_paise) : ""}</span>
                     </span>
                     <span className="mt-3 block">{showsFulfillmentTimeline(order.status) ? <FulfillmentTimeline status={order.status} compact /> : null}</span>
                     <span className="mt-2 flex items-center justify-between gap-2">
                       <span className={`rounded-full px-2 py-1 text-[11px] font-semibold ${TONE[fulfillmentTone(order.status, failed)]}`}>{fulfillmentLabel(order.status, failed)}</span>
                       <span className="text-xs text-[var(--ca-navy)]/55">{order.payment_status === "CAPTURED" ? "Paid" : order.payment_status || "Payment pending"}</span>
                     </span>
-                  </button>
+                    {order.group && <span className="mt-2 block text-xs text-[var(--ca-navy)]/55">{order.group.attempts} attempts · {order.group.paid_count} paid</span>}
+                  </Link>
                   <div className="mt-3 flex flex-wrap items-center gap-2">
                     {order.invoice_status === "READY" && <ViewInvoiceButton orderId={order.id} />}
                     <Link href={`/admin/notes/orders/${order.id}`} className="inline-flex min-h-11 items-center rounded-full bg-[var(--ca-navy)] px-4 text-sm font-semibold text-white">View details</Link>

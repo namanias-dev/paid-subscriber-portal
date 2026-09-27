@@ -108,6 +108,15 @@ export interface AdminOrder {
     callback_requested: boolean;
     open: boolean;
   } | null;
+  attempts?: Array<{ id: string; order_no: string; status: string; total_paise: number; placed_at: string; paid_at?: string | null; captured?: boolean }>;
+  group?: {
+    attempts: number;
+    paid_count: number;
+    paid_total_paise: number;
+    masked_phone: string;
+    matched_order_no: string | null;
+    active: Array<{ id: string; order_no: string; status: string; items?: Array<{ name: string; qty: number }> }>;
+  };
 }
 
 const TONE: Record<BadgeTone, string> = {
@@ -299,6 +308,26 @@ export default function OrderDetail({
         </header>
 
         <div className="space-y-3 px-4 py-4">
+          {order.attempts && order.attempts.length > 1 && (
+            <section className="rounded-2xl bg-white p-4">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--ca-gold-dark)]">Payment attempts</p>
+              <p className="mt-1 text-xs text-[var(--ca-navy)]/55">{order.attempts.filter((item) => item.captured).length} paid · {order.attempts.length} attempts. Earlier retries stay here for audit.</p>
+              <ul className="mt-3 space-y-2">
+                {order.attempts.map((item) => (
+                  <li key={item.id} className="flex items-center justify-between gap-3 text-sm">
+                    <span>
+                      <a className="font-semibold text-[var(--ca-navy)]" href={`/admin/notes/orders/${item.id}`}>{orderIndexLabel(item.order_no) || item.order_no}</a>
+                      <span className="mt-0.5 block text-xs text-[var(--ca-navy)]/50">{formatAdminWhen(item.placed_at)}</span>
+                    </span>
+                    <span className="text-right">
+                      <span className="block font-semibold tabular-nums">{formatPaise(item.total_paise)}</span>
+                      <span className="text-xs text-[var(--ca-navy)]/60">{item.captured ? "Paid" : fulfillmentLabel(item.status, false)}</span>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
           <section className="rounded-2xl bg-white p-4">
             <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--ca-gold-dark)]">Fulfillment</p>
             {showsFulfillmentTimeline(order.status) ? (
