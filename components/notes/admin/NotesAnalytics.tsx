@@ -40,7 +40,7 @@ export default function NotesAnalytics({
         <div>
           <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--ca-gold-dark)]">Notes Store</p>
           <h1 className="font-heading text-3xl font-bold text-[var(--ca-navy)]">Analytics</h1>
-          <p className="mt-1 text-sm text-[var(--ca-navy)]/60">{label}. Revenue is captured orders, not browser events.</p>
+          <p className="mt-1 text-sm text-[var(--ca-navy)]/60">{label}. Revenue is cash captured on paid orders. A page load with no analytics cookie is not counted as a visitor.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {RANGES.map(([key, text]) => (
@@ -78,7 +78,10 @@ export default function NotesAnalytics({
 
       <section className="mt-4 rounded-2xl bg-white p-4">
         <h2 className="font-heading text-lg font-bold text-[var(--ca-navy)]">Funnel</h2>
-        <p className="mt-1 text-sm text-[var(--ca-navy)]/60">People are unique sessions. Paid is captured orders.</p>
+        <p className="mt-1 text-sm text-[var(--ca-navy)]/60">People are unique browsers with a session or visitor cookie. Paid is captured orders, not a browser event. Checkout started is the checkout page, not a tap on Pay.</p>
+        {report.unidentifiedStoreViews > 0 && (
+          <p className="mt-1 text-sm text-[var(--ca-navy)]/60">{report.unidentifiedStoreViews} store views had no cookie and are excluded from the visitor count.</p>
+        )}
         <ol className="mt-3 space-y-2">
           {report.funnel.map((step) => (
             <li key={step.id}>
@@ -101,13 +104,15 @@ export default function NotesAnalytics({
         )}
       </section>
 
+      <p className="mt-4 text-sm text-[var(--ca-navy)]/60">One browser can appear under two sources when a later store view carries a different campaign. Paid orders use the attribution frozen at checkout.</p>
       <div className="mt-4 grid gap-4 lg:grid-cols-2">
         <Table title="Acquisition" headers={["Source", "Visitors", "Checkout", "Paid", "Conv.", "Revenue"]} rows={report.sources.map((row) => [row.channel, row.visitors, row.checkouts, row.paid, pct(row.conversionPct), money(row.revenuePaise)])} />
         <Table title="Campaigns" headers={["Campaign", "Content", "Visitors", "Paid", "Revenue"]} rows={report.campaigns.map((row) => [row.campaign, row.content, row.visitors, row.paid, money(row.revenuePaise)])} />
       </div>
 
       <div className="mt-4">
-        <Table title="Products" headers={["Product", "Views", "PDF", "Video", "Cart", "Orders", "Conv.", "Revenue"]} rows={report.products.map((row) => [row.label, row.views, row.pdfPeople, row.videoStarts, row.addToCarts, row.orders, pct(row.conversionPct), money(row.revenuePaise)])} />
+        <Table title="Products" headers={["Product", "Views", "PDF", "Video plays", "Cart", "Orders", "Conv.", "Line total"]} rows={report.products.map((row) => [row.label, row.views, row.pdfPeople, row.videoStarts, row.addToCarts, row.orders, pct(row.conversionPct), money(row.revenuePaise)])} />
+        <p className="mt-2 text-sm text-[var(--ca-navy)]/60">Line total is merchandise on captured orders. It is not cash collected. One order can contain more than one product. Header revenue is the order total after discounts and shipping.</p>
       </div>
 
       <section className="mt-4 overflow-hidden rounded-2xl bg-white">
@@ -146,7 +151,8 @@ export default function NotesAnalytics({
           <h2 className="font-heading text-lg font-bold text-[var(--ca-navy)]">Content</h2>
           <ul className="mt-3 space-y-1 text-sm text-[var(--ca-navy)]">
             <li>PDF sample opens: {report.content.pdfPeople} people</li>
-            <li>Video starts: {report.content.videoStarts} people</li>
+            <li>Intentional video plays: {report.content.videoStarts} people</li>
+            <li>Muted preview autoplays: {report.content.previewAutoplays} people</li>
             <li>Video 50%: {report.content.video50} people</li>
             <li>Video completes: {report.content.videoCompletes} people</li>
             <li>Polity card: {report.subjects.polity.clicks} clicks · {report.subjects.polity.people} people</li>
@@ -156,13 +162,17 @@ export default function NotesAnalytics({
         <section className="rounded-2xl bg-white p-4">
           <h2 className="font-heading text-lg font-bold text-[var(--ca-navy)]">Checkout health</h2>
           <ul className="mt-3 space-y-1 text-sm text-[var(--ca-navy)]">
-            <li>Checkout starts: {report.checkoutHealth.starts}</li>
-            <li>Payment attempts: {report.checkoutHealth.paymentAttempts}</li>
-            <li>Paid: {report.checkoutHealth.paid}</li>
-            <li>Payment failures: {report.checkoutHealth.failedPayments}</li>
-            <li>Validation errors: {report.checkoutHealth.validationErrors}</li>
-            <li>Shipping quote failures: {report.checkoutHealth.shippingErrors}</li>
-            <li>API errors: {report.checkoutHealth.apiErrors}</li>
+            <li>Checkout page opened: {report.checkoutHealth.starts} people</li>
+            <li>Shipping quote shown: {report.checkoutHealth.shippingQuotes} people</li>
+            <li>Address confirmed: {report.checkoutHealth.addressConfirmed} people</li>
+            <li>Pay tapped: {report.checkoutHealth.paymentClicks} people</li>
+            <li>ICICI payment started: {report.checkoutHealth.paymentAttempts} people</li>
+            <li>Paid orders: {report.checkoutHealth.paid}</li>
+            <li>Gateway outcomes (expired or failed): {report.checkoutHealth.failedPayments} events</li>
+            <li>Pay request errors: {report.checkoutHealth.checkoutSubmitEvents} events · {report.checkoutHealth.checkoutSubmitPeople} people</li>
+            <li>Validation errors: {report.checkoutHealth.validationErrors} events</li>
+            <li>Shipping quote failures: {report.checkoutHealth.shippingErrors} events</li>
+            <li>API errors: {report.checkoutHealth.apiErrors} events</li>
           </ul>
           {report.checkoutHealth.topErrors.length > 0 && (
             <p className="mt-2 text-sm text-[var(--ca-navy)]/70">Most common: {report.checkoutHealth.topErrors.map((row) => `${row.key} (${row.count})`).join(", ")}</p>

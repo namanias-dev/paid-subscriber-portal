@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { trackClient } from "@/lib/analytics/client";
+import { checkoutFailureReason } from "@/lib/analytics/checkoutFailure";
 import { addressAnalyticsProps, addressFingerprint, buildDeliveryGoogleMapsUrl, canonicalDelivery, formatDeliveryAddress } from "@/lib/store/deliveryAddress";
 import { pinPlaceConflict } from "@/lib/store/address";
 import DiscountCodeField from "@/components/notes/DiscountCodeField";
@@ -32,6 +33,7 @@ interface QuoteJson {
 
 export default function CheckoutForm() {
   const [cart, setCart] = useState<CartJson | null>(null);
+  const [cartStatus, setCartStatus] = useState<"loading" | "ready" | "error">("loading");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [pinInfo, setPinInfo] = useState<string | null>(null);
@@ -40,7 +42,9 @@ export default function CheckoutForm() {
   const [postal, setPostal] = useState<{ city: string | null; state: string | null }>({ city: null, state: null });
   const [confirmedHash, setConfirmedHash] = useState<string | null>(null);
   const shownRef = useRef(false);
+  const confirmRef = useRef<HTMLElement>(null);
   const editedRef = useRef(false);
+  const submitLock = useRef(false);
   const [marketingConsent, setMarketingConsent] = useState(false);
   const [discountEnabled, setDiscountEnabled] = useState(false);
   const [couponNotice, setCouponNotice] = useState<string | null>(null);
@@ -105,9 +109,13 @@ export default function CheckoutForm() {
       .then((r) => r.json())
       .then((j) => {
         setCart(j.cart);
+        setCartStatus("ready");
         setDiscountEnabled(Boolean(j.cart?.discount_codes_enabled));
       })
-      .catch(() => trackClient("notes_checkout_api_error", { endpoint: "cart", recoverable: true }));
+      .catch(() => {
+        setCartStatus("error");
+        trackClient("notes_checkout_api_error", { endpoint: "cart", recoverable: true, reason: "network" });
+      });
   }, []);
 
   async function lookupPin(pin: string) {
@@ -183,6 +191,9 @@ export default function CheckoutForm() {
     if (!canConfirm || shownRef.current) return;
     shownRef.current = true;
     trackClient("notes_address_confirmation_shown", addressAnalyticsProps({ itemCount: cart?.item_count }));
+    if (window.matchMedia("(max-width: 1023px)").matches) {
+      confirmRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
   }, [canConfirm, cart?.item_count]);
 
   useEffect(() => {
@@ -196,6 +207,7 @@ export default function CheckoutForm() {
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (submitLock.current) return;
     if (confirmedHash !== addressFingerprint(canonicalDelivery(form))) {
       setErr("Confirm the delivery address before paying.");
       trackClient("notes_address_validation_error", addressAnalyticsProps({ reason: "unconfirmed" }));
@@ -210,6 +222,7 @@ export default function CheckoutForm() {
     if (!form.line1.trim()) {
       trackClient("notes_checkout_validation_error", { field: "address", reason: "required" });
     }
+    submitLock.current = true;
     setBusy(true);
     setErr(null);
     trackClient("notes_checkout_step_viewed", { step: "payment_clicked", item_count: cart?.item_count ?? 0 });
@@ -224,18 +237,41 @@ export default function CheckoutForm() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ ...form, address_hash: confirmedHash }),
       });
-      const json = await res.json();
-      if (!json.ok) throw new Error(json.error || "Payment could not be started.");
+      const json = await res.json().catch(() => null);
+      if (!json || typeof json !== "object") throw new Error("Payment response was not valid JSON.");
+      if (!json.ok || typeof json.payment_url !== "string" || !json.payment_url) {
+        throw new Error(typeof json.error === "string" && json.error ? json.error : "Payment could not be started.");
+      }
       trackClient("notes_payment_gateway_opened", { cta_id: "pay_securely", item_count: cart?.item_count ?? 0 });
       window.location.href = json.payment_url;
     } catch (e2) {
-      trackClient("notes_checkout_api_error", { endpoint: "checkout", recoverable: true, stage: "order_create" });
-      trackClient("notes_payment_failed", { stage: "checkout_submit" });
-      setErr((e2 as Error).message);
+      const message = e2 instanceof Error ? e2.message : "Payment could not be started.";
+      trackClient("notes_checkout_api_error", {
+        endpoint: "checkout",
+        recoverable: true,
+        stage: "order_create",
+        reason: checkoutFailureReason(message),
+      });
+      setErr(message);
       if (form.pincode.length === 6) void lookupPin(form.pincode);
+      submitLock.current = false;
       setBusy(false);
     }
   }
+
+  const payBlocked = cartStatus === "loading"
+    ? "Loading your cart."
+    : cartStatus === "error" || !cart
+      ? "Cart could not be loaded. Refresh the page and try again."
+      : !cart.item_count
+        ? "Your cart is empty."
+        : !quote || !pinReady
+          ? "Enter a delivery PIN to calculate shipping and the payable total."
+          : placeConflict
+            ? placeConflict
+            : !confirmed
+              ? "Tap “Yes, deliver here” before payment."
+              : null;
 
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
     setForm((f) => ({ ...f, [k]: e.target.value }));
@@ -265,7 +301,7 @@ export default function CheckoutForm() {
         </label>
         {placeConflict && <p className="text-sm text-red-700" role="alert">{placeConflict}</p>}
         {canConfirm && (
-          <section className="rounded-2xl border border-[var(--ca-navy)]/10 bg-[#f7f5ef] p-4">
+          <section ref={confirmRef} className="rounded-2xl border border-[var(--ca-navy)]/10 bg-[#f7f5ef] p-4">
             <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--ca-gold-dark)]">Confirm delivery address</p>
             <p className="mt-2 whitespace-pre-line text-sm leading-relaxed text-[var(--ca-navy)]">{formatDeliveryAddress(canonical)}</p>
             <p className="mt-2 text-xs text-[var(--ca-navy)]/60">Please confirm this is where you want your Notes delivered.</p>
@@ -361,10 +397,14 @@ export default function CheckoutForm() {
         <button
           type="submit"
           disabled={busy || !cart?.item_count || !confirmed}
+          aria-describedby={payBlocked ? "checkout-pay-status" : undefined}
           className="ca-focus ns-press mt-5 inline-flex min-h-12 w-full items-center justify-center rounded-full bg-[var(--ca-navy)] text-sm font-semibold text-white disabled:opacity-50"
         >
           {busy ? "Redirecting to ICICI…" : quote ? `Pay ${quote.total_label} securely` : "Pay securely"}
         </button>
+        {payBlocked && !busy && (
+          <p id="checkout-pay-status" className="mt-2 text-sm text-[var(--ca-navy)]/70">{payBlocked}</p>
+        )}
         <p className="mt-3 text-xs text-[var(--ca-navy)]/50">
           Full-page redirect to ICICI Eazypay. We never mark an order paid from this page — ICICI confirmation does.
         </p>

@@ -247,6 +247,7 @@ describe("funnel aggregation", () => {
     assert.equal(report.subjects.polity.people, 1);
     assert.equal(report.content.pdfPeople, 1);
     assert.equal(report.content.videoStarts, 1);
+    assert.equal(report.content.previewAutoplays, 0);
     assert.equal(report.content.video50, 1);
     assert.equal(report.content.videoCompletes, 1);
     assert.equal(report.checkoutHealth.validationErrors, 1);
@@ -259,5 +260,41 @@ describe("funnel aggregation", () => {
     assert.equal(report.promotions.find((row) => row.code === "LAUNCH")?.orders, 1);
     assert.equal(report.largestDrop?.label.includes("→"), true);
     assert.equal(isQaState({ first_touch: { ...touch({ utm_source: "qa", utm_medium: "test", utm_campaign: "notes_analytics_validation" }), first_seen_at: "t" }, last_touch: null }), true);
+  });
+
+  it("does not treat a cookieless view, a muted preview, or a pre-gateway error as extra people or payment failures", () => {
+    const events = [
+      event("notes_store_viewed", "s1"),
+      { ...event("notes_store_viewed", "missing"), session_id: null, visitor_id: null },
+      event("notes_teaching_preview_started", "s1", { video_id: "polity" }),
+      event("notes_physical_video_play", "s1", { product_id: "polity", cta_id: "sample_video" }),
+      event("notes_teaching_inline_play", "s2", { video_id: "economy" }),
+      event("notes_checkout_started", "s1"),
+      event("notes_checkout_step_viewed", "s1", { step: "shipping_quote" }),
+      event("notes_address_confirmed", "s1"),
+      event("notes_checkout_step_viewed", "s1", { step: "payment_clicked" }),
+      event("notes_checkout_api_error", "s1", { endpoint: "checkout", stage: "order_create", reason: "address_unconfirmed" }),
+      event("notes_payment_failed", "s1", { stage: "checkout_submit" }),
+      event("notes_payment_failed", "s1", { outcome: "expired" }),
+      event("notes_payment_initiated", "s1"),
+    ];
+    const report = aggregateNotesAnalytics(events, [], []);
+    assert.equal(report.kpis.visitors, 1);
+    assert.equal(report.unidentifiedStoreViews, 1);
+    assert.equal(report.content.videoStarts, 2);
+    assert.equal(report.content.previewAutoplays, 1);
+    assert.equal(report.checkoutHealth.starts, 1);
+    assert.equal(report.checkoutHealth.shippingQuotes, 1);
+    assert.equal(report.checkoutHealth.addressConfirmed, 1);
+    assert.equal(report.checkoutHealth.paymentClicks, 1);
+    assert.equal(report.checkoutHealth.paymentAttempts, 1);
+    assert.equal(report.checkoutHealth.failedPayments, 1);
+    assert.equal(report.checkoutHealth.checkoutSubmitEvents, 1);
+    assert.equal(report.checkoutHealth.checkoutSubmitPeople, 1);
+    assert.equal(report.checkoutHealth.apiErrors, 1);
+    assert.equal(report.checkoutHealth.topErrors.some((row) => row.key === "checkout_submit"), false);
+    assert.equal(report.checkoutHealth.topErrors.find((row) => row.key === "address_unconfirmed")?.count, 1);
+    assert.equal(report.checkoutHealth.topErrors.find((row) => row.key === "expired")?.count, 1);
+    assert.equal(report.checkoutHealth.browsers.reduce((sum, row) => sum + row.errors, 0), 2);
   });
 });
