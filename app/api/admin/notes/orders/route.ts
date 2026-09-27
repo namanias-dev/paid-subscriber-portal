@@ -10,6 +10,7 @@ import { BUSINESS_CHANNELS, orderMarketingSummary, type StoredNotesAttribution }
 import { paidRollup } from "@/lib/store/opsBoard";
 import { groupMatchesBucket, groupNotesCustomers, isCapturedNotesOrder } from "@/lib/store/customerGroups";
 import { gatewayChargesForStaff } from "@/lib/store/payments/eazypayAmounts";
+import { scheduleStoreInvoice } from "@/lib/store/invoice/issue";
 
 export const dynamic = "force-dynamic";
 
@@ -365,6 +366,10 @@ export async function GET(req: Request) {
     const ship = shipByOrder.get(o.id) || null;
     const issue = issueByOrder.get(o.id) || null;
     const { attribution_json, ...safe } = o;
+    const storedInvoice = invoiceByOrder.get(o.id) || null;
+    const paid = Boolean(o.paid_at) && !["PAYMENT_PENDING", "PAYMENT_FAILED", "PAYMENT_EXPIRED", "CANCELLED"].includes(o.status);
+    if (paid && !storedInvoice) scheduleStoreInvoice(o.id);
+    const invoiceStatus = storedInvoice || (paid ? "PENDING" : null);
     const reasons = actionRequiredReasons({
       status: o.status,
       awb: ship?.awb,
@@ -373,6 +378,7 @@ export async function GET(req: Request) {
       openIssue: Boolean(issue?.open),
       paymentPending: o.status === "PAYMENT_PENDING",
       cityConfirm: !ship && cityConfirmByOrder.has(o.id),
+      invoiceStatus,
     });
     return {
       ...safe,
@@ -395,7 +401,7 @@ export async function GET(req: Request) {
       action_reasons: reasons,
       payment_status: staffPaymentLabel(payByOrder.get(o.id)?.provider, payByOrder.get(o.id)?.status),
       gateway_charges: gatewayChargesForStaff(payByOrder.get(o.id)?.verify_payload, Number(o.total_paise) || 0),
-      invoice_status: invoiceByOrder.get(o.id) || null,
+      invoice_status: invoiceStatus,
       issue,
     };
   });

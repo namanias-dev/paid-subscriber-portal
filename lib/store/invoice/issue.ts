@@ -4,7 +4,7 @@ import { storeDb } from "../db";
 import { putObject, signGetUrl } from "@/lib/r2";
 import { financialYearLabel, formatInvoiceNumber, invoiceObjectKey } from "./number";
 import { PRINTED_NOTES_TAX_PROFILE } from "./profile";
-import { amountInWords, chooseDocumentType, computeTaxDocument, stateCodeFromName, taxClassificationConfirmed, type TaxDocument, type TaxLineInput } from "./tax";
+import { amountInWords, chooseDocumentType, classificationFromSnapshot, computeTaxDocument, stateCodeFromName, taxClassificationConfirmed, type TaxDocument, type TaxLineInput } from "./tax";
 import { renderInvoicePdf, type InvoicePdfModel } from "./pdf";
 import { formatRegisteredAddress } from "./address";
 import { loadInvoiceLogo } from "./logo";
@@ -61,6 +61,33 @@ export function scheduleStoreInvoice(orderId: string): void {
   } catch {
     void work;
   }
+}
+
+/**
+ * Paid orders whose capture never left an invoice row. Idempotent: an existing
+ * invoice is reused, and an unpaid order is refused inside ensureStoreInvoice.
+ */
+export async function repairMissingPaidInvoices(limit = 8): Promise<number> {
+  const db = storeDb();
+  if (!db) return 0;
+  const { data: orders } = await db
+    .from("store_orders")
+    .select("id,status")
+    .not("paid_at", "is", null)
+    .order("paid_at", { ascending: true })
+    .limit(40);
+  const candidates = (orders || []).filter((order) => !["PAYMENT_PENDING", "PAYMENT_FAILED", "PAYMENT_EXPIRED", "CANCELLED"].includes(order.status));
+  if (!candidates.length) return 0;
+  const ids = candidates.map((order) => order.id);
+  const { data: invoices } = await db.from("store_invoices").select("order_id").in("order_id", ids);
+  const present = new Set((invoices || []).map((row) => row.order_id));
+  let repaired = 0;
+  for (const order of candidates) {
+    if (present.has(order.id) || repaired >= limit) continue;
+    repaired += 1;
+    await ensureStoreInvoice(order.id).catch(() => {});
+  }
+  return repaired;
 }
 
 /** Finish invoices that already exist. Does not create a row for an older paid order. */
@@ -133,18 +160,24 @@ export async function ensureStoreInvoice(orderId: string, opts?: { namespace?: "
     ? await db.from("store_addresses").select("name,line1,line2,city,state,pincode,phone").eq("id", order.shipping_address_id).maybeSingle()
     : { data: null };
 
-  const lines: TaxLineInput[] = (items || []).map((item) => ({
+  const lines: TaxLineInput[] = (items || []).map((item) => {
+    const snapshotStatus = classificationFromSnapshot({
+      hsn: item.hsn_snapshot,
+      taxTreatment: item.tax_treatment_snapshot,
+    });
+    return {
     name: item.name_snapshot,
     sku: item.sku_snapshot,
     hsn: item.hsn_snapshot,
-    unit: null,
-    taxConfigurationStatus: null,
+    unit: snapshotStatus && item.hsn_snapshot === PRINTED_NOTES_TAX_PROFILE.hsn ? PRINTED_NOTES_TAX_PROFILE.unit : null,
+    taxConfigurationStatus: snapshotStatus,
     qty: item.qty,
     lineTotalPaise: item.line_total_paise,
     discountPaise: item.line_discount_paise || 0,
     taxTreatment: item.tax_treatment_snapshot || "exempt",
     taxRateBps: item.tax_rate_bps_snapshot || 0,
-  }));
+    };
+  });
   const skus = lines.map((line) => line.sku).filter((sku): sku is string => Boolean(sku));
   if (skus.length) {
     const { data: products } = await db.from("store_products").select("sku,hsn_code,tax_treatment,tax_rate_bps,tax_configuration_status").in("sku", skus);
@@ -163,6 +196,7 @@ export async function ensureStoreInvoice(orderId: string, opts?: { namespace?: "
   const namespace = opts?.namespace || "production";
   if (namespace !== "test" && !existing && !taxClassificationConfirmed(lines)) {
     console.info(`[store/invoice] classification_unconfirmed order=${order.order_no}`);
+    await noteInvoiceBlocked(db, orderId);
     return { ok: false, status: "UNCONFIRMED", invoiceNumber: null };
   }
   const inclusive = (settings?.price_tax_mode || "inclusive") !== "exclusive";
@@ -344,14 +378,28 @@ export async function ensureStoreInvoice(orderId: string, opts?: { namespace?: "
     console.info(`[store/invoice] ready order=${order.order_no} bytes=${pdf.length}`);
     return { ok: true, status: "READY", invoiceNumber };
   } catch (error) {
+    // Payment stays captured. A PDF or storage failure only marks this invoice retryable.
     await db.from("store_invoices").update({
       status: "FAILED",
       attention: error instanceof Error ? error.message.slice(0, 160) : "PDF was not stored.",
       updated_at: new Date().toISOString(),
     }).eq("order_id", orderId);
+    await noteInvoiceBlocked(db, orderId);
     console.info(`[store/invoice] failed order=${order.order_no}`);
     return { ok: false, status: "FAILED", invoiceNumber };
   }
+}
+
+/** One activity row per order. Payment, alerts, and analytics are not touched. */
+async function noteInvoiceBlocked(db: NonNullable<ReturnType<typeof storeDb>>, orderId: string): Promise<void> {
+  const { data } = await db.from("store_order_events").select("id").eq("order_id", orderId).eq("event", "invoice_generation_failed").limit(1);
+  if (data?.length) return;
+  await db.from("store_order_events").insert({
+    order_id: orderId,
+    event: "invoice_generation_failed",
+    actor_type: "system",
+    payload_json: { reason: "invoice_not_ready" },
+  });
 }
 
 /** One historical order. Refuses every other order number. Does not allocate when classification is unconfirmed. */

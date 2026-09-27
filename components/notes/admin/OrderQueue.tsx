@@ -8,6 +8,7 @@ import {
   fulfillmentTone,
   formatAdminWhen,
   invoiceStatusLabel,
+  showAdminViewInvoice,
   orderIndexLabel,
   pickupFailedActivity,
   type BadgeTone,
@@ -335,7 +336,7 @@ export default function NotesOrderQueue() {
                     </Link>
                     <span className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-[var(--ca-navy)]/45">
                       {(!order.group || order.group.paid_count === 1) && invoiceStatusLabel(order.invoice_status)}
-                      {(!order.group || order.group.paid_count === 1) && order.invoice_status === "READY" && <ViewInvoiceButton orderId={order.id} />}
+                      {(!order.group || order.group.paid_count === 1) && showAdminViewInvoice(order.invoice_status) && <ViewInvoiceButton orderId={order.id} />}
                     </span>
                   </div>
                   <div>
@@ -386,7 +387,7 @@ export default function NotesOrderQueue() {
                     {order.group && <span className="mt-2 block text-xs text-[var(--ca-navy)]/55">{order.group.attempts} attempts · {order.group.paid_count} paid</span>}
                   </Link>
                   <div className="mt-3 flex flex-wrap items-center gap-2">
-                    {order.invoice_status === "READY" && <ViewInvoiceButton orderId={order.id} />}
+                    {showAdminViewInvoice(order.invoice_status) && <ViewInvoiceButton orderId={order.id} />}
                     <Link href={`/admin/notes/orders/${order.id}`} className="inline-flex min-h-11 items-center rounded-full bg-[var(--ca-navy)] px-4 text-sm font-semibold text-white">View details</Link>
                   </div>
                 </li>
