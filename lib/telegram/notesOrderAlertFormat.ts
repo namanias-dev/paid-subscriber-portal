@@ -1,6 +1,8 @@
 /**
  * Pure HTML for a real-time paid Notes Store order alert.
- * Parse mode is HTML. Dynamic text is escaped. No customer contact data.
+ * Parse mode is HTML. Dynamic text is escaped.
+ * Name, phone and city are included for the internal business channels.
+ * Street address is never accepted by this formatter.
  */
 import { istYMD } from "../dates";
 import { isNotesTestOrder, isQualifyingNotesOrder, notesSubjectLabel, paiseToRupees, type NotesOrderInput } from "../store/reporting";
@@ -12,6 +14,21 @@ const RULE = "━━━━━━━━━━━━━━━━━━";
 export const NOTES_ORDER_ALERT_GRACE_MS = 15 * 60 * 1000;
 
 export const NOTES_ORDER_ALERT_EVENT = "notes_order_paid";
+
+export const NOTES_ALERT_DESTINATIONS = ["executive", "sales_admissions"] as const;
+
+export type NotesAlertDestination = (typeof NOTES_ALERT_DESTINATIONS)[number];
+
+/** Existing Sales & Admissions chat title. Sends are refused when getChat does not match. */
+export const SALES_ADMISSIONS_TITLE = "Naman IAS — Sales & Admissions";
+
+export const NOTES_ORDER_REPLAY_ORDER_NO = "NIAS-N-2026-001002";
+
+export interface NotesAlertCustomer {
+  name: string;
+  phone: string;
+  city: string;
+}
 
 export interface NotesAlertItem {
   name: string;
@@ -35,8 +52,63 @@ export interface NotesPaidAlertCounts {
   today: number;
 }
 
-export function notesOrderPaidSlot(orderId: string): string {
+/** Legacy single-channel key. Left in place for orders already sent. */
+export function notesOrderPaidLegacySlot(orderId: string): string {
   return `notes_order_paid:${orderId}`;
+}
+
+export function notesOrderPaidSlot(orderId: string, destination: NotesAlertDestination): string {
+  return `notes_order_paid:${orderId}:${destination}`;
+}
+
+export function notesOrderReplaySlot(orderId: string, destination: NotesAlertDestination): string {
+  return `notes_order_manual_replay:${orderId}:customer_details_v2:${destination}`;
+}
+
+export function notesOrderReplayRequestSlot(orderNo: string): string {
+  return `notes_order_replay_request:customer_details_v2:${orderNo.trim().toUpperCase()}`;
+}
+
+export function salesAdmissionsTitleMatches(title: string | null | undefined): boolean {
+  const norm = (value: string) => value.replace(/[—–−-]/g, "-").replace(/\s+/g, " ").trim().toLowerCase();
+  return norm(title || "") === norm(SALES_ADMISSIONS_TITLE);
+}
+
+export function notesAlertText(value: string | null | undefined): string {
+  const cleaned = String(value || "").replace(/\s+/g, " ").trim();
+  return cleaned || "Not available";
+}
+
+/** Format a stored phone for Telegram. +91 is added only when the address country is India. */
+export function formatNotesAlertPhone(raw: string | null | undefined, country: string | null | undefined): string {
+  const trimmed = String(raw || "").trim();
+  if (!trimmed) return "Not available";
+  const digits = trimmed.replace(/\D/g, "");
+  const countryNorm = String(country || "").trim().toUpperCase();
+  const india = countryNorm === "IN" || countryNorm === "IND" || countryNorm === "INDIA";
+  const local = digits.length === 12 && digits.startsWith("91") ? digits.slice(2) : digits.length === 10 ? digits : "";
+  if (india && local.length === 10) return `+91 ${local.slice(0, 5)} ${local.slice(5)}`;
+  if (trimmed.startsWith("+91") && digits.length === 12) {
+    const ten = digits.slice(2);
+    return `+91 ${ten.slice(0, 5)} ${ten.slice(5)}`;
+  }
+  return trimmed;
+}
+
+export function resolveNotesAlertCustomer(input: {
+  shippingName?: string | null;
+  customerName?: string | null;
+  shippingPhone?: string | null;
+  orderPhone?: string | null;
+  country?: string | null;
+  city?: string | null;
+}): NotesAlertCustomer {
+  const phoneRaw = String(input.shippingPhone || "").trim() || String(input.orderPhone || "").trim();
+  return {
+    name: notesAlertText(input.shippingName || input.customerName),
+    phone: formatNotesAlertPhone(phoneRaw, input.country),
+    city: notesAlertText(input.city),
+  };
 }
 
 /** The verify path may alert only on the first committed paid transition. */
@@ -83,30 +155,38 @@ export function formatNotesOrderAlertHtml(input: {
   paidAt: string;
   todayCount: number;
   totalCount: number;
+  customer: NotesAlertCustomer;
+  variant?: "new" | "updated";
 }): string {
   const subject = formatNotesSubjectLine(input.items);
   const paid = inrExact(paiseToRupees(input.paidPaise));
-  const paidLine =
-    subject.units > 1
-      ? `${subject.units} units · Paid <b>${escapeHtml(paid)}</b>`
-      : `Paid <b>${escapeHtml(paid)}</b>`;
   const todayWord = input.todayCount === 1 ? "order" : "orders";
   const heading =
     input.sequence > 0
       ? `<b>#${input.sequence} · ${escapeHtml(input.orderNo || "Order")}</b>`
       : `<b>${escapeHtml(input.orderNo || "Order")}</b>`;
+  const title = input.variant === "updated" ? "📦 <b>NOTES ORDER — UPDATED ALERT</b>" : "📦 <b>NEW NOTES ORDER</b>";
+  const footer =
+    input.variant === "updated"
+      ? `<b>Total Notes Orders:</b> ${input.totalCount}`
+      : `<b>Today:</b> ${input.todayCount} ${todayWord} · <b>Total:</b> ${input.totalCount}`;
+  const customer = input.customer;
   return [
     RULE,
-    "📦 <b>NEW NOTES ORDER</b>",
+    title,
     "",
     heading,
     "",
-    `<b>${escapeHtml(subject.text)}</b>`,
-    paidLine,
+    `📚 <b>${escapeHtml(subject.text)}</b>`,
+    `💰 Paid <b>${escapeHtml(paid)}</b>`,
     "",
-    escapeHtml(formatNotesAlertStamp(input.paidAt)),
+    `👤 <b>Customer:</b> ${escapeHtml(customer.name)}`,
+    `📞 <b>Phone:</b> ${escapeHtml(customer.phone)}`,
+    `📍 <b>City:</b> ${escapeHtml(customer.city)}`,
     "",
-    `Today: <b>${input.todayCount} ${todayWord}</b> · Total: <b>${input.totalCount}</b>`,
+    `🕒 ${escapeHtml(formatNotesAlertStamp(input.paidAt))}`,
+    "",
+    footer,
     RULE,
   ].join("\n");
 }
