@@ -20,13 +20,13 @@ export default function StoreSubnav() {
             aria-current={onCatalogue ? "page" : undefined}
             className={`${pill} h-10 border ${
               onCatalogue
-                ? "border-[var(--ca-gold)]/80 bg-[#fbf8f2]"
-                : "border-[var(--ca-navy)]/12 bg-white hover:border-[var(--ca-gold)]/55 hover:bg-[#fbf8f2]"
+                ? "border-[#d4af37]/75 bg-[#fbf8f2]"
+                : "border-[#0a1a3f]/15 bg-white hover:border-[#d4af37]/65 hover:bg-[#fbf8f2]"
             }`}
           >
             All notes
           </Link>
-          <span className="inline-flex h-10 shrink-0 rounded-full bg-gradient-to-r from-[var(--ca-navy)]/40 to-[var(--ca-gold-dark)]/75 p-px">
+          <span className="inline-flex h-10 shrink-0 rounded-full bg-[linear-gradient(90deg,rgba(10,26,63,0.4),rgba(154,123,47,0.78))] p-px transition-[background-image] duration-150 hover:bg-[linear-gradient(90deg,rgba(10,26,63,0.58),rgba(154,123,47,0.92))]">
             <Link
               href="/notes/track"
               aria-current={path.startsWith("/notes/track") ? "page" : undefined}
