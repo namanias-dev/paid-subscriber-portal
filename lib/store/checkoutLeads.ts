@@ -329,6 +329,9 @@ export async function markLeadConverted(orderId: string, totalPaise: number): Pr
     });
     void emit("notes_checkout_lead_converted", data.id, props);
     if (data.was_abandoned) void emit("notes_checkout_recovered", data.id, props);
+    void import("@/lib/telegram/notesLeadAlert")
+      .then((alerts) => alerts.enqueueLeadConvertedAlert(data.id))
+      .catch(() => {});
   } catch { /* capture already committed */ }
 }
 

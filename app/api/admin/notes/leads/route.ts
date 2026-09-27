@@ -11,7 +11,14 @@ export async function GET(req: Request) {
   }
   const filter = new URL(req.url).searchParams.get("filter") || "open";
   const leads = await listCheckoutLeads(filter);
-  return NextResponse.json({ ok: true, leads }, { headers: { "Cache-Control": "no-store" } });
+  let activity: Record<string, { lines: string[] }> = {};
+  try {
+    const { loadLeadAlertActivity } = await import("@/lib/telegram/notesLeadAlert");
+    const ids = leads.map((lead) => String(lead.id || "")).filter(Boolean);
+    activity = await loadLeadAlertActivity(ids);
+  } catch { /* the lead list still renders */ }
+  const withAlert = leads.map((lead) => ({ ...lead, sales_alert: activity[String(lead.id)] || { lines: [] } }));
+  return NextResponse.json({ ok: true, leads: withAlert }, { headers: { "Cache-Control": "no-store" } });
 }
 
 export async function PATCH(req: Request) {

@@ -34,6 +34,15 @@ async function run(req: Request) {
       console.error(`[telegram-dispatch] notes_outbox ${(error as Error).message}`);
     }
 
+    // Notes checkout-lead alerts. Same 2-minute job. Does not change the schedule.
+    let leadAlerts = { due: 0, sent: 0, failed: 0, skipped: 0 };
+    try {
+      const { sweepNotesLeadAlerts } = await import("@/lib/telegram/notesLeadAlert");
+      leadAlerts = await sweepNotesLeadAlerts();
+    } catch (error) {
+      console.error(`[telegram-dispatch] notes_leads ${(error as Error).message}`);
+    }
+
     // Lead batch flush — only when SALES_LEAD_BATCHING=1 (shipped OFF).
     let leadBatch = { flushed: 0 };
     if (salesLeadBatchingEnabled()) {
@@ -57,6 +66,7 @@ async function run(req: Request) {
         idle: true,
         sales_outbox: salesOutbox,
         notes_outbox: notesOutbox,
+        lead_alerts: leadAlerts,
         lead_batch: leadBatch,
         ts: Date.now(),
       });
@@ -81,6 +91,7 @@ async function run(req: Request) {
       scheduled,
       sales_outbox: salesOutbox,
       notes_outbox: notesOutbox,
+      lead_alerts: leadAlerts,
       lead_batch: leadBatch,
       ts: Date.now(),
     });
