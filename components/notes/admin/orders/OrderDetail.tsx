@@ -20,6 +20,7 @@ import {
 import { DownloadInvoiceButton, ViewInvoiceButton } from "./InvoiceActions";
 import { FulfillmentTimeline } from "./FulfillmentTimeline";
 import { showsFulfillmentTimeline, TIMELINE, timelineIndex } from "@/lib/store/opsBoard";
+import { staffAdvanceLabel } from "@/lib/store/stages";
 import ChangeDeliveryAddress from "./ChangeDeliveryAddress";
 import { buildDeliveryGoogleMapsUrl, formatDeliveryAddress } from "@/lib/store/deliveryAddress";
 
@@ -139,6 +140,7 @@ export default function OrderDetail({
   onRefresh,
   onCompare,
   act,
+  presentation = "drawer",
 }: {
   order: AdminOrder;
   busy: boolean;
@@ -147,6 +149,7 @@ export default function OrderDetail({
   onRefresh: () => void;
   onCompare: () => void;
   act: (fn: () => Promise<Response>, ok: string) => void;
+  presentation?: "drawer" | "page";
 }) {
   const ship = order.shipment;
   const active = hasActiveShipment(ship?.status, ship?.awb);
@@ -264,10 +267,19 @@ export default function OrderDetail({
   const next = nextPreparationStatus(order.status);
   const reasons = order.action_reasons || [];
 
+  const advanceLabel = staffAdvanceLabel(order.status);
+  const packing = next === "PACKED";
+  const shell = presentation === "page"
+    ? "min-h-screen bg-[#f7f5ef]"
+    : "fixed inset-0 z-40 flex justify-end bg-[var(--ca-navy)]/30";
+  const panel = presentation === "page"
+    ? "mx-auto min-h-screen w-full max-w-3xl bg-[#f7f5ef] pb-16"
+    : "h-full w-full overflow-y-auto bg-[#f7f5ef] pb-28 sm:max-w-xl";
+
   return (
-    <div className="fixed inset-0 z-40 flex justify-end bg-[var(--ca-navy)]/30">
-      <button type="button" aria-label="Close order" className="hidden flex-1 sm:block" onClick={onClose} />
-      <article className="h-full w-full overflow-y-auto bg-[#f7f5ef] pb-28 sm:max-w-xl">
+    <div className={shell}>
+      {presentation === "drawer" && <button type="button" aria-label="Close order" className="hidden flex-1 sm:block" onClick={onClose} />}
+      <article className={panel}>
         <header className="sticky top-0 z-10 border-b border-[var(--ca-navy)]/10 bg-[#fbfaf6]/95 px-4 py-4 backdrop-blur">
           <div className="flex items-start justify-between gap-3">
             <div>
@@ -277,7 +289,7 @@ export default function OrderDetail({
             </div>
             <div className="text-right">
               <p className="font-heading text-lg font-bold tabular-nums text-[var(--ca-navy)]">{formatPaise(order.total_paise)}</p>
-              <button type="button" onClick={onClose} className="mt-1 min-h-11 text-sm text-[var(--ca-navy)]/60">Close</button>
+              <button type="button" onClick={onClose} className="mt-1 min-h-11 text-sm text-[var(--ca-navy)]/60">{presentation === "page" ? "Back to orders" : "Close"}</button>
             </div>
           </div>
           <div className="mt-3 flex flex-wrap gap-2">
@@ -299,15 +311,36 @@ export default function OrderDetail({
             <p className="mt-3 text-sm text-[var(--ca-navy)]">
               Current: <span className="font-semibold">{showsFulfillmentTimeline(order.status) ? TIMELINE[timelineIndex(order.status) || 0].label : fulfillmentLabel(order.status, failed)}</span>
             </p>
-            {next && (action === "prepare" || action === "pack") && (
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => act(() => fetch(`/api/admin/notes/orders/${order.id}/advance`, { method: "POST" }), `Moved to ${fulfillmentLabel(next, false)}`)}
-                className="mt-3 min-h-11 rounded-full bg-[var(--ca-navy)] px-4 text-sm font-semibold text-white disabled:opacity-50"
-              >
-                {busy ? "Saving…" : order.status === "ORDER_CONFIRMED" || order.status === "PAYMENT_CONFIRMED" ? "Start preparing" : `Mark ${fulfillmentLabel(next, false).toLowerCase()}`}
-              </button>
+            {advanceLabel && (
+              packing && !confirmAdvance ? (
+                <div className="mt-3 rounded-2xl bg-[#f7f5ef] p-3">
+                  <p className="text-sm text-[var(--ca-navy)]">Marking this order packed will start automatic courier selection and shipment booking.</p>
+                  <div className="mt-3 flex gap-2">
+                    <button type="button" onClick={() => setConfirmAdvance(true)} className="min-h-11 rounded-full bg-[var(--ca-navy)] px-4 text-sm font-semibold text-white">Mark packed</button>
+                  </div>
+                </div>
+              ) : packing ? (
+                <div className="mt-3 flex gap-2">
+                  <button type="button" onClick={() => setConfirmAdvance(false)} className="min-h-11 rounded-full border px-4 text-sm font-semibold">Cancel</button>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => act(() => fetch(`/api/admin/notes/orders/${order.id}/advance`, { method: "POST" }), "Marked packed")}
+                    className="min-h-11 rounded-full bg-[var(--ca-navy)] px-4 text-sm font-semibold text-white disabled:opacity-50"
+                  >
+                    {busy ? "Saving…" : "Mark packed"}
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => act(() => fetch(`/api/admin/notes/orders/${order.id}/advance`, { method: "POST" }), advanceLabel)}
+                  className="mt-3 min-h-11 rounded-full bg-[var(--ca-navy)] px-4 text-sm font-semibold text-white disabled:opacity-50"
+                >
+                  {busy ? "Saving…" : advanceLabel}
+                </button>
+              )
             )}
             {(order.status === "ORDER_CONFIRMED" || order.status === "PAYMENT_CONFIRMED") && order.paid_at && (
               <p className="mt-2 text-xs text-[var(--ca-navy)]/55">Auto-prepares after 5 min</p>
@@ -635,23 +668,7 @@ export default function OrderDetail({
                 >
                   Mark shipped
                 </button>
-                {next && (
-                  <div>
-                    <p>Next preparation step: {next.replaceAll("_", " ")}. This does not mark the order shipped.</p>
-                    {!confirmAdvance ? (
-                      <button type="button" onClick={() => setConfirmAdvance(true)} className="mt-2 min-h-11 rounded-full border px-4 text-sm">Override fulfillment status</button>
-                    ) : (
-                      <button
-                        type="button"
-                        disabled={busy}
-                        onClick={() => act(() => fetch(`/api/admin/notes/orders/${order.id}/advance`, { method: "POST" }), `Moved to ${next.replaceAll("_", " ")}`)}
-                        className="mt-2 min-h-11 rounded-full bg-[var(--ca-navy)] px-4 text-sm font-semibold text-white"
-                      >
-                        Confirm move to {next.replaceAll("_", " ")}
-                      </button>
-                    )}
-                  </div>
-                )}
+                <p>Courier stages after pickup come from tracking. Pre-shipment steps use the button at the top.</p>
                 <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2} placeholder="Internal note" className="w-full rounded-xl border px-3 py-2" />
                 <button
                   type="button"

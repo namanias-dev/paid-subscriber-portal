@@ -1,17 +1,15 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { formatPaise } from "@/lib/store/money";
 import {
   fulfillmentLabel,
   fulfillmentTone,
   formatAdminWhen,
   invoiceStatusLabel,
-  nextPreparationStatus,
   orderIndexLabel,
   pickupFailedActivity,
-  primaryAction,
-  PRIMARY_LABEL,
   type BadgeTone,
 } from "@/lib/store/adminConsole";
 import { BUSINESS_CHANNELS } from "@/lib/analytics/notesCommerce";
@@ -20,12 +18,14 @@ import CourierPicker from "./orders/CourierPicker";
 import { ViewInvoiceButton } from "./orders/InvoiceActions";
 import { FulfillmentTimeline } from "./orders/FulfillmentTimeline";
 import { showsFulfillmentTimeline } from "@/lib/store/opsBoard";
+import { productSummary } from "@/lib/store/stages";
 
 const FILTERS = [
   { key: "", label: "All orders", count: "total" },
   { key: "paid", label: "Paid", count: "paid" },
   { key: "new", label: "New", count: "new" },
   { key: "preparing", label: "Preparing", count: "preparing" },
+  { key: "printing", label: "Printing", count: "printing" },
   { key: "packed", label: "Packed", count: "packed" },
   { key: "pickup", label: "Pickup", count: "pickup" },
   { key: "shipped", label: "Shipped", count: "transit" },
@@ -72,6 +72,7 @@ export default function NotesOrderQueue() {
   const initial = typeof window === "undefined" ? { bucket: "", q: "", sort: "newest", action: false, acq: "", offset: 0 } : readParams();
   const [orders, setOrders] = useState<AdminOrder[]>([]);
   const [counts, setCounts] = useState<Record<string, number>>({});
+  const [products, setProducts] = useState<Array<{ name: string; orders: number; units: number }>>([]);
   const [total, setTotal] = useState(0);
   const [bucket, setBucket] = useState(initial.bucket === "issues" ? "" : initial.bucket);
   const [issueOnly, setIssueOnly] = useState(initial.bucket === "issues");
@@ -127,6 +128,7 @@ export default function NotesOrderQueue() {
     const rows = (json.orders || []) as AdminOrder[];
     setOrders(rows);
     setCounts(json.counts || {});
+    setProducts(json.counts?.products || []);
     setTotal(json.total || rows.length);
     setWrites(Boolean(json.writes_authorized));
     setLoading(false);
@@ -165,9 +167,15 @@ export default function NotesOrderQueue() {
 
   return (
     <div className="mx-auto max-w-6xl">
-      <header className="mb-4">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--ca-gold-dark)]">Notes Store</p>
-        <h1 className="font-heading text-3xl font-bold text-[var(--ca-navy)]">Orders</h1>
+      <header className="mb-4 flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--ca-gold-dark)]">Notes Store</p>
+          <h1 className="font-heading text-3xl font-bold text-[var(--ca-navy)]">Orders</h1>
+        </div>
+        <div className="flex gap-2">
+          <Link href="/admin/notes/analytics" className="inline-flex min-h-10 items-center rounded-full border border-[var(--ca-navy)]/15 bg-white px-4 text-sm font-semibold text-[var(--ca-navy)]">Analytics</Link>
+          <Link href="/admin/notes/leads" className="inline-flex min-h-10 items-center rounded-full px-3 text-sm font-semibold text-[var(--ca-navy)]/70">Checkout leads</Link>
+        </div>
       </header>
 
       <div className="-mx-1 mb-4 flex gap-2 overflow-x-auto pb-1">
@@ -176,6 +184,7 @@ export default function NotesOrderQueue() {
           ["sales", "Paid sales", "paid", counts.paid_sales_paise != null ? formatPaise(Number(counts.paid_sales_paise)) : "–"],
           ["new", "New", "new", counts.new],
           ["preparing", "Preparing", "preparing", counts.preparing],
+          ["printing", "Printing", "printing", counts.printing],
           ["packed", "Packed", "packed", counts.packed],
           ["pickup", "Pickup", "pickup", counts.pickup],
           ["transit", "In transit", "shipped", counts.transit],
@@ -197,6 +206,18 @@ export default function NotesOrderQueue() {
           );
         })}
       </div>
+
+      {products.length > 0 && (
+        <div className="-mx-1 mb-4 flex gap-2 overflow-x-auto pb-1">
+          <p className="sr-only">Paid by product</p>
+          {products.map((product) => (
+            <div key={product.name} className="min-w-[9rem] shrink-0 rounded-2xl border border-[var(--ca-navy)]/10 bg-white px-3 py-2">
+              <span className="block truncate text-sm font-semibold text-[var(--ca-navy)]">{product.name.replace(/ notes$/i, "")}</span>
+              <span className="mt-0.5 block text-xs text-[var(--ca-navy)]/55">{product.orders} orders · {product.units} units</span>
+            </div>
+          ))}
+        </div>
+      )}
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <form
@@ -297,9 +318,7 @@ export default function NotesOrderQueue() {
           <ul className="hidden overflow-hidden rounded-2xl bg-white md:block">
             {orders.map((order) => {
               const failed = pickupFailedActivity(order.shipment?.tracking_activity);
-              const action = primaryAction({ status: order.status, awb: order.shipment?.awb, pickupFailed: failed, openIssue: order.issue?.open, paymentPending: order.status === "PAYMENT_PENDING" });
-              const next = nextPreparationStatus(order.status);
-              const product = order.items[0] ? `${order.items[0].name} × ${order.items[0].qty}` : "—";
+              const product = productSummary(order.items);
               return (
                 <li key={order.id} className={`grid grid-cols-[1.2fr_0.9fr_0.7fr_1.3fr_auto] items-center gap-3 border-b border-l-2 border-[var(--ca-navy)]/5 px-4 py-3 ${rowAccent(order.status, Boolean(order.action_required))}`}>
                   <div>
@@ -313,7 +332,7 @@ export default function NotesOrderQueue() {
                     </span>
                   </div>
                   <div>
-                    <span className="block text-sm text-[var(--ca-navy)]/80">{product}{order.items.length > 1 ? ` +${order.items.length - 1}` : ""}</span>
+                    <span className="block text-sm text-[var(--ca-navy)]/80">{product}</span>
                     <span className="mt-1 block text-sm font-semibold tabular-nums text-[var(--ca-navy)]">{formatPaise(order.total_paise)}</span>
                     {order.promo_code && <span className="block text-[11px] text-[var(--ca-navy)]/45">{order.promo_code}</span>}
                   </div>
@@ -322,18 +341,7 @@ export default function NotesOrderQueue() {
                     {showsFulfillmentTimeline(order.status) ? <FulfillmentTimeline status={order.status} compact /> : <span className="text-xs font-semibold text-amber-900">{order.action_required ? "Action required" : fulfillmentLabel(order.status, failed)}</span>}
                     <span className="mt-1 block text-[11px] text-[var(--ca-navy)]/50">{fulfillmentLabel(order.status, failed)} · {formatAdminWhen(order.placed_at)}</span>
                   </div>
-                  <button
-                    type="button"
-                    disabled={busyId === order.id}
-                    onClick={() => {
-                      if (writes && next && (action === "prepare" || action === "pack")) {
-                        act(order.id, () => fetch(`/api/admin/notes/orders/${order.id}/advance`, { method: "POST" }), `Moved to ${fulfillmentLabel(next, false)}`);
-                      } else openOrder(order.id);
-                    }}
-                    className="min-h-11 rounded-full bg-[var(--ca-navy)] px-3 text-sm font-semibold text-white disabled:opacity-50"
-                  >
-                    {busyId === order.id ? "Saving…" : next && (action === "prepare" || action === "pack") ? (order.status === "ORDER_CONFIRMED" || order.status === "PAYMENT_CONFIRMED" ? "Start preparing" : PRIMARY_LABEL[action]) : PRIMARY_LABEL[action]}
-                  </button>
+                  <Link href={`/admin/notes/orders/${order.id}`} className="inline-flex min-h-11 items-center rounded-full bg-[var(--ca-navy)] px-3 text-sm font-semibold text-white">View details</Link>
                 </li>
               );
             })}
@@ -348,7 +356,7 @@ export default function NotesOrderQueue() {
                       <span>
                         <span className="block font-heading text-lg font-bold">{orderIndexLabel(order.order_no) || order.order_no}</span>
                         <span className="mt-1 block text-sm">{order.customer_name}</span>
-                        <span className="mt-1 block text-sm text-[var(--ca-navy)]/70">{order.items[0] ? `${order.items[0].name} × ${order.items[0].qty}` : "—"}</span>
+                        <span className="mt-1 block text-sm text-[var(--ca-navy)]/70">{productSummary(order.items)}</span>
                       </span>
                       <span className="text-sm font-semibold tabular-nums">{formatPaise(order.total_paise)}</span>
                     </span>
@@ -358,11 +366,10 @@ export default function NotesOrderQueue() {
                       <span className="text-xs text-[var(--ca-navy)]/55">{order.payment_status === "CAPTURED" ? "Paid" : order.payment_status || "Payment pending"}</span>
                     </span>
                   </button>
-                  {order.invoice_status === "READY" && (
-                    <div className="mt-3">
-                      <ViewInvoiceButton orderId={order.id} />
-                    </div>
-                  )}
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    {order.invoice_status === "READY" && <ViewInvoiceButton orderId={order.id} />}
+                    <Link href={`/admin/notes/orders/${order.id}`} className="inline-flex min-h-11 items-center rounded-full bg-[var(--ca-navy)] px-4 text-sm font-semibold text-white">View details</Link>
+                  </div>
                 </li>
               );
             })}

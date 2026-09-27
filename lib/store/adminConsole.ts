@@ -1,5 +1,7 @@
 /** Notes admin operations view. Pure helpers: no courier calls, no status writes. */
 
+import { staffNextStatus } from "@/lib/store/stages";
+
 export type AdminSort = "newest" | "oldest" | "value_desc" | "value_asc" | "updated" | "action";
 
 export interface AdminQuote {
@@ -61,10 +63,11 @@ export function fulfillmentLabel(status: string, pickupFailed: boolean): string 
     case "ORDER_CONFIRMED":
       return "New";
     case "PROCESSING":
+      return "Preparing";
     case "PRINTING":
     case "QUALITY_CHECK":
     case "READY_TO_PACK":
-      return "Preparing";
+      return "Printing";
     case "PACKED":
     case "READY_FOR_PICKUP":
       return "Packed";
@@ -100,6 +103,7 @@ export function fulfillmentTone(status: string, pickupFailed: boolean): BadgeTon
   if (pickupFailed || status === "DELIVERY_FAILED" || status === "REFUND_PENDING" || status === "PAYMENT_PENDING") return "amber";
   if (status === "CANCELLED" || status === "PAYMENT_FAILED" || status.startsWith("RTO_")) return "red";
   if (status === "DELIVERED") return "green";
+  if (status === "PRINTING" || status === "QUALITY_CHECK" || status === "READY_TO_PACK") return "gold";
   if (status === "PICKUP_SCHEDULED" || status === "PACKED" || status === "READY_FOR_PICKUP") return "gold";
   if (PREP.has(status) || status === "IN_TRANSIT" || status === "PICKED_UP" || status === "OUT_FOR_DELIVERY") return "navy";
   return "neutral";
@@ -169,17 +173,8 @@ export const PRIMARY_LABEL: Record<PrimaryAction, string> = {
   none: "View order",
 };
 
-const NEXT_PREP: Record<string, string> = {
-  ORDER_CONFIRMED: "PROCESSING",
-  PAYMENT_CONFIRMED: "PROCESSING",
-  PROCESSING: "PRINTING",
-  PRINTING: "QUALITY_CHECK",
-  QUALITY_CHECK: "READY_TO_PACK",
-  READY_TO_PACK: "PACKED",
-};
-
 export function nextPreparationStatus(status: string): string | null {
-  return NEXT_PREP[status] || null;
+  return staffNextStatus(status);
 }
 
 export function hasActiveShipment(status: string | null | undefined, awb: string | null | undefined): boolean {

@@ -4,6 +4,7 @@ export type CustomerStage =
   | "pending"
   | "confirmed"
   | "preparing"
+  | "printing"
   | "packed"
   | "shipped"
   | "in_transit"
@@ -20,6 +21,7 @@ const STAGE_LABEL: Record<CustomerStage, string> = {
   pending: "Payment received — confirming your order",
   confirmed: "Order Confirmed",
   preparing: "Preparing Your Notes",
+  printing: "Printing your notes",
   packed: "Packed",
   shipped: "Shipped",
   in_transit: "In Transit",
@@ -33,7 +35,7 @@ const STAGE_LABEL: Record<CustomerStage, string> = {
   refunded: "Refund recorded",
 };
 
-const TRACK_STEPS: CustomerStage[] = ["confirmed", "preparing", "packed", "shipped", "in_transit", "out_for_delivery", "delivered"];
+const TRACK_STEPS: CustomerStage[] = ["confirmed", "preparing", "printing", "packed", "shipped", "in_transit", "out_for_delivery", "delivered"];
 
 export function projectCustomerStage(internal: string, _hasAwb: boolean): CustomerStage {
   switch (internal) {
@@ -48,10 +50,11 @@ export function projectCustomerStage(internal: string, _hasAwb: boolean): Custom
     case "ORDER_CONFIRMED":
       return "confirmed";
     case "PROCESSING":
+      return "preparing";
     case "PRINTING":
     case "QUALITY_CHECK":
     case "READY_TO_PACK":
-      return "preparing";
+      return "printing";
     case "PACKED":
     case "READY_FOR_PICKUP":
     case "PICKUP_SCHEDULED":

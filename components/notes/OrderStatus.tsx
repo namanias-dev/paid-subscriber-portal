@@ -8,6 +8,7 @@ import { categoriesForStage, issueCategoryLabel } from "@/lib/store/issues";
 import type { PublicOrder } from "@/lib/store/orders";
 import { buildTrackingTimeline, formatPromise, trackingNarrative } from "@/lib/store/trackingView";
 import IssueSheet from "./track/IssueSheet";
+import { StageArt } from "./track/StageArt";
 
 const MAX_MS = 90_000;
 const GAPS_MS = [2000, 2500, 3000, 4000, 5000, 6000, 8000];
@@ -237,9 +238,12 @@ export default function OrderStatus({ order }: { order: PublicOrder }) {
               {copied === "Order number" ? "Copied" : "Copy"}
             </button>
           </div>
-          <h1 className="mt-2 font-heading text-[1.85rem] font-bold leading-tight text-[var(--ca-navy)] sm:text-4xl">
-            {narrative.headline}
-          </h1>
+          <div className="mt-3 flex items-start justify-between gap-3">
+            <h1 className="font-heading text-[1.85rem] font-bold leading-tight text-[var(--ca-navy)] sm:text-4xl">
+              {narrative.headline}
+            </h1>
+            <StageArt step={(timeline.find((step) => step.state === "current")?.id || "confirmed")} active />
+          </div>
           <p className="mt-3 text-[15px] leading-relaxed text-[var(--ca-navy)]/75">{narrative.explanation}</p>
           {promise && <p className="mt-4 text-sm font-semibold text-[var(--ca-navy)]">{promise}</p>}
           {productLine && <p className="mt-2 text-sm text-[var(--ca-navy)]/70">{productLine}</p>}

@@ -87,7 +87,7 @@ export function issueNextStep(status: string): string {
 /** Categories that make sense for the stage the student is looking at. */
 export function categoriesForStage(stage: CustomerStage): IssueCategory[] {
   const base: IssueCategory[] = ["ADDRESS_ISSUE", "UPDATE_REQUEST", "STATUS_MISMATCH", "TRACKING_ISSUE", "OTHER"];
-  if (stage === "packed" || stage === "confirmed" || stage === "preparing" || stage === "pending") {
+  if (stage === "packed" || stage === "confirmed" || stage === "preparing" || stage === "printing" || stage === "pending") {
     return ["PICKUP_ISSUE", "ADDRESS_ISSUE", "UPDATE_REQUEST", "STATUS_MISMATCH", "TRACKING_ISSUE", "OTHER"];
   }
   if (stage === "shipped" || stage === "in_transit" || stage === "out_for_delivery" || stage === "delivery_issue") {

@@ -1,5 +1,7 @@
 /** Admin operations classification. Payment capture and fulfilment stage stay separate. */
 
+import { PROGRESS, progressIndex } from "@/lib/store/stages";
+
 const NOT_COLLECTED = new Set(["PAYMENT_PENDING", "PAYMENT_FAILED", "PAYMENT_EXPIRED", "CANCELLED", "REFUNDED", "PARTIALLY_REFUNDED"]);
 
 export const AUTO_PREPARE_AFTER_MS = 5 * 60 * 1000;
@@ -7,34 +9,10 @@ export const AUTO_PREPARE_AFTER_MS = 5 * 60 * 1000;
 /** Statuses the queue already labels "New". Only these can auto-advance. */
 export const NEW_FULFILLMENT_STATUSES = ["PAYMENT_CONFIRMED", "ORDER_CONFIRMED"] as const;
 
-export const TIMELINE = [
-  { key: "new", label: "New" },
-  { key: "preparing", label: "Preparing" },
-  { key: "printing", label: "Printing" },
-  { key: "packed", label: "Packed" },
-  { key: "pickup", label: "Pickup" },
-  { key: "transit", label: "In transit" },
-  { key: "delivered", label: "Delivered" },
-] as const;
-
-const STAGE: Record<string, number> = {
-  PAYMENT_CONFIRMED: 0,
-  ORDER_CONFIRMED: 0,
-  PROCESSING: 1,
-  PRINTING: 2,
-  QUALITY_CHECK: 2,
-  READY_TO_PACK: 2,
-  PACKED: 3,
-  READY_FOR_PICKUP: 3,
-  PICKUP_SCHEDULED: 4,
-  PICKED_UP: 5,
-  IN_TRANSIT: 5,
-  OUT_FOR_DELIVERY: 5,
-  DELIVERED: 6,
-};
+export const TIMELINE = PROGRESS.map((step) => ({ key: step.key, label: step.admin }));
 
 export function timelineIndex(status: string): number | null {
-  return Object.prototype.hasOwnProperty.call(STAGE, status) ? STAGE[status] : null;
+  return progressIndex(status);
 }
 
 export function showsFulfillmentTimeline(status: string): boolean {

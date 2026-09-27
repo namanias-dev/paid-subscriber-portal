@@ -15,7 +15,8 @@ export const dynamic = "force-dynamic";
 const BUCKETS: Record<string, string[]> = {
   confirming: ["PAYMENT_PENDING"],
   new: ["PAYMENT_CONFIRMED", "ORDER_CONFIRMED"],
-  preparing: ["PROCESSING", "PRINTING", "QUALITY_CHECK", "READY_TO_PACK"],
+  preparing: ["PROCESSING"],
+  printing: ["PRINTING", "QUALITY_CHECK", "READY_TO_PACK"],
   packed: ["PACKED", "READY_FOR_PICKUP"],
   pickup: ["PICKUP_SCHEDULED"],
   shipped: ["PICKED_UP", "IN_TRANSIT", "OUT_FOR_DELIVERY"],
@@ -43,6 +44,7 @@ const ALL_STATUSES = [
   ...BUCKETS.confirming,
   ...BUCKETS.new,
   ...BUCKETS.preparing,
+  ...BUCKETS.printing,
   ...BUCKETS.packed,
   ...BUCKETS.pickup,
   ...BUCKETS.shipped,
@@ -60,6 +62,7 @@ export async function GET(req: Request) {
 
   const url = new URL(req.url);
   const bucket = url.searchParams.get("bucket") || "";
+  const id = url.searchParams.get("id") || "";
   const q = (url.searchParams.get("q") || "").trim();
   const limit = Math.min(50, Math.max(1, Number(url.searchParams.get("limit") || 25)));
   const offset = Math.max(0, Number(url.searchParams.get("offset") || 0));
@@ -104,6 +107,7 @@ export async function GET(req: Request) {
       { count: "exact" },
     )
     .in("status", paidOnly ? ALL_STATUSES.filter((status) => !["PAYMENT_PENDING", "PAYMENT_FAILED", "PAYMENT_EXPIRED", "CANCELLED", "REFUNDED", "PARTIALLY_REFUNDED"].includes(status)) : statuses);
+  if (id) query = query.eq("id", id);
   if (paidOnly) query = query.not("paid_at", "is", null);
   if ((BUSINESS_CHANNELS as readonly string[]).includes(acq)) query = query.eq("attribution_platform", acq);
   if (openIssueOrderIds) query = query.in("id", openIssueOrderIds);
@@ -360,10 +364,11 @@ async function adminCounts(db: NonNullable<ReturnType<typeof storeDb>>) {
     const { count: n } = await db.from("store_orders").select("id", { count: "exact", head: true }).in("status", statuses);
     return n || 0;
   }
-  const [total, fresh, preparing, packed, pickup, transit, delivered] = await Promise.all([
+  const [total, fresh, preparing, printing, packed, pickup, transit, delivered] = await Promise.all([
     count(ALL_STATUSES),
     count(BUCKETS.new),
     count(BUCKETS.preparing),
+    count(BUCKETS.printing),
     count(["PACKED", "READY_FOR_PICKUP"]),
     count(["PICKUP_SCHEDULED"]),
     count(BUCKETS.shipped),
@@ -375,20 +380,40 @@ async function adminCounts(db: NonNullable<ReturnType<typeof storeDb>>) {
     .in("status", [...OPEN_ISSUE_STATUSES]);
   const { data: paidRows } = await db
     .from("store_orders")
-    .select("status,paid_at,total_paise")
+    .select("id,status,paid_at,total_paise")
     .not("paid_at", "is", null)
     .limit(5000);
-  const paid = paidRollup(paidRows || []);
+  const captured = (paidRows || []).filter((row) => row.paid_at && !["PAYMENT_PENDING", "PAYMENT_FAILED", "PAYMENT_EXPIRED", "CANCELLED", "REFUNDED", "PARTIALLY_REFUNDED"].includes(row.status));
+  const paid = paidRollup(captured);
+  const products = await paidProductSplit(db, captured.map((row) => row.id));
   return {
     total,
     paid: paid.orders,
     paid_sales_paise: paid.salesPaise,
+    products,
     new: fresh,
     preparing,
+    printing,
     packed,
     pickup,
     transit,
     delivered,
     issues: issues || 0,
   };
+}
+
+async function paidProductSplit(db: NonNullable<ReturnType<typeof storeDb>>, ids: string[]) {
+  if (!ids.length) return [];
+  const { data } = await db.from("store_order_items").select("order_id,name_snapshot,qty").in("order_id", ids);
+  const byName = new Map<string, { orders: Set<string>; units: number }>();
+  for (const row of data || []) {
+    const name = String(row.name_snapshot || "Notes");
+    const slot = byName.get(name) || { orders: new Set<string>(), units: 0 };
+    slot.orders.add(String(row.order_id));
+    slot.units += Number(row.qty) || 0;
+    byName.set(name, slot);
+  }
+  return [...byName.entries()]
+    .map(([name, slot]) => ({ name, orders: slot.orders.size, units: slot.units }))
+    .sort((a, b) => b.units - a.units || b.orders - a.orders);
 }

@@ -3,6 +3,7 @@ import type { CustomerStage } from "./projection";
 export type TrackStepId =
   | "confirmed"
   | "preparing"
+  | "printing"
   | "packed"
   | "pickup"
   | "shipped"
@@ -29,6 +30,7 @@ export interface TrackingNarrative {
 const STEP_LABEL: Record<TrackStepId, string> = {
   confirmed: "Order confirmed",
   preparing: "Preparing your notes",
+  printing: "Printing your notes",
   packed: "Packed",
   pickup: "Pickup scheduled",
   shipped: "Shipped",
@@ -40,6 +42,7 @@ const STEP_LABEL: Record<TrackStepId, string> = {
 const ORDER: TrackStepId[] = [
   "confirmed",
   "preparing",
+  "printing",
   "packed",
   "pickup",
   "shipped",
@@ -84,22 +87,24 @@ function currentIndex(input: TrackingViewInput): number {
       return 0;
     case "preparing":
       return 1;
-    case "packed":
+    case "printing":
       return 2;
+    case "packed":
+      return 3;
     case "shipped":
-      return 4;
-    case "in_transit":
       return 5;
+    case "in_transit":
+      return 6;
     case "out_for_delivery":
     case "delivery_issue":
-      return 6;
+      return 7;
     case "delivered":
     case "return_open":
     case "refund":
     case "refunded":
-      return 7;
+      return 8;
     case "returning":
-      return 6;
+      return 7;
     default:
       return 1;
   }
@@ -191,8 +196,15 @@ export function trackingNarrative(input: TrackingViewInput): TrackingNarrative {
     case "preparing":
       return {
         headline: "Preparing your notes",
-        explanation: "Your notes are being prepared for dispatch.",
-        next: "Next they are packed, then handed to the courier.",
+        explanation: "Your notes are being prepared for printing.",
+        next: "Printing is the next step. Nothing has been handed to a courier yet.",
+        exception: null,
+      };
+    case "printing":
+      return {
+        headline: "Printing your notes",
+        explanation: "Your notes are being printed.",
+        next: "They will be packed next, before any courier is booked.",
         exception: null,
       };
     case "packed":
