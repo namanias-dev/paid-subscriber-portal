@@ -2,8 +2,12 @@ import Reveal, { Stagger, StaggerItem } from "@/components/ui/Reveal";
 import Link from "next/link";
 import { getSiteSettings } from "@/lib/dataProvider";
 import TopperCard from "@/components/public/TopperCard";
+import { seoUrl } from "@/lib/seoOrigin";
 
-export const metadata = { title: "Results — Naman Sharma IAS Academy" };
+export const metadata = {
+  title: "Results — Naman Sharma IAS Academy",
+  alternates: { canonical: seoUrl("/results") },
+};
 export const revalidate = 600;
 
 const STORIES = [

@@ -1,5 +1,5 @@
 import type { MetadataRoute } from "next";
-import { SITE_URL } from "@/lib/config";
+import { SEO_ORIGIN, seoUrl } from "@/lib/seoOrigin";
 
 /**
  * Keep scrapers off unauthenticated force-dynamic surfaces (enroll/purchase,
@@ -29,7 +29,7 @@ export default function robots(): MetadataRoute.Robots {
         ],
       },
     ],
-    sitemap: `${SITE_URL}/sitemap.xml`,
-    host: SITE_URL,
+    sitemap: seoUrl("/sitemap.xml"),
+    host: SEO_ORIGIN,
   };
 }

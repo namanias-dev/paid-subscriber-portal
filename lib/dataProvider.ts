@@ -2,6 +2,7 @@ import { cache } from "react";
 import { unstable_cache } from "next/cache";
 import { getSupabaseAdmin, getSupabasePublic, getSupabaseDataCache } from "./supabase";
 import { archivedPhoneSet, excludeArchivedRows, isArchivedStudent } from "./archivedStudents";
+import { isPublicCourseAvailable } from "./publicCourse";
 import {
   PUBLIC_CACHE_TAGS,
   revalidatePublicCa,
@@ -1542,12 +1543,12 @@ export async function getAllCourses(): Promise<Course[]> {
 // unchanged; outside a request scope it is a transparent passthrough.
 const loadPublishedCourses = unstable_cache(
   async (): Promise<Course[]> => {
-    if (demoMode()) return sortCoursesByOrder(mock.courses).filter((c) => c.status === "published" && c.active !== false);
+    if (demoMode()) return sortCoursesByOrder(mock.courses).filter((c) => isPublicCourseAvailable(c));
     const db = getSupabaseDataCache();
-    if (!db) return sortCoursesByOrder(mock.courses).filter((c) => c.status === "published" && c.active !== false);
+    if (!db) return sortCoursesByOrder(mock.courses).filter((c) => isPublicCourseAvailable(c));
     const { data } = await db.from("courses").select("*").order("created_at", { ascending: false });
     const rows = (data as Course[]) ?? [];
-    return sortCoursesByOrder(rows.length ? rows : [...mock.courses]).filter((c) => c.status === "published" && c.active !== false);
+    return sortCoursesByOrder(rows.length ? rows : [...mock.courses]).filter((c) => isPublicCourseAvailable(c));
   },
   ["public-published-courses"],
   { revalidate: 600, tags: [PUBLIC_CACHE_TAGS.courses] },

@@ -1,7 +1,8 @@
 import Image from "next/image";
 import { Check } from "lucide-react";
 import ExpiredWebinarHandoff from "@/components/public/ExpiredWebinarHandoff";
-import { ACADEMY, SITE_URL } from "@/lib/config";
+import { ACADEMY } from "@/lib/config";
+import { SEO_ORIGIN } from "@/lib/seoOrigin";
 import { formatNextSession, recoveryHostName } from "@/lib/webinarRecovery";
 import { whatsappLink } from "@/lib/phone";
 import { toPublicImageSrc } from "@/lib/publicMediaUrl";
@@ -35,13 +36,13 @@ export default function ExpiredWebinarRecovery({
     eventAttendanceMode: "https://schema.org/OnlineEventAttendanceMode",
     eventStatus: "https://schema.org/EventScheduled",
     image: expired.cover_image_url ? [expired.cover_image_url] : undefined,
-    organizer: { "@type": "Organization", name: ACADEMY.name, url: SITE_URL },
+    organizer: { "@type": "Organization", name: ACADEMY.name, url: SEO_ORIGIN },
     offers: {
       "@type": "Offer",
       price: expired.price,
       priceCurrency: "INR",
       availability: "https://schema.org/SoldOut",
-      url: `${SITE_URL}/webinars/${expired.slug}`,
+      url: `${SEO_ORIGIN}/webinars/${expired.slug}`,
     },
   };
 

@@ -3,7 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Lock, CheckCircle2 } from "lucide-react";
 import { getQuizBySlug, getQuizQuestions, getAllCourses } from "@/lib/dataProvider";
-import { SITE_URL } from "@/lib/config";
+import { indexableUrl, SEO_ORIGIN } from "@/lib/seoOrigin";
 import { quizIsLive } from "@/lib/quizAccess";
 import { resolveLearner, gateQuiz } from "@/lib/entitlements";
 import { getAttemptStatusForLearner } from "@/lib/quizAttemptStatus";
@@ -23,12 +23,12 @@ export async function generateMetadata({ params }: { params: { slug: string } })
     title,
     description,
     keywords: seo.seo_keywords,
-    alternates: { canonical: seo.canonical_url || `${SITE_URL}/quizzes/${quiz.slug}` },
+    alternates: { canonical: indexableUrl(seo.canonical_url, `/quizzes/${quiz.slug}`) },
     robots: indexable ? undefined : { index: false, follow: false },
     openGraph: {
       title: seo.og_title || title,
       description: seo.og_description || description,
-      url: `${SITE_URL}/quizzes/${quiz.slug}`,
+      url: `${SEO_ORIGIN}/quizzes/${quiz.slug}`,
       images: seo.og_image || quiz.thumbnail ? [{ url: (seo.og_image || quiz.thumbnail)! }] : undefined,
       type: "website",
     },
@@ -68,15 +68,15 @@ export default async function QuizIntroPage({ params }: { params: { slug: string
     name: quiz.title,
     educationalLevel: "UPSC Civil Services Prelims",
     about: quiz.subject || "UPSC Prelims",
-    url: `${SITE_URL}/quizzes/${quiz.slug}`,
+    url: `${SEO_ORIGIN}/quizzes/${quiz.slug}`,
     numberOfQuestions: quizQuestions.length,
   };
   const breadcrumb = {
     "@context": "https://schema.org",
     "@type": "BreadcrumbList",
     itemListElement: [
-      { "@type": "ListItem", position: 1, name: "Quizzes", item: `${SITE_URL}/quizzes` },
-      { "@type": "ListItem", position: 2, name: quiz.title, item: `${SITE_URL}/quizzes/${quiz.slug}` },
+      { "@type": "ListItem", position: 1, name: "Quizzes", item: `${SEO_ORIGIN}/quizzes` },
+      { "@type": "ListItem", position: 2, name: quiz.title, item: `${SEO_ORIGIN}/quizzes/${quiz.slug}` },
     ],
   };
   const faqLd = seo.faq && seo.faq.length ? {

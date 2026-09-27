@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
-import { SITE_URL, ACADEMY } from "@/lib/config";
+import { ACADEMY } from "@/lib/config";
+import { SEO_ORIGIN } from "@/lib/seoOrigin";
 import type { SiteSettings, Course } from "@/lib/types";
 import { FAQ_V2 } from "./content";
 
@@ -9,7 +10,7 @@ function abs(url: string | null | undefined): string | undefined {
   const u = url.trim();
   if (!u) return undefined;
   if (/^https?:\/\//i.test(u)) return u;
-  return `${SITE_URL}${u.startsWith("/") ? "" : "/"}${u}`;
+  return `${SEO_ORIGIN}${u.startsWith("/") ? "" : "/"}${u}`;
 }
 
 const DEFAULT_TITLE = "Naman Sharma IAS Academy — Crack UPSC the Right Way";
@@ -29,13 +30,13 @@ export function buildHomeV2Metadata(settings: SiteSettings): Metadata {
   const images = ogImage ? [{ url: ogImage }] : undefined;
 
   return {
-    metadataBase: new URL(SITE_URL),
+    metadataBase: new URL(SEO_ORIGIN),
     title,
     description,
-    alternates: { canonical: "/" },
+    alternates: { canonical: SEO_ORIGIN },
     openGraph: {
       type: "website",
-      url: SITE_URL,
+      url: SEO_ORIGIN,
       siteName: ACADEMY.name,
       title,
       description,
@@ -67,9 +68,9 @@ export function buildHomeV2JsonLd(settings: SiteSettings, courses: Course[]): Js
 
   const organization: Json = {
     "@type": "EducationalOrganization",
-    "@id": `${SITE_URL}/#organization`,
+    "@id": `${SEO_ORIGIN}/#organization`,
     name: brand?.name || ACADEMY.name,
-    url: SITE_URL,
+    url: SEO_ORIGIN,
     ...(logo ? { logo } : {}),
     ...(brand?.address ? { address: { "@type": "PostalAddress", streetAddress: brand.address, addressCountry: "IN" } } : {}),
     ...(brand?.support_email ? { email: brand.support_email } : {}),
@@ -86,8 +87,8 @@ export function buildHomeV2JsonLd(settings: SiteSettings, courses: Course[]): Js
         "@type": "Course",
         name: c.title,
         ...(c.description ? { description: c.description.slice(0, 300) } : {}),
-        url: `${SITE_URL}/courses/${c.slug}`,
-        provider: { "@type": "EducationalOrganization", name: brand?.name || ACADEMY.name, sameAs: SITE_URL },
+        url: `${SEO_ORIGIN}/courses/${c.slug}`,
+        provider: { "@type": "EducationalOrganization", name: brand?.name || ACADEMY.name, sameAs: SEO_ORIGIN },
       },
     })),
   };

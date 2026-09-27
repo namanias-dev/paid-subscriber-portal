@@ -3,8 +3,12 @@ import LeadForm from "@/components/public/LeadForm";
 import { getSiteSettings } from "@/lib/dataProvider";
 import { whatsappLink } from "@/lib/phone";
 import { directionsUrl, mapEmbedUrl } from "@/lib/maps";
+import { seoUrl } from "@/lib/seoOrigin";
 
-export const metadata = { title: "Contact — Naman Sharma IAS Academy" };
+export const metadata = {
+  title: "Contact — Naman Sharma IAS Academy",
+  alternates: { canonical: seoUrl("/contact") },
+};
 export const revalidate = 3600;
 
 export default async function ContactPage() {

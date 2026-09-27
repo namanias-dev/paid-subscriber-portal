@@ -6,7 +6,7 @@ import { getCategoryBySlug, getProductBySlug, listActiveProducts } from "@/lib/s
 import { getActiveStoreOffer, getPublicActiveOffer, toPricingOffer } from "@/lib/store/offers";
 import { getNotesCurriculum } from "@/lib/store/notesCurriculum";
 import { isNotesReservedSlug, notesProductPath, resolveNotesProductSlug } from "@/lib/store/paths";
-import { SITE_URL } from "@/lib/config";
+import { seoUrl } from "@/lib/seoOrigin";
 import Link from "next/link";
 import { BookOpen } from "lucide-react";
 
@@ -21,7 +21,7 @@ export async function generateMetadata({ params }: { params: { subject: string }
     return {
       title: product.seo_title || story?.seoTitle || `${product.name} for UPSC | Naman Sir`,
       description: product.seo_description || story?.seoDescription || product.short_description || `Printed ${product.name}, delivered from Chandigarh.`,
-      alternates: { canonical: `${SITE_URL}${notesProductPath(product.slug)}` },
+      alternates: { canonical: seoUrl(notesProductPath(product.slug)) },
     };
   }
   const cat = await getCategoryBySlug(params.subject);

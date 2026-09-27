@@ -16,6 +16,7 @@ import { listStorefrontProducts } from "@/lib/store/catalogue";
 import { calculateStorePrice } from "@/lib/store/pricing";
 import { formatPaise } from "@/lib/store/money";
 import { notesProductPath } from "@/lib/store/paths";
+import { seoUrl } from "@/lib/seoOrigin";
 import { listPreferenceSubjects } from "@/lib/store/preferences";
 import { getPublicActiveOffer } from "@/lib/store/offers";
 
@@ -25,6 +26,7 @@ export const metadata = {
   title: "Naman Sir's Handwritten UPSC Notes — Delivered to Your Doorstep",
   description:
     "Premium printed hard copies of Naman Sir's handwritten UPSC notes. Exam-focused, revision-ready, delivered pan-India from Chandigarh.",
+  alternates: { canonical: seoUrl("/notes") },
 };
 
 const WHY = [

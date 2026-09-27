@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { seoUrl } from "@/lib/seoOrigin";
 
 /**
  * Public Terms of Service for Meta App Review / Live mode.
@@ -15,6 +16,7 @@ export const metadata: Metadata = {
   description:
     "Terms governing use of the Naman Sharma IAS Academy website, lead forms, and related services.",
   robots: { index: true, follow: true },
+  alternates: { canonical: seoUrl("/terms") },
 };
 
 export default function TermsOfServicePage() {

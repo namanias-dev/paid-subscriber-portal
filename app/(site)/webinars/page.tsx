@@ -7,8 +7,12 @@ import WebinarRegister from "@/components/public/WebinarRegister";
 import { getPublicWebinars, getWebinarRegisteredCounts } from "@/lib/dataProvider";
 import { getPurchaseSnapshot, webinarPurchased } from "@/lib/purchaseStatus";
 import { canRegisterForWebinar } from "@/lib/webinarLifecycle";
+import { seoUrl } from "@/lib/seoOrigin";
 
-export const metadata = { title: "Webinars — Naman Sharma IAS Academy" };
+export const metadata = {
+  title: "Webinars — Naman Sharma IAS Academy",
+  alternates: { canonical: seoUrl("/webinars") },
+};
 
 // ISR: ordinary visits served from cache → zero live Postgres on a warm path.
 export const revalidate = 300;

@@ -1,8 +1,9 @@
 import type { Metadata } from "next";
-import { SITE_URL, ACADEMY } from "./config";
+import { ACADEMY } from "./config";
+import { indexableUrl, SEO_ORIGIN } from "./seoOrigin";
 import type { CaArticle, CaSeo } from "./types";
 
-export const CA_BASE = `${SITE_URL}/current-affairs`;
+export const CA_BASE = `${SEO_ORIGIN}/current-affairs`;
 
 /** Build Next metadata for a generic CA route (hub, archives, taxonomy). */
 export function caMetadata(opts: {
@@ -16,7 +17,7 @@ export function caMetadata(opts: {
   const seo = opts.seo || {};
   const title = seo.title?.trim() || opts.title;
   const description = (seo.description?.trim() || opts.description).slice(0, 180);
-  const canonical = seo.canonical_override?.trim() || `${SITE_URL}${opts.path}`;
+  const canonical = indexableUrl(seo.canonical_override, opts.path);
   const ogImage = seo.og_image?.trim() || opts.image || undefined;
   const images = ogImage ? [{ url: ogImage, width: 1200, height: 630, alt: title }] : [];
   const noindex = seo.noindex || opts.indexable === false;

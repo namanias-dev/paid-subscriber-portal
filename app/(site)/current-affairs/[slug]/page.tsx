@@ -17,7 +17,8 @@ import {
 } from "@/lib/dataProvider";
 import { caCategoryName, caArticleTypeLabel } from "@/lib/caConstants";
 import { caMetadata, caDateLabel } from "@/lib/caView";
-import { SITE_URL, ACADEMY } from "@/lib/config";
+import { ACADEMY } from "@/lib/config";
+import { SEO_ORIGIN } from "@/lib/seoOrigin";
 import type { CaPdf } from "@/lib/types";
 
 export const revalidate = 600;
@@ -89,16 +90,16 @@ export default async function CaArticlePage({
     dateModified: article.updated_at,
     image: article.featured_image ? [article.featured_image] : undefined,
     author: { "@type": article.author ? "Person" : "Organization", name: article.author || ACADEMY.name },
-    publisher: { "@type": "Organization", name: ACADEMY.name, url: SITE_URL },
-    mainEntityOfPage: { "@type": "WebPage", "@id": `${SITE_URL}${articlePath}` },
+    publisher: { "@type": "Organization", name: ACADEMY.name, url: SEO_ORIGIN },
+    mainEntityOfPage: { "@type": "WebPage", "@id": `${SEO_ORIGIN}${articlePath}` },
   };
   const breadcrumb = {
     "@context": "https://schema.org",
     "@type": "BreadcrumbList",
     itemListElement: [
-      { "@type": "ListItem", position: 1, name: "Home", item: SITE_URL },
-      { "@type": "ListItem", position: 2, name: "Current Affairs", item: `${SITE_URL}/current-affairs` },
-      ...(article.category_slug ? [{ "@type": "ListItem", position: 3, name: caCategoryName(article.category_slug), item: `${SITE_URL}/current-affairs/category/${article.category_slug}` }] : []),
+      { "@type": "ListItem", position: 1, name: "Home", item: SEO_ORIGIN },
+      { "@type": "ListItem", position: 2, name: "Current Affairs", item: `${SEO_ORIGIN}/current-affairs` },
+      ...(article.category_slug ? [{ "@type": "ListItem", position: 3, name: caCategoryName(article.category_slug), item: `${SEO_ORIGIN}/current-affairs/category/${article.category_slug}` }] : []),
     ],
   };
   const faqJsonLd = article.seo?.faq_schema_enabled && (article.seo?.faq?.length || 0) > 0

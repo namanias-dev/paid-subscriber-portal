@@ -17,7 +17,7 @@ import { getNotesCurriculum } from "@/lib/store/notesCurriculum";
 import { notesProductPath } from "@/lib/store/paths";
 import type { OfferForPricing } from "@/lib/store/pricing";
 import type { PublicStoreOffer } from "@/lib/store/offers";
-import { SITE_URL } from "@/lib/config";
+import { seoUrl } from "@/lib/seoOrigin";
 import Link from "next/link";
 
 function stageLabel(stage: string | null): string | null {
@@ -69,7 +69,7 @@ export default async function NotesPdp({
   const hero = p.cover_url || p.photos[0]?.url || null;
   const stage = stageLabel(p.stage);
   const related = (await listStorefrontProducts()).filter((r) => r.id !== p.id).slice(0, 2);
-  const canonical = `${SITE_URL}${notesProductPath(p.slug)}`;
+  const canonical = seoUrl(notesProductPath(p.slug));
   const view = presentStorePrice({
     mrpPaise: p.mrp_paise,
     finalPaise: priced.final_paise,
@@ -100,7 +100,7 @@ export default async function NotesPdp({
     "@context": "https://schema.org",
     "@type": "BreadcrumbList",
     itemListElement: [
-      { "@type": "ListItem", position: 1, name: "Notes", item: `${SITE_URL}/notes` },
+      { "@type": "ListItem", position: 1, name: "Notes", item: seoUrl("/notes") },
       { "@type": "ListItem", position: 2, name: title, item: canonical },
     ],
   };

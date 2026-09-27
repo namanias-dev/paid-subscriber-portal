@@ -7,6 +7,7 @@ import { getPublicResources, getPublicDownloadablePdfs } from "@/lib/dataProvide
 import { journeyResources, resourceMetadata } from "@/lib/resourceView";
 import { RESOURCE_CATEGORIES } from "@/lib/resourceConstants";
 import { ACADEMY } from "@/lib/config";
+import { seoUrl } from "@/lib/seoOrigin";
 import ResourceCard from "@/components/public/resources/ResourceCard";
 import JourneyRoadmap from "@/components/public/resources/JourneyRoadmap";
 import ResourceSearch from "@/components/public/resources/ResourceSearch";
@@ -33,7 +34,7 @@ export default async function ResourcesHub() {
     "@type": "CollectionPage",
     name: "UPSC Resources",
     description: "Free UPSC preparation guides, strategy and booklists by Naman Sharma IAS Academy.",
-    url: `${(process.env.NEXT_PUBLIC_SITE_URL || "https://namanias.com").replace(/\/$/, "")}/resources`,
+    url: seoUrl("/resources"),
   };
 
   return (

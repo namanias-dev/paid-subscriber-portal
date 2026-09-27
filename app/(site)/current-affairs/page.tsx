@@ -13,7 +13,8 @@ import { CaIconChip, categoryIcon } from "@/components/public/ca/CaIcons";
 import { getPublicCaArticles, getPublicCaPdfs } from "@/lib/dataProvider";
 import { DEFAULT_CA_CATEGORIES } from "@/lib/caConstants";
 import { caMetadata, caDateLabel, caMonthLabel, groupByDate } from "@/lib/caView";
-import { SITE_URL, ACADEMY } from "@/lib/config";
+import { ACADEMY } from "@/lib/config";
+import { SEO_ORIGIN } from "@/lib/seoOrigin";
 
 export const revalidate = 600;
 
@@ -46,8 +47,8 @@ export default async function CurrentAffairsHub() {
     "@context": "https://schema.org",
     "@type": "BreadcrumbList",
     itemListElement: [
-      { "@type": "ListItem", position: 1, name: "Home", item: SITE_URL },
-      { "@type": "ListItem", position: 2, name: "Current Affairs", item: `${SITE_URL}/current-affairs` },
+      { "@type": "ListItem", position: 1, name: "Home", item: SEO_ORIGIN },
+      { "@type": "ListItem", position: 2, name: "Current Affairs", item: `${SEO_ORIGIN}/current-affairs` },
     ],
   };
 

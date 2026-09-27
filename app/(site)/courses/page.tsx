@@ -1,8 +1,12 @@
 import CourseExplorer from "@/components/public/home/CourseExplorer";
 import { getPublishedCourses } from "@/lib/dataProvider";
 import { getPurchaseSnapshot, coursePurchaseMap } from "@/lib/purchaseStatus";
+import { seoUrl } from "@/lib/seoOrigin";
 
-export const metadata = { title: "Courses — Naman Sharma IAS Academy" };
+export const metadata = {
+  title: "Courses — Naman Sharma IAS Academy",
+  alternates: { canonical: seoUrl("/courses") },
+};
 
 // Always render fresh so newly published/edited courses appear immediately
 // (otherwise this listing is statically prerendered at build time and goes stale).

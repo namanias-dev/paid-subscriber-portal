@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { seoUrl } from "@/lib/seoOrigin";
 
 /**
  * Public privacy policy for Meta App Review / Live mode.
@@ -16,6 +17,7 @@ export const metadata: Metadata = {
   description:
     "How Naman Sharma IAS Academy collects and uses information submitted through Meta Lead Ads and other enquiry forms.",
   robots: { index: true, follow: true },
+  alternates: { canonical: seoUrl("/privacy") },
 };
 
 export default function PrivacyPolicyPage() {
