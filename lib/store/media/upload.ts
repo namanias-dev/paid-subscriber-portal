@@ -18,6 +18,7 @@
  */
 import { randomUUID } from "node:crypto";
 import { storeDb } from "../db";
+import { publicStoreMediaUrl } from "../catalogue";
 import { deleteObject, getObject, putObject } from "@/lib/r2";
 import {
   renderProductPhoto,
@@ -132,7 +133,7 @@ export async function uploadSamplePage(
 export async function uploadProductPhoto(
   productId: string,
   input: Buffer,
-  opts?: { alt?: string | null },
+  opts?: { alt?: string | null; makeCover?: boolean },
 ): Promise<StoreMediaRow> {
   const db = storeDb();
   if (!db) throw new Error("store unavailable");
@@ -169,10 +170,102 @@ export async function uploadProductPhoto(
     .select("cover_image_key")
     .eq("id", productId)
     .maybeSingle();
-  if (prod && !prod.cover_image_key) {
+  if (prod && (opts?.makeCover || !prod.cover_image_key)) {
     await db.from("store_products").update({ cover_image_key: key, updated_at: new Date().toISOString() }).eq("id", productId);
   }
   return data as StoreMediaRow;
+}
+
+async function deleteUnreferencedPublicKey(key: string | null, coverKey: string | null): Promise<void> {
+  if (!key || key === coverKey || !key.startsWith("media/")) return;
+  const db = storeDb();
+  if (!db) return;
+  const { data: used } = await db.from("store_product_media").select("id").eq("r2_key", key).limit(1);
+  if (used?.length) return;
+  await deleteObject(key);
+}
+
+/**
+ * Replace the optional 4:5 landing thumbnail. The new object is stored before
+ * the product row changes. A failed database write deletes only the new object
+ * and leaves the previous key in place.
+ */
+export async function uploadStoreThumbnail(
+  productId: string,
+  input: Buffer,
+): Promise<{ key: string; url: string | null; width: number; height: number }> {
+  const db = storeDb();
+  if (!db) throw new Error("store unavailable");
+  const { data: current } = await db
+    .from("store_products")
+    .select("id,store_thumbnail_image_key,cover_image_key")
+    .eq("id", productId)
+    .maybeSingle();
+  if (!current) throw new Error("product not found");
+
+  const key = `media/store/products/${productId}/thumb-${randomUUID()}.webp`;
+  const derivative = await renderProductPhoto(input, 1600);
+  await putObject(key, derivative.buffer, "image/webp");
+  const { error } = await db
+    .from("store_products")
+    .update({ store_thumbnail_image_key: key, updated_at: new Date().toISOString() })
+    .eq("id", productId);
+  if (error) {
+    await deleteObject(key);
+    throw new Error(error.message);
+  }
+  const previous = (current.store_thumbnail_image_key as string | null) || null;
+  if (previous && previous !== key) {
+    await deleteUnreferencedPublicKey(previous, (current.cover_image_key as string | null) || null);
+  }
+  return { key, url: publicStoreMediaUrl(key), width: derivative.width, height: derivative.height };
+}
+
+/** Clear the landing thumbnail and remove its object when nothing else uses it. */
+export async function clearStoreThumbnail(productId: string): Promise<void> {
+  const db = storeDb();
+  if (!db) throw new Error("store unavailable");
+  const { data: current } = await db
+    .from("store_products")
+    .select("store_thumbnail_image_key,cover_image_key")
+    .eq("id", productId)
+    .maybeSingle();
+  if (!current) throw new Error("product not found");
+  const previous = (current.store_thumbnail_image_key as string | null) || null;
+  const { error } = await db
+    .from("store_products")
+    .update({ store_thumbnail_image_key: null, updated_at: new Date().toISOString() })
+    .eq("id", productId);
+  if (error) throw new Error(error.message);
+  if (previous) await deleteUnreferencedPublicKey(previous, (current.cover_image_key as string | null) || null);
+}
+
+export async function getProductImageSlots(productId: string): Promise<{
+  cover_image_key: string | null;
+  cover_url: string | null;
+  store_thumbnail_image_key: string | null;
+  store_thumbnail_url: string | null;
+}> {
+  const db = storeDb();
+  const empty = {
+    cover_image_key: null,
+    cover_url: null,
+    store_thumbnail_image_key: null,
+    store_thumbnail_url: null,
+  };
+  if (!db) return empty;
+  const { data } = await db
+    .from("store_products")
+    .select("cover_image_key,store_thumbnail_image_key")
+    .eq("id", productId)
+    .maybeSingle();
+  if (!data) return empty;
+  return {
+    cover_image_key: (data.cover_image_key as string) || null,
+    cover_url: publicStoreMediaUrl((data.cover_image_key as string) || null),
+    store_thumbnail_image_key: (data.store_thumbnail_image_key as string) || null,
+    store_thumbnail_url: publicStoreMediaUrl((data.store_thumbnail_image_key as string) || null),
+  };
 }
 
 /**

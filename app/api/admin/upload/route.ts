@@ -22,6 +22,18 @@ export const runtime = "nodejs";
 const BUCKET = "media";
 const MAX_BYTES = 8 * 1024 * 1024; // 8 MB
 
+// Served from the public media host. Block active content; SVG logos stay allowed.
+const BLOCKED_UPLOAD_EXT = new Set([
+  "html", "htm", "xhtml", "js", "mjs", "cjs", "jsx", "ts", "tsx",
+  "php", "phtml", "exe", "sh", "bat", "cmd", "ps1", "svgz",
+]);
+const BLOCKED_UPLOAD_TYPES = new Set([
+  "text/html",
+  "application/javascript",
+  "text/javascript",
+  "application/x-httpd-php",
+]);
+
 export async function POST(req: Request) {
   try {
     if (!(await requireAnyPermission([...UPLOAD_PERMS]))) {
@@ -39,7 +51,18 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: "File too large (max 8 MB)." }, { status: 413 });
     }
 
-    const ext = (file.name.split(".").pop() || "bin").toLowerCase().replace(/[^a-z0-9]/g, "");
+    const declaredType = (file.type || "").toLowerCase().split(";")[0].trim();
+    let ext = "";
+    const dot = file.name.lastIndexOf(".");
+    if (dot > 0 && dot < file.name.length - 1) {
+      ext = file.name.slice(dot + 1).toLowerCase().replace(/[^a-z0-9]/g, "");
+    }
+    if (!ext && (declaredType.startsWith("image/") || declaredType === "application/pdf")) {
+      ext = declaredType === "application/pdf" ? "pdf" : declaredType.slice("image/".length).replace(/[^a-z0-9]/g, "");
+    }
+    if (!ext || BLOCKED_UPLOAD_EXT.has(ext) || BLOCKED_UPLOAD_TYPES.has(declaredType)) {
+      return NextResponse.json({ ok: false, error: "This file type is not allowed." }, { status: 415 });
+    }
     const buffer = Buffer.from(await file.arrayBuffer());
 
     // Primary path: store the asset in Cloudflare R2 (single source of truth for

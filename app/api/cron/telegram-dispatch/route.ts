@@ -24,6 +24,25 @@ async function run(req: Request) {
     // Always sweep sales outbox (purge pre-cutoff first; no-op send when empty).
     const salesOutbox = await sweepSalesOutbox(40);
 
+    // Retry Notes paid-order alerts already claimed by the payment event.
+    // This does not poll for new orders and does not change the cron schedule.
+    let notesOutbox = { due: 0, sent: 0, failed: 0, baselined: 0 };
+    try {
+      const { sweepNotesOrderOutbox } = await import("@/lib/telegram/notesOrderAlert");
+      notesOutbox = await sweepNotesOrderOutbox(20);
+    } catch (error) {
+      console.error(`[telegram-dispatch] notes_outbox ${(error as Error).message}`);
+    }
+
+    // Notes checkout-lead alerts. Same 2-minute job. Does not change the schedule.
+    let leadAlerts = { due: 0, sent: 0, failed: 0, skipped: 0 };
+    try {
+      const { sweepNotesLeadAlerts } = await import("@/lib/telegram/notesLeadAlert");
+      leadAlerts = await sweepNotesLeadAlerts();
+    } catch (error) {
+      console.error(`[telegram-dispatch] notes_leads ${(error as Error).message}`);
+    }
+
     // Lead batch flush — only when SALES_LEAD_BATCHING=1 (shipped OFF).
     let leadBatch = { flushed: 0 };
     if (salesLeadBatchingEnabled()) {
@@ -46,6 +65,8 @@ async function run(req: Request) {
         ok: true,
         idle: true,
         sales_outbox: salesOutbox,
+        notes_outbox: notesOutbox,
+        lead_alerts: leadAlerts,
         lead_batch: leadBatch,
         ts: Date.now(),
       });
@@ -69,6 +90,8 @@ async function run(req: Request) {
       queue,
       scheduled,
       sales_outbox: salesOutbox,
+      notes_outbox: notesOutbox,
+      lead_alerts: leadAlerts,
       lead_batch: leadBatch,
       ts: Date.now(),
     });

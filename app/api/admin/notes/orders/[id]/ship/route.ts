@@ -2,16 +2,14 @@ import { NextResponse } from "next/server";
 import { requirePermission, getActionActor } from "@/lib/adminGuard";
 import { storeDb } from "@/lib/store/db";
 import { commitReservations } from "@/lib/store/inventory";
-import { selectShippingProvider } from "@/lib/store/shipping";
+import { manualShippingProvider } from "@/lib/store/shipping";
 import { notifyOrderShipped } from "@/lib/store/notifications";
 
 export const dynamic = "force-dynamic";
 
 /**
- * Mark shipped via the active shipping provider (manual today; pluggable later).
- * The manual provider records the typed courier/AWB; an automated provider would
- * create the shipment and return the AWB. Fulfilment is never blocked by a
- * missing aggregator — manual is always available.
+ * Mark shipped from a courier and AWB the team already has.
+ * This does not call Shiprocket or Delhivery, so it cannot buy a label.
  */
 export async function POST(req: Request, { params }: { params: { id: string } }) {
   if (!(await requirePermission("store_manage_orders"))) {
@@ -27,8 +25,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
 
   let shipment;
   try {
-    const provider = await selectShippingProvider();
-    shipment = await provider.createShipment({
+    shipment = await manualShippingProvider.createShipment({
       orderId: order.id,
       awb: body.awb,
       courierName: body.courier_name,

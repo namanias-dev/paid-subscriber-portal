@@ -1,88 +1,91 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import Image from "next/image";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { trackClient } from "@/lib/analytics/client";
 import { ga4Event, readGaClientId } from "@/lib/analytics/ga4";
 import { useGa4FormTracking } from "@/lib/analytics/ga4Form";
 import { toPublicImageSrc } from "@/lib/publicMediaUrl";
-import {
-  ArrowLeft,
-  ShieldCheck,
-  CalendarClock,
-  Wallet,
-  CheckCircle2,
-  ChevronDown,
-  Sparkles,
-  Lock,
-  Tag,
-  Users,
-} from "lucide-react";
 import { formatINR, formatISTDate } from "@/lib/dates";
 import {
   resolveEmiConfig,
   planCourseEnrollment,
   payInFullTotal,
   effectiveCourseForBatch,
-  batchModeLabel,
-  batchTimingLabel,
 } from "@/lib/installments";
+import {
+  analyzeBatches,
+  batchAxis,
+  buildEnrollmentPaymentBody,
+  defaultInstallmentCount,
+  publicPaymentIntent,
+  resolveBatchId,
+  timingsForMode,
+  type PublicPaymentMethod,
+} from "@/lib/enrollmentCheckout";
 import type { Course, CourseBatch, InstallmentItem } from "@/lib/types";
+import {
+  BatchList,
+  ChoiceCard,
+  CouponAccordion,
+  CourseEnrollmentSummary,
+  InstallmentScheduleAccordion,
+  MoneyRow,
+  PayButton,
+  SegmentedRadio,
+  SelectedBatchSummary,
+  StudentDetailsForm,
+  TrustLine,
+} from "@/components/public/enrollment/parts";
 
-type Plan = "full" | "emi";
+const DETAILS_DRAFT = (slug: string) => `nsa_enroll_details:${slug}`;
 
-export default function CheckoutClient({ course }: { course: Course }) {
-  // --- Batches (Phase 3): only a course with 2+ batches shows a selector. With
-  // 0/1 batch we use the course-level fields verbatim, so single-batch/default
-  // courses behave byte-for-byte exactly as before. ---
+export default function CheckoutClient({ course, waLink = null }: { course: Course; waLink?: string | null }) {
   const batches = useMemo<CourseBatch[]>(() => course.batches || [], [course.batches]);
   const multiBatch = batches.length >= 2;
+  const batchModel = useMemo(() => analyzeBatches(batches), [batches]);
   const initialBatchId = multiBatch
     ? (course.default_batch_id && batches.some((b) => b.id === course.default_batch_id) ? course.default_batch_id : batches[0].id)
     : null;
   const [batchId, setBatchId] = useState<string | null>(initialBatchId);
 
-  // Effective course = course-level fields overridden by the chosen batch. For
-  // single-batch courses (multiBatch=false) this is exactly `course`.
   const ec = useMemo(
     () => (multiBatch ? effectiveCourseForBatch(course, batchId) : course),
-    [course, batchId, multiBatch]
+    [course, batchId, multiBatch],
   );
 
   useEffect(() => {
     trackClient("course_view", { course_id: course.id, course_slug: course.slug, course_title: course.title, price: course.price });
-    // GA4 (independent, consent-gated, no PII) fires alongside the in-house tracker.
     ga4Event("course_view", { course_id: course.id, course_slug: course.slug, value: course.price, currency: "INR" });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
   const cfg = useMemo(() => resolveEmiConfig(ec), [ec]);
   const standardTotal = Math.max(0, Math.round(ec.price));
   const payInFull = useMemo(() => payInFullTotal(ec), [ec]);
-  const fullSavings = Math.max(0, standardTotal - payInFull);
-
   const emiAvailable = cfg.enabled && standardTotal > 1 && cfg.installmentCounts.length > 0;
   const fullAvailable = !cfg.enabled || cfg.allowFull;
   const seatConfigured = cfg.enabled && (cfg.seatAmount != null || cfg.allowCustomSeat);
+  const defaultMethod: PublicPaymentMethod = emiAvailable ? "installments" : "full";
 
-  const [plan, setPlan] = useState<Plan>(emiAvailable ? "emi" : fullAvailable ? "full" : "emi");
-  const [bookSeat, setBookSeat] = useState(true);
-  const [count, setCount] = useState<number>(
-    cfg.installmentCounts[Math.min(1, cfg.installmentCounts.length - 1)] || cfg.installmentCounts[0] || 6
-  );
+  const [method, setMethod] = useState<PublicPaymentMethod>(defaultMethod);
+  const [count, setCount] = useState<number>(defaultInstallmentCount(cfg.installmentCounts));
 
-  const base = plan === "full" ? payInFull : standardTotal;
   const seatFloor = cfg.allowCustomSeat ? (cfg.minSeatAmount ?? cfg.seatAmount ?? 1) : (cfg.seatAmount ?? 1);
   const [seatInput, setSeatInput] = useState<number>(cfg.seatAmount ?? seatFloor);
+  const [amountOpen, setAmountOpen] = useState(false);
 
-  // When the chosen batch changes, reset the plan/seat/installment selections to
-  // that batch's defaults (its EMI config may differ). No-op for single-batch.
   useEffect(() => {
     if (!multiBatch) return;
-    setPlan(emiAvailable ? "emi" : fullAvailable ? "full" : "emi");
-    setBookSeat(true);
-    setCount(cfg.installmentCounts[Math.min(1, cfg.installmentCounts.length - 1)] || cfg.installmentCounts[0] || 6);
+    setMethod((current) => {
+      if (current === "installments" && emiAvailable) return "installments";
+      if (current === "full" && fullAvailable) return "full";
+      return emiAvailable ? "installments" : "full";
+    });
+    setCount(defaultInstallmentCount(cfg.installmentCounts));
     setSeatInput(cfg.seatAmount ?? seatFloor);
+    setAmountOpen(false);
+    setScheduleOpen(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [batchId]);
 
@@ -90,45 +93,151 @@ export default function CheckoutClient({ course }: { course: Course }) {
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
   const [loading, setLoading] = useState(false);
+  const submitting = useRef(false);
+  const paybarRef = useRef<HTMLDivElement>(null);
   const [error, setError] = useState<string | null>(null);
-  const [detailsOpen, setDetailsOpen] = useState(false);
 
   const [couponOpen, setCouponOpen] = useState(false);
   const [couponInput, setCouponInput] = useState("");
   const [couponLoading, setCouponLoading] = useState(false);
   const [couponError, setCouponError] = useState<string | null>(null);
   const [applied, setApplied] = useState<{ code: string; discount: number } | null>(null);
+  const [scheduleOpen, setScheduleOpen] = useState(false);
   const formId = `course_checkout:${course.slug}`;
   const { onFocusCapture, trackSubmit } = useGa4FormTracking(formId, "Course checkout");
 
-  const bookingISO = useMemo(() => new Date().toISOString(), []);
-  const seatActive = bookSeat && seatConfigured;
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem(DETAILS_DRAFT(course.slug));
+      if (!raw) return;
+      sessionStorage.removeItem(DETAILS_DRAFT(course.slug));
+      const draft = JSON.parse(raw) as { name?: unknown; phone?: unknown; email?: unknown };
+      if (typeof draft.name === "string") setName(draft.name);
+      if (typeof draft.phone === "string") setPhone(draft.phone.replace(/\D/g, "").slice(0, 10));
+      if (typeof draft.email === "string") setEmail(draft.email);
+    } catch { /* ignore */ }
+  }, [course.slug]);
 
-  // Preview only — server re-validates and decides the real amounts at initiation.
-  const plannedPreview = useMemo(() => {
+  const bookingISO = useMemo(() => new Date().toISOString(), []);
+  const seatCeiling = standardTotal;
+  const seatOutOfRange = cfg.allowCustomSeat && (seatInput < seatFloor || seatInput >= seatCeiling);
+  const reservationForPlan = cfg.allowCustomSeat && !seatOutOfRange ? seatInput : (cfg.seatAmount ?? seatFloor);
+  const installmentIntent = publicPaymentIntent({
+    method: "installments",
+    seatConfigured,
+    allowCustomSeat: cfg.allowCustomSeat,
+    reservationAmount: reservationForPlan,
+  });
+  const selectedIntent = publicPaymentIntent({
+    method,
+    seatConfigured,
+    allowCustomSeat: cfg.allowCustomSeat,
+    reservationAmount: reservationForPlan,
+  });
+  const seatActive = method === "installments" && installmentIntent.bookSeat;
+
+  const emiPreview = useMemo(() => {
+    if (!emiAvailable) return null;
     return planCourseEnrollment({
       course: ec,
-      plan,
-      bookSeat: seatActive,
-      seatAmount: seatActive && cfg.allowCustomSeat ? seatInput : null,
-      installmentCount: plan === "emi" ? count : null,
+      plan: "emi",
+      bookSeat: installmentIntent.bookSeat,
+      seatAmount: installmentIntent.seatAmount ?? null,
+      installmentCount: count,
       bookingISO,
       discountRupees: applied?.discount ?? 0,
     });
-  }, [ec, plan, seatActive, cfg.allowCustomSeat, seatInput, count, bookingISO, applied]);
+  }, [emiAvailable, ec, installmentIntent.bookSeat, installmentIntent.seatAmount, count, bookingISO, applied]);
 
-  const schedule: InstallmentItem[] = plannedPreview.ok ? plannedPreview.plan.schedule : [];
-  const todayItem = schedule[0];
-  const laterItems = schedule.slice(1);
-  const todayAmount = todayItem?.amount ?? 0;
-  const grandTotal = plannedPreview.ok ? plannedPreview.plan.totalFee : schedule.reduce((a, s) => a + s.amount, 0);
-  const remaining = Math.max(0, grandTotal - todayAmount);
-  const couponDiscount = plannedPreview.ok ? plannedPreview.plan.discountAmount : (applied?.discount ?? 0);
-  const originalTotal = plannedPreview.ok ? plannedPreview.plan.originalTotalFee : base;
+  const fullPreview = useMemo(() => {
+    if (!fullAvailable) return null;
+    return planCourseEnrollment({
+      course: ec,
+      plan: "full",
+      bookSeat: false,
+      installmentCount: null,
+      bookingISO,
+      discountRupees: applied?.discount ?? 0,
+    });
+  }, [fullAvailable, ec, bookingISO, applied]);
 
-  const seatTooLow = cfg.allowCustomSeat && seatInput < seatFloor;
-  const seatTooHigh = seatInput >= base;
-  const seatInvalid = seatActive && (seatTooLow || seatTooHigh);
+  const plannedPreview = method === "installments" ? emiPreview : fullPreview;
+  const planOk = plannedPreview?.ok === true;
+  const schedule: InstallmentItem[] = planOk ? plannedPreview.plan.schedule : [];
+  const plannedToday = planOk ? plannedPreview.plan.firstAmount : 0;
+  const grandTotal = planOk ? plannedPreview.plan.totalFee : (method === "full" ? payInFull : standardTotal);
+  const todayAmount = seatActive && (seatOutOfRange || !planOk) ? seatInput : plannedToday;
+  const remaining = seatOutOfRange || !planOk ? 0 : Math.max(0, grandTotal - todayAmount);
+  const couponDiscount = plannedPreview?.ok ? plannedPreview.plan.discountAmount : (applied?.discount ?? 0);
+  const originalTotal = plannedPreview?.ok ? plannedPreview.plan.originalTotalFee : (method === "full" ? payInFull : standardTotal);
+
+  const seatTooLow = seatActive && cfg.allowCustomSeat && seatInput < seatFloor;
+  const seatTooHigh = seatActive && cfg.allowCustomSeat && seatInput >= seatCeiling;
+  const seatInvalid = seatTooLow || seatTooHigh || (method === "installments" && !!emiPreview && !emiPreview.ok);
+
+  const proposition = seatOutOfRange
+    ? null
+    : method === "full" && fullPreview?.ok
+      ? { kind: "payFull" as const, amount: fullPreview.plan.firstAmount }
+      : seatActive && emiPreview?.ok
+        ? { kind: "reserve" as const, amount: emiPreview.plan.firstAmount }
+        : method === "installments" && emiPreview?.ok
+          ? { kind: "payToday" as const, amount: emiPreview.plan.firstAmount }
+          : null;
+
+  const selectedBatch = multiBatch ? batches.find((b) => b.id === batchId) ?? null : null;
+  const selectedAxis = selectedBatch && batchModel.kind === "matrix" ? batchAxis(selectedBatch) : null;
+  const visibleTimings = batchModel.kind === "matrix" && selectedAxis
+    ? timingsForMode(batchModel, selectedAxis.mode)
+    : [];
+
+  const firstInstallment = schedule.find((item) => item.kind === "installment" && item.due);
+  const emiPlanTotal = emiPreview?.ok ? emiPreview.plan.totalFee : standardTotal;
+  const fullPlanTotal = fullPreview?.ok ? fullPreview.plan.totalFee : payInFull;
+  const saveVsInstallments = Math.max(0, emiPlanTotal - fullPlanTotal);
+
+  const payLabel = seatActive
+    ? "Reserve My Seat"
+    : `Pay ${formatINR(todayAmount)} Securely`;
+
+  function chooseBatch(id: string) {
+    if (!id || id === batchId) return;
+    setBatchId(id);
+    trackClient("batch_selected", { course_id: course.id, course_slug: course.slug, batch_id: id });
+  }
+
+  function chooseMode(mode: string) {
+    if (batchModel.kind !== "matrix" || !selectedAxis) return;
+    const id = resolveBatchId(batchModel, mode, selectedAxis.timing);
+    if (id) chooseBatch(id);
+  }
+
+  function chooseTiming(timing: string) {
+    if (batchModel.kind !== "matrix" || !selectedAxis) return;
+    const id = resolveBatchId(batchModel, selectedAxis.mode, timing);
+    if (id) chooseBatch(id);
+  }
+
+  function clampSeat(value: number) {
+    return Math.min(Math.max(seatFloor, seatCeiling - 1), Math.max(seatFloor, value));
+  }
+
+  function chooseMethod(next: PublicPaymentMethod) {
+    if (next === method) return;
+    if (next === "installments" && !emiAvailable) return;
+    if (next === "full" && !fullAvailable) return;
+    if (next !== "installments") setSeatInput((value) => clampSeat(value));
+    setMethod(next);
+    setScheduleOpen(false);
+    setAmountOpen(false);
+    trackClient(next === "installments" ? "installments_selected" : "pay_in_full_selected", {
+      course_id: course.id,
+      course_slug: course.slug,
+    });
+    if (next === "installments" && seatConfigured) {
+      trackClient("seat_booking_selected", { course_id: course.id, course_slug: course.slug });
+    }
+  }
 
   async function applyCoupon() {
     const code = couponInput.trim();
@@ -142,7 +251,16 @@ export default function CheckoutClient({ course }: { course: Course }) {
       const res = await fetch("/api/v1/coupons/validate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ itemType: "course", slug: course.slug, code }),
+        body: JSON.stringify({
+          itemType: "course",
+          slug: course.slug,
+          code,
+          plan: selectedIntent.plan,
+          bookSeat: selectedIntent.bookSeat,
+          seatAmount: selectedIntent.seatAmount,
+          installmentCount: selectedIntent.plan === "emi" ? count : undefined,
+          batchId: multiBatch ? batchId : undefined,
+        }),
       });
       const data = await res.json();
       if (!data.ok) {
@@ -152,6 +270,7 @@ export default function CheckoutClient({ course }: { course: Course }) {
       }
       setApplied({ code: data.code, discount: data.discount });
       setCouponError(null);
+      trackClient("coupon_applied", { course_id: course.id, course_slug: course.slug });
     } catch {
       setApplied(null);
       setCouponError("Could not validate coupon. Try again.");
@@ -167,25 +286,33 @@ export default function CheckoutClient({ course }: { course: Course }) {
   }
 
   async function proceed() {
-    if (loading) return; // re-entry guard: a submit is already in flight
+    if (loading || submitting.current) return;
+    submitting.current = true;
     setError(null);
     if (!name.trim() || !/^\d{10}$/.test(phone)) {
       setError("Enter your name and a valid 10-digit mobile number.");
-      setDetailsOpen(true);
+      submitting.current = false;
+      document.getElementById("enrollment-details")?.scrollIntoView({ behavior: "smooth", block: "center" });
       return;
     }
     if (email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
       setError("Enter a valid email address, or leave it blank.");
+      submitting.current = false;
       return;
     }
     if (seatInvalid) {
-      setError("Please choose a valid seat-booking amount.");
+      setError(seatTooLow ? `Minimum amount is ${formatINR(seatFloor)}.` : "Please choose a valid seat-booking amount.");
+      submitting.current = false;
+      return;
+    }
+    if (!plannedPreview?.ok) {
+      setError(plannedPreview?.error || "This payment plan is not available.");
+      submitting.current = false;
       return;
     }
     setLoading(true);
     trackClient("click_enroll", { course_id: course.id, course_slug: course.slug, item_type: "course", price: ec.price });
-    // GA4 enroll/buy click + payment_start — numeric value + currency only, no PII.
-    const productType = seatActive ? "seat_booking" : plan === "emi" ? "installment" : "full_payment";
+    const productType = seatActive ? "seat_booking" : method === "installments" ? "installment" : "full_payment";
     let isRetry = false;
     try {
       const key = `ga4_pay_start:course:${course.slug}:${productType}`;
@@ -216,453 +343,378 @@ export default function CheckoutClient({ course }: { course: Course }) {
       const res = await fetch("/api/v1/enroll/create-payment", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+        body: JSON.stringify(buildEnrollmentPaymentBody({
           courseSlug: course.slug,
-          name: name.trim(),
-          email: email.trim(),
+          name,
+          email,
           mobile: phone,
-          plan,
-          bookSeat: seatActive,
-          installmentCount: plan === "emi" ? count : undefined,
-          seatAmount: seatActive && cfg.allowCustomSeat ? seatInput : undefined,
-          // Phase 3: only sent for multi-batch courses. Server validates it belongs
-          // to the course and recomputes price server-side (client price ignored).
-          batchId: multiBatch ? batchId : undefined,
-          // Code only — server re-validates and computes the discount.
-          couponCode: applied?.code || undefined,
-          gaClientId: gaClientId || undefined,
-        }),
+          plan: selectedIntent.plan,
+          bookSeat: selectedIntent.bookSeat,
+          installmentCount: count,
+          seatAmount: selectedIntent.seatAmount ?? seatInput,
+          allowCustomSeat: cfg.allowCustomSeat,
+          multiBatch,
+          batchId,
+          couponCode: applied?.code,
+          gaClientId,
+          expectedAmount: todayAmount,
+        })),
       });
       const json = await res.json();
+      if (json.priceChanged) {
+        try {
+          sessionStorage.setItem(DETAILS_DRAFT(course.slug), JSON.stringify({ name, phone, email }));
+        } catch { /* ignore */ }
+        setError(json.error || "Course pricing has been updated. We've refreshed your enrollment total.");
+        window.location.reload();
+        return;
+      }
       if (!json.ok || !json.paymentUrl) {
         setError(json.error || "Could not start payment.");
+        submitting.current = false;
         setLoading(false);
         return;
       }
       window.location.href = json.paymentUrl;
     } catch {
       setError("Network error. Please try again.");
+      submitting.current = false;
       setLoading(false);
     }
   }
 
-  const payLabel = `Pay ${formatINR(todayAmount)} now`;
+  const image = toPublicImageSrc(course.cover_image_url || course.image);
+  const cadence = cfg.intervalMonths === 1
+    ? `${count} monthly payments`
+    : `${count} payments, every ${cfg.intervalMonths} months`;
+  const laterSchedule = schedule.filter((item) => item.kind === "installment");
+  const emiToday = seatActive && seatOutOfRange
+    ? seatInput
+    : emiPreview?.ok ? emiPreview.plan.firstAmount : (cfg.seatAmount ?? seatFloor);
+  const fullToday = fullPreview?.ok ? fullPreview.plan.firstAmount : payInFull;
+  const totalLabel = method === "full" ? "Pay-in-full price" : "Installment plan total";
+
+  useLayoutEffect(() => {
+    const el = paybarRef.current;
+    if (!el) return;
+    const apply = () => {
+      const height = Math.ceil(el.getBoundingClientRect().height);
+      document.documentElement.style.setProperty("--checkout-paybar-height", `${height}px`);
+      document.documentElement.style.scrollPaddingBottom = height > 0 ? `calc(${height}px + 1rem)` : "";
+    };
+    apply();
+    const observer = new ResizeObserver(apply);
+    observer.observe(el);
+    return () => {
+      observer.disconnect();
+      document.documentElement.style.removeProperty("--checkout-paybar-height");
+      document.documentElement.style.scrollPaddingBottom = "";
+    };
+  }, [todayAmount, payLabel, error]);
 
   return (
-    <div className="bg-[var(--ca-slate-50)] pb-28 lg:pb-16">
-      <div className="container-wide pt-6">
-        <Link href={`/courses/${course.slug}`} className="ca-focus inline-flex items-center gap-1.5 text-sm font-semibold text-[var(--ca-navy-600)] hover:text-[var(--ca-navy-900)]">
-          <ArrowLeft size={16} /> Back to course
+    <div
+      className="bg-[var(--ca-slate-50)] pb-[calc(var(--checkout-paybar-height,calc(5.5rem+env(safe-area-inset-bottom,0px)))+1.25rem)] lg:pb-16"
+      onFocusCapture={(event) => {
+        onFocusCapture();
+        const target = event.target;
+        if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
+          target.scrollIntoView({ block: "center", inline: "nearest" });
+        }
+      }}
+    >
+      <div className="container-wide pt-3">
+        <Link href={`/courses/${course.slug}`} className="ca-focus inline-flex min-h-11 items-center text-sm font-semibold text-[var(--ca-navy-600)]">
+          Back to course
         </Link>
       </div>
 
-      <div className="container-wide mt-4 grid gap-6 lg:grid-cols-[1fr_380px]">
-        {/* ---------------- LEFT ---------------- */}
-        <div className="space-y-6">
-          {/* Course header */}
-          <div className="ca-card overflow-hidden p-0">
-            <div className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:p-5">
-              <div className="relative h-24 w-full shrink-0 overflow-hidden rounded-xl sm:h-20 sm:w-32">
-                {(course.cover_image_url || course.image) ? (
-                  <Image src={toPublicImageSrc(course.cover_image_url || course.image)!} alt={course.title} fill sizes="160px" className="object-cover" />
-                ) : (
-                  <div className="ca-dark h-full w-full" />
+      <div className="container-wide mt-2 grid gap-3 lg:grid-cols-[minmax(0,1fr)_360px] lg:items-start lg:gap-6">
+        <div className="overflow-hidden rounded-2xl border border-[var(--ca-slate-200)] bg-white">
+          <CourseEnrollmentSummary
+            title={course.title}
+            image={image}
+            eyebrow={course.badge_label || course.category || null}
+            startISO={ec.batch_start}
+            gstIncluded={!!course.gst}
+            proposition={proposition}
+            meta={ec.batch_timings?.length && !multiBatch ? ec.batch_timings.join(" · ") : null}
+          />
+
+          {multiBatch && (
+            <section className="border-t border-[var(--ca-slate-200)] px-4 py-4 sm:px-5">
+              <h2 className="font-heading text-base font-bold text-[var(--ca-navy-900)]">Choose your batch</h2>
+              {batchModel.kind === "matrix" && selectedAxis ? (
+                <div className="mt-3 space-y-3">
+                  <SegmentedRadio label="How do you want to study?" options={batchModel.modes} value={selectedAxis.mode} onChange={chooseMode} />
+                  <SegmentedRadio label="Choose your timing" options={visibleTimings} value={selectedAxis.timing} onChange={chooseTiming} />
+                </div>
+              ) : (
+                <BatchList
+                  batches={batches}
+                  selectedId={batchId}
+                  onSelect={chooseBatch}
+                  feeOf={(batch) => ({
+                    courseFee: Math.max(0, Math.round(batch.price || 0)),
+                    original: batch.original_price && batch.original_price > (batch.price || 0) ? Math.round(batch.original_price) : null,
+                  })}
+                />
+              )}
+              {selectedBatch && <SelectedBatchSummary batch={selectedBatch} />}
+            </section>
+          )}
+
+          {waLink && (
+            <div className="border-t border-[var(--ca-slate-200)] px-4 py-2 sm:px-5">
+              <a
+                href={waLink}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={() => ga4Event("whatsapp_click", { source: "enrollment_help", page_path: `/courses/${course.slug}/enroll` })}
+                className="ca-focus inline-flex min-h-11 items-center text-sm font-semibold text-[var(--ca-navy-600)]"
+              >
+                Need help choosing a batch? Chat with us on WhatsApp
+              </a>
+            </div>
+          )}
+
+          {(emiAvailable || fullAvailable) && (
+            <section className="border-t border-[var(--ca-slate-200)] px-4 py-4 sm:px-5">
+              <h2 className="font-heading text-base font-bold text-[var(--ca-navy-900)]">How would you like to pay?</h2>
+              <div role="radiogroup" aria-label="How would you like to pay?" className="mt-3 space-y-2">
+                {emiAvailable && (
+                  <ChoiceCard
+                    selected={method === "installments"}
+                    title="Installments"
+                    badge="Popular"
+                    amount={`${formatINR(emiToday)} today`}
+                    onSelect={() => chooseMethod("installments")}
+                  >
+                    <span className="block font-medium text-[var(--ca-navy-900)]">
+                      {installmentIntent.bookSeat ? `Then ${cadence}` : `${cadence.charAt(0).toUpperCase()}${cadence.slice(1)}`}
+                    </span>
+                    <span className="mt-0.5 block">
+                      {installmentIntent.bookSeat
+                        ? "Reserve your seat today and pay the remaining amount over time."
+                        : "Pay the first installment today. The rest follows the schedule."}
+                    </span>
+                  </ChoiceCard>
+                )}
+                {fullAvailable && (
+                  <ChoiceCard
+                    selected={method === "full"}
+                    title="Pay in Full"
+                    amount={`${formatINR(fullToday)} today`}
+                    onSelect={() => chooseMethod("full")}
+                  >
+                    {saveVsInstallments > 0 && (
+                      <span className="block font-semibold text-[#16a34a]">Save {formatINR(saveVsInstallments)} vs installments</span>
+                    )}
+                    <span className="mt-0.5 block">Pay the complete discounted fee now.</span>
+                  </ChoiceCard>
                 )}
               </div>
-              <div className="min-w-0">
-                <p className="ca-eyebrow">Secure enrollment</p>
-                <h1 className="mt-1 font-heading text-lg font-bold leading-snug text-[var(--ca-navy-900)] sm:text-xl">{course.title}</h1>
-                <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[var(--ca-slate-700)]">
-                  {ec.batch_start && (
-                    <span className="inline-flex items-center gap-1"><CalendarClock size={13} /> Starts {formatISTDate(ec.batch_start)}</span>
-                  )}
-                  {ec.batch_timings?.length ? <span>{ec.batch_timings.join(" · ")}</span> : null}
-                  <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 font-semibold text-emerald-700">GST included</span>
-                </div>
-              </div>
-            </div>
-          </div>
 
-          {/* Batch selector — only when the course offers multiple batches */}
-          {multiBatch && (
-            <BatchSelector batches={batches} selectedId={batchId} onSelect={setBatchId} />
-          )}
-
-          {/* STEP A — Book your seat (modifier, works with both plans) */}
-          {seatConfigured && (
-            <div>
-              <h2 className="font-heading text-base font-bold text-[var(--ca-navy-900)]"><span className="text-[var(--ca-gold)]">Step 1.</span> Book your seat (optional)</h2>
-              <button
-                type="button"
-                onClick={() => setBookSeat((v) => !v)}
-                aria-pressed={bookSeat}
-                className={`ca-focus mt-3 flex w-full items-center justify-between gap-3 rounded-2xl border-2 p-4 text-left transition ${bookSeat ? "border-[var(--ca-gold)] bg-white shadow-soft-lg" : "border-[var(--ca-slate-200)] bg-white hover:border-[var(--ca-slate-300)]"}`}
-              >
-                <div className="min-w-0">
-                  <p className="inline-flex items-center gap-2 font-bold text-[var(--ca-navy-900)]"><Tag size={17} /> Book your seat now</p>
-                  <p className="mt-1 text-xs text-[var(--ca-slate-700)]">Pay {formatINR(cfg.seatAmount ?? seatFloor)} today to lock your spot — deducted from your total, pay the rest later.</p>
-                </div>
-                <span className={`grid h-6 w-11 shrink-0 items-center rounded-full px-0.5 transition ${bookSeat ? "bg-[var(--ca-gold)]" : "bg-[var(--ca-slate-300)]"}`}>
-                  <span className={`h-5 w-5 rounded-full bg-white shadow transition-transform ${bookSeat ? "translate-x-5" : "translate-x-0"}`} />
-                </span>
-              </button>
-
-              {/* Custom seat amount */}
-              {bookSeat && cfg.allowCustomSeat && (
-                <div className="mt-3 rounded-xl border border-[var(--ca-slate-200)] bg-white p-4">
-                  <label className="text-sm font-semibold text-[var(--ca-navy-900)]">Seat amount</label>
-                  <div className="mt-2 flex items-center gap-2">
-                    <span className="font-heading text-lg font-bold text-[var(--ca-navy-900)]">₹</span>
-                    <input
-                      type="number"
-                      inputMode="numeric"
-                      className="w-40 rounded-xl border border-[var(--ca-slate-300)] px-3 py-2 font-semibold focus:border-[var(--ca-gold)] focus:outline-none"
-                      value={seatInput}
-                      min={seatFloor}
-                      max={base - 1}
-                      onChange={(e) => setSeatInput(Math.round(Number(e.target.value) || 0))}
-                      onBlur={() => setSeatInput((v) => Math.min(base - 1, Math.max(seatFloor, v)))}
-                    />
-                  </div>
-                  <p className={`mt-1 text-xs ${seatTooLow || seatTooHigh ? "text-red-600" : "text-[var(--ca-slate-700)]"}`}>
-                    {seatTooHigh ? "Seat amount must be less than the total." : `Pay any amount from ${formatINR(seatFloor)}.`}
+              <div className="mt-4 space-y-1.5 border-t border-[var(--ca-slate-200)] pt-3" aria-live="polite">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-[var(--ca-slate-700)]">Your payment</p>
+                <MoneyRow label="Pay today" value={formatINR(todayAmount)} strong />
+                <MoneyRow label={totalLabel} value={formatINR(grandTotal)} />
+                {!seatOutOfRange && planOk && <MoneyRow label="Remaining balance" value={formatINR(remaining)} />}
+                {seatTooLow && (
+                  <p role="alert" className="text-sm text-red-600">Minimum amount is {formatINR(seatFloor)}.</p>
+                )}
+                {seatTooHigh && (
+                  <p role="alert" className="text-sm text-red-600">Amount must stay below the installment plan total.</p>
+                )}
+                {method === "full" && saveVsInstallments > 0 && (
+                  <MoneyRow label="You save" value={`${formatINR(saveVsInstallments)} vs installments`} save />
+                )}
+                {applied && couponDiscount > 0 && (
+                  <MoneyRow label={`Coupon ${applied.code}`} value={`− ${formatINR(couponDiscount)}`} save />
+                )}
+                {applied && (
+                  <p className="text-xs text-[var(--ca-slate-700)]">{totalLabel} before coupon {formatINR(originalTotal)}.</p>
+                )}
+                {method === "installments" && (
+                  <p className="text-sm text-[var(--ca-navy-900)]">
+                    {cadence.charAt(0).toUpperCase()}{cadence.slice(1)}
+                    {firstInstallment?.due ? ` · First due ${formatISTDate(firstInstallment.due)}` : ""}
                   </p>
+                )}
+                {seatActive && !seatOutOfRange && planOk && (
+                  <p className="text-sm text-[var(--ca-slate-700)]">
+                    Today&apos;s {formatINR(todayAmount)} is part of the {formatINR(grandTotal)} installment plan, not a separate fee.
+                  </p>
+                )}
+              </div>
+
+              {method === "installments" && emiAvailable && cfg.installmentCounts.length > 1 && (
+                <div className="mt-3">
+                  <p className="text-sm font-semibold text-[var(--ca-navy-900)]">Number of installments</p>
+                  <div className="mt-2 flex flex-wrap gap-2" role="radiogroup" aria-label="Number of installments">
+                    {cfg.installmentCounts.map((n) => (
+                      <button
+                        key={n}
+                        type="button"
+                        role="radio"
+                        aria-checked={count === n}
+                        onClick={() => setCount(n)}
+                        className={`ca-focus min-h-11 rounded-full border px-4 text-sm font-semibold ${
+                          count === n
+                            ? "border-[var(--ca-gold)] bg-[var(--ca-navy-900)] text-[var(--ca-gold-bright)]"
+                            : "border-[var(--ca-slate-300)] bg-white text-[var(--ca-slate-700)]"
+                        }`}
+                      >
+                        {n} payments
+                      </button>
+                    ))}
+                  </div>
                 </div>
               )}
-            </div>
-          )}
 
-          {/* STEP B — payment plan */}
-          <div>
-            <h2 className="font-heading text-base font-bold text-[var(--ca-navy-900)]">
-              {seatConfigured ? <span className="text-[var(--ca-gold)]">Step 2. </span> : null}Choose your payment plan
-            </h2>
-            <div className="mt-3 grid gap-3 sm:grid-cols-2">
-              {fullAvailable && (
-                <button
-                  type="button"
-                  onClick={() => setPlan("full")}
-                  className={`ca-focus relative rounded-2xl border-2 p-4 text-left transition ${plan === "full" ? "border-[var(--ca-gold)] bg-white shadow-soft-lg" : "border-[var(--ca-slate-200)] bg-white hover:border-[var(--ca-slate-300)]"}`}
-                >
-                  {fullSavings > 0 && (
-                    <span className="absolute -top-2.5 right-3 inline-flex items-center gap-1 rounded-full bg-[#16a34a] px-2 py-0.5 text-[10px] font-bold text-white"><Sparkles size={11} /> Save {formatINR(fullSavings)}</span>
-                  )}
-                  <div className="flex items-center justify-between">
-                    <span className="inline-flex items-center gap-2 font-bold text-[var(--ca-navy-900)]"><Wallet size={18} /> Pay in Full</span>
-                    {plan === "full" && <CheckCircle2 size={18} className="text-[var(--ca-gold)]" />}
-                  </div>
-                  <div className="mt-2 flex items-baseline gap-2">
-                    <span className="font-heading text-2xl font-extrabold text-[var(--ca-navy-900)]">{formatINR(payInFull)}</span>
-                    {fullSavings > 0 && <span className="text-sm text-[var(--ca-slate-400)] line-through">{formatINR(standardTotal)}</span>}
-                  </div>
-                  <p className="mt-1 text-xs text-[var(--ca-slate-700)]">Best price · full access · GST included</p>
-                </button>
-              )}
-
-              {emiAvailable && (
-                <button
-                  type="button"
-                  onClick={() => setPlan("emi")}
-                  className={`ca-focus relative rounded-2xl border-2 p-4 text-left transition ${plan === "emi" ? "border-[var(--ca-gold)] bg-white shadow-soft-lg" : "border-[var(--ca-slate-200)] bg-white hover:border-[var(--ca-slate-300)]"}`}
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="inline-flex items-center gap-2 font-bold text-[var(--ca-navy-900)]"><CalendarClock size={18} /> EMI / Installments</span>
-                    {plan === "emi" && <CheckCircle2 size={18} className="text-[var(--ca-gold)]" />}
-                  </div>
-                  <p className="mt-2 font-heading text-2xl font-extrabold text-[var(--ca-navy-900)]">{formatINR(standardTotal)}</p>
-                  <p className="mt-1 text-xs text-[var(--ca-slate-700)]">Spread the standard fee over easy monthly payments</p>
-                </button>
-              )}
-            </div>
-
-            {/* Transparent comparison */}
-            {fullAvailable && emiAvailable && fullSavings > 0 && (
-              <p className="mt-3 rounded-xl bg-[rgba(212,175,55,0.10)] px-4 py-2.5 text-sm text-[#8a6d12]">
-                <b>Pay in full and save {formatINR(fullSavings)}</b> ({formatINR(payInFull)}) vs <b>pay over time</b> ({formatINR(standardTotal)} via EMI). All prices GST-inclusive.
-              </p>
-            )}
-          </div>
-
-          {/* EMI installment count */}
-          {plan === "emi" && emiAvailable && (
-            <div className="ca-card space-y-3 p-5">
-              <label className="text-sm font-semibold text-[var(--ca-navy-900)]">Number of installments</label>
-              <div className="flex flex-wrap gap-2">
-                {cfg.installmentCounts.map((n) => (
-                  <button
-                    key={n}
-                    type="button"
-                    onClick={() => setCount(n)}
-                    className={`ca-focus rounded-full border px-4 py-1.5 text-sm font-semibold transition ${count === n ? "border-[var(--ca-gold)] bg-[var(--ca-navy-900)] text-[var(--ca-gold-bright)]" : "border-[var(--ca-slate-300)] bg-white text-[var(--ca-slate-700)] hover:border-[var(--ca-slate-400)]"}`}
-                  >
-                    {n} months
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Schedule preview */}
-          <div className="ca-card p-5">
-            <h3 className="font-heading text-base font-bold text-[var(--ca-navy-900)]">Payment schedule</h3>
-            <div className="mt-3 overflow-hidden rounded-xl border border-[var(--ca-slate-200)]">
-              <div className="flex items-center justify-between bg-[var(--ca-slate-50)] px-4 py-2.5 text-xs font-bold uppercase tracking-wide text-[var(--ca-slate-700)]">
-                <span>{formatISTDate(bookingISO)} onward</span><span>IST</span>
-              </div>
-              <div className="divide-y divide-[var(--ca-slate-200)]">
-                <ScheduleRow label={todayItem?.label || "Payment"} amount={todayAmount} due="Pay now" highlight />
-                {laterItems.map((it) => (
-                  <ScheduleRow key={it.no} label={it.label} amount={it.amount} due={it.due ? `Due ${formatISTDate(it.due)}` : "Later"} />
-                ))}
-              </div>
-            </div>
-            {plan === "emi" && (
-              <p className="mt-2 text-xs text-[var(--ca-slate-700)]">
-                {seatActive
-                  ? `First installment ~${cfg.firstIntervalDays} days after booking, then every ${cfg.intervalMonths === 1 ? "month" : `${cfg.intervalMonths} months`}.`
-                  : `First installment today, then every ${cfg.intervalMonths === 1 ? "month" : `${cfg.intervalMonths} months`}.`}
-              </p>
-            )}
-          </div>
-
-          {/* Coupon */}
-          <div className="ca-card space-y-3 p-5">
-            <button
-              type="button"
-              onClick={() => setCouponOpen((v) => !v)}
-              aria-expanded={couponOpen}
-              className="ca-focus flex w-full items-center justify-between text-left"
-            >
-              <span className="inline-flex items-center gap-2 font-heading text-base font-bold text-[var(--ca-navy-900)]">
-                <Tag size={16} /> Have a coupon code?
-              </span>
-              <ChevronDown size={16} className={`text-[var(--ca-slate-400)] transition ${couponOpen || applied ? "rotate-180" : ""}`} />
-            </button>
-
-            {applied ? (
-              <div className="flex items-center justify-between gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-sm">
-                <div>
-                  <p className="font-semibold text-emerald-800">{applied.code}</p>
-                  <p className="text-xs text-emerald-700">− {formatINR(couponDiscount)} off course fee</p>
-                </div>
-                <button type="button" onClick={removeCoupon} className="ca-focus text-xs font-semibold text-[var(--ca-navy-700)] underline-offset-2 hover:underline">
-                  Remove
-                </button>
-              </div>
-            ) : couponOpen ? (
-              <div>
-                <div className="flex gap-2">
-                  <input
-                    className="w-full rounded-xl border border-[var(--ca-slate-300)] px-3 py-2.5 uppercase focus:border-[var(--ca-gold)] focus:outline-none"
-                    placeholder="Enter code"
-                    value={couponInput}
-                    onChange={(e) => setCouponInput(e.target.value.toUpperCase())}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        e.preventDefault();
-                        void applyCoupon();
+              {method === "installments" && !seatOutOfRange && laterSchedule.length > 0 && (
+                <InstallmentScheduleAccordion
+                  open={scheduleOpen}
+                  onToggle={() => {
+                    setScheduleOpen((open) => {
+                      if (!open) {
+                        trackClient("installment_schedule_expanded", { course_id: course.id, course_slug: course.slug });
                       }
-                    }}
-                  />
+                      return !open;
+                    });
+                  }}
+                  schedule={laterSchedule}
+                  bookingISO={bookingISO}
+                />
+              )}
+
+              {method === "installments" && seatActive && cfg.allowCustomSeat && (
+                <div className="mt-3">
                   <button
                     type="button"
-                    onClick={() => void applyCoupon()}
-                    disabled={couponLoading}
-                    className="ca-btn ca-btn-outline ca-focus shrink-0 whitespace-nowrap disabled:opacity-60"
+                    className="ca-focus min-h-11 text-sm font-semibold text-[var(--ca-navy-600)]"
+                    aria-expanded={amountOpen}
+                    aria-controls="booking-amount-editor"
+                    onClick={() => setAmountOpen((v) => !v)}
                   >
-                    {couponLoading ? "…" : "Apply"}
+                    {amountOpen ? "Hide amount" : "Want to pay more today?"}
                   </button>
+                  {amountOpen && (
+                    <div id="booking-amount-editor" className="mt-2">
+                      <label htmlFor="booking-amount" className="text-sm font-semibold text-[var(--ca-navy-900)]">
+                        Pay today
+                      </label>
+                      <div className="mt-1 flex items-center gap-2">
+                        <span className="font-heading text-lg font-bold text-[var(--ca-navy-900)]" aria-hidden="true">₹</span>
+                        <input
+                          id="booking-amount"
+                          type="number"
+                          inputMode="numeric"
+                          aria-invalid={seatInvalid}
+                          aria-describedby="booking-amount-help"
+                          className="w-40 scroll-mb-[calc(var(--checkout-paybar-height,5.5rem)+1rem)] rounded-xl border border-[var(--ca-slate-300)] px-3 py-2.5 text-base font-semibold focus:border-[var(--ca-gold)] focus:outline-none"
+                          value={seatInput}
+                          min={seatFloor}
+                          max={Math.max(seatFloor, seatCeiling - 1)}
+                          onChange={(e) => {
+                            const next = Math.round(Number(e.target.value) || 0);
+                            setSeatInput(next);
+                          }}
+                          onBlur={() => {
+                            setSeatInput((v) => {
+                              const clamped = clampSeat(v);
+                              if (clamped !== (cfg.seatAmount ?? seatFloor)) {
+                                trackClient("booking_amount_changed", {
+                                  course_id: course.id,
+                                  course_slug: course.slug,
+                                  amount: clamped,
+                                });
+                              }
+                              return clamped;
+                            });
+                          }}
+                        />
+                      </div>
+                      <p id="booking-amount-help" className={`mt-1 text-sm ${seatInvalid ? "text-red-600" : "text-[var(--ca-slate-700)]"}`} role={seatInvalid ? "alert" : undefined}>
+                        {seatTooHigh ? "Amount must stay below the installment plan total." : `Minimum amount is ${formatINR(seatFloor)}.`}
+                      </p>
+                    </div>
+                  )}
                 </div>
-                {couponError && <p className="mt-1.5 text-xs text-red-600">{couponError}</p>}
-              </div>
-            ) : null}
+              )}
+            </section>
+          )}
+
+          <div className="border-t border-[var(--ca-slate-200)]">
+            <StudentDetailsForm
+              name={name}
+              phone={phone}
+              email={email}
+              onName={setName}
+              onPhone={setPhone}
+              onEmail={setEmail}
+              onFocusCapture={onFocusCapture}
+              error={error}
+            />
           </div>
 
-          {/* Your details */}
-          <div className="ca-card space-y-3 p-5">
-            <h3 className="font-heading text-base font-bold text-[var(--ca-navy-900)]">Your details</h3>
-            <input
-              className="w-full rounded-xl border border-[var(--ca-slate-300)] px-3 py-2.5 focus:border-[var(--ca-gold)] focus:outline-none"
-              placeholder="Full name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              onFocus={onFocusCapture}
+          <div className="border-t border-[var(--ca-slate-200)]">
+            <CouponAccordion
+              open={couponOpen}
+              onToggle={() => {
+                setCouponOpen((open) => {
+                  if (!open) trackClient("coupon_opened", { course_id: course.id, course_slug: course.slug });
+                  return !open;
+                });
+              }}
+              applied={applied}
+              discountLabel={couponDiscount > 0 ? `− ${formatINR(couponDiscount)} off the plan total` : null}
+              input={couponInput}
+              onInput={setCouponInput}
+              onApply={() => void applyCoupon()}
+              onRemove={removeCoupon}
+              loading={couponLoading}
+              error={couponError}
             />
-            <input className="w-full rounded-xl border border-[var(--ca-slate-300)] px-3 py-2.5 focus:border-[var(--ca-gold)] focus:outline-none" placeholder="10-digit mobile *" inputMode="numeric" value={phone} onChange={(e) => setPhone(e.target.value.replace(/\D/g, "").slice(0, 10))} />
-            <input className="w-full rounded-xl border border-[var(--ca-slate-300)] px-3 py-2.5 focus:border-[var(--ca-gold)] focus:outline-none" type="email" placeholder="Email (optional — for receipts)" value={email} onChange={(e) => setEmail(e.target.value)} />
-            <p className="text-xs text-[var(--ca-slate-700)]">You&apos;ll receive a login code after payment to access your Class Hub and payment history.</p>
           </div>
         </div>
 
-        {/* ---------------- RIGHT: sticky order summary (desktop) ---------------- */}
         <aside className="hidden lg:block">
-          <div className="sticky top-24">
-            <OrderSummary
-              plan={plan}
-              seatActive={seatActive}
-              base={base}
-              todayAmount={todayAmount}
-              remaining={remaining}
-              laterCount={laterItems.length}
-              grandTotal={grandTotal}
-              fullSavings={fullSavings}
-              couponCode={applied?.code ?? null}
-              couponDiscount={couponDiscount}
-              originalTotal={originalTotal}
-              error={error}
-              loading={loading}
-              payLabel={payLabel}
-              onPay={proceed}
-            />
+          <div className="sticky top-20 rounded-2xl border border-[var(--ca-slate-200)] bg-white p-5">
+            <h2 className="font-heading text-base font-bold text-[var(--ca-navy-900)]">Enrollment summary</h2>
+            <div className="mt-3 space-y-2">
+              {selectedBatch && <MoneyRow label="Batch" value={[selectedAxis?.mode, selectedAxis?.timing].filter(Boolean).join(" · ") || selectedBatch.label || "Selected"} />}
+              <MoneyRow label="Plan" value={method === "installments" ? "Installments" : "Pay in Full"} />
+              <MoneyRow label={totalLabel} value={formatINR(grandTotal)} />
+              <MoneyRow label="Pay today" value={formatINR(todayAmount)} strong />
+              {!seatOutOfRange && planOk && <MoneyRow label="Remaining balance" value={formatINR(remaining)} />}
+            </div>
+            {error && <p role="alert" className="mt-3 text-sm text-red-600">{error}</p>}
+            <div className="mt-4">
+              <PayButton label={payLabel} loading={loading} disabled={seatInvalid} onClick={() => void proceed()} />
+            </div>
+            <TrustLine />
+            {course.gst && <p className="mt-1 text-center text-[11px] text-[var(--ca-slate-700)]">GST included</p>}
           </div>
         </aside>
       </div>
 
-      {/* ---------------- MOBILE sticky bottom bar ---------------- */}
-      <div className="fixed inset-x-0 bottom-0 z-40 border-t border-[var(--ca-slate-200)] bg-white/95 backdrop-blur lg:hidden">
-        {detailsOpen && (
-          <div className="max-h-[50vh] overflow-y-auto border-b border-[var(--ca-slate-200)] p-4">
-            <SummaryRows plan={plan} seatActive={seatActive} base={base} todayAmount={todayAmount} remaining={remaining} laterCount={laterItems.length} grandTotal={grandTotal} fullSavings={fullSavings} couponCode={applied?.code ?? null} couponDiscount={couponDiscount} originalTotal={originalTotal} />
-          </div>
-        )}
+      <div
+        ref={paybarRef}
+        className="fixed inset-x-0 bottom-0 z-[70] border-t border-[var(--ca-slate-200)] bg-white lg:hidden"
+        style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
+      >
         <div className="flex items-center gap-3 px-4 py-2.5">
-          <button onClick={() => setDetailsOpen((v) => !v)} className="ca-focus shrink-0 text-left">
-            <p className="text-[11px] leading-none text-[var(--ca-slate-400)]">Total today</p>
-            <p className="inline-flex items-center gap-1 font-heading text-lg font-bold leading-tight text-[var(--ca-navy-900)]">
-              {formatINR(todayAmount)} <ChevronDown size={14} className={`transition ${detailsOpen ? "rotate-180" : ""}`} />
-            </p>
-          </button>
-          <button onClick={proceed} disabled={loading} className="ca-btn ca-btn-gold ca-focus flex-1 justify-center disabled:opacity-60">
-            {loading ? "Starting…" : payLabel}
-          </button>
+          <div className="min-w-0 shrink-0" aria-live="polite">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-[var(--ca-slate-700)]">Today</p>
+            <p className="font-heading text-lg font-extrabold leading-tight text-[var(--ca-navy-900)]">{formatINR(todayAmount)}</p>
+          </div>
+          <div className="min-w-0 flex-1">
+            <PayButton label={payLabel} loading={loading} disabled={seatInvalid} onClick={() => void proceed()} />
+          </div>
         </div>
-        {error && <p className="px-4 pb-2 text-xs text-red-600">{error}</p>}
+        {error && <p role="alert" className="px-4 pb-2 text-xs text-red-600">{error}</p>}
       </div>
-    </div>
-  );
-}
-
-/** Multi-batch picker. Choosing a batch updates price/start/seats via the parent's effective course. */
-function BatchSelector({ batches, selectedId, onSelect }: { batches: CourseBatch[]; selectedId: string | null; onSelect: (id: string) => void }) {
-  return (
-    <div>
-      <h2 className="font-heading text-base font-bold text-[var(--ca-navy-900)]">Choose your batch</h2>
-      <p className="mt-1 text-xs text-[var(--ca-slate-700)]">Pick a batch — the price, start date and seats update to match your choice.</p>
-      <div className="mt-3 grid gap-3 sm:grid-cols-2">
-        {batches.map((b) => {
-          const selected = b.id === selectedId;
-          const std = Math.max(0, Math.round(b.price || 0));
-          const pif = payInFullTotal({ price: b.price, pay_in_full_price: b.pay_in_full_price });
-          const anchor = b.original_price && b.original_price > std ? Math.round(b.original_price) : null;
-          const modeTiming = [batchModeLabel(b), batchTimingLabel(b)].filter(Boolean).join(" · ");
-          const title = b.label || modeTiming || "Batch";
-          return (
-            <button
-              key={b.id}
-              type="button"
-              onClick={() => onSelect(b.id)}
-              aria-pressed={selected}
-              className={`ca-focus relative rounded-2xl border-2 p-4 text-left transition ${selected ? "border-[var(--ca-gold)] bg-white shadow-soft-lg" : "border-[var(--ca-slate-200)] bg-white hover:border-[var(--ca-slate-300)]"}`}
-            >
-              <div className="flex items-center justify-between gap-2">
-                <span className="font-bold text-[var(--ca-navy-900)]">{title}</span>
-                {selected && <CheckCircle2 size={18} className="text-[var(--ca-gold)]" />}
-              </div>
-              {b.label && modeTiming && <p className="mt-0.5 text-xs text-[var(--ca-slate-700)]">{modeTiming}</p>}
-              <div className="mt-2 flex items-baseline gap-2">
-                <span className="font-heading text-xl font-extrabold text-[var(--ca-navy-900)]">{formatINR(pif)}</span>
-                {anchor && <span className="text-sm text-[var(--ca-slate-400)] line-through">{formatINR(anchor)}</span>}
-              </div>
-              <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[var(--ca-slate-700)]">
-                {b.start_date && <span className="inline-flex items-center gap-1"><CalendarClock size={12} /> Starts {formatISTDate(b.start_date)}</span>}
-                {b.seats_left != null && <span className="inline-flex items-center gap-1"><Users size={12} /> {b.seats_left} seats left</span>}
-              </div>
-            </button>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-function ScheduleRow({ label, amount, due, highlight }: { label: string; amount: number; due: string; highlight?: boolean }) {
-  return (
-    <div className={`flex items-center justify-between px-4 py-2.5 text-sm ${highlight ? "bg-[rgba(212,175,55,0.12)]" : ""}`}>
-      <div>
-        <p className="font-semibold text-[var(--ca-navy-900)]">{label}</p>
-        <p className="text-xs text-[var(--ca-slate-700)]">{due}</p>
-      </div>
-      <span className="font-heading font-bold text-[var(--ca-navy-900)]">{formatINR(amount)}</span>
-    </div>
-  );
-}
-
-interface SummaryProps {
-  plan: Plan;
-  seatActive: boolean;
-  base: number;
-  todayAmount: number;
-  remaining: number;
-  laterCount: number;
-  grandTotal: number;
-  fullSavings: number;
-  couponCode?: string | null;
-  couponDiscount?: number;
-  originalTotal?: number;
-}
-
-function SummaryRows(p: SummaryProps) {
-  const baseLabel = p.plan === "full" ? "Pay-in-full price" : "Course fee";
-  const showCoupon = !!p.couponCode && (p.couponDiscount || 0) > 0;
-  return (
-    <div className="space-y-2.5 text-sm">
-      <Row label={baseLabel} value={formatINR(showCoupon ? (p.originalTotal ?? p.base) : p.base)} />
-      {p.plan === "full" && p.fullSavings > 0 && !showCoupon && <Row label="You save" value={`− ${formatINR(p.fullSavings)}`} success />}
-      {showCoupon && <Row label={`Coupon ${p.couponCode}`} value={`− ${formatINR(p.couponDiscount || 0)}`} success />}
-      {p.seatActive && (
-        <>
-          <Row label="Seat today" value={formatINR(p.todayAmount)} strong />
-          <Row label={p.laterCount > 1 ? `Remaining over ${p.laterCount} installments` : "Remaining balance"} value={formatINR(p.remaining)} />
-        </>
-      )}
-      {!p.seatActive && p.plan === "emi" && (
-        <>
-          <Row label="Installment today" value={formatINR(p.todayAmount)} strong />
-          <Row label={`Remaining over ${p.laterCount} installments`} value={formatINR(p.remaining)} />
-        </>
-      )}
-      <div className="my-2 border-t border-dashed border-[var(--ca-slate-300)]" />
-      <Row label="Total today" value={formatINR(p.todayAmount)} big />
-      <div className="flex items-center justify-between rounded-lg bg-[var(--ca-slate-50)] px-3 py-2 text-xs">
-        <span className="text-[var(--ca-slate-700)]">Grand total (GST incl.)</span>
-        <span className="font-bold text-[var(--ca-navy-900)]">{formatINR(p.grandTotal)}</span>
-      </div>
-    </div>
-  );
-}
-
-function OrderSummary(props: SummaryProps & { error: string | null; loading: boolean; payLabel: string; onPay: () => void }) {
-  return (
-    <div className="ca-card p-5">
-      <h3 className="font-heading text-base font-bold text-[var(--ca-navy-900)]">Order summary</h3>
-      <div className="mt-4">
-        <SummaryRows {...props} />
-      </div>
-      {props.error && <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-600">{props.error}</p>}
-      <button onClick={props.onPay} disabled={props.loading} className="ca-btn ca-btn-gold ca-focus mt-4 w-full justify-center disabled:opacity-60">
-        {props.loading ? "Starting…" : props.payLabel}
-      </button>
-      <p className="mt-3 flex items-center justify-center gap-1.5 text-xs text-[var(--ca-slate-700)]"><ShieldCheck size={14} className="text-emerald-600" /> Secure checkout · verified server-side</p>
-      <p className="mt-1 flex items-center justify-center gap-1.5 text-[11px] text-[var(--ca-slate-400)]"><Lock size={11} /> Your details are never shared</p>
-    </div>
-  );
-}
-
-function Row({ label, value, strong, big, success }: { label: string; value: string; strong?: boolean; big?: boolean; success?: boolean }) {
-  return (
-    <div className="flex items-center justify-between">
-      <span className={`${big ? "font-semibold text-[var(--ca-navy-900)]" : "text-[var(--ca-slate-700)]"}`}>{label}</span>
-      <span className={`${big ? "font-heading text-xl font-extrabold text-[var(--ca-navy-900)]" : success ? "font-bold text-[#16a34a]" : strong ? "font-bold text-[var(--ca-navy-900)]" : "font-semibold text-[var(--ca-navy-900)]"}`}>{value}</span>
     </div>
   );
 }

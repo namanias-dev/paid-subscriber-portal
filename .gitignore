@@ -30,8 +30,13 @@ yarn-error.log*
 
 # local env files
 .env
+.env.*
+!.env.example
 .env.local
 .env*.local
+*.key
+credentials.json
+service-account*.json
 
 # vercel
 .vercel
@@ -54,4 +59,11 @@ next-env.d.ts
 # or passes --service-account-path=<file> as an ephemeral local input for the dry-run.
 credentials/
 service_account*.json
+
+# Local Gmail OTP helper (desktop OAuth). Never deploy, never commit secrets.
+scripts/local/shipping-gmail-otp/.venv/
+scripts/local/shipping-gmail-otp/__pycache__/
+scripts/local/shipping-gmail-otp/client_secret.json
+scripts/local/shipping-gmail-otp/token.json
+scripts/local/shipping-gmail-otp/*.token.json
 

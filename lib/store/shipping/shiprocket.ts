@@ -24,7 +24,7 @@ export const shiprocketProvider: ShippingProvider = {
   },
   async createShipment(_input: CreateShipmentInput): Promise<ShipmentResult> {
     throw new Error(
-      "Shiprocket integration is not configured. Set SHIPROCKET_* credentials and implement lib/store/shipping/shiprocket.ts, or use the manual courier/AWB flow.",
+      "Shiprocket shipment creation is disabled. Record the courier and AWB manually. Rate quotes do not create a label or pickup.",
     );
   },
 };

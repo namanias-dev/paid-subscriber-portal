@@ -16,12 +16,10 @@ export const STORE_ACCESS_TOKEN_BYTES = 24;
 const COOKIE_MAX_AGE_SEC = 60 * 60 * 24 * 14; // 14 days — covers dispatch window
 
 function pepper(): string {
-  // Prefer a dedicated pepper; fall back to JWT_SECRET; never empty.
-  return (
-    (process.env.STORE_ACCESS_TOKEN_PEPPER || "").trim() ||
-    (process.env.JWT_SECRET || "").trim() ||
-    "nsa-store-access-v1"
-  );
+  // Dedicated pepper only. Do not fall back to JWT_SECRET: rotating session
+  // keys must not invalidate existing Notes Store order links. The historical
+  // default matches every order hashed before a dedicated pepper was set.
+  return (process.env.STORE_ACCESS_TOKEN_PEPPER || "").trim() || "nsa-store-access-v1";
 }
 
 /** Cryptographically secure opaque token (≥128 bits). */
@@ -72,11 +70,21 @@ export function parseOrderAccessCookie(
   return { orderNo, token };
 }
 
-export function storeOrderAccessCookieOptions() {
+/**
+ * Cookie that lets the paying browser reopen the order after ICICI.
+ * On namanias.com it must be SameSite=None and parent-domain scoped: the
+ * return is a cross-site POST, and UPI often takes longer than Chrome's
+ * two-minute Lax exemption. Local and preview hosts stay Lax.
+ */
+export function storeOrderAccessCookieOptions(host?: string | null) {
+  const secure = process.env.NODE_ENV === "production" || process.env.VERCEL === "1";
+  const bare = (host || "").split(":")[0].toLowerCase();
+  const onAcademy = bare === "namanias.com" || bare.endsWith(".namanias.com");
   return {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production" || process.env.VERCEL === "1",
-    sameSite: "lax" as const,
+    secure,
+    sameSite: (secure && onAcademy ? "none" : "lax") as "none" | "lax",
+    ...(onAcademy ? { domain: ".namanias.com" } : {}),
     path: "/",
     maxAge: COOKIE_MAX_AGE_SEC,
   };

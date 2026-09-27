@@ -1,340 +1,417 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { PageHeader } from "@/components/admin/ui";
+import { useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { formatPaise } from "@/lib/store/money";
+import {
+  fulfillmentLabel,
+  fulfillmentTone,
+  formatAdminWhen,
+  invoiceStatusLabel,
+  orderIndexLabel,
+  pickupFailedActivity,
+  type BadgeTone,
+} from "@/lib/store/adminConsole";
+import { BUSINESS_CHANNELS } from "@/lib/analytics/notesCommerce";
+import OrderDetail, { type AdminOrder } from "./orders/OrderDetail";
+import CourierPicker from "./orders/CourierPicker";
+import { ViewInvoiceButton } from "./orders/InvoiceActions";
+import { FulfillmentTimeline } from "./orders/FulfillmentTimeline";
+import { showsFulfillmentTimeline } from "@/lib/store/opsBoard";
+import { productSummary } from "@/lib/store/stages";
 
-interface Address {
-  name?: string;
-  phone?: string;
-  line1: string;
-  line2: string | null;
-  city: string;
-  state: string;
-  pincode: string;
-  landmark: string | null;
-  delivery_instructions?: string | null;
+const FILTERS = [
+  { key: "", label: "All orders", count: "total" },
+  { key: "paid", label: "Paid", count: "paid" },
+  { key: "new", label: "New", count: "new" },
+  { key: "preparing", label: "Preparing", count: "preparing" },
+  { key: "printing", label: "Printing", count: "printing" },
+  { key: "packed", label: "Packed", count: "packed" },
+  { key: "pickup", label: "Pickup", count: "pickup" },
+  { key: "shipped", label: "Shipped", count: "transit" },
+  { key: "delivered", label: "Delivered", count: "delivered" },
+  { key: "issues", label: "Issues", count: "issues" },
+] as const;
+
+function rowAccent(status: string, actionRequired: boolean): string {
+  if (status === "PAYMENT_PENDING" || actionRequired && (status === "PAYMENT_PENDING" || status === "REFUND_PENDING")) return "border-l-amber-600 bg-amber-50/70";
+  if (status === "CANCELLED" || status === "PAYMENT_FAILED" || status === "PAYMENT_EXPIRED" || status === "REFUNDED") return "border-l-red-700/50 bg-red-50/50";
+  if (status === "DELIVERED") return "border-l-emerald-700 bg-emerald-50/50";
+  if (status === "PROCESSING") return "border-l-amber-600 bg-amber-50/40";
+  if (status === "PRINTING" || status === "QUALITY_CHECK" || status === "READY_TO_PACK") return "border-l-[var(--ca-gold-dark)] bg-[var(--ca-gold)]/10";
+  if (status === "PACKED" || status === "READY_FOR_PICKUP") return "border-l-indigo-700 bg-indigo-50/50";
+  if (status === "PICKUP_SCHEDULED") return "border-l-teal-700 bg-teal-50/50";
+  if (status === "PICKED_UP" || status === "IN_TRANSIT" || status === "OUT_FOR_DELIVERY") return "border-l-sky-700 bg-sky-50/40";
+  if (status === "ORDER_CONFIRMED" || status === "PAYMENT_CONFIRMED") return "border-l-indigo-500 bg-indigo-50/30";
+  if (actionRequired) return "border-l-amber-600 bg-amber-50/40";
+  return "border-l-transparent";
 }
 
-interface Row {
-  id: string;
-  order_no: string;
-  status: string;
-  customer_name: string;
-  phone: string;
-  email: string | null;
-  total_paise: number;
-  payment_status: string | null;
-  promised_delivery_date: string | null;
-  placed_at: string;
-  internal_notes: string | null;
-  address: Address | null;
-  items: Array<{ name: string; qty: number; sku: string }>;
-  shipment: { courier: string | null; awb: string | null; tracking_url: string | null } | null;
-}
+const TONE: Record<BadgeTone, string> = {
+  neutral: "bg-[var(--ca-navy)]/5 text-[var(--ca-navy)]",
+  navy: "bg-[var(--ca-navy)] text-white",
+  gold: "bg-[var(--ca-gold)]/30 text-[var(--ca-gold-dark)]",
+  amber: "bg-amber-100 text-amber-950",
+  green: "bg-emerald-50 text-emerald-900",
+  red: "bg-red-50 text-red-900",
+};
 
-const BUCKETS = [
-  { key: "", label: "All" },
-  { key: "new", label: "New" },
-  { key: "preparing", label: "Preparing" },
-  { key: "packed", label: "Packed" },
-  { key: "shipped", label: "Shipped" },
-  { key: "delivered", label: "Delivered" },
-  { key: "problem", label: "Problem" },
-  { key: "cancelled", label: "Cancelled" },
-];
-
-const EXCEPTIONS = [
-  { value: "damaged", label: "Damaged in transit" },
-  { value: "wrong_item", label: "Wrong item sent" },
-  { value: "missing_item", label: "Missing item" },
-  { value: "lost_in_transit", label: "Lost in transit" },
-  { value: "duplicate_order", label: "Duplicate order" },
-];
-
-function formatAddress(a: Address | null): string {
-  if (!a) return "—";
-  return [a.line1, a.line2, a.landmark, `${a.city}, ${a.state} ${a.pincode}`].filter(Boolean).join(", ");
-}
-
-function courierBlock(o: Row): string {
-  const a = o.address;
-  return [
-    o.customer_name,
-    o.phone,
-    a?.line1,
-    a?.line2,
-    a?.landmark,
-    a ? `${a.city}, ${a.state} - ${a.pincode}` : "",
-    `Order ${o.order_no}`,
-  ]
-    .filter(Boolean)
-    .join("\n");
+function readParams() {
+  const params = new URLSearchParams(window.location.search);
+  return {
+    bucket: params.get("status") || "",
+    q: params.get("q") || "",
+    sort: params.get("sort") || "newest",
+    action: params.get("action") === "required",
+    acq: params.get("acq") || "",
+    offset: Number(params.get("offset") || 0),
+  };
 }
 
 export default function NotesOrderQueue() {
-  const [orders, setOrders] = useState<Row[]>([]);
-  const [bucket, setBucket] = useState("");
-  const [q, setQ] = useState("");
+  const initial = typeof window === "undefined" ? { bucket: "", q: "", sort: "newest", action: false, acq: "", offset: 0 } : readParams();
+  const [orders, setOrders] = useState<AdminOrder[]>([]);
+  const [counts, setCounts] = useState<Record<string, number>>({});
+  const [products, setProducts] = useState<Array<{ name: string; orders: number; units: number }>>([]);
+  const [total, setTotal] = useState(0);
+  const [bucket, setBucket] = useState(initial.bucket === "issues" ? "" : initial.bucket);
+  const [issueOnly, setIssueOnly] = useState(initial.bucket === "issues");
+  const [actionOnly, setActionOnly] = useState(initial.action);
+  const [acq, setAcq] = useState(initial.acq);
+  const [q, setQ] = useState(initial.q);
+  const [sort, setSort] = useState(initial.sort);
+  const [offset, setOffset] = useState(initial.offset);
+  const [openId, setOpenId] = useState<string | null>(null);
+  const openOrder = useCallback((id: string) => {
+    window.history.pushState({ notesOrder: id }, "", window.location.href);
+    setOpenId(id);
+  }, []);
+  useEffect(() => {
+    const onPop = () => setOpenId(window.history.state?.notesOrder || null);
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+  const [compareId, setCompareId] = useState<string | null>(null);
+  const [writes, setWrites] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
-  const [awb, setAwb] = useState<Record<string, string>>({});
-  const [courier, setCourier] = useState<Record<string, string>>({});
-  const [noteOpen, setNoteOpen] = useState<string | null>(null);
-  const [note, setNote] = useState<Record<string, string>>({});
-  const [exc, setExc] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const queryRef = useRef(q);
+
+  const writeUrl = useCallback((next: { bucket: string; issue: boolean; action: boolean; acq: string; q: string; sort: string; offset: number }) => {
+    const params = new URLSearchParams();
+    if (next.issue) params.set("status", "issues");
+    else if (next.bucket) params.set("status", next.bucket);
+    if (next.action) params.set("action", "required");
+    if (next.acq) params.set("acq", next.acq);
+    if (next.q) params.set("q", next.q);
+    if (next.sort && next.sort !== "newest") params.set("sort", next.sort);
+    if (next.offset) params.set("offset", String(next.offset));
+    const qs = params.toString();
+    window.history.replaceState(null, "", qs ? `/admin/notes?${qs}` : "/admin/notes");
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
     const params = new URLSearchParams();
     if (bucket) params.set("bucket", bucket);
+    if (issueOnly) params.set("issue", "open");
+    if (actionOnly) params.set("action", "required");
+    if (acq) params.set("acq", acq);
     if (q.trim()) params.set("q", q.trim());
+    if (sort) params.set("sort", sort);
+    params.set("limit", "25");
+    params.set("offset", String(offset));
     const res = await fetch(`/api/admin/notes/orders?${params}`, { cache: "no-store" });
     const json = await res.json();
-    setOrders(json.orders || []);
+    const rows = (json.orders || []) as AdminOrder[];
+    setOrders(rows);
+    setCounts(json.counts || {});
+    setProducts(json.counts?.products || []);
+    setTotal(json.total || rows.length);
+    setWrites(Boolean(json.writes_authorized));
     setLoading(false);
-  }, [bucket, q]);
+  }, [bucket, issueOnly, actionOnly, acq, q, sort, offset]);
 
   useEffect(() => {
     void load();
-  }, [bucket]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [load]);
 
-  async function copy(text: string, what: string) {
-    try {
-      await navigator.clipboard.writeText(text);
-      setMsg(`${what} copied`);
-      setTimeout(() => setMsg(null), 1400);
-    } catch {
-      setMsg("Copy failed");
-    }
+  function applyFilter(key: string) {
+    const issues = key === "issues";
+    setIssueOnly(issues);
+    setBucket(issues ? "" : key);
+    setActionOnly(false);
+    setOffset(0);
+    writeUrl({ bucket: issues ? "" : key, issue: issues, action: false, acq, q, sort, offset: 0 });
   }
 
-  async function act(id: string, fn: () => Promise<Response>, ok: string) {
+  const open = orders.find((row) => row.id === openId) || null;
+  const compare = orders.find((row) => row.id === compareId) || null;
+
+  function act(id: string, fn: () => Promise<Response>, ok: string) {
     setBusyId(id);
     setMsg(null);
-    try {
-      const res = await fn();
-      const json = await res.json();
-      setMsg(json.ok ? ok : json.error);
-      await load();
-    } finally {
-      setBusyId(null);
-    }
+    void (async () => {
+      try {
+        const res = await fn();
+        const json = await res.json();
+        setMsg(json.ok ? ok : json.error || "Could not update the order.");
+        await load();
+      } finally {
+        setBusyId(null);
+      }
+    })();
   }
 
-  const advance = (id: string) =>
-    act(id, () => fetch(`/api/admin/notes/orders/${id}/advance`, { method: "POST", cache: "no-store" }), "Status advanced");
-
-  const ship = (id: string) =>
-    act(
-      id,
-      () =>
-        fetch(`/api/admin/notes/orders/${id}/ship`, {
-          method: "POST",
-          cache: "no-store",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ awb: awb[id], courier_name: courier[id] || "Manual" }),
-        }),
-      "Marked shipped — stock deducted",
-    );
-
-  const saveNote = (id: string) =>
-    act(
-      id,
-      () =>
-        fetch(`/api/admin/notes/orders/${id}/note`, {
-          method: "POST",
-          cache: "no-store",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ note: note[id] || "", exception_type: exc[id] || null }),
-        }),
-      "Saved",
-    ).then(() => {
-      setNote((m) => ({ ...m, [id]: "" }));
-      setExc((m) => ({ ...m, [id]: "" }));
-    });
-
   return (
-    <div>
-      <PageHeader
-        title="Notes Store — orders"
-        subtitle="Search, filter, prepare, pack and ship. Copy the shipping block straight into your courier portal."
-      />
+    <div className="mx-auto max-w-6xl">
+      <header className="mb-4 flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--ca-gold-dark)]">Notes Store</p>
+          <h1 className="font-heading text-3xl font-bold text-[var(--ca-navy)]">Orders</h1>
+        </div>
+        <div className="flex gap-2">
+          <Link href="/admin/notes/analytics" className="inline-flex min-h-10 items-center rounded-full border border-[var(--ca-navy)]/15 bg-white px-4 text-sm font-semibold text-[var(--ca-navy)]">Analytics</Link>
+          <Link href="/admin/notes/leads" className="inline-flex min-h-10 items-center rounded-full px-3 text-sm font-semibold text-[var(--ca-navy)]/70">Checkout leads</Link>
+        </div>
+      </header>
 
-      <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center">
+      <div className="-mx-1 mb-4 flex gap-2 overflow-x-auto pb-1">
+        {[
+          ["paid", "Paid orders", "paid", counts.paid],
+          ["sales", "Paid sales", "paid", counts.paid_sales_paise != null ? formatPaise(Number(counts.paid_sales_paise)) : "–"],
+          ["new", "New", "new", counts.new],
+          ["preparing", "Preparing", "preparing", counts.preparing],
+          ["printing", "Printing", "printing", counts.printing],
+          ["packed", "Packed", "packed", counts.packed],
+          ["pickup", "Pickup", "pickup", counts.pickup],
+          ["transit", "In transit", "shipped", counts.transit],
+          ["delivered", "Delivered", "delivered", counts.delivered],
+          ["issues", "Issues", "issues", counts.issues],
+        ].map(([key, label, filter, value]) => {
+          const selected = filter === "issues" ? issueOnly : !issueOnly && bucket === filter;
+          return (
+            <button
+              key={String(key)}
+              type="button"
+              aria-pressed={selected}
+              onClick={() => applyFilter(String(filter))}
+              className={`min-w-[7.5rem] shrink-0 rounded-2xl border px-3 py-2.5 text-left ${selected ? "border-[var(--ca-navy)] bg-[var(--ca-navy)] text-white" : "border-[var(--ca-navy)]/10 bg-white"}`}
+            >
+              <span className={`block text-[10px] font-semibold uppercase tracking-wide ${selected ? "text-white/70" : "text-[var(--ca-navy)]/45"}`}>{label}</span>
+              <span className="mt-0.5 block font-heading text-xl font-bold tabular-nums">{value ?? "–"}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      {products.length > 0 && (
+        <div className="-mx-1 mb-4 flex gap-2 overflow-x-auto pb-1">
+          <p className="sr-only">Paid by product</p>
+          {products.map((product) => (
+            <div key={product.name} className="min-w-[9rem] shrink-0 rounded-2xl border border-[var(--ca-navy)]/10 bg-white px-3 py-2">
+              <span className="block truncate text-sm font-semibold text-[var(--ca-navy)]">{product.name.replace(/ notes$/i, "")}</span>
+              <span className="mt-0.5 block text-xs text-[var(--ca-navy)]/55">{product.orders} orders · {product.units} units</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="mb-3 flex flex-wrap items-center gap-2">
         <form
+          className="min-w-0 flex-1"
           onSubmit={(e) => {
             e.preventDefault();
+            setOffset(0);
+            queryRef.current = q;
+            writeUrl({ bucket, issue: issueOnly, action: actionOnly, acq, q, sort, offset: 0 });
             void load();
           }}
-          className="flex flex-1 gap-2"
         >
           <input
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="Search order no, name, phone, email, AWB"
-            className="h-9 w-full rounded-lg border border-line px-3 text-sm"
+            placeholder="Order, customer, phone, email, AWB"
+            className="min-h-11 w-full rounded-2xl border border-[var(--ca-navy)]/10 bg-white px-3 text-sm"
           />
-          <button type="submit" className="h-9 shrink-0 rounded-lg bg-ink px-3 text-sm font-semibold text-white">
-            Search
-          </button>
         </form>
+        <button type="button" onClick={() => setFiltersOpen((v) => !v)} className="min-h-11 rounded-full border bg-white px-4 text-sm font-semibold sm:hidden">
+          Filters
+        </button>
+        <select
+          aria-label="Sort orders"
+          value={sort}
+          onChange={(e) => {
+            setSort(e.target.value);
+            setOffset(0);
+            writeUrl({ bucket, issue: issueOnly, action: actionOnly, acq, q, sort: e.target.value, offset: 0 });
+          }}
+          className="min-h-11 rounded-full border bg-white px-3 text-sm"
+        >
+          <option value="newest">Newest</option>
+          <option value="oldest">Oldest</option>
+          <option value="value_desc">Highest value</option>
+          <option value="value_asc">Lowest value</option>
+          <option value="updated">Recently updated</option>
+          <option value="action">Action required first</option>
+        </select>
       </div>
 
-      <div className="mb-4 -mx-1 flex gap-1 overflow-x-auto pb-1">
-        {BUCKETS.map((b) => (
-          <button
-            key={b.key}
-            type="button"
-            onClick={() => setBucket(b.key)}
-            className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-semibold ${
-              bucket === b.key ? "bg-ink text-white" : "bg-surface text-ink2 ring-1 ring-line"
-            }`}
-          >
-            {b.label}
-          </button>
-        ))}
+      <div className={`${filtersOpen ? "flex" : "hidden"} mb-4 flex-wrap gap-2 sm:flex`}>
+        {FILTERS.map((filter) => {
+          const active = filter.key === "issues" ? issueOnly : !issueOnly && bucket === filter.key;
+          return (
+            <button
+              key={filter.key || "all"}
+              type="button"
+              onClick={() => applyFilter(filter.key)}
+              className={`min-h-10 rounded-full px-3 text-sm font-semibold ${active ? "bg-[var(--ca-navy)] text-white" : "bg-white text-[var(--ca-navy)]"}`}
+            >
+              {filter.label}
+              {counts[filter.count] != null ? ` ${counts[filter.count]}` : ""}
+            </button>
+          );
+        })}
+        <button
+          type="button"
+          onClick={() => {
+            setActionOnly((v) => !v);
+            setOffset(0);
+            writeUrl({ bucket, issue: issueOnly, action: !actionOnly, acq, q, sort, offset: 0 });
+          }}
+          className={`min-h-10 rounded-full px-3 text-sm font-semibold ${actionOnly ? "bg-amber-800 text-white" : "bg-white text-[var(--ca-navy)]"}`}
+        >
+          Action required
+        </button>
+        <select
+          aria-label="Acquisition source"
+          value={acq}
+          onChange={(e) => {
+            setAcq(e.target.value);
+            setOffset(0);
+            writeUrl({ bucket, issue: issueOnly, action: actionOnly, acq: e.target.value, q, sort, offset: 0 });
+          }}
+          className="min-h-10 rounded-full border bg-white px-3 text-sm"
+        >
+          <option value="">All sources</option>
+          {BUSINESS_CHANNELS.filter((channel) => channel !== "Unknown").map((channel) => (
+            <option key={channel} value={channel}>{channel}</option>
+          ))}
+        </select>
       </div>
 
-      {msg && <p className="mb-3 rounded-lg border border-line bg-white px-3 py-2 text-sm">{msg}</p>}
+      {msg && <p className="mb-3 rounded-xl bg-white px-3 py-2 text-sm text-[var(--ca-navy)]">{msg}</p>}
 
       {loading ? (
-        <p className="text-sm text-muted">Loading…</p>
+        <div className="space-y-2" aria-hidden>
+          <div className="h-16 animate-pulse rounded-2xl bg-white" />
+          <div className="h-16 animate-pulse rounded-2xl bg-white" />
+        </div>
       ) : orders.length === 0 ? (
-        <p className="rounded-xl border border-dashed border-line bg-white p-8 text-center text-sm text-muted">
-          No orders match.
+        <p className="rounded-2xl bg-white p-8 text-center text-sm text-[var(--ca-navy)]/60">
+          {q || bucket || issueOnly || actionOnly || acq ? "No orders match these filters." : "No orders yet."}
         </p>
       ) : (
-        <div className="space-y-4">
-          {orders.map((o) => (
-            <article key={o.id} className="rounded-xl border border-line bg-white p-4 shadow-soft-sm">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="font-mono text-xs font-semibold text-ink">{o.order_no}</p>
-                  <p className="mt-1 font-heading text-lg font-bold">{o.customer_name}</p>
-                  <p className="text-sm tabular-nums text-ink2">
-                    {o.phone}
-                    {o.email ? ` · ${o.email}` : ""}
-                  </p>
-                </div>
-                <div className="text-right">
-                  <p className="font-heading text-lg font-bold tabular-nums">{formatPaise(o.total_paise)}</p>
-                  <p className="mt-1 inline-flex rounded-full bg-surface px-2.5 py-0.5 text-xs font-semibold uppercase tracking-wide text-ink2">
-                    {o.status.replaceAll("_", " ")}
-                  </p>
-                  {o.payment_status && (
-                    <p className="mt-1 text-[11px] font-medium text-emerald-700">{o.payment_status}</p>
-                  )}
-                </div>
-              </div>
-
-              <div className="mt-3 rounded-lg bg-surface p-2 text-sm text-ink2">
-                <span className="font-semibold text-ink">Ship to: </span>
-                {formatAddress(o.address)}
-                <div className="mt-2 flex flex-wrap gap-2">
-                  <button type="button" onClick={() => copy(formatAddress(o.address), "Address")} className="rounded border border-line bg-white px-2 py-1 text-xs font-medium">
-                    Copy address
+        <>
+          <ul className="hidden overflow-hidden rounded-2xl bg-white md:block">
+            {orders.map((order) => {
+              const failed = pickupFailedActivity(order.shipment?.tracking_activity);
+              const product = productSummary(order.items);
+              return (
+                <li key={order.id} className={`grid grid-cols-[1.2fr_0.9fr_0.7fr_1.3fr_auto] items-center gap-3 border-b border-l-2 border-[var(--ca-navy)]/5 px-4 py-3 ${rowAccent(order.status, Boolean(order.action_required))}`}>
+                  <div>
+                    <button type="button" onClick={() => openOrder(order.id)} className="text-left">
+                      <span className="block font-heading text-base font-bold text-[var(--ca-navy)]">{orderIndexLabel(order.order_no) || order.order_no}</span>
+                      <span className="block text-sm text-[var(--ca-navy)]">{order.customer_name}</span>
+                    </button>
+                    <span className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-[var(--ca-navy)]/45">
+                      {invoiceStatusLabel(order.invoice_status)}
+                      {order.invoice_status === "READY" && <ViewInvoiceButton orderId={order.id} />}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="block text-sm text-[var(--ca-navy)]/80">{product}</span>
+                    <span className="mt-1 block text-sm font-semibold tabular-nums text-[var(--ca-navy)]">{formatPaise(order.total_paise)}</span>
+                    {order.promo_code && <span className="block text-[11px] text-[var(--ca-navy)]/45">{order.promo_code}</span>}
+                  </div>
+                  <span className={`w-fit rounded-full px-2 py-1 text-[11px] font-semibold ${order.payment_status === "CAPTURED" ? TONE.green : TONE[fulfillmentTone(order.status, failed)]}`}>{order.payment_status === "CAPTURED" ? "Paid" : order.payment_status || "Payment pending"}</span>
+                  <div>
+                    {showsFulfillmentTimeline(order.status) ? <FulfillmentTimeline status={order.status} compact /> : <span className="text-xs font-semibold text-amber-900">{order.action_required ? "Action required" : fulfillmentLabel(order.status, failed)}</span>}
+                    <span className="mt-1 block text-[11px] text-[var(--ca-navy)]/50">{fulfillmentLabel(order.status, failed)} · {formatAdminWhen(order.placed_at)}</span>
+                  </div>
+                  <Link href={`/admin/notes/orders/${order.id}`} className="inline-flex min-h-11 items-center rounded-full bg-[var(--ca-navy)] px-3 text-sm font-semibold text-white">View details</Link>
+                </li>
+              );
+            })}
+          </ul>
+          <ul className="space-y-2 md:hidden">
+            {orders.map((order) => {
+              const failed = pickupFailedActivity(order.shipment?.tracking_activity);
+              return (
+                <li key={order.id} className={`rounded-2xl border-l-2 bg-white p-4 ${rowAccent(order.status, Boolean(order.action_required))}`}>
+                  <button type="button" onClick={() => openOrder(order.id)} className="w-full text-left">
+                    <span className="flex items-start justify-between gap-3">
+                      <span>
+                        <span className="block font-heading text-lg font-bold">{orderIndexLabel(order.order_no) || order.order_no}</span>
+                        <span className="mt-1 block text-sm">{order.customer_name}</span>
+                        <span className="mt-1 block text-sm text-[var(--ca-navy)]/70">{productSummary(order.items)}</span>
+                      </span>
+                      <span className="text-sm font-semibold tabular-nums">{formatPaise(order.total_paise)}</span>
+                    </span>
+                    <span className="mt-3 block">{showsFulfillmentTimeline(order.status) ? <FulfillmentTimeline status={order.status} compact /> : null}</span>
+                    <span className="mt-2 flex items-center justify-between gap-2">
+                      <span className={`rounded-full px-2 py-1 text-[11px] font-semibold ${TONE[fulfillmentTone(order.status, failed)]}`}>{fulfillmentLabel(order.status, failed)}</span>
+                      <span className="text-xs text-[var(--ca-navy)]/55">{order.payment_status === "CAPTURED" ? "Paid" : order.payment_status || "Payment pending"}</span>
+                    </span>
                   </button>
-                  <button type="button" onClick={() => copy(o.phone, "Phone")} className="rounded border border-line bg-white px-2 py-1 text-xs font-medium">
-                    Copy phone
-                  </button>
-                  <button type="button" onClick={() => copy(courierBlock(o), "Shipping block")} className="rounded border border-line bg-white px-2 py-1 text-xs font-medium">
-                    Copy full shipping
-                  </button>
-                </div>
-              </div>
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    {order.invoice_status === "READY" && <ViewInvoiceButton orderId={order.id} />}
+                    <Link href={`/admin/notes/orders/${order.id}`} className="inline-flex min-h-11 items-center rounded-full bg-[var(--ca-navy)] px-4 text-sm font-semibold text-white">View details</Link>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        </>
+      )}
 
-              <ul className="mt-2 text-sm text-ink2">
-                {o.items.map((it, i) => (
-                  <li key={i}>
-                    <span className="font-mono text-xs text-muted">{it.sku}</span> — {it.name} × {it.qty}
-                  </li>
-                ))}
-              </ul>
+      <div className="mt-4 flex items-center justify-between text-sm">
+        <button type="button" disabled={offset === 0} onClick={() => setOffset((n) => Math.max(0, n - 25))} className="min-h-11 rounded-full px-3 disabled:opacity-40">Previous</button>
+        <span className="text-[var(--ca-navy)]/50">{offset + 1}–{Math.min(offset + orders.length, total)} of {total}</span>
+        <button type="button" disabled={offset + 25 >= total} onClick={() => setOffset((n) => n + 25)} className="min-h-11 rounded-full px-3 disabled:opacity-40">Next</button>
+      </div>
 
-              {o.shipment?.awb && (
-                <p className="mt-2 text-sm text-ink2">
-                  <span className="font-semibold text-ink">Shipped: </span>
-                  {o.shipment.courier || "Courier"} · AWB <span className="font-mono">{o.shipment.awb}</span>
-                </p>
-              )}
-              {o.internal_notes && (
-                <pre className="mt-2 whitespace-pre-wrap rounded-lg bg-surface p-2 text-xs text-ink2">{o.internal_notes}</pre>
-              )}
-
-              <div className="mt-4 flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  disabled={busyId === o.id}
-                  onClick={() => advance(o.id)}
-                  className="h-9 rounded bg-surface px-3 text-sm font-semibold text-ink ring-1 ring-line hover:bg-white disabled:opacity-50"
-                >
-                  Advance status
-                </button>
-                <input
-                  value={courier[o.id] || ""}
-                  onChange={(e) => setCourier((m) => ({ ...m, [o.id]: e.target.value }))}
-                  placeholder="Courier"
-                  className="h-9 w-28 rounded border border-line px-2 text-sm"
-                />
-                <input
-                  value={awb[o.id] || ""}
-                  onChange={(e) => setAwb((m) => ({ ...m, [o.id]: e.target.value }))}
-                  placeholder="AWB"
-                  className="h-9 w-40 rounded border border-line px-2 font-mono text-sm"
-                />
-                <button
-                  type="button"
-                  disabled={busyId === o.id || !(awb[o.id] || "").trim()}
-                  onClick={() => ship(o.id)}
-                  className="h-9 rounded bg-ink px-3 text-sm font-semibold text-white disabled:opacity-50"
-                >
-                  Mark shipped
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setNoteOpen((c) => (c === o.id ? null : o.id))}
-                  className="h-9 rounded border border-line px-3 text-sm font-medium text-ink2"
-                >
-                  {noteOpen === o.id ? "Close" : "Note / issue"}
-                </button>
-              </div>
-
-              {noteOpen === o.id && (
-                <div className="mt-3 space-y-2 rounded-lg border border-line bg-surface p-3">
-                  <select
-                    value={exc[o.id] || ""}
-                    onChange={(e) => setExc((m) => ({ ...m, [o.id]: e.target.value }))}
-                    className="h-9 w-full rounded border border-line px-2 text-sm"
-                  >
-                    <option value="">Internal note (no exception)</option>
-                    {EXCEPTIONS.map((x) => (
-                      <option key={x.value} value={x.value}>
-                        {x.label}
-                      </option>
-                    ))}
-                  </select>
-                  <textarea
-                    value={note[o.id] || ""}
-                    onChange={(e) => setNote((m) => ({ ...m, [o.id]: e.target.value }))}
-                    rows={2}
-                    placeholder="e.g. Call before dispatch · replacement sent via Delhivery"
-                    className="w-full rounded border border-line px-2 py-1 text-sm"
-                  />
-                  <button
-                    type="button"
-                    disabled={busyId === o.id || !((note[o.id] || "").trim() || exc[o.id])}
-                    onClick={() => saveNote(o.id)}
-                    className="h-9 rounded bg-ink px-3 text-sm font-semibold text-white disabled:opacity-50"
-                  >
-                    Save note
-                  </button>
-                </div>
-              )}
-            </article>
-          ))}
-        </div>
+      {open && (
+        <OrderDetail
+          order={open}
+          busy={busyId === open.id}
+          writesAuthorized={writes}
+          onClose={() => {
+            if (window.history.state?.notesOrder) window.history.back();
+            else setOpenId(null);
+          }}
+          onRefresh={() => void load()}
+          onCompare={() => setCompareId(open.id)}
+          act={(fn, ok) => act(open.id, fn, ok)}
+        />
+      )}
+      {compare && (
+        <CourierPicker
+          orderId={compare.id}
+          open
+          writesAuthorized={writes}
+          weight={compare.shipment?.weight_grams || 500}
+          length={compare.shipment?.length_cm || 30}
+          width={compare.shipment?.width_cm || 25}
+          height={compare.shipment?.height_cm || 3}
+          onClose={() => setCompareId(null)}
+          onBooked={() => {
+            setCompareId(null);
+            void load();
+          }}
+        />
       )}
     </div>
   );

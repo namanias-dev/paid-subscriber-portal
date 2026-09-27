@@ -1,17 +1,10 @@
 import { NextResponse } from "next/server";
 import { requirePermission, getActionActor } from "@/lib/adminGuard";
 import { storeDb } from "@/lib/store/db";
+import { runAutoFulfillment } from "@/lib/store/shipping/autoFulfillRun";
+import { staffNextStatus } from "@/lib/store/stages";
 
 export const dynamic = "force-dynamic";
-
-const ADVANCE: Record<string, string> = {
-  ORDER_CONFIRMED: "PROCESSING",
-  PAYMENT_CONFIRMED: "PROCESSING",
-  PROCESSING: "PRINTING",
-  PRINTING: "QUALITY_CHECK",
-  QUALITY_CHECK: "READY_TO_PACK",
-  READY_TO_PACK: "PACKED",
-};
 
 /** Advance fulfilment status one step (manual queue). Shipping still uses /ship. */
 export async function POST(req: Request, { params }: { params: { id: string } }) {
@@ -24,7 +17,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
 
   const { data: order } = await db.from("store_orders").select("id,status").eq("id", params.id).maybeSingle();
   if (!order) return NextResponse.json({ ok: false, error: "not found" }, { status: 404 });
-  const next = ADVANCE[order.status];
+  const next = staffNextStatus(order.status);
   if (!next) {
     return NextResponse.json(
       { ok: false, error: `Cannot advance from ${order.status}. Use Ship with an AWB when ready.` },
@@ -33,8 +26,16 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   }
 
   const now = new Date().toISOString();
-  const { error } = await db.from("store_orders").update({ status: next, updated_at: now }).eq("id", order.id);
+  const { data: updated, error } = await db
+    .from("store_orders")
+    .update({ status: next, updated_at: now })
+    .eq("id", order.id)
+    .eq("status", order.status)
+    .select("id");
   if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 400 });
+  if (!updated?.length) {
+    return NextResponse.json({ ok: false, error: "This order already moved. Refresh and try the next step." }, { status: 409 });
+  }
 
   await db.from("store_order_events").insert({
     order_id: order.id,
@@ -46,5 +47,10 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     actor_name: actor?.name,
   });
 
-  return NextResponse.json({ ok: true, status: next }, { headers: { "Cache-Control": "no-store" } });
+  let fulfillment: { ok: boolean; blocked: string | null; awb: string | null } | null = null;
+  if (next === "PACKED") {
+    fulfillment = await runAutoFulfillment(order.id);
+  }
+
+  return NextResponse.json({ ok: true, status: next, fulfillment }, { headers: { "Cache-Control": "no-store" } });
 }
