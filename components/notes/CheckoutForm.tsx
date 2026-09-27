@@ -39,9 +39,12 @@ export default function CheckoutForm() {
   });
 
   useEffect(() => {
+    trackClient("notes_checkout_started", { cta_id: "checkout_page" });
+    trackClient("notes_checkout_step_viewed", { step: "address" });
     fetch("/api/notes/cart", { cache: "no-store", credentials: "same-origin" })
       .then((r) => r.json())
-      .then((j) => setCart(j.cart));
+      .then((j) => setCart(j.cart))
+      .catch(() => trackClient("notes_checkout_api_error", { endpoint: "cart", recoverable: true }));
   }, []);
 
   async function lookupPin(pin: string) {
@@ -51,16 +54,19 @@ export default function CheckoutForm() {
     if (!json.ok) {
       setPinInfo(json.error);
       setQuote(null);
+      trackClient("notes_checkout_validation_error", { field: "pin", reason: "invalid_pin" });
       return;
     }
     if (!json.serviceable) {
       setPinInfo("We don't currently deliver to this PIN.");
       setQuote(null);
+      trackClient("notes_shipping_quote_error", { field: "serviceability", reason: "no_shipping_quote", recoverable: true });
       return;
     }
     setForm((f) => ({ ...f, city: f.city || json.city || "", state: f.state || json.state || "" }));
     setQuote(json.quote || null);
     setPinInfo(`Delivered by ${json.promised_label}.`);
+    trackClient("notes_checkout_step_viewed", { step: "shipping_quote" });
   }
 
   async function onPinBlur() {
@@ -78,9 +84,18 @@ export default function CheckoutForm() {
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (!/^[6-9]\d{9}$/.test(form.phone)) {
+      trackClient("notes_checkout_validation_error", { field: "phone", reason: "invalid_phone" });
+    }
+    if (!/^[1-9][0-9]{5}$/.test(form.pincode)) {
+      trackClient("notes_checkout_validation_error", { field: "pin", reason: "invalid_pin" });
+    }
+    if (!form.line1.trim()) {
+      trackClient("notes_checkout_validation_error", { field: "address", reason: "required" });
+    }
     setBusy(true);
     setErr(null);
-    trackClient("notes_checkout_started", { item_count: cart?.item_count ?? 0 });
+    trackClient("notes_checkout_step_viewed", { step: "payment_clicked", item_count: cart?.item_count ?? 0 });
     if (quote?.offer_id) {
       trackClient("notes_offer_checkout_started", { offer_id: quote.offer_id });
     }
@@ -94,8 +109,10 @@ export default function CheckoutForm() {
       });
       const json = await res.json();
       if (!json.ok) throw new Error(json.error || "Payment could not be started.");
+      trackClient("notes_payment_gateway_opened", { cta_id: "pay_securely", item_count: cart?.item_count ?? 0 });
       window.location.href = json.payment_url;
     } catch (e2) {
+      trackClient("notes_checkout_api_error", { endpoint: "checkout", recoverable: true, stage: "order_create" });
       trackClient("notes_payment_failed", { stage: "checkout_submit" });
       setErr((e2 as Error).message);
       setBusy(false);

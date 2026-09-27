@@ -72,7 +72,11 @@ export default function SubjectRail({
                   trackClient("notes_product_clicked", {
                     product_id: product.id,
                     subject: product.category_slug || product.slug,
+                    slug: product.slug,
                     offer_id: priced?.offer_id,
+                    cta_id: "subject_card",
+                    placement: "shop_by_subject",
+                    destination: product.slug,
                   })
                 }
               >

@@ -207,6 +207,9 @@ async function applyOrderTerminal(
       await consumeStoreOfferHold(orderId);
       const { scheduleStoreInvoice } = await import("../invoice/issue");
       scheduleStoreInvoice(orderId);
+      void import("@/lib/analytics/notesPurchase")
+        .then((m) => m.recordNotesPurchase(orderId))
+        .catch(() => {});
     }
     await holdReservationsUntilShip(orderId);
     return orderNo;
@@ -231,6 +234,9 @@ async function applyOrderTerminal(
   }
   if (data?.length) {
     await releaseStoreOfferHold(orderId);
+    void import("@/lib/analytics/notesPurchase")
+      .then((m) => m.recordNotesPaymentFailed(orderId, outcome))
+      .catch(() => {});
   }
   await releaseReservations({ orderId });
   return data?.[0]?.order_no ?? null;

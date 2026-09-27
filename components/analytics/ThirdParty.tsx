@@ -27,7 +27,15 @@ function loadPostHog() {
   s.onload = () => {
     try {
       // @ts-expect-error injected global
-      window.posthog?.init?.(POSTHOG_KEY, { api_host: POSTHOG_HOST, capture_pageview: true, persistence: "localStorage+cookie" });
+      window.posthog?.init?.(POSTHOG_KEY, {
+        api_host: POSTHOG_HOST,
+        capture_pageview: true,
+        persistence: "localStorage+cookie",
+        session_recording: {
+          maskAllInputs: true,
+          maskTextSelector: "input, textarea, select",
+        },
+      });
     } catch { /* ignore */ }
   };
   document.head.appendChild(s);

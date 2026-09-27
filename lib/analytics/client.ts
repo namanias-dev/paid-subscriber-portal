@@ -15,6 +15,9 @@ import {
   serializeAttr,
 } from "@/lib/attribution";
 import type { EventName } from "./events";
+import { externalNotesDispatch, isQaState, NOTES_SCHEMA_VERSION, stripAnalyticsProps } from "./notesCommerce";
+import { ga4Event } from "./ga4";
+import { trackMetaPixel } from "./metaPixel";
 
 const YEAR = 60 * 60 * 24 * 365;
 const SESSION_TTL = 60 * 30; // 30 min rolling session
@@ -32,7 +35,10 @@ function readCookie(name: string): string | null {
 function writeCookie(name: string, value: string, maxAge: number): void {
   if (!isBrowser()) return;
   const secure = location.protocol === "https:" ? "; secure" : "";
-  document.cookie = `${name}=${value}; path=/; max-age=${maxAge}; samesite=lax${secure}`;
+  const domain = location.hostname === "namanias.com" || location.hostname.endsWith(".namanias.com")
+    ? "; domain=.namanias.com"
+    : "";
+  document.cookie = `${name}=${value}; path=/; max-age=${maxAge}; samesite=lax${secure}${domain}`;
 }
 
 function uuid(): string {
@@ -110,9 +116,13 @@ export function captureAttribution(): void {
 export function trackClient(event: EventName, props: Record<string, unknown> = {}): void {
   if (!isBrowser()) return;
   try {
+    const safe = stripAnalyticsProps(props);
+    if (event.startsWith("notes_") && safe.schema_version == null) safe.schema_version = NOTES_SCHEMA_VERSION;
+    const attr = parseAttrCookie(readCookie(ATTR_COOKIE));
+    if (event.startsWith("notes_") && isQaState(attr)) safe.is_test = true;
     const payload = JSON.stringify({
       event_name: event,
-      props,
+      props: safe,
       page_path: location.pathname,
       referrer: document.referrer || null,
       visitor_id: readCookie(VISITOR_COOKIE),
@@ -124,5 +134,23 @@ export function trackClient(event: EventName, props: Record<string, unknown> = {
     } else {
       void fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: payload, keepalive: true }).catch(() => {});
     }
+    if (event.startsWith("notes_")) dispatchNotesProviders(event, safe);
+    if (localStorage.getItem("nsa_analytics_debug") === "1") {
+      console.info("[notes-analytics]", event, safe);
+    }
   } catch { /* ignore */ }
+}
+
+function dispatchNotesProviders(event: EventName, props: Record<string, unknown>): void {
+  try {
+    const posthog = (window as unknown as { posthog?: { capture?: (name: string, props: Record<string, unknown>) => void } }).posthog;
+    posthog?.capture?.(event, props);
+  } catch { /* provider down */ }
+  try {
+    const mapped = externalNotesDispatch(event, props);
+    if (mapped.ga4) ga4Event(mapped.ga4.name, mapped.ga4.params, { beacon: event === "notes_payment_gateway_opened" });
+    if (mapped.meta) {
+      trackMetaPixel(mapped.meta.name, `${event}:${String(props.product_id || props.slug || "notes")}`, mapped.meta.params);
+    }
+  } catch { /* provider down */ }
 }

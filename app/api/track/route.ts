@@ -5,6 +5,7 @@ import { rateLimited } from "@/lib/dataProvider";
 import { writeEvent, isBot, parseDevice } from "@/lib/analytics/server";
 import { CLIENT_ALLOWED_EVENTS, type EventName } from "@/lib/analytics/events";
 import { VISITOR_COOKIE, SESSION_COOKIE, ATTR_COOKIE, parseAttrCookie } from "@/lib/attribution";
+import { isQaState, stripAnalyticsProps } from "@/lib/analytics/notesCommerce";
 import { withDbBudget } from "@/lib/dbCircuit";
 
 export const dynamic = "force-dynamic";
@@ -52,7 +53,8 @@ export async function POST(req: Request) {
       } catch { /* anon */ }
     }
 
-    const props = (body.props && typeof body.props === "object" ? body.props : {}) as Record<string, unknown>;
+    const props = stripAnalyticsProps((body.props && typeof body.props === "object" ? body.props : {}) as Record<string, unknown>);
+    if (isQaState(attr)) props.is_test = true;
 
     // Rate-limit noisy beacons per IP; never throttle conversion/funnel events.
     const noisy =

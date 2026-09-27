@@ -13,6 +13,7 @@ import {
   PRIMARY_LABEL,
   type BadgeTone,
 } from "@/lib/store/adminConsole";
+import { BUSINESS_CHANNELS } from "@/lib/analytics/notesCommerce";
 import OrderDetail, { type AdminOrder } from "./orders/OrderDetail";
 import CourierPicker from "./orders/CourierPicker";
 import { ViewInvoiceButton } from "./orders/InvoiceActions";
@@ -44,18 +45,20 @@ function readParams() {
     q: params.get("q") || "",
     sort: params.get("sort") || "newest",
     action: params.get("action") === "required",
+    acq: params.get("acq") || "",
     offset: Number(params.get("offset") || 0),
   };
 }
 
 export default function NotesOrderQueue() {
-  const initial = typeof window === "undefined" ? { bucket: "", q: "", sort: "newest", action: false, offset: 0 } : readParams();
+  const initial = typeof window === "undefined" ? { bucket: "", q: "", sort: "newest", action: false, acq: "", offset: 0 } : readParams();
   const [orders, setOrders] = useState<AdminOrder[]>([]);
   const [counts, setCounts] = useState<Record<string, number>>({});
   const [total, setTotal] = useState(0);
   const [bucket, setBucket] = useState(initial.bucket === "issues" ? "" : initial.bucket);
   const [issueOnly, setIssueOnly] = useState(initial.bucket === "issues");
   const [actionOnly, setActionOnly] = useState(initial.action);
+  const [acq, setAcq] = useState(initial.acq);
   const [q, setQ] = useState(initial.q);
   const [sort, setSort] = useState(initial.sort);
   const [offset, setOffset] = useState(initial.offset);
@@ -77,11 +80,12 @@ export default function NotesOrderQueue() {
   const [filtersOpen, setFiltersOpen] = useState(false);
   const queryRef = useRef(q);
 
-  const writeUrl = useCallback((next: { bucket: string; issue: boolean; action: boolean; q: string; sort: string; offset: number }) => {
+  const writeUrl = useCallback((next: { bucket: string; issue: boolean; action: boolean; acq: string; q: string; sort: string; offset: number }) => {
     const params = new URLSearchParams();
     if (next.issue) params.set("status", "issues");
     else if (next.bucket) params.set("status", next.bucket);
     if (next.action) params.set("action", "required");
+    if (next.acq) params.set("acq", next.acq);
     if (next.q) params.set("q", next.q);
     if (next.sort && next.sort !== "newest") params.set("sort", next.sort);
     if (next.offset) params.set("offset", String(next.offset));
@@ -95,6 +99,7 @@ export default function NotesOrderQueue() {
     if (bucket) params.set("bucket", bucket);
     if (issueOnly) params.set("issue", "open");
     if (actionOnly) params.set("action", "required");
+    if (acq) params.set("acq", acq);
     if (q.trim()) params.set("q", q.trim());
     if (sort) params.set("sort", sort);
     params.set("limit", "25");
@@ -107,7 +112,7 @@ export default function NotesOrderQueue() {
     setTotal(json.total || rows.length);
     setWrites(Boolean(json.writes_authorized));
     setLoading(false);
-  }, [bucket, issueOnly, actionOnly, q, sort, offset]);
+  }, [bucket, issueOnly, actionOnly, acq, q, sort, offset]);
 
   useEffect(() => {
     void load();
@@ -119,7 +124,7 @@ export default function NotesOrderQueue() {
     setBucket(issues ? "" : key);
     setActionOnly(false);
     setOffset(0);
-    writeUrl({ bucket: issues ? "" : key, issue: issues, action: false, q, sort, offset: 0 });
+    writeUrl({ bucket: issues ? "" : key, issue: issues, action: false, acq, q, sort, offset: 0 });
   }
 
   const open = orders.find((row) => row.id === openId) || null;
@@ -175,7 +180,7 @@ export default function NotesOrderQueue() {
             e.preventDefault();
             setOffset(0);
             queryRef.current = q;
-            writeUrl({ bucket, issue: issueOnly, action: actionOnly, q, sort, offset: 0 });
+            writeUrl({ bucket, issue: issueOnly, action: actionOnly, acq, q, sort, offset: 0 });
             void load();
           }}
         >
@@ -195,7 +200,7 @@ export default function NotesOrderQueue() {
           onChange={(e) => {
             setSort(e.target.value);
             setOffset(0);
-            writeUrl({ bucket, issue: issueOnly, action: actionOnly, q, sort: e.target.value, offset: 0 });
+            writeUrl({ bucket, issue: issueOnly, action: actionOnly, acq, q, sort: e.target.value, offset: 0 });
           }}
           className="min-h-11 rounded-full border bg-white px-3 text-sm"
         >
@@ -228,12 +233,27 @@ export default function NotesOrderQueue() {
           onClick={() => {
             setActionOnly((v) => !v);
             setOffset(0);
-            writeUrl({ bucket, issue: issueOnly, action: !actionOnly, q, sort, offset: 0 });
+            writeUrl({ bucket, issue: issueOnly, action: !actionOnly, acq, q, sort, offset: 0 });
           }}
           className={`min-h-10 rounded-full px-3 text-sm font-semibold ${actionOnly ? "bg-amber-800 text-white" : "bg-white text-[var(--ca-navy)]"}`}
         >
           Action required
         </button>
+        <select
+          aria-label="Acquisition source"
+          value={acq}
+          onChange={(e) => {
+            setAcq(e.target.value);
+            setOffset(0);
+            writeUrl({ bucket, issue: issueOnly, action: actionOnly, acq: e.target.value, q, sort, offset: 0 });
+          }}
+          className="min-h-10 rounded-full border bg-white px-3 text-sm"
+        >
+          <option value="">All sources</option>
+          {BUSINESS_CHANNELS.filter((channel) => channel !== "Unknown").map((channel) => (
+            <option key={channel} value={channel}>{channel}</option>
+          ))}
+        </select>
       </div>
 
       {msg && <p className="mb-3 rounded-xl bg-white px-3 py-2 text-sm text-[var(--ca-navy)]">{msg}</p>}
@@ -245,7 +265,7 @@ export default function NotesOrderQueue() {
         </div>
       ) : orders.length === 0 ? (
         <p className="rounded-2xl bg-white p-8 text-center text-sm text-[var(--ca-navy)]/60">
-          {q || bucket || issueOnly || actionOnly ? "No orders match these filters." : "No orders yet."}
+          {q || bucket || issueOnly || actionOnly || acq ? "No orders match these filters." : "No orders yet."}
         </p>
       ) : (
         <>

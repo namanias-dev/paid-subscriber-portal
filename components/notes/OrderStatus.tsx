@@ -67,6 +67,10 @@ export default function OrderStatus({ order }: { order: PublicOrder }) {
   }, [order]);
 
   useEffect(() => {
+    trackClient("notes_payment_returned", { cta_id: "payment_return" });
+  }, []);
+
+  useEffect(() => {
     if (completedFired.current) return;
     if (!current.confirming && current.steps.some((s) => s.done)) {
       completedFired.current = true;
