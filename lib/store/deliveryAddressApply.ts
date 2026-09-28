@@ -175,16 +175,8 @@ export async function applyDeliveryAddressChange(input: AddressChangeInput): Pro
       }
     },
     refulfill: async () => {
-      const { runAutoFulfillment } = await import("./shipping/autoFulfillRun");
-      const booked = await runAutoFulfillment(order.id);
-      return { ok: Boolean(booked.awb), awb: booked.awb };
+      return { ok: false, awb: null };
     },
   });
-  if (result.ok && decision.action === "update" && (order.status === "PACKED" || order.status === "READY_FOR_PICKUP")) {
-    try {
-      const { runAutoFulfillment } = await import("./shipping/autoFulfillRun");
-      await runAutoFulfillment(order.id);
-    } catch { /* the corrected address is saved; fulfillment can be retried */ }
-  }
   return result;
 }

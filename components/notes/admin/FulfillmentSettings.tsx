@@ -47,7 +47,7 @@ export default function FulfillmentSettings() {
     <section className="mb-6 rounded-3xl border border-[var(--ca-navy)]/10 bg-white p-4">
       <p className="text-xs font-semibold uppercase tracking-wide text-[var(--ca-navy)]/50">Automatic fulfillment</p>
       <p className="mt-1 text-sm text-[var(--ca-navy)]/70">
-        Starts after Mark packed. Strategy: cheapest eligible. Up to {settings.maxAttempts} couriers. Delhivery stays eligible.
+        Mark packed does not book a courier. Staff compare prices and confirm one courier. Saved strategy: {settings.strategy}. Delhivery stays available in the comparison.
       </p>
       <div className="mt-3 flex flex-wrap gap-2">
         <button type="button" disabled={busy} onClick={() => void save({ auto: !settings.auto })} className="min-h-11 rounded-full bg-[var(--ca-navy)] px-4 text-sm font-semibold text-white">
