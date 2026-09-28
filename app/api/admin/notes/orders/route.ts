@@ -137,7 +137,7 @@ export async function GET(req: Request) {
     const keys = await customerKeysForSearch(db, q, awbOrderIds);
     if (!keys.phones.length && !keys.ids.length) {
       const counts = await adminCounts(db);
-      return NextResponse.json({ ok: true, total: 0, limit, offset, customers: [], orders: [], counts, writes_authorized: shippingWritesAuthorized() }, { headers: { "Cache-Control": "no-store" } });
+      return NextResponse.json({ ok: true, total: 0, limit, offset, customers: [], orders: [], counts, can_manage: canManage, can_view_analytics: canViewAnalytics, writes_authorized: shippingWritesAuthorized() }, { headers: { "Cache-Control": "no-store" } });
     }
     const ors = [];
     if (keys.phones.length) ors.push(`phone_key.in.(${keys.phones.join(",")})`);
@@ -386,6 +386,8 @@ export async function GET(req: Request) {
         limit,
         offset,
         writes_authorized: shippingWritesAuthorized(),
+        can_manage: canManage,
+        can_view_analytics: canViewAnalytics,
         counts,
         customers,
         orders: customers.map((group) => ({
