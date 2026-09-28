@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import PrivacySettingsButton from "@/components/analytics/PrivacySettingsButton";
 
 /**
  * Public privacy policy for Meta App Review / Live mode.
@@ -29,6 +30,10 @@ export default function PrivacyPolicyPage() {
         enquiry forms on our website.
       </p>
       <p className="mt-2 text-sm text-muted">Last updated: {LAST_UPDATED}</p>
+      <p className="mt-4 text-sm text-ink2">
+        <PrivacySettingsButton className="font-medium text-primary hover:underline" />
+        {" "}opens optional analytics and advertising choices. It does not appear on its own.
+      </p>
 
       <div className="prose-legal mt-10 max-w-3xl space-y-8 text-ink2">
         <section>
