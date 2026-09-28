@@ -257,6 +257,9 @@ export interface NotesOrderFact {
   attribution_source?: string | null;
   attribution_platform?: string | null;
   attribution_json?: StoredNotesAttribution | null;
+  /** Used only to count distinct buyers. Never rendered. */
+  phone_key?: string | null;
+  shipping_address_id?: string | null;
 }
 
 export interface NotesItemFact {
@@ -265,6 +268,7 @@ export interface NotesItemFact {
   name_snapshot: string;
   sku_snapshot?: string | null;
   line_total_paise: number;
+  qty?: number | null;
 }
 
 const UNPAID = new Set(["PAYMENT_PENDING", "PAYMENT_FAILED", "PAYMENT_EXPIRED", "CANCELLED", "REFUNDED", "PARTIALLY_REFUNDED"]);
@@ -272,6 +276,16 @@ const UNPAID = new Set(["PAYMENT_PENDING", "PAYMENT_FAILED", "PAYMENT_EXPIRED", 
 export function orderIsCaptured(order: NotesOrderFact): boolean {
   if (!order.paid_at) return false;
   return !UNPAID.has(order.status);
+}
+
+/** Paid orders that belong in business charts. QA and unpaid rows stay out. */
+export function notesBusinessOrders(orders: NotesOrderFact[]): NotesOrderFact[] {
+  return orders.filter((order) => orderIsCaptured(order) && !orderQa(order));
+}
+
+/** First-party events that belong in behavior charts. QA rows stay out. */
+export function notesBusinessEvents(events: NotesEventRow[]): NotesEventRow[] {
+  return events.filter((event) => !eventQa(event));
 }
 
 function touchOf(state: AttributionState | null | undefined): AttributionTouch | null {
