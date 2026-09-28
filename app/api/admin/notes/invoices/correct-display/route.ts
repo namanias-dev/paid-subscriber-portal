@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requirePermission } from "@/lib/adminGuard";
+import { requireSuperAdmin } from "@/lib/adminGuard";
 import { correctInvoiceSellerDisplay, SELLER_DISPLAY_CORRECTION_REASON } from "@/lib/store/invoice/correct";
 
 export const dynamic = "force-dynamic";
@@ -8,7 +8,7 @@ const CORRECTABLE_INVOICE = "NIA/26-27/00001";
 
 /** One clerical presentation correction. Does not allocate an invoice number. */
 export async function POST(req: Request) {
-  if (!(await requirePermission("store_manage_orders"))) {
+  if (!(await requireSuperAdmin())) {
     return NextResponse.json({ ok: false, error: "Forbidden" }, { status: 403 });
   }
   const body = (await req.json().catch(() => ({}))) as { invoiceNumber?: string; reason?: string };

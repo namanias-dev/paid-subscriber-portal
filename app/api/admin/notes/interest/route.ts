@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireAnyPermission } from "@/lib/adminGuard";
+import { requireSuperAdmin } from "@/lib/adminGuard";
 import { listInterestAggregates, type InterestSort } from "@/lib/store/interest";
 import { listPreferenceIntelligence } from "@/lib/store/preferences";
 
@@ -10,7 +10,7 @@ function noStore(body: unknown, status = 200) {
 }
 
 export async function GET(req: Request) {
-  if (!(await requireAnyPermission(["store_manage_orders", "store_manage_catalogue"]))) {
+  if (!(await requireSuperAdmin())) {
     return noStore({ ok: false, error: "Forbidden" }, 403);
   }
   const url = new URL(req.url);

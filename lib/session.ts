@@ -2,7 +2,7 @@ import { cache } from "react";
 import { cookies } from "next/headers";
 import { STUDENT_COOKIE, ADMIN_COOKIE, BUYER_COOKIE } from "./config";
 import { verifyStudentToken, verifyAdminToken, verifyBuyerToken } from "./auth";
-import { getBuyerSessionVersion, getAdminStatus } from "./dataProvider";
+import { getBuyerSessionVersion, readAdminGate } from "./dataProvider";
 import type { SessionPayload, AdminSessionPayload, BuyerSessionPayload } from "./types";
 
 /** Read & verify the student session from the httpOnly cookie (server-side). */
@@ -45,7 +45,11 @@ export const getAdminSession = cache(async (): Promise<AdminSessionPayload | nul
   const token = cookies().get(ADMIN_COOKIE)?.value;
   const payload = await verifyAdminToken(token);
   if (!payload) return null;
-  const status = await getAdminStatus(payload.admin_id);
-  if (status === null) return payload; // unknown → fail-open
-  return status === "active" ? payload : null;
+  const gate = await readAdminGate(payload.admin_id);
+  if (gate === null) return payload; // unknown → fail-open
+  if (gate.status !== "active") return null;
+  // Role + per-account override are authoritative. A signed token cannot
+  // widen access, and a permission grant applies without waiting for re-login.
+  if (gate.permissions) return { ...payload, permissions: gate.permissions };
+  return payload;
 });

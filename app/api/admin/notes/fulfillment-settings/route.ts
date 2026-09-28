@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getActionActor, requirePermission } from "@/lib/adminGuard";
+import { getActionActor, requireSuperAdmin } from "@/lib/adminGuard";
 import { getFulfillmentSettings, setFulfillmentSettings } from "@/lib/store/fulfillmentSettings";
 
 export const dynamic = "force-dynamic";
@@ -9,12 +9,12 @@ function noStore(body: unknown, status = 200) {
 }
 
 export async function GET() {
-  if (!(await requirePermission("store_manage_orders"))) return noStore({ ok: false, error: "Forbidden" }, 403);
+  if (!(await requireSuperAdmin())) return noStore({ ok: false, error: "Forbidden" }, 403);
   return noStore({ ok: true, settings: await getFulfillmentSettings() });
 }
 
 export async function POST(req: Request) {
-  if (!(await requirePermission("store_manage_orders"))) return noStore({ ok: false, error: "Forbidden" }, 403);
+  if (!(await requireSuperAdmin())) return noStore({ ok: false, error: "Forbidden" }, 403);
   const body = (await req.json().catch(() => ({}))) as {
     auto?: unknown;
     shiprocket?: unknown;

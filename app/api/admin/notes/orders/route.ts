@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requirePermission } from "@/lib/adminGuard";
+import { requirePermission, requireStoreOrderRead, requireSuperAdmin } from "@/lib/adminGuard";
 import { storeDb } from "@/lib/store/db";
 import { staffPaymentLabel } from "@/lib/store/orders";
 import { fulfilmentAttention } from "@/lib/store/shipping/dispatch";
@@ -56,9 +56,11 @@ const ALL_STATUSES = [
 ];
 
 export async function GET(req: Request) {
-  if (!(await requirePermission("store_manage_orders"))) {
+  if (!(await requireStoreOrderRead())) {
     return NextResponse.json({ ok: false, error: "Forbidden" }, { status: 403, headers: { "Cache-Control": "no-store" } });
   }
+  const canManage = await requirePermission("store_manage_orders");
+  const canViewAnalytics = await requireSuperAdmin();
   const db = storeDb();
   if (!db) return NextResponse.json({ ok: false, error: "unavailable" }, { status: 503 });
 
@@ -86,7 +88,10 @@ export async function GET(req: Request) {
     if (!openError) {
       openIssueOrderIds = [...new Set((openRows || []).map((row) => row.order_id).filter(Boolean))] as string[];
       if (!openIssueOrderIds.length) {
-        return NextResponse.json({ ok: true, total: 0, limit, offset, orders: [] }, { headers: { "Cache-Control": "no-store" } });
+        return NextResponse.json(
+          { ok: true, total: 0, limit, offset, orders: [], can_manage: canManage, can_view_analytics: canViewAnalytics, writes_authorized: shippingWritesAuthorized() },
+          { headers: { "Cache-Control": "no-store" } },
+        );
       }
     }
   }
@@ -371,6 +376,8 @@ export async function GET(req: Request) {
       limit,
       offset,
       writes_authorized: shippingWritesAuthorized(),
+      can_manage: canManage,
+      can_view_analytics: canViewAnalytics,
       counts,
       orders: page,
     },

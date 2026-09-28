@@ -146,6 +146,7 @@ export default function OrderDetail({
   order,
   busy,
   writesAuthorized,
+  canManage,
   onClose,
   onRefresh,
   onCompare,
@@ -155,6 +156,8 @@ export default function OrderDetail({
   order: AdminOrder;
   busy: boolean;
   writesAuthorized: boolean;
+  /** False hides operational controls. The APIs still reject a read-only caller. */
+  canManage: boolean;
   onClose: () => void;
   onRefresh: () => void;
   onCompare: () => void;
@@ -321,7 +324,7 @@ export default function OrderDetail({
             <p className="mt-3 text-sm text-[var(--ca-navy)]">
               Current: <span className="font-semibold">{showsFulfillmentTimeline(order.status) ? TIMELINE[timelineIndex(order.status) || 0].label : fulfillmentLabel(order.status, failed)}</span>
             </p>
-            {advanceLabel && (
+            {canManage && advanceLabel && (
               packing && !confirmAdvance ? (
                 <div className="mt-3 rounded-2xl bg-[#f7f5ef] p-3">
                   <p className="text-sm text-[var(--ca-navy)]">Marking this order packed will start automatic courier selection and shipment booking.</p>
@@ -398,9 +401,11 @@ export default function OrderDetail({
                 {queued ? " The parcel remains in the courier pickup queue." : " Collection needs a follow-up."}
               </p>
               {queued && <p className="mt-2 text-sm font-medium text-[var(--ca-navy)]">No new pickup has been booked.</p>}
-              <button type="button" onClick={() => void refreshTrack()} className="mt-3 min-h-11 rounded-full bg-[var(--ca-navy)] px-4 text-sm font-semibold text-white">
-                Check latest status
-              </button>
+              {canManage && (
+                <button type="button" onClick={() => void refreshTrack()} className="mt-3 min-h-11 rounded-full bg-[var(--ca-navy)] px-4 text-sm font-semibold text-white">
+                  Check latest status
+                </button>
+              )}
             </section>
           )}
 
@@ -417,21 +422,23 @@ export default function OrderDetail({
                 <Field label="Destination" value={address ? `${address.city} · ${address.pincode}` : null} />
               </dl>
               <div className="mt-4 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
-                {ship.has_label && (
+                {canManage && ship.has_label && (
                   <button type="button" onClick={() => void printLabel()} className="min-h-11 rounded-full border border-[var(--ca-navy)]/15 px-4 text-sm font-semibold text-[var(--ca-navy)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2">
                     Print Label
                   </button>
                 )}
+                {canManage && (
                 <button type="button" onClick={() => void refreshTrack()} className="min-h-11 rounded-full border border-[var(--ca-navy)]/15 px-4 text-sm font-semibold text-[var(--ca-navy)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2">
                   View Tracking
                 </button>
+                )}
                 {showAdminViewInvoice(order.invoice_status) && <ViewInvoiceButton orderId={order.id} prominent />}
                 {showAdminViewInvoice(order.invoice_status) && <DownloadInvoiceButton orderId={order.id} />}
               </div>
             </section>
           )}
 
-          {!active && (order.status === "PACKED" || order.status === "READY_FOR_PICKUP") && (
+          {canManage && !active && (order.status === "PACKED" || order.status === "READY_FOR_PICKUP") && (
             <section className="rounded-2xl bg-white p-4">
               <p className="font-semibold text-[var(--ca-navy)]">Packed and ready to book a courier.</p>
               <button type="button" onClick={onCompare} className="mt-3 min-h-11 rounded-full bg-[var(--ca-navy)] px-4 text-sm font-semibold text-white">
@@ -454,7 +461,7 @@ export default function OrderDetail({
             <p className="mt-1 whitespace-pre-line text-sm leading-relaxed text-[var(--ca-navy)]/80">{address ? formatDeliveryAddress(address) : "No address"}</p>
             <div className="mt-3 flex flex-wrap gap-2">
               {deliveryMapsUrl && <a href={deliveryMapsUrl} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-11 items-center rounded-full border px-3 text-xs font-semibold">Open in Google Maps</a>}
-              <button type="button" onClick={() => setAddressEditor(true)} className="min-h-11 rounded-full border px-3 text-xs font-semibold">Change delivery address</button>
+              {canManage && <button type="button" onClick={() => setAddressEditor(true)} className="min-h-11 rounded-full border px-3 text-xs font-semibold">Change delivery address</button>}
               <button type="button" aria-label="Copy address" onClick={() => copy(addressLine)} className="min-h-11 rounded-full border px-3 text-xs font-semibold">Copy address</button>
               <button type="button" aria-label="Copy phone" onClick={() => copy(order.phone)} className="min-h-11 rounded-full border px-3 text-xs font-semibold">Copy phone</button>
             </div>
@@ -521,7 +528,7 @@ export default function OrderDetail({
                 {invoice.attention && <p className="mt-2 text-xs text-amber-900">{invoice.attention}</p>}
                 <div className="mt-3 flex flex-wrap gap-2">
                   <button type="button" onClick={() => copy(invoice.invoice_number || "")} className="min-h-11 rounded-full border px-3 text-xs font-semibold">Copy invoice number</button>
-                  {invoice.status === "FAILED" && (
+                  {canManage && invoice.status === "FAILED" && (
                     <button
                       type="button"
                       disabled={invoiceBusy}
@@ -555,7 +562,7 @@ export default function OrderDetail({
           <section className="rounded-2xl bg-white p-4">
             <div className="flex items-center justify-between">
               <h2 className="font-heading text-lg font-bold text-[var(--ca-navy)]">Package</h2>
-              <button type="button" onClick={() => setPackEdit((v) => !v)} className="min-h-11 text-sm font-semibold text-[var(--ca-navy)]">{packEdit ? "Close" : "Edit"}</button>
+              {canManage && <button type="button" onClick={() => setPackEdit((v) => !v)} className="min-h-11 text-sm font-semibold text-[var(--ca-navy)]">{packEdit ? "Close" : "Edit"}</button>}
             </div>
             {!packEdit && (
               <p className="mt-2 text-sm text-[var(--ca-navy)]">
@@ -565,7 +572,7 @@ export default function OrderDetail({
                 {vol ? ` · Volumetric ${vol} g` : ""}
               </p>
             )}
-            {packEdit && (
+            {canManage && packEdit && (
               <form
                 className="mt-3 grid grid-cols-2 gap-2"
                 onSubmit={(e) => {
@@ -632,27 +639,31 @@ export default function OrderDetail({
                 <p className="text-sm font-semibold text-[var(--ca-navy)]">{order.issue.reference} · {order.issue.category_label}</p>
                 <p className="mt-1 text-xs text-[var(--ca-navy)]/55">{order.issue.status_label} · {formatAdminWhen(order.issue.created_at)}</p>
                 <p className="mt-2 text-sm leading-relaxed">{order.issue.description}</p>
-                <select value={issueStatus} onChange={(e) => setIssueStatus(e.target.value)} className="mt-3 min-h-11 w-full rounded-xl border px-2 text-sm">
-                  <option value="OPEN">Issue received</option>
-                  <option value="IN_REVIEW">In review</option>
-                  <option value="WAITING_ON_TEAM">With the team</option>
-                  <option value="RESOLVED">Resolved</option>
-                  <option value="CLOSED">Closed</option>
-                </select>
-                <textarea value={issueAdmin} onChange={(e) => setIssueAdmin(e.target.value)} placeholder="Internal note" rows={2} className="mt-2 w-full rounded-xl border px-3 py-2 text-sm" />
-                <textarea value={issueCustomer} onChange={(e) => setIssueCustomer(e.target.value)} placeholder="Note the student will see" rows={2} className="mt-2 w-full rounded-xl border px-3 py-2 text-sm" />
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => act(() => fetch(`/api/admin/notes/orders/${order.id}/issues`, {
-                    method: "POST",
-                    headers: { "content-type": "application/json" },
-                    body: JSON.stringify({ issue_id: order.issue?.id, status: issueStatus, admin_note: issueAdmin, customer_note: issueCustomer }),
-                  }), "Issue updated")}
-                  className="mt-2 min-h-11 rounded-full bg-[var(--ca-navy)] px-4 text-sm font-semibold text-white"
-                >
-                  Update issue
-                </button>
+                {canManage && (
+                  <>
+                    <select value={issueStatus} onChange={(e) => setIssueStatus(e.target.value)} className="mt-3 min-h-11 w-full rounded-xl border px-2 text-sm">
+                      <option value="OPEN">Issue received</option>
+                      <option value="IN_REVIEW">In review</option>
+                      <option value="WAITING_ON_TEAM">With the team</option>
+                      <option value="RESOLVED">Resolved</option>
+                      <option value="CLOSED">Closed</option>
+                    </select>
+                    <textarea value={issueAdmin} onChange={(e) => setIssueAdmin(e.target.value)} placeholder="Internal note" rows={2} className="mt-2 w-full rounded-xl border px-3 py-2 text-sm" />
+                    <textarea value={issueCustomer} onChange={(e) => setIssueCustomer(e.target.value)} placeholder="Note the student will see" rows={2} className="mt-2 w-full rounded-xl border px-3 py-2 text-sm" />
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => act(() => fetch(`/api/admin/notes/orders/${order.id}/issues`, {
+                        method: "POST",
+                        headers: { "content-type": "application/json" },
+                        body: JSON.stringify({ issue_id: order.issue?.id, status: issueStatus, admin_note: issueAdmin, customer_note: issueCustomer }),
+                      }), "Issue updated")}
+                      className="mt-2 min-h-11 rounded-full bg-[var(--ca-navy)] px-4 text-sm font-semibold text-white"
+                    >
+                      Update issue
+                    </button>
+                  </>
+                )}
               </div>
             )}
           </section>
@@ -670,7 +681,7 @@ export default function OrderDetail({
             </ol>
           </section>
 
-          <section className="rounded-2xl border border-dashed border-[var(--ca-navy)]/15 p-4">
+          {canManage && <section className="rounded-2xl border border-dashed border-[var(--ca-navy)]/15 p-4">
             <button type="button" onClick={() => setAdvanced((v) => !v)} className="min-h-11 text-sm font-semibold text-[var(--ca-navy)]">
               {advanced ? "Hide advanced" : "Advanced"}
             </button>
@@ -710,17 +721,21 @@ export default function OrderDetail({
                 </button>
               </div>
             )}
-          </section>
+          </section>}
         </div>
 
+        {(canManage || toast) && (
         <div className="fixed inset-x-0 bottom-0 z-20 border-t border-[var(--ca-navy)]/10 bg-[#fbfaf6] p-3 sm:max-w-xl sm:left-auto">
+          {canManage && (
           <button type="button" disabled={busy} onClick={runPrimary} className="min-h-12 w-full rounded-full bg-[var(--ca-navy)] text-sm font-semibold text-white">
             {PRIMARY_LABEL[action]}
           </button>
+          )}
           {toast && <p className="mt-1 text-center text-xs text-[var(--ca-navy)]/70">{toast}</p>}
         </div>
+        )}
       </article>
-      {addressEditor && (
+      {canManage && addressEditor && (
         <ChangeDeliveryAddress
           orderId={order.id}
           current={address}

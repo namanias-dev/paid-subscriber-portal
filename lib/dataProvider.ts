@@ -4246,6 +4246,39 @@ export async function bumpBuyerSessionVersion(phone: string): Promise<void> {
 }
 
 /**
+ * Live status and role+override permissions for one admin account.
+ * Returns null when the lookup itself fails — callers keep the signed token
+ * so an infra hiccup never locks every admin out.
+ * `permissions: null` means "do not replace the token" (demo mode).
+ */
+export async function readAdminGate(id: string): Promise<{ status: string; permissions: PermissionSet | null } | null> {
+  const a = (id || "").trim();
+  if (!a) return null;
+  if (demoMode()) return { status: "active", permissions: null };
+  const db = getSupabaseAdmin();
+  if (!db) return null;
+  try {
+    const { data, error } = await db
+      .from("admin_users")
+      .select("status, role_id, permissions_override")
+      .eq("id", a)
+      .maybeSingle();
+    if (error) return null;
+    if (!data) return { status: "missing", permissions: null };
+    const row = data as { status: string | null; role_id: string | null; permissions_override: PermissionSet | null };
+    const status = row.status || "active";
+    if (status !== "active") return { status, permissions: null };
+    const roleId = row.role_id || "super_admin";
+    const { data: role, error: roleError } = await db.from("roles").select("permissions").eq("id", roleId).maybeSingle();
+    if (roleError || !role) return null;
+    const rolePerms = ((role as { permissions?: PermissionSet }).permissions || {}) as PermissionSet;
+    return { status, permissions: resolvePermissions(rolePerms, row.permissions_override) };
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Current status of an admin account, for per-request session re-validation.
  * Returns:
  *   • "active" / "disabled" / other → the live DB status

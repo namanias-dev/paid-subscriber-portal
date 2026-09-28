@@ -51,10 +51,12 @@ export type PermissionKey =
   | "journey_manage_templates"
   | "journey_manage_execution"
   | "journey_manage_killswitch"
-  // Notes Store. Restrictive by default — only Super Admin / Admin hold these
-  // until explicitly granted. Catalogue is content; orders carry customer PII
-  // and money, so they are a separate key.
+  // Notes Store. Restrictive by default — only Super Admin / Admin hold the
+  // manage keys until explicitly granted. Catalogue is content. Orders carry
+  // customer PII and money, so read and manage are separate keys. Analytics is
+  // not a permission: it stays Super Admin only (see lib/store/notesAccess.ts).
   | "store_manage_catalogue"
+  | "store_view_orders"
   | "store_manage_orders";
 
 export interface PermissionMeta {
@@ -105,6 +107,7 @@ export const PERMISSIONS: PermissionMeta[] = [
   { key: "journey_manage_killswitch", label: "Manage Journey Automation kill switch", group: "Communications" },
 
   { key: "store_manage_catalogue", label: "Manage Notes Store catalogue (products, samples, inventory)", group: "Notes Store" },
+  { key: "store_view_orders", label: "View Notes Store orders and checkout leads (read only)", group: "Notes Store" },
   { key: "store_manage_orders", label: "Manage Notes Store orders (queue, pick list, mark shipped)", group: "Notes Store" },
 ];
 

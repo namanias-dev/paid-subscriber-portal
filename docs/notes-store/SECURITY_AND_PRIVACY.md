@@ -35,7 +35,7 @@ Exposed: `order_no`, `stage`, `stage_label`, `placed_at`, `promised_delivery_dat
 
 ## Admin
 
-Admin Notes APIs use `requirePermission(...)` server-side (`store_manage_catalogue`, fulfilment perms in `lib/permissions.ts`). Never trust client role alone.
+Admin Notes APIs use `requirePermission(...)` / `requireStoreOrderRead()` / `requireSuperAdmin()` server-side (`lib/permissions.ts`, `lib/store/notesAccess.ts`). `store_view_orders` reads the order queue, order detail, and checkout leads. `store_manage_orders` is required for fulfilment mutations. Notes analytics, demand, overview, store launch, and seller settings are Super Admin only and are not implied by `store_manage_orders`. The signed session is re-read against `admin_users` + `roles` on each request. Never trust a client-provided role.
 
 ## Sample media
 
