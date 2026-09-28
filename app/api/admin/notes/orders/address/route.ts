@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
 import { getAdminSession } from "@/lib/session";
-import { requirePermission } from "@/lib/adminGuard";
+import { requireFreshPermission } from "@/lib/adminGuard";
 import { applyDeliveryAddressChange } from "@/lib/store/deliveryAddressApply";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(req: Request) {
-  if (!(await requirePermission("store_manage_orders"))) {
+  if (!(await requireFreshPermission("store_manage_orders"))) {
     return NextResponse.json({ ok: false, error: "Forbidden" }, { status: 403 });
   }
   const session = await getAdminSession();

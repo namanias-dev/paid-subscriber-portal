@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireStoreOrderRead, requireSuperAdmin } from "@/lib/adminGuard";
+import { requireFreshSuperAdmin, requireStoreOrderRead } from "@/lib/adminGuard";
 import { issueRecoveryLink, listCheckoutLeads, updateCheckoutLeadSales } from "@/lib/store/checkoutLeads";
 import { SALES_STATUSES, type SalesStatus } from "@/lib/store/checkoutLeadLogic";
 
@@ -9,7 +9,7 @@ export async function GET(req: Request) {
   if (!(await requireStoreOrderRead())) {
     return NextResponse.json({ ok: false, error: "Forbidden" }, { status: 403 });
   }
-  const canUpdate = await requireSuperAdmin();
+  const canUpdate = await requireFreshSuperAdmin();
   const filter = new URL(req.url).searchParams.get("filter") || "open";
   const leads = await listCheckoutLeads(filter);
   let activity: Record<string, { lines: string[] }> = {};
@@ -23,7 +23,7 @@ export async function GET(req: Request) {
 }
 
 export async function PATCH(req: Request) {
-  if (!(await requireSuperAdmin())) {
+  if (!(await requireFreshSuperAdmin())) {
     return NextResponse.json({ ok: false, error: "Forbidden" }, { status: 403 });
   }
   const body = await req.json().catch(() => ({}));

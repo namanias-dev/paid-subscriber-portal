@@ -184,7 +184,7 @@ check("checkout still requires the confirmation hash before payment", () => {
 
 check("admin address route is staff-only", () => {
   const src = readFileSync(new URL("../../app/api/admin/notes/orders/address/route.ts", import.meta.url), "utf8");
-  assert.match(src, /requirePermission\("store_manage_orders"\)/);
+  assert.match(src, /requireFreshPermission\("store_manage_orders"\)/);
 });
 
 void Promise.all(pending).then(() => {

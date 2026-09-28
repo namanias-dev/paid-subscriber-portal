@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requirePermission } from "@/lib/adminGuard";
+import { requireFreshPermission } from "@/lib/adminGuard";
 import { storeDb } from "@/lib/store/db";
 import { trackDelhiveryAwb } from "@/lib/store/shipping/delhiveryApi";
 import { normalizeCourierStatus } from "@/lib/store/shipping/status";
@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 
 /** Read the latest carrier scan. Does not change the order. */
 export async function GET(_req: Request, { params }: { params: { id: string } }) {
-  if (!(await requirePermission("store_manage_orders"))) {
+  if (!(await requireFreshPermission("store_manage_orders"))) {
     return NextResponse.json({ ok: false, error: "Forbidden" }, { status: 403, headers: { "Cache-Control": "no-store" } });
   }
   const db = storeDb();

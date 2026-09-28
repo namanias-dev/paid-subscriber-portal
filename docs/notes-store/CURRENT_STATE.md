@@ -127,7 +127,7 @@ Additive. After `applyStoreVerify` commits the first transition into `ORDER_CONF
 
 ## Notes staff access (2026-09-28)
 
-Staff were seeing the global “Page not found” screen because Notes pages call `notFound()` unless `store_manage_orders` is held, and that key is not on the production role rows. Super Admin still passes because `isSuperAdmin` expands to every permission. Read access is now `store_view_orders` (manage still implies read). Analytics, demand, overview, and store settings stay Super Admin only. Per-account overrides for the three named staff accounts are in `supabase/migrations/2026-09-28-notes-staff-order-access.sql`. Order, payment, and courier business logic is unchanged.
+Staff were seeing the global “Page not found” screen because Notes pages call `notFound()` unless `store_manage_orders` is held, and that key is not on the production role rows. Super Admin still passes because `isSuperAdmin` expands to every permission. Read access is now `store_view_orders` (manage still implies read). Analytics, demand, overview, and store settings stay Super Admin only. Per-account overrides for the three named staff accounts are in `supabase/migrations/2026-09-28-notes-staff-order-access.sql`. Order mutations, courier actions, refunds, store settings, and Super Admin Notes routes deny when the live permission read fails; they do not keep a stale signed grant. Order, payment, and courier business logic is unchanged.
 
 ## Checkout measurement and pay-button guard (2026-09-27)
 

@@ -38,18 +38,21 @@ export const getBuyerSession = cache(async (): Promise<BuyerSessionPayload | nul
  * Read & verify the admin session. Beyond the signed token, this re-validates the
  * admin's CURRENT status against the DB on each request, so a disabled/deleted
  * admin loses access immediately on ALL devices (not after the 7-day token TTL).
- * Fail-open if status can't be read (infra hiccup never locks out every admin).
- * Per-request cached so the extra read happens at most once per request.
+ *
+ * If the permission read itself fails, the signed snapshot is kept and marked
+ * auth_source "token" so ordinary portal pages stay available. Privileged Notes
+ * checks refuse that snapshot. auth_source is always overwritten here; a value
+ * carried in the JWT is ignored. Per-request cached.
  */
 export const getAdminSession = cache(async (): Promise<AdminSessionPayload | null> => {
   const token = cookies().get(ADMIN_COOKIE)?.value;
   const payload = await verifyAdminToken(token);
   if (!payload) return null;
   const gate = await readAdminGate(payload.admin_id);
-  if (gate === null) return payload; // unknown → fail-open
+  if (gate === null) return { ...payload, auth_source: "token" };
   if (gate.status !== "active") return null;
   // Role + per-account override are authoritative. A signed token cannot
   // widen access, and a permission grant applies without waiting for re-login.
-  if (gate.permissions) return { ...payload, permissions: gate.permissions };
-  return payload;
+  if (gate.permissions) return { ...payload, permissions: gate.permissions, auth_source: "database" };
+  return { ...payload, auth_source: "demo" };
 });

@@ -4247,8 +4247,8 @@ export async function bumpBuyerSessionVersion(phone: string): Promise<void> {
 
 /**
  * Live status and role+override permissions for one admin account.
- * Returns null when the lookup itself fails — callers keep the signed token
- * so an infra hiccup never locks every admin out.
+ * Returns null when the lookup itself fails. Ordinary portal checks may keep
+ * the signed token; privileged Notes checks treat that as unauthorized.
  * `permissions: null` means "do not replace the token" (demo mode).
  */
 export async function readAdminGate(id: string): Promise<{ status: string; permissions: PermissionSet | null } | null> {

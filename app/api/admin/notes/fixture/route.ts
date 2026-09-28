@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requirePermission } from "@/lib/adminGuard";
+import { requireFreshPermission } from "@/lib/adminGuard";
 import { applyLocalFixtureScene, localFixtureEnabled } from "@/lib/store/localFixture";
 
 export const dynamic = "force-dynamic";
@@ -13,7 +13,7 @@ export async function POST(req: Request) {
   if (!localFixtureEnabled()) {
     return NextResponse.json({ ok: false, error: "not found" }, { status: 404, headers: { "Cache-Control": "no-store" } });
   }
-  if (!(await requirePermission("store_manage_orders"))) {
+  if (!(await requireFreshPermission("store_manage_orders"))) {
     return NextResponse.json({ ok: false, error: "Forbidden" }, { status: 403, headers: { "Cache-Control": "no-store" } });
   }
   const body = (await req.json().catch(() => null)) as { scene?: string } | null;
