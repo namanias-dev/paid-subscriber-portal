@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getActionActor, requirePermission } from "@/lib/adminGuard";
+import { getActionActor, requireFreshPermission } from "@/lib/adminGuard";
 import { storeDb } from "@/lib/store/db";
 import { clampIssueText, issueStatusAllowed, type IssueStatus } from "@/lib/store/issues";
 
@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 const noStore = { "Cache-Control": "no-store" };
 
 export async function POST(req: Request, { params }: { params: { id: string } }) {
-  if (!(await requirePermission("store_manage_orders"))) {
+  if (!(await requireFreshPermission("store_manage_orders"))) {
     return NextResponse.json({ ok: false, error: "Forbidden" }, { status: 403, headers: noStore });
   }
   const actor = await getActionActor();

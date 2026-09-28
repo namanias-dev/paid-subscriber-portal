@@ -96,6 +96,8 @@ export default function NotesOrderQueue() {
   }, []);
   const [compareId, setCompareId] = useState<string | null>(null);
   const [writes, setWrites] = useState(false);
+  const [canManage, setCanManage] = useState(false);
+  const [showAnalytics, setShowAnalytics] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -136,6 +138,8 @@ export default function NotesOrderQueue() {
     setProducts(json.counts?.products || []);
     setTotal(json.total || rows.length);
     setWrites(Boolean(json.writes_authorized));
+    setCanManage(Boolean(json.can_manage));
+    setShowAnalytics(Boolean(json.can_view_analytics));
     setLoading(false);
   }, [bucket, issueOnly, actionOnly, acq, q, sort, offset, code]);
 
@@ -178,7 +182,7 @@ export default function NotesOrderQueue() {
           <h1 className="font-heading text-3xl font-bold text-[var(--ca-navy)]">Orders</h1>
         </div>
         <div className="flex gap-2">
-          <Link href="/admin/notes/analytics" className="inline-flex min-h-10 items-center rounded-full border border-[var(--ca-navy)]/15 bg-white px-4 text-sm font-semibold text-[var(--ca-navy)]">Analytics</Link>
+          {showAnalytics && <Link href="/admin/notes/analytics" className="inline-flex min-h-10 items-center rounded-full border border-[var(--ca-navy)]/15 bg-white px-4 text-sm font-semibold text-[var(--ca-navy)]">Analytics</Link>}
           <Link href="/admin/notes/leads" className="inline-flex min-h-10 items-center rounded-full px-3 text-sm font-semibold text-[var(--ca-navy)]/70">Checkout leads</Link>
         </div>
       </header>
@@ -403,6 +407,7 @@ export default function NotesOrderQueue() {
           order={open}
           busy={busyId === open.id}
           writesAuthorized={writes}
+          canManage={canManage}
           onClose={() => {
             if (window.history.state?.notesOrder) window.history.back();
             else setOpenId(null);
@@ -412,7 +417,7 @@ export default function NotesOrderQueue() {
           act={(fn, ok) => act(open.id, fn, ok)}
         />
       )}
-      {compare && (
+      {canManage && compare && (
         <CourierPicker
           orderId={compare.id}
           open

@@ -7,6 +7,10 @@ export interface AdminNavItem {
   group: string;
   /** If set, the item is shown only to admins holding this permission. */
   perm?: PermissionKey;
+  /** Shown when the admin holds any of these permissions. */
+  anyPerm?: PermissionKey[];
+  /** Super Admin only. Not implied by a Notes Store permission. */
+  superOnly?: boolean;
   /**
    * Extra route prefixes this item "owns" for active-state highlighting, so a
    * child/consolidated route lights up its true parent in the sidebar (e.g. the
@@ -93,11 +97,11 @@ export const ADMIN_NAV: AdminNavItem[] = [
     match: ["/admin/course-payments/at-risk", "/admin/access-risk"],
   },
   { href: "/admin/payments", label: "Payments", icon: "payments", group: "Admissions & Payments", perm: "view_revenue" },
-  { href: "/admin/notes/overview", label: "Notes overview", icon: "reports", group: "Notes Store", perm: "store_manage_orders" },
-  { href: "/admin/notes/analytics", label: "Notes analytics", icon: "reports", group: "Notes Store", perm: "store_manage_orders" },
-  { href: "/admin/notes/interest", label: "Notes demand", icon: "reports", group: "Notes Store", perm: "store_manage_orders" },
-  { href: "/admin/notes", label: "Notes orders", icon: "payments", group: "Notes Store", perm: "store_manage_orders" },
-  { href: "/admin/notes/leads", label: "Checkout leads", icon: "reports", group: "Notes Store", perm: "store_manage_orders" },
+  { href: "/admin/notes/overview", label: "Notes overview", icon: "reports", group: "Notes Store", superOnly: true },
+  { href: "/admin/notes/analytics", label: "Notes analytics", icon: "reports", group: "Notes Store", superOnly: true },
+  { href: "/admin/notes/interest", label: "Notes demand", icon: "reports", group: "Notes Store", superOnly: true },
+  { href: "/admin/notes", label: "Notes orders", icon: "payments", group: "Notes Store", anyPerm: ["store_view_orders", "store_manage_orders"] },
+  { href: "/admin/notes/leads", label: "Checkout leads", icon: "reports", group: "Notes Store", anyPerm: ["store_view_orders", "store_manage_orders"] },
   { href: "/admin/notes/preparation", label: "Preparation queue", icon: "reports", group: "Notes Store", perm: "store_manage_orders" },
   { href: "/admin/notes/products", label: "Notes catalogue", icon: "content", group: "Notes Store", perm: "store_manage_catalogue" },
   { href: "/admin/notes/offers", label: "Notes offers", icon: "content", group: "Notes Store", perm: "store_manage_catalogue" },

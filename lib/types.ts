@@ -248,6 +248,13 @@ export interface AdminSessionPayload {
   role_name?: string;
   /** Effective permissions resolved from role + per-account override. */
   permissions?: import("./permissions").PermissionSet;
+  /**
+   * Where this request's authorization was established. Set only by
+   * getAdminSession; a claim inside the JWT is overwritten and is not signed.
+   * "token" means the live database read failed and the signed snapshot was
+   * kept for ordinary portal availability.
+   */
+  auth_source?: "database" | "demo" | "token";
   /** Forces a password change prompt after login. */
   must_change_password?: boolean;
 }

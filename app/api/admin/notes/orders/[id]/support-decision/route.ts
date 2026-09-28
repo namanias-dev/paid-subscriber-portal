@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requirePermission, getActionActor } from "@/lib/adminGuard";
+import { requireFreshPermission, getActionActor } from "@/lib/adminGuard";
 import { storeDb } from "@/lib/store/db";
 import { requestReverseShipment } from "@/lib/store/shipping/book";
 import { dispatchBlocked } from "@/lib/store/shipping/dispatch";
@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
  * requires the billable write gate. This route does not refund money.
  */
 export async function POST(req: Request, { params }: { params: { id: string } }) {
-  if (!(await requirePermission("store_manage_orders"))) {
+  if (!(await requireFreshPermission("store_manage_orders"))) {
     return NextResponse.json({ ok: false, error: "Forbidden" }, { status: 403, headers: { "Cache-Control": "no-store" } });
   }
   const body = (await req.json().catch(() => null)) as { action?: string; reason?: string } | null;

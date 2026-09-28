@@ -12,7 +12,7 @@ import { ADMIN_NAV, type AdminNavItem } from "./adminNav";
 import { UploadManagerProvider } from "./upload/uploadManager";
 import UploadManagerWidget from "./upload/UploadManagerWidget";
 import HelpPanel from "./help/HelpPanel";
-import { allPermissions, type PermissionSet } from "@/lib/permissions";
+import { allPermissions, isSuperAdmin, type PermissionSet } from "@/lib/permissions";
 
 interface AdminMe { username: string; role: string; role_name?: string; permissions?: PermissionSet; must_change_password?: boolean }
 
@@ -82,8 +82,14 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
 
   // Legacy tokens (pre-RBAC) carry no permissions field — treat them as full access.
   const perms = admin?.permissions === undefined ? allPermissions() : admin.permissions;
-  // Super Admin (and any account whose role grants it) sees everything; otherwise gate by permission.
-  const visibleNav = ADMIN_NAV.filter((n) => !n.perm || perms[n.perm] === true);
+  const superUser = isSuperAdmin(perms);
+  // Super Admin sees everything except items that are not permission-gated.
+  // superOnly items stay Super Admin even when another permission is held.
+  const visibleNav = ADMIN_NAV.filter((n) => {
+    if (n.superOnly && !superUser) return false;
+    if (n.anyPerm?.length) return n.anyPerm.some((key) => perms[key] === true);
+    return !n.perm || perms[n.perm] === true;
+  });
   const groups = Array.from(new Set(visibleNav.map((n) => n.group)));
   const activeHref = activeNavHref(pathname, visibleNav);
 

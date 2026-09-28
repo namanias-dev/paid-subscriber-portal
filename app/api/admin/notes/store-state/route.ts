@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { revalidatePath, revalidateTag } from "next/cache";
-import { requirePermission, getActionActor } from "@/lib/adminGuard";
+import { requireFreshSuperAdmin, getActionActor } from "@/lib/adminGuard";
 import { logAdminActivity } from "@/lib/adminActivity";
 import { STORE_CACHE_TAG } from "@/lib/store/catalogue";
 import { getStoreLaunchState, getStoreReadiness, setStoreLaunch } from "@/lib/store/launch";
@@ -13,14 +13,14 @@ function noStore(body: unknown, status = 200) {
 
 /** GET — current store launch state + pre-launch readiness summary. */
 export async function GET() {
-  if (!(await requirePermission("store_manage_orders"))) return noStore({ ok: false, error: "Forbidden" }, 403);
+  if (!(await requireFreshSuperAdmin())) return noStore({ ok: false, error: "Forbidden" }, 403);
   const [state, readiness] = await Promise.all([getStoreLaunchState(), getStoreReadiness()]);
   return noStore({ ok: true, state, readiness });
 }
 
 /** POST { live: boolean } — take the store live or offline. */
 export async function POST(req: Request) {
-  if (!(await requirePermission("store_manage_orders"))) return noStore({ ok: false, error: "Forbidden" }, 403);
+  if (!(await requireFreshSuperAdmin())) return noStore({ ok: false, error: "Forbidden" }, 403);
   const body = (await req.json().catch(() => ({}))) as { live?: unknown };
   if (typeof body.live !== "boolean") {
     return noStore({ ok: false, error: "`live` (boolean) is required." }, 400);

@@ -1,5 +1,7 @@
+import { isDemoMode } from "./config";
 import { getAdminSession } from "./session";
 import { hasPermission, allPermissions, isSuperAdmin, type PermissionKey, type PermissionSet } from "./permissions";
+import { canReadNotesOrders } from "./store/notesAccess";
 import type { AdminSessionPayload } from "./types";
 
 /**
@@ -37,11 +39,48 @@ export async function requireAnyPermission(keys: PermissionKey[]): Promise<boole
   return keys.some((k) => hasPermission(perms, k));
 }
 
+/**
+ * Notes orders list, order detail, and checkout leads.
+ * `store_manage_orders` implies read so existing order managers keep access.
+ */
+export async function requireStoreOrderRead(): Promise<boolean> {
+  const session = await getAdminSession();
+  if (!session) return false;
+  return canReadNotesOrders(effectivePermissions(session));
+}
+
 /** True only for a Super Admin (manage_roles + manage_staff + view_revenue). */
 export async function requireSuperAdmin(): Promise<boolean> {
   const session = await getAdminSession();
   if (!session) return false;
   return isSuperAdmin(effectivePermissions(session));
+}
+
+/**
+ * Permissions allowed to authorize a privileged Notes action on this request.
+ * The live database read must have succeeded. A stale signed snapshot
+ * (auth_source "token") is refused. Demo mode is the only non-database
+ * exception, and only while this process is actually running without Supabase.
+ */
+export function freshPermissions(session: AdminSessionPayload | null): PermissionSet | null {
+  if (!session) return null;
+  if (session.auth_source === "database") return effectivePermissions(session);
+  if (session.auth_source === "demo" && isDemoMode) return effectivePermissions(session);
+  return null;
+}
+
+/** Privileged Notes write. Denies when fresh authorization cannot be established. */
+export async function requireFreshPermission(key: PermissionKey): Promise<boolean> {
+  const perms = freshPermissions(await getAdminSession());
+  if (!perms) return false;
+  return hasPermission(perms, key);
+}
+
+/** Super Admin Notes route. Denies when fresh Super Admin authorization cannot be established. */
+export async function requireFreshSuperAdmin(): Promise<boolean> {
+  const perms = freshPermissions(await getAdminSession());
+  if (!perms) return false;
+  return isSuperAdmin(perms);
 }
 
 /** Current admin's id (for sms_logs.sent_by_user_id), or null. */

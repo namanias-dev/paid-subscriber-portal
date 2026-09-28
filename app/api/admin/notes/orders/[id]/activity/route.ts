@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
-import { requirePermission } from "@/lib/adminGuard";
+import { requireStoreOrderRead } from "@/lib/adminGuard";
 import { storeDb } from "@/lib/store/db";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(_req: Request, { params }: { params: { id: string } }) {
-  if (!(await requirePermission("store_manage_orders"))) {
+  if (!(await requireStoreOrderRead())) {
     return NextResponse.json({ ok: false, error: "Forbidden" }, { status: 403, headers: { "Cache-Control": "no-store" } });
   }
   const db = storeDb();

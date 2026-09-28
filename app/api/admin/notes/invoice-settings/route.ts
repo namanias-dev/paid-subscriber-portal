@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getActionActor, requirePermission } from "@/lib/adminGuard";
+import { getActionActor, requireFreshSuperAdmin } from "@/lib/adminGuard";
 import { storeDb } from "@/lib/store/db";
 import { normalizeCertificateFloor } from "@/lib/store/invoice/address";
 import { validateGstin } from "@/lib/store/invoice/gstin";
@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 const FIELDS = ["display_name", "legal_name", "trade_name", "address_line", "address_floor_display", "address_floor_raw", "address_sector", "city", "state", "state_code", "pincode", "gstin", "pan", "support_phone", "support_email", "invoice_prefix", "price_tax_mode", "document_mode", "legal_footer", "signatory_name", "logo_url", "constitution", "gst_registration_status", "registration_type"] as const;
 
 export async function GET() {
-  if (!(await requirePermission("store_manage_orders"))) {
+  if (!(await requireFreshSuperAdmin())) {
     return NextResponse.json({ ok: false, error: "Forbidden" }, { status: 403 });
   }
   const db = storeDb();
@@ -29,7 +29,7 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
-  if (!(await requirePermission("store_manage_orders"))) {
+  if (!(await requireFreshSuperAdmin())) {
     return NextResponse.json({ ok: false, error: "Forbidden" }, { status: 403 });
   }
   const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;

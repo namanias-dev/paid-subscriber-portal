@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requirePermission } from "@/lib/adminGuard";
+import { requireFreshPermission } from "@/lib/adminGuard";
 import { compareCourierRates } from "@/lib/store/shipping/compare";
 import { storeDb } from "@/lib/store/db";
 
@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
  * Live courier quotes for one paid order. Read-only: no label, AWB, or pickup.
  */
 export async function POST(req: Request, { params }: { params: { id: string } }) {
-  if (!(await requirePermission("store_manage_orders"))) {
+  if (!(await requireFreshPermission("store_manage_orders"))) {
     return NextResponse.json({ ok: false, error: "Forbidden" }, { status: 403, headers: { "Cache-Control": "no-store" } });
   }
   const db = storeDb();

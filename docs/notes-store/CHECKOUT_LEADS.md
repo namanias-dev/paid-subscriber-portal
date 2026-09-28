@@ -26,4 +26,4 @@ Abandoned leads are not sent when the phone is first saved. The existing sweep i
 
 ## Admin
 
-`/admin/notes/leads` for staff with `store_manage_orders`. The list shows a masked phone. The detail view can call, copy the phone, or copy a recovery link. The recovery URL contains only a random token. `/admin/notes/analytics` adds lead, abandoned, recovered, and recovered-revenue figures without changing the purchase funnel.
+`/admin/notes/leads` for staff with `store_view_orders` or `store_manage_orders`. The list shows a masked phone. The detail view can call or copy the phone. Recovery links and sales-status updates are Super Admin only. The recovery URL contains only a random token. `/admin/notes/analytics` is Super Admin only and adds lead, abandoned, recovered, and recovered-revenue figures without changing the purchase funnel.

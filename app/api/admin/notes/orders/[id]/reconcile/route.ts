@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requirePermission } from "@/lib/adminGuard";
+import { requireFreshPermission } from "@/lib/adminGuard";
 import { storeDb } from "@/lib/store/db";
 import { applyStoreVerify } from "@/lib/store/payments/verify";
 
@@ -10,7 +10,7 @@ export const dynamic = "force-dynamic";
  * order paid from the click itself — EazyPGVerify remains the only authority.
  */
 export async function POST(_req: Request, { params }: { params: { id: string } }) {
-  if (!(await requirePermission("store_manage_orders"))) {
+  if (!(await requireFreshPermission("store_manage_orders"))) {
     return NextResponse.json({ ok: false, error: "Forbidden" }, { status: 403, headers: { "Cache-Control": "no-store" } });
   }
   const db = storeDb();
