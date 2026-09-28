@@ -1,8 +1,12 @@
 import Link from "next/link";
 import { formatPaise } from "@/lib/store/money";
-import type { NotesAnalyticsReport } from "@/lib/analytics/notesCommerce";
+import type { NotesAnalyticsView } from "@/lib/analytics/notesReport";
+import type { NotesTrend } from "@/lib/analytics/notesVisuals";
 import type { CheckoutLeadReport } from "@/lib/store/checkoutLeadLogic";
 import CampaignLinkBuilder from "./CampaignLinkBuilder";
+import Sparkline from "./analytics/Sparkline";
+import SalesChartSlot from "./analytics/SalesChartSlot";
+import CityRanking from "./analytics/CityRanking";
 
 function money(paise: number): string {
   return formatPaise(paise);
@@ -20,25 +24,50 @@ const RANGES = [
   ["month", "This month"],
 ] as const;
 
+const TONE: Record<NotesTrend["tone"], string> = {
+  up: "text-[#3d6b4f]",
+  down: "text-[#8a4b4b]",
+  flat: "text-[var(--ca-navy)]/45",
+  new: "text-[var(--ca-gold-dark)]",
+  none: "text-[var(--ca-navy)]/35",
+};
+
+function trendSummary(name: string, trend: NotesTrend | undefined): string {
+  if (!trend || trend.tone === "none") return `${name} trend`;
+  if (trend.tone === "new") return `${name} trend, new versus the previous period`;
+  return `${name} trend, ${trend.delta} versus the previous period`;
+}
+
 export default function NotesAnalytics({
   report,
   range,
   label,
   leads,
 }: {
-  report: NotesAnalyticsReport;
+  report: NotesAnalyticsView;
   range: string;
   label: string;
   leads: CheckoutLeadReport;
 }) {
   const k = report.kpis;
+  const trends = report.visuals?.trends;
+  const tiles: Array<{ label: string; value: string; trend?: NotesTrend }> = [
+    { label: "Visitors", value: String(k.visitors), trend: trends?.visitors },
+    { label: "Product viewers", value: String(k.productViewers), trend: trends?.productViewers },
+    { label: "Add to cart", value: String(k.addToCarts), trend: trends?.addToCarts },
+    { label: "Checkout", value: String(k.checkouts), trend: trends?.checkouts },
+    { label: "Paid orders", value: String(k.paidOrders), trend: trends?.paidOrders },
+    { label: "Conversion", value: pct(k.conversionPct), trend: trends?.conversion },
+    { label: "Revenue", value: money(k.revenuePaise), trend: trends?.revenue },
+    { label: "AOV", value: k.aovPaise == null ? "—" : money(k.aovPaise), trend: trends?.aov },
+  ];
   return (
     <div className="mx-auto max-w-6xl">
       <header className="mb-4 flex flex-wrap items-end justify-between gap-3">
         <div>
           <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--ca-gold-dark)]">Notes Store</p>
           <h1 className="font-heading text-3xl font-bold text-[var(--ca-navy)]">Analytics</h1>
-          <p className="mt-1 text-sm text-[var(--ca-navy)]/60">{label}. Revenue is captured orders, not browser events.</p>
+          <p className="mt-1 text-sm text-[var(--ca-navy)]/60">{label}. Sales metrics use captured orders. Behavior metrics use unique first-party sessions.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {RANGES.map(([key, text]) => (
@@ -56,22 +85,26 @@ export default function NotesAnalytics({
       </header>
 
       <div className="grid grid-cols-2 gap-2 md:grid-cols-4 xl:grid-cols-8">
-        {[
-          ["Visitors", String(k.visitors)],
-          ["Product viewers", String(k.productViewers)],
-          ["Add to cart", String(k.addToCarts)],
-          ["Checkout", String(k.checkouts)],
-          ["Paid orders", String(k.paidOrders)],
-          ["Conversion", pct(k.conversionPct)],
-          ["Revenue", money(k.revenuePaise)],
-          ["AOV", k.aovPaise == null ? "—" : money(k.aovPaise)],
-        ].map(([labelText, value]) => (
-          <div key={labelText} className="rounded-2xl bg-white px-3 py-3">
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-[var(--ca-navy)]/45">{labelText}</p>
-            <p className="mt-1 font-heading text-xl font-bold text-[var(--ca-navy)]">{value}</p>
+        {tiles.map((tile) => (
+          <div key={tile.label} className="min-w-0 rounded-2xl bg-white px-3 py-3">
+            <p className="truncate text-[11px] font-semibold uppercase tracking-wide text-[var(--ca-navy)]/45">{tile.label}</p>
+            <p className="mt-1 font-heading text-xl font-bold tabular-nums text-[var(--ca-navy)]">{tile.value}</p>
+            {tile.trend ? <Sparkline points={tile.trend.points} label={trendSummary(tile.label, tile.trend)} /> : null}
+            {tile.trend ? (
+              <p className={`mt-1 text-[10px] font-semibold tabular-nums ${TONE[tile.trend.tone]}`} title="Compared with the previous period">{tile.trend.delta}</p>
+            ) : null}
           </div>
         ))}
       </div>
+
+      {report.visuals ? (
+        <SalesChartSlot points={report.visuals.points} grain={report.visuals.grain} subtitle={report.visuals.subtitle} />
+      ) : (
+        <section className="mt-4 rounded-2xl bg-white p-4">
+          <h2 className="font-heading text-lg font-bold text-[var(--ca-navy)]">Sales over time</h2>
+          <p className="mt-2 text-sm text-[var(--ca-navy)]/55">Sales timeline is unavailable right now.</p>
+        </section>
+      )}
 
       <section className="mt-4 rounded-2xl bg-white p-4">
         <h2 className="font-heading text-lg font-bold text-[var(--ca-navy)]">Funnel</h2>
@@ -99,7 +132,11 @@ export default function NotesAnalytics({
       </section>
 
       <div className="mt-4 grid gap-4 lg:grid-cols-2">
+        <CityRanking cities={report.visuals ? report.visuals.cities : null} />
         <Table title="Acquisition" headers={["Source", "Visitors", "Checkout", "Paid", "Conv.", "Revenue"]} rows={report.sources.map((row) => [row.channel, row.visitors, row.checkouts, row.paid, pct(row.conversionPct), money(row.revenuePaise)])} />
+      </div>
+
+      <div className="mt-4">
         <Table title="Campaigns" headers={["Campaign", "Content", "Visitors", "Paid", "Revenue"]} rows={report.campaigns.map((row) => [row.campaign, row.content, row.visitors, row.paid, money(row.revenuePaise)])} />
       </div>
 
@@ -148,20 +185,6 @@ export default function NotesAnalytics({
         <div className="mt-4">
           <Table title="Promotions" headers={["Code", "Orders", "Revenue"]} rows={report.promotions.filter((row) => row.code !== "(none)").map((row) => [row.code, row.orders, money(row.revenuePaise)])} />
         </div>
-      )}
-
-      {report.revenueByDay.length > 0 && (
-        <section className="mt-4 rounded-2xl bg-white p-4">
-          <h2 className="font-heading text-lg font-bold text-[var(--ca-navy)]">Revenue by day</h2>
-          <ul className="mt-3 space-y-1 text-sm">
-            {report.revenueByDay.map((row) => (
-              <li key={row.day} className="flex justify-between gap-3 text-[var(--ca-navy)]">
-                <span>{row.day}</span>
-                <span className="tabular-nums">{row.orders} · {money(row.revenuePaise)}</span>
-              </li>
-            ))}
-          </ul>
-        </section>
       )}
 
       {report.ctas.length > 0 && (
