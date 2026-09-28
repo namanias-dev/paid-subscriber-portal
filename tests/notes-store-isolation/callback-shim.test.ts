@@ -133,7 +133,7 @@ describe("store callback is claimed by the shim", () => {
     assert.equal(res!.status, 302);
     const location = res!.headers.get("Location") || "";
     console.log(`\nStore callback claimed → ${res!.status} ${location}\n`);
-    assert.match(location, /^https:\/\/namanias\.com\/notes\//);
+    assert.match(location, /^https:\/\/(www\.)?namanias\.com\/notes\//);
     assert.doesNotMatch(location, /payment\/status/);
   });
 

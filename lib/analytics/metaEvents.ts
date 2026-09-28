@@ -15,6 +15,8 @@ export const META_GRAPH_VERSION = "v21.0";
 export type MetaEventName =
   | "PageView"
   | "Lead"
+  | "ViewContent"
+  | "AddToCart"
   | "InitiateCheckout"
   | "Purchase";
 

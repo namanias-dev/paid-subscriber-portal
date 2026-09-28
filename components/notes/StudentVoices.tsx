@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import Link from "next/link";
 import { AnimatePresence, motion, useInView, useReducedMotion } from "framer-motion";
 import {
@@ -54,6 +55,7 @@ export default function StudentVoices({ subjects }: { subjects: PreferenceSubjec
   const reduce = useReducedMotion();
   const sectionRef = useRef<HTMLElement>(null);
   const viewed = useRef(false);
+  const [mounted, setMounted] = useState(false);
   const [rows, setRows] = useState(subjects);
   const [selected, setSelected] = useState<string[]>([]);
   const [saved, setSaved] = useState(false);
@@ -62,6 +64,10 @@ export default function StudentVoices({ subjects }: { subjects: PreferenceSubjec
   const [error, setError] = useState<string | null>(null);
   const [available, setAvailable] = useState<PreferenceSubject[]>([]);
   const [waitlist, setWaitlist] = useState<PreferenceSubject[]>([]);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -165,15 +171,15 @@ export default function StudentVoices({ subjects }: { subjects: PreferenceSubjec
       className="relative overflow-hidden rounded-[28px] border border-[var(--ca-navy)]/8 bg-[linear-gradient(180deg,#ffffff_0%,#fbf8f2_100%)] px-4 py-8 ns-elev-1 sm:px-6 sm:py-10"
     >
       <div className="pointer-events-none absolute -right-10 top-0 h-40 w-40 rounded-full bg-[radial-gradient(circle,rgba(212,175,55,0.14),transparent_68%)]" aria-hidden="true" />
-      <div className="lg:grid lg:grid-cols-[minmax(0,1.15fr)_minmax(16rem,0.85fr)] lg:items-start lg:gap-10">
-        <div>
+      <div>
           <p className="ca-eyebrow text-[var(--ca-gold-dark)]">Student voices</p>
           <h2 id="voices-title" className="mt-2 font-heading text-2xl font-bold text-[var(--ca-navy)] sm:text-3xl">
-            Which subjects&apos; notes do you want?
+            Tell Us What You Want Next
           </h2>
           <p className="mt-2 max-w-xl text-sm leading-relaxed text-[var(--ca-navy)]/58">
-            Choose as many as you&apos;d like. Your choices help us understand what aspirants actually need.
+            Your choices help us decide which handwritten notes to prepare next.
           </p>
+          <p className="mt-1 text-[11px] text-[var(--ca-navy)]/40">This is an interest signal, not an order.</p>
 
           <AnimatePresence mode="wait">
             {saved ? (
@@ -309,60 +315,48 @@ export default function StudentVoices({ subjects }: { subjects: PreferenceSubjec
               </motion.div>
             )}
           </AnimatePresence>
-        </div>
-
-        <aside className="mt-8 rounded-2xl border border-[var(--ca-navy)]/8 bg-white/80 p-5 lg:mt-10">
-          <p className="text-[11px] font-extrabold uppercase tracking-[0.16em] text-[var(--ca-gold-dark)]">Why we ask</p>
-          <p className="mt-2 text-sm leading-relaxed text-[var(--ca-navy)]/62">
-            Your choices help us understand which handwritten notes matter most and which subject combinations make sense together.
-          </p>
-          <ul className="mt-4 space-y-2 text-sm font-semibold text-[var(--ca-navy)]">
-            <li>Future notes</li>
-            <li>Better bundles</li>
-            <li>Availability planning</li>
-          </ul>
-          <p className="mt-4 text-xs leading-relaxed text-[var(--ca-navy)]/45">
-            Saving interest is a demand signal, not an order and not a marketing subscription.
-          </p>
-        </aside>
       </div>
 
       {!saved && selected.length > 0 && <div className="h-28 lg:hidden" aria-hidden="true" />}
 
-      <AnimatePresence>
-        {!saved && selected.length > 0 && (
-          <motion.div
-            initial={reduce ? false : { opacity: 0, y: 16 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={reduce ? undefined : { opacity: 0, y: 16 }}
-            className="ns-voices-tray fixed inset-x-0 bottom-0 z-40 border-t border-[var(--ca-navy)]/10 bg-white/96 px-4 pt-3 shadow-[0_-12px_32px_-18px_rgba(10,26,63,0.35)] backdrop-blur-md lg:hidden"
-          >
-            <p className="text-xs font-semibold text-[var(--ca-navy)]">
-              {selected.length} subject{selected.length === 1 ? "" : "s"} selected
-            </p>
-            <div className="mt-2 flex gap-2 overflow-x-auto ns-hide-scrollbar">
-              {selectedRows.map((s) => (
+      {mounted &&
+        createPortal(
+          <AnimatePresence>
+            {!saved && selected.length > 0 && (
+              <motion.div
+                initial={reduce ? false : { opacity: 0, y: 16 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={reduce ? undefined : { opacity: 0, y: 16 }}
+                className="ns-voices-tray fixed inset-x-0 bottom-0 z-40 border-t border-[var(--ca-navy)]/10 bg-white/96 px-4 pt-3 shadow-[0_-12px_32px_-18px_rgba(10,26,63,0.35)] backdrop-blur-md lg:hidden"
+              >
+                <p className="text-xs font-semibold text-[var(--ca-navy)]">
+                  {selected.length} subject{selected.length === 1 ? "" : "s"} selected
+                </p>
+                <div className="mt-2 flex gap-2 overflow-x-auto ns-hide-scrollbar">
+                  {selectedRows.map((s) => (
+                    <button
+                      key={s.id}
+                      type="button"
+                      onClick={() => toggle(s.id)}
+                      className="ca-focus shrink-0 rounded-full border border-[var(--ca-navy)]/12 bg-[var(--ca-surface)] px-3 py-1 text-xs font-semibold text-[var(--ca-navy)]"
+                    >
+                      {s.name} ×
+                    </button>
+                  ))}
+                </div>
                 <button
-                  key={s.id}
                   type="button"
-                  onClick={() => toggle(s.id)}
-                  className="ca-focus shrink-0 rounded-full border border-[var(--ca-navy)]/12 bg-[var(--ca-surface)] px-3 py-1 text-xs font-semibold text-[var(--ca-navy)]"
+                  onClick={save}
+                  disabled={saving}
+                  className="ca-btn ca-btn-gold ca-focus ns-press mt-3 w-full rounded-full disabled:opacity-50"
                 >
-                  {s.name} ×
+                  {saving ? "Saving…" : "Save my interests →"}
                 </button>
-              ))}
-            </div>
-            <button
-              type="button"
-              onClick={save}
-              disabled={saving}
-              className="ca-btn ca-btn-gold ca-focus ns-press mt-3 w-full rounded-full disabled:opacity-50"
-            >
-              {saving ? "Saving…" : "Save my interests →"}
-            </button>
-          </motion.div>
+              </motion.div>
+            )}
+          </AnimatePresence>,
+          document.body,
         )}
-      </AnimatePresence>
     </section>
   );
 }

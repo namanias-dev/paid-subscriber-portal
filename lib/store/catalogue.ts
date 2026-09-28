@@ -40,12 +40,16 @@ export interface StoreProductCard {
   selling_price_paise: number;
   cover_image_key: string | null;
   cover_url: string | null;
+  store_thumbnail_image_key: string | null;
+  store_thumbnail_url: string | null;
   is_featured: boolean;
   is_bestseller: boolean;
   dispatch_days: number;
   sellable: number;
+  category_id: string | null;
   category_slug: string | null;
   category_name: string | null;
+  short_description: string | null;
   max_quantity_per_order: number;
   availability_mode: AvailabilityMode;
   availability: AvailabilityView;
@@ -104,7 +108,7 @@ export interface StoreBundleItem {
   availability: AvailabilityView;
 }
 
-function coverUrl(key: string | null | undefined): string | null {
+export function publicStoreMediaUrl(key: string | null | undefined): string | null {
   if (!key) return null;
   if (key.startsWith("store-private/")) return null;
   // Public CDN when configured; otherwise the stable same-origin `/media/[...]`
@@ -136,13 +140,17 @@ function toCard(row: Record<string, unknown>, category?: { slug: string; name: s
     mrp_paise: Number(row.mrp_paise || 0),
     selling_price_paise: Number(row.selling_price_paise || 0),
     cover_image_key: (row.cover_image_key as string) || null,
-    cover_url: coverUrl((row.cover_image_key as string) || null),
+    cover_url: publicStoreMediaUrl((row.cover_image_key as string) || null),
+    store_thumbnail_image_key: (row.store_thumbnail_image_key as string) || null,
+    store_thumbnail_url: publicStoreMediaUrl((row.store_thumbnail_image_key as string) || null),
     is_featured: !!row.is_featured,
     is_bestseller: !!row.is_bestseller,
     dispatch_days: Number(row.dispatch_days || 2),
     sellable,
+    category_id: (row.category_id as string) || null,
     category_slug: category?.slug ?? null,
     category_name: category?.name ?? null,
+    short_description: (row.short_description as string) || null,
     max_quantity_per_order: Number(row.max_quantity_per_order || 5),
     availability_mode: availabilityMode,
     availability: resolveAvailability(availabilityMode, sellable, lowStockThreshold, isActive),
@@ -183,7 +191,20 @@ export async function getCategoryBySlug(slug: string): Promise<StoreCategory | n
 }
 
 const PRODUCT_LIST_COLS =
-  "id,sku,slug,kind,name,short_name,subject,stage,language,edition,page_count,mrp_paise,selling_price_paise,cover_image_key,is_featured,is_bestseller,dispatch_days,on_hand,reserved,low_stock_threshold,availability_mode,is_active,max_quantity_per_order,category_id,position";
+  "id,sku,slug,kind,name,short_name,subject,stage,language,edition,page_count,mrp_paise,selling_price_paise,cover_image_key,store_thumbnail_image_key,is_featured,is_bestseller,dispatch_days,on_hand,reserved,low_stock_threshold,availability_mode,is_active,max_quantity_per_order,category_id,position,short_description";
+
+/** Live individual subject notes for the public Shop by Subject rail. */
+export async function listStorefrontProducts(): Promise<StoreProductCard[]> {
+  const products = await listActiveProducts({ kind: "single", limit: 24 });
+  const preferred = ["polity", "modern-history", "economy"];
+  return products
+    .filter((p) => !!p.category_slug)
+    .sort((a, b) => {
+      const ai = preferred.indexOf(a.category_slug || a.slug);
+      const bi = preferred.indexOf(b.category_slug || b.slug);
+      return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
+    });
+}
 
 export async function listActiveProducts(opts?: {
   categoryId?: string;
@@ -239,7 +260,7 @@ export async function getProductBySlug(slug: string): Promise<StoreProductDetail
       id: m.id,
       kind: m.kind,
       r2_key: m.r2_key,
-      url: m.kind === "photo" ? coverUrl(m.r2_key) : `/api/notes/sample/${m.id}`,
+      url: m.kind === "photo" ? publicStoreMediaUrl(m.r2_key) : `/api/notes/sample/${m.id}`,
       alt: m.alt,
       source_page_no: m.source_page_no,
       position: m.position,

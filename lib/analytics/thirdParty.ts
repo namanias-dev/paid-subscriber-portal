@@ -244,6 +244,32 @@ export async function sendMetaLead(input: {
   });
 }
 
+/**
+ * Notes Store purchase for Meta CAPI. No-ops until pixel + token exist.
+ * Never receives phone, email, or address — match keys only.
+ */
+export async function sendNotesMetaPurchase(input: {
+  orderId: string;
+  orderNo: string;
+  valueInr: number;
+  fbc?: string | null;
+  fbp?: string | null;
+  contentName?: string | null;
+}): Promise<void> {
+  await sendMetaEvent("Purchase", `notes_purchase_${input.orderId}`, {
+    value: input.valueInr,
+    currency: "INR",
+    fbc: input.fbc ?? null,
+    fbp: input.fbp ?? null,
+    eventSourceUrl: `${SITE_URL}/notes`,
+    customData: {
+      content_type: "product",
+      content_name: input.contentName || "UPSC Notes",
+      order_id: input.orderNo,
+    },
+  });
+}
+
 /** Fire InitiateCheckout when a payment attempt (PENDING row) is created. */
 export async function sendMetaInitiateCheckout(
   payment: Payment,

@@ -137,6 +137,58 @@ describe("checkout coupon — NAM5000 on Safalta-like fees", () => {
     assert.equal(enrollmentPatch.original_total_fee, 45000);
   });
 
+  test("invalid code, expired coupon, and a used-up coupon are refused", () => {
+    const invalid = validateCoupon([NAM5000], "NOPE", 40000);
+    assert.equal(invalid.ok, false);
+    if (!invalid.ok) assert.match(invalid.error, /not applicable/i);
+
+    const expired: Coupon = { ...NAM5000, expires_at: "2020-01-01T00:00:00.000Z" };
+    const expiredResult = validateCoupon([expired], "NAM5000", 40000);
+    assert.equal(expiredResult.ok, false);
+    if (!expiredResult.ok) assert.match(expiredResult.error, /expired/i);
+
+    const usedUp: Coupon = { ...NAM5000, max_uses: 1, used: 1 };
+    const limited = validateCoupon([usedUp], "NAM5000", 40000);
+    assert.equal(limited.ok, false);
+    if (!limited.ok) assert.match(limited.error, /already been used/i);
+  });
+
+  test("installments and pay in full recompute the amount due today from the coupon", () => {
+    const course = safaltaCourse();
+    for (const plan of ["emi", "full"] as const) {
+      const base = planCourseEnrollment({
+        course,
+        plan,
+        bookSeat: plan === "emi",
+        installmentCount: plan === "emi" ? 3 : null,
+      });
+      assert.equal(base.ok, true);
+      if (!base.ok) continue;
+      const coupon = validateCoupon(course.coupons, "NAM5000", base.plan.totalFee);
+      assert.equal(coupon.ok, true);
+      if (!coupon.ok) continue;
+      const discounted = planCourseEnrollment({
+        course,
+        plan,
+        bookSeat: plan === "emi",
+        installmentCount: plan === "emi" ? 3 : null,
+        discountRupees: coupon.discount,
+      });
+      assert.equal(discounted.ok, true);
+      if (!discounted.ok) continue;
+      assert.equal(discounted.plan.discountAmount, coupon.discount);
+      assert.equal(discounted.plan.totalFee, base.plan.totalFee - coupon.discount);
+      assert.equal(sumSchedule(discounted.plan.schedule), discounted.plan.totalFee);
+      if (plan === "full") {
+        assert.equal(discounted.plan.firstAmount, discounted.plan.totalFee);
+        assert.equal(discounted.plan.totalFee - discounted.plan.firstAmount, 0);
+      } else {
+        assert.equal(discounted.plan.firstKind, "seat");
+        assert.equal(discounted.plan.firstAmount, base.plan.firstAmount);
+      }
+    }
+  });
+
   test("expired coupon rejected at initiation-time validation", () => {
     const expired: Coupon = { ...NAM5000, expires_at: "2020-01-01T00:00:00.000Z" };
     const result = validateCoupon([expired], "NAM5000", 40000);

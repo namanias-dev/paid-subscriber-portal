@@ -4,6 +4,7 @@ import { storeDb } from "@/lib/store/db";
 import { computePreparationDemand } from "@/lib/store/preparation";
 import { listInterestAggregates } from "@/lib/store/interest";
 import { listPreferenceIntelligence } from "@/lib/store/preferences";
+import { operationalActions, type OperationalAction } from "@/lib/store/shipping/dispatch";
 
 export const dynamic = "force-dynamic";
 
@@ -56,6 +57,70 @@ export async function GET() {
   }
   lowStock.sort((a, b) => a.sellable - b.sellable);
 
+  const actionStatuses = [
+    "PACKED",
+    "READY_FOR_PICKUP",
+    "PICKUP_SCHEDULED",
+    "PICKED_UP",
+    "IN_TRANSIT",
+    "OUT_FOR_DELIVERY",
+    "DELIVERY_FAILED",
+    "REATTEMPT_REQUESTED",
+    "RTO_INITIATED",
+    "RTO_IN_TRANSIT",
+    "RTO_DELIVERED",
+    "RETURN_REQUESTED",
+    "REFUND_PENDING",
+  ];
+  const { data: actionOrders } = await db
+    .from("store_orders")
+    .select("id,status,promised_delivery_date")
+    .in("status", actionStatuses)
+    .limit(300);
+  const actionIds = (actionOrders || []).map((row) => row.id);
+  const shipmentByOrder = new Map<string, Record<string, unknown>>();
+  if (actionIds.length) {
+    const { data: ships } = await db
+      .from("store_shipments")
+      .select("order_id,provider,status,awb,created_at,pickup_scheduled_at,picked_up_at,last_synced_at,expected_delivery_date")
+      .in("order_id", actionIds);
+    for (const ship of ships || []) {
+      const current = shipmentByOrder.get(ship.order_id);
+      if (!current) shipmentByOrder.set(ship.order_id, ship);
+    }
+  }
+  const nowIso = new Date().toISOString();
+  const actionCounts: Record<OperationalAction, number> = {
+    awb_missing: 0,
+    shipment_failed: 0,
+    pickup_overdue: 0,
+    tracking_stale: 0,
+    delivery_delayed: 0,
+    delivery_failed: 0,
+    ndr: 0,
+    rto: 0,
+    return_waiting: 0,
+    refund_manual: 0,
+  };
+  for (const row of actionOrders || []) {
+    const ship = shipmentByOrder.get(row.id);
+    for (const reason of operationalActions({
+      orderStatus: row.status,
+      now: nowIso,
+      awb: (ship?.awb as string | null) || null,
+      provider: (ship?.provider as string | null) || null,
+      shipmentStatus: (ship?.status as string | null) || null,
+      shipmentCreatedAt: (ship?.created_at as string | null) || null,
+      pickupScheduledAt: (ship?.pickup_scheduled_at as string | null) || null,
+      pickedUpAt: (ship?.picked_up_at as string | null) || null,
+      lastSyncedAt: (ship?.last_synced_at as string | null) || null,
+      expectedDeliveryDate: (ship?.expected_delivery_date as string | null) || null,
+      promisedDeliveryDate: row.promised_delivery_date,
+    })) {
+      actionCounts[reason] += 1;
+    }
+  }
+
   return noStore({
     ok: true,
     cards: {
@@ -73,6 +138,7 @@ export async function GET() {
     interest_top: (await listInterestAggregates("most"))
       .filter((r) => r.availability_mode === "coming_soon" || r.availability_mode === "unavailable")
       .slice(0, 5),
+    action_required: actionCounts,
     preference_top: (await listPreferenceIntelligence()).subjects
       .slice()
       .sort((a, b) => b.raw_count - a.raw_count)

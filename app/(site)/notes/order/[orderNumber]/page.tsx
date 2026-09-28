@@ -1,9 +1,9 @@
 import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
 import { unstable_noStore as noStore } from "next/cache";
-import Link from "next/link";
 import { getPublicOrder } from "@/lib/store/orders";
 import OrderStatus from "@/components/notes/OrderStatus";
+import TrackForm from "@/components/notes/TrackForm";
 import {
   STORE_ORDER_ACCESS_COOKIE,
   parseOrderAccessCookie,
@@ -41,16 +41,15 @@ export default async function OrderPage({
     return (
       <div className="container-wide py-16">
         <div className="mx-auto max-w-lg text-center">
-          <h1 className="font-heading text-2xl font-bold text-[var(--ca-navy)]">Confirm this order</h1>
+          <p className="text-xs font-semibold uppercase tracking-wide text-[var(--ca-navy)]/50">Confirming your payment</p>
+          <h1 className="mt-2 font-heading text-2xl font-bold text-[var(--ca-navy)]">Payment received — open your order</h1>
           <p className="mt-3 text-sm text-[var(--ca-navy)]/70">
-            Open this page from the device you used to pay, or look up the order with your phone number.
+            Your payment is being confirmed on our server. This page does not start another payment.
           </p>
-          <Link
-            href="/notes/track"
-            className="mt-6 inline-flex min-h-11 items-center justify-center rounded-full bg-[var(--ca-navy)] px-6 text-sm font-semibold text-white"
-          >
-            Track an order
-          </Link>
+          {orderNo ? (
+            <p className="mt-4 font-mono text-sm font-semibold text-[var(--ca-navy)]">{orderNo}</p>
+          ) : null}
+          <TrackForm initialOrderNo={orderNo} />
         </div>
       </div>
     );

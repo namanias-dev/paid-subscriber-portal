@@ -71,7 +71,14 @@ const nextConfig = {
       { key: "Referrer-Policy", value: "no-referrer" },
       { key: "X-Robots-Tag", value: "noindex, nofollow" },
     ];
+    const securityHeaders = [
+      { key: "X-Content-Type-Options", value: "nosniff" },
+      { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+      { key: "X-Frame-Options", value: "SAMEORIGIN" },
+      { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" },
+    ];
     return [
+      { source: "/:path*", headers: securityHeaders },
       { source: "/notes/cart", headers: noStore },
       { source: "/notes/checkout", headers: noStore },
       { source: "/notes/order/:path*", headers: orderHeaders },
@@ -96,6 +103,13 @@ const nextConfig = {
         destination: "/webinars",
         permanent: false,
       })),
+      { source: "/notes/products/test-polity-notes", destination: "/notes/polity", permanent: true },
+      { source: "/notes/products/test-only-polity-notes", destination: "/notes/polity", permanent: true },
+      { source: "/notes/products/test-economy-notes", destination: "/notes/economy", permanent: true },
+      { source: "/notes/products/test-geography-notes", destination: "/notes", permanent: true },
+      { source: "/notes/products/test-ethics-notes", destination: "/notes", permanent: true },
+      { source: "/notes/products/test-gs-starter-bundle", destination: "/notes", permanent: true },
+      { source: "/notes/products/:slug", destination: "/notes/:slug", permanent: true },
     ];
   },
 };

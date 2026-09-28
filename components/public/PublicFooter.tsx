@@ -1,4 +1,5 @@
 import Link from "next/link";
+import PrivacySettingsButton from "@/components/analytics/PrivacySettingsButton";
 import Logo from "@/components/ui/Logo";
 import { DEFAULT_BRAND } from "@/lib/homeDefaults";
 import { whatsappLink } from "@/lib/phone";
@@ -57,6 +58,11 @@ export default function PublicFooter({ brand }: { brand?: BrandConfig }) {
                   <Link href={l.href} className="hover:text-primary">{l.label}</Link>
                 </li>
               ))}
+              {c.title === "Academy" && (
+                <li>
+                  <PrivacySettingsButton />
+                </li>
+              )}
             </ul>
           </div>
         ))}
