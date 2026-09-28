@@ -206,6 +206,10 @@ export function shipmentPickupLabel(
     return pickupDate || "Collected";
   }
   if (queued) return "Still in courier queue";
+  if (pickupStatus && /\d{1,2}:\d{2}/.test(pickupStatus)) {
+    return pickupDate ? `${pickupDate} · ${pickupStatus}` : pickupStatus;
+  }
+  if (pickupStatus === "requested" || (pickupStatus != null && /^\d+$/.test(pickupStatus))) return "Pickup requested";
   return pickupDate || "Not scheduled";
 }
 

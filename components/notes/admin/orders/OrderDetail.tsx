@@ -343,7 +343,7 @@ export default function OrderDetail({
             {advanceLabel && (
               packing && !confirmAdvance ? (
                 <div className="mt-3 rounded-2xl bg-[#f7f5ef] p-3">
-                  <p className="text-sm text-[var(--ca-navy)]">Marking this order packed will start automatic courier selection and shipment booking.</p>
+                  <p className="text-sm text-[var(--ca-navy)]">This marks the order packed. It does not choose a courier or create a shipment.</p>
                   <div className="mt-3 flex gap-2">
                     <button type="button" onClick={() => setConfirmAdvance(true)} className="min-h-11 rounded-full bg-[var(--ca-navy)] px-4 text-sm font-semibold text-white">Mark packed</button>
                   </div>
@@ -444,6 +444,20 @@ export default function OrderDetail({
                 <button type="button" onClick={() => void refreshTrack()} className="min-h-11 rounded-full border border-[var(--ca-navy)]/15 px-4 text-sm font-semibold text-[var(--ca-navy)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2">
                   View Tracking
                 </button>
+                {order.status === "READY_FOR_PICKUP" && !ship.pickup_reference && (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => act(() => fetch(`/api/admin/notes/orders/${order.id}/pickup`, {
+                      method: "POST",
+                      headers: { "content-type": "application/json" },
+                      body: JSON.stringify({ date: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().slice(0, 10) }),
+                    }), "Pickup requested")}
+                    className="min-h-11 rounded-full bg-[var(--ca-navy)] px-4 text-sm font-semibold text-white disabled:opacity-50"
+                  >
+                    Request pickup
+                  </button>
+                )}
                 {order.invoice_status === "READY" && <ViewInvoiceButton orderId={order.id} prominent />}
                 {order.invoice_status === "READY" && <DownloadInvoiceButton orderId={order.id} />}
               </div>
@@ -452,7 +466,9 @@ export default function OrderDetail({
 
           {!active && (order.status === "PACKED" || order.status === "READY_FOR_PICKUP") && (
             <section className="rounded-2xl bg-white p-4">
-              <p className="font-semibold text-[var(--ca-navy)]">Packed and ready to book a courier.</p>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--ca-gold-dark)]">Status</p>
+              <p className="mt-1 font-heading text-xl font-bold text-[var(--ca-navy)]">Packed</p>
+              <p className="mt-1 text-sm text-[var(--ca-navy)]/70">Order is packed and ready for courier booking.</p>
               <button type="button" onClick={onCompare} className="mt-3 min-h-11 rounded-full bg-[var(--ca-navy)] px-4 text-sm font-semibold text-white">
                 Compare couriers
               </button>

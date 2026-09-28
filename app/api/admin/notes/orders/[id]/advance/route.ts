@@ -1,12 +1,11 @@
 import { NextResponse } from "next/server";
 import { requirePermission, getActionActor } from "@/lib/adminGuard";
 import { storeDb } from "@/lib/store/db";
-import { runAutoFulfillment } from "@/lib/store/shipping/autoFulfillRun";
 import { staffNextStatus } from "@/lib/store/stages";
 
 export const dynamic = "force-dynamic";
 
-/** Advance fulfilment status one step (manual queue). Shipping still uses /ship. */
+/** Advance fulfilment one step. PACKED does not book a courier. */
 export async function POST(req: Request, { params }: { params: { id: string } }) {
   if (!(await requirePermission("store_manage_orders"))) {
     return NextResponse.json({ ok: false, error: "Forbidden" }, { status: 403, headers: { "Cache-Control": "no-store" } });
@@ -47,10 +46,5 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     actor_name: actor?.name,
   });
 
-  let fulfillment: { ok: boolean; blocked: string | null; awb: string | null } | null = null;
-  if (next === "PACKED") {
-    fulfillment = await runAutoFulfillment(order.id);
-  }
-
-  return NextResponse.json({ ok: true, status: next, fulfillment }, { headers: { "Cache-Control": "no-store" } });
+  return NextResponse.json({ ok: true, status: next, fulfillment: null }, { headers: { "Cache-Control": "no-store" } });
 }
