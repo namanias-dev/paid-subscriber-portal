@@ -9,8 +9,11 @@ import StickyMobileCTA from "@/components/public/StickyMobileCTA";
 import LandingSections from "@/components/public/LandingSections";
 import BrochureCards from "@/components/public/BrochureCards";
 import WebinarNotFound from "@/components/public/WebinarNotFound";
-import { getWebinarBySlugCached, getWebinarById, getLibraryDocsByIds, getWebinarRegisteredCount } from "@/lib/dataProvider";
+import ExpiredWebinarRecovery from "@/components/public/ExpiredWebinarRecovery";
+import { getWebinarForPublicDisplay, getPublicWebinars, getWebinarById, getLibraryDocsByIds, getWebinarRegisteredCount } from "@/lib/dataProvider";
 import { canRegisterForWebinar, EXPIRED_COPY, webinarRegCountDisplay, WEBINAR_REGCOUNT_ENCOURAGE } from "@/lib/webinarLifecycle";
+import { resolvePublicWebinarState } from "@/lib/webinarRecovery";
+import type { Webinar } from "@/lib/types";
 import { getPurchaseSnapshot, webinarStatus } from "@/lib/purchaseStatus";
 import { buildLandingView } from "@/lib/landingView";
 import { formatINR, formatISTRange } from "@/lib/dates";
@@ -34,11 +37,68 @@ async function withBudget<T>(work: Promise<T>, ms: number, fallback: T): Promise
   }
 }
 
+type LoadedWebinarPage =
+  | { kind: "unavailable" }
+  | { kind: "missing" }
+  | { kind: "active"; webinar: Webinar }
+  | { kind: "ended"; webinar: Webinar; next: Webinar | null };
+
+/**
+ * Active sessions come from the public list. A historical slug that the list
+ * hides is still loaded, then classified. Drafts stay missing. If the list of
+ * candidates fails, an ended event is "unavailable" rather than a false
+ * "nothing upcoming".
+ */
+async function loadWebinarPage(slug: string): Promise<LoadedWebinarPage> {
+  let webinar: Webinar | null;
+  try {
+    webinar = await getWebinarForPublicDisplay(slug);
+  } catch {
+    return { kind: "unavailable" };
+  }
+  if (!webinar) return { kind: "missing" };
+
+  let candidates: Webinar[] = [];
+  let candidatesFailed = false;
+  try {
+    candidates = await getPublicWebinars();
+  } catch {
+    candidatesFailed = true;
+  }
+
+  const state = resolvePublicWebinarState(webinar, candidates);
+  if (state.outcome === "NOT_FOUND") return { kind: "missing" };
+  if (state.outcome === "ACTIVE_UPCOMING") return { kind: "active", webinar };
+  if (candidatesFailed) return { kind: "unavailable" };
+  if (state.outcome === "COMPLETED_WITH_NEXT_EVENT") return { kind: "ended", webinar, next: state.next };
+  return { kind: "ended", webinar, next: null };
+}
+
+function endedMetadata(w: Webinar, hasNext: boolean): Metadata {
+  const title = `${w.title} — Completed`;
+  const description = hasNext
+    ? "This masterclass has ended. Registration for the next live session with Naman Sir is open."
+    : "This masterclass has ended. The next live session with Naman Sir will be announced soon.";
+  const url = `${SITE_URL}/webinars/${w.slug}`;
+  const ogImage = w.seo?.og_image?.trim() || w.cover_image_url || undefined;
+  const images = ogImage ? [{ url: ogImage, width: 1200, height: 630, alt: w.title }] : [];
+  return {
+    title,
+    description,
+    alternates: { canonical: url },
+    openGraph: { title, description, url, type: "website", siteName: ACADEMY.name, images },
+    twitter: { card: "summary_large_image", title, description, images: images.map((i) => i.url) },
+    robots: { index: true, follow: true },
+  };
+}
+
 export async function generateMetadata({ params }: { params: { slug: string } }): Promise<Metadata> {
   try {
-    const w = await withBudget(getWebinarBySlugCached(params.slug), 2500, null);
-    if (!w) return { title: "Webinar not found" };
-    if (w.active === false && w.status !== "completed") return { title: "Webinar not found" };
+    const loaded = await withBudget(loadWebinarPage(params.slug), 2500, { kind: "unavailable" } as const);
+    if (loaded.kind === "unavailable") return { title: "Webinars — Naman Sharma IAS Academy" };
+    if (loaded.kind === "missing") return { title: "Webinar not found" };
+    if (loaded.kind === "ended") return endedMetadata(loaded.webinar, !!loaded.next);
+    const w = loaded.webinar;
     const seo = w.seo || {};
     const canonicalSlug = seo.canonical_slug?.trim() || w.slug;
     const url = `${SITE_URL}/webinars/${canonicalSlug}`;
@@ -61,14 +121,8 @@ export async function generateMetadata({ params }: { params: { slug: string } })
 }
 
 export default async function WebinarDetail({ params }: { params: { slug: string } }) {
-  let w: Awaited<ReturnType<typeof getWebinarBySlugCached>> = null;
-  let dbFailed = false;
-  try {
-    w = await getWebinarBySlugCached(params.slug);
-  } catch {
-    dbFailed = true;
-  }
-  if (dbFailed) {
+  const loaded = await loadWebinarPage(params.slug);
+  if (loaded.kind === "unavailable") {
     return (
       <div className="container-wide py-16 text-center">
         <h1 className="font-heading text-2xl font-bold">Webinar temporarily unavailable</h1>
@@ -77,13 +131,13 @@ export default async function WebinarDetail({ params }: { params: { slug: string
       </div>
     );
   }
-  // List hides inactive; detail still serves completed/disabled rows so old links & recordings work.
-  if (!w) {
+  if (loaded.kind === "missing") {
     return <WebinarNotFound reason="webinar_missing" />;
   }
-  if (w.active === false && w.status !== "completed") {
-    return <WebinarNotFound reason="webinar_inactive" />;
+  if (loaded.kind === "ended") {
+    return <ExpiredWebinarRecovery expired={loaded.webinar} next={loaded.next} />;
   }
+  const w = loaded.webinar;
 
   const view = buildLandingView(w);
   let brochures: Awaited<ReturnType<typeof getLibraryDocsByIds>> = [];

@@ -83,6 +83,42 @@ export async function sendGa4PaymentSuccess(p: Payment): Promise<void> {
   }
 }
 
+/** Verified Notes purchase. No-ops without GA4 MP credentials. Caller dedupes. */
+export async function sendGa4NotesPurchase(input: {
+  orderId: string;
+  orderNo: string;
+  valueInr: number;
+  items: Array<{ item_id: string; item_name: string; price: number; quantity: number }>;
+}): Promise<void> {
+  try {
+    const mid = measurementId();
+    const secret = apiSecret();
+    if (!mid || !secret || !input.orderNo) return;
+    const clientId = `notes.${input.orderId.replace(/-/g, "").slice(0, 20)}`;
+    const url = `https://www.google-analytics.com/mp/collect?measurement_id=${encodeURIComponent(mid)}&api_secret=${encodeURIComponent(secret)}`;
+    await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        client_id: clientId,
+        events: [{
+          name: "purchase",
+          params: {
+            transaction_id: input.orderNo,
+            value: input.valueInr,
+            currency: "INR",
+            items: input.items,
+            engagement_time_msec: 1,
+          },
+        }],
+      }),
+      signal: AbortSignal.timeout(2500),
+    }).catch(() => {});
+  } catch {
+    /* never throw into the payment path */
+  }
+}
+
 /** Validate a payload against GA4 debug MP (no persistence). */
 export async function debugGa4MpPayload(payload: unknown): Promise<{ ok: boolean; validationMessages: unknown[] }> {
   try {

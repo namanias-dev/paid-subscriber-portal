@@ -7,33 +7,93 @@
  *
  *  - Free-text is mapped to a flow by simple keyword matching (no LLM).
  *  - Page path is mapped to a sensible default flow / greeting.
- *  - Trigger timing + frequency caps are defined here (single source of truth).
+ *  - The widget never opens by itself. Click or keyboard activation is the only open.
  *  - A guardrail linter (assertSafeCopy) rejects any agent copy that promises
  *    selection, uses fake scarcity, or invents offer facts — defense-in-depth so
  *    a bad edit to the copy library can be caught in tests / dev.
  */
 
 import type { FlowId } from "./providers/types";
+import { isEnrollmentCheckoutPath } from "../enrollmentPath";
 
 /* ------------------------------------------------------------------ *
- * TRIGGER TIMING & FREQUENCY (widget behaviour)
+ * OPEN POLICY — manual launcher only
  * ------------------------------------------------------------------ */
 
-export const TRIGGER_POLICY = {
-  /** Earliest auto-open, ms after load. */
-  minDelayMs: 8_000,
-  /** Latest auto-open, ms after load (if scroll threshold not hit sooner). */
-  maxDelayMs: 15_000,
-  /** Scroll fraction (0-1) that can trigger an earlier open. */
-  scrollFraction: 0.3,
-  /** Suppress auto-open for this long after a manual dismiss (24h). */
-  dismissSuppressMs: 24 * 60 * 60 * 1000,
-  /** localStorage keys (client-only). */
-  storageKeys: {
-    dismissedAt: "nsa_ai_dismissed_at",
-    openedSession: "nsa_ai_opened_session",
-  },
-} as const;
+/**
+ * Older builds wrote these flags and could reopen the widget from them.
+ * They are open-state only. Conversation history lives in ai_conversations
+ * and must not be deleted to keep the widget closed.
+ */
+export const LEGACY_COUNSELOR_OPEN_KEYS = [
+  "nsa_ai_opened_session",
+  "nsa_ai_dismissed_at",
+  "counselor_open",
+  "chat_open",
+  "assistant_open",
+] as const;
+
+/** Query keys that must never open the widget. There is no deep-link exception. */
+export const COUNSELOR_QUERY_OPEN_KEYS = ["chat", "counselor", "assistant"] as const;
+
+export type PassiveCounselorTrigger =
+  | "mount"
+  | "route"
+  | "timer"
+  | "scroll"
+  | "inactivity"
+  | "exit_intent"
+  | "storage"
+  | "query"
+  | "focus";
+
+export type CounselorUserTrigger = "click" | "keyboard";
+
+/** Passive events never open the counselor. */
+export function shouldAutoOpenCounselor(_trigger?: PassiveCounselorTrigger | string): false {
+  return false;
+}
+
+/**
+ * The sheet opens only after a real launcher activation.
+ * Focus/tab alone is not an activation. Route changes are not an activation.
+ */
+export function counselorOpensForReason(reason: PassiveCounselorTrigger | CounselorUserTrigger | string): boolean {
+  return reason === "click" || reason === "keyboard";
+}
+
+/**
+ * URL parameters never open the counselor.
+ * No support or marketing deep link is allowed to bypass the launcher.
+ */
+export function counselorOpensFromQuery(search: string | null | undefined): false {
+  void search;
+  return false;
+}
+
+type StorageLike = {
+  getItem(key: string): string | null;
+  removeItem(key: string): void;
+};
+
+/** Drop leftover open/dismiss flags. Does not touch conversation history. */
+export function purgeLegacyCounselorOpenFlags(...stores: Array<StorageLike | null | undefined>): string[] {
+  const removed: string[] = [];
+  for (const store of stores) {
+    if (!store) continue;
+    for (const key of LEGACY_COUNSELOR_OPEN_KEYS) {
+      try {
+        if (store.getItem(key) != null) {
+          store.removeItem(key);
+          removed.push(key);
+        }
+      } catch {
+        /* private mode or blocked storage */
+      }
+    }
+  }
+  return removed;
+}
 
 /**
  * Route prefixes where the PUBLIC widget must NEVER mount, even if the flag is on.
@@ -55,6 +115,8 @@ export function isWidgetAllowedPath(pathname: string | null | undefined): boolea
   for (const pre of WIDGET_PRIVATE_PREFIXES) {
     if (p === pre || p.startsWith(`${pre}/`)) return false;
   }
+  // Checkout keeps the page focused. The counsellor launcher is hidden only here.
+  if (isEnrollmentCheckoutPath(p)) return false;
   return true;
 }
 

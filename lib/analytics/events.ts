@@ -5,6 +5,9 @@ export type EventName =
   | "session_start"
   // webinar funnel
   | "webinar_view"
+  | "expired_webinar_viewed"
+  | "expired_webinar_cta_clicked"
+  | "expired_webinar_auto_forwarded"
   | "click_register_pay"
   | "registration_attempt"
   | "registration_created"
@@ -12,6 +15,16 @@ export type EventName =
   | "course_view"
   | "click_enroll"
   | "enrollment_created"
+  // Enrollment checkout interactions. PII-free. Does not replace course_view,
+  // click_enroll, or the server Purchase / payment_paid events.
+  | "batch_selected"
+  | "seat_booking_selected"
+  | "booking_amount_changed"
+  | "installments_selected"
+  | "pay_in_full_selected"
+  | "installment_schedule_expanded"
+  | "coupon_opened"
+  | "coupon_applied"
   // payment
   | "payment_initiated"
   | "payment_status_changed"
@@ -24,6 +37,9 @@ export type EventName =
   | "login"
   | "logout"
   | "identity_stitched"
+  // Once per authenticated student per IST day. Server-written only, after a
+  // real portal/dashboard session — never from the public beacon.
+  | "portal_active"
   // post-enrollment engagement
   | "enrolled_card_viewed"
   | "zoom_link_clicked"
@@ -77,13 +93,49 @@ export type EventName =
   // name, phone, address, order token or payment payloads).
   | "notes_store_viewed"
   | "notes_product_viewed"
+  | "notes_product_clicked"
   | "notes_bundle_viewed"
   | "notes_sample_opened"
+  | "notes_sample_impression"
+  | "notes_sample_page_view"
+  | "notes_sample_completed"
+  | "notes_sample_buy_clicked"
+  | "notes_physical_video_impression"
+  | "notes_physical_video_play"
+  | "notes_physical_video_25"
+  | "notes_physical_video_50"
+  | "notes_physical_video_75"
+  | "notes_physical_video_completed"
+  | "notes_physical_video_buy_clicked"
   | "notes_added_to_cart"
   | "notes_removed_from_cart"
   | "notes_checkout_started"
+  | "notes_checkout_contact_captured"
+  | "notes_checkout_lead_created"
+  | "notes_checkout_abandoned"
+  | "notes_checkout_recovered"
+  | "notes_checkout_lead_converted"
+  | "notes_lead_telegram_alert_sent"
+  | "notes_checkout_step_viewed"
+  | "notes_checkout_validation_error"
+  | "notes_address_confirmation_shown"
+  | "notes_address_maps_opened"
+  | "notes_address_confirmed"
+  | "notes_address_edited_after_confirmation"
+  | "notes_address_validation_error"
+  | "notes_order_address_changed"
+  | "notes_order_address_rebooked"
+  | "notes_checkout_api_error"
+  | "notes_shipping_quote_error"
+  | "notes_cart_viewed"
+  | "notes_cart_quantity_changed"
   | "notes_coupon_applied"
+  | "notes_payment_initiated"
+  | "notes_payment_gateway_opened"
+  | "notes_payment_returned"
   | "notes_payment_failed"
+  | "notes_purchase"
+  | "notes_media_error"
   | "notes_order_completed"
   | "notes_interest_submitted"
   | "notes_interest_section_viewed"
@@ -92,7 +144,26 @@ export type EventName =
   | "subject_interest_saved"
   | "available_note_clicked_from_interest"
   | "waitlist_interest_saved"
-  | "interest_preferences_updated";
+  | "interest_preferences_updated"
+  | "notes_teaching_section_viewed"
+  | "notes_teaching_preview_started"
+  | "notes_teaching_video_opened"
+  | "notes_teaching_sound_enabled"
+  | "notes_teaching_video_25"
+  | "notes_teaching_video_50"
+  | "notes_teaching_video_75"
+  | "notes_teaching_video_completed"
+  | "notes_teaching_video_changed"
+  | "notes_teaching_inline_play"
+  | "notes_teaching_inline_pause"
+  | "notes_teaching_fullscreen_entered"
+  | "notes_shop_after_teaching_clicked"
+  | "notes_offer_impression"
+  | "notes_offer_cta_clicked"
+  | "notes_offer_product_view"
+  | "notes_offer_cart_applied"
+  | "notes_offer_checkout_started"
+  | "notes_offer_order_completed";
 
 /**
  * Events the CLIENT beacon (/api/track) is allowed to emit. Anything that
@@ -103,7 +174,18 @@ export const CLIENT_ALLOWED_EVENTS: ReadonlySet<EventName> = new Set<EventName>(
   "page_view",
   "session_start",
   "webinar_view",
+  "expired_webinar_viewed",
+  "expired_webinar_cta_clicked",
+  "expired_webinar_auto_forwarded",
   "course_view",
+  "batch_selected",
+  "seat_booking_selected",
+  "booking_amount_changed",
+  "installments_selected",
+  "pay_in_full_selected",
+  "installment_schedule_expanded",
+  "coupon_opened",
+  "coupon_applied",
   "click_register_pay",
   "registration_attempt",
   "click_enroll",
@@ -157,13 +239,39 @@ export const CLIENT_ALLOWED_EVENTS: ReadonlySet<EventName> = new Set<EventName>(
   // signal only). Same classification as the course/AI funnel events above.
   "notes_store_viewed",
   "notes_product_viewed",
+  "notes_product_clicked",
   "notes_bundle_viewed",
   "notes_sample_opened",
+  "notes_sample_impression",
+  "notes_sample_page_view",
+  "notes_sample_completed",
+  "notes_sample_buy_clicked",
+  "notes_physical_video_impression",
+  "notes_physical_video_play",
+  "notes_physical_video_25",
+  "notes_physical_video_50",
+  "notes_physical_video_75",
+  "notes_physical_video_completed",
+  "notes_physical_video_buy_clicked",
   "notes_added_to_cart",
   "notes_removed_from_cart",
   "notes_checkout_started",
+  "notes_checkout_step_viewed",
+  "notes_checkout_validation_error",
+  "notes_address_confirmation_shown",
+  "notes_address_maps_opened",
+  "notes_address_confirmed",
+  "notes_address_edited_after_confirmation",
+  "notes_address_validation_error",
+  "notes_checkout_api_error",
+  "notes_shipping_quote_error",
+  "notes_cart_viewed",
+  "notes_cart_quantity_changed",
   "notes_coupon_applied",
+  "notes_payment_gateway_opened",
+  "notes_payment_returned",
   "notes_payment_failed",
+  "notes_media_error",
   "notes_order_completed",
   "notes_interest_submitted",
   "notes_interest_section_viewed",
@@ -173,6 +281,25 @@ export const CLIENT_ALLOWED_EVENTS: ReadonlySet<EventName> = new Set<EventName>(
   "available_note_clicked_from_interest",
   "waitlist_interest_saved",
   "interest_preferences_updated",
+  "notes_teaching_section_viewed",
+  "notes_teaching_preview_started",
+  "notes_teaching_video_opened",
+  "notes_teaching_sound_enabled",
+  "notes_teaching_video_25",
+  "notes_teaching_video_50",
+  "notes_teaching_video_75",
+  "notes_teaching_video_completed",
+  "notes_teaching_video_changed",
+  "notes_teaching_inline_play",
+  "notes_teaching_inline_pause",
+  "notes_teaching_fullscreen_entered",
+  "notes_shop_after_teaching_clicked",
+  "notes_offer_impression",
+  "notes_offer_cta_clicked",
+  "notes_offer_product_view",
+  "notes_offer_cart_applied",
+  "notes_offer_checkout_started",
+  "notes_offer_order_completed",
 ]);
 
 /** High-volume traffic events that the retention job may prune after 90 days. */

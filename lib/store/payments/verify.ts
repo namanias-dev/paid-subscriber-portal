@@ -18,6 +18,7 @@
 import { storeDb } from "@/lib/store/db";
 import { storeOpsAlert } from "@/lib/store/alerts";
 import { holdReservationsUntilShip, releaseReservations } from "@/lib/store/inventory";
+import { consumeStoreOfferHold, releaseStoreOfferHold } from "@/lib/store/offers";
 import { isStoreReference, STORE_REFERENCE_SQL_LIKE } from "@/lib/store/references";
 import { storeEazypayVerify, paiseToGatewayAmount } from "./eazypay";
 import {
@@ -201,6 +202,28 @@ async function applyOrderTerminal(
       // flag on). Must never affect the capture result.
       const { notifyOrderConfirmed } = await import("../notifications");
       void notifyOrderConfirmed({ orderId, orderNo }).catch(() => {});
+      // Post-commit only. Import is awaited so the send can be handed to
+      // waitUntil before this request ends. The send itself is not awaited.
+      // A Telegram failure must not change the paid order.
+      try {
+        const alerts = await import("@/lib/telegram/notesOrderAlert");
+        if (alerts.shouldFireNotesPaidAlert({ outcome: "paid", transitioned: true })) {
+          alerts.fireNotesOrderPaidAlert({ orderId, orderNo, amountPaise, paidAt: nowIso });
+        }
+      } catch (error) {
+        console.error(`[store/verify] notes_alert_schedule_failed order=${orderId} ${(error as Error).message}`);
+      }
+    }
+    if (data?.length) {
+      await consumeStoreOfferHold(orderId);
+      const { scheduleStoreInvoice } = await import("../invoice/issue");
+      scheduleStoreInvoice(orderId);
+      void import("@/lib/analytics/notesPurchase")
+        .then((m) => m.recordNotesPurchase(orderId))
+        .catch(() => {});
+      void import("@/lib/store/checkoutLeads")
+        .then((m) => m.markLeadConverted(orderId, amountPaise))
+        .catch(() => {});
     }
     await holdReservationsUntilShip(orderId);
     return orderNo;
@@ -222,6 +245,12 @@ async function applyOrderTerminal(
       actor_type: "gateway",
       payload_json: { reference_no: referenceNo, outcome },
     });
+  }
+  if (data?.length) {
+    await releaseStoreOfferHold(orderId);
+    void import("@/lib/analytics/notesPurchase")
+      .then((m) => m.recordNotesPaymentFailed(orderId, outcome))
+      .catch(() => {});
   }
   await releaseReservations({ orderId });
   return data?.[0]?.order_no ?? null;

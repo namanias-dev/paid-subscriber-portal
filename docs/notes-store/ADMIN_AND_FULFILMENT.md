@@ -16,7 +16,9 @@ All `force-dynamic` / no-store.
 |--------|------|----------------------|
 | GET | `/api/admin/notes/orders` | store fulfilment |
 | POST | `/api/admin/notes/orders/[id]/advance` | advance one step |
-| POST | `/api/admin/notes/orders/[id]/ship` | courier + AWB |
+| POST | `/api/admin/notes/orders/[id]/ship` | courier + AWB already in hand. Does not buy a label. |
+| POST | `/api/admin/notes/orders/[id]/rates` | live Shiprocket and Delhivery quotes. Read-only. |
+| POST | `/api/notes/courier/events` | courier tracking webhook. Requires `x-api-key`. |
 | GET/POST/PATCH | `/api/admin/notes/products` | `store_manage_catalogue` |
 | GET/POST/PATCH/DELETE | `/api/admin/notes/media` | `store_manage_catalogue` |
 
@@ -75,7 +77,8 @@ prepare — bundles counted as their components.
 1. Paid order appears in queue with **customer, address, line items, amount, payment status**.  
 2. Advance through internal statuses (printing/QC/packing as implemented).  
 3. Enter courier + AWB → ship endpoint creates/updates `store_shipments`.  
-4. Customer sees shipped only once AWB exists.
+4. Save packed weight and dimensions, compare rates, then choose a courier. Create shipment and Schedule pickup stay refused until both write flags are set.  
+5. Customer sees Packed while the parcel is still at the academy, including after an AWB or a pickup request. Shipped starts when the carrier scans possession.
 
 ## Order management
 
@@ -89,6 +92,8 @@ DB edits. No general returns are offered to customers; these are ops-only record
 
 ## Limitations
 
-- Manual shipping only — no Shiprocket.  
+- Staff still mark shipped by typing the courier and AWB.  
+- The order card can compare live Delhivery and Shiprocket rates. Quotes do not create a label, AWB, or pickup.  
+- `POST /api/notes/courier/events` applies tracking scans when `NOTES_STORE_COURIER_WEBHOOK_KEY` is set. Delivered does not move backwards.  
 - No automated DLT on ship until templates approved + `notes_store_sms` on.  
 - Do not build ERP complexity; keep queue scannable on laptop + phone.

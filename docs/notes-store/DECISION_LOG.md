@@ -27,5 +27,8 @@ Dated accepted decisions. Do not silently reverse.
 | 2026-09-19 | **Explicit `availability_mode`** (ready_stock/on_demand/coming_soon/unavailable), orthogonal to `is_active` | Staff never fake a stock number for print-on-demand titles (spec §5); on_demand skips reservation |
 | 2026-09-19 | **Preparation demand** computed from paid-unfulfilled orders, bundles exploded to components | Real ops tool vs manipulating SKU counts (spec §21); never double-counts bundles |
 | 2026-09-19 | Store media upload reuses Cloudflare R2 (never Supabase storage); samples watermarked, originals private | Spec §6/§28 |
+| 2026-09-21 | Limited-time offers are a real `store_offers` campaign with atomic holds; `calculateStorePrice` is the only discount formula | No frontend-only sale price; first-N orders counted on CAPTURED only |
+| 2026-09-21 | Bundles stay in schema/admin; storefront merchandising gated by `notes_store_bundles` (off) | Re-enable later without a rewrite |
+| 2026-09-21 | Merchandised individual subjects sell at ₹2,999 incl. GST; ₹1 TEST-NOTES-POLITY-001 untouched | Canonical catalogue price; payment-test SKU preserved |
 
 Canonical product requirements remain in `docs/notes-store-spec.md`.

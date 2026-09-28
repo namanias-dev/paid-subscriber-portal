@@ -24,6 +24,7 @@ import { scheduleAsCheckoutIntent } from "@/lib/enrollmentScope";
 import { validateCoupon, couponDiscountReason, parseCouponCodeFromReason } from "@/lib/coupons";
 import type { CourseEnrollment } from "@/lib/types";
 import { parseGaClientId } from "@/lib/analytics/gaClientId";
+import { checkoutAmountsDiffer, checkoutBatchError, normalizePublicPaymentRequest } from "@/lib/enrollmentCheckout";
 
 export const dynamic = "force-dynamic";
 
@@ -55,8 +56,10 @@ export async function POST(req: Request) {
     const email = String(body.email || "").trim();
     const mobile = String(body.mobile || body.phone || "").replace(/\D/g, "");
     const slug = String(body.courseSlug || body.slug || "");
-    const plan = String(body.plan || body.mode || "full") as "full" | "emi";
-    const bookSeat = body.bookSeat === true || body.bookSeat === "true";
+    const paymentRequest = normalizePublicPaymentRequest(body);
+    if (!paymentRequest.ok) return NextResponse.json({ ok: false, error: paymentRequest.error }, { status: 400 });
+    const plan = paymentRequest.plan;
+    const bookSeat = paymentRequest.bookSeat;
     const couponCode = String(body.couponCode || body.coupon || "").trim();
     // Phase 3: optional chosen batch. Pricing is recomputed server-side from the
     // batch (planCourseEnrollment) — a client price is never accepted. An unknown
@@ -81,6 +84,8 @@ export async function POST(req: Request) {
     if (course.status !== "published" || course.active === false) {
       return NextResponse.json({ ok: false, error: "This course is not open for enrollment." }, { status: 400 });
     }
+    const batchError = checkoutBatchError(course.batches, batchId);
+    if (batchError) return NextResponse.json({ ok: false, error: batchError }, { status: 400 });
 
     const planInput = {
       course,
@@ -126,6 +131,20 @@ export async function POST(req: Request) {
       discountAmount,
     } = planned.plan;
     let { firstAmount, firstKind, firstInstallmentNo } = planned.plan;
+
+    // Fresh quotes only. The public checkout sends the amount it is displaying,
+    // including after a coupon preview planned on this same selected total.
+    // Omitted expectedAmount (older clients) is ignored.
+    if (checkoutAmountsDiffer(body.expectedAmount, firstAmount)) {
+      return NextResponse.json(
+        {
+          ok: false,
+          priceChanged: true,
+          error: "Course pricing has been updated. We've refreshed your enrollment total.",
+        },
+        { status: 409 },
+      );
+    }
 
     const discountPatch: Partial<CourseEnrollment> =
       discountAmount > 0 && appliedCouponCode

@@ -35,10 +35,12 @@
 | Admin catalogue | BUILT BUT HUMAN/EXTERNAL VERIFICATION PENDING | CRUD API + UI; preview admin login needed |
 | Admin order queue/detail | BUILT BUT HUMAN/EXTERNAL VERIFICATION PENDING | Address + line items shown |
 | Manual status advance | BUILT BUT HUMAN/EXTERNAL VERIFICATION PENDING | `/advance` API |
-| Courier / AWB entry | BUILT BUT HUMAN/EXTERNAL VERIFICATION PENDING | Manual ship; no Shiprocket |
+| Courier / AWB entry | BUILT BUT HUMAN/EXTERNAL VERIFICATION PENDING | Manual ship. Does not buy a label. |
+| Courier rate quote | BUILT BUT HUMAN/EXTERNAL VERIFICATION PENDING | Admin compare. Delhivery read API verified. Shiprocket panel login is not an API user (403). |
+| Shipping aggregator writes | OUT OF CURRENT PHASE | Label, AWB creation, and pickup stay off. |
 | Real Eazypay transaction | **DEFERRED BY OWNER** | Checklist preserved; not executed |
 | Notifications / DLT send | OUT OF CURRENT PHASE | Templates drafted, **not submitted**; `notes_store_sms` off |
-| Shipping aggregator | OUT OF CURRENT PHASE | Manual Phase 1; `notes_store_shiprocket` off |
+| Shipping aggregator | OUT OF CURRENT PHASE | See courier rate quote. `notes_store_shiprocket` does not create shipments. |
 | Coupons | OUT OF CURRENT PHASE | Flag off; schema may allow later |
 | Bundles composition UI | OUT OF CURRENT PHASE | Schema `store_bundle_items`; limited Phase 1 UX |
 | Reviews | OUT OF CURRENT PHASE | Table exists; flag off; no fake social proof |
@@ -102,6 +104,9 @@ Automated-verified only (tsc + isolation guard + 53/53 store tests + `next build
 | Store test suite | 64 pass / 0 fail | +7 availability/prep +4 PDF-pipeline tests |
 | Premium storefront redesign + subject interest | BUILT AND AUTOMATED-VERIFIED | Elevation tokens, landing/PDP/cart/checkout/track polish, `store_subject_interest`, admin interest dashboard |
 | Cinematic notebook hero + Student Voices | BUILT AND AUTOMATED-VERIFIED | Real product PNG hero; compact preference-set poll after Shop by Subject; admin Notes Demand / co-selection |
+| Commerce upgrade: premium subject cards, ₹2,999 base, admin-controlled Launch Offer | BUILT | `store_offers` + hold/consume RPCs; `calculateStorePrice` is the quote/cart/checkout/Eazypay source of truth; bundles merchandising hidden via `notes_store_bundles` |
+| See before you buy (sample reader + physical-copy video) | BUILT | Config in `lib/store/notesProof.ts`, one sample and one physical video per product slug. Polity: `media/store/samples/anti-defection-law/` and `media/store/videos/physical-notes/`. Economy: `media/store/samples/foreign-direct-investment/` and `media/store/videos/physical-notes-economy/`. Admin sample upload is unchanged. |
+| Landing subject card uses the admin product cover | BUILT | `SubjectRail` passes `cover_url` into `NotebookStack`. Same `cover_image_key` as the PDP. No second upload. |
 
 ## External blockers preventing a browsable-by-owner preview (owner action)
 
@@ -115,3 +120,7 @@ Baseline re-confirmed green after each commit. Production flag still disabled; n
 
 1. `notes-store-release-hardening` has **no common git history with `main`** (disjoint). Deployment runbook names `master` as production track; `main` is the GitHub default branch.
 2. `handoff-state.json` `headCommit`/`treeHash` self-reference earlier commits (documented as expected); the annotated tag `notes-store-handoff-2026-09-19` is authoritative and verified (commit `2c1a440`, tree `6f970eb`).
+
+## Real-time paid-order Telegram (2026-09-27)
+
+Additive. After `applyStoreVerify` commits the first transition into `ORDER_CONFIRMED`, `fireNotesOrderPaidAlert` posts one HTML message to the executive-brief channel and one to the existing Sales & Admissions channel (`TELEGRAM_SALES_CHAT_ID`, title-checked). Idempotency is one `telegram_report_snapshots` row per destination: `notes_order_paid:<orderId>:executive` and `notes_order_paid:<orderId>:sales_admissions`. The original `notes_order_paid:<orderId>` row is not rewritten. Qualifying orders already paid more than 15 minutes before the dual-channel cutoff are marked `skipped` / `pre_existing` and are not sent. A one-off updated replay of `NIAS-N-2026-001002` uses `notes_order_manual_replay:<orderId>:customer_details_v2:<destination>` and does not touch payment or fulfillment. Telegram failure does not roll back the order. The 2-hour digest schedule is unchanged.

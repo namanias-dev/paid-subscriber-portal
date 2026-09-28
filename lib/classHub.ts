@@ -194,6 +194,7 @@ const SUBJECT_ORDER = [
   "Polity", "History", "Geography", "Economy", "Environment",
   "S&T", "Science & Tech", "IR", "Current Affairs", "CSAT",
   "Ethics", "Public Administration", "Optional", "Orientation", "Starter",
+  "Disaster Management", "Social Justice", "Society", "Mapping", "Internal Security",
 ];
 
 function subjectRank(s: string): number {

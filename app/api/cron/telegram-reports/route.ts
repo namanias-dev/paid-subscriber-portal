@@ -8,6 +8,7 @@ import {
   maybeRunScheduledDigest,
   sendDigestNow,
 } from "@/lib/telegram/reports";
+import { maybeRunMonthlyBusinessReport } from "@/lib/telegram/reports/monthly";
 import { verifyReportsChannel } from "@/lib/telegram/reports/verify";
 import { alertPaymentPaid } from "@/lib/telegram/reports/alerts";
 import { getPayments } from "@/lib/dataProvider";
@@ -332,6 +333,11 @@ async function run(req: Request) {
     }
 
     const digest = await maybeRunScheduledDigest();
+    const monthly = await maybeRunMonthlyBusinessReport().catch((e) => ({
+      ok: false,
+      ran: false,
+      reason: (e as Error).message || "monthly_failed",
+    }));
     const alerts = {
       overdue: await alertOverdueInstallments().catch(() => ({ sent: 0 })),
       noLeads: await alertNoLeadsIfStale().catch(() => false),
@@ -355,7 +361,7 @@ async function run(req: Request) {
     } catch (e) {
       sales = { error: (e as Error).message };
     }
-    return NextResponse.json({ ok: true, digest, alerts, sales, ts: Date.now() });
+    return NextResponse.json({ ok: true, digest, monthly, alerts, sales, ts: Date.now() });
   } catch (e) {
     return NextResponse.json({ ok: false, error: (e as Error).message }, { status: 500 });
   }
