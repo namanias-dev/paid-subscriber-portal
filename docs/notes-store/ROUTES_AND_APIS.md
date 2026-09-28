@@ -36,7 +36,7 @@
 | GET/POST/PATCH | `/api/admin/notes/products` | `store_manage_catalogue` |
 | GET/POST/PATCH/DELETE | `/api/admin/notes/media` | `store_manage_catalogue` — upload/reorder/cover/delete product photos + watermarked sample pages (Cloudflare R2) |
 | GET | `/api/admin/notes/preparation` | `store_manage_orders` — copies-to-prepare (paid, not-yet-dispatched; bundles exploded) |
-| GET | `/api/admin/notes/overview` | `store_manage_orders` — action-required counts + prepare/low-stock lists |
+| GET | `/api/admin/notes/overview` | Super Admin — action-required counts + prepare/low-stock lists |
 | GET/POST/PATCH/DELETE | `/api/admin/notes/bundles` | `store_manage_catalogue` — manage bundle components (add/remove/reorder/qty) |
 | GET/POST | `/api/admin/notes/offers` | `store_manage_catalogue` — list/create campaigns |
 | GET/PATCH | `/api/admin/notes/offers/[id]` | `store_manage_catalogue` — edit, pause, duplicate |
@@ -45,10 +45,13 @@
 
 | Path | Perm |
 |------|------|
-| `/admin/notes/overview` | `store_manage_orders` — action-required dashboard |
-| `/admin/notes` | `store_manage_orders` — order queue |
+| `/admin/notes/overview` | Super Admin — action-required dashboard and store settings |
+| `/admin/notes` | `store_view_orders` or `store_manage_orders` — order queue |
+| `/admin/notes/orders/[id]` | same read gate; mutations require `store_manage_orders` |
+| `/admin/notes/leads` | `store_view_orders` or `store_manage_orders` — checkout leads (updates are Super Admin) |
 | `/admin/notes/preparation` | `store_manage_orders` — preparation demand |
 | `/admin/notes/products` | `store_manage_catalogue` — catalogue + availability + media |
+| `/admin/notes/analytics` | Super Admin only |
 | `/admin/notes/pick-list` | `store_manage_orders` |
 
 ## Cron

@@ -42,11 +42,13 @@ export default function CheckoutLeads() {
   const [leads, setLeads] = useState<LeadRow[]>([]);
   const [openId, setOpenId] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
+  const [canUpdate, setCanUpdate] = useState(false);
 
   const load = useCallback(async (next = filter) => {
     const res = await fetch(`/api/admin/notes/leads?filter=${next}`, { cache: "no-store" });
     const json = await res.json();
     setLeads(json.leads || []);
+    setCanUpdate(Boolean(json.can_update));
   }, [filter]);
 
   useEffect(() => { void load(); }, [load]);
@@ -120,7 +122,7 @@ export default function CheckoutLeads() {
             <div className="mt-3 flex flex-wrap gap-2">
               <a className="min-h-11 rounded-full bg-[var(--ca-navy)] px-4 py-2 text-sm font-semibold text-white" href={`tel:+91${open.phone}`}>Call</a>
               <button type="button" className="min-h-11 rounded-full bg-white px-4 text-sm font-semibold" onClick={() => void navigator.clipboard.writeText(open.phone).then(() => setMsg("Phone copied"))}>Copy phone</button>
-              <button type="button" className="min-h-11 rounded-full bg-white px-4 text-sm font-semibold" onClick={() => void patch({ id: open.id, recovery: true })}>Copy recovery link</button>
+              {canUpdate && <button type="button" className="min-h-11 rounded-full bg-white px-4 text-sm font-semibold" onClick={() => void patch({ id: open.id, recovery: true })}>Copy recovery link</button>}
             </div>
             {open.sales_status === "DO_NOT_CONTACT" && <p className="mt-3 rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-950">Do not contact. Promotional messages must not be sent.</p>}
             <dl className="mt-4 space-y-2 text-sm text-[var(--ca-navy)]">
@@ -139,17 +141,27 @@ export default function CheckoutLeads() {
                 </div>
               )}
             </dl>
-            <div className="mt-4 flex flex-wrap gap-2">
-              {SALES.map((status) => (
-                <button key={status} type="button" onClick={() => void patch({ id: open.id, sales_status: status })} className={`min-h-10 rounded-full px-3 text-xs font-semibold ${open.sales_status === status ? "bg-[var(--ca-navy)] text-white" : "bg-white"}`}>
-                  {status.replaceAll("_", " ")}
-                </button>
-              ))}
-            </div>
-            <label className="mt-4 block text-sm">
-              <span className="mb-1 block font-medium">Sales note</span>
-              <textarea defaultValue={open.sales_note || ""} rows={3} className="w-full rounded-xl border px-3 py-2" onBlur={(e) => void patch({ id: open.id, sales_status: open.sales_status, sales_note: e.target.value })} />
-            </label>
+            {canUpdate ? (
+              <>
+                <div className="mt-4 flex flex-wrap gap-2">
+                  {SALES.map((status) => (
+                    <button key={status} type="button" onClick={() => void patch({ id: open.id, sales_status: status })} className={`min-h-10 rounded-full px-3 text-xs font-semibold ${open.sales_status === status ? "bg-[var(--ca-navy)] text-white" : "bg-white"}`}>
+                      {status.replaceAll("_", " ")}
+                    </button>
+                  ))}
+                </div>
+                <label className="mt-4 block text-sm">
+                  <span className="mb-1 block font-medium">Sales note</span>
+                  <textarea defaultValue={open.sales_note || ""} rows={3} className="w-full rounded-xl border px-3 py-2" onBlur={(e) => void patch({ id: open.id, sales_status: open.sales_status, sales_note: e.target.value })} />
+                </label>
+              </>
+            ) : (
+              <div className="mt-4 text-sm text-[var(--ca-navy)]">
+                <p className="text-[11px] uppercase tracking-wide text-[var(--ca-navy)]/45">Sales status</p>
+                <p>{open.sales_status.replaceAll("_", " ")}</p>
+                {open.sales_note && <p className="mt-2">{open.sales_note}</p>}
+              </div>
+            )}
           </div>
         </aside>
       )}

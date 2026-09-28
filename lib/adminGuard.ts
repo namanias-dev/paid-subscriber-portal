@@ -1,5 +1,6 @@
 import { getAdminSession } from "./session";
 import { hasPermission, allPermissions, isSuperAdmin, type PermissionKey, type PermissionSet } from "./permissions";
+import { canReadNotesOrders } from "./store/notesAccess";
 import type { AdminSessionPayload } from "./types";
 
 /**
@@ -35,6 +36,16 @@ export async function requireAnyPermission(keys: PermissionKey[]): Promise<boole
   if (!session) return false;
   const perms = effectivePermissions(session);
   return keys.some((k) => hasPermission(perms, k));
+}
+
+/**
+ * Notes orders list, order detail, and checkout leads.
+ * `store_manage_orders` implies read so existing order managers keep access.
+ */
+export async function requireStoreOrderRead(): Promise<boolean> {
+  const session = await getAdminSession();
+  if (!session) return false;
+  return canReadNotesOrders(effectivePermissions(session));
 }
 
 /** True only for a Super Admin (manage_roles + manage_staff + view_revenue). */
