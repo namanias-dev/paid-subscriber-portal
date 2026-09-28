@@ -21,6 +21,9 @@ import {
   canReadNotesOrders,
   canUpdateNotesLeads,
 } from "../../lib/store/notesAccess";
+import { freshPermissions } from "../../lib/adminGuard";
+import { isDemoMode } from "../../lib/config";
+import type { AdminSessionPayload } from "../../lib/types";
 
 const root = process.cwd();
 const read = (path: string) => readFileSync(join(root, path), "utf8");
@@ -127,7 +130,7 @@ describe("Notes routes enforce the matrix on the server", () => {
     }
   });
 
-  it("analytics, overview, and interest stay Super Admin only", () => {
+  it("analytics, overview, and interest require a fresh Super Admin check", () => {
     for (const path of [
       "app/admin/notes/analytics/page.tsx",
       "app/admin/notes/overview/page.tsx",
@@ -136,22 +139,27 @@ describe("Notes routes enforce the matrix on the server", () => {
       "app/api/admin/notes/interest/route.ts",
     ]) {
       const src = read(path);
-      assert.match(src, /requireSuperAdmin\(\)/);
+      assert.match(src, /requireFreshSuperAdmin\(\)/);
+      assert.doesNotMatch(src, /requireSuperAdmin\(\)/);
       assert.doesNotMatch(src, /requirePermission\("store_manage_orders"\)/);
       assert.doesNotMatch(src, /requireStoreOrderRead\(\)/);
     }
   });
 
-  it("order reads accept view access and mutations stay on store_manage_orders", () => {
+  it("order reads accept view access and mutations require a fresh manage check", () => {
     const orders = read("app/api/admin/notes/orders/route.ts");
     assert.match(orders, /requireStoreOrderRead\(\)/);
-    assert.match(orders, /requirePermission\("store_manage_orders"\)/);
+    assert.match(orders, /requireFreshPermission\("store_manage_orders"\)/);
+    assert.match(orders, /requireFreshSuperAdmin\(\)/);
+    assert.doesNotMatch(orders, /requirePermission\("store_manage_orders"\)/);
+    assert.doesNotMatch(orders, /requireSuperAdmin\(\)/);
     assert.match(orders, /can_manage/);
     assert.match(orders, /can_view_analytics/);
 
     const invoice = read("app/api/admin/notes/orders/[id]/invoice/route.ts");
     assert.match(invoice, /export async function GET[\s\S]*requireStoreOrderRead\(\)/);
-    assert.match(invoice, /export async function POST[\s\S]*requirePermission\("store_manage_orders"\)/);
+    assert.match(invoice, /export async function POST[\s\S]*requireFreshPermission\("store_manage_orders"\)/);
+    assert.doesNotMatch(invoice, /requirePermission\("store_manage_orders"\)/);
 
     for (const path of [
       "app/api/admin/notes/orders/[id]/advance/route.ts",
@@ -166,20 +174,39 @@ describe("Notes routes enforce the matrix on the server", () => {
       "app/api/admin/notes/orders/[id]/note/route.ts",
       "app/api/admin/notes/orders/[id]/issues/route.ts",
       "app/api/admin/notes/orders/[id]/reconcile/route.ts",
+      "app/api/admin/notes/orders/[id]/provider-lookup/route.ts",
       "app/api/admin/notes/orders/address/route.ts",
       "app/api/admin/notes/orders/[id]/support-decision/route.ts",
+      "app/api/admin/notes/fixture/route.ts",
     ]) {
-      assert.match(read(path), /requirePermission\("store_manage_orders"\)/, path);
-      assert.doesNotMatch(read(path), /requireStoreOrderRead\(\)/, path);
+      const src = read(path);
+      assert.match(src, /requireFreshPermission\("store_manage_orders"\)/, path);
+      assert.doesNotMatch(src, /requirePermission\("store_manage_orders"\)/, path);
+      assert.doesNotMatch(src, /requireStoreOrderRead\(\)/, path);
     }
   });
 
-  it("checkout lead updates and store settings are Super Admin only", () => {
+  it("preparation and pick list stay on the ordinary permission check", () => {
+    for (const path of [
+      "app/api/admin/notes/preparation/route.ts",
+      "app/admin/notes/preparation/page.tsx",
+      "app/admin/notes/pick-list/page.tsx",
+    ]) {
+      const src = read(path);
+      assert.match(src, /requirePermission\("store_manage_orders"\)/, path);
+      assert.doesNotMatch(src, /requireFreshPermission/, path);
+    }
+  });
+
+  it("checkout lead updates, refunds, and store settings require a fresh Super Admin check", () => {
     const leads = read("app/api/admin/notes/leads/route.ts");
     assert.match(leads, /export async function GET[\s\S]*requireStoreOrderRead\(\)/);
-    assert.match(leads, /export async function PATCH[\s\S]*requireSuperAdmin\(\)/);
+    assert.match(leads, /requireFreshSuperAdmin\(\)/);
+    assert.match(leads, /export async function PATCH[\s\S]*requireFreshSuperAdmin\(\)/);
+    assert.doesNotMatch(leads, /requireSuperAdmin\(\)/);
     const refund = read("app/api/admin/notes/orders/[id]/refund/route.ts");
-    assert.match(refund, /requireSuperAdmin\(\)/);
+    assert.match(refund, /requireFreshSuperAdmin\(\)/);
+    assert.doesNotMatch(refund, /requireSuperAdmin\(\)/);
     assert.doesNotMatch(refund, /store_manage_orders/);
     for (const path of [
       "app/api/admin/notes/store-state/route.ts",
@@ -189,7 +216,8 @@ describe("Notes routes enforce the matrix on the server", () => {
       "app/api/admin/notes/invoices/correct-display/route.ts",
     ]) {
       const src = read(path);
-      assert.match(src, /requireSuperAdmin\(\)/, path);
+      assert.match(src, /requireFreshSuperAdmin\(\)/, path);
+      assert.doesNotMatch(src, /requireSuperAdmin\(\)/, path);
       assert.doesNotMatch(src, /store_manage_orders/, path);
     }
   });
@@ -204,5 +232,50 @@ describe("Notes routes enforce the matrix on the server", () => {
     const queue = read("components/notes/admin/OrderQueue.tsx");
     assert.match(queue, /showAnalytics &&/);
     assert.match(queue, /canManage=\{canManage\}/);
+  });
+});
+
+function session(auth_source: AdminSessionPayload["auth_source"], permissions: PermissionSet): AdminSessionPayload {
+  return { admin_id: "a", username: "u", role: "admin", permissions, auth_source };
+}
+
+describe("privileged Notes checks fail closed without a fresh read", () => {
+  it("a database read authorizes the permissions it returned", () => {
+    const perms = freshPermissions(session("database", { store_view_orders: true, store_manage_orders: true }));
+    assert.equal(perms?.store_manage_orders, true);
+    assert.equal(isSuperAdmin(perms!), false);
+  });
+
+  it("a database read that removed manage does not keep an older grant", () => {
+    const perms = freshPermissions(session("database", { store_view_orders: true, store_manage_orders: false }));
+    assert.equal(perms?.store_view_orders, true);
+    assert.equal(perms?.store_manage_orders, false);
+  });
+
+  it("a fresh Super Admin read still expands to full access", () => {
+    const perms = freshPermissions(session("database", { manage_roles: true, manage_staff: true, view_revenue: true }));
+    assert.equal(isSuperAdmin(perms!), true);
+    assert.equal(perms?.store_manage_orders, true);
+  });
+
+  it("a signed snapshot is not an authorization fallback", () => {
+    assert.equal(freshPermissions(session("token", allPermissions())), null);
+    assert.equal(freshPermissions(session(undefined, allPermissions())), null);
+  });
+
+  it("demo mode is the only non-database exception", () => {
+    const perms = freshPermissions(session("demo", { store_manage_orders: true }));
+    if (isDemoMode) assert.equal(perms?.store_manage_orders, true);
+    else assert.equal(perms, null);
+  });
+
+  it("the session gate labels the source and never returns the raw token on a failed read", () => {
+    const src = read("lib/session.ts");
+    assert.match(src, /auth_source: "token"/);
+    assert.match(src, /auth_source: "database"/);
+    assert.match(src, /auth_source: "demo"/);
+    assert.doesNotMatch(src, /if \(gate === null\) return payload/);
+    const auth = read("lib/auth.ts");
+    assert.match(auth, /delete claims\.auth_source/);
   });
 });

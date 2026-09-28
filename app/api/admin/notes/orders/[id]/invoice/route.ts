@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requirePermission, requireStoreOrderRead } from "@/lib/adminGuard";
+import { requireFreshPermission, requireStoreOrderRead } from "@/lib/adminGuard";
 import { storeDb } from "@/lib/store/db";
 import { ensureStoreInvoice, invoiceDownloadUrl } from "@/lib/store/invoice/issue";
 
@@ -25,7 +25,7 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
 }
 
 export async function POST(req: Request, { params }: { params: { id: string } }) {
-  if (!(await requirePermission("store_manage_orders"))) {
+  if (!(await requireFreshPermission("store_manage_orders"))) {
     return NextResponse.json({ ok: false, error: "Forbidden" }, { status: 403 });
   }
   const body = (await req.json().catch(() => ({}))) as { retry?: boolean };

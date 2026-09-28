@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
-import { requireSuperAdmin } from "@/lib/adminGuard";
+import { requireFreshSuperAdmin } from "@/lib/adminGuard";
 import { HISTORICAL_INVOICE_ORDER, issueHistoricalStoreInvoice } from "@/lib/store/invoice/issue";
 
 export const dynamic = "force-dynamic";
 
 /** One authorized historical bill. Every other order number is refused. */
 export async function POST(req: Request) {
-  if (!(await requireSuperAdmin())) {
+  if (!(await requireFreshSuperAdmin())) {
     return NextResponse.json({ ok: false, error: "Forbidden" }, { status: 403 });
   }
   const body = (await req.json().catch(() => ({}))) as { orderNo?: string };

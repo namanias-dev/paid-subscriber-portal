@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requirePermission, requireStoreOrderRead, requireSuperAdmin } from "@/lib/adminGuard";
+import { requireFreshPermission, requireFreshSuperAdmin, requireStoreOrderRead } from "@/lib/adminGuard";
 import { storeDb } from "@/lib/store/db";
 import { staffPaymentLabel } from "@/lib/store/orders";
 import { fulfilmentAttention } from "@/lib/store/shipping/dispatch";
@@ -58,8 +58,8 @@ export async function GET(req: Request) {
   if (!(await requireStoreOrderRead())) {
     return NextResponse.json({ ok: false, error: "Forbidden" }, { status: 403, headers: { "Cache-Control": "no-store" } });
   }
-  const canManage = await requirePermission("store_manage_orders");
-  const canViewAnalytics = await requireSuperAdmin();
+  const canManage = await requireFreshPermission("store_manage_orders");
+  const canViewAnalytics = await requireFreshSuperAdmin();
   const db = storeDb();
   if (!db) return NextResponse.json({ ok: false, error: "unavailable" }, { status: 503 });
 

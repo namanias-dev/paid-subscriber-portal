@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireSuperAdmin } from "@/lib/adminGuard";
+import { requireFreshSuperAdmin } from "@/lib/adminGuard";
 import { storeDb } from "@/lib/store/db";
 import { computePreparationDemand } from "@/lib/store/preparation";
 import { listInterestAggregates } from "@/lib/store/interest";
@@ -19,7 +19,7 @@ async function countIn(db: NonNullable<ReturnType<typeof storeDb>>, statuses: st
 
 /** Action-required snapshot for the Notes Store admin landing (spec §19). */
 export async function GET() {
-  if (!(await requireSuperAdmin())) return noStore({ ok: false, error: "Forbidden" }, 403);
+  if (!(await requireFreshSuperAdmin())) return noStore({ ok: false, error: "Forbidden" }, 403);
   const db = storeDb();
   if (!db) return noStore({ ok: false, error: "unavailable" }, 503);
 
