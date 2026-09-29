@@ -137,6 +137,11 @@ export function pickupWhen(input: {
 const JUNK_ACTIVITY = new Set(["na", "n/a", "null", "undefined", "none", "-", "--", "unknown"]);
 const PRE_POSSESSION_TEXT = /pickup|pick up|manifest|data received|shipment booked|awb assigned|label generated/i;
 const POSSESSED_STAGES = new Set(["shipped", "transit", "delivery", "delivered"]);
+const RESTATES_STAGE: Record<string, RegExp> = {
+  shipped: /^(shipped|picked ?up)$/i,
+  transit: /^in[ -]?transit$/i,
+  delivery: /^out for delivery$/i,
+};
 
 /**
  * Latest stored provider event, only when it is short, readable and not stale for the
@@ -157,7 +162,7 @@ export function latestTracking(
   if (!stage) return { text, at };
   if (stage.key === "delivered") return none;
   if (POSSESSED_STAGES.has(stage.key) && PRE_POSSESSION_TEXT.test(text)) return none;
-  if (text.toLowerCase() === stage.label.toLowerCase()) return { text: null, at };
+  if (text.toLowerCase() === stage.label.toLowerCase() || RESTATES_STAGE[stage.key]?.test(text)) return { text: null, at };
   return { text, at };
 }
 

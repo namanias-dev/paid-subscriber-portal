@@ -156,6 +156,7 @@ test("stale pre-pickup provider text is hidden once the courier has the parcel",
   assert.deepEqual(latestTracking("NA", "2026-09-28 19:44:00", stageProgress("PICKED_UP")), { text: null, at: null });
   assert.deepEqual(latestTracking("IN_TRANSIT_CODE_7", null, stage), { text: null, at: null });
   assert.deepEqual(latestTracking("In Transit", "2026-09-29 16:10:00", stage), { text: null, at: "2026-09-29 16:10:00" });
+  assert.deepEqual(latestTracking("PICKED UP", "2026-09-29 15:57:36", stageProgress("PICKED_UP")), { text: null, at: "2026-09-29 15:57:36" });
 });
 
 test("I: out for delivery keeps the provider event time", () => {
