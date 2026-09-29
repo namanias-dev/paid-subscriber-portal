@@ -352,6 +352,7 @@ export default function NotesOrderQueue() {
                   <div>
                     {order.group?.paid_count && showsFulfillmentTimeline(order.status) ? <FulfillmentTimeline status={order.status} compact /> : <span className="text-xs text-[var(--ca-navy)]/60">{order.group?.paid_count ? fulfillmentLabel(order.status, failed) : "Previous attempt"}</span>}
                     <span className="mt-1 block text-[11px] text-[var(--ca-navy)]/50">{order.group ? `${order.group.attempts} attempts · ${order.group.paid_count} paid` : formatAdminWhen(order.placed_at)}</span>
+                    {(order.status === "PACKED" || order.status === "READY_FOR_PICKUP") && !order.shipment?.awb && <span className="mt-1 block text-[11px] font-semibold text-[var(--ca-navy)]">Courier not selected</span>}
                   </div>
                   <Link href={`/admin/notes/orders/${order.id}`} className="inline-flex min-h-11 items-center rounded-full bg-[var(--ca-navy)] px-3 text-sm font-semibold text-white">View details</Link>
                 </li>
@@ -375,6 +376,7 @@ export default function NotesOrderQueue() {
                     <span className="mt-3 block">{showsFulfillmentTimeline(order.status) ? <FulfillmentTimeline status={order.status} compact /> : null}</span>
                     <span className="mt-2 flex items-center justify-between gap-2">
                       <span className={`rounded-full px-2 py-1 text-[11px] font-semibold ${TONE[fulfillmentTone(order.status, failed)]}`}>{fulfillmentLabel(order.status, failed)}</span>
+                      {(order.status === "PACKED" || order.status === "READY_FOR_PICKUP") && !order.shipment?.awb ? <span className="text-[11px] font-semibold text-[var(--ca-navy)]">Courier not selected</span> : null}
                       <span className="text-xs text-[var(--ca-navy)]/55">{order.payment_status === "CAPTURED" ? "Paid" : order.payment_status || "Payment pending"}</span>
                     </span>
                     {order.group && <span className="mt-2 block text-xs text-[var(--ca-navy)]/55">{order.group.attempts} attempts · {order.group.paid_count} paid</span>}
@@ -415,10 +417,10 @@ export default function NotesOrderQueue() {
           orderId={compare.id}
           open
           writesAuthorized={writes}
-          weight={compare.shipment?.weight_grams || 500}
-          length={compare.shipment?.length_cm || 30}
-          width={compare.shipment?.width_cm || 25}
-          height={compare.shipment?.height_cm || 3}
+          weight={compare.shipment?.weight_grams || 0}
+          length={compare.shipment?.length_cm || 0}
+          width={compare.shipment?.width_cm || 0}
+          height={compare.shipment?.height_cm || 0}
           onClose={() => setCompareId(null)}
           onBooked={() => {
             setCompareId(null);

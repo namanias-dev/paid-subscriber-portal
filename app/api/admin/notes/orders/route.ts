@@ -186,6 +186,7 @@ export async function GET(req: Request) {
       width_cm: number | null;
       height_cm: number | null;
       package_source: string | null;
+      rate_paise: number | null;
     }
   >();
   const payByOrder = new Map<string, { status: string; provider: string | null }>();
@@ -234,6 +235,7 @@ export async function GET(req: Request) {
         const payload = (s.provider_payload && typeof s.provider_payload === "object" ? s.provider_payload : {}) as {
           cancellation_reason?: string;
           reason?: string;
+          do_not_use?: boolean;
         };
         const list = pastByOrder.get(s.order_id) || [];
         list.push({
@@ -241,7 +243,7 @@ export async function GET(req: Request) {
           courier: s.courier_name,
           awb: s.awb,
           status: s.status,
-          reason: payload.cancellation_reason || payload.reason || null,
+          reason: payload.cancellation_reason || payload.reason || (payload.do_not_use ? "CANCELLED / DO NOT USE" : null),
         });
         pastByOrder.set(s.order_id, list);
       }
@@ -260,6 +262,8 @@ export async function GET(req: Request) {
           address_mismatch?: boolean;
           do_not_handoff?: boolean;
           package_source?: string;
+          rate_paise?: number;
+          do_not_use?: boolean;
         };
         shipByOrder.set(s.order_id, {
           courier: s.courier_name,
@@ -282,6 +286,7 @@ export async function GET(req: Request) {
           width_cm: s.width_mm ? Number(s.width_mm) / 10 : null,
           height_cm: s.height_mm ? Number(s.height_mm) / 10 : null,
           package_source: payload.package_source || null,
+          rate_paise: Number(payload.rate_paise) || null,
         });
       }
     }

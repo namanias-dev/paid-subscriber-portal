@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { requirePermission } from "@/lib/adminGuard";
 import { compareCourierRates } from "@/lib/store/shipping/compare";
 import { storeDb } from "@/lib/store/db";
+import { resolveBookingPackage } from "@/lib/store/shipping/manualBook";
+import type { PackageLine } from "@/lib/store/shipping/autoFulfill";
 
 export const dynamic = "force-dynamic";
 
@@ -14,17 +16,6 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   }
   const db = storeDb();
   if (!db) return NextResponse.json({ ok: false, error: "unavailable" }, { status: 503 });
-
-  const body = (await req.json().catch(() => null)) as {
-    weight_grams?: number;
-    length_cm?: number;
-    width_cm?: number;
-    height_cm?: number;
-  } | null;
-  const weight = Number(body?.weight_grams);
-  const length = Number(body?.length_cm);
-  const width = Number(body?.width_cm);
-  const height = Number(body?.height_cm);
 
   const { data: order } = await db
     .from("store_orders")
@@ -41,12 +32,42 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     return NextResponse.json({ ok: false, error: "Delivery PIN is missing." }, { status: 400 });
   }
 
+  const { data: shipmentRows } = await db
+    .from("store_shipments")
+    .select("weight_grams,length_mm,width_mm,height_mm")
+    .eq("order_id", order.id)
+    .order("created_at", { ascending: false });
+  const saved = (shipmentRows || []).find((row) => row.weight_grams && row.length_mm && row.width_mm && row.height_mm) || null;
+  const { data: itemRows } = await db.from("store_order_items").select("qty,weight_grams_snapshot,product_id").eq("order_id", order.id);
+  const lines: PackageLine[] = [];
+  for (const item of itemRows || []) {
+    const { data: product } = item.product_id
+      ? await db.from("store_products").select("weight_grams,length_mm,width_mm,height_mm").eq("id", item.product_id).maybeSingle()
+      : { data: null };
+    lines.push({
+      qty: Number(item.qty) || 1,
+      weightGrams: product?.weight_grams || item.weight_grams_snapshot || null,
+      lengthMm: product?.length_mm || null,
+      widthMm: product?.width_mm || null,
+      heightMm: product?.height_mm || null,
+    });
+  }
+  const pack = resolveBookingPackage({
+    override: saved
+      ? { weightGrams: saved.weight_grams, lengthMm: saved.length_mm, widthMm: saved.width_mm, heightMm: saved.height_mm }
+      : null,
+    lines,
+  });
+  if (!pack.ok) {
+    return NextResponse.json({ ok: false, error: "Save the packed weight and dimensions first." }, { status: 400, headers: { "Cache-Control": "no-store" } });
+  }
+
   const result = await compareCourierRates({
     deliveryPostcode: pin,
-    weightGrams: weight,
-    lengthCm: length,
-    widthCm: width,
-    heightCm: height,
+    weightGrams: pack.weightGrams,
+    lengthCm: pack.lengthCm,
+    widthCm: pack.widthCm,
+    heightCm: pack.heightCm,
     declaredValuePaise: Number(order.total_paise) || 0,
   });
 
@@ -58,7 +79,14 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       pickup_postcode: result.pickupPostcode,
       writes_authorized: result.writesAuthorized,
       providers: result.providers,
-      lowest: result.lowest,
+      lowest: null,
+      package: {
+        weight_grams: pack.weightGrams,
+        length_cm: pack.lengthCm,
+        width_cm: pack.widthCm,
+        height_cm: pack.heightCm,
+        source: pack.source,
+      },
     },
     { headers: { "Cache-Control": "no-store" } },
   );

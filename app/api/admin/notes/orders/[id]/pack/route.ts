@@ -3,8 +3,6 @@ import { requirePermission, getActionActor } from "@/lib/adminGuard";
 import { storeDb } from "@/lib/store/db";
 import { shipmentAlreadyActive } from "@/lib/store/shipping/dispatch";
 import { assertPackage } from "@/lib/store/shipping/quotes";
-import { runAutoFulfillment } from "@/lib/store/shipping/autoFulfillRun";
-
 export const dynamic = "force-dynamic";
 
 /** Save the packed size. Does not call a courier. */
@@ -75,8 +73,5 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     actor_name: actor?.name,
     payload_json: { weight_grams: pack.weightGrams },
   });
-  const fulfillment = order.status === "PACKED" || order.status === "READY_FOR_PICKUP"
-    ? await runAutoFulfillment(order.id)
-    : null;
-  return NextResponse.json({ ok: true, fulfillment }, { headers: { "Cache-Control": "no-store" } });
+  return NextResponse.json({ ok: true, fulfillment: null }, { headers: { "Cache-Control": "no-store" } });
 }
