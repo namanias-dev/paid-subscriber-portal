@@ -1,6 +1,7 @@
 /** Notes admin operations view. Pure helpers: no courier calls, no status writes. */
 
 import { staffNextStatus } from "@/lib/store/stages";
+import { formatPaise } from "@/lib/store/money";
 
 export type AdminSort = "newest" | "oldest" | "value_desc" | "value_asc" | "updated" | "action";
 
@@ -292,6 +293,29 @@ export function presentCourierQuotes(quotes: AdminQuote[]): PresentedQuote[] {
 export function explicitCourierSelection(selectedKey: string | null | undefined): string | null {
   const key = String(selectedKey || "").trim();
   return key || null;
+}
+
+/** Visual notice only. A rate above ₹100 can still be booked. */
+export const SHIPPING_NOTICE_PAISE = 10_000;
+
+export function quoteWithinShippingNotice(ratePaise: number): boolean {
+  return ratePaise > 0 && ratePaise <= SHIPPING_NOTICE_PAISE;
+}
+
+export function courierCostNotice(quotes: Array<{ eligible: boolean; ratePaise: number }>): {
+  cheapestPaise: number | null;
+  underHundred: boolean;
+  lowestLine: string | null;
+} {
+  const eligible = quotes.filter((quote) => quote.eligible && quote.ratePaise > 0);
+  if (!eligible.length) return { cheapestPaise: null, underHundred: false, lowestLine: null };
+  const cheapestPaise = Math.min(...eligible.map((quote) => quote.ratePaise));
+  const underHundred = quoteWithinShippingNotice(cheapestPaise);
+  return {
+    cheapestPaise,
+    underHundred,
+    lowestLine: underHundred ? null : `Lowest available rate is ${formatPaise(cheapestPaise)}`,
+  };
 }
 
 export function sortAdminOrders<T extends { placed_at: string; total_paise: number; updated_at?: string | null; action_required?: boolean }>(

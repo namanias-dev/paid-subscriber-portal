@@ -168,6 +168,7 @@ export async function GET(req: Request) {
 
   const itemsByOrder = new Map<string, Array<{ name: string; qty: number; sku: string; unit_price_paise: number; line_total_paise: number }>>();
   const pastByOrder = new Map<string, Array<{ provider: string | null; courier: string | null; awb: string | null; status: string | null; reason: string | null }>>();
+  const cityConfirmByOrder = new Map<string, { customer_destination: string; courier_destination: string; pin: "MATCH"; state: "MATCH"; courier: string; awb: string; rate_paise: number | null }>();
   const shipByOrder = new Map<
     string,
     {
@@ -252,9 +253,33 @@ export async function GET(req: Request) {
         });
         pastByOrder.set(s.order_id, list);
       }
-      if (inactive || shipByOrder.has(s.order_id)) continue;
+      const livePayload = (s.provider_payload && typeof s.provider_payload === "object" ? s.provider_payload : {}) as {
+        city_confirm_required?: boolean;
+        destination_accepted?: boolean;
+        requested_city?: string;
+        requested_state?: string;
+        requested_pin?: string;
+        provider_city?: string;
+        provider_state?: string;
+        provider_pin?: string;
+        booked_rate_paise?: number;
+        rate_paise?: number;
+      };
+      const awaitingCity = !inactive && livePayload.city_confirm_required === true && livePayload.destination_accepted !== true && Boolean(s.awb);
+      if (awaitingCity && !shipByOrder.has(s.order_id) && !cityConfirmByOrder.has(s.order_id) && livePayload.provider_city && livePayload.requested_city) {
+        cityConfirmByOrder.set(s.order_id, {
+          customer_destination: `${livePayload.requested_city}, ${livePayload.requested_state || ""} — ${livePayload.requested_pin || ""}`,
+          courier_destination: `${livePayload.provider_city}, ${livePayload.provider_state || ""} — ${livePayload.provider_pin || livePayload.requested_pin || ""}`,
+          pin: "MATCH",
+          state: "MATCH",
+          courier: s.courier_name || "",
+          awb: s.awb || "",
+          rate_paise: Number(livePayload.booked_rate_paise) || Number(livePayload.rate_paise) || null,
+        });
+      }
+      if (inactive || awaitingCity || shipByOrder.has(s.order_id)) continue;
       {
-        const payload = (s.provider_payload && typeof s.provider_payload === "object" ? s.provider_payload : {}) as {
+        const payload = livePayload as typeof livePayload & {
           label_url?: string;
           pickup_reference?: string;
           pickup_time?: string;
@@ -267,7 +292,6 @@ export async function GET(req: Request) {
           address_mismatch?: boolean;
           do_not_handoff?: boolean;
           package_source?: string;
-          rate_paise?: number;
           do_not_use?: boolean;
         };
         shipByOrder.set(s.order_id, {
@@ -291,7 +315,7 @@ export async function GET(req: Request) {
           width_cm: s.width_mm ? Number(s.width_mm) / 10 : null,
           height_cm: s.height_mm ? Number(s.height_mm) / 10 : null,
           package_source: payload.package_source || null,
-          rate_paise: Number(payload.rate_paise) || null,
+          rate_paise: Number(payload.booked_rate_paise) || Number(payload.rate_paise) || null,
         });
       }
     }
@@ -356,6 +380,7 @@ export async function GET(req: Request) {
       address: o.shipping_address_id ? addrMap.get(o.shipping_address_id) || null : null,
       items: itemsByOrder.get(o.id) || [],
       shipment: ship,
+      city_confirmation: cityConfirmByOrder.get(o.id) || null,
       past_shipments: pastByOrder.get(o.id) || [],
       attention: fulfilmentAttention({
         orderStatus: o.status,

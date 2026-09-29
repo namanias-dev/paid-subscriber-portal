@@ -84,6 +84,15 @@ export interface AdminOrder {
     package_source?: string | null;
     rate_paise?: number | null;
   } | null;
+  city_confirmation?: {
+    customer_destination: string;
+    courier_destination: string;
+    pin: string;
+    state: string;
+    courier: string;
+    awb: string;
+    rate_paise: number | null;
+  } | null;
   invoice_status?: string | null;
   marketing?: {
     channel: string;
@@ -461,8 +470,12 @@ export default function OrderDetail({
 
           {canManage && !active && (order.status === "PACKED" || order.status === "READY_FOR_PICKUP") && (
             <section className="rounded-2xl bg-white p-4">
-              <p className="font-semibold text-[var(--ca-navy)]">Courier not selected</p>
-              <p className="mt-1 text-sm text-[var(--ca-navy)]/70">Compare live prices, choose one courier, then confirm the booking.</p>
+              <p className="font-semibold text-[var(--ca-navy)]">{order.city_confirmation ? "Courier city needs confirmation" : "Courier not selected"}</p>
+              <p className="mt-1 text-sm text-[var(--ca-navy)]/70">
+                {order.city_confirmation
+                  ? `${order.city_confirmation.courier}: ${order.city_confirmation.courier_destination}`
+                  : "Compare live prices, choose one courier, then confirm the booking."}
+              </p>
               <button type="button" onClick={onCompare} className="mt-3 min-h-11 rounded-full bg-[var(--ca-navy)] px-4 text-sm font-semibold text-white">
                 Compare couriers
               </button>

@@ -201,5 +201,7 @@ test("mark packed and package save do not book a courier", () => {
   assert.equal(picker.includes("defaultQuote"), false);
   assert.match(picker, /Confirm booking/);
   assert.match(picker, /Book this courier/);
+  assert.match(picker, /CHEAPEST/);
+  assert.match(picker, /Confirm courier city/);
   assert.match(picker, /explicitCourierSelection\(null\)/);
 });

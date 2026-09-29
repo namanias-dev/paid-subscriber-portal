@@ -6,7 +6,7 @@
 import { delhiveryBaseUrl, delhiveryPickupLocation, delhiveryToken, shiprocketBaseUrl, shiprocketPickupLocation } from "./config";
 import { delhiveryCreateBody, dispatchBlocked, type DelhiveryShipmentDraft } from "./dispatch";
 import { delhiveryPackingSlipPath, parseDelhiveryPackage } from "./delhiveryApi";
-import { providerDestinationMismatch } from "../address";
+import { aliasesForPin, evaluateProviderReadback } from "./destinationCheck";
 import { shiprocketAdhocDraft, shiprocketToken } from "./shiprocketApi";
 
 type FetchLike = typeof fetch;
@@ -31,6 +31,10 @@ export interface CreateProviderInput extends BookParty {
   provider: "shiprocket" | "delhivery";
   courierId?: string | null;
   shippingMode?: "Express" | "Surface";
+  /** City stored for this PIN. Does not replace the customer city. */
+  canonicalCity?: string | null;
+  /** Extra PIN-scoped aliases. The built-in PIN map is always included. */
+  cityAliases?: string[];
 }
 
 export interface CreatedShipment {
@@ -49,6 +53,8 @@ export interface CreatedShipment {
   storedAddress?: string | null;
   phoneStored?: boolean;
   addressMismatch?: boolean;
+  /** PIN and state match, but the city is not a trusted alias yet. */
+  cityConfirm?: boolean;
   addressUnverified?: boolean;
 }
 
@@ -208,16 +214,14 @@ async function createDelhivery(input: CreateProviderInput, env: NodeJS.ProcessEn
     throw new Error((parsed.remark || `Delhivery shipment was not created (${res.status}).`).slice(0, 180));
   }
   const stored = await readDelhiveryPackage(parsed.awb, env, fetchImpl);
-  const mismatch = stored.read
-    ? stored.pin !== input.pin.trim() ||
-      !stored.city ||
-      !stored.state ||
-      providerDestinationMismatch(
-        { city: input.city, state: input.state, pincode: input.pin },
-        { city: stored.city, state: stored.state, pincode: stored.pin || "" },
-      ) ||
-      !stored.phoneStored
-    : false;
+  const decision = evaluateProviderReadback({
+    provider: "delhivery",
+    order: { city: input.city, state: input.state, pincode: input.pin },
+    stored,
+    sentPhone: input.phone,
+    canonicalCity: input.canonicalCity,
+    aliases: [...aliasesForPin(input.pin), ...(input.cityAliases || [])],
+  });
   return {
     provider: "delhivery",
     providerShipmentId: parsed.awb,
@@ -226,13 +230,14 @@ async function createDelhivery(input: CreateProviderInput, env: NodeJS.ProcessEn
     courierName: input.shippingMode === "Surface" ? "Delhivery Surface" : "Delhivery Express",
     labelUrl: null,
     shipmentStatus: "created",
-    orderStatus: stored.read && !mismatch ? "READY_FOR_PICKUP" : null,
+    orderStatus: stored.read && !decision.addressMismatch && !decision.cityConfirm ? "READY_FOR_PICKUP" : null,
     storedPin: stored.pin,
     storedCity: stored.city,
     storedState: stored.state,
     phoneStored: stored.read ? stored.phoneStored : undefined,
-    addressMismatch: mismatch,
-    addressUnverified: !stored.read,
+    addressMismatch: decision.addressMismatch,
+    cityConfirm: decision.cityConfirm,
+    addressUnverified: decision.unverified,
   };
 }
 
@@ -316,12 +321,14 @@ async function createShiprocket(input: CreateProviderInput, env: NodeJS.ProcessE
   const stored = created.orderId
     ? await readShiprocketOrder(base, token, created.orderId, fetchImpl)
     : { pin: null, city: null, state: null, address: null, phoneStored: false, read: false };
-  const mismatch = stored.read
-    ? stored.pin !== input.pin.trim() ||
-      place(stored.city || "") !== place(input.city) ||
-      place(stored.state || "") !== place(input.state) ||
-      !stored.phoneStored
-    : false;
+  const decision = evaluateProviderReadback({
+    provider: "shiprocket",
+    order: { city: input.city, state: input.state, pincode: input.pin },
+    stored,
+    sentPhone: input.phone,
+    canonicalCity: input.canonicalCity,
+    aliases: [...aliasesForPin(input.pin), ...(input.cityAliases || [])],
+  });
   return {
     provider: "shiprocket",
     providerShipmentId: created.shipmentId,
@@ -330,14 +337,15 @@ async function createShiprocket(input: CreateProviderInput, env: NodeJS.ProcessE
     courierName,
     labelUrl,
     shipmentStatus: "created",
-    orderStatus: awb && stored.read && !mismatch ? "READY_FOR_PICKUP" : null,
+    orderStatus: awb && stored.read && !decision.addressMismatch && !decision.cityConfirm ? "READY_FOR_PICKUP" : null,
     storedPin: stored.pin,
     storedCity: stored.city,
     storedState: stored.state,
     storedAddress: stored.address,
     phoneStored: stored.phoneStored,
-    addressMismatch: mismatch,
-    addressUnverified: !stored.read,
+    addressMismatch: decision.addressMismatch,
+    cityConfirm: decision.cityConfirm,
+    addressUnverified: decision.unverified,
   };
 }
 
@@ -395,10 +403,6 @@ export async function findShiprocketOrder(
     state: stored.state,
     phoneStored: stored.phoneStored,
   };
-}
-
-function place(value: string): string {
-  return value.toLowerCase().replace(/[^a-z]/g, "");
 }
 
 export async function readShiprocketOrderPublic(orderId: string, opts: { fetchImpl?: FetchLike; env?: NodeJS.ProcessEnv } = {}) {

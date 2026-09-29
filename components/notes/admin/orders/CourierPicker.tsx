@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { formatPaise } from "@/lib/store/money";
-import { explicitCourierSelection, presentCourierQuotes, providerDisplayName, type AdminQuote, type PresentedQuote } from "@/lib/store/adminConsole";
+import { courierCostNotice, explicitCourierSelection, presentCourierQuotes, providerDisplayName, quoteWithinShippingNotice, type AdminQuote, type PresentedQuote } from "@/lib/store/adminConsole";
 
 interface ProviderResult {
   provider: string;
@@ -28,6 +28,16 @@ interface Booked {
   labelUrl: string | null;
 }
 
+interface CityConfirm {
+  customer: string;
+  courierDestination: string;
+  pin: string;
+  state: string;
+  courier: string;
+  awb: string;
+  ratePaise: number;
+}
+
 export default function CourierPicker({
   orderId,
   open,
@@ -51,12 +61,16 @@ export default function CourierPicker({
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [booked, setBooked] = useState<Booked | null>(null);
+  const [cityConfirm, setCityConfirm] = useState<CityConfirm | null>(null);
+  const [blockedKeys, setBlockedKeys] = useState<Record<string, string>>({});
   const [packLabel, setPackLabel] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open) return;
     setConfirming(false);
     setBooked(null);
+    setCityConfirm(null);
+    setBlockedKeys({});
     setError(null);
     setSelectedKey(null);
     setBusy(true);
@@ -67,11 +81,25 @@ export default function CourierPicker({
           headers: { "content-type": "application/json" },
           body: JSON.stringify({}),
         });
-        const json = (await res.json()) as RateResponse;
+        const json = (await res.json()) as RateResponse & {
+          city_confirmation?: { customer_destination: string; courier_destination: string; pin: string; state: string; courier: string; awb: string; rate_paise: number | null } | null;
+        };
         const flat = (json.providers || []).flatMap((provider) => provider.quotes || []);
         const presented = presentCourierQuotes(flat);
         setQuotes(presented);
         setSelectedKey(explicitCourierSelection(null));
+        const pending = json.city_confirmation;
+        if (pending?.customer_destination && pending.courier_destination) {
+          setCityConfirm({
+            customer: pending.customer_destination,
+            courierDestination: pending.courier_destination,
+            pin: pending.pin,
+            state: pending.state,
+            courier: pending.courier,
+            awb: pending.awb,
+            ratePaise: pending.rate_paise || 0,
+          });
+        }
         const pack = json.package;
         setPackLabel(pack ? `${pack.weight_grams} g · ${pack.length_cm}×${pack.width_cm}×${pack.height_cm} cm` : null);
         if (!json.ok && !presented.length) setError(json.error || "No quote available.");
@@ -83,7 +111,82 @@ export default function CourierPicker({
     })();
   }, [open, orderId]);
 
-  const chosen = quotes.find((quote) => quote.key === selectedKey && quote.eligible) || null;
+  const visible = quotes.map((quote) => blockedKeys[quote.key] ? { ...quote, eligible: false, unavailableReason: blockedKeys[quote.key] } : quote);
+  const chosen = visible.find((quote) => quote.key === selectedKey && quote.eligible) || null;
+  const cost = courierCostNotice(visible);
+
+  function rememberCity(json: {
+    customer_destination?: string;
+    courier_destination?: string;
+    pin?: string;
+    state?: string;
+    courier?: string;
+    awb?: string;
+    rate_paise?: number;
+  }, fallbackCourier: string, fallbackRate: number) {
+    if (!json.customer_destination || !json.courier_destination) return;
+    setCityConfirm({
+      customer: json.customer_destination,
+      courierDestination: json.courier_destination,
+      pin: json.pin || "MATCH",
+      state: json.state || "MATCH",
+      courier: json.courier || fallbackCourier,
+      awb: json.awb || "",
+      ratePaise: json.rate_paise || fallbackRate,
+    });
+    setConfirming(false);
+  }
+
+  async function confirmCity() {
+    if (!cityConfirm || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/admin/notes/orders/${orderId}/dispatch`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "confirm_city" }),
+      });
+      const json = await res.json();
+      if (!json.ok) {
+        setError(json.error || "The courier city could not be confirmed.");
+      } else {
+        setBooked({
+          courier: json.courier || cityConfirm.courier,
+          awb: json.awb || cityConfirm.awb,
+          ratePaise: json.rate_paise || cityConfirm.ratePaise,
+          pickupRequested: Boolean(json.pickup_requested),
+          labelUrl: null,
+        });
+        setCityConfirm(null);
+        onBooked();
+      }
+    } catch {
+      setError("The courier city could not be confirmed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function declineCity() {
+    if (!cityConfirm || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/admin/notes/orders/${orderId}/dispatch`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "decline_city" }),
+      });
+      const json = await res.json();
+      if (!json.ok) setError(json.error || "The shipment could not be released.");
+      else setCityConfirm(null);
+    } catch {
+      setError("The shipment could not be released.");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function confirmBook() {
     if (!chosen || !writesAuthorized || busy) return;
@@ -102,8 +205,13 @@ export default function CourierPicker({
         }),
       });
       const json = await res.json();
-      if (!json.ok) {
+      if (json.city_confirm) {
+        rememberCity(json, chosen.courier, chosen.ratePaise);
+      } else if (!json.ok) {
         setError(json.error || `${chosen.courier} could not be booked.`);
+        if (json.reason === "destination_mismatch") {
+          setBlockedKeys((current) => ({ ...current, [chosen.key]: "Unavailable — destination mismatch" }));
+        }
         setConfirming(false);
         setSelectedKey(null);
       } else {
@@ -139,6 +247,27 @@ export default function CourierPicker({
           <button type="button" onClick={onClose} className="min-h-11 px-2 text-sm text-[var(--ca-navy)]/60">Close</button>
         </div>
 
+        {cityConfirm && !booked && (
+          <div className="mt-4 rounded-2xl bg-white p-4">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--ca-gold-dark)]">Courier address confirmation</p>
+            <h2 className="mt-1 font-heading text-xl font-bold text-[var(--ca-navy)]">COURIER ADDRESS CONFIRMATION</h2>
+            <dl className="mt-3 space-y-2 text-sm text-[var(--ca-navy)]">
+              <div><dt className="text-[11px] font-semibold uppercase tracking-wide text-[var(--ca-navy)]/50">Customer destination</dt><dd>{cityConfirm.customer}</dd></div>
+              <div><dt className="text-[11px] font-semibold uppercase tracking-wide text-[var(--ca-navy)]/50">Courier destination</dt><dd>{cityConfirm.courierDestination}</dd></div>
+              <div className="flex justify-between gap-3"><dt>PIN</dt><dd className="font-semibold">{cityConfirm.pin}</dd></div>
+              <div className="flex justify-between gap-3"><dt>State</dt><dd className="font-semibold">{cityConfirm.state}</dd></div>
+            </dl>
+            <p className="mt-3 text-sm text-[var(--ca-navy)]/70">Only this courier city is confirmed. The customer address stays as entered.</p>
+            {error && <p className="mt-3 text-sm text-red-800">{error}</p>}
+            <div className="mt-4 flex gap-2">
+              <button type="button" disabled={busy} onClick={() => void declineCity()} className="min-h-11 flex-1 rounded-full border text-sm font-semibold">Back</button>
+              <button type="button" disabled={busy || !writesAuthorized} onClick={() => void confirmCity()} className="min-h-11 flex-1 rounded-full bg-[var(--ca-navy)] text-sm font-semibold text-white disabled:opacity-50">
+                {busy ? "Confirming…" : "Confirm courier city"}
+              </button>
+            </div>
+          </div>
+        )}
+
         {booked && (
           <div className="mt-4 rounded-2xl bg-white p-4">
             <p className="font-heading text-lg font-bold text-[var(--ca-navy)]">Courier booked</p>
@@ -154,10 +283,11 @@ export default function CourierPicker({
           </div>
         )}
 
-        {!booked && confirming && chosen && (
+        {!booked && !cityConfirm && confirming && chosen && (
           <div className="mt-4 rounded-2xl bg-white p-4">
             <p className="text-sm text-[var(--ca-navy)]">Book {chosen.courier} for {formatPaise(chosen.ratePaise)}?</p>
             <p className="mt-2 text-sm text-[var(--ca-navy)]/70">This will create the courier shipment, AWB, label and request pickup.</p>
+            {!quoteWithinShippingNotice(chosen.ratePaise) && <p className="mt-2 text-sm text-[var(--ca-navy)]">Shipping exceeds ₹100</p>}
             <div className="mt-4 flex gap-2">
               <button type="button" onClick={() => setConfirming(false)} className="min-h-11 flex-1 rounded-full border text-sm font-semibold">Cancel</button>
               <button type="button" disabled={busy || !writesAuthorized} onClick={() => void confirmBook()} className="min-h-11 flex-1 rounded-full bg-[var(--ca-navy)] text-sm font-semibold text-white disabled:opacity-50">
@@ -167,10 +297,13 @@ export default function CourierPicker({
           </div>
         )}
 
-        {!booked && !confirming && (
+        {!booked && !cityConfirm && !confirming && (
           <>
             {busy && !quotes.length && <div className="mt-4 h-28 animate-pulse rounded-2xl bg-white" />}
-            {!!quotes.length && (
+            {cost.cheapestPaise != null && !cost.underHundred && (
+              <p className="mt-4 text-sm font-semibold text-[var(--ca-navy)]">Lowest available rate is {formatPaise(cost.cheapestPaise)}</p>
+            )}
+            {!!visible.length && (
               <div className="mt-4 overflow-x-auto rounded-2xl bg-white">
                 <table className="w-full min-w-[32rem] text-left text-sm">
                   <thead className="text-[11px] uppercase tracking-wide text-[var(--ca-navy)]/50">
@@ -184,17 +317,20 @@ export default function CourierPicker({
                     </tr>
                   </thead>
                   <tbody>
-                    {quotes.map((quote) => {
+                    {visible.map((quote) => {
                       const selected = chosen?.key === quote.key;
                       return (
                         <tr key={quote.key} className={selected ? "bg-[var(--ca-gold)]/10" : undefined}>
                           <td className="px-3 py-3">
                             <span className="block font-semibold text-[var(--ca-navy)]">{quote.courier}</span>
-                            {quote.lowest && quote.eligible && <span className="mt-1 inline-block rounded-full bg-[var(--ca-gold)]/20 px-2 py-0.5 text-[10px] font-semibold text-[var(--ca-gold-dark)]">Cheapest</span>}
+                            {quote.lowest && quote.eligible && <span className="mt-1 inline-block rounded-full bg-[var(--ca-gold)]/20 px-2 py-0.5 text-[10px] font-semibold text-[var(--ca-gold-dark)]">CHEAPEST</span>}
                           </td>
                           <td className="px-3 py-3">{providerDisplayName(quote.provider)}</td>
                           <td className="px-3 py-3">{quote.service || "—"}</td>
-                          <td className="px-3 py-3 tabular-nums">{formatPaise(quote.ratePaise)}</td>
+                          <td className="px-3 py-3 tabular-nums">
+                            {formatPaise(quote.ratePaise)}
+                            {quote.eligible && quoteWithinShippingNotice(quote.ratePaise) && <span className="mt-1 block text-[10px] font-semibold text-[var(--ca-gold-dark)]">UNDER ₹100</span>}
+                          </td>
                           <td className="px-3 py-3">{quote.etaText || (quote.etaDays != null ? `${quote.etaDays} days` : "—")}</td>
                           <td className="px-3 py-3">
                             {quote.eligible ? (
@@ -231,7 +367,7 @@ export default function CourierPicker({
             </button>
           </>
         )}
-        {!booked && confirming && error && <p className="mt-3 text-sm text-red-800">{error}</p>}
+        {!booked && !cityConfirm && confirming && error && <p className="mt-3 text-sm text-red-800">{error}</p>}
       </div>
     </div>
   );

@@ -18,8 +18,13 @@ export interface SelectedCreated {
   providerShipmentId: string | null;
   courierName: string | null;
   addressMismatch: boolean;
+  cityConfirm?: boolean;
   unverified: boolean;
   possessed: boolean;
+  storedPin?: string | null;
+  storedCity?: string | null;
+  storedState?: string | null;
+  phoneStored?: boolean;
 }
 
 export interface ManualBookResult {
@@ -31,8 +36,12 @@ export interface ManualBookResult {
   courierName: string | null;
   pickupRequested: boolean;
   creates: number;
-  blocked: "EXISTING_AWB" | "BOOKING_FAILED" | "PICKUP_PENDING" | null;
+  blocked: "EXISTING_AWB" | "BOOKING_FAILED" | "PICKUP_PENDING" | "CITY_CONFIRM" | null;
   message: string;
+  providerPin: string | null;
+  providerCity: string | null;
+  providerState: string | null;
+  phoneStored: boolean | null;
 }
 
 export function resolveBookingPackage(input: {
@@ -76,6 +85,7 @@ export async function bookSelectedCourier(input: {
   requestPickup: (created: SelectedCreated) => Promise<void>;
 }): Promise<ManualBookResult> {
   const name = input.selected.courier || "The selected courier";
+  const emptyPlace = { providerPin: null, providerCity: null, providerState: null, phoneStored: null };
   if (input.activeAwb) {
     return {
       ok: false,
@@ -88,6 +98,7 @@ export async function bookSelectedCourier(input: {
       creates: 0,
       blocked: "EXISTING_AWB",
       message: "This order already has an active shipment.",
+      ...emptyPlace,
     };
   }
   let created: SelectedCreated;
@@ -106,15 +117,39 @@ export async function bookSelectedCourier(input: {
       creates: 0,
       blocked: "BOOKING_FAILED",
       message: detail ? `${name} could not be booked. ${detail}` : `${name} could not be booked.`,
+      ...emptyPlace,
+    };
+  }
+  const place = {
+    providerPin: created.storedPin || null,
+    providerCity: created.storedCity || null,
+    providerState: created.storedState || null,
+    phoneStored: created.phoneStored ?? null,
+  };
+  if (created.cityConfirm && created.awb && !created.addressMismatch && !created.unverified && !created.possessed) {
+    return {
+      ok: false,
+      awb: created.awb,
+      labelUrl: created.labelUrl,
+      providerOrderId: created.providerOrderId,
+      providerShipmentId: created.providerShipmentId,
+      courierName: created.courierName || name,
+      pickupRequested: false,
+      creates: 1,
+      blocked: "CITY_CONFIRM",
+      message: "Confirm the courier city before pickup.",
+      ...place,
     };
   }
   if (created.possessed || created.addressMismatch || created.unverified || !created.awb) {
     const cancelled = await input.cancel(created);
-    const why = created.addressMismatch || created.unverified
-      ? "The courier address check did not pass."
-      : created.possessed
-        ? "The courier may already have the parcel."
-        : "No AWB was returned.";
+    const why = created.addressMismatch
+      ? "Unavailable — destination mismatch."
+      : created.unverified
+        ? "The courier destination could not be read."
+        : created.possessed
+          ? "The courier may already have the parcel."
+          : "No AWB was returned.";
     if (!cancelled && created.awb) {
       return {
         ok: false,
@@ -127,6 +162,7 @@ export async function bookSelectedCourier(input: {
         creates: 1,
         blocked: "EXISTING_AWB",
         message: `${name} could not be booked. ${why} The shipment could not be cancelled, so no second shipment was created.`,
+        ...place,
       };
     }
     return {
@@ -140,6 +176,7 @@ export async function bookSelectedCourier(input: {
       creates: 1,
       blocked: "BOOKING_FAILED",
       message: `${name} could not be booked. ${why}`,
+      ...place,
     };
   }
   try {
@@ -157,6 +194,7 @@ export async function bookSelectedCourier(input: {
       creates: 1,
       blocked: "PICKUP_PENDING",
       message: detail,
+      ...place,
     };
   }
   return {
@@ -170,5 +208,6 @@ export async function bookSelectedCourier(input: {
     creates: 1,
     blocked: null,
     message: "Courier booked.",
+    ...place,
   };
 }
