@@ -12,6 +12,7 @@ export interface AdminQuote {
   etaText: string | null;
   etaDays: number | null;
   courierId?: string | null;
+  prepaid?: boolean;
 }
 
 export interface RankedQuote extends AdminQuote {
@@ -253,6 +254,44 @@ export function rankQuotes(quotes: AdminQuote[], mode: "price" | "eta" = "price"
 
 export function defaultQuote(quotes: AdminQuote[]): RankedQuote | null {
   return rankQuotes(quotes, "price")[0] || null;
+}
+
+export function providerDisplayName(provider: string): string {
+  if (provider === "delhivery") return "Delhivery Direct";
+  if (provider === "shiprocket") return "Shiprocket";
+  return provider;
+}
+
+export interface PresentedQuote extends RankedQuote {
+  eligible: boolean;
+  unavailableReason: string | null;
+}
+
+/** Cheapest eligible quote first. Nothing here is a booking decision. */
+export function presentCourierQuotes(quotes: AdminQuote[]): PresentedQuote[] {
+  const eligible = rankQuotes(quotes.filter((quote) => quote.prepaid !== false && quote.ratePaise > 0), "price").map((quote) => ({
+    ...quote,
+    eligible: true,
+    unavailableReason: null,
+  }));
+  const blocked = quotes
+    .filter((quote) => quote.prepaid === false || !(quote.ratePaise > 0))
+    .map((quote) => ({
+      ...quote,
+      key: quoteKey(quote),
+      lowest: false,
+      fastest: false,
+      bestValue: false,
+      eligible: false,
+      unavailableReason: quote.prepaid === false ? "Not eligible for prepaid notes" : "Price was not returned",
+    }));
+  return [...eligible, ...blocked];
+}
+
+/** A courier is chosen only when staff pass an explicit quote key. */
+export function explicitCourierSelection(selectedKey: string | null | undefined): string | null {
+  const key = String(selectedKey || "").trim();
+  return key || null;
 }
 
 export function sortAdminOrders<T extends { placed_at: string; total_paise: number; updated_at?: string | null; action_required?: boolean }>(

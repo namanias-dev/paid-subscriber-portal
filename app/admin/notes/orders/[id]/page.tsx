@@ -70,10 +70,10 @@ export default function NotesOrderPage() {
           orderId={order.id}
           open
           writesAuthorized={writes}
-          weight={order.shipment?.weight_grams || 500}
-          length={order.shipment?.length_cm || 30}
-          width={order.shipment?.width_cm || 25}
-          height={order.shipment?.height_cm || 3}
+          weight={order.shipment?.weight_grams || 0}
+          length={order.shipment?.length_cm || 0}
+          width={order.shipment?.width_cm || 0}
+          height={order.shipment?.height_cm || 0}
           onClose={() => setCompare(false)}
           onBooked={() => {
             setCompare(false);

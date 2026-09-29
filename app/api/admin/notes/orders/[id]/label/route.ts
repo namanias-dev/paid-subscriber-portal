@@ -23,7 +23,14 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
     .select("id,provider,awb,status,provider_shipment_id,label_r2_key,provider_payload")
     .eq("order_id", params.id)
     .order("created_at", { ascending: false });
-  const shipment = (shipmentRows || []).find((row) => row.status !== "cancelled" && row.status !== "failed") || null;
+  const rows = shipmentRows || [];
+  const shipment = rows.find((row) => row.status !== "cancelled" && row.status !== "failed") || null;
+  if (!shipment && rows.length) {
+    return NextResponse.json(
+      { ok: false, error: "This label was cancelled. Do not use it." },
+      { status: 410, headers: { "Cache-Control": "no-store" } },
+    );
+  }
   const payload = (shipment?.provider_payload && typeof shipment.provider_payload === "object" ? shipment.provider_payload : {}) as {
     label_url?: string;
   };

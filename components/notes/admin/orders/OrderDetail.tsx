@@ -82,6 +82,7 @@ export interface AdminOrder {
     width_cm?: number | null;
     height_cm?: number | null;
     package_source?: string | null;
+    rate_paise?: number | null;
   } | null;
   invoice_status?: string | null;
   marketing?: {
@@ -346,7 +347,7 @@ export default function OrderDetail({
             {canManage && advanceLabel && (
               packing && !confirmAdvance ? (
                 <div className="mt-3 rounded-2xl bg-[#f7f5ef] p-3">
-                  <p className="text-sm text-[var(--ca-navy)]">Marking this order packed will start automatic courier selection and shipment booking.</p>
+                  <p className="text-sm text-[var(--ca-navy)]">Mark packed saves this stage only. It does not choose a courier or create a shipment.</p>
                   <div className="mt-3 flex gap-2">
                     <button type="button" onClick={() => setConfirmAdvance(true)} className="min-h-11 rounded-full bg-[var(--ca-navy)] px-4 text-sm font-semibold text-white">Mark packed</button>
                   </div>
@@ -434,6 +435,7 @@ export default function OrderDetail({
               <h2 className="mt-1 font-heading text-xl font-bold text-[var(--ca-navy)]">{ship.courier || ship.provider}</h2>
               <dl className="mt-4 grid grid-cols-2 gap-4">
                 <Field label="AWB" value={ship.awb} />
+                <Field label="Price" value={ship.rate_paise ? formatPaise(ship.rate_paise) : null} />
                 <Field label="Status" value={canonicalShipmentStatusLabel(ship.status, ship.tracking_activity)} />
                 <Field label="Latest update" value={formatAdminWhen(ship.tracking_event_at)} />
                 <Field label="Pickup" value={shipmentPickupLabel(ship.status, ship.pickup_status, ship.pickup_date)} />
@@ -459,7 +461,8 @@ export default function OrderDetail({
 
           {canManage && !active && (order.status === "PACKED" || order.status === "READY_FOR_PICKUP") && (
             <section className="rounded-2xl bg-white p-4">
-              <p className="font-semibold text-[var(--ca-navy)]">Packed and ready to book a courier.</p>
+              <p className="font-semibold text-[var(--ca-navy)]">Courier not selected</p>
+              <p className="mt-1 text-sm text-[var(--ca-navy)]/70">Compare live prices, choose one courier, then confirm the booking.</p>
               <button type="button" onClick={onCompare} className="mt-3 min-h-11 rounded-full bg-[var(--ca-navy)] px-4 text-sm font-semibold text-white">
                 Compare couriers
               </button>
@@ -611,7 +614,7 @@ export default function OrderDetail({
                     <li key={past.awb || past.courier} className="text-sm text-[var(--ca-navy)]/70">
                       <p className="font-semibold text-[var(--ca-navy)]">{past.courier || past.provider}</p>
                       <p className="font-mono text-xs">{past.awb}</p>
-                      <p>{past.status}{past.reason ? ` · ${past.reason.replaceAll("_", " ")}` : ""}</p>
+                      <p>{past.status === "cancelled" ? "CANCELLED / DO NOT USE" : past.status}{past.reason && past.status !== "cancelled" ? ` · ${past.reason.replaceAll("_", " ")}` : ""}</p>
                     </li>
                   ))}
                 </ul>
