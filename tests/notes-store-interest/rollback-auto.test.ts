@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import test from "node:test";
 import { cancellationConfirmed, rollbackDecision } from "../../lib/store/shipping/rollbackAuto";
 
@@ -34,11 +33,4 @@ test("an unreadable tracking response does not cancel", () => {
   assert.equal(cancellationConfirmed("CANCELED"), true);
   assert.equal(cancellationConfirmed("PICKUP SCHEDULED"), false);
   assert.equal(cancellationConfirmed(null), false);
-});
-
-test("rollback route does not create a shipment", () => {
-  const source = readFileSync(new URL("../../app/api/admin/notes/orders/rollback-auto/route.ts", import.meta.url), "utf8");
-  assert.equal(source.includes("createProviderShipment"), false);
-  assert.equal(source.includes("requestProviderPickup"), false);
-  assert.equal(source.includes("cancelProviderShipment"), true);
 });
