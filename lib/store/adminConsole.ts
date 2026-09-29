@@ -139,7 +139,7 @@ export function actionRequiredReasons(input: ActionInput): string[] {
   if (input.status.startsWith("RETURN_")) reasons.push("Return action required");
   if (input.status === "REFUND_PENDING") reasons.push("Refund pending");
   if (input.trackingStale) reasons.push("Tracking stale");
-  if (input.invoiceStatus === "FAILED") reasons.push("Invoice needs attention");
+  if (input.invoiceStatus === "FAILED" || input.invoiceStatus === "MISSING") reasons.push("Invoice needs attention");
   return reasons;
 }
 
@@ -222,7 +222,7 @@ export function shipmentPickupLabel(
 
 export function invoiceStatusLabel(status: string | null | undefined): string {
   if (status === "READY") return "Invoice ready";
-  if (status === "FAILED") return "Invoice needs attention";
+  if (status === "FAILED" || status === "MISSING") return "Invoice needs attention";
   if (status === "PENDING" || status === "GENERATING") return "Invoice generating";
   return "Invoice not applicable";
 }

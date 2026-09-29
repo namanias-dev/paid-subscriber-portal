@@ -619,7 +619,7 @@ class FixtureQuery {
     if (this.action === "update") {
       const patch = this.patch || {};
       for (const row of matched) Object.assign(row, patch);
-      return { data: null, error: null, count: matched.length };
+      return { data: this.returning ? matched.map((row) => this.decorate(row)) : null, error: null, count: matched.length };
     }
     if (this.action === "delete") {
       const keep = rows(this.table).filter((row) => !matched.includes(row));
@@ -674,6 +674,39 @@ export function localFixtureClient() {
         }
         found.last_value = Number(found.last_value) + 1;
         return Promise.resolve({ data: found.last_value, error: null });
+      }
+      if (fn === "claim_store_invoice") {
+        const orderId = String(args?.p_order_id || "");
+        const invoices = rows("store_invoices");
+        const existing = invoices.find((row) => row.order_id === orderId);
+        if (existing) return Promise.resolve({ data: [{ invoice_number: existing.invoice_number, status: existing.status, created: false }], error: null });
+        const namespace = String(args?.p_namespace || "test");
+        const fy = String(args?.p_fy || "");
+        const counters = rows("store_invoice_counters");
+        let counter = counters.find((row) => row.namespace === namespace && row.financial_year === fy);
+        if (!counter) {
+          counter = { namespace, financial_year: fy, last_value: 0 };
+          counters.push(counter);
+        }
+        counter.last_value = Number(counter.last_value) + 1;
+        const seq = Number(counter.last_value);
+        const prefix = String(args?.p_prefix || "NIA").replace(/[^A-Za-z0-9]/g, "").slice(0, 8) || "NIA";
+        const invoiceNumber = `${prefix}/${fy}/${String(seq).padStart(5, "0")}`;
+        const now = new Date().toISOString();
+        invoices.push({
+          id: `inv-${orderId}`,
+          ...((args?.p_row as Row) || {}),
+          order_id: orderId,
+          invoice_number: invoiceNumber,
+          financial_year: fy,
+          sequence_number: seq,
+          namespace,
+          status: "PENDING",
+          issued_at: now,
+          created_at: now,
+          updated_at: now,
+        });
+        return Promise.resolve({ data: [{ invoice_number: invoiceNumber, status: "PENDING", created: true }], error: null });
       }
       return Promise.resolve({ data: null, error: { message: "rpc unavailable" } });
     },

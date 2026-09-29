@@ -14,6 +14,8 @@ import { scheduleStoreInvoice } from "@/lib/store/invoice/issue";
 
 export const dynamic = "force-dynamic";
 
+const INVOICE_GRACE_MS = 5 * 60_000;
+
 /** Customer-visible/admin status buckets → concrete statuses. */
 const BUCKETS: Record<string, string[]> = {
   confirming: ["PAYMENT_PENDING"],
@@ -362,14 +364,19 @@ export async function GET(req: Request) {
     }
   }
 
+  let invoiceHeals = 0;
   const mapped = orders.map((o) => {
     const ship = shipByOrder.get(o.id) || null;
     const issue = issueByOrder.get(o.id) || null;
     const { attribution_json, ...safe } = o;
     const storedInvoice = invoiceByOrder.get(o.id) || null;
     const paid = Boolean(o.paid_at) && !["PAYMENT_PENDING", "PAYMENT_FAILED", "PAYMENT_EXPIRED", "CANCELLED"].includes(o.status);
-    if (paid && !storedInvoice) scheduleStoreInvoice(o.id);
-    const invoiceStatus = storedInvoice || (paid ? "PENDING" : null);
+    if (paid && !storedInvoice && invoiceHeals < 3) {
+      invoiceHeals += 1;
+      scheduleStoreInvoice(o.id);
+    }
+    const invoiceOverdue = paid && !storedInvoice && Date.now() - Date.parse(String(o.paid_at)) > INVOICE_GRACE_MS;
+    const invoiceStatus = storedInvoice || (paid ? (invoiceOverdue ? "MISSING" : "PENDING") : null);
     const reasons = actionRequiredReasons({
       status: o.status,
       awb: ship?.awb,

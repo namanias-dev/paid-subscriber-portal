@@ -40,6 +40,15 @@ export function invoiceWorkPlan(
   return "return";
 }
 
+/**
+ * Lines plus customer shipping must reach the captured order amount. A larger
+ * gap means a discount or charge the invoice would misstate as rounding.
+ */
+export const MAX_INVOICE_ROUNDING_PAISE = 100;
+export function invoiceTotalsAgree(tax: Pick<TaxDocument, "roundingPaise">): boolean {
+  return Math.abs(Number(tax.roundingPaise) || 0) <= MAX_INVOICE_ROUNDING_PAISE;
+}
+
 export function paymentAllowsInvoice(input: {
   paid: boolean;
   paymentStatus: string | null;
@@ -63,30 +72,49 @@ export function scheduleStoreInvoice(orderId: string): void {
   }
 }
 
+const UNPAID_ORDER_STATUSES = ["PAYMENT_PENDING", "PAYMENT_FAILED", "PAYMENT_EXPIRED", "CANCELLED"];
+const REPAIR_PAGE = 500;
+const REPAIR_SCAN_MAX = 5_000;
+
+/** Paid orders with no invoice row, newest first. Read-only. */
+export async function findPaidOrdersWithoutInvoice(max = REPAIR_SCAN_MAX): Promise<string[]> {
+  const db = storeDb();
+  if (!db) return [];
+  const missing: string[] = [];
+  for (let from = 0; from < max; from += REPAIR_PAGE) {
+    const { data: orders, error } = await db
+      .from("store_orders")
+      .select("id,status")
+      .not("paid_at", "is", null)
+      .order("paid_at", { ascending: false })
+      .range(from, from + REPAIR_PAGE - 1);
+    if (error || !orders?.length) break;
+    const paid = orders.filter((order) => !UNPAID_ORDER_STATUSES.includes(order.status));
+    if (paid.length) {
+      const { data: invoices } = await db.from("store_invoices").select("order_id").in("order_id", paid.map((order) => order.id));
+      const present = new Set((invoices || []).map((row) => row.order_id));
+      for (const order of paid) if (!present.has(order.id)) missing.push(order.id);
+    }
+    if (orders.length < REPAIR_PAGE) break;
+  }
+  return missing;
+}
+
 /**
  * Paid orders whose capture never left an invoice row. Idempotent: an existing
  * invoice is reused, and an unpaid order is refused inside ensureStoreInvoice.
+ * Newest first, so an old blocked order cannot starve a new sale.
  */
 export async function repairMissingPaidInvoices(limit = 8): Promise<number> {
-  const db = storeDb();
-  if (!db) return 0;
-  const { data: orders } = await db
-    .from("store_orders")
-    .select("id,status")
-    .not("paid_at", "is", null)
-    .order("paid_at", { ascending: true })
-    .limit(40);
-  const candidates = (orders || []).filter((order) => !["PAYMENT_PENDING", "PAYMENT_FAILED", "PAYMENT_EXPIRED", "CANCELLED"].includes(order.status));
-  if (!candidates.length) return 0;
-  const ids = candidates.map((order) => order.id);
-  const { data: invoices } = await db.from("store_invoices").select("order_id").in("order_id", ids);
-  const present = new Set((invoices || []).map((row) => row.order_id));
+  const missing = await findPaidOrdersWithoutInvoice();
+  if (!missing.length) return 0;
   let repaired = 0;
-  for (const order of candidates) {
-    if (present.has(order.id) || repaired >= limit) continue;
-    repaired += 1;
-    await ensureStoreInvoice(order.id).catch(() => {});
+  for (const orderId of missing.slice(0, limit)) {
+    const result = await ensureStoreInvoice(orderId).catch(() => null);
+    if (result?.status === "READY") repaired += 1;
+    console.info(`[store/invoice] repair order_id=${orderId} status=${result?.status || "error"}`);
   }
+  console.info(`[store/invoice] repair_scan missing=${missing.length} attempted=${Math.min(limit, missing.length)} ready=${repaired}`);
   return repaired;
 }
 
@@ -209,6 +237,11 @@ export async function ensureStoreInvoice(orderId: string, opts?: { namespace?: "
     placeOfSupplyCode: placeCode,
     chargedTotalPaise: order.total_paise,
   });
+  if (!existing && !invoiceTotalsAgree(tax)) {
+    console.info(`[store/invoice] total_mismatch order=${order.order_no} rounding=${tax.roundingPaise}`);
+    await noteInvoiceBlocked(db, orderId);
+    return { ok: false, status: "FAILED", invoiceNumber: null };
+  }
   const chosen = chooseDocumentType({
     gstin: settings?.gstin || null,
     anyTaxable: tax.anyTaxable,
@@ -220,27 +253,10 @@ export async function ensureStoreInvoice(orderId: string, opts?: { namespace?: "
     .sort((a, b) => String(b.created_at || "").localeCompare(String(a.created_at || "")))[0] || null;
   const fy = financialYearLabel(new Date(order.paid_at));
   let invoiceNumber = existing?.invoice_number || null;
-  let sequence = 0;
   if (!existing) {
-    const { data: seq, error } = await db.rpc("next_store_invoice_seq", {
-      p_namespace: namespace,
-      p_fy: fy,
-    });
-    if (error || !seq) {
-      console.info(`[store/invoice] sequence_failed order=${order.order_no}`);
-      return { ok: false, status: "FAILED", invoiceNumber: null };
-    }
-    sequence = Number(seq);
     const prefix = namespace === "test" ? "TEST" : settings?.invoice_prefix || "NIA";
-    invoiceNumber = formatInvoiceNumber(prefix, fy, sequence);
-    const { error: insertError } = await db.from("store_invoices").insert({
-      order_id: orderId,
-      invoice_number: invoiceNumber,
-      financial_year: fy,
-      sequence_number: sequence,
-      namespace,
+    const snapshot = {
       document_type: chosen.type,
-      status: "PENDING",
       attention: chosen.attention,
       seller_snapshot: {
         display_name: settings?.trade_name || settings?.display_name || "Naman IAS Academy",
@@ -288,10 +304,51 @@ export async function ensureStoreInvoice(orderId: string, opts?: { namespace?: "
       gateway_transaction_id: payment.gateway_ref,
       gateway_reference: payment.reference_no,
       paid_at: payment.captured_at || order.paid_at,
+    };
+    const { data: claim, error: claimError } = await db.rpc("claim_store_invoice", {
+      p_order_id: orderId,
+      p_namespace: namespace,
+      p_fy: fy,
+      p_prefix: prefix,
+      p_row: snapshot,
     });
-    if (insertError) {
-      const { data: raced } = await db.from("store_invoices").select("invoice_number,status").eq("order_id", orderId).maybeSingle();
-      return { ok: Boolean(raced), status: raced?.status || "FAILED", invoiceNumber: raced?.invoice_number || null };
+    if (claimError && !claimRpcMissing(claimError)) {
+      console.info(`[store/invoice] claim_failed order=${order.order_no}`);
+      return { ok: false, status: "FAILED", invoiceNumber: null };
+    }
+    if (claimError) {
+      console.info(`[store/invoice] claim_rpc_missing order=${order.order_no}`);
+      const { data: seq, error } = await db.rpc("next_store_invoice_seq", { p_namespace: namespace, p_fy: fy });
+      if (error || !seq) {
+        console.info(`[store/invoice] sequence_failed order=${order.order_no}`);
+        return { ok: false, status: "FAILED", invoiceNumber: null };
+      }
+      const sequence = Number(seq);
+      invoiceNumber = formatInvoiceNumber(prefix, fy, sequence);
+      const { error: insertError } = await db.from("store_invoices").insert({
+        ...snapshot,
+        order_id: orderId,
+        invoice_number: invoiceNumber,
+        financial_year: fy,
+        sequence_number: sequence,
+        namespace,
+        status: "PENDING",
+      });
+      if (insertError) {
+        const { data: raced } = await db.from("store_invoices").select("invoice_number,status").eq("order_id", orderId).maybeSingle();
+        return { ok: Boolean(raced), status: raced?.status || "FAILED", invoiceNumber: raced?.invoice_number || null };
+      }
+    } else {
+      const row = (Array.isArray(claim) ? claim[0] : claim) as { invoice_number?: string; status?: string; created?: boolean } | null;
+      if (!row?.invoice_number) {
+        console.info(`[store/invoice] claim_failed order=${order.order_no}`);
+        return { ok: false, status: "FAILED", invoiceNumber: null };
+      }
+      invoiceNumber = row.invoice_number;
+      if (!row.created) {
+        console.info(`[store/invoice] claim_reused order=${order.order_no} number=${invoiceNumber} status=${row.status}`);
+        return { ok: row.status === "READY", status: row.status || "PENDING", invoiceNumber };
+      }
     }
     console.info(`[store/invoice] allocated order=${order.order_no} number=${invoiceNumber}`);
   }
@@ -361,8 +418,12 @@ export async function ensureStoreInvoice(orderId: string, opts?: { namespace?: "
     }
   }
 
+  if (!(await claimInvoiceRender(db, orderId))) {
+    console.info(`[store/invoice] render_claim_lost order=${order.order_no}`);
+    return { ok: false, status: "GENERATING", invoiceNumber };
+  }
+
   try {
-    await db.from("store_invoices").update({ status: "GENERATING", updated_at: new Date().toISOString() }).eq("order_id", orderId);
     const pdf = Buffer.from(await renderInvoicePdf(model));
     const key = invoiceObjectKey(fy, invoiceNumber || order.order_no);
     await putObject(key, pdf, "application/pdf");
@@ -388,6 +449,29 @@ export async function ensureStoreInvoice(orderId: string, opts?: { namespace?: "
     console.info(`[store/invoice] failed order=${order.order_no}`);
     return { ok: false, status: "FAILED", invoiceNumber };
   }
+}
+
+/**
+ * Compare-and-set on status and updated_at, so only one issuer renders a row.
+ * A live GENERATING lease or a stored READY PDF is left alone.
+ */
+async function claimInvoiceRender(db: NonNullable<ReturnType<typeof storeDb>>, orderId: string): Promise<boolean> {
+  const { data: current } = await db.from("store_invoices").select("status,updated_at,r2_object_key").eq("order_id", orderId).maybeSingle();
+  if (!current) return false;
+  const plan = invoiceWorkPlan({ status: current.status, updatedAt: current.updated_at, hasKey: Boolean(current.r2_object_key) });
+  if (plan !== "render") return false;
+  let claim = db
+    .from("store_invoices")
+    .update({ status: "GENERATING", updated_at: new Date().toISOString() })
+    .eq("order_id", orderId)
+    .eq("status", current.status);
+  claim = current.updated_at ? claim.eq("updated_at", current.updated_at) : claim.is("updated_at", null);
+  const { data: claimed } = await claim.select("id");
+  return (claimed || []).length === 1;
+}
+
+function claimRpcMissing(error: { code?: string; message?: string }): boolean {
+  return error.code === "PGRST202" || /could not find the function/i.test(error.message || "");
 }
 
 /** One activity row per order. Payment, alerts, and analytics are not touched. */

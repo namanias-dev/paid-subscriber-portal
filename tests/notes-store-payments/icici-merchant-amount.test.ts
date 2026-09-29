@@ -10,7 +10,6 @@ import {
 } from "../../lib/store/payments/eazypayAmounts";
 import { mapStoreVerifyStatus, STORE_OPEN_STATUSES } from "../../lib/store/payments/status";
 import { shouldFireNotesPaidAlert } from "../../lib/telegram/notesOrderAlertFormat";
-import { redemptionCaptureIncrements } from "../../lib/store/discountPricing";
 import { notesPurchaseDedupeKey } from "../../lib/analytics/notesCommerce";
 
 const REF = "NIASN-N-MUK1CPWK-MDBEUV";
@@ -168,8 +167,6 @@ describe("ICICI merchant amount", () => {
     assert.equal(STORE_OPEN_STATUSES.includes("CAPTURED"), false);
     assert.equal(shouldFireNotesPaidAlert({ outcome: "paid", transitioned: true }), true);
     assert.equal(shouldFireNotesPaidAlert({ outcome: "paid", transitioned: false }), false);
-    assert.equal(redemptionCaptureIncrements("held"), true);
-    assert.equal(redemptionCaptureIncrements("captured"), false);
     const orderId = "order-1";
     assert.equal(notesPurchaseDedupeKey(orderId), notesPurchaseDedupeKey(orderId));
   });

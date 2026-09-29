@@ -12,6 +12,7 @@ import {
   nextPreparationStatus,
   orderIndexLabel,
   showAdminViewInvoice,
+  invoiceStatusLabel,
   pickupFailedActivity,
   primaryAction,
   shipmentPickupLabel,
@@ -251,6 +252,24 @@ export default function OrderDetail({
       .then((json) => setInvoice(json.invoice || null))
       .catch(() => setInvoice(null));
   }, [order.id]);
+
+  function retryInvoice() {
+    setInvoiceBusy(true);
+    void fetch(`/api/admin/notes/orders/${order.id}/invoice`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ retry: true }),
+    })
+      .then((res) => res.json())
+      .then((json) => {
+        setToast(json.ok ? "Invoice ready" : json.error || "Retry failed");
+        if (json.ok) onRefresh();
+        return fetch(`/api/admin/notes/orders/${order.id}/invoice`, { cache: "no-store" }).then((r) => r.json());
+      })
+      .then((json) => setInvoice(json?.invoice || null))
+      .catch(() => setToast("Retry failed"))
+      .finally(() => setInvoiceBusy(false));
+  }
 
   async function copy(text: string) {
     try {
@@ -572,21 +591,7 @@ export default function OrderDetail({
                     <button
                       type="button"
                       disabled={invoiceBusy}
-                      onClick={() => {
-                        setInvoiceBusy(true);
-                        void fetch(`/api/admin/notes/orders/${order.id}/invoice`, {
-                          method: "POST",
-                          headers: { "content-type": "application/json" },
-                          body: JSON.stringify({ retry: true }),
-                        })
-                          .then((res) => res.json())
-                          .then((json) => {
-                            setToast(json.ok ? "Invoice PDF regenerated" : json.error || "Retry failed");
-                            return fetch(`/api/admin/notes/orders/${order.id}/invoice`, { cache: "no-store" }).then((r) => r.json());
-                          })
-                          .then((json) => setInvoice(json?.invoice || null))
-                          .finally(() => setInvoiceBusy(false));
-                      }}
+                      onClick={retryInvoice}
                       className="min-h-11 rounded-full border px-3 text-xs font-semibold"
                     >
                       {invoiceBusy ? "Regenerating…" : "Regenerate PDF"}
@@ -595,7 +600,14 @@ export default function OrderDetail({
                 </div>
               </div>
             ) : (
-              <p className="mt-2 text-sm text-[var(--ca-navy)]/60">{order.invoice_status ? "Generating" : "Not applicable"}</p>
+              <div className="mt-2 flex flex-wrap items-center gap-3">
+                <p className="text-sm text-[var(--ca-navy)]/60">{invoiceStatusLabel(order.invoice_status)}</p>
+                {canManage && (order.invoice_status === "PENDING" || order.invoice_status === "MISSING") && (
+                  <button type="button" disabled={invoiceBusy} onClick={retryInvoice} className="min-h-11 rounded-full border px-3 text-xs font-semibold disabled:opacity-50">
+                    {invoiceBusy ? "Generating…" : "Retry invoice"}
+                  </button>
+                )}
+              </div>
             )}
           </section>
 

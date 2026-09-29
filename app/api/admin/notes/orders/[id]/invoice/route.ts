@@ -33,10 +33,18 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   const db = storeDb();
   if (!db) return NextResponse.json({ ok: false, error: "unavailable" }, { status: 503 });
   const { data } = await db.from("store_invoices").select("status,invoice_number").eq("order_id", params.id).maybeSingle();
-  if (!data) return NextResponse.json({ ok: false, error: "There is no invoice to retry." }, { status: 404 });
-  if (data.status !== "FAILED") return NextResponse.json({ ok: false, error: "Only a failed PDF can be regenerated." }, { status: 409 });
-  await db.from("store_invoices").update({ status: "PENDING", updated_at: new Date().toISOString() }).eq("order_id", params.id);
+  if (data?.status === "READY") return NextResponse.json({ ok: false, error: "The invoice is already ready." }, { status: 409 });
+  if (data?.status === "FAILED") {
+    await db.from("store_invoices").update({ status: "PENDING", updated_at: new Date().toISOString() }).eq("order_id", params.id).eq("status", "FAILED");
+  }
   const result = await ensureStoreInvoice(params.id);
   const file = result.status === "READY" ? await invoiceDownloadUrl(params.id) : null;
-  return NextResponse.json({ ...result, url: file?.url || null });
+  return NextResponse.json({ ...result, error: result.ok ? undefined : retryMessage(result.status), url: file?.url || null });
+}
+
+function retryMessage(status: string): string {
+  if (status === "NOT_REQUIRED") return "This order has no captured payment.";
+  if (status === "UNCONFIRMED") return "Tax classification is missing on this order. Invoice was not issued.";
+  if (status === "GENERATING" || status === "PENDING") return "Invoice is already being generated.";
+  return "Invoice was not generated. Try again.";
 }

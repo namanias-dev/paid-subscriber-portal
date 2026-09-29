@@ -6,14 +6,14 @@ import fontkit from "@pdf-lib/fontkit";
 import { PDFDocument } from "pdf-lib";
 import sharp from "sharp";
 import { invoiceLogoDrawSize, renderInvoicePdf } from "../../lib/store/invoice/pdf";
-import { INVOICE_URL_TTL_SECONDS, invoiceWorkPlan, paymentAllowsInvoice } from "../../lib/store/invoice/issue";
+import { INVOICE_URL_TTL_SECONDS, invoiceTotalsAgree, invoiceWorkPlan, paymentAllowsInvoice } from "../../lib/store/invoice/issue";
 import { financialYearLabel, formatInvoiceNumber } from "../../lib/store/invoice/number";
 import { formatRegisteredAddress, normalizeCertificateFloor } from "../../lib/store/invoice/address";
 import { clericalCorrectionAllowed, correctedSellerDisplay, SELLER_DISPLAY_CORRECTION_REASON } from "../../lib/store/invoice/correct";
 import { GST_STATE_NAME, validateGstin } from "../../lib/store/invoice/gstin";
 import { prepareInvoiceLogo } from "../../lib/store/invoice/logo";
 import { amountInWords, chooseDocumentType, classificationFromSnapshot, computeTaxDocument, localTaxKind, splitTax, taxClassificationConfirmed, taxOnAmount } from "../../lib/store/invoice/tax";
-import { showAdminViewInvoice } from "../../lib/store/adminConsole";
+import { actionRequiredReasons, invoiceStatusLabel, showAdminViewInvoice } from "../../lib/store/adminConsole";
 
 test("invoice numbers reset with the Indian financial year and never reuse a width", () => {
   assert.equal(financialYearLabel(new Date("2026-09-25T00:00:00+05:30")), "26-27");
@@ -347,20 +347,17 @@ test("order #1011 snapshot can be invoiced without the live product confirmed fl
   assert.equal(taxClassificationConfirmed([{ hsn: null, taxTreatment: "exempt", taxConfigurationStatus: null }]), false);
   const doc = computeTaxDocument({
     lines: [{ name: "Indian Economy Notes", sku: "NOTES-ECONOMY", hsn: "49011010", qty: 1, lineTotalPaise: 250_000, discountPaise: 0, taxTreatment: "nil", taxRateBps: 0 }],
-    shippingPaise: 5_900,
+    shippingPaise: 9_900,
     pricesIncludeTax: true,
     supplierStateCode: "04",
     placeOfSupplyCode: "04",
-    chargedTotalPaise: 205_900,
-    couponCode: "NOTES500",
-    couponDiscountPaise: 50_000,
+    chargedTotalPaise: 259_900,
   });
-  assert.equal(doc.couponCode, "NOTES500");
-  assert.equal(doc.couponDiscountPaise, 50_000);
-  assert.equal(doc.shippingPaise, 5_900);
+  assert.equal(doc.shippingPaise, 9_900);
   assert.equal(doc.lines[0].totalPaise, 250_000);
-  assert.equal(doc.grandTotalPaise, 205_900);
-  assert.equal(doc.grandTotalPaise === 207_877, false);
+  assert.equal(doc.roundingPaise, 0);
+  assert.equal(doc.grandTotalPaise, 259_900);
+  assert.equal(invoiceTotalsAgree(doc), true);
   assert.equal(paymentAllowsInvoice({ paid: true, paymentStatus: "CAPTURED", paymentAmountPaise: 205_900, orderTotalPaise: 205_900 }), "ok");
   assert.equal(paymentAllowsInvoice({ paid: true, paymentStatus: "CAPTURED", paymentAmountPaise: 207_877, orderTotalPaise: 205_900 }), "mismatch");
   assert.equal(paymentAllowsInvoice({ paid: false, paymentStatus: "UNCONFIRMED", paymentAmountPaise: 205_900, orderTotalPaise: 205_900 }), "unpaid");
@@ -385,6 +382,130 @@ test("a ready invoice is reused and a failed PDF keeps the same identity", () =>
   assert.equal(failed.includes("store_orders"), false);
   assert.match(issue, /let invoiceNumber = existing\?\.invoice_number \|\| null/);
   assert.match(issue, /if \(!existing\)/);
+});
+
+test("every Economy order paid after the regression classifies from its own snapshot", () => {
+  const economy = { name: "Indian Economy Notes", sku: "NOTES-ECONOMY", hsn: "49011010", qty: 1, lineTotalPaise: 250_000, discountPaise: 0, taxTreatment: "nil", taxRateBps: 0 };
+  const polity = { ...economy, name: "Indian Polity Notes", sku: "NOTES-POLITY" };
+  const orders = [
+    { order: "001024", lines: [economy, polity], shipping: 5_900, total: 505_900 },
+    { order: "001026", lines: [economy, polity], shipping: 9_900, total: 509_900 },
+    { order: "001030", lines: [economy], shipping: 9_900, total: 259_900 },
+    { order: "001032", lines: [economy], shipping: 9_900, total: 259_900 },
+    { order: "001037", lines: [economy], shipping: 9_900, total: 259_900 },
+    { order: "001045", lines: [economy], shipping: 7_900, total: 257_900 },
+  ];
+  for (const row of orders) {
+    const lines = row.lines.map((line) => ({ ...line, taxConfigurationStatus: classificationFromSnapshot({ hsn: line.hsn, taxTreatment: line.taxTreatment }) }));
+    assert.equal(taxClassificationConfirmed(lines), true, row.order);
+    const doc = computeTaxDocument({ lines, shippingPaise: row.shipping, pricesIncludeTax: true, supplierStateCode: "04", placeOfSupplyCode: "07", chargedTotalPaise: row.total });
+    assert.equal(doc.grandTotalPaise, row.total, row.order);
+    assert.equal(doc.roundingPaise, 0, row.order);
+    assert.equal(doc.taxPaise, 0, row.order);
+    assert.equal(invoiceTotalsAgree(doc), true, row.order);
+  }
+  assert.equal(classificationFromSnapshot({ hsn: "49011010", taxTreatment: "exempt" }), null);
+  assert.equal(classificationFromSnapshot({ hsn: "4901", taxTreatment: "nil" }), "CONFIRMED");
+  assert.equal(classificationFromSnapshot({ hsn: "NA", taxTreatment: "nil" }), null);
+});
+
+test("a discount the invoice cannot show is refused instead of printed as rounding", () => {
+  const doc = computeTaxDocument({
+    lines: [{ name: "Indian Economy Notes", sku: "NOTES-ECONOMY", hsn: "49011010", qty: 1, lineTotalPaise: 250_000, discountPaise: 0, taxTreatment: "nil", taxRateBps: 0 }],
+    shippingPaise: 5_900,
+    pricesIncludeTax: true,
+    supplierStateCode: "04",
+    placeOfSupplyCode: "04",
+    chargedTotalPaise: 205_900,
+  });
+  assert.equal(doc.roundingPaise, -50_000);
+  assert.equal(invoiceTotalsAgree(doc), false);
+  assert.equal(invoiceTotalsAgree({ roundingPaise: 100 }), true);
+  assert.equal(invoiceTotalsAgree({ roundingPaise: -100 }), true);
+  assert.equal(invoiceTotalsAgree({ roundingPaise: 101 }), false);
+  const issue = readFileSync(join(process.cwd(), "lib/store/invoice/issue.ts"), "utf8");
+  const guard = issue.indexOf("!invoiceTotalsAgree(tax)");
+  assert.ok(guard > 0 && guard < issue.indexOf('db.rpc("claim_store_invoice"'), "totals are checked before a number is allocated");
+});
+
+test("concurrent issuers for one order share one number and the counter has no gap", async () => {
+  const { localFixtureClient, resetLocalFixture } = await import("../../lib/store/localFixture");
+  resetLocalFixture();
+  const db = localFixtureClient();
+  const claim = (orderId: string) => db.rpc("claim_store_invoice", { p_order_id: orderId, p_namespace: "test", p_fy: "26-27", p_prefix: "TEST", p_row: { document_type: "BILL_OF_SUPPLY", grand_total_minor: 259_900 } });
+  const [a, b] = await Promise.all([claim("order-a"), claim("order-a")]);
+  const rowsA = [...(a.data as Array<{ invoice_number: string; created: boolean }>), ...(b.data as Array<{ invoice_number: string; created: boolean }>)];
+  assert.equal(rowsA.filter((row) => row.created).length, 1);
+  assert.equal(rowsA[0].invoice_number, rowsA[1].invoice_number);
+  const next = (await claim("order-b")).data as Array<{ invoice_number: string; created: boolean }>;
+  assert.equal(next[0].created, true);
+  assert.equal(Number(next[0].invoice_number.split("/").pop()), Number(rowsA[0].invoice_number.split("/").pop()) + 1);
+  const again = (await claim("order-a")).data as Array<{ invoice_number: string; created: boolean }>;
+  assert.equal(again[0].created, false);
+  assert.equal(again[0].invoice_number, rowsA[0].invoice_number);
+});
+
+test("the claim migration numbers and inserts in one transaction without touching existing rows", () => {
+  const sql = readFileSync(join(process.cwd(), "supabase/migrations/2026-09-29-notes-store-invoice-claim.sql"), "utf8");
+  assert.match(sql, /pg_advisory_xact_lock\(hashtextextended\('store_invoice:' \|\| p_order_id::text, 0\)\)/);
+  assert.ok(sql.indexOf("from public.store_invoices i") < sql.indexOf("public.next_store_invoice_seq(p_namespace, p_fy)"), "an existing invoice is returned before a number is drawn");
+  assert.ok(sql.indexOf("public.next_store_invoice_seq(p_namespace, p_fy)") < sql.indexOf("insert into public.store_invoices"));
+  assert.equal(/delete\s+from/i.test(sql), false);
+  assert.equal(/update\s+public\.store_invoices/i.test(sql), false);
+  assert.equal(/drop\s+/i.test(sql), false);
+  assert.match(sql, /revoke all on function public\.claim_store_invoice\(uuid, text, text, text, jsonb\) from public, anon, authenticated/);
+});
+
+test("render work is claimed once: a live lease waits and a stale one resumes", () => {
+  const now = Date.parse("2026-09-29T12:00:00Z");
+  assert.equal(invoiceWorkPlan({ status: "GENERATING", updatedAt: "2026-09-29T11:59:30Z", hasKey: false }, now), "wait");
+  assert.equal(invoiceWorkPlan({ status: "GENERATING", updatedAt: "2026-09-29T11:55:00Z", hasKey: false }, now), "render");
+  assert.equal(invoiceWorkPlan({ status: "READY", updatedAt: "2026-09-29T11:00:00Z", hasKey: true }, now), "return");
+  assert.equal(invoiceWorkPlan({ status: "READY", updatedAt: "2026-09-29T11:00:00Z", hasKey: false }, now), "render");
+  assert.equal(invoiceWorkPlan(null, now), "allocate");
+  const issue = readFileSync(join(process.cwd(), "lib/store/invoice/issue.ts"), "utf8");
+  const claim = issue.slice(issue.indexOf("async function claimInvoiceRender"), issue.indexOf("function claimRpcMissing"));
+  assert.match(claim, /\.eq\("status", current\.status\)/);
+  assert.match(claim, /\.eq\("updated_at", current\.updated_at\)/);
+  assert.ok(issue.indexOf("claimInvoiceRender(db, orderId)") < issue.indexOf("renderInvoicePdf(model)"));
+});
+
+test("the self-heal scan is newest first, paginated, and sends no payment side effects", () => {
+  const issue = readFileSync(join(process.cwd(), "lib/store/invoice/issue.ts"), "utf8");
+  const scan = issue.slice(issue.indexOf("export async function findPaidOrdersWithoutInvoice"), issue.indexOf("export async function resumeIncompleteInvoices"));
+  assert.match(scan, /order\("paid_at", \{ ascending: false \}\)/);
+  assert.match(scan, /\.range\(from, from \+ REPAIR_PAGE - 1\)/);
+  for (const effect of ["recordNotesPurchase", "fireNotesOrderPaidAlert", "notifyOrderConfirmed", "consumeStoreOfferHold", "storeOpsAlert", "store_order_payments", ".update("]) {
+    assert.equal(scan.includes(effect), false, effect);
+  }
+  const cron = readFileSync(join(process.cwd(), "app/api/cron/notes-store-verify/route.ts"), "utf8");
+  assert.match(cron, /await repairMissingPaidInvoices\(\)/);
+  assert.match(cron, /await resumeIncompleteInvoices\(\)/);
+});
+
+test("capture schedules the invoice after the paid transition and never waits on the PDF", () => {
+  const verify = readFileSync(join(process.cwd(), "lib/store/payments/verify.ts"), "utf8");
+  const paidBranch = verify.slice(verify.indexOf('if (outcome === "paid") {\n    const { data } = await db'), verify.indexOf("const failedStatus"));
+  assert.match(paidBranch, /if \(data\?\.length\) \{\n\s+await consumeStoreOfferHold\(orderId\);\n\s+const \{ scheduleStoreInvoice \} = await import\("\.\.\/invoice\/issue"\);\n\s+scheduleStoreInvoice\(orderId\);/);
+  assert.equal(/await scheduleStoreInvoice/.test(verify), false);
+  const issue = readFileSync(join(process.cwd(), "lib/store/invoice/issue.ts"), "utf8");
+  const schedule = issue.slice(issue.indexOf("export function scheduleStoreInvoice"), issue.indexOf("const UNPAID_ORDER_STATUSES"));
+  assert.match(schedule, /\.catch\(/);
+  assert.match(schedule, /waitUntil\(work\)/);
+});
+
+test("a captured sale never reads as invoice not applicable in admin", () => {
+  for (const status of ["READY", "PENDING", "GENERATING", "FAILED", "MISSING"]) {
+    assert.notEqual(invoiceStatusLabel(status), "Invoice not applicable", status);
+  }
+  assert.equal(invoiceStatusLabel(null), "Invoice not applicable");
+  assert.equal(showAdminViewInvoice("MISSING"), false);
+  assert.ok(actionRequiredReasons({ status: "PROCESSING", invoiceStatus: "MISSING" }).includes("Invoice needs attention"));
+  assert.equal(actionRequiredReasons({ status: "PROCESSING", invoiceStatus: "PENDING" }).includes("Invoice needs attention"), false);
+  const route = readFileSync(join(process.cwd(), "app/api/admin/notes/orders/route.ts"), "utf8");
+  assert.match(route, /const invoiceStatus = storedInvoice \|\| \(paid \? \(invoiceOverdue \? "MISSING" : "PENDING"\) : null\);/);
+  const detail = readFileSync(join(process.cwd(), "components/notes/admin/orders/OrderDetail.tsx"), "utf8");
+  assert.equal(detail.includes('"Not applicable"'), false);
 });
 
 function linesForLogo(): string[] {
