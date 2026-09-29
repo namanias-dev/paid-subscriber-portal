@@ -25,6 +25,7 @@ import { showsFulfillmentTimeline, TIMELINE, timelineIndex } from "@/lib/store/o
 import { staffAdvanceLabel } from "@/lib/store/stages";
 import ChangeDeliveryAddress from "./ChangeDeliveryAddress";
 import { buildDeliveryGoogleMapsUrl, formatDeliveryAddress } from "@/lib/store/deliveryAddress";
+import type { OrderOps } from "@/lib/store/orderOpsDisplay";
 
 interface Address {
   name?: string;
@@ -133,9 +134,21 @@ export interface AdminOrder {
     paid_count: number;
     paid_total_paise: number;
     masked_phone: string;
+    phone?: string | null;
     matched_order_no: string | null;
     active: Array<{ id: string; order_no: string; status: string; items?: Array<{ name: string; qty: number }> }>;
+    paid_orders?: Array<{
+      id: string;
+      order_no: string;
+      status: string;
+      total_paise: number;
+      items: Array<{ name: string; qty: number }>;
+      invoice_status?: string | null;
+      action_required?: boolean;
+      ops?: OrderOps | null;
+    }>;
   };
+  ops?: OrderOps | null;
 }
 
 const TONE: Record<BadgeTone, string> = {

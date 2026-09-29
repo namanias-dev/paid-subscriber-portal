@@ -69,6 +69,8 @@ export interface CustomerGroup<T extends GroupOrder> {
   key: string;
   name: string;
   masked_phone: string;
+  /** Normalized 10-digit mobile. Admin read model only. */
+  phone: string | null;
   email: string | null;
   customer_id: string | null;
   attempts: number;
@@ -103,6 +105,7 @@ export function groupNotesCustomers<T extends GroupOrder>(
       key,
       name: (nameSource.customer_name || primary.customer_name || "Customer").trim(),
       masked_phone: maskPhone(primary.phone_key || primary.phone),
+      phone: normalizeIndianMobile(primary.phone_key || primary.phone),
       email: nameSource.email || primary.email || null,
       customer_id: primary.customer_id || null,
       attempts: sorted.length,

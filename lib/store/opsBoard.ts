@@ -19,6 +19,32 @@ export function showsFulfillmentTimeline(status: string): boolean {
   return timelineIndex(status) != null;
 }
 
+export interface StageProgress {
+  key: string;
+  label: string;
+  index: number;
+  total: number;
+  final: boolean;
+  ariaLabel: string;
+}
+
+/** Badge, dots and filter buckets all read the same ladder. */
+export function stageProgress(status: string): StageProgress | null {
+  const index = timelineIndex(status);
+  if (index == null) return null;
+  const step = TIMELINE[index];
+  const final = index === TIMELINE.length - 1;
+  const completed = final ? TIMELINE.length : index;
+  return {
+    key: step.key,
+    label: step.label,
+    index,
+    total: TIMELINE.length,
+    final,
+    ariaLabel: `Current stage: ${step.label}. ${completed} of ${TIMELINE.length} stages completed.`,
+  };
+}
+
 export interface PaidRollup {
   orders: number;
   salesPaise: number;

@@ -58,6 +58,16 @@ export function staffAdvanceLabel(status: string): string | null {
   return null;
 }
 
+function shortProductName(name: string): string {
+  return name.replace(/\s+notes$/i, "").replace(/^indian\s+/i, "").trim() || name;
+}
+
+/** "Polity ×1 + Economy ×1": every subject in one order, never a second payment attempt. */
+export function productList(items: Array<{ name: string; qty: number }>): string {
+  if (!items.length) return "—";
+  return items.map((item) => `${shortProductName(item.name)} ×${item.qty}`).join(" + ");
+}
+
 export function productSummary(items: Array<{ name: string; qty: number }>): string {
   if (!items.length) return "—";
   const first = `${items[0].name} ×${items[0].qty}`;

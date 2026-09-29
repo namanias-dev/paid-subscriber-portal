@@ -11,6 +11,15 @@ import { paidRollup } from "@/lib/store/opsBoard";
 import { groupMatchesBucket, groupNotesCustomers, isCapturedNotesOrder } from "@/lib/store/customerGroups";
 import { gatewayChargesForStaff } from "@/lib/store/payments/eazypayAmounts";
 import { scheduleStoreInvoice } from "@/lib/store/invoice/issue";
+import { isQaNotesOrder } from "@/lib/analytics/notesCommerce";
+import {
+  buildOrderOps,
+  packageLinesFrom,
+  resolvePackageDisplay,
+  savedCourierRatePaise,
+  shippingRateStats,
+  type ShipmentRowLike,
+} from "@/lib/store/orderOps";
 
 export const dynamic = "force-dynamic";
 
@@ -122,6 +131,7 @@ export async function GET(req: Request) {
   if ((BUSINESS_CHANNELS as readonly string[]).includes(acq)) query = query.eq("attribution_platform", acq);
   if (openIssueOrderIds) query = query.in("id", openIssueOrderIds);
 
+  const phoneDigits = phoneSearchDigits(q);
   if (q) {
     const like = `%${q.replace(/[%,]/g, "")}%`;
     const ors = [
@@ -130,6 +140,7 @@ export async function GET(req: Request) {
       `phone.ilike.${like}`,
       `email.ilike.${like}`,
     ];
+    if (phoneDigits) ors.push(`phone_key.ilike.%${phoneDigits}%`);
     if (awbOrderIds?.length) ors.push(`id.in.(${awbOrderIds.join(",")})`);
     query = query.or(ors.join(","));
   }
@@ -141,7 +152,7 @@ export async function GET(req: Request) {
     const keys = await customerKeysForSearch(db, q, awbOrderIds);
     if (!keys.phones.length && !keys.ids.length) {
       const counts = await adminCounts(db);
-      return NextResponse.json({ ok: true, total: 0, limit, offset, customers: [], orders: [], counts, can_manage: canManage, can_view_analytics: canViewAnalytics, writes_authorized: shippingWritesAuthorized() }, { headers: { "Cache-Control": "no-store" } });
+      return NextResponse.json({ ok: true, total: 0, limit, offset, orders: [], counts, can_manage: canManage, can_view_analytics: canViewAnalytics, writes_authorized: shippingWritesAuthorized() }, { headers: { "Cache-Control": "no-store" } });
     }
     const ors = [];
     if (keys.phones.length) ors.push(`phone_key.in.(${keys.phones.join(",")})`);
@@ -171,6 +182,9 @@ export async function GET(req: Request) {
   }
 
   const itemsByOrder = new Map<string, Array<{ name: string; qty: number; sku: string; unit_price_paise: number; line_total_paise: number }>>();
+  const lineInputsByOrder = new Map<string, Array<{ qty: number | null; product_id: string | null; weight_grams_snapshot: number | null }>>();
+  const productProfiles = new Map<string, { weight_grams: number | null; length_mm: number | null; width_mm: number | null; height_mm: number | null }>();
+  const shipRowsByOrder = new Map<string, ShipmentRowLike[]>();
   const pastByOrder = new Map<string, Array<{ provider: string | null; courier: string | null; awb: string | null; status: string | null; reason: string | null }>>();
   const cityConfirmByOrder = new Map<string, { customer_destination: string; courier_destination: string; pin: "MATCH"; state: "MATCH"; courier: string; awb: string; rate_paise: number | null }>();
   const shipByOrder = new Map<
@@ -191,6 +205,8 @@ export async function GET(req: Request) {
       address_mismatch: boolean;
       pickup_reference: string | null;
       pickup_time: string | null;
+      picked_up_at: string | null;
+      delivered_at: string | null;
       weight_grams: number | null;
       length_cm: number | null;
       width_cm: number | null;
@@ -221,9 +237,17 @@ export async function GET(req: Request) {
   if (ids.length) {
     const { data: itemRows } = await db
       .from("store_order_items")
-      .select("order_id,name_snapshot,qty,sku_snapshot,unit_price_paise,line_total_paise")
+      .select("order_id,name_snapshot,qty,sku_snapshot,unit_price_paise,line_total_paise,product_id,weight_grams_snapshot")
       .in("order_id", ids);
+    const productIds = [...new Set((itemRows || []).map((it) => it.product_id).filter(Boolean))] as string[];
+    if (productIds.length) {
+      const { data: productRows } = await db.from("store_products").select("id,weight_grams,length_mm,width_mm,height_mm").in("id", productIds);
+      for (const p of productRows || []) productProfiles.set(p.id, p);
+    }
     for (const it of itemRows || []) {
+      const lines = lineInputsByOrder.get(it.order_id) || [];
+      lines.push({ qty: it.qty, product_id: it.product_id || null, weight_grams_snapshot: it.weight_grams_snapshot ?? null });
+      lineInputsByOrder.set(it.order_id, lines);
       const list = itemsByOrder.get(it.order_id) || [];
       list.push({
         name: it.name_snapshot,
@@ -236,10 +260,13 @@ export async function GET(req: Request) {
     }
     const { data: shipRows } = await db
       .from("store_shipments")
-      .select("order_id,courier_name,awb,tracking_url,provider,status,label_r2_key,provider_payload,pickup_scheduled_at,weight_grams,length_mm,width_mm,height_mm,created_at")
+      .select("order_id,courier_name,awb,tracking_url,provider,status,label_r2_key,provider_payload,pickup_scheduled_at,picked_up_at,delivered_at,weight_grams,length_mm,width_mm,height_mm,created_at")
       .in("order_id", ids)
       .order("created_at", { ascending: false });
     for (const s of shipRows || []) {
+      const history = shipRowsByOrder.get(s.order_id) || [];
+      history.push(s);
+      shipRowsByOrder.set(s.order_id, history);
       const inactive = s.status === "cancelled" || s.status === "failed";
       if (inactive) {
         const payload = (s.provider_payload && typeof s.provider_payload === "object" ? s.provider_payload : {}) as {
@@ -314,12 +341,14 @@ export async function GET(req: Request) {
           address_mismatch: Boolean(payload.address_mismatch || payload.do_not_handoff),
           pickup_reference: payload.pickup_reference || null,
           pickup_time: payload.pickup_time || null,
+          picked_up_at: s.picked_up_at || null,
+          delivered_at: s.delivered_at || null,
           weight_grams: s.weight_grams ?? null,
           length_cm: s.length_mm ? Number(s.length_mm) / 10 : null,
           width_cm: s.width_mm ? Number(s.width_mm) / 10 : null,
           height_cm: s.height_mm ? Number(s.height_mm) / 10 : null,
           package_source: payload.package_source || null,
-          rate_paise: Number(payload.booked_rate_paise) || Number(payload.rate_paise) || null,
+          rate_paise: savedCourierRatePaise(payload),
         });
       }
     }
@@ -387,6 +416,19 @@ export async function GET(req: Request) {
       cityConfirm: !ship && cityConfirmByOrder.has(o.id),
       invoiceStatus,
     });
+    const address = o.shipping_address_id ? addrMap.get(o.shipping_address_id) || null : null;
+    const ops = buildOrderOps({
+      status: o.status,
+      address,
+      ship,
+      cityConfirm: !ship && cityConfirmByOrder.has(o.id),
+      reasons,
+      package: resolvePackageDisplay({
+        rows: shipRowsByOrder.get(o.id) || [],
+        lines: packageLinesFrom(lineInputsByOrder.get(o.id) || [], productProfiles),
+      }),
+      orderDeliveredAt: o.delivered_at,
+    });
     return {
       ...safe,
       marketing: orderMarketingSummary({
@@ -394,8 +436,9 @@ export async function GET(req: Request) {
         attribution_platform: o.attribution_platform,
         attribution_json: (attribution_json || null) as StoredNotesAttribution | null,
       }),
-      address: o.shipping_address_id ? addrMap.get(o.shipping_address_id) || null : null,
+      address,
       items: itemsByOrder.get(o.id) || [],
+      ops,
       shipment: ship,
       city_confirmation: cityConfirmByOrder.get(o.id) || null,
       past_shipments: pastByOrder.get(o.id) || [],
@@ -424,7 +467,14 @@ export async function GET(req: Request) {
   }
   if (!id) {
     const needle = q.toLowerCase();
-    const groups = groupNotesCustomers(mapped, q ? (order) => `${order.order_no} ${order.customer_name || ""} ${order.phone || ""} ${order.phone_key || ""} ${order.email || ""}`.toLowerCase().includes(needle) : undefined);
+    const groups = groupNotesCustomers(
+      mapped,
+      q
+        ? (order) =>
+            `${order.order_no} ${order.customer_name || ""} ${order.phone || ""} ${order.phone_key || ""} ${order.email || ""}`.toLowerCase().includes(needle) ||
+            Boolean(phoneDigits && String(order.phone_key || "").includes(phoneDigits))
+        : undefined,
+    );
     const filtered = groups.filter((group) => groupMatchesBucket(group, issueFilter === "open" || actionOnly ? "issues" : bucket));
     const customers = filtered.slice(offset, offset + limit);
     return NextResponse.json(
@@ -437,7 +487,6 @@ export async function GET(req: Request) {
         can_manage: canManage,
         can_view_analytics: canViewAnalytics,
         counts,
-        customers,
         orders: customers.map((group) => ({
           ...group.primary,
           group: {
@@ -445,12 +494,23 @@ export async function GET(req: Request) {
             paid_count: group.paid_count,
             paid_total_paise: group.paid_total_paise,
             masked_phone: group.masked_phone,
+            phone: group.phone,
             matched_order_no: group.matched_order_no,
             active: group.active.map((order) => ({
               id: order.id,
               order_no: order.order_no,
               status: order.status,
               items: "items" in order ? order.items : [],
+            })),
+            paid_orders: paidOrdersForRow(group.orders).map((order) => ({
+              id: order.id,
+              order_no: order.order_no,
+              status: order.status,
+              total_paise: order.total_paise,
+              items: order.items,
+              invoice_status: order.invoice_status,
+              action_required: order.action_required,
+              ops: order.ops,
             })),
           },
         })),
@@ -477,11 +537,29 @@ export async function GET(req: Request) {
   );
 }
 
+/** "+91 98765 43210" and "98765-43210" both search the stored 10-digit phone key. */
+function phoneSearchDigits(q: string): string | null {
+  if (!/^[\d\s+()-]+$/.test(q)) return null;
+  const digits = q.replace(/\D/g, "");
+  if (digits.length < 6) return null;
+  return digits.length > 10 ? digits.slice(-10) : digits;
+}
+
+/** Every captured order stays visible: open parcels first, then completed ones, newest first. */
+function paidOrdersForRow<T extends { status: string; paid_at?: string | null; placed_at?: string | null }>(orders: T[]): T[] {
+  const time = (value: string | null | undefined) => (value ? Date.parse(value) || 0 : 0);
+  return orders
+    .filter((order) => isCapturedNotesOrder(order))
+    .sort((a, b) => Number(a.status === "DELIVERED") - Number(b.status === "DELIVERED") || time(b.placed_at) - time(a.placed_at));
+}
+
 async function customerKeysForSearch(db: NonNullable<ReturnType<typeof storeDb>>, q: string, awbOrderIds: string[] | null) {
   let lookup = db.from("store_orders").select("id,phone_key").limit(200);
   if (q) {
     const like = `%${q.replace(/[%,]/g, "")}%`;
     const ors = [`order_no.ilike.${like}`, `customer_name.ilike.${like}`, `phone.ilike.${like}`, `email.ilike.${like}`];
+    const digits = phoneSearchDigits(q);
+    if (digits) ors.push(`phone_key.ilike.%${digits}%`);
     if (awbOrderIds?.length) ors.push(`id.in.(${awbOrderIds.join(",")})`);
     lookup = lookup.or(ors.join(","));
   } else if (awbOrderIds?.length) {
@@ -514,12 +592,13 @@ async function adminCounts(db: NonNullable<ReturnType<typeof storeDb>>) {
     .in("status", [...OPEN_ISSUE_STATUSES]);
   const { data: paidRows } = await db
     .from("store_orders")
-    .select("id,status,paid_at,total_paise")
+    .select("id,status,paid_at,total_paise,attribution_source,attribution_json,promo_code")
     .not("paid_at", "is", null)
     .limit(5000);
   const captured = (paidRows || []).filter((row) => row.paid_at && !["PAYMENT_PENDING", "PAYMENT_FAILED", "PAYMENT_EXPIRED", "CANCELLED", "REFUNDED", "PARTIALLY_REFUNDED"].includes(row.status));
   const paid = paidRollup(captured);
   const products = await paidProductSplit(db, captured.map((row) => row.id));
+  const shippingRate = await shippingRateForCaptured(db, captured);
   const { data: heads } = await db.from("store_orders").select("id,order_no,status,paid_at,phone,phone_key,customer_id,customer_name,placed_at").limit(5000);
   const groups = groupNotesCustomers((heads || []) as Array<{ id: string; order_no: string; status: string; paid_at: string | null; phone: string | null; phone_key: string | null; customer_id: string | null; customer_name: string | null; placed_at: string | null }>);
   return {
@@ -530,6 +609,7 @@ async function adminCounts(db: NonNullable<ReturnType<typeof storeDb>>) {
     paid: paid.orders,
     paid_sales_paise: paid.salesPaise,
     products,
+    shipping_rate: shippingRate,
     new: fresh,
     preparing,
     printing,
@@ -539,6 +619,43 @@ async function adminCounts(db: NonNullable<ReturnType<typeof storeDb>>) {
     delivered,
     issues: issues || 0,
   };
+}
+
+/**
+ * Whole-store booked courier rate, independent of list filters like the other KPI tiles.
+ * One live shipment per captured, non-QA order; customer shipping charges are never read.
+ */
+async function shippingRateForCaptured(
+  db: NonNullable<ReturnType<typeof storeDb>>,
+  captured: Array<{ id: string; status: string; paid_at: string | null; attribution_source?: string | null; attribution_json?: unknown; promo_code?: string | null }>,
+) {
+  const eligible = captured.filter((row) => ["PACKED", "READY_FOR_PICKUP", "PICKUP_SCHEDULED", "PICKED_UP", "IN_TRANSIT", "OUT_FOR_DELIVERY", "DELIVERED"].includes(row.status));
+  const byOrder = new Map<string, ShipmentRowLike[]>();
+  if (eligible.length) {
+    const { data } = await db
+      .from("store_shipments")
+      .select("order_id,status,awb,provider_payload,created_at")
+      .in("order_id", eligible.map((row) => row.id))
+      .order("created_at", { ascending: false });
+    for (const row of data || []) {
+      const list = byOrder.get(row.order_id) || [];
+      list.push(row);
+      byOrder.set(row.order_id, list);
+    }
+  }
+  return shippingRateStats(
+    eligible.map((row) => ({
+      id: row.id,
+      status: row.status,
+      paid_at: row.paid_at,
+      qa: isQaNotesOrder({
+        attribution_source: row.attribution_source ?? null,
+        attribution_json: (row.attribution_json || null) as StoredNotesAttribution | null,
+        promo_code: row.promo_code ?? null,
+      }),
+    })),
+    byOrder,
+  );
 }
 
 async function paidProductSplit(db: NonNullable<ReturnType<typeof storeDb>>, ids: string[]) {

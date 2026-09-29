@@ -303,6 +303,11 @@ function orderQa(order: NotesOrderFact): boolean {
   return source === "qa" || clean(order.promo_code) === NOTES_QA_CAMPAIGN;
 }
 
+/** Same QA rule the commerce report uses to leave test orders out. */
+export function isQaNotesOrder(order: Pick<NotesOrderFact, "attribution_json" | "attribution_source" | "promo_code">): boolean {
+  return orderQa(order as NotesOrderFact);
+}
+
 function actor(event: NotesEventRow, index: number): string {
   return event.session_id || event.visitor_id || `anon:${index}`;
 }

@@ -46,7 +46,9 @@ export function formatAdminWhen(value: string | null | undefined): string | null
     timeZone: "Asia/Kolkata",
     day: "numeric",
     month: "short",
-  }).format(date);
+  })
+    .format(date)
+    .replace("Sept", "Sep");
   if (!value.includes(":") && !value.includes("T")) return dated;
   const time = new Intl.DateTimeFormat("en-IN", {
     timeZone: "Asia/Kolkata",
