@@ -35,7 +35,7 @@ Exposed: `order_no`, `stage`, `stage_label`, `placed_at`, `promised_delivery_dat
 
 ## Admin
 
-Admin Notes APIs use `requirePermission(...)` server-side (`store_manage_catalogue`, fulfilment perms in `lib/permissions.ts`). Never trust client role alone.
+Admin Notes APIs use `requirePermission(...)` / `requireStoreOrderRead()` / `requireFreshPermission(...)` / `requireFreshSuperAdmin()` server-side (`lib/permissions.ts`, `lib/store/notesAccess.ts`, `lib/adminGuard.ts`). `store_view_orders` reads the order queue, order detail, and checkout leads. `store_manage_orders` is required for fulfilment mutations. Notes analytics, demand, overview, store launch, and seller settings are Super Admin only and are not implied by `store_manage_orders`. Each admin request re-reads `admin_users` + `roles`. If that read fails, ordinary portal pages and Notes reads may keep the signed session. Order mutations, courier and shipping actions, address changes, refunds, store settings, and Super Admin Notes routes (including analytics) deny with the same 403 used for a missing permission. They do not fall back to the signed snapshot. 503 is reserved for the store database being unavailable after authorization succeeds. Never trust a client-provided role.
 
 ## Sample media
 

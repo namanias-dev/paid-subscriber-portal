@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requirePermission, getActionActor } from "@/lib/adminGuard";
+import { requireFreshPermission, getActionActor } from "@/lib/adminGuard";
 import { storeDb } from "@/lib/store/db";
 import { createProviderShipment, requestProviderPickup, cancelProviderShipment } from "@/lib/store/shipping/book";
 import { dispatchBlocked, shipmentAlreadyActive } from "@/lib/store/shipping/dispatch";
@@ -18,7 +18,7 @@ const LOCK_MS = 15 * 60 * 1000;
  * Does not choose a replacement courier and does not mark the parcel picked up.
  */
 export async function POST(req: Request, { params }: { params: { id: string } }) {
-  if (!(await requirePermission("store_manage_orders"))) {
+  if (!(await requireFreshPermission("store_manage_orders"))) {
     return NextResponse.json({ ok: false, error: "Forbidden" }, { status: 403, headers: { "Cache-Control": "no-store" } });
   }
   const blocked = dispatchBlocked();

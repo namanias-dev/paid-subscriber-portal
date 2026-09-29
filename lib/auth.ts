@@ -65,7 +65,9 @@ export async function verifyBuyerToken(
 }
 
 export async function signAdminToken(payload: AdminSessionPayload): Promise<string> {
-  return sign(payload, resolveSecret("ADMIN_JWT_SECRET", DEMO_ADMIN_JWT_SECRET));
+  const claims = { ...payload };
+  delete claims.auth_source;
+  return sign(claims, resolveSecret("ADMIN_JWT_SECRET", DEMO_ADMIN_JWT_SECRET));
 }
 
 export async function verifyAdminToken(

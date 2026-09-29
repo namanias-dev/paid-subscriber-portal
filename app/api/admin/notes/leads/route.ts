@@ -1,14 +1,15 @@
 import { NextResponse } from "next/server";
-import { requirePermission } from "@/lib/adminGuard";
+import { requireFreshSuperAdmin, requireStoreOrderRead } from "@/lib/adminGuard";
 import { issueRecoveryLink, listCheckoutLeads, updateCheckoutLeadSales } from "@/lib/store/checkoutLeads";
 import { SALES_STATUSES, type SalesStatus } from "@/lib/store/checkoutLeadLogic";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(req: Request) {
-  if (!(await requirePermission("store_manage_orders"))) {
+  if (!(await requireStoreOrderRead())) {
     return NextResponse.json({ ok: false, error: "Forbidden" }, { status: 403 });
   }
+  const canUpdate = await requireFreshSuperAdmin();
   const filter = new URL(req.url).searchParams.get("filter") || "open";
   const leads = await listCheckoutLeads(filter);
   let activity: Record<string, { lines: string[] }> = {};
@@ -18,11 +19,11 @@ export async function GET(req: Request) {
     activity = await loadLeadAlertActivity(ids);
   } catch { /* the lead list still renders */ }
   const withAlert = leads.map((lead) => ({ ...lead, sales_alert: activity[String(lead.id)] || { lines: [] } }));
-  return NextResponse.json({ ok: true, leads: withAlert }, { headers: { "Cache-Control": "no-store" } });
+  return NextResponse.json({ ok: true, leads: withAlert, can_update: canUpdate }, { headers: { "Cache-Control": "no-store" } });
 }
 
 export async function PATCH(req: Request) {
-  if (!(await requirePermission("store_manage_orders"))) {
+  if (!(await requireFreshSuperAdmin())) {
     return NextResponse.json({ ok: false, error: "Forbidden" }, { status: 403 });
   }
   const body = await req.json().catch(() => ({}));

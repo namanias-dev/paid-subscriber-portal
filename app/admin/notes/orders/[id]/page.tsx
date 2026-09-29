@@ -10,6 +10,7 @@ export default function NotesOrderPage() {
   const router = useRouter();
   const [order, setOrder] = useState<AdminOrder | null>(null);
   const [writes, setWrites] = useState(false);
+  const [canManage, setCanManage] = useState(false);
   const [busy, setBusy] = useState(false);
   const [missing, setMissing] = useState(false);
   const [compare, setCompare] = useState(false);
@@ -19,6 +20,7 @@ export default function NotesOrderPage() {
     const json = await res.json();
     const row = (json.orders || [])[0] as AdminOrder | undefined;
     setWrites(Boolean(json.writes_authorized));
+    setCanManage(Boolean(json.can_manage));
     if (!row) setMissing(true);
     else setOrder(row);
   }, [params.id]);
@@ -43,6 +45,7 @@ export default function NotesOrderPage() {
       order={order}
       busy={busy}
       writesAuthorized={writes}
+      canManage={canManage}
       presentation="page"
       onClose={() => router.push("/admin/notes")}
       onRefresh={() => void load()}
@@ -62,7 +65,7 @@ export default function NotesOrderPage() {
         })();
       }}
     />
-      {compare && (
+      {canManage && compare && (
         <CourierPicker
           orderId={order.id}
           open

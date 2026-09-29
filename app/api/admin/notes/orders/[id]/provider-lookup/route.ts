@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requirePermission } from "@/lib/adminGuard";
+import { requireFreshPermission } from "@/lib/adminGuard";
 import { storeDb } from "@/lib/store/db";
 import { findShiprocketOrder, readShiprocketOrderPublic } from "@/lib/store/shipping/book";
 import { shiprocketToken } from "@/lib/store/shipping/shiprocketApi";
@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 
 /** Read-only Shiprocket search. Does not create an order, AWB, or pickup. */
 export async function GET(_req: Request, { params }: { params: { id: string } }) {
-  if (!(await requirePermission("store_manage_orders"))) {
+  if (!(await requireFreshPermission("store_manage_orders"))) {
     return NextResponse.json({ ok: false, error: "Forbidden" }, { status: 403, headers: { "Cache-Control": "no-store" } });
   }
   const db = storeDb();
@@ -49,7 +49,7 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
 
 /** Assign courier 51 once when the provider order exists and has no AWB. Does not create another order. */
 export async function POST(req: Request, { params }: { params: { id: string } }) {
-  if (!(await requirePermission("store_manage_orders"))) {
+  if (!(await requireFreshPermission("store_manage_orders"))) {
     return NextResponse.json({ ok: false, error: "Forbidden" }, { status: 403, headers: { "Cache-Control": "no-store" } });
   }
   if (!shippingWritesAuthorized()) {

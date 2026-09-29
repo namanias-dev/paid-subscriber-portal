@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requirePermission, getActionActor } from "@/lib/adminGuard";
+import { requireFreshSuperAdmin, getActionActor } from "@/lib/adminGuard";
 import { storeDb } from "@/lib/store/db";
 import { refundRequestPaise } from "@/lib/store/shipping/dispatch";
 
@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
  * A second request for an order already waiting on a refund is a no-op.
  */
 export async function POST(req: Request, { params }: { params: { id: string } }) {
-  if (!(await requirePermission("store_manage_orders"))) {
+  if (!(await requireFreshSuperAdmin())) {
     return NextResponse.json({ ok: false, error: "Forbidden" }, { status: 403, headers: { "Cache-Control": "no-store" } });
   }
   const actor = await getActionActor();

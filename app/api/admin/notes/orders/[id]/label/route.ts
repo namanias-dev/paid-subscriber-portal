@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requirePermission } from "@/lib/adminGuard";
+import { requireFreshPermission } from "@/lib/adminGuard";
 import { storeDb } from "@/lib/store/db";
 import { fetchExistingLabel } from "@/lib/store/shipping/book";
 import { shiprocketBaseUrl } from "@/lib/store/shipping/config";
@@ -13,7 +13,7 @@ export const dynamic = "force-dynamic";
  * Does not create an order, AWB, or pickup.
  */
 export async function GET(_req: Request, { params }: { params: { id: string } }) {
-  if (!(await requirePermission("store_manage_orders"))) {
+  if (!(await requireFreshPermission("store_manage_orders"))) {
     return NextResponse.json({ ok: false, error: "Forbidden" }, { status: 403, headers: { "Cache-Control": "no-store" } });
   }
   const db = storeDb();

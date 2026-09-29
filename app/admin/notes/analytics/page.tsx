@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { requirePermission } from "@/lib/adminGuard";
+import { requireFreshSuperAdmin } from "@/lib/adminGuard";
 import NotesAnalytics from "@/components/notes/admin/NotesAnalytics";
 import { loadNotesAnalytics } from "@/lib/analytics/notesReport";
 import { loadCheckoutLeadReport } from "@/lib/store/checkoutLeads";
@@ -16,7 +16,7 @@ export default async function NotesAnalyticsPage({
 }: {
   searchParams: { range?: string; from?: string; to?: string };
 }) {
-  if (!(await requirePermission("store_manage_orders"))) notFound();
+  if (!(await requireFreshSuperAdmin())) notFound();
   const key = (KEYS.has(searchParams.range || "") ? searchParams.range : "7d") as NotesRangeKey;
   const bounds = notesRangeBounds(key, new Date(), { from: searchParams.from, to: searchParams.to });
   const report = await loadNotesAnalytics({ key, from: searchParams.from, to: searchParams.to });

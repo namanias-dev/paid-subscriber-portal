@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requirePermission, getActionActor } from "@/lib/adminGuard";
+import { requireFreshPermission, getActionActor } from "@/lib/adminGuard";
 import { storeDb } from "@/lib/store/db";
 import { requestProviderPickup } from "@/lib/store/shipping/book";
 import { dispatchBlocked } from "@/lib/store/shipping/dispatch";
@@ -13,7 +13,7 @@ export const dynamic = "force-dynamic";
  * Does not mark the order shipped. Possession still comes from a carrier scan.
  */
 export async function POST(req: Request, { params }: { params: { id: string } }) {
-  if (!(await requirePermission("store_manage_orders"))) {
+  if (!(await requireFreshPermission("store_manage_orders"))) {
     return NextResponse.json({ ok: false, error: "Forbidden" }, { status: 403, headers: { "Cache-Control": "no-store" } });
   }
   const blocked = dispatchBlocked();
