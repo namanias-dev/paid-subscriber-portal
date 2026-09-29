@@ -14,13 +14,18 @@ import {
   type OrderOpsShipment,
   type ShipmentRowLike,
 } from "../../lib/store/orderOps";
-import { formatPackageDims, formatPackageWeight, PACKAGE_SOURCE_LABEL } from "../../lib/store/orderOpsDisplay";
+import { formatPackageDims, formatPackageWeight, ISSUE_HINT, opsLines, PACKAGE_SOURCE_LABEL } from "../../lib/store/orderOpsDisplay";
 import { resolveBookingPackage } from "../../lib/store/shipping/manualBook";
 import { stageProgress, TIMELINE } from "../../lib/store/opsBoard";
 import { adminStageLabel, PROGRESS, productList } from "../../lib/store/stages";
 import { formatAdminWhen } from "../../lib/store/adminConsole";
 import { groupMatchesBucket, groupNotesCustomers } from "../../lib/store/customerGroups";
-import { timelineText } from "../../components/notes/admin/orders/OrderOpsCell";
+
+const ROW_FILES = [
+  "components/notes/admin/OrderQueue.tsx",
+  "components/notes/admin/orders/CustomerViews.tsx",
+  "components/notes/admin/orders/OrderOpsCell.tsx",
+];
 
 const root = process.cwd();
 const read = (path: string) => readFileSync(join(root, path), "utf8");
@@ -86,7 +91,8 @@ test("A/B: preparing and printing show the exact stage and no courier prompt", (
   const a = ops({ status: "PROCESSING" });
   assert.equal(a.stage?.label, "Preparing");
   assert.equal(a.courier_not_selected, false);
-  assert.equal(timelineText({ status: "PROCESSING", ops: a }), "Preparing");
+  assert.equal(opsLines({ status: "PROCESSING", ops: a }).headline, "Preparing notes");
+  assert.equal(opsLines({ status: "PROCESSING", ops: a }).rate, null);
   const b = ops({ status: "PRINTING" });
   assert.equal(b.stage?.label, "Printing");
   assert.equal(b.courier_not_selected, false);
@@ -99,7 +105,7 @@ test("C: packed without a shipment says Courier not selected and is not an issue
   assert.equal(c.courier, null);
   assert.equal(c.rate_paise, null);
   assert.equal(c.issue, null);
-  assert.equal(timelineText({ status: "PACKED", ops: c }), "Packed · Courier not selected");
+  assert.deepEqual(opsLines({ status: "PACKED", ops: c }), { headline: "Courier not selected", rate: null, detail: null, recorded: false, alert: null });
 });
 
 test("D/O: mixed order with a saved package shows the order package, not the 500 g profile", () => {
@@ -117,6 +123,13 @@ test("E: mixed order without a saved package is Package required", () => {
   const e = ops({ status: "PACKED", items: [POLITY, ECONOMY], reasons: ["No active shipment"] });
   assert.equal(e.package, null);
   assert.equal(e.issue, "Package required");
+  assert.deepEqual(opsLines({ status: "PACKED", ops: e }), {
+    headline: "Package required",
+    rate: null,
+    detail: "Weigh and enter final parcel dimensions",
+    recorded: false,
+    alert: "package",
+  });
   const twoCopies = ops({ status: "PRINTING", items: [{ ...POLITY, qty: 2 }] });
   assert.equal(twoCopies.package, null);
   assert.equal(twoCopies.issue, null, "not actionable before packing");
@@ -126,7 +139,9 @@ test("F/G: pickup date only stays a date; a provider slot keeps its time", () =>
   const f = ops({ status: "PICKUP_SCHEDULED", rows: [ship({ pickup_scheduled_at: "2026-09-30T00:00:00+00:00", provider_payload: { pickup_date: "2026-09-30", rate_paise: 9372 } })] });
   assert.equal(f.pickup_at, "2026-09-30");
   assert.equal(formatAdminWhen(f.pickup_at), "30 Sep");
-  assert.equal(timelineText({ status: "PICKUP_SCHEDULED", ops: f }), "Pickup scheduled · 30 Sep");
+  assert.deepEqual(opsLines({ status: "PICKUP_SCHEDULED", ops: f }), { headline: "Xpressbees Surface", rate: "₹93.72", detail: "Pickup 30 Sep", recorded: false, alert: null });
+  const unknown = ops({ status: "PICKUP_SCHEDULED", rows: [ship({ provider_payload: { rate_paise: 9372 } })] });
+  assert.equal(opsLines({ status: "PICKUP_SCHEDULED", ops: unknown }).detail, "Pickup requested · time unavailable", "no invented pickup time");
   const g = ops({ status: "PICKUP_SCHEDULED", rows: [ship({ provider: "delhivery", courier_name: "Delhivery Surface", provider_payload: { pickup_date: "2026-09-30", pickup_time: "10:00:00", booked_rate_paise: 4568 } })] });
   assert.equal(g.pickup_at, "2026-09-30 10:00");
   assert.equal(formatAdminWhen(g.pickup_at), "30 Sep · 10:00 am");
@@ -146,7 +161,15 @@ test("H: in transit shows courier and booked rate with the Paid concept kept sep
   assert.equal(h.latest_text, "Departed Delhi hub");
   assert.equal(formatAdminWhen(h.latest_at), "29 Sep · 4:12 pm");
   assert.equal(formatAdminWhen(h.picked_up_at), "29 Sep · 11:55 am");
-  assert.equal(h.stage?.ariaLabel, "Current stage: In transit. 6 of 9 stages completed.");
+  assert.equal(h.stage?.ariaLabel, "In transit. Stage 7 of 9.");
+  assert.equal(h.stage?.position, 7);
+  assert.deepEqual(opsLines({ status: "IN_TRANSIT", ops: h }), {
+    headline: "Xpressbees Surface",
+    rate: "₹93.72",
+    detail: "Departed Delhi hub · 29 Sep · 4:12 pm",
+    recorded: true,
+    alert: null,
+  });
 });
 
 test("stale pre-pickup provider text is hidden once the courier has the parcel", () => {
@@ -169,8 +192,8 @@ test("I: out for delivery keeps the provider event time", () => {
 test("J: delivered shows the stored delivered time", () => {
   const j = ops({ status: "DELIVERED", rows: [ship({ status: "delivered", delivered_at: "2026-09-26T07:51:28.737+00:00" })] });
   assert.equal(formatAdminWhen(j.delivered_at), "26 Sep · 1:21 pm");
-  assert.equal(timelineText({ status: "DELIVERED", ops: j }), "Delivered · 26 Sep · 1:21 pm");
-  assert.equal(j.stage?.ariaLabel, "Current stage: Delivered. 9 of 9 stages completed.");
+  assert.deepEqual(opsLines({ status: "DELIVERED", ops: j }), { headline: "Delivered 26 Sep · 1:21 pm", rate: null, detail: "Xpressbees Surface", recorded: true, alert: null });
+  assert.equal(j.stage?.ariaLabel, "Delivered. Stage 9 of 9.");
   assert.equal(j.latest_text, null);
 });
 
@@ -178,6 +201,7 @@ test("K: a booked shipment without a saved rate shows the courier and never ₹0
   const k = ops({ status: "IN_TRANSIT", rows: [ship({ status: "in_transit", provider_payload: {} })] });
   assert.equal(k.courier, "Xpressbees Surface");
   assert.equal(k.rate_paise, null);
+  assert.equal(opsLines({ status: "IN_TRANSIT", ops: k }).rate, "Rate unavailable");
   assert.equal(savedCourierRatePaise({ rate_paise: 0 }), null);
   assert.equal(savedCourierRatePaise({ booked_rate_paise: 4568, rate_paise: 9999 }), 4568);
 });
@@ -201,6 +225,12 @@ test("Q: issues use staff copy and red only when actionable", () => {
   assert.equal(ops({ status: "PICKUP_SCHEDULED", reasons: ["Address mismatch"], rows: [ship({})] }).issue, "Shipment needs attention");
   assert.equal(ops({ status: "IN_TRANSIT", rows: [ship({ status: "in_transit" })], reasons: ["Invoice needs attention"] }).issue, null);
   assert.equal(ops({ status: "PACKED", cityConfirm: true, reasons: ["Courier city needs confirmation"] }).courier_not_selected, false);
+  const city = ops({ status: "PACKED", cityConfirm: true, reasons: ["Courier city needs confirmation"] });
+  assert.equal(opsLines({ status: "PACKED", ops: city }).alert, "issue");
+  const orderOps = read("lib/store/orderOps.ts");
+  const issueCopy = orderOps.slice(orderOps.indexOf("const ISSUE_COPY"), orderOps.indexOf("export function opsIssue"));
+  const copies = [...issueCopy.matchAll(/\["[^"]+", "([^"]+)"\]/g)].map((match) => match[1]);
+  for (const copy of [...copies, "Package required"]) assert.ok(ISSUE_HINT[copy], `${copy} has a next-step hint`);
 });
 
 test("74: avg shipping rate counts one live shipment per paid order, in paise", () => {
@@ -289,7 +319,7 @@ test("package profile comes from the product row, not a UI constant", () => {
   const pkg = resolvePackageDisplay({ rows: [], lines: packageLinesFrom([POLITY], heavier) })!;
   assert.equal(pkg.weight_grams, 650);
   assert.equal(formatPackageDims(pkg), "30.5×25.5×3.2 cm");
-  for (const file of ["components/notes/admin/OrderQueue.tsx", "components/notes/admin/orders/OrderOpsCell.tsx"]) {
+  for (const file of ROW_FILES) {
     const src = read(file);
     assert.doesNotMatch(src, /(?<![-\w])500(?![\w-])/, `${file} must not hardcode a package weight`);
     assert.doesNotMatch(src, /resolveBookingPackage|resolveAutoPackage|packageLinesFrom/, `${file} must not resolve packages itself`);
@@ -297,10 +327,15 @@ test("package profile comes from the product row, not a UI constant", () => {
 });
 
 test("76: a captured in-transit order shows Paid and In transit together", () => {
-  const queue = read("components/notes/admin/OrderQueue.tsx");
-  const line = queue.slice(queue.indexOf("function OrderLine"), queue.indexOf("function CustomerRow"));
-  assert.match(line, />Paid</);
-  assert.match(line, /<FulfillmentBlock order=\{line\} \/>/);
+  const views = read("components/notes/admin/orders/CustomerViews.tsx");
+  const summary = views.slice(views.indexOf("function OrderSummary"), views.indexOf("function ModuleLabel"));
+  assert.match(summary, /<PaidMark \/>/);
+  for (const variant of ["OrderCustomerCardMobile", "OrderCustomerRowDesktop"]) {
+    const body = views.slice(views.indexOf(`function ${variant}`));
+    assert.match(body, /customerView\(order\)/, `${variant} reads the shared customer view`);
+    assert.match(body, /<OpsStrip order=\{line\}/, `${variant} uses the shared status strip`);
+    assert.match(body, /<OrderSummary line=\{line\}/);
+  }
   const h = ops({ status: "IN_TRANSIT", rows: [ship({ status: "in_transit", provider_payload: { rate_paise: 9372 } })] });
   assert.equal(h.stage?.label, "In transit");
 });
@@ -338,11 +373,20 @@ test("62: badge, dots and filter labels come from the one shared ladder", () => 
   }
   const timeline = read("components/notes/admin/orders/FulfillmentTimeline.tsx");
   assert.match(timeline, /stageProgress\(status\)/);
-  assert.match(timeline, /motion-safe:animate-stage-breathe/, "breathing ring only when motion is allowed");
-  assert.match(timeline, /motion-reduce:transition-none/);
+  assert.match(timeline, /useReducedMotion\(\)/);
+  assert.match(timeline, /reduce \? \{ duration: 0 \} : \{ duration: 2\.8, ease: "easeInOut", repeat: Infinity \}/, "breathing halo only when motion is allowed");
+  assert.match(timeline, /scale: \[1, 1\.08, 1\]/);
   assert.match(timeline, /aria-label=\{stage\.ariaLabel\}/);
-  const cell = read("components/notes/admin/orders/OrderOpsCell.tsx");
-  assert.doesNotMatch(cell, /IN_TRANSIT|PICKUP_SCHEDULED|OUT_FOR_DELIVERY/, "no second status mapping in the row");
+  assert.equal(stageProgress("PACKED")?.ariaLabel, "Packed. Stage 4 of 9.");
+  for (const file of ROW_FILES) {
+    assert.doesNotMatch(read(file), /IN_TRANSIT|PICKUP_SCHEDULED|OUT_FOR_DELIVERY|READY_FOR_PICKUP/, `${file}: no second status mapping in the row`);
+  }
+  for (const file of ["components/notes/admin/orders/CustomerViews.tsx", "components/notes/admin/orders/OrderOpsCell.tsx"]) {
+    assert.match(read(file), /useReducedMotion\(\)/, `${file} honours reduced motion`);
+  }
+  for (const file of [...ROW_FILES, "components/notes/admin/orders/FulfillmentTimeline.tsx"]) {
+    assert.doesNotMatch(read(file), /\b(LazyMotion|MotionConfig|domAnimation)\b/, `${file}: only framer APIs the storefront already ships, so the shared chunk is unchanged`);
+  }
 });
 
 test("47: a two-subject order reads as both subjects", () => {
@@ -372,7 +416,7 @@ test("48: full phone stays inside the authenticated admin read model", () => {
     }
     assert.doesNotMatch(src, /orderOps|group\.phone/, `${file} must not expose the admin phone field`);
   }
-  for (const file of ["components/notes/admin/OrderQueue.tsx", "components/notes/admin/orders/OrderOpsCell.tsx"]) {
+  for (const file of ROW_FILES) {
     assert.doesNotMatch(read(file), /track\(|posthog|gtag|fbq|console\.log/, `${file} must not send phone to telemetry`);
   }
 });

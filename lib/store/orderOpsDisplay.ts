@@ -1,4 +1,6 @@
 /** Client-safe shapes and formatters for the admin orders operations summary. */
+import { formatAdminWhen, fulfillmentLabel } from "./adminConsole";
+import { formatPaise } from "./money";
 import type { StageProgress } from "./opsBoard";
 
 export type PackageDisplaySource = "BOOKED_SHIPMENT" | "ORDER_PACKAGE" | "PRODUCT_PROFILE";
@@ -52,4 +54,91 @@ export function formatPackageWeight(grams: number): string {
 
 export function formatPackageDims(pkg: Pick<PackageDisplay, "length_cm" | "width_cm" | "height_cm">): string {
   return `${trimNumber(pkg.length_cm)}×${trimNumber(pkg.width_cm)}×${trimNumber(pkg.height_cm)} cm`;
+}
+
+/** What staff do next for each `OrderOps.issue`. */
+export const ISSUE_HINT: Record<string, string> = {
+  "Package required": "Weigh and enter final parcel dimensions",
+  "Courier city confirmation": "Confirm the courier's destination city",
+  "Shipment needs attention": "Review the shipment address",
+  "Pickup needs attention": "Pickup wasn't completed · review pickup",
+  "Delivery exception": "Courier reported a delivery exception",
+  "Return needs attention": "Return action required",
+  "Refund pending": "Refund not yet completed",
+  "Customer issue open": "Customer raised an issue",
+  "Tracking needs attention": "No recent courier tracking update",
+};
+
+export interface OpsLines {
+  headline: string;
+  /** Courier rate beside a courier headline: a formatted amount or "Rate unavailable". */
+  rate: string | null;
+  detail: string | null;
+  /** A timestamp in the lines came from Notes tracking sync. */
+  recorded: boolean;
+  alert: "package" | "issue" | null;
+}
+
+export interface OpsLinesInput {
+  status: string;
+  ops?: OrderOps | null;
+}
+
+/** Status-strip copy for one paid order. Reads only the shared read model; never guesses. */
+export function opsLines(order: OpsLinesInput): OpsLines {
+  const ops = order.ops;
+  const stage = ops?.stage;
+  const plain = (headline: string, detail: string | null = null, recorded = false): OpsLines => ({ headline, rate: null, detail, recorded, alert: null });
+  if (!ops || !stage) return plain(fulfillmentLabel(order.status, false));
+  if (ops.issue) {
+    return {
+      headline: ops.issue,
+      rate: null,
+      detail: ISSUE_HINT[ops.issue] || "Open details to resolve",
+      recorded: false,
+      alert: ops.issue === "Package required" ? "package" : "issue",
+    };
+  }
+  const courier = ops.courier;
+  const rate = courier ? (ops.rate_paise ? formatPaise(ops.rate_paise) : "Rate unavailable") : null;
+  const withCourier = (detail: string | null, recorded = false): OpsLines => ({
+    headline: courier || "Courier not recorded",
+    rate,
+    detail,
+    recorded,
+    alert: null,
+  });
+  switch (stage.key) {
+    case "confirmed":
+      return plain("Ready to prepare");
+    case "preparing":
+      return plain("Preparing notes");
+    case "printing":
+      return plain("Printing notes");
+    case "packed":
+      return courier ? withCourier(null) : plain("Courier not selected");
+    case "pickup": {
+      const at = formatAdminWhen(ops.pickup_at);
+      return withCourier(at ? `Pickup ${at}` : "Pickup requested · time unavailable");
+    }
+    case "shipped": {
+      const at = formatAdminWhen(ops.picked_up_at);
+      return withCourier(at ? `Picked up ${at}` : null, Boolean(at));
+    }
+    case "transit":
+    case "delivery": {
+      const latestAt = formatAdminWhen(ops.latest_at);
+      const pickedUp = formatAdminWhen(ops.picked_up_at);
+      if (ops.latest_text) return withCourier(`${ops.latest_text}${latestAt ? ` · ${latestAt}` : ""}`, Boolean(latestAt));
+      if (latestAt) return withCourier(`Updated ${latestAt}`, true);
+      return withCourier(pickedUp ? `Picked up ${pickedUp}` : null, Boolean(pickedUp));
+    }
+    case "delivered": {
+      const at = formatAdminWhen(ops.delivered_at);
+      const via = courier ? `${courier}${ops.rate_paise ? ` · ${formatPaise(ops.rate_paise)}` : ""}` : null;
+      return plain(at ? `Delivered ${at}` : "Delivered", via, Boolean(at));
+    }
+    default:
+      return plain(stage.label);
+  }
 }

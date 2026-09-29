@@ -23,6 +23,8 @@ export interface StageProgress {
   key: string;
   label: string;
   index: number;
+  /** 1-based rung on the ladder, as staff read it ("4 of 9"). */
+  position: number;
   total: number;
   final: boolean;
   ariaLabel: string;
@@ -34,14 +36,14 @@ export function stageProgress(status: string): StageProgress | null {
   if (index == null) return null;
   const step = TIMELINE[index];
   const final = index === TIMELINE.length - 1;
-  const completed = final ? TIMELINE.length : index;
   return {
     key: step.key,
     label: step.label,
     index,
+    position: index + 1,
     total: TIMELINE.length,
     final,
-    ariaLabel: `Current stage: ${step.label}. ${completed} of ${TIMELINE.length} stages completed.`,
+    ariaLabel: `${step.label}. Stage ${index + 1} of ${TIMELINE.length}.`,
   };
 }
 

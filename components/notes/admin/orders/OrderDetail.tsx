@@ -790,7 +790,7 @@ export default function OrderDetail({
         </div>
 
         {(canManage || toast) && (
-        <div className="fixed inset-x-0 bottom-0 z-20 border-t border-[var(--ca-navy)]/10 bg-[#fbfaf6] p-3 sm:max-w-xl sm:left-auto">
+        <div data-admin-bottom-bar className="fixed inset-x-0 bottom-0 z-20 border-t border-[var(--ca-navy)]/10 bg-[#fbfaf6] p-3 sm:max-w-xl sm:left-auto">
           {canManage && (
           <button type="button" disabled={busy} onClick={runPrimary} className="min-h-12 w-full rounded-full bg-[var(--ca-navy)] text-sm font-semibold text-white">
             {PRIMARY_LABEL[action]}
