@@ -102,7 +102,7 @@ export default function CourierPicker({
         }
         const pack = json.package;
         setPackLabel(pack ? `${pack.weight_grams} g · ${pack.length_cm}×${pack.width_cm}×${pack.height_cm} cm` : null);
-        if (!json.ok && !presented.length) setError(json.error || "No quote available.");
+        if (!json.ok && !presented.length && !pending?.customer_destination) setError(json.error || "No quote available.");
       } catch {
         setError("Could not reach the quote service.");
       } finally {
@@ -249,8 +249,11 @@ export default function CourierPicker({
 
         {cityConfirm && !booked && (
           <div className="mt-4 rounded-2xl bg-white p-4">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--ca-gold-dark)]">Courier address confirmation</p>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--ca-gold-dark)]">Before pickup</p>
             <h2 className="mt-1 font-heading text-xl font-bold text-[var(--ca-navy)]">COURIER ADDRESS CONFIRMATION</h2>
+            <p className="mt-1 text-sm text-[var(--ca-navy)]/70">
+              {cityConfirm.courier}{cityConfirm.ratePaise > 0 ? ` · ${formatPaise(cityConfirm.ratePaise)}` : ""}
+            </p>
             <dl className="mt-3 space-y-2 text-sm text-[var(--ca-navy)]">
               <div><dt className="text-[11px] font-semibold uppercase tracking-wide text-[var(--ca-navy)]/50">Customer destination</dt><dd>{cityConfirm.customer}</dd></div>
               <div><dt className="text-[11px] font-semibold uppercase tracking-wide text-[var(--ca-navy)]/50">Courier destination</dt><dd>{cityConfirm.courierDestination}</dd></div>

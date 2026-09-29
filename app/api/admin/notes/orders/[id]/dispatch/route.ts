@@ -8,11 +8,10 @@ import { canAdvanceOrder } from "@/lib/store/shipping/status";
 import { bookSelectedCourier, resolveBookingPackage, type SelectedCreated } from "@/lib/store/shipping/manualBook";
 import type { PackageLine } from "@/lib/store/shipping/autoFulfill";
 import {
-  aliasesForPin,
-  canonicalCityForPin,
   cityConfirmationView,
   classifyCourierDestination,
   normalizedCustomerPhone,
+  pinDestinationContext,
   shipmentQuoteAudit,
 } from "@/lib/store/shipping/destinationCheck";
 
@@ -137,7 +136,11 @@ async function decideCourierCity(orderId: string, action: "confirm_city" | "decl
     await release("blocked", "The ship-to address is incomplete.");
     return NextResponse.json({ ok: false, error: "The ship-to address is incomplete." }, { status: 400, headers: { "Cache-Control": "no-store" } });
   }
-  const { data: pinRow } = await db.from("store_pincode_cache").select("city,state").eq("pincode", address.pincode).maybeSingle();
+  const { data: pinRow } = await db.from("store_pincode_cache").select("city,district,state").eq("pincode", address.pincode).maybeSingle();
+  const pinContext = pinDestinationContext(
+    pinRow ? { ...pinRow, pincode: address.pincode } : null,
+    { pincode: address.pincode, state: address.state },
+  );
   const decision = classifyCourierDestination({
     order: { city: address.city, state: address.state, pincode: address.pincode },
     provider: {
@@ -145,11 +148,8 @@ async function decideCourierCity(orderId: string, action: "confirm_city" | "decl
       state: String(payload.provider_state || ""),
       pincode: String(payload.provider_pin || ""),
     },
-    canonicalCity: canonicalCityForPin(
-      pinRow ? { city: pinRow.city, state: pinRow.state, pincode: address.pincode } : null,
-      { pincode: address.pincode, state: address.state },
-    ),
-    aliases: aliasesForPin(address.pincode),
+    canonicalCity: pinContext.canonicalCity,
+    aliases: pinContext.aliases,
   });
   if (decision.verdict === "fail") {
     await release("blocked", "Unavailable — destination mismatch.");
@@ -315,12 +315,11 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   }
   const sentPhone = normalizedCustomerPhone(address.phone);
   if (!sentPhone) return fail(400, "A valid 10-digit phone is required before booking.");
-  const { data: pinRow } = await db.from("store_pincode_cache").select("city,state").eq("pincode", address.pincode).maybeSingle();
-  const canonicalCity = canonicalCityForPin(
-    pinRow ? { city: pinRow.city, state: pinRow.state, pincode: address.pincode } : null,
+  const { data: pinRow } = await db.from("store_pincode_cache").select("city,district,state").eq("pincode", address.pincode).maybeSingle();
+  const { canonicalCity, aliases: pinAliases } = pinDestinationContext(
+    pinRow ? { ...pinRow, pincode: address.pincode } : null,
     { pincode: address.pincode, state: address.state },
   );
-  const pinAliases = aliasesForPin(address.pincode);
   const product = (itemRows || []).map((it) => it.name_snapshot).filter(Boolean).join(", ").slice(0, 120) || "Printed notes";
   const attempt = (shipmentRows || []).length + 1;
 

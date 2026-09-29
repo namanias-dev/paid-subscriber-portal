@@ -35,17 +35,31 @@ export function normalizedCustomerPhone(phone: string | null | undefined): strin
   return ten.length === 10 ? ten : null;
 }
 
-export function canonicalCityForPin(
-  row: { pincode?: string | null; city?: string | null; state?: string | null } | null | undefined,
-  order: { pincode: string; state: string },
-): string | null {
+type PinCacheRow = { pincode?: string | null; city?: string | null; district?: string | null; state?: string | null };
+
+function pinRowMatches(row: PinCacheRow | null | undefined, order: { pincode: string; state: string }): boolean {
+  if (!row) return false;
+  const rowPin = String(row.pincode || order.pincode).trim();
+  if (rowPin !== order.pincode.trim()) return false;
+  const rowState = String(row.state || "").trim();
+  return Boolean(rowState) && normalizePlace(rowState) === normalizePlace(order.state);
+}
+
+export function canonicalCityForPin(row: PinCacheRow | null | undefined, order: { pincode: string; state: string }): string | null {
   const city = String(row?.city || "").trim();
-  if (!city) return null;
-  const rowPin = String(row?.pincode || order.pincode).trim();
-  if (rowPin !== order.pincode.trim()) return null;
-  const rowState = String(row?.state || "").trim();
-  if (!rowState || normalizePlace(rowState) !== normalizePlace(order.state)) return null;
+  if (!city || !pinRowMatches(row, order)) return null;
   return city;
+}
+
+/** City and district from the cache row for this PIN, plus the built-in aliases for that PIN. */
+export function pinDestinationContext(
+  row: PinCacheRow | null | undefined,
+  order: { pincode: string; state: string },
+): { canonicalCity: string | null; aliases: string[] } {
+  const aliases = aliasesForPin(order.pincode);
+  const district = pinRowMatches(row, order) ? String(row?.district || "").trim() : "";
+  if (district) aliases.push(district);
+  return { canonicalCity: canonicalCityForPin(row, order), aliases };
 }
 
 function containsPlace(left: string, right: string): boolean {
@@ -87,6 +101,7 @@ export function classifyCourierDestination(input: {
   if (sharesCanonical) return { verdict: "pass", reason: "expansion" };
 
   if (containsPlace(orderCity, providerCity)) return { verdict: "confirm", reason: "city" };
+  if (canonical && containsPlace(providerCity, canonical)) return { verdict: "confirm", reason: "city" };
   return { verdict: "fail", reason: "city" };
 }
 

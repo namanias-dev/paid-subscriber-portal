@@ -4,7 +4,7 @@ import { shipmentAlreadyActive } from "./dispatch";
 import { compareCourierRates } from "./compare";
 import { createProviderShipment, findShiprocketOrder, requestProviderPickup, cancelProviderShipment } from "./book";
 import { shippingWritesAuthorized } from "./config";
-import { aliasesForPin, canonicalCityForPin, normalizedCustomerPhone, shipmentQuoteAudit } from "./destinationCheck";
+import { normalizedCustomerPhone, pinDestinationContext, shipmentQuoteAudit } from "./destinationCheck";
 import { canAdvanceOrder } from "./status";
 import { fulfillCheapest, resolveAutoPackage, type CreatedCandidate, type FulfillCandidate } from "./autoFulfill";
 import { getFulfillmentSettings } from "../fulfillmentSettings";
@@ -103,12 +103,11 @@ export async function runAutoFulfillment(orderId: string): Promise<{ ok: boolean
     const { data: items } = await db.from("store_order_items").select("name_snapshot").eq("order_id", orderId).limit(4);
     const product = (items || []).map((it) => it.name_snapshot).filter(Boolean).join(", ").slice(0, 120) || "Printed notes";
     const attemptNo = { n: (ships || []).length };
-    const { data: pinRow } = await db.from("store_pincode_cache").select("city,state").eq("pincode", address.pincode).maybeSingle();
-    const canonicalCity = canonicalCityForPin(
-      pinRow ? { city: pinRow.city, state: pinRow.state, pincode: address.pincode } : null,
+    const { data: pinRow } = await db.from("store_pincode_cache").select("city,district,state").eq("pincode", address.pincode).maybeSingle();
+    const { canonicalCity, aliases: pinAliases } = pinDestinationContext(
+      pinRow ? { ...pinRow, pincode: address.pincode } : null,
       { pincode: address.pincode, state: address.state },
     );
-    const pinAliases = aliasesForPin(address.pincode);
     const result = await fulfillCheapest({
       quotes,
       excluded: settings.excluded,

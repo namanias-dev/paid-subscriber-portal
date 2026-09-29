@@ -27,7 +27,7 @@ Zero-shipping PIN for ₹1 gateway total: **`160099`** (serviceability fixture).
 
 Preview and production share one Supabase project. Do not insert a test order into either.
 
-`NOTES_STORE_LOCAL_FIXTURE=1` opens an in-memory store for a local process only. It stays off when `VERCEL` is set or `VERCEL_ENV=production`. The memory holds one order, `NIAS-N-2026-900001`, customer `Naman IAS Shipping Test`, Indian Polity Notes, PIN `110001`, payment provider `TEST_FIXTURE`. `POST /api/admin/notes/fixture` moves that order between scenes and does not call a courier.
+`NOTES_STORE_LOCAL_FIXTURE=1` opens an in-memory store for a local process only. It stays off when `VERCEL` is set or `VERCEL_ENV=production`. The memory holds one order, `NIAS-N-2026-900001`, customer `Naman IAS Shipping Test`, Indian Polity Notes, PIN `110001`, payment provider `TEST_FIXTURE`. `POST /api/admin/notes/fixture` moves that order between scenes and does not call a courier. Scene `city_confirm` puts it at PACKED with a Delhivery shipment waiting for COURIER ADDRESS CONFIRMATION (New Delhi vs Central Delhi, same PIN and state).
 
 ## Cleanup
 

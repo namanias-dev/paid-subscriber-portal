@@ -123,13 +123,15 @@ export interface ActionInput {
   openIssue?: boolean;
   paymentPending?: boolean;
   trackingStale?: boolean;
+  cityConfirm?: boolean;
 }
 
 export function actionRequiredReasons(input: ActionInput): string[] {
   const reasons: string[] = [];
   if (input.paymentPending || input.status === "PAYMENT_PENDING") reasons.push("Payment confirmation pending");
   if (input.addressMismatch) reasons.push("Address mismatch");
-  if ((input.status === "PACKED" || input.status === "READY_FOR_PICKUP") && !input.awb) reasons.push("No active shipment");
+  if (input.cityConfirm) reasons.push("Courier city needs confirmation");
+  else if ((input.status === "PACKED" || input.status === "READY_FOR_PICKUP") && !input.awb) reasons.push("No active shipment");
   if (input.pickupFailed) reasons.push("Pickup wasn't completed");
   if (input.status === "DELIVERY_FAILED" || input.status === "REATTEMPT_REQUESTED") reasons.push("Courier exception");
   if (input.openIssue) reasons.push("Customer issue open");

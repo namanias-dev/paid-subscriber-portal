@@ -369,6 +369,7 @@ export async function GET(req: Request) {
       addressMismatch: Boolean(ship?.address_mismatch),
       openIssue: Boolean(issue?.open),
       paymentPending: o.status === "PAYMENT_PENDING",
+      cityConfirm: !ship && cityConfirmByOrder.has(o.id),
     });
     return {
       ...safe,

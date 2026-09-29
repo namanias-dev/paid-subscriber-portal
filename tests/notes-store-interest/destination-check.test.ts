@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
 import { shipmentHandoffBlocked } from "../../lib/store/address";
-import { courierCostNotice, explicitCourierSelection, quoteWithinShippingNotice } from "../../lib/store/adminConsole";
+import { actionRequiredReasons, courierCostNotice, explicitCourierSelection, quoteWithinShippingNotice } from "../../lib/store/adminConsole";
 import { bookSelectedCourier } from "../../lib/store/shipping/manualBook";
 import {
   aliasesForPin,
@@ -11,6 +11,7 @@ import {
   classifyCourierDestination,
   evaluateProviderReadback,
   normalizedCustomerPhone,
+  pinDestinationContext,
   shipmentQuoteAudit,
 } from "../../lib/store/shipping/destinationCheck";
 
@@ -306,4 +307,185 @@ test("compare couriers keeps manual booking and the city confirmation copy", () 
   assert.match(dispatch, /decline_city/);
   assert.match(dispatch, /normalizedCustomerPhone/);
   assert.equal(dispatch.includes("runAutoFulfillment"), false);
+});
+
+test("the cached district for the same PIN and state is a trusted alias", () => {
+  const context = pinDestinationContext(
+    { pincode: "110085", city: "North Delhi", district: "North West Delhi", state: "Delhi" },
+    { pincode: "110085", state: "Delhi" },
+  );
+  assert.equal(context.canonicalCity, "North Delhi");
+  assert.ok(context.aliases.includes("North West Delhi"));
+  const central = pinDestinationContext(
+    { pincode: "110055", city: "Delhi", district: "Central Delhi", state: "Delhi" },
+    { pincode: "110055", state: "Delhi" },
+  );
+  const decision = classifyCourierDestination({
+    order: delhi,
+    provider: { city: "Central Delhi", state: "Delhi", pincode: "110055" },
+    ...central,
+  });
+  assert.equal(decision.verdict, "pass");
+  assert.equal(decision.reason, "alias");
+});
+
+test("a cached district from another state or PIN is ignored", () => {
+  const otherState = pinDestinationContext(
+    { pincode: "134109", city: "Panchkula", district: "Mohali", state: "Punjab" },
+    { pincode: "134109", state: "Haryana" },
+  );
+  assert.equal(otherState.canonicalCity, null);
+  assert.equal(otherState.aliases.includes("Mohali"), false);
+  const otherPin = pinDestinationContext(
+    { pincode: "110001", city: "New Delhi", district: "Central Delhi", state: "Delhi" },
+    { pincode: "110055", state: "Delhi" },
+  );
+  assert.deepEqual(otherPin, { canonicalCity: null, aliases: [] });
+});
+
+test("a provider city that names the PIN's own district asks for confirmation instead of cancelling", () => {
+  const decision = classifyCourierDestination({
+    order: { city: "Rohini", state: "Delhi", pincode: "110085" },
+    provider: { city: "Delhi", state: "Delhi", pincode: "110085" },
+    canonicalCity: "North West Delhi",
+  });
+  assert.equal(decision.verdict, "confirm");
+  const unrelated = classifyCourierDestination({
+    order: { city: "Rohini", state: "Delhi", pincode: "110085" },
+    provider: { city: "Gurugram", state: "Delhi", pincode: "110085" },
+    canonicalCity: "North West Delhi",
+  });
+  assert.equal(unrelated.verdict, "fail");
+});
+
+test("#1001 read-back with a different PIN and state is a hard mismatch for both providers", () => {
+  for (const provider of ["delhivery", "shiprocket"] as const) {
+    const decision = evaluateProviderReadback({
+      provider,
+      order: { city: "Panchkula", state: "Haryana", pincode: "134109" },
+      stored: { pin: "134111", city: "Panchkula", state: "Punjab", phoneStored: true, read: true },
+      sentPhone: "9810012345",
+      canonicalCity: "Panchkula",
+    });
+    assert.equal(decision.addressMismatch, true);
+    assert.equal(decision.cityConfirm, false);
+  }
+});
+
+test("Shiprocket still has to echo the phone, and a district alias passes there too", () => {
+  const blank = evaluateProviderReadback({
+    provider: "shiprocket",
+    order: delhi,
+    stored: { pin: "110055", city: "Delhi", state: "Delhi", phoneStored: false, read: true },
+    sentPhone: "9810012345",
+  });
+  assert.equal(blank.addressMismatch, true);
+  const district = evaluateProviderReadback({
+    provider: "shiprocket",
+    order: delhi,
+    stored: { pin: "110055", city: "Central Delhi", state: "Delhi", phoneStored: true, read: true },
+    sentPhone: "9810012345",
+    canonicalCity: "Central Delhi",
+  });
+  assert.deepEqual(district, { addressMismatch: false, cityConfirm: false, unverified: false });
+});
+
+test("an unread Delhivery destination fails closed and a blank phone does not skip city confirmation", () => {
+  const unread = evaluateProviderReadback({
+    provider: "delhivery",
+    order: delhi,
+    stored: { pin: null, city: null, state: null, phoneStored: false, read: false },
+    sentPhone: "9810012345",
+  });
+  assert.equal(unread.unverified, true);
+  const confirm = evaluateProviderReadback({
+    provider: "delhivery",
+    order: delhi,
+    stored: { pin: "110055", city: "Central Delhi", state: "Delhi", phoneStored: false, read: true },
+    sentPhone: "9810012345",
+  });
+  assert.deepEqual(confirm, { addressMismatch: false, cityConfirm: true, unverified: false });
+});
+
+test("a destination mismatch on the selected courier cancels it and books nothing else", async () => {
+  let creates = 0;
+  let cancels = 0;
+  let pickups = 0;
+  const result = await bookSelectedCourier({
+    selected: { provider: "delhivery", courier: "Delhivery Surface", service: "Surface", courierId: null, ratePaise: 4568 },
+    activeAwb: null,
+    create: async () => {
+      creates += 1;
+      return {
+        awb: "DL-WRONG",
+        labelUrl: null,
+        providerOrderId: null,
+        providerShipmentId: "DL-WRONG",
+        courierName: "Delhivery Surface",
+        addressMismatch: true,
+        unverified: false,
+        possessed: false,
+        storedPin: "134111",
+        storedCity: "Panchkula",
+        storedState: "Punjab",
+      };
+    },
+    cancel: async () => {
+      cancels += 1;
+      return true;
+    },
+    requestPickup: async () => {
+      pickups += 1;
+    },
+  });
+  assert.equal(creates, 1);
+  assert.equal(cancels, 1);
+  assert.equal(pickups, 0);
+  assert.equal(result.ok, false);
+  assert.equal(result.blocked, "BOOKING_FAILED");
+  assert.match(result.message, /Unavailable — destination mismatch/);
+});
+
+test("a blank Delhivery phone with a matching destination books the selected courier once", async () => {
+  let creates = 0;
+  let cancels = 0;
+  const result = await bookSelectedCourier({
+    selected: { provider: "delhivery", courier: "Delhivery Surface", service: "Surface", courierId: null, ratePaise: 4568 },
+    activeAwb: null,
+    create: async () => {
+      creates += 1;
+      const decision = evaluateProviderReadback({
+        provider: "delhivery",
+        order: delhi,
+        stored: { pin: "110055", city: "Delhi", state: "Delhi", phoneStored: false, read: true },
+        sentPhone: "9810012345",
+      });
+      return {
+        awb: "DL-OK",
+        labelUrl: null,
+        providerOrderId: null,
+        providerShipmentId: "DL-OK",
+        courierName: "Delhivery Surface",
+        addressMismatch: decision.addressMismatch,
+        cityConfirm: decision.cityConfirm,
+        unverified: decision.unverified,
+        possessed: false,
+        phoneStored: false,
+      };
+    },
+    cancel: async () => {
+      cancels += 1;
+      return true;
+    },
+    requestPickup: async () => undefined,
+  });
+  assert.equal(creates, 1);
+  assert.equal(cancels, 0);
+  assert.equal(result.ok, true);
+  assert.equal(result.awb, "DL-OK");
+});
+
+test("a pending city confirmation is the action reason instead of no active shipment", () => {
+  assert.deepEqual(actionRequiredReasons({ status: "PACKED", awb: null, cityConfirm: true }), ["Courier city needs confirmation"]);
+  assert.deepEqual(actionRequiredReasons({ status: "PACKED", awb: null }), ["No active shipment"]);
 });
