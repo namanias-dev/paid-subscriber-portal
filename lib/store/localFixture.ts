@@ -262,6 +262,7 @@ function ensureShipment(patch: Row): Row {
 const SCENES = [
   "reset",
   "packed_no_awb",
+  "city_confirm",
   "shipment_failed",
   "awb_label",
   "pickup_scheduled",
@@ -290,6 +291,31 @@ export function applyLocalFixtureScene(scene: string): { ok: true; scene: LocalF
   if (scene === "packed_no_awb") {
     order.status = "PACKED";
     ensureShipment({ ...pack, provider: "manual", status: "pending", awb: null });
+  } else if (scene === "city_confirm") {
+    order.status = "PACKED";
+    ensureShipment({
+      ...pack,
+      provider: "delhivery",
+      status: "created",
+      awb: LOCAL_FIXTURE_AWB,
+      courier_name: "Delhivery Surface",
+      provider_payload: {
+        test: true,
+        quoted_rate_paise: 4568,
+        booked_rate_paise: 4568,
+        rate_paise: 4568,
+        requested_pin: "110001",
+        requested_city: "New Delhi",
+        requested_state: "Delhi",
+        provider_pin: "110001",
+        provider_city: "Central Delhi",
+        provider_state: "Delhi",
+        phone_stored: false,
+        city_confirm_required: true,
+        destination_accepted: false,
+        do_not_handoff: true,
+      },
+    });
   } else if (scene === "shipment_failed") {
     order.status = "PACKED";
     ensureShipment({ ...pack, provider: "shiprocket", status: "failed", awb: null, last_error: "TEST: creation was not sent" });
@@ -505,6 +531,12 @@ class FixtureQuery {
 
   is(col: string, val: unknown): this {
     this.filters.push((row) => (val === null ? row[col] == null : row[col] === val));
+    return this;
+  }
+
+  not(col: string, op: string, val: unknown): this {
+    if (op === "is") this.filters.push((row) => (val === null ? row[col] != null : row[col] !== val));
+    else if (op === "eq") this.filters.push((row) => row[col] !== val);
     return this;
   }
 

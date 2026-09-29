@@ -28,8 +28,13 @@ export function customerShipTo(address: {
   return [address.line1, address.line2, address.city, address.state, address.pincode].filter(Boolean).join(", ");
 }
 
-function place(value: string): string {
+/** Lowercase letters only. "&" matches "and". Shared by checkout and courier checks. */
+export function normalizePlace(value: string): string {
   return value.toLowerCase().replace(/&/g, "and").replace(/[^a-z]/g, "");
+}
+
+function place(value: string): string {
+  return normalizePlace(value);
 }
 
 /** Ask the customer to confirm when the city or state does not match the PIN. Street lines are left untouched. */
@@ -66,15 +71,19 @@ export const SHIPMENT_ADDRESS_MISMATCH = "SHIPMENT_ADDRESS_MISMATCH";
 export function shipmentHandoffBlocked(payload: Record<string, unknown> | null | undefined): boolean {
   if (!payload) return false;
   if (payload.address_mismatch === true || payload.address_unverified === true || payload.do_not_handoff === true) return true;
+  if (payload.city_confirm_required === true && payload.destination_accepted !== true) return true;
   const requestedPin = String(payload.requested_pin || "").trim();
   const storedPin = String(payload.provider_pin || "").trim();
   if (requestedPin && storedPin && requestedPin !== storedPin) return true;
-  const requestedCity = String(payload.requested_city || "").trim();
-  const storedCity = String(payload.provider_city || "").trim();
-  if (requestedCity && storedCity && place(requestedCity) !== place(storedCity)) return true;
   const requestedState = String(payload.requested_state || "").trim();
   const storedState = String(payload.provider_state || "").trim();
   if (requestedState && storedState && place(requestedState) !== place(storedState)) return true;
+  const cityAccepted = payload.destination_accepted === true;
+  if (!cityAccepted) {
+    const requestedCity = String(payload.requested_city || "").trim();
+    const storedCity = String(payload.provider_city || "").trim();
+    if (requestedCity && storedCity && place(requestedCity) !== place(storedCity)) return true;
+  }
   return false;
 }
 

@@ -155,6 +155,40 @@ test("a timed-out create is reconciled and not repeated", async () => {
   assert.equal(result.accepted?.awb, "1411");
 });
 
+test("Delhivery blank phone with a sent number and a matching destination is accepted", async () => {
+  let creates = 0;
+  const result = await fulfillCheapest({
+    quotes: [
+      quote({ provider: "delhivery", courier: "Delhivery", ratePaise: 4568 }),
+      quote({ provider: "shiprocket", courier: "Xpressbees Surface", ratePaise: 9400, courierId: "51" }),
+    ],
+    canonical,
+    outboundPhoneValid: true,
+    create: async (candidate) => {
+      creates += 1;
+      return {
+        provider: candidate.provider,
+        providerOrderId: candidate.courier,
+        providerShipmentId: candidate.courier,
+        awb: "DL-BLANK",
+        courierName: candidate.courier,
+        labelUrl: null,
+        pin: "134109",
+        city: "Panchkula",
+        state: "Haryana",
+        phoneStored: false,
+        possessed: false,
+        unverified: false,
+      };
+    },
+    reconcile: async () => null,
+    cancel: async () => true,
+  });
+  assert.equal(creates, 1);
+  assert.equal(result.accepted?.courier, "Delhivery");
+  assert.equal(result.accepted?.awb, "DL-BLANK");
+});
+
 test("a missing phone cancels and tries the next courier", async () => {
   const result = await fulfillCheapest({
     quotes: [

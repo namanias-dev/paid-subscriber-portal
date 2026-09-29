@@ -34,7 +34,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
 
   const { data: shipmentRows } = await db
     .from("store_shipments")
-    .select("weight_grams,length_mm,width_mm,height_mm")
+    .select("weight_grams,length_mm,width_mm,height_mm,status,awb,courier_name,provider_payload")
     .eq("order_id", order.id)
     .order("created_at", { ascending: false });
   const saved = (shipmentRows || []).find((row) => row.weight_grams && row.length_mm && row.width_mm && row.height_mm) || null;
@@ -71,6 +71,25 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     declaredValuePaise: Number(order.total_paise) || 0,
   });
 
+  const pending = (shipmentRows || []).find((row) => {
+    const payload = row.provider_payload && typeof row.provider_payload === "object" ? row.provider_payload as Record<string, unknown> : null;
+    return row.status === "created" && row.awb && payload?.city_confirm_required === true && payload.destination_accepted !== true;
+  });
+  const pendingPayload = pending?.provider_payload && typeof pending.provider_payload === "object"
+    ? pending.provider_payload as Record<string, unknown>
+    : null;
+  const cityConfirmation = pending && pendingPayload?.provider_city && pendingPayload.requested_city
+    ? {
+        customer_destination: `${pendingPayload.requested_city}, ${pendingPayload.requested_state || ""} — ${pendingPayload.requested_pin || pin}`,
+        courier_destination: `${pendingPayload.provider_city}, ${pendingPayload.provider_state || ""} — ${pendingPayload.provider_pin || pendingPayload.requested_pin || pin}`,
+        pin: "MATCH",
+        state: "MATCH",
+        courier: pending.courier_name || "",
+        awb: pending.awb,
+        rate_paise: Number(pendingPayload.booked_rate_paise) || Number(pendingPayload.rate_paise) || null,
+      }
+    : null;
+
   return NextResponse.json(
     {
       ok: result.ok,
@@ -79,6 +98,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       pickup_postcode: result.pickupPostcode,
       writes_authorized: result.writesAuthorized,
       providers: result.providers,
+      city_confirmation: cityConfirmation,
       lowest: null,
       package: {
         weight_grams: pack.weightGrams,

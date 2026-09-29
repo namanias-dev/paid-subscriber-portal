@@ -4,6 +4,7 @@ import { shipmentAlreadyActive } from "./dispatch";
 import { compareCourierRates } from "./compare";
 import { createProviderShipment, findShiprocketOrder, requestProviderPickup, cancelProviderShipment } from "./book";
 import { shippingWritesAuthorized } from "./config";
+import { normalizedCustomerPhone, pinDestinationContext, shipmentQuoteAudit } from "./destinationCheck";
 import { canAdvanceOrder } from "./status";
 import { fulfillCheapest, resolveAutoPackage, type CreatedCandidate, type FulfillCandidate } from "./autoFulfill";
 import { getFulfillmentSettings } from "../fulfillmentSettings";
@@ -102,12 +103,20 @@ export async function runAutoFulfillment(orderId: string): Promise<{ ok: boolean
     const { data: items } = await db.from("store_order_items").select("name_snapshot").eq("order_id", orderId).limit(4);
     const product = (items || []).map((it) => it.name_snapshot).filter(Boolean).join(", ").slice(0, 120) || "Printed notes";
     const attemptNo = { n: (ships || []).length };
+    const { data: pinRow } = await db.from("store_pincode_cache").select("city,district,state").eq("pincode", address.pincode).maybeSingle();
+    const { canonicalCity, aliases: pinAliases } = pinDestinationContext(
+      pinRow ? { ...pinRow, pincode: address.pincode } : null,
+      { pincode: address.pincode, state: address.state },
+    );
     const result = await fulfillCheapest({
       quotes,
       excluded: settings.excluded,
       maxAttempts: settings.maxAttempts,
       canonical: { city: address.city, state: address.state, pincode: address.pincode },
-      create: (candidate) => createMapped(locked, address, pack!, product, candidate, ++attemptNo.n),
+      canonicalCity,
+      aliases: pinAliases,
+      outboundPhoneValid: normalizedCustomerPhone(address.phone) != null,
+      create: (candidate) => createMapped(locked, address, pack!, product, candidate, ++attemptNo.n, canonicalCity, pinAliases),
       reconcile: async (candidate) => {
         if (candidate.provider !== "shiprocket") return null;
         const found = await findShiprocketOrder(`${locked.order_no}-S${attemptNo.n}`);
@@ -192,8 +201,11 @@ async function createMapped(
   product: string,
   candidate: FulfillCandidate,
   attempt: number,
+  canonicalCity: string | null,
+  pinAliases: string[],
 ): Promise<CreatedCandidate> {
   const db = storeDb();
+  const sentPhone = normalizedCustomerPhone(address.phone) || "";
   const created = await createProviderShipment({
     provider: candidate.provider,
     courierId: candidate.courierId,
@@ -203,7 +215,9 @@ async function createMapped(
     pin: address.pincode,
     city: address.city,
     state: address.state,
-    phone: address.phone || "",
+    phone: sentPhone,
+    canonicalCity,
+    cityAliases: pinAliases,
     product,
     amountRupees: Math.round(Number(order.total_paise) || 0) / 100,
     weightGrams: pack.weightGrams,
@@ -227,7 +241,14 @@ async function createMapped(
         provider_payload: {
         attempt,
         package_source: pack.source || "PRODUCT_PROFILE",
-        rate_paise: candidate.ratePaise,
+        ...shipmentQuoteAudit({
+          ratePaise: candidate.ratePaise,
+          provider: created.provider,
+          courier: created.courierName || candidate.courier,
+          service: candidate.service,
+          selectedAt: new Date().toISOString(),
+          selectedBy: "auto",
+        }),
         label_url: created.labelUrl,
         provider_order_id: created.providerOrderId,
         requested_pin: address.pincode,
@@ -238,8 +259,10 @@ async function createMapped(
         provider_state: created.storedState || null,
         phone_stored: created.phoneStored === true,
         address_mismatch: created.addressMismatch === true,
+        city_confirm_required: created.cityConfirm === true,
+        destination_accepted: created.addressMismatch !== true && created.addressUnverified !== true && created.cityConfirm !== true,
         address_unverified: created.addressUnverified === true,
-        do_not_handoff: created.addressMismatch === true || created.addressUnverified === true || created.phoneStored === false,
+        do_not_handoff: created.addressMismatch === true || created.addressUnverified === true || created.cityConfirm === true || (created.provider === "shiprocket" && created.phoneStored === false),
       },
     });
     await db.from("store_order_events").insert({
