@@ -48,6 +48,7 @@ Implementation exists and automated isolation tests pass; a real Eazypay transac
 | [SECURITY_AND_PRIVACY.md](./SECURITY_AND_PRIVACY.md) | Access tokens, rate limits, PII |
 | [ADMIN_AND_FULFILMENT.md](./ADMIN_AND_FULFILMENT.md) | Queue, advance, ship |
 | [ANALYTICS_INTELLIGENCE.md](./ANALYTICS_INTELLIGENCE.md) | Admin analytics: subjects, cumulative sales, geography, booked shipping, anomalies |
+| [COURIER_QUOTE_HISTORY.md](./COURIER_QUOTE_HISTORY.md) | Saved courier comparisons, booking attempts, price history UI |
 | [DESIGN_AND_MOTION.md](./DESIGN_AND_MOTION.md) | Tokens + gold-standard reuse |
 | [ROUTES_AND_APIS.md](./ROUTES_AND_APIS.md) | Page + API inventory |
 | [FEATURE_FLAGS_AND_ENV.md](./FEATURE_FLAGS_AND_ENV.md) | Flag/env **names** only |

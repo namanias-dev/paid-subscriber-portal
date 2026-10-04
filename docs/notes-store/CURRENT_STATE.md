@@ -169,3 +169,15 @@ The booked-rate eligibility rule is now one function, `rateShipmentFor` in `lib/
 
 Production base was `f70cbc1`. Master-only work (Notes discount codes, the cookieless-view analytics fix, the mobile address-confirm scroll fix, counsellor no-auto-open) is still not on this production line and was not merged here.
 
+## Courier quote history (2026-10-04)
+
+Every Compare Couriers result is saved, as staff saw it, in `store_courier_quote_sessions` / `store_courier_quote_options` before it is shown. Every Book click is saved in `store_courier_booking_attempts` before the provider is called.
+
+- Booking accepts only a saved `quote_session_id` + `quote_option_id`. Courier and price come from the stored option.
+- Selections that are expired (15 min), ineligible, or made before a package/address change are refused with no provider call.
+- Order detail shows Courier price history. The Orders list shows "N options compared".
+- Orders booked earlier show "Historical quote list unavailable". Nothing was backfilled.
+- The existing lock, one-active-AWB, destination check, label, pickup and tracking paths are unchanged.
+
+Migration `2026-10-04-notes-store-courier-quote-history.sql` was applied to production on 2026-10-04: additive, RLS on, service role only. Release `be8bb64`. Details: `COURIER_QUOTE_HISTORY.md`.
+
