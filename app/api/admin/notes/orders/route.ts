@@ -20,6 +20,7 @@ import {
   shippingRateStats,
   type ShipmentRowLike,
 } from "@/lib/store/orderOps";
+import { historySummaries } from "@/lib/store/shipping/quoteHistory";
 
 export const dynamic = "force-dynamic";
 
@@ -393,6 +394,8 @@ export async function GET(req: Request) {
     }
   }
 
+  // Summary only (counts and booked-vs-cheapest). Full quote rows load on the order page.
+  const quoteSummaries = ids.length ? await historySummaries(db, ids) : new Map();
   let invoiceHeals = 0;
   const mapped = orders.map((o) => {
     const ship = shipByOrder.get(o.id) || null;
@@ -429,6 +432,10 @@ export async function GET(req: Request) {
       }),
       orderDeliveredAt: o.delivered_at,
     });
+    const quotes = quoteSummaries.get(o.id);
+    if (quotes) {
+      ops.quote_history = { sessions: quotes.sessions, options: quotes.lastOptionCount, cheapest_paise: quotes.cheapestPaise, premium_paise: quotes.premiumPaise };
+    }
     return {
       ...safe,
       marketing: orderMarketingSummary({

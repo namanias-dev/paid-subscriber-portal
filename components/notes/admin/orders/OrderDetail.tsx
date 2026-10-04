@@ -24,6 +24,7 @@ import { FulfillmentTimeline } from "./FulfillmentTimeline";
 import { showsFulfillmentTimeline, TIMELINE, timelineIndex } from "@/lib/store/opsBoard";
 import { staffAdvanceLabel } from "@/lib/store/stages";
 import ChangeDeliveryAddress from "./ChangeDeliveryAddress";
+import CourierPriceHistory from "./CourierPriceHistory";
 import { buildDeliveryGoogleMapsUrl, formatDeliveryAddress } from "@/lib/store/deliveryAddress";
 import type { OrderOps } from "@/lib/store/orderOpsDisplay";
 
@@ -660,6 +661,8 @@ export default function OrderDetail({
               </form>
             )}
           </section>
+
+          <CourierPriceHistory orderId={order.id} reloadKey={`${order.status}|${ship?.awb || ""}`} />
 
           {(order.past_shipments || []).length > 0 && (
             <section className="rounded-2xl bg-white p-4">

@@ -1,6 +1,7 @@
 /** Client-safe shapes and formatters for the admin orders operations summary. */
 import { formatAdminWhen, fulfillmentLabel } from "./adminConsole";
 import { formatPaise } from "./money";
+import { PREMIUM_NOTICE_PAISE } from "./adminConsole";
 import type { StageProgress } from "./opsBoard";
 
 export type PackageDisplaySource = "BOOKED_SHIPMENT" | "ORDER_PACKAGE" | "PRODUCT_PROFILE";
@@ -28,6 +29,8 @@ export interface OrderOps {
   latest_at: string | null;
   package: PackageDisplay | null;
   issue: string | null;
+  /** Saved courier comparisons for this order (summary only). Absent before history recording began. */
+  quote_history?: { sessions: number; options: number; cheapest_paise: number | null; premium_paise: number | null } | null;
 }
 
 export interface ShippingRateStats {
@@ -77,6 +80,17 @@ export interface OpsLines {
   /** A timestamp in the lines came from Notes tracking sync. */
   recorded: boolean;
   alert: "package" | "issue" | null;
+  /** Quiet comparison note, e.g. "4 options compared · cheapest ₹68.94". */
+  quotes?: string | null;
+}
+
+/** Shown only once a courier is on the order; the cheapest is named only when the gap is material. */
+export function quoteHistoryLine(ops: OrderOps | null | undefined): string | null {
+  const q = ops?.quote_history;
+  if (!q || !q.sessions || !ops?.courier) return null;
+  const compared = `${q.options} ${q.options === 1 ? "option" : "options"} compared`;
+  if (q.premium_paise != null && q.premium_paise >= PREMIUM_NOTICE_PAISE && q.cheapest_paise != null) return `${compared} · cheapest ${formatPaise(q.cheapest_paise)}`;
+  return compared;
 }
 
 export interface OpsLinesInput {
@@ -86,6 +100,12 @@ export interface OpsLinesInput {
 
 /** Status-strip copy for one paid order. Reads only the shared read model; never guesses. */
 export function opsLines(order: OpsLinesInput): OpsLines {
+  const lines = baseOpsLines(order);
+  const quotes = lines.alert ? null : quoteHistoryLine(order.ops);
+  return quotes ? { ...lines, quotes } : lines;
+}
+
+function baseOpsLines(order: OpsLinesInput): OpsLines {
   const ops = order.ops;
   const stage = ops?.stage;
   const plain = (headline: string, detail: string | null = null, recorded = false): OpsLines => ({ headline, rate: null, detail, recorded, alert: null });

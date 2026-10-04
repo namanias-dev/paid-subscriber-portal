@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { formatPaise } from "@/lib/store/money";
-import { courierCostNotice, explicitCourierSelection, presentCourierQuotes, providerDisplayName, quoteWithinShippingNotice, type AdminQuote, type PresentedQuote } from "@/lib/store/adminConsole";
+import { courierCostNotice, explicitCourierSelection, providerDisplayName, quoteWithinShippingNotice, selectionPremiumNotice, type AdminQuote, type PresentedQuote } from "@/lib/store/adminConsole";
 
 interface ProviderResult {
   provider: string;
@@ -18,6 +18,14 @@ interface RateResponse {
   writes_authorized: boolean;
   providers: ProviderResult[];
   package?: { weight_grams: number; length_cm: number; width_cm: number; height_cm: number } | null;
+  /** The saved comparison. Its rows are exactly what is shown and the only thing that can be booked. */
+  quote_session?: { id: string; expires_at: string; options: PresentedQuote[] } | null;
+}
+
+function requestKey(): string {
+  const c = typeof crypto !== "undefined" ? crypto : null;
+  if (c && "randomUUID" in c) return c.randomUUID();
+  return `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 12)}`;
 }
 
 interface Booked {
@@ -64,6 +72,9 @@ export default function CourierPicker({
   const [cityConfirm, setCityConfirm] = useState<CityConfirm | null>(null);
   const [blockedKeys, setBlockedKeys] = useState<Record<string, string>>({});
   const [packLabel, setPackLabel] = useState<string | null>(null);
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [stale, setStale] = useState(false);
+  const [round, setRound] = useState(0);
 
   useEffect(() => {
     if (!open) return;
@@ -73,20 +84,25 @@ export default function CourierPicker({
     setBlockedKeys({});
     setError(null);
     setSelectedKey(null);
+    setQuotes([]);
+    setSessionId(null);
+    setStale(false);
     setBusy(true);
+    // One key per Compare action: a repeated request returns the saved session without new provider calls.
+    const key = requestKey();
     void (async () => {
       try {
         const res = await fetch(`/api/admin/notes/orders/${orderId}/rates`, {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({}),
+          body: JSON.stringify({ request_key: key }),
         });
         const json = (await res.json()) as RateResponse & {
           city_confirmation?: { customer_destination: string; courier_destination: string; pin: string; state: string; courier: string; awb: string; rate_paise: number | null } | null;
         };
-        const flat = (json.providers || []).flatMap((provider) => provider.quotes || []);
-        const presented = presentCourierQuotes(flat);
+        const presented = json.quote_session?.options || [];
         setQuotes(presented);
+        setSessionId(json.quote_session?.id || null);
         setSelectedKey(explicitCourierSelection(null));
         const pending = json.city_confirmation;
         if (pending?.customer_destination && pending.courier_destination) {
@@ -109,11 +125,12 @@ export default function CourierPicker({
         setBusy(false);
       }
     })();
-  }, [open, orderId]);
+  }, [open, orderId, round]);
 
   const visible = quotes.map((quote) => blockedKeys[quote.key] ? { ...quote, eligible: false, unavailableReason: blockedKeys[quote.key] } : quote);
   const chosen = visible.find((quote) => quote.key === selectedKey && quote.eligible) || null;
   const cost = courierCostNotice(visible);
+  const premium = chosen ? selectionPremiumNotice(chosen, quotes) : null;
 
   function rememberCity(json: {
     customer_destination?: string;
@@ -189,23 +206,23 @@ export default function CourierPicker({
   }
 
   async function confirmBook() {
-    if (!chosen || !writesAuthorized || busy) return;
+    if (!chosen || !sessionId || !writesAuthorized || busy) return;
     setBusy(true);
     setError(null);
     try {
+      // Only the saved option is sent. The server takes courier and price from it.
       const res = await fetch(`/api/admin/notes/orders/${orderId}/dispatch`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          provider: chosen.provider,
-          courier_id: chosen.courierId || undefined,
-          courier: chosen.courier,
-          service: chosen.service,
-          rate_paise: chosen.ratePaise,
-        }),
+        body: JSON.stringify({ quote_session_id: sessionId, quote_option_id: chosen.key }),
       });
       const json = await res.json();
-      if (json.city_confirm) {
+      if (json.reason === "quote_expired" || json.reason === "quote_changed" || json.reason === "quote_required") {
+        setError(json.error || "Courier rates have expired. Compare Couriers again.");
+        setStale(true);
+        setConfirming(false);
+        setSelectedKey(null);
+      } else if (json.city_confirm) {
         rememberCity(json, chosen.courier, chosen.ratePaise);
       } else if (!json.ok) {
         setError(json.error || `${chosen.courier} could not be booked.`);
@@ -291,6 +308,7 @@ export default function CourierPicker({
             <p className="text-sm text-[var(--ca-navy)]">Book {chosen.courier} for {formatPaise(chosen.ratePaise)}?</p>
             <p className="mt-2 text-sm text-[var(--ca-navy)]/70">This will create the courier shipment, AWB, label and request pickup.</p>
             {!quoteWithinShippingNotice(chosen.ratePaise) && <p className="mt-2 text-sm text-[var(--ca-navy)]">Shipping exceeds ₹100</p>}
+            {premium && <p className="mt-2 rounded-xl bg-[#fbf8f3] px-3 py-2 text-sm text-[var(--ca-navy)]">{premium}</p>}
             <div className="mt-4 flex gap-2">
               <button type="button" onClick={() => setConfirming(false)} className="min-h-11 flex-1 rounded-full border text-sm font-semibold">Cancel</button>
               <button type="button" disabled={busy || !writesAuthorized} onClick={() => void confirmBook()} className="min-h-11 flex-1 rounded-full bg-[var(--ca-navy)] text-sm font-semibold text-white disabled:opacity-50">
@@ -360,9 +378,14 @@ export default function CourierPicker({
               </div>
             )}
             {error && <p className="mt-3 text-sm text-red-800">{error}</p>}
+            {stale && (
+              <button type="button" disabled={busy} onClick={() => setRound((n) => n + 1)} className="mt-3 min-h-11 w-full rounded-full border border-[var(--ca-navy)]/20 text-sm font-semibold text-[var(--ca-navy)]">
+                Compare couriers again
+              </button>
+            )}
             <button
               type="button"
-              disabled={busy || !chosen || !writesAuthorized}
+              disabled={busy || !chosen || !sessionId || stale || !writesAuthorized}
               onClick={() => setConfirming(true)}
               className="mt-4 min-h-12 w-full rounded-full bg-[var(--ca-navy)] text-sm font-semibold text-white disabled:opacity-50"
             >

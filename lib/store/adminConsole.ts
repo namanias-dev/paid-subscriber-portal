@@ -306,6 +306,19 @@ export function explicitCourierSelection(selectedKey: string | null | undefined)
   return key || null;
 }
 
+/** Book-step notice (not a block) when the chosen rate is this far above the cheapest eligible rate. */
+export const PREMIUM_NOTICE_PAISE = 2500;
+
+/** Neutral premium line for the confirm step, or null when the choice is within the notice band. */
+export function selectionPremiumNotice(chosen: { courier: string; ratePaise: number }, quotes: Array<{ courier: string; ratePaise: number; eligible: boolean }>): string | null {
+  const eligible = quotes.filter((q) => q.eligible && q.ratePaise > 0);
+  if (!eligible.length) return null;
+  const cheapest = eligible.reduce((best, q) => (q.ratePaise < best.ratePaise ? q : best));
+  const diff = chosen.ratePaise - cheapest.ratePaise;
+  if (diff < PREMIUM_NOTICE_PAISE) return null;
+  return `${chosen.courier} is ${formatPaise(diff)} more than the cheapest eligible option, ${cheapest.courier}.`;
+}
+
 /** Visual notice only. A rate above ₹100 can still be booked. */
 export const SHIPPING_NOTICE_PAISE = 10_000;
 

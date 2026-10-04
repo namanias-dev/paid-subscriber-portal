@@ -158,6 +158,9 @@ export function OpsStrip({ order, withPill = false, className = "" }: { order: O
           {lines.detail}
         </Swap>
       )}
+      {lines.quotes && (
+        <p className="truncate text-[11px] leading-4 text-ca-navy/45" title="Saved courier comparison. Open details for the full price history.">{lines.quotes}</p>
+      )}
       {stage && (
         <div className="mt-1 flex h-2.5 items-center">
           <FulfillmentTimeline status={order.status} compact fill />

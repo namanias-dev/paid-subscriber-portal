@@ -14,6 +14,16 @@ import {
   pinDestinationContext,
   shipmentQuoteAudit,
 } from "@/lib/store/shipping/destinationCheck";
+import {
+  QUOTE_REQUIRED,
+  bookingFailureCategory,
+  bookingFingerprint,
+  checkSelection,
+  finishAttempt,
+  finishCityAttempt,
+  loadSelection,
+  startAttempt,
+} from "@/lib/store/shipping/quoteHistory";
 
 export const dynamic = "force-dynamic";
 
@@ -127,6 +137,7 @@ async function decideCourierCity(orderId: string, action: "confirm_city" | "decl
       actor_name: actor?.name,
       payload_json: { result: "city_declined", awb_assigned: true },
     });
+    await finishCityAttempt(db, row.id, "FAILED");
     await release("waiting", null);
     return NextResponse.json({ ok: true, city_confirm: false, declined: true }, { headers: { "Cache-Control": "no-store" } });
   }
@@ -180,6 +191,7 @@ async function decideCourierCity(orderId: string, action: "confirm_city" | "decl
   }).eq("id", row.id);
   let orderStatus = order.status;
   if (pickupRequested && canAdvanceOrder(order.status, "PICKUP_SCHEDULED")) orderStatus = "PICKUP_SCHEDULED";
+  await finishCityAttempt(db, row.id, "BOOKED");
   await release(pickupRequested ? "ready" : "pickup_pending", pickupRequested ? null : pickupError, orderStatus);
   await db.from("store_order_events").insert({
     order_id: order.id,
@@ -222,26 +234,45 @@ export async function POST(req: Request, { params }: { params: { id: string } })
 
   const body = (await req.json().catch(() => null)) as {
     action?: string;
-    provider?: string;
-    courier_id?: string;
-    courier?: string;
-    service?: string;
-    rate_paise?: number;
+    quote_session_id?: string;
+    quote_option_id?: string;
   } | null;
   if (body?.action === "confirm_city" || body?.action === "decline_city") {
     return decideCourierCity(params.id, body.action);
   }
-  const provider = body?.provider === "shiprocket" || body?.provider === "delhivery" ? body.provider : null;
-  const courier = String(body?.courier || "").trim();
-  const service = String(body?.service || "").trim();
-  const ratePaise = Number(body?.rate_paise);
-  if (!provider || !courier || !Number.isFinite(ratePaise) || ratePaise <= 0) {
-    return NextResponse.json({ ok: false, error: "Select a courier before booking." }, { status: 400 });
+  // Only a saved quote option can be booked. Provider, courier, service and price come from it,
+  // never from the browser.
+  const sessionId = typeof body?.quote_session_id === "string" ? body.quote_session_id : "";
+  const optionId = typeof body?.quote_option_id === "string" ? body.quote_option_id : "";
+  if (!/^[0-9a-f-]{36}$/i.test(sessionId) || !/^[0-9a-f-]{36}$/i.test(optionId)) {
+    return NextResponse.json({ ok: false, error: QUOTE_REQUIRED, reason: "quote_required" }, { status: 400, headers: { "Cache-Control": "no-store" } });
   }
 
   const actor = await getActionActor();
   const db = storeDb();
   if (!db) return NextResponse.json({ ok: false, error: "unavailable" }, { status: 503 });
+
+  const selection = await loadSelection(db, sessionId, optionId);
+  const precheck = checkSelection({ orderId: params.id, session: selection.session, option: selection.option, now: new Date() });
+  if (!precheck.ok) {
+    if (precheck.category !== "QUOTE_NOT_FOUND" && selection.session && selection.option) {
+      await startAttempt(db, { session: selection.session, option: selection.option, actor, status: "BLOCKED", category: precheck.category, message: precheck.message });
+    }
+    return NextResponse.json(
+      { ok: false, error: precheck.message, reason: precheck.category === "RATE_EXPIRED" ? "quote_expired" : "quote_invalid" },
+      { status: 409, headers: { "Cache-Control": "no-store" } },
+    );
+  }
+  const quoteSession = selection.session!;
+  const quoteOption = selection.option!;
+  const provider = quoteOption.provider === "shiprocket" || quoteOption.provider === "delhivery" ? quoteOption.provider : null;
+  if (!provider) {
+    return NextResponse.json({ ok: false, error: "This courier option cannot be booked." }, { status: 409, headers: { "Cache-Control": "no-store" } });
+  }
+  const courier = quoteOption.courier_name;
+  const service = quoteOption.service_name || "";
+  const ratePaise = quoteOption.quoted_rate_paise;
+  const courierId = quoteOption.courier_id || null;
 
   const now = new Date().toISOString();
   const stale = new Date(Date.now() - LOCK_MS).toISOString();
@@ -323,19 +354,29 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   const product = (itemRows || []).map((it) => it.name_snapshot).filter(Boolean).join(", ").slice(0, 120) || "Printed notes";
   const attempt = (shipmentRows || []).length + 1;
 
+  const fresh = checkSelection({ orderId: order.id, session: quoteSession, option: quoteOption, now: new Date(), fingerprint: bookingFingerprint(pack, address) });
+  if (!fresh.ok) {
+    await startAttempt(db, { session: quoteSession, option: quoteOption, actor, status: "BLOCKED", category: fresh.category, message: fresh.message });
+    return fail(409, fresh.message, "waiting", fresh.category === "RATE_EXPIRED" ? "quote_expired" : "quote_changed");
+  }
+  // Recorded before the provider is called. If the record cannot be written, nothing is booked.
+  const bookingAttempt = await startAttempt(db, { session: quoteSession, option: quoteOption, actor });
+  if (!bookingAttempt) return fail(503, "The booking could not be recorded, so no courier was booked. Please retry.", "waiting");
+  const quoteLink = { quote_session_id: quoteSession.id, quote_option_id: quoteOption.id, booking_attempt_id: bookingAttempt.id };
+
   const result = await bookSelectedCourier({
     selected: {
       provider,
       courier,
       service: service || "Surface",
-      courierId: body?.courier_id || null,
+      courierId: courierId,
       ratePaise,
     },
     activeAwb: active?.awb || null,
     create: async () => {
       const created = await createProviderShipment({
         provider,
-        courierId: body?.courier_id || null,
+        courierId: courierId,
         orderNumber: `${order.order_no}-M${attempt}`,
         name: address.name || "Customer",
         address: [address.line1, address.line2].filter(Boolean).join(", "),
@@ -407,7 +448,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       providerState: result.providerState,
       pincode: address.pincode,
     });
-    await db.from("store_shipments").insert({
+    const { data: waiting } = await db.from("store_shipments").insert({
       order_id: order.id,
       provider,
       provider_shipment_id: result.providerShipmentId,
@@ -424,15 +465,17 @@ export async function POST(req: Request, { params }: { params: { id: string } })
         ...destinationPayload,
         label_url: result.labelUrl,
         provider_order_id: result.providerOrderId,
-        courier_id: body?.courier_id || null,
+        courier_id: courierId,
         selected_courier: courier,
         phone_stored: result.phoneStored === true,
         address_mismatch: false,
         city_confirm_required: true,
         destination_accepted: false,
         do_not_handoff: true,
+        ...quoteLink,
       },
-    });
+    }).select("id").maybeSingle();
+    await finishAttempt(db, bookingAttempt.id, { status: "CITY_CONFIRM", shipmentId: waiting?.id || null, awb: result.awb });
     await db.from("store_order_events").insert({
       order_id: order.id,
       event: "courier_selected",
@@ -462,9 +505,10 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   }
 
   if (!result.ok) {
+    let failedShipmentId: string | null = null;
     if (result.creates > 0) {
       const keep = result.blocked === "EXISTING_AWB" && result.awb;
-      await db.from("store_shipments").insert({
+      const { data: failedRow } = await db.from("store_shipments").insert({
         order_id: order.id,
         provider,
         provider_shipment_id: result.providerShipmentId,
@@ -485,9 +529,18 @@ export async function POST(req: Request, { params }: { params: { id: string } })
           destination_accepted: false,
           cancellation_reason: keep ? null : "CANCELLED / DO NOT USE",
           selected_courier: courier,
+          ...quoteLink,
         },
-      });
+      }).select("id").maybeSingle();
+      failedShipmentId = failedRow?.id || null;
     }
+    await finishAttempt(db, bookingAttempt.id, {
+      status: "FAILED",
+      category: bookingFailureCategory(result),
+      message: result.message,
+      shipmentId: failedShipmentId,
+      awb: result.awb || null,
+    });
     await db.from("store_order_events").insert({
       order_id: order.id,
       event: "courier_selected",
@@ -507,7 +560,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     pickupStatus = "requested";
   }
   const bookedAt = new Date().toISOString();
-  await db.from("store_shipments").insert({
+  const { data: bookedRow } = await db.from("store_shipments").insert({
     order_id: order.id,
     provider,
     provider_shipment_id: result.providerShipmentId,
@@ -525,7 +578,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       ...destinationPayload,
       label_url: result.labelUrl,
       provider_order_id: result.providerOrderId,
-      courier_id: body?.courier_id || null,
+      courier_id: courierId,
       selected_courier: courier,
       phone_stored: result.phoneStored === true,
       address_mismatch: false,
@@ -534,8 +587,10 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       do_not_handoff: false,
       pickup_date: pickupDate,
       pickup_status: pickupStatus,
+      ...quoteLink,
     },
-  });
+  }).select("id").maybeSingle();
+  await finishAttempt(db, bookingAttempt.id, { status: "BOOKED", shipmentId: bookedRow?.id || null, awb: result.awb });
 
   let orderStatus = order.status;
   if (result.pickupRequested && canAdvanceOrder(order.status, "PICKUP_SCHEDULED")) {
