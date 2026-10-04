@@ -241,6 +241,22 @@ export function buildOrderOps(input: {
 const RATE_STAGES = new Set(["PICKUP_SCHEDULED", "PICKED_UP", "IN_TRANSIT", "OUT_FOR_DELIVERY", "DELIVERED"]);
 
 /**
+ * The one shipment whose saved rate counts for an order: captured, non-QA,
+ * packed with a live booking or later, newest live AWB, destination accepted.
+ * Notes Orders and Notes Analytics both use this rule.
+ */
+export function rateShipmentFor<T extends ShipmentRowLike>(
+  order: { status: string; paid_at: string | null; qa?: boolean },
+  rowsNewestFirst: T[],
+): T | null {
+  if (order.qa || !isCapturedNotesOrder(order)) return null;
+  if (!RATE_STAGES.has(order.status) && !PACKED.has(order.status)) return null;
+  const live = liveShipment(rowsNewestFirst);
+  if (!live || awaitingCityConfirm(live)) return null;
+  return live;
+}
+
+/**
  * One current shipment per captured, non-QA order from pickup onward
  * (or packed with a live booking). Unknown rates are counted, not averaged.
  */
@@ -251,10 +267,8 @@ export function shippingRateStats(
   const rates: number[] = [];
   let unknown = 0;
   for (const order of orders) {
-    if (order.qa || !isCapturedNotesOrder(order)) continue;
-    if (!RATE_STAGES.has(order.status) && !PACKED.has(order.status)) continue;
-    const live = liveShipment(shipmentsByOrder.get(order.id) || []);
-    if (!live || awaitingCityConfirm(live)) continue;
+    const live = rateShipmentFor(order, shipmentsByOrder.get(order.id) || []);
+    if (!live) continue;
     const rate = savedCourierRatePaise(live.provider_payload);
     if (rate == null) unknown += 1;
     else rates.push(rate);

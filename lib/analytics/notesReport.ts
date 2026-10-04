@@ -37,7 +37,7 @@ const EVENT_NAMES = [
   "notes_purchase",
 ];
 
-type AdminDb = NonNullable<ReturnType<typeof getSupabaseAdmin>>;
+export type AdminDb = NonNullable<ReturnType<typeof getSupabaseAdmin>>;
 
 async function loadFacts(db: AdminDb, start: Date, end: Date, withItems: boolean): Promise<{ events: NotesEventRow[]; orders: NotesOrderFact[]; items: NotesItemFact[]; ok: boolean }> {
   const events: NotesEventRow[] = [];
@@ -75,7 +75,8 @@ async function loadFacts(db: AdminDb, start: Date, end: Date, withItems: boolean
   return { events, orders, items, ok };
 }
 
-async function selectIn(db: AdminDb, table: "store_order_items" | "store_invoices" | "store_addresses", column: string, ids: string[], columns: string): Promise<{ rows: Array<Record<string, unknown>>; ok: boolean }> {
+/** Batched `in` reads, 200 ids per request, up to four requests at a time. */
+export async function selectIn(db: AdminDb, table: "store_order_items" | "store_invoices" | "store_addresses", column: string, ids: string[], columns: string): Promise<{ rows: Array<Record<string, unknown>>; ok: boolean }> {
   const rows: Array<Record<string, unknown>> = [];
   const unique = [...new Set(ids.filter(Boolean))];
   const loose = db as unknown as {
@@ -85,11 +86,14 @@ async function selectIn(db: AdminDb, table: "store_order_items" | "store_invoice
       };
     };
   };
-  for (let index = 0; index < unique.length; index += 200) {
-    const slice = unique.slice(index, index + 200);
-    const { data, error } = await loose.from(table).select(columns).in(column, slice);
-    if (error) return { rows: [], ok: false };
-    rows.push(...((data || []) as Array<Record<string, unknown>>));
+  const slices: string[][] = [];
+  for (let index = 0; index < unique.length; index += 200) slices.push(unique.slice(index, index + 200));
+  for (let index = 0; index < slices.length; index += 4) {
+    const results = await Promise.all(slices.slice(index, index + 4).map((slice) => loose.from(table).select(columns).in(column, slice)));
+    for (const { data, error } of results) {
+      if (error) return { rows: [], ok: false };
+      rows.push(...((data || []) as Array<Record<string, unknown>>));
+    }
   }
   return { rows, ok: true };
 }
@@ -104,7 +108,7 @@ function placeOf(snapshot: unknown): { city: string | null; state: string | null
 }
 
 /** Delivery city comes from the invoice shipping snapshot, then the order ship-to. Courier hubs are not read. */
-async function loadDestinations(db: AdminDb, orders: NotesOrderFact[]): Promise<{ rows: NotesDestination[]; ok: boolean }> {
+export async function loadDestinations(db: AdminDb, orders: Array<Pick<NotesOrderFact, "id" | "shipping_address_id">>): Promise<{ rows: NotesDestination[]; ok: boolean }> {
   if (!orders.length) return { rows: [], ok: true };
   const ids = orders.map((order) => order.id);
   const invoices = await selectIn(db, "store_invoices", "order_id", ids, "order_id,shipping_snapshot");
@@ -138,8 +142,8 @@ async function loadDestinations(db: AdminDb, orders: NotesOrderFact[]): Promise<
   };
 }
 
-export async function loadNotesAnalytics(input: { key: NotesRangeKey; from?: string; to?: string }): Promise<NotesAnalyticsView> {
-  const now = new Date();
+export async function loadNotesAnalytics(input: { key: NotesRangeKey; from?: string; to?: string; now?: Date }): Promise<NotesAnalyticsView> {
+  const now = input.now || new Date();
   const bounds = notesRangeBounds(input.key, now, { from: input.from, to: input.to });
   const empty = aggregateNotesAnalytics([], [], []);
   const db = getSupabaseAdmin();

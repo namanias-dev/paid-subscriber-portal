@@ -174,11 +174,11 @@ function actor(event: NotesEventRow, index: number): string {
   return event.session_id || event.visitor_id || `anon:${index}`;
 }
 
-function grainFor(start: Date, end: Date): "hour" | "day" {
+export function grainFor(start: Date, end: Date): "hour" | "day" {
   return end.getTime() - start.getTime() <= 36 * 3600 * 1000 ? "hour" : "day";
 }
 
-function bucketKeys(start: Date, end: Date, grain: "hour" | "day", now: Date): string[] {
+export function bucketKeys(start: Date, end: Date, grain: "hour" | "day", now: Date): string[] {
   const cap = Math.min(end.getTime(), now.getTime());
   const keys: string[] = [];
   if (grain === "day") {
@@ -200,17 +200,17 @@ function bucketKeys(start: Date, end: Date, grain: "hour" | "day", now: Date): s
   return keys;
 }
 
-function pointKey(at: Date, grain: "hour" | "day"): string {
+export function pointKey(at: Date, grain: "hour" | "day"): string {
   return grain === "day" ? istDayKey(at) : `${istDayKey(at)}T${String(istHour(at)).padStart(2, "0")}`;
 }
 
-function pointLabel(key: string, grain: "hour" | "day"): string {
+export function pointLabel(key: string, grain: "hour" | "day"): string {
   if (grain === "day") return istDayLabel(key);
   const [day, hour] = key.split("T");
   return `${istDayLabel(day)} ${hourLabel(Number(hour))}`;
 }
 
-function pointAxis(key: string, grain: "hour" | "day"): string {
+export function pointAxis(key: string, grain: "hour" | "day"): string {
   if (grain === "day") return istDayLabel(key);
   const hour = Number(key.split("T")[1]);
   return hour % 4 === 0 ? hourLabel(hour) : "";

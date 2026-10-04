@@ -150,3 +150,22 @@ Read-only upgrade of `/admin/notes`. One row per customer (phone key, never name
 ## Orders mobile redesign (2026-09-29)
 
 Presentation only; the `/api/admin/notes/orders` read model, statuses, and actions are unchanged. Below 1024 px each customer is a card (`OrderCustomerCardMobile`); at 1024 px and up it is a dense row (`OrderCustomerRowDesktop`). Both live in `components/notes/admin/orders/CustomerViews.tsx`, read the same `customerView(order)`, and share the primitives in `OrderOpsCell.tsx`. The operation strip text comes from `opsLines` in `lib/store/orderOpsDisplay.ts` (stage headline, booked rate or "Rate unavailable", one detail line, and a next-step hint from `ISSUE_HINT` for each ACTION REQUIRED issue). A multi-order customer gets one card with a module per order; timelines are never merged. The timeline announces "Packed. Stage 4 of 9." (`stageProgress().ariaLabel`). Motion uses only `motion` / `AnimatePresence` / `useReducedMotion`, the framer APIs the root layout already ships, so public Notes routes keep their first-load size; reduced motion disables entry, halo, and slide. The Help launcher sits above any element marked `data-admin-bottom-bar` (the order detail action bar) and never auto-opens.
+
+## Analytics intelligence 2.0 (2026-10-03)
+
+Read-only upgrade of `/admin/notes/analytics` (Super Admin only). Full definitions are in `ANALYTICS_INTELLIGENCE.md`, and the spec is `analytics-intelligence-2.md`. Existing KPIs, AOV, funnel, acquisition, campaigns, products, content, checkout health, landings, devices, promotions, CTAs and checkout leads are unchanged.
+
+New sections:
+
+- **Commerce & fulfillment strip:** avg booked shipping for orders paid in the range, current Packed / Pickup / In transit / Out for delivery (linked to Orders filters), and today's picked up / shipped / delivered in IST.
+- **Subject performance:** subjects come from `store_products.subject`. Net product revenue uses integer-paise residual allocation and excludes customer shipping.
+- **Sales over time:** gains Picked up / Shipped / Delivered event metrics and a Cumulative mode. The cumulative end value equals the KPI.
+- **Geographic intelligence:** vendored CC BY 4.0 India SVG (lazy, admin-only), state ranking and table, state-scoped city ranking.
+- **Shipping intelligence:** avg / median / min / max, ≤ ₹100 share, distribution, by state, city, courier and provider, coverage, and a documented rate-anomaly rule (≥ 1.5 × peer median and ≥ ₹40, same state + weight band, national fallback, 3-peer minimum).
+
+The booked-rate eligibility rule is now one function, `rateShipmentFor` in `lib/store/orderOps.ts`, shared with the Notes Orders tile. Behaviour is unchanged.
+
+`loadNotesIntel` runs beside the existing loaders and fails to `null`, so only the new sections degrade. No migration. No writes. `tests/notes-store-analytics/` is now part of `npm test`.
+
+Production base was `f70cbc1`. Master-only work (Notes discount codes, the cookieless-view analytics fix, the mobile address-confirm scroll fix, counsellor no-auto-open) is still not on this production line and was not merged here.
+

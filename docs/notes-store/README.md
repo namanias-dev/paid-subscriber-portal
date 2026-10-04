@@ -47,6 +47,7 @@ Implementation exists and automated isolation tests pass; a real Eazypay transac
 | [PAYMENTS_EAZYPAY.md](./PAYMENTS_EAZYPAY.md) | Same merchant/return URL, Verify terminal |
 | [SECURITY_AND_PRIVACY.md](./SECURITY_AND_PRIVACY.md) | Access tokens, rate limits, PII |
 | [ADMIN_AND_FULFILMENT.md](./ADMIN_AND_FULFILMENT.md) | Queue, advance, ship |
+| [ANALYTICS_INTELLIGENCE.md](./ANALYTICS_INTELLIGENCE.md) | Admin analytics: subjects, cumulative sales, geography, booked shipping, anomalies |
 | [DESIGN_AND_MOTION.md](./DESIGN_AND_MOTION.md) | Tokens + gold-standard reuse |
 | [ROUTES_AND_APIS.md](./ROUTES_AND_APIS.md) | Page + API inventory |
 | [FEATURE_FLAGS_AND_ENV.md](./FEATURE_FLAGS_AND_ENV.md) | Flag/env **names** only |

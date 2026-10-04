@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { requireFreshSuperAdmin } from "@/lib/adminGuard";
 import NotesAnalytics from "@/components/notes/admin/NotesAnalytics";
 import { loadNotesAnalytics } from "@/lib/analytics/notesReport";
+import { loadNotesIntel } from "@/lib/analytics/notesIntelLoad";
 import { loadCheckoutLeadReport } from "@/lib/store/checkoutLeads";
 import { notesRangeBounds, type NotesRangeKey } from "@/lib/analytics/notesCommerce";
 
@@ -18,8 +19,13 @@ export default async function NotesAnalyticsPage({
 }) {
   if (!(await requireFreshSuperAdmin())) notFound();
   const key = (KEYS.has(searchParams.range || "") ? searchParams.range : "7d") as NotesRangeKey;
-  const bounds = notesRangeBounds(key, new Date(), { from: searchParams.from, to: searchParams.to });
-  const report = await loadNotesAnalytics({ key, from: searchParams.from, to: searchParams.to });
-  const leads = await loadCheckoutLeadReport(bounds.start, bounds.end);
-  return <NotesAnalytics report={report} range={key} label={bounds.label} leads={leads} />;
+  const now = new Date();
+  const bounds = notesRangeBounds(key, now, { from: searchParams.from, to: searchParams.to });
+  // Independent loads: intelligence failing returns null and leaves KPIs, sales and funnel intact.
+  const [report, leads, intel] = await Promise.all([
+    loadNotesAnalytics({ key, from: searchParams.from, to: searchParams.to, now }),
+    loadCheckoutLeadReport(bounds.start, bounds.end),
+    loadNotesIntel({ key, from: searchParams.from, to: searchParams.to, now }),
+  ]);
+  return <NotesAnalytics report={report} range={key} label={bounds.label} leads={leads} intel={intel} />;
 }
