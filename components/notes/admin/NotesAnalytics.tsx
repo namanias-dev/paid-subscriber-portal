@@ -219,6 +219,9 @@ export default function NotesAnalytics({
       <div className="mt-4">
         <CampaignLinkBuilder />
       </div>
+      {report.eventsCapped ? (
+        <p className="mt-3 text-xs font-semibold text-[#8a4b4b]">This range has more behaviour events than the dashboard reads at once. Visitor and funnel numbers are partial; choose a shorter range. Sales numbers are complete.</p>
+      ) : null}
       {report.excludedTestEvents > 0 && (
         <p className="mt-3 text-xs text-ca-navy/45">{report.excludedTestEvents} QA events were excluded from these numbers.</p>
       )}

@@ -16,6 +16,7 @@
     "release:smoke": "node scripts/release/release.mjs smoke",
     "release:prod": "node scripts/release/release.mjs prod",
     "release:verify": "node scripts/release/release.mjs verify",
+    "release:verify-data": "node --import tsx --import ./scripts/_react-cache-shim.mjs scripts/release/verify-data.ts",
     "release:rollback": "node scripts/release/release.mjs rollback"
   },
   "dependencies": {

@@ -73,5 +73,6 @@ See `docs/PRODUCTION_RELEASE.md`. For production feature tasks:
 - Start from the exact live SHA (`curl https://www.namanias.com/api/version`), not `master`. Keep live functionality, and do not merge unrelated master-only work.
 - Run `npm run release:check`, push, then `npm run release:smoke -- <preview url>`.
 - Ship with `npm run release:prod -- <preview url>`. It promotes the tested preview, verifies the live SHA, routes and logs, and rolls back automatically on a critical regression.
+- For data features, run `npm run release:verify-data -- <suite>` before and after promoting. It is read-only and goes through the Supabase CLI login. Never read or store the service-role key.
 - Stop for the user only for interactive logins (Vercel, Supabase, Cloudflare, GitHub) or a destructive migration.
 - Automated QA never pays, books couriers, advances real orders, or writes R2. Production checks are read-only.

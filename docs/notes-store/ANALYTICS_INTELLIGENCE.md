@@ -88,6 +88,7 @@ The tooltip and table show the peer interquartile range ("Typical ≤600 g Mahar
 - `loadNotesIntel` returns `null` on any failure. The commerce strip, subjects, geography and shipping sections then show local "unavailable" messages, and the existing city ranking falls back to its previous data. KPIs, sales and the funnel are unaffected.
 - Queries: paid orders paginated 1,000 at a time (cap 20,000), the product catalogue, bundle items, then order items and shipments in 200-id batches four at a time, plus destinations through the existing invoice/address loader. There are no per-order queries. Aggregation is server-side (`lib/analytics/notesIntel.ts`, pure and unit-tested). The browser receives aggregates only.
 - Indexes: `store_orders` (`paid_at`), `store_shipments_order_idx`, and `store_order_items` by `order_id` cover these reads. No migration was added. If order volume makes the all-time pool slow, the next step is an additive SQL RPC returning the same shapes.
+- Behaviour events are paged in full: an exact count, then 1,000-row pages read four at a time and ordered by (`occurred_at`, `event_id`), up to `MAX_NOTES_EVENTS` (100,000). The page shows a warning if a range exceeds that. Before 2026-10-04 the loader stopped at the newest 8,000 events, which halved 30-day Visitors and the funnel.
 - Range changes keep the current numbers on screen, dimmed, until the next range has loaded.
 
 ## Tests
