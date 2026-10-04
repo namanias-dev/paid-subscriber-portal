@@ -125,7 +125,8 @@ function deployment(idOrUrl) {
 async function prod(previewUrl) {
   if (!previewUrl) return fail("usage: release:prod -- <tested preview deployment url>");
   const before = await liveSha();
-  const current = sh("vercel", ["inspect", SITE, "--scope", SCOPE]).match(/id\s+(dpl_\w+)/)?.[1];
+  const current = deployment("www.namanias.com").id;
+  if (!current) return fail("could not resolve the live production deployment; not promoting without a rollback target");
   console.log(`rollback target ${current} (${before})`);
   const startedAt = new Date().toISOString();
   if (deployment(previewUrl).state !== "READY") return fail("candidate preview is not READY; not promoting");
