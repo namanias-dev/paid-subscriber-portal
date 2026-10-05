@@ -49,6 +49,7 @@ Implementation exists and automated isolation tests pass; a real Eazypay transac
 | [ADMIN_AND_FULFILMENT.md](./ADMIN_AND_FULFILMENT.md) | Queue, advance, ship |
 | [ANALYTICS_INTELLIGENCE.md](./ANALYTICS_INTELLIGENCE.md) | Admin analytics: subjects, cumulative sales, geography, booked shipping, anomalies |
 | [COURIER_QUOTE_HISTORY.md](./COURIER_QUOTE_HISTORY.md) | Saved courier comparisons, booking attempts, price history UI |
+| [ACADEMY_PICKUP.md](./ACADEMY_PICKUP.md) | Academy Pickup beside Delivery: checkout rules, lifecycle, staff SOP, invoice, analytics, flag and rollback |
 | [DESIGN_AND_MOTION.md](./DESIGN_AND_MOTION.md) | Tokens + gold-standard reuse |
 | [ROUTES_AND_APIS.md](./ROUTES_AND_APIS.md) | Page + API inventory |
 | [FEATURE_FLAGS_AND_ENV.md](./FEATURE_FLAGS_AND_ENV.md) | Flag/env **names** only |

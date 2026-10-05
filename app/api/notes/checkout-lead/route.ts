@@ -35,6 +35,8 @@ export async function POST(req: Request) {
     marketingConsent: body.marketing_consent === true,
     address: body.address && typeof body.address === "object" ? body.address : null,
     addressConfirmed: body.address_confirmed === true,
+    fulfillmentMethod: body.fulfillment_method === "ACADEMY_PICKUP" ? "ACADEMY_PICKUP" : body.fulfillment_method === "DELIVERY" ? "DELIVERY" : null,
+    pickupLocation: body.pickup_location && typeof body.pickup_location === "object" ? body.pickup_location : null,
   });
   return noStoreJson({ ok: true });
 }

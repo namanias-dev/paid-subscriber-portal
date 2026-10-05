@@ -122,6 +122,8 @@ export type EventName =
   | "notes_address_maps_opened"
   | "notes_address_confirmed"
   | "notes_address_edited_after_confirmation"
+  | "notes_fulfillment_selected"
+  | "notes_pickup_acknowledged"
   | "notes_address_validation_error"
   | "notes_order_address_changed"
   | "notes_order_address_rebooked"
@@ -262,6 +264,8 @@ export const CLIENT_ALLOWED_EVENTS: ReadonlySet<EventName> = new Set<EventName>(
   "notes_address_maps_opened",
   "notes_address_confirmed",
   "notes_address_edited_after_confirmation",
+  "notes_fulfillment_selected",
+  "notes_pickup_acknowledged",
   "notes_address_validation_error",
   "notes_checkout_api_error",
   "notes_shipping_quote_error",

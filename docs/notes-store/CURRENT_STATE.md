@@ -48,14 +48,15 @@
 | Logged-in order history | NOT BUILT | Guest track + token only |
 | Analytics store events | BUILT BUT HUMAN/EXTERNAL VERIFICATION PENDING | Attribution freeze at checkout; full event suite uneven |
 | Feature flags | BUILT AND AUTOMATED-VERIFIED | Preview override tests |
-| Production store | DISABLED | Must stay off until owner enables |
+| Production store | LIVE | `notes_store` enabled by the owner (recorded 2026-10-05: `enabled=true`, `scope=all`); the "disabled" entries below are the 2026-09-19 handoff snapshot |
+| Academy Pickup | SEE BELOW | Order-level fulfilment beside Delivery; `docs/notes-store/ACADEMY_PICKUP.md` |
 | Preview store enable | BUILT AND AUTOMATED-VERIFIED | `NOTES_STORE_PREVIEW_ENABLE` preview-only |
 | Playwright e2e | NOT BUILT | No Playwright in `package.json` |
 | Valid Lighthouse (store pages) | NOT BUILT | SSO login Lighthouse scores are **invalid** — do not cite as store scores |
 
 ## Explicit records
 
-1. **Production `notes_store` is disabled** (`enabled=false`, `kill_switch=false`, `scope=off` as of handoff verification).
+1. **Historical (2026-09-19):** production `notes_store` was disabled at handoff. **Superseded:** the owner has since enabled it; as of 2026-10-05 production reads `enabled=true`, `scope=all`, `kill_switch=false`.
 2. **Preview enable exists** via `NOTES_STORE_PREVIEW_ENABLE` and is **ignored when `VERCEL_ENV=production`**.
 3. **No real Eazypay transaction has been performed** for Notes Store validation.
 4. **Payment validation is deliberately deferred by owner.**
@@ -180,4 +181,18 @@ Every Compare Couriers result is saved, as staff saw it, in `store_courier_quote
 - The existing lock, one-active-AWB, destination check, label, pickup and tracking paths are unchanged.
 
 Migration `2026-10-04-notes-store-courier-quote-history.sql` was applied to production on 2026-10-04: additive, RLS on, service role only. Release `be8bb64`. Details: `COURIER_QUOTE_HISTORY.md`.
+
+## Academy Pickup (2026-10-05)
+
+Customers can choose **Delivery** or **Pick up from academy** (Naman Sharma IAS Academy, SCO 173–174, 2nd Floor, Sector 17C, Chandigarh) per order. Pickup orders charge ₹0 shipping and follow PROCESSING → PRINTING → READY_FOR_COLLECTION → COLLECTED. Staff use Mark ready for collection and Mark collected, and both record who did it. Courier, AWB, label, package and courier-pickup flows refuse pickup orders at every API entry point, in auto-fulfil and in database triggers. Full design, SOP and rollback rules: `ACADEMY_PICKUP.md`.
+
+| Item | Status | Notes |
+|------|--------|-------|
+| Migration `2026-10-05-notes-store-academy-pickup.sql` | APPLIED TO PRODUCTION | Additive; columns, status/method checks, freeze trigger, courier backstop triggers, issue categories, cart/lead columns, flag row (inserted disabled) |
+| Release A (compatibility) `5818c53` | LIVE then superseded by Release B | `dpl_9pY9kEogb8i3jU6nNng7PjF52e5Q`; SAFE_COMPATIBILITY target for rollback |
+| Release B (creation UI) | See `handoff-state.json` `academyPickup` | Cart/checkout chooser, pickup checkout, leads, events |
+| Flag `notes_store_academy_pickup` | See `handoff-state.json` | Creation only; existing pickup orders always operable |
+| Interim place of supply for pickup | PENDING CA CONFIRMATION | Customer PIN state; nil-rated lines only, taxable pickup refused before payment |
+| SMS for ready/collected | INERT | Hooks exist; no DLT template; staff notify by WhatsApp/call |
+| Real Eazypay pickup payment | NOT RUN BY AUTOMATION | Automated QA never pays; local E2E stubs the gateway |
 

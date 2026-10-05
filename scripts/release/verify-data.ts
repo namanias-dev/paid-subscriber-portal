@@ -167,7 +167,7 @@ async function notesAnalytics(range: NotesRangeKey) {
   check("delivery + pickup revenue = revenue", m.delivery.revenuePaise + m.pickup.revenuePaise === intel.cohort.revenuePaise);
   check("delivery + pickup units = paid units", m.delivery.units + m.pickup.units === intel.cohort.units);
   check("shipping coverage context counts delivery orders only", intel.shipping.paidOrders === m.delivery.orders, `${intel.shipping.paidOrders}`);
-  console.log(`  pickup ops: ready now ${intel.pickupOps.readyNow} · collected in range ${intel.pickupOps.collectedInRange} · oldest ready ${intel.pickupOps.oldestReadyMs ?? "—"} ms`);
+  console.log(`  pickup ops: ready now ${intel.pickupOps.readyNow} · collected in range ${intel.pickupOps.collectedInRange} · oldest ready ${intel.pickupOps.oldestReadyMs == null ? "—" : `${(intel.pickupOps.oldestReadyMs / 3_600_000).toFixed(1)} h`}`);
 
   console.log("\nFulfillment");
   console.log(`  events in range: picked up ${intel.fulfillmentTotals.pickedUp} · shipped ${intel.fulfillmentTotals.shipped} · delivered ${intel.fulfillmentTotals.delivered}`);

@@ -87,10 +87,33 @@ function blankTables(): void {
   }
 }
 
+/**
+ * PIN locations for checkout QA without calling India Post: a Chandigarh-area PIN, a
+ * Delhi PIN, and an island PIN whose zone is not serviceable for courier delivery
+ * (valid for Academy Pickup). 999999-style unknowns fall through to the live lookup.
+ */
+function seedLocations(): void {
+  const expires = new Date(Date.now() + 30 * 24 * 3600 * 1000).toISOString();
+  for (const [pincode, city, state] of [
+    ["160062", "S.A.S Nagar", "Punjab"],
+    ["160017", "Chandigarh", "Chandigarh"],
+    ["110001", "Central Delhi", "Delhi"],
+    ["744101", "South Andaman", "Andaman & Nicobar Islands"],
+  ]) {
+    rows("store_pincode_cache").push({ pincode, city, state, serviceable: true, source: "fixture", fetched_at: nowIso(), expires_at: expires });
+  }
+  rows("store_zones").push(
+    { pincode_prefix: "744", zone: "islands", label: "Islands (TEST)", transit_days_min: 8, transit_days_max: 12, shipping_paise: 19900, free_above_paise: null, serviceable: false },
+    { pincode_prefix: "16", zone: "local", label: "Tricity (TEST)", transit_days_min: 1, transit_days_max: 2, shipping_paise: 4900, free_above_paise: null, serviceable: true },
+    { pincode_prefix: "", zone: "national", label: "Rest of India", transit_days_min: 5, transit_days_max: 9, shipping_paise: 9900, free_above_paise: null, serviceable: true },
+  );
+}
+
 /** Replace memory with the single confirmed test order. */
 export function resetLocalFixture(): void {
   blankTables();
   const now = nowIso();
+  seedLocations();
   tables.get("store_customers")!.push({
     id: IDS.customer,
     name: "Naman IAS Shipping Test",
@@ -745,6 +768,22 @@ class FixtureQuery {
     return this;
   }
 
+  /** Insert, or replace the row with the same natural key (pincode, key or id). */
+  upsert(payload: Row): this {
+    const keyCol = ["pincode", "key", "id"].find((col) => payload[col] != null);
+    const table = rows(this.table);
+    const existing = keyCol ? table.find((row) => row[keyCol] === payload[keyCol]) : null;
+    if (existing) {
+      this.action = "update";
+      this.patch = payload;
+      this.filters.push((row) => row === existing);
+    } else {
+      this.action = "insert";
+      this.payload = payload;
+    }
+    return this;
+  }
+
   delete(): this {
     this.action = "delete";
     return this;
@@ -907,7 +946,12 @@ export function localFixtureClient() {
       return new FixtureQuery(table);
     },
     rpc(fn: string, args?: Record<string, unknown>) {
-      if (fn === "next_store_order_no") return Promise.resolve({ data: "NIAS-N-2026-900099", error: null });
+      if (fn === "next_store_order_no") {
+        // Derived from the shared tables: each dev route bundle has its own module state.
+        const used = rows("store_orders").map((row) => Number(String(row.order_no || "").match(/^NIAS-N-2026-9(\d{5})$/)?.[1] || 0)).filter((n) => n >= 800);
+        const next = Math.max(800, ...used) + 1;
+        return Promise.resolve({ data: `NIAS-N-2026-9${String(next).padStart(5, "0")}`, error: null });
+      }
       if (fn === "store_commit_reservations") return Promise.resolve({ data: 0, error: null });
       if (fn === "next_store_invoice_seq") {
         const namespace = String(args?.p_namespace || "test");

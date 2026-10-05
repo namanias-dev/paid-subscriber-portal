@@ -31,4 +31,15 @@ Dated accepted decisions. Do not silently reverse.
 | 2026-09-21 | Bundles stay in schema/admin; storefront merchandising gated by `notes_store_bundles` (off) | Re-enable later without a rewrite |
 | 2026-09-21 | Merchandised individual subjects sell at ₹2,999 incl. GST; ₹1 TEST-NOTES-POLITY-001 untouched | Canonical catalogue price; payment-test SKU preserved |
 
+| 2026-10-05 | **Academy Pickup is an order-level fulfilment method** (`DELIVERY` default, `ACADEMY_PICKUP`), frozen at INSERT by trigger | One order, one method; no post-payment switching in V1 |
+| 2026-10-05 | Pickup lifecycle uses its own statuses `READY_FOR_COLLECTION` → `COLLECTED`; courier statuses are refused for pickup by a DB check | Courier "pickup" (READY_FOR_PICKUP / PICKUP_SCHEDULED / PICKED_UP) means a courier collecting a parcel; UI relabels those "Courier pickup…", DB codes unchanged |
+| 2026-10-05 | Pickup customer location is an order snapshot (`customer_location_snapshot`: PIN, city, state), not a `store_addresses` row | Keeps `store_addresses.line1 NOT NULL` and every address consumer unchanged; no fake address |
+| 2026-10-05 | **Interim pickup place of supply = customer's own state from the server-normalized PIN, pending CA confirmation** | All Notes lines are nil-rated today, so no amount changes; taxable pickup lines are refused before payment until a policy is approved |
+| 2026-10-05 | Pickup location is server config (`CHD_17C`) checked by code + fingerprint and frozen on the order; postal PIN left unset | Browser never supplies academy data; invoice seller PIN 160030 untouched |
+| 2026-10-05 | No opening hours, SLA, OTP/QR, auto-cancel or admin method change in V1 | No promises we cannot keep; staff verify order number + registered mobile |
+| 2026-10-05 | `notes_store_academy_pickup` gates creation only | Existing pickup orders stay operable (track, invoice, capture, staff actions) when it is off |
+| 2026-10-05 | Two-stage release: Release A (`5818c53`) reads/operates pickup, Release B adds creation | After any pickup order exists, roll back to Release A or later, never pre-pickup |
+| 2026-10-05 | Courier isolation is enforced three times: route guard (`deliveryOnlyGuard`), auto-fulfil refusal, DB triggers on courier tables | A pickup order can never reach Shiprocket/Delhivery, AWB, courier pickup or tracking |
+| 2026-10-05 | Pickup checkout claims the cart conditionally before creating the order | At most one order per cart under double tap / two tabs |
+
 Canonical product requirements remain in `docs/notes-store-spec.md`.

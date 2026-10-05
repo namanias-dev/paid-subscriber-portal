@@ -115,8 +115,10 @@ export function isWidgetAllowedPath(pathname: string | null | undefined): boolea
   for (const pre of WIDGET_PRIVATE_PREFIXES) {
     if (p === pre || p.startsWith(`${pre}/`)) return false;
   }
-  // Checkout keeps the page focused. The counsellor launcher is hidden only here.
+  // Checkout keeps the page focused. The counsellor launcher is hidden only here:
+  // course enrolment checkout and the Notes checkout (its sticky pay bar sits there).
   if (isEnrollmentCheckoutPath(p)) return false;
+  if (p === "/notes/checkout") return false;
   return true;
 }
 

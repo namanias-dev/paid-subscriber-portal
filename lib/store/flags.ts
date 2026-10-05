@@ -30,7 +30,8 @@ export type StoreFlagKey =
   | "notes_store_qr_bonuses"
   | "notes_store_preorders"
   | "notes_store_bundles"
-  | "notes_store_auto_fulfillment";
+  | "notes_store_auto_fulfillment"
+  | "notes_store_academy_pickup";
 
 interface FlagRow {
   enabled: boolean;
