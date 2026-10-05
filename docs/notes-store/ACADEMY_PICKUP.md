@@ -76,6 +76,16 @@ Events `notes_fulfillment_selected` and `notes_pickup_acknowledged` carry only t
 - `notes_store_academy_pickup` gates **creation only**. Turning it off hides the chooser and refuses new pickup checkouts within about 20 s (flag memo). Existing pickup orders still track, invoice, capture and move through staff actions.
 - Release A (`5818c53`, `dpl_9pY9kEogb8i3jU6nNng7PjF52e5Q`) is the **safe compatibility** target. It reads and operates pickup orders but cannot create them. Once any pickup order exists, roll back to Release A or later, never to a pre-pickup SHA.
 - Read-only verifier: `npm run release:verify-data -- notes-pickup`.
+- Flag commands (`scripts/release/pickup-flag.mjs`, fixed SQL, no arguments, Supabase CLI login):
+  - `npm run release:pickup-status`: read-only. Shows:
+    - the flag row and the live SHA,
+    - whether the app resolves pickup ON,
+    - whether the active products are pickup-eligible,
+    - the pickup columns, constraints and triggers,
+    - the order count by method,
+    - whether the location config is valid.
+  - `npm run release:pickup-enable`: sets `enabled=true, scope='all'` on this one row, only when `kill_switch=false`. It refuses if the live app is not pickup-aware, the schema is incomplete, the location is invalid or an active product is taxable. It then reads the row back.
+  - `npm run release:pickup-disable`: sets `enabled=false` on this one row and reads it back. Use it first for any pickup-only problem. Do not roll the app back for that.
 
 ## Local QA
 

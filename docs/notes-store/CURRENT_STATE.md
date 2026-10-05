@@ -191,7 +191,7 @@ Customers can choose **Delivery** or **Pick up from academy** (Naman Sharma IAS 
 | Migration `2026-10-05-notes-store-academy-pickup.sql` | APPLIED TO PRODUCTION | Additive; columns, status/method checks, freeze trigger, courier backstop triggers, issue categories, cart/lead columns, flag row (inserted disabled) |
 | Release A (compatibility) `5818c53` | LIVE then superseded by Release B | `dpl_9pY9kEogb8i3jU6nNng7PjF52e5Q`; SAFE_COMPATIBILITY target for rollback |
 | Release B (creation UI) `f458f11` | LIVE | `dpl_9Bag72KP8FVxSghKLWn57sqzesEh`; cart/checkout chooser, pickup checkout, leads, events; verified with the flag off (delivery unchanged) |
-| Flag `notes_store_academy_pickup` | OFF — PENDING OWNER | Creation only. Enabling was blocked by the automation permission check; SQL in `handoff-state.json` `academyPickup.enableFlagSql`. Existing pickup orders always operable |
+| Flag `notes_store_academy_pickup` | ON (2026-10-05 13:10 UTC) | Creation only. Switch with `npm run release:pickup-status` / `release:pickup-enable` / `release:pickup-disable`. Existing pickup orders stay operable when off |
 | Interim place of supply for pickup | PENDING CA CONFIRMATION | Customer PIN state; nil-rated lines only, taxable pickup refused before payment |
 | SMS for ready/collected | INERT | Hooks exist; no DLT template; staff notify by WhatsApp/call |
 | Real Eazypay pickup payment | NOT RUN BY AUTOMATION | Automated QA never pays; local E2E stubs the gateway |

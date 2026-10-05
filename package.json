@@ -17,7 +17,10 @@
     "release:prod": "node scripts/release/release.mjs prod",
     "release:verify": "node scripts/release/release.mjs verify",
     "release:verify-data": "node --import tsx --import ./scripts/_react-cache-shim.mjs scripts/release/verify-data.ts",
-    "release:rollback": "node scripts/release/release.mjs rollback"
+    "release:rollback": "node scripts/release/release.mjs rollback",
+    "release:pickup-status": "node --import tsx scripts/release/pickup-flag.mjs status",
+    "release:pickup-enable": "node --import tsx scripts/release/pickup-flag.mjs enable",
+    "release:pickup-disable": "node --import tsx scripts/release/pickup-flag.mjs disable"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1075.0",

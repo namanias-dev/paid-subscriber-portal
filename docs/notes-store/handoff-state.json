@@ -66,7 +66,7 @@
     "migrationAppliedToProduction": true,
     "flag": "notes_store_academy_pickup",
     "flagGates": "creation_only",
-    "flagEnabled": false,
+    "flagEnabled": true,
     "locationCode": "CHD_17C",
     "releaseA": {
       "sha": "5818c5359ed2",
@@ -82,7 +82,12 @@
     "placeOfSupplyPickup": "interim_customer_pin_state_pending_ca",
     "smsReadyCollected": "inert_no_dlt_template",
     "realPaymentByAutomation": false,
-    "flagEnableStatus": "pending_owner: production flag write was denied by the auto-mode permission check; Release B is live with creation off",
-    "enableFlagSql": "update public.app_feature_flags set enabled = true, scope = 'all', updated_at = now() where key = 'notes_store_academy_pickup' and kill_switch = false;"
+    "flagEnableStatus": "enabled via npm run release:pickup-enable; read back enabled=true scope=all kill_switch=false; propagated in ~5 s",
+    "flagEnabledAt": "2026-10-05T13:10:01Z",
+    "flagCommands": {
+      "status": "npm run release:pickup-status",
+      "enable": "npm run release:pickup-enable",
+      "disable": "npm run release:pickup-disable"
+    }
   }
 }
