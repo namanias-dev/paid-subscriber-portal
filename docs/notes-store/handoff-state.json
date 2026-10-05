@@ -74,12 +74,15 @@
       "role": "SAFE_COMPATIBILITY_SHA"
     },
     "releaseB": {
-      "sha": null,
-      "deployment": null
+      "sha": "f458f117f34e",
+      "deployment": "dpl_9Bag72KP8FVxSghKLWn57sqzesEh",
+      "promotedAt": "2026-10-05"
     },
     "rollbackRule": "after any pickup order exists, roll back to Release A or later, never pre-pickup",
     "placeOfSupplyPickup": "interim_customer_pin_state_pending_ca",
     "smsReadyCollected": "inert_no_dlt_template",
-    "realPaymentByAutomation": false
+    "realPaymentByAutomation": false,
+    "flagEnableStatus": "pending_owner: production flag write was denied by the auto-mode permission check; Release B is live with creation off",
+    "enableFlagSql": "update public.app_feature_flags set enabled = true, scope = 'all', updated_at = now() where key = 'notes_store_academy_pickup' and kill_switch = false;"
   }
 }
