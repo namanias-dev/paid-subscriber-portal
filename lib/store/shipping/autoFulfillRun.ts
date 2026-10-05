@@ -8,6 +8,7 @@ import { normalizedCustomerPhone, pinDestinationContext, shipmentQuoteAudit } fr
 import { canAdvanceOrder } from "./status";
 import { fulfillCheapest, resolveAutoPackage, type CreatedCandidate, type FulfillCandidate } from "./autoFulfill";
 import { getFulfillmentSettings } from "../fulfillmentSettings";
+import { isAcademyPickup } from "../fulfillment";
 
 const LOCK_MS = 15 * 60 * 1000;
 
@@ -19,6 +20,9 @@ export async function runAutoFulfillment(orderId: string): Promise<{ ok: boolean
     return { ok: false, blocked: "AUTO_FULFILLMENT_OFF", awb: null };
   }
   if (!shippingWritesAuthorized()) return { ok: false, blocked: "SHIPPING_WRITES_OFF", awb: null };
+  // Academy Pickup orders never enter courier fulfilment, even if this runner is wired up later.
+  const { data: method } = await db.from("store_orders").select("fulfillment_method").eq("id", orderId).maybeSingle();
+  if (!method || isAcademyPickup(method)) return { ok: false, blocked: "ACADEMY_PICKUP", awb: null };
 
   const now = new Date().toISOString();
   const stale = new Date(Date.now() - LOCK_MS).toISOString();

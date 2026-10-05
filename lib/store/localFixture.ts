@@ -10,6 +10,7 @@
  * tracking routes already use, and it holds exactly one seeded test order.
  */
 import { hashStoreAccessToken } from "./accessToken";
+import { PICKUP_LOCATIONS, snapshotPickupLocation } from "./pickupLocation";
 
 export const LOCAL_FIXTURE_ORDER_NO = "NIAS-N-2026-900001";
 export const LOCAL_FIXTURE_ORDER_ID = "11111111-1111-4111-8111-111111111111";
@@ -308,6 +309,8 @@ function seedOpsBoard(): void {
     paid?: boolean;
     shipments?: Row[];
     deliveredAt?: string | null;
+    /** Academy Pickup fixture: no shipping address, ₹0 shipping, frozen location. */
+    pickup?: { readyHoursAgo?: number; collectedHoursAgo?: number; collectedBy?: string; token?: string };
   }) => {
     n += 1;
     const id = `b0000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
@@ -315,7 +318,11 @@ function seedOpsBoard(): void {
     const placed = new Date(Date.now() - spec.ageHours * 3_600_000).toISOString();
     const paid = spec.paid !== false;
     const subtotal = spec.items.length * 239920;
-    rows("store_addresses").push({ id: addressId, name: spec.name, phone: spec.phone, line1: "TEST desk", line2: null, city: spec.city, state: spec.state, pincode: "110001", landmark: null, delivery_instructions: "TEST FIXTURE" });
+    const pickup = spec.pickup || null;
+    const shipping = pickup ? 0 : 9900;
+    if (!pickup) rows("store_addresses").push({ id: addressId, name: spec.name, phone: spec.phone, line1: "TEST desk", line2: null, city: spec.city, state: spec.state, pincode: "110001", landmark: null, delivery_instructions: "TEST FIXTURE" });
+    const readyAt = pickup?.readyHoursAgo != null ? new Date(Date.now() - pickup.readyHoursAgo * 3_600_000).toISOString() : null;
+    const collectedAt = pickup?.collectedHoursAgo != null ? new Date(Date.now() - pickup.collectedHoursAgo * 3_600_000).toISOString() : null;
     rows("store_orders").push({
       id,
       order_no: `NIAS-N-2026-9${String(100 + n).padStart(5, "0")}`,
@@ -325,11 +332,19 @@ function seedOpsBoard(): void {
       phone: spec.phone,
       phone_key: phoneKey(spec.phone),
       email: null,
-      shipping_address_id: addressId,
+      shipping_address_id: pickup ? null : addressId,
       subtotal_paise: subtotal,
       discount_paise: 0,
-      shipping_paise: 9900,
-      total_paise: subtotal + 9900,
+      shipping_paise: shipping,
+      total_paise: subtotal + shipping,
+      fulfillment_method: pickup ? "ACADEMY_PICKUP" : "DELIVERY",
+      pickup_location_code: pickup ? "CHD_17C" : null,
+      pickup_location_snapshot: pickup ? snapshotPickupLocation(PICKUP_LOCATIONS.CHD_17C, new Date(placed)) : null,
+      pickup_acknowledged_at: pickup ? placed : null,
+      customer_location_snapshot: pickup ? { pincode: "160062", city: spec.city, state: spec.state, country: "IN", source: "fixture", captured_at: placed } : null,
+      ready_for_collection_at: readyAt,
+      collected_at: collectedAt,
+      tracking_token_hash: pickup?.token ? hashStoreAccessToken(pickup.token) : null,
       promo_code: null,
       discount_trace_json: null,
       internal_notes: "TEST FIXTURE. Ops board.",
@@ -355,9 +370,11 @@ function seedOpsBoard(): void {
       });
     });
     if (paid) {
-      rows("store_order_payments").push({ id: `e0000000-0000-4000-8000-${String(n).padStart(12, "0")}`, order_id: id, provider: "TEST_FIXTURE", status: "CAPTURED", amount_paise: subtotal + 9900, created_at: placed });
+      rows("store_order_payments").push({ id: `e0000000-0000-4000-8000-${String(n).padStart(12, "0")}`, order_id: id, provider: "TEST_FIXTURE", status: "CAPTURED", amount_paise: subtotal + shipping, created_at: placed });
       rows("store_invoices").push({ id: `f0000000-0000-4000-8000-${String(n).padStart(12, "0")}`, order_id: id, status: "READY" });
     }
+    if (readyAt) rows("store_order_events").push({ id: `ea000000-0000-4000-8000-${String(n).padStart(12, "0")}`, order_id: id, event: "ready_for_collection", from_status: "PRINTING", to_status: "READY_FOR_COLLECTION", actor_type: "admin", actor_name: "TEST Staff Ravi", created_at: readyAt });
+    if (collectedAt) rows("store_order_events").push({ id: `eb000000-0000-4000-8000-${String(n).padStart(12, "0")}`, order_id: id, event: "collected", from_status: "READY_FOR_COLLECTION", to_status: "COLLECTED", actor_type: "admin", actor_name: pickup?.collectedBy || "TEST Staff", created_at: collectedAt });
     (spec.shipments || []).forEach((shipment, index) => {
       rows("store_shipments").push({
         id: `90000000-0000-4000-8000-${String(n * 10 + index).padStart(12, "0")}`,
@@ -492,7 +509,13 @@ function seedOpsBoard(): void {
     items: ["polity"],
     ageHours: 8,
     shipments: [{ provider: "delhivery", courier_name: "Delhivery Surface", status: "created", provider_payload: { rate_paise: 4568, city_confirm_required: true, destination_accepted: false, requested_city: "New Delhi", requested_state: "Delhi", requested_pin: "110001", provider_city: "Central Delhi", provider_state: "Delhi", provider_pin: "110001" } }],
-  });
+  });  // Academy Pickup: one order per collection rung, an aged ready order and a mixed-method customer.
+  add({ name: "TEST P Pickup preparing", phone: "9000000121", status: "PROCESSING", city: "Mohali", state: "Punjab", items: ["polity"], ageHours: 2, pickup: { token: "fixture-pickup-preparing" } });
+  add({ name: "TEST P Pickup printing", phone: "9000000122", status: "PRINTING", city: "Chandigarh", state: "Chandigarh", items: ["economy"], ageHours: 6, pickup: {} });
+  add({ name: "TEST P Pickup ready", phone: "9000000123", status: "READY_FOR_COLLECTION", city: "Panchkula", state: "Haryana", items: ["polity", "economy"], ageHours: 30, pickup: { readyHoursAgo: 4, token: "fixture-pickup-ready" } });
+  add({ name: "TEST P Pickup waiting", phone: "9000000124", status: "READY_FOR_COLLECTION", city: "Zirakpur", state: "Punjab", items: ["polity"], ageHours: 120, pickup: { readyHoursAgo: 80 } });
+  add({ name: "TEST P Pickup collected", phone: "9000000125", status: "COLLECTED", city: "Chandigarh", state: "Chandigarh", items: ["economy"], ageHours: 70, pickup: { readyHoursAgo: 30, collectedHoursAgo: 3, collectedBy: "TEST Staff Abhishek", token: "fixture-pickup-collected" } });
+  add({ name: "TEST M Kiran Kumar", phone: "9000000113", status: "READY_FOR_COLLECTION", city: "Chandigarh", state: "Chandigarh", items: ["polity"], ageHours: 26, pickup: { readyHoursAgo: 26 } });
 }
 
 export type LocalFixtureScene = (typeof SCENES)[number];

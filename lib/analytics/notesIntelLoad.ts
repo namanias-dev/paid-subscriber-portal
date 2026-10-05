@@ -12,7 +12,7 @@ import { loadDestinations, type AdminDb } from "./notesReport";
 import { buildNotesIntel, type IntelBundleItem, type IntelItem, type IntelOrder, type IntelProduct, type IntelShipment, type NotesIntel } from "./notesIntel";
 
 export const ORDER_COLUMNS =
-  "id,order_no,status,total_paise,shipping_paise,discount_paise,paid_at,shipped_at,delivered_at,shipping_address_id,promo_code,attribution_source,attribution_json";
+  "id,order_no,status,total_paise,shipping_paise,discount_paise,paid_at,shipped_at,delivered_at,shipping_address_id,promo_code,attribution_source,attribution_json,fulfillment_method,ready_for_collection_at,collected_at,customer_location_snapshot";
 export const MAX_ORDERS = 20000;
 
 /** Statuses that can carry a booked shipment or fulfillment event. */

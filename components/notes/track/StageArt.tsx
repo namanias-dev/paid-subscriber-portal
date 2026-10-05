@@ -2,9 +2,10 @@
 
 import { motion, useReducedMotion } from "framer-motion";
 import type { TrackStepId } from "@/lib/store/trackingView";
+import type { PickupStepId } from "@/lib/store/pickupTracking";
 
 /** Small vector for the current customer stage. Completed and future stages stay still. */
-export function StageArt({ step, active }: { step: TrackStepId; active: boolean }) {
+export function StageArt({ step, active }: { step: TrackStepId | PickupStepId; active: boolean }) {
   const reduce = useReducedMotion();
   const loop = active && !reduce;
   return (
@@ -23,7 +24,8 @@ export function StageArt({ step, active }: { step: TrackStepId; active: boolean 
           <motion.rect x="22" width="20" height="8" fill="var(--ca-gold)" animate={loop ? { y: [10, 28] } : { y: 18 }} transition={{ duration: 2.8, repeat: Infinity, repeatDelay: 0.6 }} />
         </>
       )}
-      {step === "packed" && <path d="M16 20h32l-4 14H20z" fill="none" stroke="currentColor" strokeWidth="1.5" />}
+      {(step === "packed" || step === "ready") && <path d="M16 20h32l-4 14H20z" fill="none" stroke="currentColor" strokeWidth="1.5" />}
+      {step === "ready" && <circle cx="56" cy="14" r="3" fill="none" stroke="var(--ca-gold-dark)" />}
       {(step === "pickup" || step === "shipped" || step === "in_transit" || step === "out_for_delivery") && (
         <motion.g animate={loop && (step === "shipped" || step === "in_transit") ? { x: [0, 10, 0] } : undefined} transition={{ duration: 3.2, repeat: Infinity }}>
           <path d="M8 28h28l6-8h10v8h4" fill="none" stroke="currentColor" strokeWidth="1.5" />
@@ -32,7 +34,7 @@ export function StageArt({ step, active }: { step: TrackStepId; active: boolean 
         </motion.g>
       )}
       {step === "out_for_delivery" && <circle cx="58" cy="16" r="3" fill="none" stroke="var(--ca-gold-dark)" />}
-      {step === "delivered" && <path d="M24 26l6 6 14-16" fill="none" stroke="currentColor" strokeWidth="1.8" />}
+      {(step === "delivered" || step === "collected") && <path d="M24 26l6 6 14-16" fill="none" stroke="currentColor" strokeWidth="1.8" />}
     </svg>
   );
 }

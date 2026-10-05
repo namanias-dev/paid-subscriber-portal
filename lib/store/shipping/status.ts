@@ -50,6 +50,7 @@ const ORDER_RANK: Record<string, number> = {
   QUALITY_CHECK: 50,
   READY_TO_PACK: 60,
   PACKED: 70,
+  READY_FOR_COLLECTION: 70,
   READY_FOR_PICKUP: 80,
   PICKUP_SCHEDULED: 90,
   PICKED_UP: 100,
@@ -61,6 +62,7 @@ const ORDER_RANK: Record<string, number> = {
   RTO_IN_TRANSIT: 190,
   RTO_DELIVERED: 200,
   DELIVERED: 200,
+  COLLECTED: 200,
   CANCEL_REQUESTED: 200,
   CANCELLED: 200,
   RETURN_REQUESTED: 200,
@@ -72,6 +74,7 @@ const ORDER_RANK: Record<string, number> = {
 
 const TERMINAL_ORDER = new Set([
   "DELIVERED",
+  "COLLECTED",
   "CANCELLED",
   "RTO_DELIVERED",
   "REFUNDED",

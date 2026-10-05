@@ -1,4 +1,5 @@
 import type { CustomerStage } from "./projection";
+import type { FulfillmentMethod } from "./fulfillment";
 
 export const ISSUE_CATEGORIES = [
   "ADDRESS_ISSUE",
@@ -9,6 +10,11 @@ export const ISSUE_CATEGORIES = [
   "DAMAGE_ISSUE",
   "UPDATE_REQUEST",
   "OTHER",
+  // Academy Pickup
+  "NOT_READY_YET",
+  "CANNOT_COLLECT",
+  "MISSING_OR_WRONG",
+  "INVOICE_PAYMENT",
 ] as const;
 
 export type IssueCategory = (typeof ISSUE_CATEGORIES)[number];
@@ -21,12 +27,16 @@ export const OPEN_ISSUE_STATUSES: IssueStatus[] = ["OPEN", "IN_REVIEW", "WAITING
 const CATEGORY_LABEL: Record<IssueCategory, string> = {
   ADDRESS_ISSUE: "Address issue",
   DELIVERY_DELAY: "Delivery delayed",
-  PICKUP_ISSUE: "Pickup not done",
+  PICKUP_ISSUE: "Courier pickup not done",
   TRACKING_ISSUE: "Tracking problem",
   STATUS_MISMATCH: "Wrong status shown",
   DAMAGE_ISSUE: "Package damaged",
   UPDATE_REQUEST: "Update phone or address",
   OTHER: "Something else",
+  NOT_READY_YET: "Notes not ready yet",
+  CANNOT_COLLECT: "Can't come to collect",
+  MISSING_OR_WRONG: "Something missing or wrong",
+  INVOICE_PAYMENT: "Invoice or payment question",
 };
 
 const STATUS_LABEL: Record<IssueStatus, string> = {
@@ -84,8 +94,15 @@ export function issueNextStep(status: string): string {
   return issueStatusAllowed(status) ? STATUS_NEXT[status] : STATUS_NEXT.OPEN;
 }
 
+/** Academy Pickup orders never offer courier, address or tracking categories. */
+const PICKUP_CATEGORIES: IssueCategory[] = ["NOT_READY_YET", "CANNOT_COLLECT", "MISSING_OR_WRONG", "INVOICE_PAYMENT", "UPDATE_REQUEST", "OTHER"];
+
 /** Categories that make sense for the stage the student is looking at. */
-export function categoriesForStage(stage: CustomerStage): IssueCategory[] {
+export function categoriesForStage(stage: CustomerStage, method: FulfillmentMethod = "DELIVERY"): IssueCategory[] {
+  if (method === "ACADEMY_PICKUP") {
+    if (stage === "collected") return ["MISSING_OR_WRONG", "INVOICE_PAYMENT", "UPDATE_REQUEST", "OTHER"];
+    return PICKUP_CATEGORIES;
+  }
   const base: IssueCategory[] = ["ADDRESS_ISSUE", "UPDATE_REQUEST", "STATUS_MISMATCH", "TRACKING_ISSUE", "OTHER"];
   if (stage === "packed" || stage === "confirmed" || stage === "preparing" || stage === "printing" || stage === "pending") {
     return ["PICKUP_ISSUE", "ADDRESS_ISSUE", "UPDATE_REQUEST", "STATUS_MISMATCH", "TRACKING_ISSUE", "OTHER"];

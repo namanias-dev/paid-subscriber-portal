@@ -6,6 +6,7 @@ import { AlertTriangle, ChevronRight, CircleCheck, Clock3, Package } from "lucid
 import { fulfillmentLabel, fulfillmentTone, invoiceStatusLabel, showAdminViewInvoice, type BadgeTone } from "@/lib/store/adminConsole";
 import { formatPackageDims, formatPackageWeight, opsLines, PACKAGE_SOURCE_LABEL, type OrderOps } from "@/lib/store/orderOpsDisplay";
 import { FulfillmentTimeline } from "./FulfillmentTimeline";
+import { METHOD_BADGE, type FulfillmentMethod } from "@/lib/store/fulfillment";
 import { ViewInvoiceButton } from "./InvoiceActions";
 
 export interface OpsOrder {
@@ -34,7 +35,30 @@ const STAGE_STYLE: Record<string, StageStyle> = {
   transit: { pill: "bg-blue-50 text-blue-900 ring-blue-200/80", strip: "bg-blue-50/70", accent: "bg-blue-700/75" },
   delivery: { pill: "bg-[var(--ca-navy)] text-white ring-[var(--ca-navy)]", strip: "bg-ca-navy/[0.06]", accent: "bg-[var(--ca-navy)]" },
   delivered: { pill: "bg-emerald-50 text-emerald-900 ring-emerald-200/80", strip: "bg-emerald-50/70", accent: "bg-emerald-600/80" },
+  // Academy Pickup rungs
+  ready: {
+    pill: "bg-[rgba(212,175,55,0.15)] text-[var(--ca-gold-dark)] ring-[rgba(212,175,55,0.4)]",
+    strip: "bg-[rgba(212,175,55,0.09)]",
+    accent: "bg-[var(--ca-gold)]",
+  },
+  collected: { pill: "bg-emerald-50 text-emerald-900 ring-emerald-200/80", strip: "bg-emerald-50/70", accent: "bg-emerald-600/80" },
 };
+
+const AGE_TEXT = { neutral: "text-ca-navy/60", amber: "text-amber-900", strong: "font-semibold text-amber-950" } as const;
+
+/** Order-level fulfilment method. Quiet for Delivery, gold for Academy Pickup; never louder than the stage. */
+export function MethodBadge({ method }: { method?: FulfillmentMethod | null }) {
+  const pickup = method === "ACADEMY_PICKUP";
+  return (
+    <span
+      className={`inline-flex w-fit shrink-0 items-center whitespace-nowrap rounded px-1.5 py-[1px] text-[10px] font-semibold tracking-[0.08em] ring-1 ring-inset ${
+        pickup ? "bg-[rgba(212,175,55,0.12)] text-[var(--ca-gold-dark)] ring-[rgba(212,175,55,0.35)]" : "bg-transparent text-ca-navy/50 ring-ca-navy/15"
+      }`}
+    >
+      {METHOD_BADGE[pickup ? "ACADEMY_PICKUP" : "DELIVERY"]}
+    </span>
+  );
+}
 
 const ALERT_STYLE = {
   package: { strip: "bg-amber-50 ring-1 ring-inset ring-amber-300/60", accent: "bg-amber-600", text: "text-amber-950", icon: "text-amber-700" },
@@ -152,18 +176,21 @@ export function OpsStrip({ order, withPill = false, className = "" }: { order: O
         <Swap
           id={lines.detail}
           layout={withPill ? "clamp" : "truncate"}
-          className={`text-[12px] leading-[18px] ${alert ? `${alert.text} opacity-80` : "text-ca-navy/60"}`}
+          className={`text-[12px] leading-[18px] ${alert ? `${alert.text} opacity-80` : lines.age ? AGE_TEXT[lines.age] : "text-ca-navy/60"}`}
           title={lines.recorded ? RECORDED : lines.detail}
         >
           {lines.detail}
         </Swap>
+      )}
+      {order.ops?.method === "ACADEMY_PICKUP" && order.ops.next && !alert && (
+        <p className="truncate text-[11.5px] leading-4 text-ca-navy/55">Next: {order.ops.next}</p>
       )}
       {lines.quotes && (
         <p className="truncate text-[11px] leading-4 text-ca-navy/45" title="Saved courier comparison. Open details for the full price history.">{lines.quotes}</p>
       )}
       {stage && (
         <div className="mt-1 flex h-2.5 items-center">
-          <FulfillmentTimeline status={order.status} compact fill />
+          <FulfillmentTimeline status={order.status} method={order.ops?.method || "DELIVERY"} compact fill />
         </div>
       )}
     </div>
@@ -172,7 +199,8 @@ export function OpsStrip({ order, withPill = false, className = "" }: { order: O
 
 /** `quiet` when the status strip already carries the Package required action. */
 export function PackageLine({ ops, quiet = false, wrap = false }: { ops?: OrderOps | null; quiet?: boolean; wrap?: boolean }) {
-  if (!ops) return null;
+  // Academy Pickup has no courier package; nothing to weigh or enter.
+  if (!ops || ops.method === "ACADEMY_PICKUP") return null;
   const pkg = ops.package;
   if (!pkg && quiet) {
     return (

@@ -1,7 +1,8 @@
 /**
- * One fulfillment ladder for admin, customer tracking, and staff buttons.
+ * The DELIVERY fulfillment ladder for admin, customer tracking, and staff buttons.
  * Courier stages after pickup stay provider-owned. PACKED is still the only
- * status that starts automatic shipment booking.
+ * status that starts automatic shipment booking. "pickup" here is the courier
+ * collecting the parcel; Academy Pickup orders use PICKUP_PROGRESS in ./fulfillment.
  */
 
 export const PROGRESS = [
@@ -9,7 +10,7 @@ export const PROGRESS = [
   { key: "preparing", admin: "Preparing", customer: "Preparing your notes", statuses: ["PROCESSING"] },
   { key: "printing", admin: "Printing", customer: "Printing your notes", statuses: ["PRINTING", "QUALITY_CHECK", "READY_TO_PACK"] },
   { key: "packed", admin: "Packed", customer: "Packed", statuses: ["PACKED", "READY_FOR_PICKUP"] },
-  { key: "pickup", admin: "Pickup scheduled", customer: "Pickup scheduled", statuses: ["PICKUP_SCHEDULED"] },
+  { key: "pickup", admin: "Courier pickup", customer: "Courier pickup scheduled", statuses: ["PICKUP_SCHEDULED"] },
   { key: "shipped", admin: "Shipped", customer: "Shipped", statuses: ["PICKED_UP"] },
   { key: "transit", admin: "In transit", customer: "In transit", statuses: ["IN_TRANSIT"] },
   { key: "delivery", admin: "Out for delivery", customer: "Out for delivery", statuses: ["OUT_FOR_DELIVERY"] },

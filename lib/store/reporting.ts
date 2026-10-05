@@ -53,6 +53,8 @@ export type NotesExecutiveStatus =
   | "in_transit"
   | "out_for_delivery"
   | "delivered"
+  | "ready_for_collection"
+  | "collected"
   | "cancelled"
   | "rto"
   | "return"
@@ -84,6 +86,9 @@ export interface NotesFulfillmentCounts {
   inTransit: number;
   outForDelivery: number;
   delivered: number;
+  /** Academy Pickup: ready at the academy / handed over. */
+  readyForCollection: number;
+  collected: number;
   rto: number;
   returns: number;
   issues: number;
@@ -124,6 +129,7 @@ const UNPAID = new Set(["PAYMENT_PENDING", "PAYMENT_FAILED", "PAYMENT_EXPIRED"])
 
 const TERMINAL = new Set([
   "DELIVERED",
+  "COLLECTED",
   "CANCELLED",
   "REFUNDED",
   "RTO_DELIVERED",
@@ -137,6 +143,8 @@ const STATUS_LABEL: Record<NotesExecutiveStatus, string> = {
   in_transit: "In transit",
   out_for_delivery: "Out for delivery",
   delivered: "Delivered",
+  ready_for_collection: "Ready for collection",
+  collected: "Collected",
   cancelled: "Cancelled",
   rto: "RTO",
   return: "Return",
@@ -147,7 +155,7 @@ const STATUS_LABEL: Record<NotesExecutiveStatus, string> = {
 const ISSUE_LABEL: Record<string, string> = {
   ADDRESS_ISSUE: "Address issue",
   DELIVERY_DELAY: "Delivery delay",
-  PICKUP_ISSUE: "Pickup issue",
+  PICKUP_ISSUE: "Courier pickup issue",
   TRACKING_ISSUE: "Tracking issue",
   STATUS_MISMATCH: "Status mismatch",
   DAMAGE_ISSUE: "Damage reported",
@@ -166,6 +174,8 @@ const PRIORITY: Record<NotesExecutiveStatus, number> = {
   in_transit: 7,
   out_for_delivery: 8,
   delivered: 9,
+  ready_for_collection: 6,
+  collected: 9,
   cancelled: 10,
 };
 
@@ -204,6 +214,8 @@ export function notesExecutiveStatus(status: string): NotesExecutiveStatus {
   if (status === "REFUND_PENDING" || status === "REFUNDED" || status === "PARTIALLY_REFUNDED") return "refund";
   if (status === "CANCELLED" || status === "CANCEL_REQUESTED") return "cancelled";
   if (status === "DELIVERED") return "delivered";
+  if (status === "READY_FOR_COLLECTION") return "ready_for_collection";
+  if (status === "COLLECTED") return "collected";
   if (status === "OUT_FOR_DELIVERY") return "out_for_delivery";
   if (status === "PICKED_UP" || status === "IN_TRANSIT") return "in_transit";
   if (status === "PICKUP_SCHEDULED") return "shipment_created";
@@ -324,6 +336,8 @@ export function buildNotesStoreReport(input: {
     inTransit: 0,
     outForDelivery: 0,
     delivered: 0,
+    readyForCollection: 0,
+    collected: 0,
     rto: 0,
     returns: 0,
     issues: 0,
@@ -341,6 +355,8 @@ export function buildNotesStoreReport(input: {
     else if (status === "in_transit") fulfillment.inTransit++;
     else if (status === "out_for_delivery") fulfillment.outForDelivery++;
     else if (status === "delivered") fulfillment.delivered++;
+    else if (status === "ready_for_collection") fulfillment.readyForCollection++;
+    else if (status === "collected") fulfillment.collected++;
     else if (status === "rto") fulfillment.rto++;
     else if (status === "return") fulfillment.returns++;
     else if (status === "issue" || status === "refund") fulfillment.issues++;

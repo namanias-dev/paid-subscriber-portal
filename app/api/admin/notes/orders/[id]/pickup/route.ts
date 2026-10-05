@@ -5,6 +5,7 @@ import { requestProviderPickup } from "@/lib/store/shipping/book";
 import { dispatchBlocked } from "@/lib/store/shipping/dispatch";
 import { canAdvanceOrder } from "@/lib/store/shipping/status";
 import { SHIPMENT_ADDRESS_MISMATCH, shipmentHandoffBlocked } from "@/lib/store/address";
+import { deliveryOnlyGuard } from "@/lib/store/fulfillmentGuard";
 
 export const dynamic = "force-dynamic";
 
@@ -26,6 +27,8 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   const actor = await getActionActor();
   const db = storeDb();
   if (!db) return NextResponse.json({ ok: false, error: "unavailable" }, { status: 503 });
+  const pickupRefusal = await deliveryOnlyGuard(db, params.id, "pickup");
+  if (pickupRefusal) return pickupRefusal;
 
   const { data: order } = await db.from("store_orders").select("id,status").eq("id", params.id).maybeSingle();
   if (!order) return NextResponse.json({ ok: false, error: "not found" }, { status: 404 });

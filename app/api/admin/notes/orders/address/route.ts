@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { getAdminSession } from "@/lib/session";
 import { requireFreshPermission } from "@/lib/adminGuard";
 import { applyDeliveryAddressChange } from "@/lib/store/deliveryAddressApply";
+import { storeDb } from "@/lib/store/db";
+import { deliveryOnlyGuard } from "@/lib/store/fulfillmentGuard";
 
 export const dynamic = "force-dynamic";
 
@@ -13,6 +15,8 @@ export async function POST(req: Request) {
   const body = await req.json().catch(() => ({}));
   const orderId = typeof body.order_id === "string" ? body.order_id : "";
   if (!orderId) return NextResponse.json({ ok: false, error: "Order not found" }, { status: 400 });
+  const pickupRefusal = await deliveryOnlyGuard(storeDb(), orderId, "address_change");
+  if (pickupRefusal) return pickupRefusal;
   const result = await applyDeliveryAddressChange({
     orderId,
     name: typeof body.name === "string" ? body.name : "",

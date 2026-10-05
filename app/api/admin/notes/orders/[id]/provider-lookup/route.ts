@@ -4,6 +4,7 @@ import { storeDb } from "@/lib/store/db";
 import { findShiprocketOrder, readShiprocketOrderPublic } from "@/lib/store/shipping/book";
 import { shiprocketToken } from "@/lib/store/shipping/shiprocketApi";
 import { shiprocketBaseUrl, shippingWritesAuthorized } from "@/lib/store/shipping/config";
+import { deliveryOnlyGuard } from "@/lib/store/fulfillmentGuard";
 
 export const dynamic = "force-dynamic";
 
@@ -14,6 +15,8 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
   }
   const db = storeDb();
   if (!db) return NextResponse.json({ ok: false, error: "unavailable" }, { status: 503 });
+  const pickupRefusal = await deliveryOnlyGuard(db, params.id, "provider-lookup");
+  if (pickupRefusal) return pickupRefusal;
   const { data: order } = await db.from("store_orders").select("order_no").eq("id", params.id).maybeSingle();
   if (!order?.order_no) return NextResponse.json({ ok: false, error: "not found" }, { status: 404 });
   const { data: shipment } = await db
@@ -61,6 +64,8 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   }
   const db = storeDb();
   if (!db) return NextResponse.json({ ok: false, error: "unavailable" }, { status: 503 });
+  const pickupRefusal = await deliveryOnlyGuard(db, params.id, "provider-lookup");
+  if (pickupRefusal) return pickupRefusal;
   if (body.action === "address") {
     const { data: current } = await db
       .from("store_shipments")

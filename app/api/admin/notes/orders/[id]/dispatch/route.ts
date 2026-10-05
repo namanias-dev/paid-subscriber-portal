@@ -1,3 +1,4 @@
+import { deliveryOnlyGuard } from "@/lib/store/fulfillmentGuard";
 import { NextResponse } from "next/server";
 import { requireFreshPermission, getActionActor } from "@/lib/adminGuard";
 import { storeDb } from "@/lib/store/db";
@@ -53,6 +54,8 @@ async function decideCourierCity(orderId: string, action: "confirm_city" | "decl
   const actor = await getActionActor();
   const db = storeDb();
   if (!db) return NextResponse.json({ ok: false, error: "unavailable" }, { status: 503 });
+  const pickupRefusal = await deliveryOnlyGuard(db, orderId, "dispatch_city");
+  if (pickupRefusal) return pickupRefusal;
   const now = new Date().toISOString();
   const stale = new Date(Date.now() - LOCK_MS).toISOString();
   const { data: order } = await db
@@ -231,6 +234,9 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   if (blocked) {
     return NextResponse.json({ ok: false, error: blocked, writes_authorized: false }, { status: 409, headers: { "Cache-Control": "no-store" } });
   }
+
+  const pickupRefusal = await deliveryOnlyGuard(storeDb(), params.id, "dispatch");
+  if (pickupRefusal) return pickupRefusal;
 
   const body = (await req.json().catch(() => null)) as {
     action?: string;

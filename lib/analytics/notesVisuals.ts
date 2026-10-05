@@ -158,11 +158,16 @@ export function destinationForOrder(
   orderId: string,
   snapshot: { city?: string | null; state?: string | null } | null | undefined,
   address: { city?: string | null; state?: string | null } | null | undefined,
+  /** Academy Pickup: the buyer's own PIN location. Never the academy. */
+  customerLocation?: { city?: string | null; state?: string | null } | null,
 ): NotesDestination {
   const snapCity = (snapshot?.city || "").trim();
   const snapState = (snapshot?.state || "").trim();
   if (snapCity || snapState) return { orderId, city: snapCity || null, state: snapState || null };
-  return { orderId, city: (address?.city || "").trim() || null, state: (address?.state || "").trim() || null };
+  const addrCity = (address?.city || "").trim();
+  const addrState = (address?.state || "").trim();
+  if (addrCity || addrState) return { orderId, city: addrCity || null, state: addrState || null };
+  return { orderId, city: (customerLocation?.city || "").trim() || null, state: (customerLocation?.state || "").trim() || null };
 }
 
 function ratio(part: number, whole: number): number | null {

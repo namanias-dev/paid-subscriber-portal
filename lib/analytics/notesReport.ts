@@ -97,7 +97,7 @@ async function loadRangeOrders(db: AdminDb, start: Date, end: Date): Promise<{ o
   for (let from = 0; from < 50000; from += PAGE) {
     const { data, error } = await db
       .from("store_orders")
-      .select("id,status,total_paise,discount_paise,paid_at,promo_code,attribution_source,attribution_platform,attribution_json,shipping_address_id,phone_key")
+      .select("id,status,total_paise,discount_paise,paid_at,promo_code,attribution_source,attribution_platform,attribution_json,shipping_address_id,phone_key,fulfillment_method,customer_location_snapshot")
       .not("paid_at", "is", null)
       .gte("paid_at", start.toISOString())
       .lt("paid_at", end.toISOString())
@@ -159,7 +159,7 @@ function placeOf(snapshot: unknown): { city: string | null; state: string | null
 }
 
 /** Delivery city comes from the invoice shipping snapshot, then the order ship-to. Courier hubs are not read. */
-export async function loadDestinations(db: AdminDb, orders: Array<Pick<NotesOrderFact, "id" | "shipping_address_id">>): Promise<{ rows: NotesDestination[]; ok: boolean }> {
+export async function loadDestinations(db: AdminDb, orders: Array<Pick<NotesOrderFact, "id" | "shipping_address_id" | "customer_location_snapshot">>): Promise<{ rows: NotesDestination[]; ok: boolean }> {
   if (!orders.length) return { rows: [], ok: true };
   const ids = orders.map((order) => order.id);
   const invoices = await selectIn(db, "store_invoices", "order_id", ids, "order_id,shipping_snapshot");
@@ -189,6 +189,7 @@ export async function loadDestinations(db: AdminDb, orders: Array<Pick<NotesOrde
       order.id,
       invoices.ok ? snapshotByOrder.get(order.id) : null,
       addresses.ok && order.shipping_address_id ? addressById.get(order.shipping_address_id) : null,
+      order.customer_location_snapshot || null,
     )),
   };
 }

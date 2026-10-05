@@ -8,6 +8,9 @@ import { actionRequiredReasons, pickupFailedActivity, sortAdminOrders } from "@/
 import { shippingWritesAuthorized } from "@/lib/store/shipping/config";
 import { BUSINESS_CHANNELS, orderMarketingSummary, type StoredNotesAttribution } from "@/lib/analytics/notesCommerce";
 import { paidRollup } from "@/lib/store/opsBoard";
+import { methodFromFilterKey, orderMethod } from "@/lib/store/fulfillment";
+import { readCustomerLocation } from "@/lib/store/orders";
+import { readPickupSnapshot } from "@/lib/store/pickupLocation";
 import { groupMatchesBucket, groupNotesCustomers, isCapturedNotesOrder } from "@/lib/store/customerGroups";
 import { gatewayChargesForStaff } from "@/lib/store/payments/eazypayAmounts";
 import { scheduleStoreInvoice } from "@/lib/store/invoice/issue";
@@ -36,6 +39,8 @@ const BUCKETS: Record<string, string[]> = {
   pickup: ["PICKUP_SCHEDULED"],
   shipped: ["PICKED_UP", "IN_TRANSIT", "OUT_FOR_DELIVERY"],
   delivered: ["DELIVERED"],
+  ready_for_collection: ["READY_FOR_COLLECTION"],
+  collected: ["COLLECTED"],
   cancelled: ["CANCELLED", "CANCEL_REQUESTED", "PAYMENT_FAILED", "PAYMENT_EXPIRED"],
   problem: [
     "DELIVERY_FAILED",
@@ -64,9 +69,15 @@ const ALL_STATUSES = [
   ...BUCKETS.pickup,
   ...BUCKETS.shipped,
   ...BUCKETS.delivered,
+  ...BUCKETS.ready_for_collection,
+  ...BUCKETS.collected,
   ...BUCKETS.cancelled,
   ...BUCKETS.problem,
 ];
+
+/** One column list for both list queries. Pickup facts are small; the full pickup snapshot loads on the order page. */
+const ORDER_COLUMNS =
+  "id,order_no,status,customer_id,customer_name,phone,phone_key,email,total_paise,discount_paise,shipping_paise,subtotal_paise,promo_code,discount_trace_json,promised_delivery_date,placed_at,updated_at,paid_at,shipped_at,delivered_at,internal_notes,shipping_address_id,attribution_source,attribution_campaign,attribution_platform,attribution_json,fulfillment_method,ready_for_collection_at,collected_at,customer_location_snapshot,pickup_acknowledged_at";
 
 export async function GET(req: Request) {
   if (!(await requireStoreOrderRead())) {
@@ -86,6 +97,7 @@ export async function GET(req: Request) {
   const sort = url.searchParams.get("sort") || "newest";
   const actionOnly = url.searchParams.get("action") === "required";
   const acq = url.searchParams.get("acq") || "";
+  const fulfillment = methodFromFilterKey(url.searchParams.get("fulfillment"));
 
   const paidOnly = bucket === "paid";
   const statuses = BUCKETS[bucket] || ALL_STATUSES;
@@ -123,7 +135,7 @@ export async function GET(req: Request) {
   let query = db
     .from("store_orders")
     .select(
-      "id,order_no,status,customer_id,customer_name,phone,phone_key,email,total_paise,discount_paise,shipping_paise,subtotal_paise,promo_code,discount_trace_json,promised_delivery_date,placed_at,updated_at,paid_at,shipped_at,delivered_at,internal_notes,shipping_address_id,attribution_source,attribution_campaign,attribution_platform,attribution_json",
+      ORDER_COLUMNS,
       { count: "exact" },
     )
     .in("status", !id ? ALL_STATUSES : paidOnly ? ALL_STATUSES.filter((status) => !["PAYMENT_PENDING", "PAYMENT_FAILED", "PAYMENT_EXPIRED", "CANCELLED", "REFUNDED", "PARTIALLY_REFUNDED"].includes(status)) : statuses);
@@ -131,6 +143,7 @@ export async function GET(req: Request) {
   if (paidOnly && id) query = query.not("paid_at", "is", null);
   if ((BUSINESS_CHANNELS as readonly string[]).includes(acq)) query = query.eq("attribution_platform", acq);
   if (openIssueOrderIds) query = query.in("id", openIssueOrderIds);
+  if (fulfillment) query = query.eq("fulfillment_method", fulfillment);
 
   const phoneDigits = phoneSearchDigits(q);
   if (q) {
@@ -161,9 +174,10 @@ export async function GET(req: Request) {
     query = db
       .from("store_orders")
       .select(
-        "id,order_no,status,customer_id,customer_name,phone,phone_key,email,total_paise,discount_paise,shipping_paise,subtotal_paise,promo_code,discount_trace_json,promised_delivery_date,placed_at,updated_at,paid_at,shipped_at,delivered_at,internal_notes,shipping_address_id,attribution_source,attribution_campaign,attribution_platform,attribution_json",
+        ORDER_COLUMNS,
       )
       .or(ors.join(","));
+    if (fulfillment) query = query.eq("fulfillment_method", fulfillment);
   }
   const scan = grouped ? 2000 : actionOnly ? 100 : limit;
   const scanOffset = grouped || actionOnly ? 0 : offset;
@@ -217,6 +231,7 @@ export async function GET(req: Request) {
     }
   >();
   const payByOrder = new Map<string, { status: string; provider: string | null; verify_payload: unknown }>();
+  const collectedByOrder = new Map<string, string>();
   const invoiceByOrder = new Map<string, string>();
   const issueByOrder = new Map<
     string,
@@ -363,6 +378,16 @@ export async function GET(req: Request) {
         payByOrder.set(p.order_id, { status: p.status, provider: p.provider || null, verify_payload: p.verify_payload });
       }
     }
+    // Who handed over each collected Academy Pickup order: one batched read of the collection events.
+    const collectedIds = orders.filter((o) => o.status === "COLLECTED").map((o) => o.id);
+    if (collectedIds.length) {
+      const { data: collectedEvents } = await db
+        .from("store_order_events")
+        .select("order_id,actor_name,created_at")
+        .eq("event", "collected")
+        .in("order_id", collectedIds);
+      for (const row of collectedEvents || []) if (row.actor_name) collectedByOrder.set(row.order_id, row.actor_name);
+    }
     const { data: invoiceRows } = await db.from("store_invoices").select("order_id,status").in("order_id", ids);
     for (const row of invoiceRows || []) invoiceByOrder.set(row.order_id, row.status);
     const { data: issueRows, error: issueError } = await db
@@ -409,8 +434,10 @@ export async function GET(req: Request) {
     }
     const invoiceOverdue = paid && !storedInvoice && Date.now() - Date.parse(String(o.paid_at)) > INVOICE_GRACE_MS;
     const invoiceStatus = storedInvoice || (paid ? (invoiceOverdue ? "MISSING" : "PENDING") : null);
+    const method = orderMethod(o);
     const reasons = actionRequiredReasons({
       status: o.status,
+      method,
       awb: ship?.awb,
       pickupFailed: pickupFailedActivity(ship?.tracking_activity),
       addressMismatch: Boolean(ship?.address_mismatch),
@@ -420,9 +447,14 @@ export async function GET(req: Request) {
       invoiceStatus,
     });
     const address = o.shipping_address_id ? addrMap.get(o.shipping_address_id) || null : null;
+    const customerLocation = method === "ACADEMY_PICKUP" ? readCustomerLocation(o.customer_location_snapshot) : null;
     const ops = buildOrderOps({
       status: o.status,
-      address,
+      method,
+      readyAt: o.ready_for_collection_at || null,
+      collectedAt: o.collected_at || null,
+      collectedBy: collectedByOrder.get(o.id) || null,
+      address: method === "ACADEMY_PICKUP" ? customerLocation : address,
       ship,
       cityConfirm: !ship && cityConfirmByOrder.has(o.id),
       reasons,
@@ -444,6 +476,8 @@ export async function GET(req: Request) {
         attribution_json: (attribution_json || null) as StoredNotesAttribution | null,
       }),
       address,
+      fulfillment_method: method,
+      customer_location: customerLocation,
       items: itemsByOrder.get(o.id) || [],
       ops,
       shipment: ship,
@@ -463,6 +497,22 @@ export async function GET(req: Request) {
     };
   });
   const counts = await adminCounts(db);
+  if (id && mapped[0] && mapped[0].fulfillment_method === "ACADEMY_PICKUP") {
+    // Detail only: the frozen pickup promise and who moved the order through collection.
+    const [{ data: pickupRow }, { data: pickupEvents }] = await Promise.all([
+      db.from("store_orders").select("pickup_location_snapshot,pickup_acknowledged_at").eq("id", id).maybeSingle(),
+      db.from("store_order_events").select("event,actor_name,created_at").eq("order_id", id).in("event", ["ready_for_collection", "collected"]),
+    ]);
+    const actorFor = (event: string) => (pickupEvents || []).find((row) => row.event === event)?.actor_name || null;
+    (mapped[0] as { pickup?: unknown }).pickup = {
+      location: readPickupSnapshot(pickupRow?.pickup_location_snapshot),
+      acknowledged_at: pickupRow?.pickup_acknowledged_at || null,
+      ready_at: mapped[0].ready_for_collection_at || null,
+      ready_by: actorFor("ready_for_collection"),
+      collected_at: mapped[0].collected_at || null,
+      collected_by: actorFor("collected"),
+    };
+  }
   if (id && mapped[0]?.phone_key) {
     const { data: siblings } = await db
       .from("store_orders")
@@ -513,6 +563,7 @@ export async function GET(req: Request) {
               id: order.id,
               order_no: order.order_no,
               status: order.status,
+              fulfillment_method: order.fulfillment_method,
               total_paise: order.total_paise,
               items: order.items,
               invoice_status: order.invoice_status,
@@ -554,10 +605,11 @@ function phoneSearchDigits(q: string): string | null {
 
 /** Every captured order stays visible: open parcels first, then completed ones, newest first. */
 function paidOrdersForRow<T extends { status: string; paid_at?: string | null; placed_at?: string | null }>(orders: T[]): T[] {
+  const done = (status: string) => status === "DELIVERED" || status === "COLLECTED";
   const time = (value: string | null | undefined) => (value ? Date.parse(value) || 0 : 0);
   return orders
     .filter((order) => isCapturedNotesOrder(order))
-    .sort((a, b) => Number(a.status === "DELIVERED") - Number(b.status === "DELIVERED") || time(b.placed_at) - time(a.placed_at));
+    .sort((a, b) => Number(done(a.status)) - Number(done(b.status)) || time(b.placed_at) - time(a.placed_at));
 }
 
 async function customerKeysForSearch(db: NonNullable<ReturnType<typeof storeDb>>, q: string, awbOrderIds: string[] | null) {
@@ -583,6 +635,18 @@ async function adminCounts(db: NonNullable<ReturnType<typeof storeDb>>) {
     const { count: n } = await db.from("store_orders").select("id", { count: "exact", head: true }).in("status", statuses);
     return n || 0;
   }
+  async function countPickup(statuses: string[]) {
+    const { count: n } = await db.from("store_orders").select("id", { count: "exact", head: true }).eq("fulfillment_method", "ACADEMY_PICKUP").in("status", statuses);
+    return n || 0;
+  }
+  const istToday = new Date(Date.now() + 330 * 60_000).toISOString().slice(0, 10);
+  const istMidnightUtc = new Date(`${istToday}T00:00:00+05:30`).toISOString();
+  const [readyForCollection, collected, pickupActive, collectedToday] = await Promise.all([
+    count(BUCKETS.ready_for_collection),
+    count(BUCKETS.collected),
+    countPickup(["PAYMENT_CONFIRMED", "ORDER_CONFIRMED", "PROCESSING", "PRINTING", "QUALITY_CHECK", "READY_TO_PACK", "READY_FOR_COLLECTION"]),
+    db.from("store_orders").select("id", { count: "exact", head: true }).eq("status", "COLLECTED").gte("collected_at", istMidnightUtc).then((r) => r.count || 0),
+  ]);
   const [total, fresh, preparing, printing, packed, pickup, transit, delivered] = await Promise.all([
     count(ALL_STATUSES),
     count(BUCKETS.new),
@@ -624,6 +688,10 @@ async function adminCounts(db: NonNullable<ReturnType<typeof storeDb>>) {
     pickup,
     transit,
     delivered,
+    ready_for_collection: readyForCollection,
+    collected,
+    pickup_active: pickupActive,
+    collected_today: collectedToday,
     issues: issues || 0,
   };
 }

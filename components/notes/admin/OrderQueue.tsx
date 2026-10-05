@@ -21,10 +21,19 @@ const FILTERS = [
   { key: "preparing", label: "Preparing", count: "preparing" },
   { key: "printing", label: "Printing", count: "printing" },
   { key: "packed", label: "Packed", count: "packed" },
-  { key: "pickup", label: "Pickup", count: "pickup" },
+  { key: "pickup", label: "Courier pickup", count: "pickup" },
   { key: "shipped", label: "Shipped", count: "transit" },
   { key: "delivered", label: "Delivered", count: "delivered" },
+  { key: "ready_for_collection", label: "Ready for collection", count: "ready_for_collection" },
+  { key: "collected", label: "Collected", count: "collected" },
   { key: "issues", label: "Issues", count: "issues" },
+] as const;
+
+/** Fulfillment method is its own axis, independent of the status chips. */
+const METHOD_FILTERS = [
+  { key: "", label: "All fulfilment" },
+  { key: "delivery", label: "Delivery" },
+  { key: "academy_pickup", label: "Academy Pickup" },
 ] as const;
 
 const DESKTOP_QUERY = "(min-width: 1024px)";
@@ -48,12 +57,13 @@ function readParams() {
     sort: params.get("sort") || "newest",
     action: params.get("action") === "required",
     acq: params.get("acq") || "",
+    fulfillment: params.get("fulfillment") || "",
     offset: Number(params.get("offset") || 0),
   };
 }
 
 export default function NotesOrderQueue() {
-  const initial = typeof window === "undefined" ? { bucket: "", q: "", sort: "newest", action: false, acq: "", offset: 0 } : readParams();
+  const initial = typeof window === "undefined" ? { bucket: "", q: "", sort: "newest", action: false, acq: "", fulfillment: "", offset: 0 } : readParams();
   const [orders, setOrders] = useState<AdminOrder[]>([]);
   const [counts, setCounts] = useState<Record<string, number>>({});
   const [shippingRate, setShippingRate] = useState<ShippingRateStats | null>(null);
@@ -63,6 +73,9 @@ export default function NotesOrderQueue() {
   const [issueOnly, setIssueOnly] = useState(initial.bucket === "issues");
   const [actionOnly, setActionOnly] = useState(initial.action);
   const [acq, setAcq] = useState(initial.acq);
+  const [fulfillment, setFulfillment] = useState(initial.fulfillment === "delivery" || initial.fulfillment === "academy_pickup" ? initial.fulfillment : "");
+  const fulfillmentRef = useRef(fulfillment);
+  fulfillmentRef.current = fulfillment;
   const [q, setQ] = useState(initial.q);
   const [sort, setSort] = useState(initial.sort);
   const [offset, setOffset] = useState(initial.offset);
@@ -89,12 +102,14 @@ export default function NotesOrderQueue() {
   const intro = useRef(true);
   const railRef = useRef<HTMLDivElement>(null);
 
-  const writeUrl = useCallback((next: { bucket: string; issue: boolean; action: boolean; acq: string; q: string; sort: string; offset: number }) => {
+  const writeUrl = useCallback((next: { bucket: string; issue: boolean; action: boolean; acq: string; q: string; sort: string; offset: number; fulfillment?: string }) => {
     const params = new URLSearchParams();
     if (next.issue) params.set("status", "issues");
     else if (next.bucket) params.set("status", next.bucket);
     if (next.action) params.set("action", "required");
     if (next.acq) params.set("acq", next.acq);
+    const method = next.fulfillment ?? fulfillmentRef.current;
+    if (method) params.set("fulfillment", method);
     if (next.q) params.set("q", next.q);
     if (next.sort && next.sort !== "newest") params.set("sort", next.sort);
     if (next.offset) params.set("offset", String(next.offset));
@@ -116,6 +131,7 @@ export default function NotesOrderQueue() {
     if (issueOnly) params.set("issue", "open");
     if (actionOnly) params.set("action", "required");
     if (acq) params.set("acq", acq);
+    if (fulfillment) params.set("fulfillment", fulfillment);
     if (q.trim()) params.set("q", q.trim());
     if (sort) params.set("sort", sort);
     params.set("limit", String(PAGE));
@@ -144,7 +160,7 @@ export default function NotesOrderQueue() {
     setShowAnalytics(Boolean(json.can_view_analytics));
     setLoadError(null);
     setLoading(false);
-  }, [bucket, issueOnly, actionOnly, acq, q, sort, offset]);
+  }, [bucket, issueOnly, actionOnly, acq, fulfillment, q, sort, offset]);
 
   useEffect(() => {
     void load();
@@ -200,14 +216,15 @@ export default function NotesOrderQueue() {
     setBucket("");
     setActionOnly(false);
     setAcq("");
+    setFulfillment("");
     setQ("");
     setOffset(0);
-    writeUrl({ bucket: "", issue: false, action: false, acq: "", q: "", sort, offset: 0 });
+    writeUrl({ bucket: "", issue: false, action: false, acq: "", q: "", sort, offset: 0, fulfillment: "" });
   }
 
   const open = orders.find((row) => row.id === openId) || null;
   const compare = orders.find((row) => row.id === compareId) || null;
-  const filtered = Boolean(q || bucket || issueOnly || actionOnly || acq);
+  const filtered = Boolean(q || bucket || issueOnly || actionOnly || acq || fulfillment);
 
   function act(id: string, fn: () => Promise<Response>, ok: string) {
     setBusyId(id);
@@ -232,9 +249,10 @@ export default function NotesOrderQueue() {
     ["preparing", "Preparing", "preparing", counts.preparing],
     ["printing", "Printing", "printing", counts.printing],
     ["packed", "Packed", "packed", counts.packed],
-    ["pickup", "Pickup", "pickup", counts.pickup],
+    ["pickup", "Courier pickup", "pickup", counts.pickup],
     ["transit", "In transit", "shipped", counts.transit],
     ["delivered", "Delivered", "delivered", counts.delivered],
+    ["ready_for_collection", "Ready for collection", "ready_for_collection", counts.ready_for_collection],
     ["issues", "Issues", "issues", counts.issues],
   ];
 
@@ -352,6 +370,31 @@ export default function NotesOrderQueue() {
             </button>
           );
         })}
+        <div role="group" aria-label="Fulfillment method" className="flex shrink-0 gap-0.5 rounded-full border border-ca-navy/10 bg-white p-0.5">
+          {METHOD_FILTERS.map((option) => {
+            const active = fulfillment === option.key;
+            return (
+              <button
+                key={option.key || "all-methods"}
+                type="button"
+                aria-pressed={active}
+                onClick={() => {
+                  setFulfillment(option.key);
+                  setOffset(0);
+                  writeUrl({ bucket, issue: issueOnly, action: actionOnly, acq, q, sort, offset: 0, fulfillment: option.key });
+                }}
+                className={`min-h-9 whitespace-nowrap rounded-full px-3 text-[12.5px] font-semibold transition-colors duration-150 ${
+                  active ? "bg-[var(--ca-navy)] text-white" : "text-[var(--ca-navy)] hover:bg-ca-navy/[0.04]"
+                }`}
+              >
+                {option.label}
+                {option.key === "academy_pickup" && counts.pickup_active != null && (
+                  <span className={`ml-1.5 tabular-nums ${active ? "text-white/70" : "text-ca-navy/45"}`} title="Active Academy Pickup orders">{counts.pickup_active}</span>
+                )}
+              </button>
+            );
+          })}
+        </div>
         <button
           type="button"
           aria-pressed={actionOnly}

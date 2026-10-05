@@ -4,6 +4,7 @@ import { storeDb } from "@/lib/store/db";
 import { trackDelhiveryAwb } from "@/lib/store/shipping/delhiveryApi";
 import { normalizeCourierStatus } from "@/lib/store/shipping/status";
 import { trackShiprocketAwb } from "@/lib/store/shipping/shiprocketApi";
+import { deliveryOnlyGuard } from "@/lib/store/fulfillmentGuard";
 
 export const dynamic = "force-dynamic";
 
@@ -14,6 +15,8 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
   }
   const db = storeDb();
   if (!db) return NextResponse.json({ ok: false, error: "unavailable" }, { status: 503 });
+  const pickupRefusal = await deliveryOnlyGuard(db, params.id, "track");
+  if (pickupRefusal) return pickupRefusal;
   const { data: shipmentRows } = await db
     .from("store_shipments")
     .select("provider,awb,status")

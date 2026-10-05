@@ -1,6 +1,7 @@
 /** Notes admin operations view. Pure helpers: no courier calls, no status writes. */
 
 import { staffNextStatus } from "@/lib/store/stages";
+import { staffNextStatusFor, type FulfillmentMethod } from "@/lib/store/fulfillment";
 import { formatPaise } from "@/lib/store/money";
 
 export type AdminSort = "newest" | "oldest" | "value_desc" | "value_asc" | "updated" | "action";
@@ -59,7 +60,7 @@ export function formatAdminWhen(value: string | null | undefined): string | null
 }
 
 export function fulfillmentLabel(status: string, pickupFailed: boolean): string {
-  if (pickupFailed) return "Pickup issue";
+  if (pickupFailed) return "Courier pickup issue";
   switch (status) {
     case "PAYMENT_PENDING":
       return "Payment confirming";
@@ -76,7 +77,11 @@ export function fulfillmentLabel(status: string, pickupFailed: boolean): string 
     case "READY_FOR_PICKUP":
       return "Packed";
     case "PICKUP_SCHEDULED":
-      return "Pickup scheduled";
+      return "Courier pickup";
+    case "READY_FOR_COLLECTION":
+      return "Ready for collection";
+    case "COLLECTED":
+      return "Collected";
     case "PICKED_UP":
       return "Shipped";
     case "IN_TRANSIT":
@@ -106,7 +111,8 @@ export type BadgeTone = "neutral" | "navy" | "gold" | "amber" | "green" | "red";
 export function fulfillmentTone(status: string, pickupFailed: boolean): BadgeTone {
   if (pickupFailed || status === "DELIVERY_FAILED" || status === "REFUND_PENDING" || status === "PAYMENT_PENDING") return "amber";
   if (status === "CANCELLED" || status === "PAYMENT_FAILED" || status.startsWith("RTO_")) return "red";
-  if (status === "DELIVERED") return "green";
+  if (status === "DELIVERED" || status === "COLLECTED") return "green";
+  if (status === "READY_FOR_COLLECTION") return "gold";
   if (status === "PRINTING" || status === "QUALITY_CHECK" || status === "READY_TO_PACK") return "gold";
   if (status === "PICKUP_SCHEDULED" || status === "PACKED" || status === "READY_FOR_PICKUP") return "gold";
   if (PREP.has(status) || status === "IN_TRANSIT" || status === "PICKED_UP" || status === "OUT_FOR_DELIVERY") return "navy";
@@ -119,6 +125,8 @@ export function pickupFailedActivity(activity: string | null | undefined): boole
 
 export interface ActionInput {
   status: string;
+  /** Absent means DELIVERY (historical rows and callers that predate Academy Pickup). */
+  method?: FulfillmentMethod;
   awb?: string | null;
   pickupFailed?: boolean;
   addressMismatch?: boolean;
@@ -131,6 +139,14 @@ export interface ActionInput {
 
 export function actionRequiredReasons(input: ActionInput): string[] {
   const reasons: string[] = [];
+  if (input.method === "ACADEMY_PICKUP") {
+    // No courier, address, shipment or tracking reasons exist for customer collection.
+    if (input.paymentPending || input.status === "PAYMENT_PENDING") reasons.push("Payment confirmation pending");
+    if (input.openIssue) reasons.push("Customer issue open");
+    if (input.status === "REFUND_PENDING") reasons.push("Refund pending");
+    if (input.invoiceStatus === "FAILED" || input.invoiceStatus === "MISSING") reasons.push("Invoice needs attention");
+    return reasons;
+  }
   if (input.paymentPending || input.status === "PAYMENT_PENDING") reasons.push("Payment confirmation pending");
   if (input.addressMismatch) reasons.push("Address mismatch");
   if (input.cityConfirm) reasons.push("Courier city needs confirmation");
@@ -159,9 +175,19 @@ export type PrimaryAction =
   | "resolve_pickup"
   | "tracking"
   | "review_issue"
+  | "ready"
+  | "collect"
   | "none";
 
 export function primaryAction(input: ActionInput): PrimaryAction {
+  if (input.method === "ACADEMY_PICKUP") {
+    if (input.paymentPending || input.status === "PAYMENT_PENDING") return "reconcile";
+    if (input.openIssue) return "review_issue";
+    if (input.status === "READY_FOR_COLLECTION") return "collect";
+    if (input.status === "PRINTING" || input.status === "QUALITY_CHECK" || input.status === "READY_TO_PACK") return "ready";
+    if (PREP.has(input.status)) return "prepare";
+    return "none";
+  }
   if (input.pickupFailed) return "resolve_pickup";
   if (input.paymentPending || input.status === "PAYMENT_PENDING") return "reconcile";
   if (input.openIssue && (input.status === "DELIVERED" || input.status.startsWith("RETURN_"))) return "review_issue";
@@ -180,14 +206,16 @@ export const PRIMARY_LABEL: Record<PrimaryAction, string> = {
   pack: "Mark packed",
   compare: "Compare couriers",
   label: "Print label",
-  resolve_pickup: "Check pickup",
+  resolve_pickup: "Check courier pickup",
   tracking: "View tracking",
   review_issue: "Review issue",
+  ready: "Mark ready for collection",
+  collect: "Mark collected",
   none: "View order",
 };
 
-export function nextPreparationStatus(status: string): string | null {
-  return staffNextStatus(status);
+export function nextPreparationStatus(status: string, method: FulfillmentMethod = "DELIVERY"): string | null {
+  return method === "DELIVERY" ? staffNextStatus(status) : staffNextStatusFor(status, method);
 }
 
 export function hasActiveShipment(status: string | null | undefined, awb: string | null | undefined): boolean {

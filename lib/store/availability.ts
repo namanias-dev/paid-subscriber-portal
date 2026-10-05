@@ -124,6 +124,14 @@ export const PREPARATION_STATUSES = [
   "PICKUP_SCHEDULED",
 ] as const;
 
+/**
+ * Paid orders not yet in the customer's hands: preparation demand plus Academy Pickup
+ * orders that are ready and waiting at the academy. Used where open orders must still
+ * count (product demand display, archive safety). READY_FOR_COLLECTION is deliberately
+ * NOT in PREPARATION_STATUSES: those copies need no more printing or packing.
+ */
+export const OPEN_PAID_STATUSES = [...PREPARATION_STATUSES, "READY_FOR_COLLECTION"] as const;
+
 /** Statuses that count as "still open / awaiting fulfilment" for admin buckets. */
 export function isPreparationStatus(status: string): boolean {
   return (PREPARATION_STATUSES as readonly string[]).includes(status);

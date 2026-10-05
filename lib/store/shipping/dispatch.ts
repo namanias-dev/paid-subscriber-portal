@@ -87,7 +87,8 @@ export function supportReasonAllowed(reason: string): boolean {
 }
 
 export function canRequestSupport(status: string): boolean {
-  return status === "DELIVERED" || status === "DELIVERY_FAILED";
+  // COLLECTED: an Academy Pickup order handed over at the academy. RETURN_REQUESTED is a shared status.
+  return status === "DELIVERED" || status === "DELIVERY_FAILED" || status === "COLLECTED";
 }
 
 /** Reasons an order needs a person. A generated AWB or label is not one of them. */

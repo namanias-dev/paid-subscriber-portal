@@ -13,6 +13,7 @@ import {
   type DeliveryFields,
 } from "./deliveryAddress";
 import { executeAddressCorrection, type CancelOutcome } from "./deliveryAddressChange";
+import { isAcademyPickup } from "./fulfillment";
 
 const REASONS = new Set(["customer_requested", "typing_error", "courier_correction", "internal", "other"]);
 const LOCK_MS = 15 * 60 * 1000;
@@ -57,10 +58,11 @@ export async function applyDeliveryAddressChange(input: AddressChangeInput): Pro
 
   const { data: order } = await db
     .from("store_orders")
-    .select("id,status,phone,customer_name,shipping_address_id,fulfillment_lock_at")
+    .select("id,status,phone,customer_name,shipping_address_id,fulfillment_lock_at,fulfillment_method")
     .eq("id", input.orderId)
     .maybeSingle();
   if (!order) return { ok: false, code: "NOT_FOUND", message: "Order not found." };
+  if (isAcademyPickup(order)) return { ok: false, code: "ACADEMY_PICKUP", message: "This is an Academy Pickup order. It has no delivery address." };
   const { data: current } = order.shipping_address_id
     ? await db.from("store_addresses").select("id,name,line1,line2,landmark,city,state,pincode,address_hash").eq("id", order.shipping_address_id).maybeSingle()
     : { data: null };

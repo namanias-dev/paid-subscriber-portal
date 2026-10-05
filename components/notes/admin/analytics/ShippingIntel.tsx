@@ -113,8 +113,8 @@ export default function ShippingIntel({ shipping, anomalies, rule }: { shipping:
             Booked courier rates for orders paid in range. Final provider billing may differ.
           </p>
         </div>
-        <p className="text-xs tabular-nums text-ca-navy/55" title="Orders paid in range with a booked shipment, and how many of those have a saved courier rate.">
-          Booked rate coverage <span className="font-semibold text-[var(--ca-navy)]">{shipping.count} of {shipping.booked}</span> shipments · {shipping.paidOrders} paid orders
+        <p className="text-xs tabular-nums text-ca-navy/55" title="Delivery orders paid in range with a booked shipment, and how many of those have a saved courier rate. Academy Pickup orders never ship and are not counted.">
+          Booked rate coverage <span className="font-semibold text-[var(--ca-navy)]">{shipping.count} of {shipping.booked}</span> shipments · {shipping.paidOrders} delivery orders
         </p>
       </div>
 

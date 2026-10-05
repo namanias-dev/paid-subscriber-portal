@@ -13,6 +13,10 @@ export interface InvoicePdfModel {
   sellerLines: string[];
   buyerLines: string[];
   shipLines: string[];
+  /** "SHIP TO" for delivery; "COLLECTION AT" for Academy Pickup. */
+  shipHeading?: string;
+  /** "Shipping" for delivery; "Academy pickup" for Academy Pickup. */
+  shippingLabel?: string;
   paymentReference: string | null;
   paidAt: string | null;
   orderDate?: string | null;
@@ -133,7 +137,7 @@ export async function renderInvoicePdf(model: InvoicePdfModel): Promise<Uint8Arr
 
   need(80);
   text("BILL TO", M, 8, GOLD, bold);
-  page.drawText("SHIP TO", { x: 320, y, size: 8, font: bold, color: GOLD });
+  page.drawText(model.shipHeading || "SHIP TO", { x: 320, y, size: 8, font: bold, color: GOLD });
   y -= 14;
   const buyer = model.buyerLines.flatMap((line) => wrap(line, font, 9, 250));
   const ship = model.shipLines.flatMap((line) => wrap(line, font, 9, 220));
@@ -199,7 +203,7 @@ export async function renderInvoicePdf(model: InvoicePdfModel): Promise<Uint8Arr
     ["Subtotal", money(gross)],
     ["Discount", model.tax.discountPaise > 0 ? `−${money(model.tax.discountPaise)}` : money(0)],
     ["Net goods", money(net)],
-    ["Shipping", money(model.tax.shippingPaise)],
+    [model.shippingLabel || "Shipping", money(model.tax.shippingPaise)],
     ["GST", money(model.tax.taxPaise)],
   ];
   if (model.tax.roundingPaise) summary.push(["Rounding", money(model.tax.roundingPaise)]);

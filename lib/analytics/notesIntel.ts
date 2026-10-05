@@ -19,6 +19,7 @@ import { isQaNotesOrder, notesBusinessOrders, type NotesOrderFact, type StoredNo
 import { bucketKeys, grainFor, normalizeCity, pointAxis, pointKey, pointLabel, type NotesDestination } from "./notesVisuals";
 import { normalizeIndiaState, UNKNOWN_STATE_CODE } from "./indiaStates";
 import { orderIndexLabel } from "@/lib/store/adminConsole";
+import { isAcademyPickup } from "@/lib/store/fulfillment";
 import { liveShipment, packageLinesFrom, rateShipmentFor, resolvePackageDisplay, savedCourierRatePaise, type ShipmentRowLike } from "@/lib/store/orderOps";
 
 // ------------------------------------------------------------------ inputs
@@ -28,6 +29,9 @@ export interface IntelOrder extends NotesOrderFact {
   shipping_paise?: number | null;
   shipped_at?: string | null;
   delivered_at?: string | null;
+  /** Academy Pickup collection timestamps. */
+  ready_for_collection_at?: string | null;
+  collected_at?: string | null;
 }
 
 export interface IntelItem {
@@ -172,7 +176,7 @@ export interface RateAnomaly {
 export interface ShippingIntel extends RateStats {
   /** Cohort orders with a canonical booked shipment. Coverage denominator. */
   booked: number;
-  /** Paid cohort orders. Context for coverage. */
+  /** Paid DELIVERY cohort orders. Context for coverage; Academy Pickup never ships. */
   paidOrders: number;
   atOrUnder100: number;
   over100: number;
@@ -186,8 +190,36 @@ export interface ShippingIntel extends RateStats {
   duplicateAwbsSkipped: number;
 }
 
+/** One fulfilment method's share of the paid cohort. Sums reconcile to `cohort`. */
+export interface MethodRow {
+  orders: number;
+  units: number;
+  revenuePaise: number;
+  aovPaise: number | null;
+  sharePct: number | null;
+}
+
+export interface PickupOps {
+  /** Pickup orders waiting at the academy right now (any paid date). */
+  readyNow: number;
+  waitingOver1d: number;
+  waitingOver3d: number;
+  oldestReadyMs: number | null;
+  collectedInRange: number;
+  readyToday: number;
+  collectedToday: number;
+  /** Median paid → ready for orders that became ready in range; null when none. */
+  medianPaidToReadyMs: number | null;
+  paidToReadySample: number;
+  /** Median ready → collected for orders collected in range (open orders excluded). */
+  medianReadyToCollectedMs: number | null;
+  readyToCollectedSample: number;
+}
+
 export interface NotesIntel {
   grain: "hour" | "day";
+  methods: { delivery: MethodRow; pickup: MethodRow };
+  pickupOps: PickupOps;
   cohort: { orders: number; units: number; revenuePaise: number; merchandisePaise: number };
   subjects: SubjectRow[];
   fulfillment: FulfillmentPoint[];
@@ -658,6 +690,7 @@ export function buildNotesIntel(input: {
   let cohortRevenue = 0;
   let cohortMerch = 0;
   let booked = 0;
+  const methodSums = { delivery: { orders: 0, units: 0, revenue: 0 }, pickup: { orders: 0, units: 0, revenue: 0 } };
 
   for (const order of cohort) {
     const items = itemsByOrder.get(order.id) || [];
@@ -665,6 +698,10 @@ export function buildNotesIntel(input: {
     const revenue = order.total_paise || 0;
     cohortUnits += units;
     cohortRevenue += revenue;
+    const methodSlot = isAcademyPickup(order) ? methodSums.pickup : methodSums.delivery;
+    methodSlot.orders += 1;
+    methodSlot.units += units;
+    methodSlot.revenue += revenue;
     cohortMerch += Math.max(0, Math.round(revenue - (order.shipping_paise || 0)));
     const bucket = order.paid_at ? keyIndex.get(pointKey(new Date(order.paid_at), grain)) : undefined;
 
@@ -815,10 +852,17 @@ export function buildNotesIntel(input: {
     .sort((a, b) => b.shipments - a.shipments || a.provider.localeCompare(b.provider));
 
   const atOrUnder100 = cohortRates.filter((rate) => rate <= 10000).length;
+  const methodRow = (slot: { orders: number; units: number; revenue: number }): MethodRow => ({
+    orders: slot.orders,
+    units: slot.units,
+    revenuePaise: slot.revenue,
+    aovPaise: slot.orders ? Math.round(slot.revenue / slot.orders) : null,
+    sharePct: pct(slot.orders, cohort.length),
+  });
   const shipping: ShippingIntel = {
     ...rateStats(cohortRates),
     booked,
-    paidOrders: cohort.length,
+    paidOrders: methodSums.delivery.orders,
     atOrUnder100,
     over100: cohortRates.length - atOrUnder100,
     atOrUnder100Pct: pct(atOrUnder100, cohortRates.length),
@@ -833,6 +877,8 @@ export function buildNotesIntel(input: {
 
   return {
     grain,
+    methods: { delivery: methodRow(methodSums.delivery), pickup: methodRow(methodSums.pickup) },
+    pickupOps: buildPickupOps(nonQa, start, end, input.todayStart, input.todayEnd, now),
     cohort: { orders: cohort.length, units: cohortUnits, revenuePaise: cohortRevenue, merchandisePaise: cohortMerch },
     subjects,
     fulfillment,
@@ -844,5 +890,44 @@ export function buildNotesIntel(input: {
     shipping,
     anomalies: anomalies.sort((a, b) => b.differencePaise - a.differencePaise),
     anomalyRule: ANOMALY_RULE,
+  };
+}
+
+/** Academy Pickup operations, IST business days via the caller's today bounds. Descriptive only. */
+export function buildPickupOps(
+  orders: Array<{ status: string; paid_at: string | null; fulfillment_method?: string | null; ready_for_collection_at?: string | null; collected_at?: string | null }>,
+  start: Date,
+  end: Date,
+  todayStart: Date,
+  todayEnd: Date,
+  now: Date,
+): PickupOps {
+  const pickups = orders.filter((order) => isAcademyPickup(order));
+  const ms = (iso: string | null | undefined) => (iso ? Date.parse(iso) : NaN);
+  const ready = pickups.filter((order) => order.status === "READY_FOR_COLLECTION" && order.ready_for_collection_at);
+  const waits = ready.map((order) => Math.max(0, now.getTime() - ms(order.ready_for_collection_at))).filter(Number.isFinite);
+  const day = 86_400_000;
+  const paidToReady = pickups
+    .filter((order) => inRange(order.ready_for_collection_at, start, end, now) && order.paid_at)
+    .map((order) => ms(order.ready_for_collection_at) - ms(order.paid_at))
+    .filter((v) => Number.isFinite(v) && v >= 0)
+    .sort((a, b) => a - b);
+  const collectedRange = pickups.filter((order) => order.status === "COLLECTED" && inRange(order.collected_at, start, end, now));
+  const readyToCollected = collectedRange
+    .map((order) => ms(order.collected_at) - ms(order.ready_for_collection_at))
+    .filter((v) => Number.isFinite(v) && v >= 0)
+    .sort((a, b) => a - b);
+  return {
+    readyNow: ready.length,
+    waitingOver1d: waits.filter((w) => w > day).length,
+    waitingOver3d: waits.filter((w) => w > 3 * day).length,
+    oldestReadyMs: waits.length ? Math.max(...waits) : null,
+    collectedInRange: collectedRange.length,
+    readyToday: pickups.filter((order) => inRange(order.ready_for_collection_at, todayStart, todayEnd, now)).length,
+    collectedToday: pickups.filter((order) => order.status === "COLLECTED" && inRange(order.collected_at, todayStart, todayEnd, now)).length,
+    medianPaidToReadyMs: medianOf(paidToReady),
+    paidToReadySample: paidToReady.length,
+    medianReadyToCollectedMs: medianOf(readyToCollected),
+    readyToCollectedSample: readyToCollected.length,
   };
 }

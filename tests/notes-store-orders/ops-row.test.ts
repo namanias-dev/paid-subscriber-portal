@@ -139,9 +139,9 @@ test("F/G: pickup date only stays a date; a provider slot keeps its time", () =>
   const f = ops({ status: "PICKUP_SCHEDULED", rows: [ship({ pickup_scheduled_at: "2026-09-30T00:00:00+00:00", provider_payload: { pickup_date: "2026-09-30", rate_paise: 9372 } })] });
   assert.equal(f.pickup_at, "2026-09-30");
   assert.equal(formatAdminWhen(f.pickup_at), "30 Sep");
-  assert.deepEqual(opsLines({ status: "PICKUP_SCHEDULED", ops: f }), { headline: "Xpressbees Surface", rate: "₹93.72", detail: "Pickup 30 Sep", recorded: false, alert: null });
+  assert.deepEqual(opsLines({ status: "PICKUP_SCHEDULED", ops: f }), { headline: "Xpressbees Surface", rate: "₹93.72", detail: "Courier pickup 30 Sep", recorded: false, alert: null });
   const unknown = ops({ status: "PICKUP_SCHEDULED", rows: [ship({ provider_payload: { rate_paise: 9372 } })] });
-  assert.equal(opsLines({ status: "PICKUP_SCHEDULED", ops: unknown }).detail, "Pickup requested · time unavailable", "no invented pickup time");
+  assert.equal(opsLines({ status: "PICKUP_SCHEDULED", ops: unknown }).detail, "Courier pickup requested · time unavailable", "no invented pickup time");
   const g = ops({ status: "PICKUP_SCHEDULED", rows: [ship({ provider: "delhivery", courier_name: "Delhivery Surface", provider_payload: { pickup_date: "2026-09-30", pickup_time: "10:00:00", booked_rate_paise: 4568 } })] });
   assert.equal(g.pickup_at, "2026-09-30 10:00");
   assert.equal(formatAdminWhen(g.pickup_at), "30 Sep · 10:00 am");
@@ -372,7 +372,7 @@ test("62: badge, dots and filter labels come from the one shared ladder", () => 
     }
   }
   const timeline = read("components/notes/admin/orders/FulfillmentTimeline.tsx");
-  assert.match(timeline, /stageProgress\(status\)/);
+  assert.match(timeline, /stageProgress\(status(, method)?\)/);
   assert.match(timeline, /useReducedMotion\(\)/);
   assert.match(timeline, /reduce \? \{ duration: 0 \} : \{ duration: 2\.8, ease: "easeInOut", repeat: Infinity \}/, "breathing halo only when motion is allowed");
   assert.match(timeline, /scale: \[1, 1\.08, 1\]/);

@@ -12,6 +12,7 @@ import AnalyticsShell from "./analytics/AnalyticsShell";
 import SubjectPerformance from "./analytics/SubjectPerformance";
 import GeoIntel from "./analytics/GeoIntel";
 import ShippingIntel from "./analytics/ShippingIntel";
+import FulfillmentMethods from "./analytics/FulfillmentMethods";
 
 function money(paise: number): string {
   return formatPaise(paise);
@@ -86,6 +87,8 @@ export default function NotesAnalytics({
       </div>
 
       <CommerceStrip intel={intel} />
+
+      <FulfillmentMethods intel={intel} />
 
       <SubjectPerformance subjects={intel ? intel.subjects : null} totalMerchandisePaise={intel ? intel.cohort.merchandisePaise : null} />
 
@@ -232,7 +235,7 @@ export default function NotesAnalytics({
 
 const NOW_LINKS: Array<{ key: "packed" | "pickup" | "inTransit" | "outForDelivery"; label: string; href: string }> = [
   { key: "packed", label: "Packed", href: "/admin/notes?status=packed" },
-  { key: "pickup", label: "Pickup", href: "/admin/notes?status=pickup" },
+  { key: "pickup", label: "Courier pickup", href: "/admin/notes?status=pickup" },
   { key: "inTransit", label: "In transit", href: "/admin/notes?status=shipped" },
   { key: "outForDelivery", label: "Out for delivery", href: "/admin/notes?status=shipped" },
 ];
@@ -277,7 +280,7 @@ function CommerceStrip({ intel }: { intel: NotesIntel | null }) {
           <p className={label}>Today · IST</p>
           <div className="mt-1 grid grid-cols-3 gap-1">
             {([
-              ["Picked up", intel.today.pickedUp],
+              ["Picked up by courier", intel.today.pickedUp],
               ["Shipped", intel.today.shipped],
               ["Delivered", intel.today.delivered],
             ] as const).map(([text, value]) => (

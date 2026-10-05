@@ -6,7 +6,7 @@ import { STORE_CACHE_TAG, publicStoreMediaUrl } from "@/lib/store/catalogue";
 import { assertActiveSellingPrice, normalizeStoreProductPrices } from "@/lib/store/productPrice";
 import { applyProductContentFields, publicProductSaveError } from "@/lib/store/productAdmin";
 import { deleteProductMedia, listProductMedia } from "@/lib/store/media/upload";
-import { PREPARATION_STATUSES } from "@/lib/store/availability";
+import { OPEN_PAID_STATUSES } from "@/lib/store/availability";
 
 export const dynamic = "force-dynamic";
 
@@ -29,9 +29,10 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
 
   const media = await listProductMedia(params.id);
 
-  // Paid, not-yet-dispatched demand for this product (for on_demand display).
+  // Paid demand not yet in the customer's hands (for on_demand display), including
+  // Academy Pickup orders waiting at the academy.
   let paidDemand = 0;
-  const { data: openOrders } = await db.from("store_orders").select("id").in("status", [...PREPARATION_STATUSES]);
+  const { data: openOrders } = await db.from("store_orders").select("id").in("status", [...OPEN_PAID_STATUSES]);
   const openIds = (openOrders || []).map((o) => o.id);
   if (openIds.length) {
     const { data: lines } = await db

@@ -1,3 +1,4 @@
+import { deliveryOnlyGuard } from "@/lib/store/fulfillmentGuard";
 import { NextResponse } from "next/server";
 import { getActionActor, requireFreshPermission } from "@/lib/adminGuard";
 import { compareCourierRates } from "@/lib/store/shipping/compare";
@@ -54,6 +55,8 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   }
   const db = storeDb();
   if (!db) return NextResponse.json({ ok: false, error: "unavailable" }, { status: 503 });
+  const pickupRefusal = await deliveryOnlyGuard(db, params.id, "rates");
+  if (pickupRefusal) return pickupRefusal;
   const body = (await req.json().catch(() => null)) as { request_key?: unknown } | null;
   const requestKey = typeof body?.request_key === "string" && /^[A-Za-z0-9_-]{8,80}$/.test(body.request_key) ? `${params.id}:${body.request_key}` : null;
   const actor = await getActionActor();

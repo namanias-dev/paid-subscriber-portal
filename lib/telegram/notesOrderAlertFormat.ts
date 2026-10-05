@@ -28,6 +28,8 @@ export interface NotesAlertCustomer {
   name: string;
   phone: string;
   city: string;
+  /** Absent on rows built before Academy Pickup: treated as Delivery. */
+  fulfillment?: "DELIVERY" | "ACADEMY_PICKUP";
 }
 
 export interface NotesAlertItem {
@@ -102,13 +104,20 @@ export function resolveNotesAlertCustomer(input: {
   orderPhone?: string | null;
   country?: string | null;
   city?: string | null;
+  fulfillment?: string | null;
 }): NotesAlertCustomer {
   const phoneRaw = String(input.shippingPhone || "").trim() || String(input.orderPhone || "").trim();
   return {
     name: notesAlertText(input.shippingName || input.customerName),
     phone: formatNotesAlertPhone(phoneRaw, input.country),
     city: notesAlertText(input.city),
+    fulfillment: input.fulfillment === "ACADEMY_PICKUP" ? "ACADEMY_PICKUP" : "DELIVERY",
   };
+}
+
+/** Staff must know at a glance whether courier booking is needed. */
+export function notesAlertFulfillmentLine(fulfillment: NotesAlertCustomer["fulfillment"]): string {
+  return fulfillment === "ACADEMY_PICKUP" ? "🏛 <b>Fulfillment:</b> Academy Pickup — no courier booking" : "🚚 <b>Fulfillment:</b> Delivery";
 }
 
 /** The verify path may alert only on the first committed paid transition. */
@@ -183,6 +192,7 @@ export function formatNotesOrderAlertHtml(input: {
     `👤 <b>Customer:</b> ${escapeHtml(customer.name)}`,
     `📞 <b>Phone:</b> ${escapeHtml(customer.phone)}`,
     `📍 <b>City:</b> ${escapeHtml(customer.city)}`,
+    notesAlertFulfillmentLine(customer.fulfillment),
     "",
     `🕒 ${escapeHtml(formatNotesAlertStamp(input.paidAt))}`,
     "",

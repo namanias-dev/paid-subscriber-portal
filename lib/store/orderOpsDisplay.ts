@@ -3,6 +3,7 @@ import { formatAdminWhen, fulfillmentLabel } from "./adminConsole";
 import { formatPaise } from "./money";
 import { PREMIUM_NOTICE_PAISE } from "./adminConsole";
 import type { StageProgress } from "./opsBoard";
+import { nextActionFor, readyAge, type FulfillmentMethod } from "./fulfillment";
 
 export type PackageDisplaySource = "BOOKED_SHIPMENT" | "ORDER_PACKAGE" | "PRODUCT_PROFILE";
 
@@ -15,6 +16,8 @@ export interface PackageDisplay {
 }
 
 export interface OrderOps {
+  /** Order-level fulfilment method. Absent on rows built before Academy Pickup (DELIVERY). */
+  method?: FulfillmentMethod;
   stage: StageProgress | null;
   city: string | null;
   state: string | null;
@@ -29,6 +32,12 @@ export interface OrderOps {
   latest_at: string | null;
   package: PackageDisplay | null;
   issue: string | null;
+  /** Academy Pickup only: when staff marked it ready / collected, and who handed it over. */
+  ready_at?: string | null;
+  collected_at?: string | null;
+  collected_by?: string | null;
+  /** Shared next-step copy from `nextActionFor`. */
+  next?: string | null;
   /** Saved courier comparisons for this order (summary only). Absent before history recording began. */
   quote_history?: { sessions: number; options: number; cheapest_paise: number | null; premium_paise: number | null } | null;
 }
@@ -82,6 +91,8 @@ export interface OpsLines {
   alert: "package" | "issue" | null;
   /** Quiet comparison note, e.g. "4 options compared · cheapest ₹68.94". */
   quotes?: string | null;
+  /** Academy Pickup waiting age tone, descriptive only. */
+  age?: "neutral" | "amber" | "strong" | null;
 }
 
 /** Shown only once a courier is on the order; the cheapest is named only when the gap is material. */
@@ -110,6 +121,7 @@ function baseOpsLines(order: OpsLinesInput): OpsLines {
   const stage = ops?.stage;
   const plain = (headline: string, detail: string | null = null, recorded = false): OpsLines => ({ headline, rate: null, detail, recorded, alert: null });
   if (!ops || !stage) return plain(fulfillmentLabel(order.status, false));
+  if (ops.method === "ACADEMY_PICKUP") return pickupOpsLines(ops, stage, plain);
   if (ops.issue) {
     return {
       headline: ops.issue,
@@ -139,7 +151,7 @@ function baseOpsLines(order: OpsLinesInput): OpsLines {
       return courier ? withCourier(null) : plain("Courier not selected");
     case "pickup": {
       const at = formatAdminWhen(ops.pickup_at);
-      return withCourier(at ? `Pickup ${at}` : "Pickup requested · time unavailable");
+      return withCourier(at ? `Courier pickup ${at}` : "Courier pickup requested · time unavailable");
     }
     case "shipped": {
       const at = formatAdminWhen(ops.picked_up_at);
@@ -161,4 +173,35 @@ function baseOpsLines(order: OpsLinesInput): OpsLines {
     default:
       return plain(stage.label);
   }
+}
+
+/** Academy Pickup strip: no courier, rate, package or quote lines ever. */
+function pickupOpsLines(ops: OrderOps, stage: StageProgress, plain: (headline: string, detail?: string | null, recorded?: boolean) => OpsLines): OpsLines {
+  if (ops.issue) {
+    return { headline: ops.issue, rate: null, detail: ISSUE_HINT[ops.issue] || "Open details to resolve", recorded: false, alert: "issue" };
+  }
+  switch (stage.key) {
+    case "confirmed":
+      return plain("Ready to prepare");
+    case "preparing":
+      return plain("Preparing notes");
+    case "printing":
+      return plain("Printing notes", "Preparing for academy collection");
+    case "ready": {
+      const at = formatAdminWhen(ops.ready_at);
+      const age = readyAge(ops.ready_at);
+      return { ...plain("Ready for collection", [at ? `Ready since ${at}` : null, age?.label].filter(Boolean).join(" · ") || null), age: age?.tone || null };
+    }
+    case "collected": {
+      const at = formatAdminWhen(ops.collected_at);
+      return plain(at ? `Collected ${at}` : "Collected", ops.collected_by ? `by ${ops.collected_by}` : null);
+    }
+    default:
+      return plain(stage.label);
+  }
+}
+
+/** Next-step line for a paid order, from the shared transition matrix. */
+export function nextStepLine(status: string, method: FulfillmentMethod = "DELIVERY"): string | null {
+  return nextActionFor(status, method).label;
 }

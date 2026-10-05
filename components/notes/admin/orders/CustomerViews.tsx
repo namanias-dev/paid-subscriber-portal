@@ -12,6 +12,7 @@ import {
   destinationLabel,
   DetailsLink,
   InvoiceAction,
+  MethodBadge,
   NeutralPill,
   OpsStrip,
   PackageLine,
@@ -125,9 +126,10 @@ function OrderSummary({ line, max, stacked = false }: { line: PaidLine; max: num
         <span className="block truncate text-[13px] font-medium leading-5 text-ca-navy/90" title={full}>
           {fitProducts(line.items, max)}
         </span>
-        <span className="flex items-center gap-2">
+        <span className="flex flex-wrap items-center gap-2">
           <span className="text-[14px] font-semibold leading-5 tabular-nums text-[var(--ca-navy)]">{formatPaise(line.total_paise)}</span>
           <PaidMark />
+          <MethodBadge method={line.ops?.method} />
         </span>
         <PackageLine ops={line.ops} quiet={opsLines(line).alert === "package"} wrap />
       </div>
@@ -139,7 +141,10 @@ function OrderSummary({ line, max, stacked = false }: { line: PaidLine; max: num
         {fitProducts(line.items, max)}
       </span>
       <span className="text-right text-[14px] font-semibold leading-5 tabular-nums text-[var(--ca-navy)]">{formatPaise(line.total_paise)}</span>
-      <PackageLine ops={line.ops} quiet={opsLines(line).alert === "package"} />
+      <span className="flex min-w-0 items-center gap-2">
+        <MethodBadge method={line.ops?.method} />
+        <PackageLine ops={line.ops} quiet={opsLines(line).alert === "package"} />
+      </span>
       <span className="justify-self-end">
         <PaidMark />
       </span>

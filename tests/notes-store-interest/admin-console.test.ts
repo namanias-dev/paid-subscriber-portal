@@ -28,7 +28,7 @@ test("pickup failure outranks booking and does not treat a cancelled AWB as acti
   assert.equal(hasActiveShipment("cancelled", "67350910000044"), false);
   assert.equal(hasActiveShipment("created", "14112365007656"), true);
   assert.deepEqual(actionRequiredReasons({ status: "PICKUP_SCHEDULED", awb: "1", pickupFailed: true }), ["Pickup wasn't completed"]);
-  assert.equal(fulfillmentLabel("PICKUP_SCHEDULED", true), "Pickup issue");
+  assert.equal(fulfillmentLabel("PICKUP_SCHEDULED", true), "Courier pickup issue");
   assert.equal(nextPreparationStatus("PICKED_UP"), null);
 });
 

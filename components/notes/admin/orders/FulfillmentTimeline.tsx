@@ -2,21 +2,23 @@
 
 import { useEffect, useRef } from "react";
 import { motion, useReducedMotion } from "framer-motion";
-import { stageProgress, TIMELINE } from "@/lib/store/opsBoard";
+import { stageProgress, timelineFor } from "@/lib/store/opsBoard";
+import type { FulfillmentMethod } from "@/lib/store/fulfillment";
 
 const EASE_OUT = [0.22, 1, 0.36, 1] as const;
 
 /**
- * The canonical nine-rung ladder. `fill` stretches connectors across the container (cards);
+ * The canonical ladder for the order's method (nine delivery rungs, five Academy Pickup rungs). `fill` stretches connectors across the container (cards);
  * otherwise connectors are fixed width. Non-compact adds a label under every dot.
  */
-export function FulfillmentTimeline({ status, compact = false, fill = false }: { status: string; compact?: boolean; fill?: boolean }) {
+export function FulfillmentTimeline({ status, method = "DELIVERY", compact = false, fill = false }: { status: string; method?: FulfillmentMethod; compact?: boolean; fill?: boolean }) {
   const reduce = useReducedMotion();
   const mounted = useRef(false);
   useEffect(() => {
     mounted.current = true;
   }, []);
-  const stage = stageProgress(status);
+  const stage = stageProgress(status, method);
+  const TIMELINE = timelineFor(method);
   if (!stage) return null;
   const current = stage.index;
   const dot = compact ? "h-2 w-2" : "h-2.5 w-2.5";

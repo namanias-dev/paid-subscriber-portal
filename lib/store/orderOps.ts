@@ -7,6 +7,7 @@ import { resolveBookingPackage } from "./shipping/manualBook";
 import type { PackageLine } from "./shipping/autoFulfill";
 import { isCapturedNotesOrder } from "./customerGroups";
 import type { OrderOps, PackageDisplay, ShippingRateStats } from "./orderOpsDisplay";
+import { nextActionFor, type FulfillmentMethod } from "./fulfillment";
 
 export type { OrderOps, PackageDisplay, PackageDisplaySource, ShippingRateStats } from "./orderOpsDisplay";
 export { formatPackageDims, formatPackageWeight, PACKAGE_SOURCE_LABEL } from "./orderOpsDisplay";
@@ -205,6 +206,12 @@ const PACKED = new Set(["PACKED", "READY_FOR_PICKUP"]);
 
 export function buildOrderOps(input: {
   status: string;
+  /** Absent means DELIVERY. */
+  method?: FulfillmentMethod;
+  /** Academy Pickup collection facts. */
+  readyAt?: string | null;
+  collectedAt?: string | null;
+  collectedBy?: string | null;
   address: { city?: unknown; state?: unknown } | null;
   ship: OrderOpsShipment | null;
   cityConfirm: boolean;
@@ -212,6 +219,7 @@ export function buildOrderOps(input: {
   package: PackageDisplay | null;
   orderDeliveredAt?: string | null;
 }): OrderOps {
+  if (input.method === "ACADEMY_PICKUP") return buildPickupOps(input);
   const stage = stageProgress(input.status);
   const ship = input.ship;
   const awb = ship?.awb || null;
@@ -235,6 +243,37 @@ export function buildOrderOps(input: {
     latest_at: latest.at,
     package: input.package,
     issue: opsIssue({ reasons: input.reasons, packed, awb, package: input.package }),
+    method: "DELIVERY",
+    next: nextActionFor(input.status, "DELIVERY").label,
+  };
+}
+
+/** Academy Pickup row: stage, customer location and collection facts. Never courier, package or rate. */
+function buildPickupOps(input: Parameters<typeof buildOrderOps>[0]): OrderOps {
+  const city = typeof input.address?.city === "string" && input.address.city.trim() ? input.address.city.trim() : null;
+  const state = typeof input.address?.state === "string" && input.address.state.trim() ? input.address.state.trim() : null;
+  const issue = opsIssue({ reasons: input.reasons, packed: false, awb: null, package: null });
+  return {
+    method: "ACADEMY_PICKUP",
+    stage: stageProgress(input.status, "ACADEMY_PICKUP"),
+    city,
+    state,
+    courier: null,
+    provider: null,
+    rate_paise: null,
+    courier_not_selected: false,
+    pickup_at: null,
+    picked_up_at: null,
+    delivered_at: null,
+    latest_text: null,
+    latest_at: null,
+    package: null,
+    issue,
+    ready_at: input.readyAt || null,
+    collected_at: input.collectedAt || null,
+    collected_by: input.collectedBy || null,
+    next: nextActionFor(input.status, "ACADEMY_PICKUP").label,
+    quote_history: null,
   };
 }
 

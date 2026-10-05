@@ -3,6 +3,7 @@ import { requireFreshPermission, getActionActor } from "@/lib/adminGuard";
 import { storeDb } from "@/lib/store/db";
 import { requestReverseShipment } from "@/lib/store/shipping/book";
 import { dispatchBlocked } from "@/lib/store/shipping/dispatch";
+import { deliveryOnlyGuard } from "@/lib/store/fulfillmentGuard";
 
 export const dynamic = "force-dynamic";
 
@@ -37,6 +38,9 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   if (!open) return NextResponse.json({ ok: false, error: "This order has no open report." }, { status: 409 });
 
   if (action === "reverse") {
+    // A reverse shipment is courier work; Academy Pickup returns are handled in person.
+    const pickupRefusal = await deliveryOnlyGuard(db, order.id, "support_reverse");
+    if (pickupRefusal) return pickupRefusal;
     const blocked = dispatchBlocked();
     if (blocked) {
       return NextResponse.json({ ok: false, error: blocked, writes_authorized: false }, { status: 409, headers: { "Cache-Control": "no-store" } });

@@ -10,7 +10,7 @@ const NOT_CAPTURED = new Set([
   "PARTIALLY_REFUNDED",
 ]);
 
-const ACTIVE_EXCLUDE = new Set(["DELIVERED", "CANCELLED", "REFUNDED", "PARTIALLY_REFUNDED", "PAYMENT_FAILED", "PAYMENT_EXPIRED", "PAYMENT_PENDING"]);
+const ACTIVE_EXCLUDE = new Set(["DELIVERED", "COLLECTED", "CANCELLED", "REFUNDED", "PARTIALLY_REFUNDED", "PAYMENT_FAILED", "PAYMENT_EXPIRED", "PAYMENT_PENDING"]);
 
 const BUCKETS: Record<string, string[]> = {
   confirming: ["PAYMENT_PENDING"],
@@ -21,6 +21,8 @@ const BUCKETS: Record<string, string[]> = {
   pickup: ["PICKUP_SCHEDULED"],
   shipped: ["PICKED_UP", "IN_TRANSIT", "OUT_FOR_DELIVERY"],
   delivered: ["DELIVERED"],
+  ready_for_collection: ["READY_FOR_COLLECTION"],
+  collected: ["COLLECTED"],
   unpaid: ["PAYMENT_PENDING", "PAYMENT_FAILED", "PAYMENT_EXPIRED", "CANCELLED", "CANCEL_REQUESTED"],
 };
 

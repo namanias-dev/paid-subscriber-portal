@@ -21,8 +21,9 @@ import {
 } from "@/lib/store/adminConsole";
 import { DownloadInvoiceButton, ViewInvoiceButton } from "./InvoiceActions";
 import { FulfillmentTimeline } from "./FulfillmentTimeline";
-import { showsFulfillmentTimeline, TIMELINE, timelineIndex } from "@/lib/store/opsBoard";
-import { staffAdvanceLabel } from "@/lib/store/stages";
+import { showsFulfillmentTimeline, timelineFor, timelineIndex } from "@/lib/store/opsBoard";
+import { METHOD_BADGE, orderMethod, staffAdvanceLabelFor, type FulfillmentMethod } from "@/lib/store/fulfillment";
+import PickupPanel, { type AdminPickupFacts } from "./PickupPanel";
 import ChangeDeliveryAddress from "./ChangeDeliveryAddress";
 import CourierPriceHistory from "./CourierPriceHistory";
 import { buildDeliveryGoogleMapsUrl, formatDeliveryAddress } from "@/lib/store/deliveryAddress";
@@ -45,6 +46,10 @@ export interface AdminOrder {
   id: string;
   order_no: string;
   status: string;
+  fulfillment_method?: FulfillmentMethod;
+  customer_location?: { city: string | null; state: string | null; pincode: string | null } | null;
+  /** Academy Pickup detail facts (order page only). */
+  pickup?: AdminPickupFacts | null;
   customer_name: string;
   phone: string;
   email: string | null;
@@ -196,12 +201,16 @@ export default function OrderDetail({
   act: (fn: () => Promise<Response>, ok: string) => void;
   presentation?: "drawer" | "page";
 }) {
-  const ship = order.shipment;
+  const method = orderMethod(order);
+  const isPickup = method === "ACADEMY_PICKUP";
+  // Academy Pickup has no shipment; ignore any row defensively so no courier UI renders.
+  const ship = isPickup ? null : order.shipment;
   const active = hasActiveShipment(ship?.status, ship?.awb);
   const failed = pickupFailedActivity(ship?.tracking_activity);
   const queued = ship?.pickup_status === "already_in_pickup_queue" || ship?.pickup_status === "reattempt_requested";
   const action = primaryAction({
     status: order.status,
+    method,
     awb: ship?.awb,
     pickupFailed: failed,
     addressMismatch: ship?.address_mismatch,
@@ -244,6 +253,7 @@ export default function OrderDetail({
   const [invoiceBusy, setInvoiceBusy] = useState(false);
   const [scans, setScans] = useState<Array<{ activity?: string; time?: string; location?: string }>>([]);
   const [toast, setToast] = useState<string | null>(null);
+  const [collectRequest, setCollectRequest] = useState(0);
 
   useEffect(() => {
     setIssueStatus(order.issue?.status || "OPEN");
@@ -285,10 +295,10 @@ export default function OrderDetail({
       .finally(() => setInvoiceBusy(false));
   }
 
-  async function copy(text: string) {
+  async function copy(text: string, label = "Copied") {
     try {
       await navigator.clipboard.writeText(text);
-      setToast("Copied");
+      setToast(label);
       window.setTimeout(() => setToast(null), 1200);
     } catch {
       setToast("Copy failed");
@@ -298,9 +308,10 @@ export default function OrderDetail({
   function runPrimary() {
     if (action === "reconcile") {
       act(() => fetch(`/api/admin/notes/orders/${order.id}/reconcile`, { method: "POST" }), "Payment rechecked with the gateway");
-    } else if (action === "prepare" || action === "pack") {
+    } else if (action === "prepare" || action === "pack" || action === "ready") {
       setConfirmAdvance(true);
-    } else if (action === "compare") onCompare();
+    } else if (action === "collect") setCollectRequest((n) => n + 1);
+    else if (action === "compare") onCompare();
     else if (action === "label") void printLabel();
     else if (action === "resolve_pickup" || action === "tracking") void refreshTrack();
     else if (action === "review_issue") document.getElementById("customer-issue")?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -327,11 +338,15 @@ export default function OrderDetail({
     ? [address.line1, address.line2, address.landmark, `${address.city}, ${address.state} ${address.pincode}`].filter(Boolean).join(", ")
     : "";
   const vol = volumetricGrams(Number(length), Number(width), Number(height));
-  const next = nextPreparationStatus(order.status);
+  const next = nextPreparationStatus(order.status, method);
   const reasons = order.action_reasons || [];
 
-  const advanceLabel = staffAdvanceLabel(order.status);
-  const packing = next === "PACKED";
+  const advanceLabel = staffAdvanceLabelFor(order.status, method);
+  const packing = next === "PACKED" || next === "READY_FOR_COLLECTION";
+  const timeline = timelineFor(method);
+  const confirmCopy = next === "READY_FOR_COLLECTION"
+    ? "Confirm this order is printed, checked and ready to hand to the customer."
+    : "Mark packed saves this stage only. It does not choose a courier or create a shipment.";
   const shell = presentation === "page"
     ? "min-h-screen bg-[#f7f5ef]"
     : "fixed inset-0 z-40 flex justify-end bg-[var(--ca-navy)]/30";
@@ -357,6 +372,7 @@ export default function OrderDetail({
           </div>
           <div className="mt-3 flex flex-wrap gap-2">
             {order.payment_status && <Badge tone={order.payment_status === "CAPTURED" ? "green" : "neutral"}>{order.payment_status === "CAPTURED" ? "Paid" : order.payment_status}</Badge>}
+            <Badge tone={isPickup ? "gold" : "neutral"}>{METHOD_BADGE[method]}</Badge>
             <Badge tone={fulfillmentTone(order.status, failed)}>{fulfillmentLabel(order.status, failed)}</Badge>
           </div>
         </header>
@@ -384,22 +400,22 @@ export default function OrderDetail({
           )}
           <section className="rounded-2xl bg-white p-4">
             <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--ca-gold-dark)]">Fulfillment</p>
-            {showsFulfillmentTimeline(order.status) ? (
+            {showsFulfillmentTimeline(order.status, method) ? (
               <div className="mt-3 overflow-x-auto">
-                <FulfillmentTimeline status={order.status} />
+                <FulfillmentTimeline status={order.status} method={method} fill={isPickup} />
               </div>
             ) : (
               <p className="mt-2 text-sm font-semibold text-[var(--ca-navy)]">{fulfillmentLabel(order.status, failed)}</p>
             )}
             <p className="mt-3 text-sm text-[var(--ca-navy)]">
-              Current: <span className="font-semibold">{showsFulfillmentTimeline(order.status) ? TIMELINE[timelineIndex(order.status) || 0].label : fulfillmentLabel(order.status, failed)}</span>
+              Current: <span className="font-semibold">{showsFulfillmentTimeline(order.status, method) ? timeline[timelineIndex(order.status, method) || 0].label : fulfillmentLabel(order.status, failed)}</span>
             </p>
             {canManage && advanceLabel && (
               packing && !confirmAdvance ? (
                 <div className="mt-3 rounded-2xl bg-[#f7f5ef] p-3">
-                  <p className="text-sm text-[var(--ca-navy)]">Mark packed saves this stage only. It does not choose a courier or create a shipment.</p>
+                  <p className="text-sm text-[var(--ca-navy)]">{confirmCopy}</p>
                   <div className="mt-3 flex gap-2">
-                    <button type="button" onClick={() => setConfirmAdvance(true)} className="min-h-11 rounded-full bg-[var(--ca-navy)] px-4 text-sm font-semibold text-white">Mark packed</button>
+                    <button type="button" onClick={() => setConfirmAdvance(true)} className="min-h-11 rounded-full bg-[var(--ca-navy)] px-4 text-sm font-semibold text-white">{advanceLabel}</button>
                   </div>
                 </div>
               ) : packing ? (
@@ -408,10 +424,10 @@ export default function OrderDetail({
                   <button
                     type="button"
                     disabled={busy}
-                    onClick={() => act(() => fetch(`/api/admin/notes/orders/${order.id}/advance`, { method: "POST" }), "Marked packed")}
+                    onClick={() => act(() => fetch(`/api/admin/notes/orders/${order.id}/advance`, { method: "POST" }), next === "READY_FOR_COLLECTION" ? "Marked ready for collection" : "Marked packed")}
                     className="min-h-11 rounded-full bg-[var(--ca-navy)] px-4 text-sm font-semibold text-white disabled:opacity-50"
                   >
-                    {busy ? "Saving…" : "Mark packed"}
+                    {busy ? "Saving…" : next === "READY_FOR_COLLECTION" ? "Mark ready" : "Mark packed"}
                   </button>
                 </div>
               ) : (
@@ -462,6 +478,27 @@ export default function OrderDetail({
             </section>
           )}
 
+          {isPickup && (
+            <PickupPanel
+              order={order}
+              pickup={order.pickup || null}
+              canManage={canManage}
+              busy={busy}
+              confirmRequest={collectRequest}
+              onCopy={(text, label) => void copy(text, label)}
+              onCollect={() =>
+                act(
+                  () => fetch(`/api/admin/notes/orders/${order.id}/collect`, {
+                    method: "POST",
+                    headers: { "content-type": "application/json" },
+                    body: JSON.stringify({ confirm: "COLLECTED" }),
+                  }),
+                  "Marked collected",
+                )
+              }
+            />
+          )}
+
           {failed && (
             <section className="rounded-2xl border border-amber-300 bg-white p-4">
               <p className="font-heading text-lg font-bold text-[var(--ca-navy)]">Pickup wasn't completed</p>
@@ -509,7 +546,7 @@ export default function OrderDetail({
             </section>
           )}
 
-          {canManage && !active && (order.status === "PACKED" || order.status === "READY_FOR_PICKUP") && (
+          {canManage && !isPickup && !active && (order.status === "PACKED" || order.status === "READY_FOR_PICKUP") && (
             <section className="rounded-2xl bg-white p-4">
               <p className="font-semibold text-[var(--ca-navy)]">{order.city_confirmation ? "Courier city needs confirmation" : "Courier not selected"}</p>
               <p className="mt-1 text-sm text-[var(--ca-navy)]/70">
@@ -530,6 +567,21 @@ export default function OrderDetail({
               <Field label="Phone" value={order.phone} />
               <Field label="Email" value={order.email} />
             </dl>
+            {isPickup ? (
+              <>
+                <h3 className="mt-4 text-sm font-semibold text-[var(--ca-navy)]">Customer location</h3>
+                <p className="mt-1 text-sm text-[var(--ca-navy)]/80">
+                  {order.customer_location
+                    ? [order.customer_location.city, order.customer_location.state, order.customer_location.pincode].filter(Boolean).join(", ")
+                    : "Location unavailable"}
+                </p>
+                <p className="mt-1 text-xs text-[var(--ca-navy)]/50">For the invoice and order records. Not a delivery address.</p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button type="button" aria-label="Copy phone" onClick={() => copy(order.phone)} className="min-h-11 rounded-full border px-3 text-xs font-semibold">Copy phone</button>
+                </div>
+              </>
+            ) : (
+            <>
             <h3 className="mt-4 text-sm font-semibold text-[var(--ca-navy)]">Delivery address</h3>
             <p className="mt-1 text-xs font-semibold uppercase tracking-wide text-[var(--ca-navy)]/45">
               {address?.confirmation_status === "CUSTOMER_CONFIRMED" ? "Customer confirmed" : address?.confirmation_status === "ADMIN_CONFIRMED" ? "Admin confirmed" : address?.confirmation_status === "ADMIN_UPDATED_CUSTOMER_CONFIRMED" ? "Admin updated" : "Legacy order / not recorded"}
@@ -541,6 +593,8 @@ export default function OrderDetail({
               <button type="button" aria-label="Copy address" onClick={() => copy(addressLine)} className="min-h-11 rounded-full border px-3 text-xs font-semibold">Copy address</button>
               <button type="button" aria-label="Copy phone" onClick={() => copy(order.phone)} className="min-h-11 rounded-full border px-3 text-xs font-semibold">Copy phone</button>
             </div>
+            </>
+            )}
           </section>
 
           <section className="rounded-2xl bg-white p-4">
@@ -558,7 +612,11 @@ export default function OrderDetail({
               {(order.discount_paise || 0) > 0 && (
                 <div className="flex justify-between"><dt>{order.discount_trace_json?.offer_name || order.promo_code || "Offer"}</dt><dd>− {formatPaise(order.discount_paise || 0)}</dd></div>
               )}
-              {(order.shipping_paise || 0) > 0 && <div className="flex justify-between"><dt>Shipping</dt><dd>{formatPaise(order.shipping_paise || 0)}</dd></div>}
+              {isPickup ? (
+                <div className="flex justify-between"><dt>Academy pickup · No delivery charge</dt><dd>{formatPaise(0)}</dd></div>
+              ) : (
+                (order.shipping_paise || 0) > 0 && <div className="flex justify-between"><dt>Shipping</dt><dd>{formatPaise(order.shipping_paise || 0)}</dd></div>
+              )}
               <div className="flex justify-between font-semibold text-[var(--ca-navy)]"><dt>Total</dt><dd>{formatPaise(order.total_paise)}</dd></div>
             </dl>
             {order.gateway_charges && order.gateway_charges.gateway_fee_paise > 0 && (
@@ -625,6 +683,7 @@ export default function OrderDetail({
             )}
           </section>
 
+          {!isPickup && (
           <section className="rounded-2xl bg-white p-4">
             <div className="flex items-center justify-between">
               <h2 className="font-heading text-lg font-bold text-[var(--ca-navy)]">Package</h2>
@@ -661,10 +720,11 @@ export default function OrderDetail({
               </form>
             )}
           </section>
+          )}
 
-          <CourierPriceHistory orderId={order.id} reloadKey={`${order.status}|${ship?.awb || ""}`} />
+          {!isPickup && <CourierPriceHistory orderId={order.id} reloadKey={`${order.status}|${ship?.awb || ""}`} />}
 
-          {(order.past_shipments || []).length > 0 && (
+          {!isPickup && (order.past_shipments || []).length > 0 && (
             <section className="rounded-2xl bg-white p-4">
               <button type="button" onClick={() => setHistory((v) => !v)} className="flex min-h-11 w-full items-center justify-between text-left">
                 <span className="font-heading text-lg font-bold text-[var(--ca-navy)]">Shipment history</span>
@@ -744,6 +804,7 @@ export default function OrderDetail({
                 <li key={event.id} className="text-sm">
                   <span className="text-[var(--ca-navy)]/50">{formatAdminWhen(event.created_at)}</span>
                   <span className="ml-2 font-medium text-[var(--ca-navy)]">{event.event.replaceAll("_", " ")}</span>
+                  {event.actor_name && <span className="ml-1 text-[var(--ca-navy)]/55">· {event.actor_name}</span>}
                 </li>
               ))}
             </ol>
@@ -755,6 +816,8 @@ export default function OrderDetail({
             </button>
             {advanced && (
               <div className="mt-3 space-y-3 text-sm">
+                {!isPickup && (
+                <>
                 <p className="text-[var(--ca-navy)]/70">Manual shipping overrides should only be used when provider integration cannot be used. This does not book a courier by itself.</p>
                 {!writesAuthorized && <p className="text-xs text-[var(--ca-navy)]/50">Live shipping writes disabled.</p>}
                 <div className="grid grid-cols-2 gap-2">
@@ -773,7 +836,9 @@ export default function OrderDetail({
                 >
                   Mark shipped
                 </button>
-                <p>Courier stages after pickup come from tracking. Pre-shipment steps use the button at the top.</p>
+                <p>Courier stages after courier pickup come from tracking. Pre-shipment steps use the button at the top.</p>
+                </>
+                )}
                 <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2} placeholder="Internal note" className="w-full rounded-xl border px-3 py-2" />
                 <button
                   type="button"
@@ -803,7 +868,7 @@ export default function OrderDetail({
         </div>
         )}
       </article>
-      {canManage && addressEditor && (
+      {canManage && !isPickup && addressEditor && (
         <ChangeDeliveryAddress
           orderId={order.id}
           current={address}

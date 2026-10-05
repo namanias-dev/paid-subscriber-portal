@@ -260,6 +260,10 @@ export interface NotesOrderFact {
   /** Used only to count distinct buyers. Never rendered. */
   phone_key?: string | null;
   shipping_address_id?: string | null;
+  /** Absent on rows read before Academy Pickup: DELIVERY. */
+  fulfillment_method?: string | null;
+  /** Academy Pickup buyer location (PIN/city/state); geography fallback only. */
+  customer_location_snapshot?: { city?: string | null; state?: string | null; pincode?: string | null } | null;
 }
 
 export interface NotesItemFact {
