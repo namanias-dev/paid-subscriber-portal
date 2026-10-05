@@ -96,7 +96,6 @@ describe("AI counselor stays closed until a launcher action", () => {
       "/notes/polity",
       "/notes/economy",
       "/notes/cart",
-      "/notes/checkout",
       "/notes/track",
       "/",
       "/courses/upsc-foundation",
@@ -109,6 +108,9 @@ describe("AI counselor stays closed until a launcher action", () => {
     assert.equal(isWidgetAllowedPath("/dashboard"), false);
     assert.equal(isWidgetAllowedPath("/courses/safalta/enroll"), false);
     assert.equal(isWidgetAllowedPath("/payment/status"), false);
+    // Notes checkout hides the launcher so nothing covers the sticky pay bar.
+    assert.equal(isWidgetAllowedPath("/notes/checkout"), false);
+    assert.equal(isWidgetAllowedPath("/notes/checkout?utm_source=ig"), false);
   });
 
   test("the widget has a single user-action open and no passive triggers", () => {
