@@ -32,7 +32,7 @@ const STEP_LABEL: Record<TrackStepId, string> = {
   preparing: "Preparing your notes",
   printing: "Printing your notes",
   packed: "Packed",
-  pickup: "Pickup scheduled",
+  pickup: "Courier pickup scheduled",
   shipped: "Shipped",
   in_transit: "In transit",
   out_for_delivery: "Out for delivery",
@@ -124,7 +124,7 @@ export function buildTrackingTimeline(input: TrackingViewInput): TrackingTimelin
     if (returned && id === "out_for_delivery") state = "exception";
     if (input.stage === "delivered" && id === "delivered") state = "done";
     let label = STEP_LABEL[id];
-    if (id === "pickup" && pickupException) label = "Pickup delayed";
+    if (id === "pickup" && pickupException) label = "Courier pickup delayed";
     if (id === "out_for_delivery" && deliveryException) label = "Delivery delayed";
     if (id === "out_for_delivery" && returned) label = "Returned";
     if (id === "confirmed" && cancelled) label = "Cancelled";
@@ -163,15 +163,15 @@ export function trackingNarrative(input: TrackingViewInput): TrackingNarrative {
   }
   if (input.pickupDelayed) {
     return {
-      headline: "Pickup delayed",
+      headline: "Courier pickup delayed",
       explanation: "Your notes are packed and waiting with us. Courier collection is being rescheduled.",
       next: "We'll update this page when the next collection is confirmed. You don't need to contact the courier.",
-      exception: "Pickup delayed",
+      exception: "Courier pickup delayed",
     };
   }
   if (input.orderStatus === "PICKUP_SCHEDULED" && input.pickupQueued) {
     return {
-      headline: "Pickup scheduled",
+      headline: "Courier pickup scheduled",
       explanation: "Your parcel is packed and still waiting for courier collection. The pickup request remains in the courier queue.",
       next: "Keep an eye on this page. We'll show it as shipped only after the courier actually collects the parcel.",
       exception: null,
@@ -179,7 +179,7 @@ export function trackingNarrative(input: TrackingViewInput): TrackingNarrative {
   }
   if (input.orderStatus === "PICKUP_SCHEDULED") {
     return {
-      headline: "Pickup scheduled",
+      headline: "Courier pickup scheduled",
       explanation: "Your parcel is packed and awaiting courier collection.",
       next: "Our courier partner will collect the parcel next. You don't need to do anything.",
       exception: null,

@@ -148,7 +148,7 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
       )}
 
       <div className="lg:pl-64">
-        <header className="frost sticky top-0 z-30 flex items-center justify-between border-b border-line px-4 py-3">
+        <header className="frost sticky top-0 z-30 flex items-center justify-between border-b border-line px-4 py-2.5 sm:py-3">
           <button onClick={() => setOpen(true)} className="rounded-lg border border-line p-2 lg:hidden" aria-label="Open menu"><Menu size={18} strokeWidth={2} /></button>
           <div className="hidden text-sm text-ink2 lg:block">UPSC Edtech Control Center</div>
           <div className="flex items-center gap-3">

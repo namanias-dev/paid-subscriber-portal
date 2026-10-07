@@ -100,7 +100,9 @@ export function matchZone(pincode: string, zones: StoreZone[]): StoreZone {
   );
 }
 
-async function lookupCityState(pincode: string): Promise<{ city: string | null; state: string | null; source: string }> {
+type CityStateLookup = { city: string | null; state: string | null; source: "cache" | "postalpincode.in" | "not_found" | "outage" };
+
+async function lookupCityState(pincode: string): Promise<CityStateLookup> {
   const db = storeDb();
   if (db) {
     const { data } = await db
@@ -136,10 +138,34 @@ async function lookupCityState(pincode: string): Promise<{ city: string | null; 
       }
       return { city, state, source: "postalpincode.in" };
     }
+    // India Post answered and does not know this PIN.
+    if (res.ok && json?.[0]?.Status) return { city: null, state: null, source: "not_found" };
   } catch {
     /* lookup is best-effort */
   }
-  return { city: null, state: null, source: "none" };
+  return { city: null, state: null, source: "outage" };
+}
+
+export type IndianPincodeLookup =
+  | { ok: true; pincode: string; city: string; state: string; source: "cache" | "postalpincode.in" }
+  | { ok: false; error: string; retriable: boolean };
+
+/**
+ * Where a PIN is, for Academy Pickup: city and state only. No zone, no courier
+ * serviceability (a valid PIN we cannot deliver to is fine for pickup). Cache first;
+ * an India Post outage is a clean, retriable error rather than a guess.
+ */
+export async function lookupIndianPincode(raw: string): Promise<IndianPincodeLookup> {
+  const pin = (raw || "").trim();
+  if (!isValidPincode(pin)) return { ok: false, error: "Enter a 6-digit PIN code", retriable: false };
+  const found = await lookupCityState(pin);
+  if (found.source === "outage") {
+    return { ok: false, error: "We couldn't check this PIN right now. Please try again in a moment.", retriable: true };
+  }
+  if (found.source === "not_found" || !found.city || !found.state) {
+    return { ok: false, error: "We couldn't find this PIN code. Please check it.", retriable: false };
+  }
+  return { ok: true, pincode: pin, city: found.city, state: found.state, source: found.source };
 }
 
 export async function checkPincode(pincode: string, dispatchDays = 2): Promise<PinCheckResult | { error: string }> {

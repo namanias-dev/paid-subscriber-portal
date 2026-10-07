@@ -7,6 +7,8 @@ import type { PublicIssue } from "@/lib/store/issues";
 import { categoriesForStage, issueCategoryLabel } from "@/lib/store/issues";
 import type { PublicOrder } from "@/lib/store/orders";
 import { buildTrackingTimeline, formatPromise, trackingNarrative } from "@/lib/store/trackingView";
+import { buildPickupTimeline, formatCustomerWhen, pickupNarrative } from "@/lib/store/pickupTracking";
+import PickupLocationCard, { pickupViewFromSnapshot } from "./PickupLocationCard";
 import IssueSheet from "./track/IssueSheet";
 import { StageArt } from "./track/StageArt";
 
@@ -27,13 +29,7 @@ const HINTS: Record<string, string> = {
 function formatStamp(value: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat("en-IN", {
-    timeZone: "Asia/Kolkata",
-    day: "numeric",
-    month: "short",
-    hour: "numeric",
-    minute: "2-digit",
-  }).format(date);
+  return formatCustomerWhen(value) || value;
 }
 
 async function copyText(value: string): Promise<boolean> {
@@ -161,7 +157,9 @@ export default function OrderStatus({ order }: { order: PublicOrder }) {
     };
   }, [current.confirming, current.invoice_status, current.order_no, current.access_token]);
 
-  const narrative = trackingNarrative({
+  const isPickup = current.fulfillment_method === "ACADEMY_PICKUP";
+  const pickupView = isPickup ? pickupViewFromSnapshot(current.pickup_location) : null;
+  const deliveryNarrative = trackingNarrative({
     stage: current.stage,
     stageLabel: current.stage_label,
     orderStatus: current.order_status,
@@ -173,7 +171,7 @@ export default function OrderStatus({ order }: { order: PublicOrder }) {
     eventAt: current.event_at,
     promisedDeliveryDate: current.promised_delivery_date,
   });
-  const timeline = buildTrackingTimeline({
+  const deliveryTimeline = buildTrackingTimeline({
     stage: current.stage,
     orderStatus: current.order_status,
     pickupDelayed: current.pickup_delayed,
@@ -182,17 +180,27 @@ export default function OrderStatus({ order }: { order: PublicOrder }) {
     deliveredAt: current.delivered_at,
     eventAt: current.event_at,
   });
-  const promise = formatPromise(current.promised_delivery_date);
+  const pickupInput = {
+    stage: current.stage,
+    placedAt: current.placed_at,
+    readyAt: current.ready_for_collection_at,
+    collectedAt: current.collected_at,
+    academyName: current.pickup_location?.name,
+  };
+  const narrative = isPickup ? pickupNarrative(pickupInput) : deliveryNarrative;
+  const timeline: Array<{ id: string; label: string; state: string; at: string | null }> = isPickup ? buildPickupTimeline(pickupInput) : deliveryTimeline;
+  const promise = isPickup ? null : formatPromise(current.promised_delivery_date);
+  const collectedWhen = isPickup && current.stage === "collected" ? formatCustomerWhen(current.collected_at) : null;
   const openIssue = issues.find((issue) => issue.open) || null;
   const latestIssue = openIssue || issues[0] || null;
   const categories = useMemo(
     () =>
-      categoriesForStage(current.stage).map((id) => ({
+      categoriesForStage(current.stage, isPickup ? "ACADEMY_PICKUP" : "DELIVERY").map((id) => ({
         id,
         label: issueCategoryLabel(id),
         hint: HINTS[id] || "",
       })),
-    [current.stage],
+    [current.stage, isPickup],
   );
   const productLine = current.items.map((item) => `${item.name} × ${item.qty}`).join(", ");
 
@@ -242,10 +250,16 @@ export default function OrderStatus({ order }: { order: PublicOrder }) {
             <h1 className="font-heading text-[1.85rem] font-bold leading-tight text-[var(--ca-navy)] sm:text-4xl">
               {narrative.headline}
             </h1>
-            <StageArt step={(timeline.find((step) => step.state === "current")?.id || "confirmed")} active />
+            <StageArt step={(timeline.find((step) => step.state === "current")?.id || (isPickup && current.stage === "collected" ? "collected" : "confirmed")) as Parameters<typeof StageArt>[0]["step"]} active />
           </div>
           <p className="mt-3 text-[15px] leading-relaxed text-[var(--ca-navy)]/75">{narrative.explanation}</p>
           {promise && <p className="mt-4 text-sm font-semibold text-[var(--ca-navy)]">{promise}</p>}
+          {isPickup && (
+            <p className="mt-4 inline-flex rounded-full bg-[var(--ca-navy)]/[0.05] px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.12em] text-[var(--ca-navy)]">
+              Academy Pickup
+            </p>
+          )}
+          {collectedWhen && <p className="mt-2 text-sm font-semibold text-[var(--ca-navy)]">Collected {collectedWhen}</p>}
           {productLine && <p className="mt-2 text-sm text-[var(--ca-navy)]/70">{productLine}</p>}
           <div className="mt-4 flex flex-wrap gap-2">
             {current.courier && (
@@ -269,8 +283,16 @@ export default function OrderStatus({ order }: { order: PublicOrder }) {
         </div>
       </motion.section>
 
+      {isPickup && pickupView && current.stage !== "collected" && current.stage !== "failed" && (
+        <PickupLocationCard
+          className="mt-4 ns-elev-1"
+          location={pickupView}
+          note={current.stage === "ready_for_collection" ? "Please mention your order number and registered mobile when collecting." : "We’ll let you know when your notes are ready to collect."}
+        />
+      )}
+
       <section className="mt-4 rounded-[28px] border border-[var(--ca-navy)]/8 bg-white p-5 ns-elev-1 sm:p-6">
-        <h2 className="font-heading text-lg font-bold text-[var(--ca-navy)]">Shipment progress</h2>
+        <h2 className="font-heading text-lg font-bold text-[var(--ca-navy)]">{isPickup ? "Pickup progress" : "Shipment progress"}</h2>
         <ol className="mt-5">
           {timeline.map((step, index) => (
             <li key={step.id} className="flex gap-3">
@@ -370,7 +392,7 @@ export default function OrderStatus({ order }: { order: PublicOrder }) {
           )}
           {current.shipping_label && (
             <div className="flex justify-between">
-              <dt>Shipping</dt>
+              <dt>{isPickup ? "Academy pickup" : "Shipping"}</dt>
               <dd className="tabular-nums">{current.shipping_label}</dd>
             </div>
           )}
@@ -381,6 +403,24 @@ export default function OrderStatus({ order }: { order: PublicOrder }) {
         </dl>
       </section>
 
+      {isPickup ? (
+        <section className="mt-4 rounded-[28px] border border-[var(--ca-navy)]/8 bg-white p-5 ns-elev-1">
+          <h2 className="font-heading text-lg font-bold text-[var(--ca-navy)]">Collection</h2>
+          {current.stage === "collected" && pickupView && (
+            <p className="mt-2 text-sm leading-relaxed text-[var(--ca-navy)]/75">Collected from {pickupView.name}{collectedWhen ? ` on ${collectedWhen}` : ""}.</p>
+          )}
+          {current.stage !== "collected" && (
+            <p className="mt-2 text-sm leading-relaxed text-[var(--ca-navy)]/75">Keep your order number handy. Staff will check it with your registered mobile.</p>
+          )}
+          <button
+            type="button"
+            onClick={() => onCopy("Order number", current.order_no)}
+            className="mt-4 min-h-12 w-full rounded-2xl border border-[var(--ca-navy)]/10 px-3 text-sm font-semibold text-[var(--ca-navy)] sm:w-auto sm:px-5"
+          >
+            {copied === "Order number" ? "Copied" : "Copy order number"}
+          </button>
+        </section>
+      ) : (
       <section className="mt-4 rounded-[28px] border border-[var(--ca-navy)]/8 bg-white p-5 ns-elev-1">
         <h2 className="font-heading text-lg font-bold text-[var(--ca-navy)]">Shipping</h2>
         {current.ship_to && <p className="mt-3 text-sm leading-relaxed text-[var(--ca-navy)]/80">{current.ship_to}</p>}
@@ -413,6 +453,7 @@ export default function OrderStatus({ order }: { order: PublicOrder }) {
           </a>
         )}
       </section>
+      )}
 
       {latestIssue ? (
         <section className="mt-4 rounded-[28px] border border-[var(--ca-navy)]/8 bg-white p-5 ns-elev-2">
@@ -447,7 +488,9 @@ export default function OrderStatus({ order }: { order: PublicOrder }) {
           <section className="mt-4 rounded-[28px] border border-[var(--ca-navy)]/8 bg-white p-5 ns-elev-1">
             <h2 className="font-heading text-lg font-bold text-[var(--ca-navy)]">Need help with this order?</h2>
             <p className="mt-2 text-sm leading-relaxed text-[var(--ca-navy)]/70">
-              Address, pickup, delivery, or a status that does not look right. We’ll reply on this page.
+              {isPickup
+                ? "Collection, timing, your invoice, or a status that does not look right. We’ll reply on this page."
+                : "Address, courier pickup, delivery, or a status that does not look right. We’ll reply on this page."}
             </p>
             <button
               type="button"
@@ -460,7 +503,7 @@ export default function OrderStatus({ order }: { order: PublicOrder }) {
         )
       )}
 
-      {(current.stage === "delivered" || current.stage === "delivery_issue") && current.access_token && (
+      {(current.stage === "delivered" || current.stage === "delivery_issue" || (isPickup && current.stage === "collected")) && current.access_token && (
         <form
           className="mt-4 rounded-[28px] border border-[var(--ca-navy)]/8 bg-white p-5 ns-elev-1"
           onSubmit={async (e) => {
@@ -477,7 +520,9 @@ export default function OrderStatus({ order }: { order: PublicOrder }) {
         >
           <p className="text-sm font-semibold text-[var(--ca-navy)]">Report damaged or incomplete notes</p>
           <p className="mt-1 text-xs leading-relaxed text-[var(--ca-navy)]/60">
-            This is for a delivered parcel. It does not start a return shipment by itself.
+            {isPickup
+              ? "This is for notes you collected at the academy. The academy will review it with you."
+              : "This is for a delivered parcel. It does not start a return shipment by itself."}
           </p>
           <select
             value={reportReason}
@@ -489,7 +534,7 @@ export default function OrderStatus({ order }: { order: PublicOrder }) {
             <option value="missing_item">Missing book</option>
             <option value="incomplete_pages">Incomplete pages</option>
             <option value="print_defect">Print defect</option>
-            <option value="delivery_problem">Delivery problem</option>
+            {!isPickup && <option value="delivery_problem">Delivery problem</option>}
           </select>
           <textarea
             value={reportText}

@@ -1,6 +1,8 @@
 /** Notes admin operations view. Pure helpers: no courier calls, no status writes. */
 
 import { staffNextStatus } from "@/lib/store/stages";
+import { staffNextStatusFor, type FulfillmentMethod } from "@/lib/store/fulfillment";
+import { formatPaise } from "@/lib/store/money";
 
 export type AdminSort = "newest" | "oldest" | "value_desc" | "value_asc" | "updated" | "action";
 
@@ -12,6 +14,7 @@ export interface AdminQuote {
   etaText: string | null;
   etaDays: number | null;
   courierId?: string | null;
+  prepaid?: boolean;
 }
 
 export interface RankedQuote extends AdminQuote {
@@ -44,7 +47,9 @@ export function formatAdminWhen(value: string | null | undefined): string | null
     timeZone: "Asia/Kolkata",
     day: "numeric",
     month: "short",
-  }).format(date);
+  })
+    .format(date)
+    .replace("Sept", "Sep");
   if (!value.includes(":") && !value.includes("T")) return dated;
   const time = new Intl.DateTimeFormat("en-IN", {
     timeZone: "Asia/Kolkata",
@@ -55,7 +60,7 @@ export function formatAdminWhen(value: string | null | undefined): string | null
 }
 
 export function fulfillmentLabel(status: string, pickupFailed: boolean): string {
-  if (pickupFailed) return "Pickup issue";
+  if (pickupFailed) return "Courier pickup issue";
   switch (status) {
     case "PAYMENT_PENDING":
       return "Payment confirming";
@@ -72,7 +77,11 @@ export function fulfillmentLabel(status: string, pickupFailed: boolean): string 
     case "READY_FOR_PICKUP":
       return "Packed";
     case "PICKUP_SCHEDULED":
-      return "Pickup scheduled";
+      return "Courier pickup";
+    case "READY_FOR_COLLECTION":
+      return "Ready for collection";
+    case "COLLECTED":
+      return "Collected";
     case "PICKED_UP":
       return "Shipped";
     case "IN_TRANSIT":
@@ -102,7 +111,8 @@ export type BadgeTone = "neutral" | "navy" | "gold" | "amber" | "green" | "red";
 export function fulfillmentTone(status: string, pickupFailed: boolean): BadgeTone {
   if (pickupFailed || status === "DELIVERY_FAILED" || status === "REFUND_PENDING" || status === "PAYMENT_PENDING") return "amber";
   if (status === "CANCELLED" || status === "PAYMENT_FAILED" || status.startsWith("RTO_")) return "red";
-  if (status === "DELIVERED") return "green";
+  if (status === "DELIVERED" || status === "COLLECTED") return "green";
+  if (status === "READY_FOR_COLLECTION") return "gold";
   if (status === "PRINTING" || status === "QUALITY_CHECK" || status === "READY_TO_PACK") return "gold";
   if (status === "PICKUP_SCHEDULED" || status === "PACKED" || status === "READY_FOR_PICKUP") return "gold";
   if (PREP.has(status) || status === "IN_TRANSIT" || status === "PICKED_UP" || status === "OUT_FOR_DELIVERY") return "navy";
@@ -115,27 +125,39 @@ export function pickupFailedActivity(activity: string | null | undefined): boole
 
 export interface ActionInput {
   status: string;
+  /** Absent means DELIVERY (historical rows and callers that predate Academy Pickup). */
+  method?: FulfillmentMethod;
   awb?: string | null;
   pickupFailed?: boolean;
   addressMismatch?: boolean;
   openIssue?: boolean;
   paymentPending?: boolean;
   trackingStale?: boolean;
+  cityConfirm?: boolean;
   invoiceStatus?: string | null;
 }
 
 export function actionRequiredReasons(input: ActionInput): string[] {
   const reasons: string[] = [];
+  if (input.method === "ACADEMY_PICKUP") {
+    // No courier, address, shipment or tracking reasons exist for customer collection.
+    if (input.paymentPending || input.status === "PAYMENT_PENDING") reasons.push("Payment confirmation pending");
+    if (input.openIssue) reasons.push("Customer issue open");
+    if (input.status === "REFUND_PENDING") reasons.push("Refund pending");
+    if (input.invoiceStatus === "FAILED" || input.invoiceStatus === "MISSING") reasons.push("Invoice needs attention");
+    return reasons;
+  }
   if (input.paymentPending || input.status === "PAYMENT_PENDING") reasons.push("Payment confirmation pending");
   if (input.addressMismatch) reasons.push("Address mismatch");
-  if ((input.status === "PACKED" || input.status === "READY_FOR_PICKUP") && !input.awb) reasons.push("No active shipment");
+  if (input.cityConfirm) reasons.push("Courier city needs confirmation");
+  else if ((input.status === "PACKED" || input.status === "READY_FOR_PICKUP") && !input.awb) reasons.push("No active shipment");
   if (input.pickupFailed) reasons.push("Pickup wasn't completed");
   if (input.status === "DELIVERY_FAILED" || input.status === "REATTEMPT_REQUESTED") reasons.push("Courier exception");
   if (input.openIssue) reasons.push("Customer issue open");
   if (input.status.startsWith("RETURN_")) reasons.push("Return action required");
   if (input.status === "REFUND_PENDING") reasons.push("Refund pending");
   if (input.trackingStale) reasons.push("Tracking stale");
-  if (input.invoiceStatus === "FAILED") reasons.push("Invoice needs attention");
+  if (input.invoiceStatus === "FAILED" || input.invoiceStatus === "MISSING") reasons.push("Invoice needs attention");
   return reasons;
 }
 
@@ -153,9 +175,19 @@ export type PrimaryAction =
   | "resolve_pickup"
   | "tracking"
   | "review_issue"
+  | "ready"
+  | "collect"
   | "none";
 
 export function primaryAction(input: ActionInput): PrimaryAction {
+  if (input.method === "ACADEMY_PICKUP") {
+    if (input.paymentPending || input.status === "PAYMENT_PENDING") return "reconcile";
+    if (input.openIssue) return "review_issue";
+    if (input.status === "READY_FOR_COLLECTION") return "collect";
+    if (input.status === "PRINTING" || input.status === "QUALITY_CHECK" || input.status === "READY_TO_PACK") return "ready";
+    if (PREP.has(input.status)) return "prepare";
+    return "none";
+  }
   if (input.pickupFailed) return "resolve_pickup";
   if (input.paymentPending || input.status === "PAYMENT_PENDING") return "reconcile";
   if (input.openIssue && (input.status === "DELIVERED" || input.status.startsWith("RETURN_"))) return "review_issue";
@@ -174,14 +206,16 @@ export const PRIMARY_LABEL: Record<PrimaryAction, string> = {
   pack: "Mark packed",
   compare: "Compare couriers",
   label: "Print label",
-  resolve_pickup: "Check pickup",
+  resolve_pickup: "Check courier pickup",
   tracking: "View tracking",
   review_issue: "Review issue",
+  ready: "Mark ready for collection",
+  collect: "Mark collected",
   none: "View order",
 };
 
-export function nextPreparationStatus(status: string): string | null {
-  return staffNextStatus(status);
+export function nextPreparationStatus(status: string, method: FulfillmentMethod = "DELIVERY"): string | null {
+  return method === "DELIVERY" ? staffNextStatus(status) : staffNextStatusFor(status, method);
 }
 
 export function hasActiveShipment(status: string | null | undefined, awb: string | null | undefined): boolean {
@@ -218,7 +252,7 @@ export function shipmentPickupLabel(
 
 export function invoiceStatusLabel(status: string | null | undefined): string {
   if (status === "READY") return "Invoice ready";
-  if (status === "FAILED") return "Invoice needs attention";
+  if (status === "FAILED" || status === "MISSING") return "Invoice needs attention";
   if (status === "PENDING" || status === "GENERATING") return "Invoice generating";
   return "Invoice not applicable";
 }
@@ -260,6 +294,80 @@ export function rankQuotes(quotes: AdminQuote[], mode: "price" | "eta" = "price"
 
 export function defaultQuote(quotes: AdminQuote[]): RankedQuote | null {
   return rankQuotes(quotes, "price")[0] || null;
+}
+
+export function providerDisplayName(provider: string): string {
+  if (provider === "delhivery") return "Delhivery Direct";
+  if (provider === "shiprocket") return "Shiprocket";
+  return provider;
+}
+
+export interface PresentedQuote extends RankedQuote {
+  eligible: boolean;
+  unavailableReason: string | null;
+}
+
+/** Cheapest eligible quote first. Nothing here is a booking decision. */
+export function presentCourierQuotes(quotes: AdminQuote[]): PresentedQuote[] {
+  const eligible = rankQuotes(quotes.filter((quote) => quote.prepaid !== false && quote.ratePaise > 0), "price").map((quote) => ({
+    ...quote,
+    eligible: true,
+    unavailableReason: null,
+  }));
+  const blocked = quotes
+    .filter((quote) => quote.prepaid === false || !(quote.ratePaise > 0))
+    .map((quote) => ({
+      ...quote,
+      key: quoteKey(quote),
+      lowest: false,
+      fastest: false,
+      bestValue: false,
+      eligible: false,
+      unavailableReason: quote.prepaid === false ? "Not eligible for prepaid notes" : "Price was not returned",
+    }));
+  return [...eligible, ...blocked];
+}
+
+/** A courier is chosen only when staff pass an explicit quote key. */
+export function explicitCourierSelection(selectedKey: string | null | undefined): string | null {
+  const key = String(selectedKey || "").trim();
+  return key || null;
+}
+
+/** Book-step notice (not a block) when the chosen rate is this far above the cheapest eligible rate. */
+export const PREMIUM_NOTICE_PAISE = 2500;
+
+/** Neutral premium line for the confirm step, or null when the choice is within the notice band. */
+export function selectionPremiumNotice(chosen: { courier: string; ratePaise: number }, quotes: Array<{ courier: string; ratePaise: number; eligible: boolean }>): string | null {
+  const eligible = quotes.filter((q) => q.eligible && q.ratePaise > 0);
+  if (!eligible.length) return null;
+  const cheapest = eligible.reduce((best, q) => (q.ratePaise < best.ratePaise ? q : best));
+  const diff = chosen.ratePaise - cheapest.ratePaise;
+  if (diff < PREMIUM_NOTICE_PAISE) return null;
+  return `${chosen.courier} is ${formatPaise(diff)} more than the cheapest eligible option, ${cheapest.courier}.`;
+}
+
+/** Visual notice only. A rate above ₹100 can still be booked. */
+export const SHIPPING_NOTICE_PAISE = 10_000;
+
+export function quoteWithinShippingNotice(ratePaise: number): boolean {
+  return ratePaise > 0 && ratePaise <= SHIPPING_NOTICE_PAISE;
+}
+
+export function courierCostNotice(quotes: Array<{ eligible: boolean; ratePaise: number }>): {
+  cheapestPaise: number | null;
+  underHundred: boolean;
+  lowestLine: string | null;
+} {
+  const eligible = quotes.filter((quote) => quote.eligible && quote.ratePaise > 0);
+  if (!eligible.length) return { cheapestPaise: null, underHundred: false, lowestLine: null };
+  const cheapestPaise = Math.min(...eligible.map((quote) => quote.ratePaise));
+  const underHundred = quoteWithinShippingNotice(cheapestPaise);
+  return {
+    cheapestPaise,
+    underHundred,
+    lowestLine: underHundred ? null : `Lowest available rate is ${formatPaise(cheapestPaise)}`,
+  };
 }
 
 export function sortAdminOrders<T extends { placed_at: string; total_paise: number; updated_at?: string | null; action_required?: boolean }>(

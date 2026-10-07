@@ -15,12 +15,13 @@ export default async function PickListPage() {
   }
   const { data: openOrders } = await db
     .from("store_orders")
-    .select("id,order_no")
+    .select("id,order_no,fulfillment_method")
     .in("status", ["ORDER_CONFIRMED", "PROCESSING", "PRINTING", "QUALITY_CHECK", "READY_TO_PACK"]) as unknown as {
-    data: Array<{ id: string; order_no: string }> | null;
+    data: Array<{ id: string; order_no: string; fulfillment_method?: string | null }> | null;
   };
   const orderIds = (openOrders || []).map((o) => o.id);
-  const orderNoById = new Map((openOrders || []).map((o) => [o.id, o.order_no]));
+  // Staff see what happens after printing: Academy Pickup orders stay at the academy (no courier label).
+  const orderNoById = new Map((openOrders || []).map((o) => [o.id, o.fulfillment_method === "ACADEMY_PICKUP" ? `${o.order_no} · ACADEMY PICKUP` : o.order_no]));
   const { data } = orderIds.length
     ? ((await db.from("store_order_items").select("order_id,sku_snapshot,name_snapshot,qty").in("order_id", orderIds)) as unknown as {
         data: Array<{ order_id: string; sku_snapshot: string; name_snapshot: string; qty: number }> | null;

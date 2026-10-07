@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { ReceiptText } from "lucide-react";
 
 async function openAuthorizedInvoice(orderId: string, attachment: boolean): Promise<boolean> {
   const tab = window.open("", "_blank");
@@ -30,9 +31,14 @@ function stopRow(event: React.MouseEvent) {
 
 const focus = "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--ca-navy)]";
 
-export function ViewInvoiceButton({ orderId, prominent = false }: { orderId: string; prominent?: boolean }) {
+export function ViewInvoiceButton({ orderId, prominent = false, chip = false }: { orderId: string; prominent?: boolean; chip?: boolean }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(false);
+  const look = chip
+    ? "inline-flex items-center gap-1.5 border border-ca-navy/[0.12] bg-white text-[12.5px] text-[var(--ca-navy)] transition duration-150 hover:-translate-y-px hover:border-ca-navy/25 active:scale-[0.98] motion-reduce:transform-none"
+    : prominent
+      ? "bg-[var(--ca-navy)] text-xs text-white"
+      : "border border-[var(--ca-navy)]/15 bg-white text-xs text-[var(--ca-navy)]";
   return (
     <span className="inline-flex flex-col">
       <button
@@ -48,13 +54,10 @@ export function ViewInvoiceButton({ orderId, prominent = false }: { orderId: str
             .then((ok) => setError(!ok))
             .finally(() => setBusy(false));
         }}
-        className={`min-h-11 rounded-full px-3 text-xs font-semibold disabled:opacity-60 ${focus} ${
-          prominent
-            ? "bg-[var(--ca-navy)] text-white"
-            : "border border-[var(--ca-navy)]/15 bg-white text-[var(--ca-navy)]"
-        }`}
+        className={`min-h-11 rounded-full px-3 font-semibold disabled:opacity-60 ${focus} ${look}`}
       >
-        {busy ? "Opening…" : "View Invoice"}
+        {chip && <ReceiptText size={14} strokeWidth={2} aria-hidden="true" />}
+        {busy ? "Opening…" : chip ? "Invoice" : "View Invoice"}
       </button>
       {error && <span className="mt-1 text-[11px] text-amber-900">Unable to open invoice. Try again.</span>}
     </span>

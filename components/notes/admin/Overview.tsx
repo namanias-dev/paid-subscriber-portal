@@ -51,7 +51,7 @@ interface PreferenceRow {
 const ACTION_DEFS: Array<{ key: string; label: string; href: string }> = [
   { key: "awb_missing", label: "AWB missing", href: "/admin/notes?bucket=packed" },
   { key: "shipment_failed", label: "Shipment creation failed", href: "/admin/notes?bucket=packed" },
-  { key: "pickup_overdue", label: "Pickup overdue", href: "/admin/notes?bucket=packed" },
+  { key: "pickup_overdue", label: "Courier pickup overdue", href: "/admin/notes?bucket=packed" },
   { key: "tracking_stale", label: "Tracking stale", href: "/admin/notes?bucket=shipped" },
   { key: "delivery_delayed", label: "Delivery delayed", href: "/admin/notes?bucket=shipped" },
   { key: "delivery_failed", label: "Delivery failed", href: "/admin/notes?bucket=problem" },

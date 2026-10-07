@@ -77,6 +77,12 @@ async function emit(name: "notes_checkout_lead_created" | "notes_checkout_contac
   } catch { /* analytics must not block checkout */ }
 }
 
+function pickupLeadLocation(input: { pincode?: string; city?: string; state?: string } | null | undefined): { pincode: string; city: string; state: string } | null {
+  const pincode = (input?.pincode || "").trim();
+  if (!/^[1-9][0-9]{5}$/.test(pincode)) return null;
+  return { pincode, city: (input?.city || "").trim().slice(0, 80), state: (input?.state || "").trim().slice(0, 80) };
+}
+
 export async function saveCheckoutLead(input: {
   name?: string | null;
   phone?: string | null;
@@ -84,6 +90,9 @@ export async function saveCheckoutLead(input: {
   marketingConsent?: boolean;
   address?: Partial<LeadAddress> | null;
   addressConfirmed?: boolean;
+  /** Academy Pickup leads carry only where the customer is (PIN, city, state). */
+  fulfillmentMethod?: "DELIVERY" | "ACADEMY_PICKUP" | null;
+  pickupLocation?: { pincode?: string; city?: string; state?: string } | null;
 }): Promise<{ ok: true; skipped?: string }> {
   try {
     const phone = normalizeIndianMobile(input.phone);
@@ -91,8 +100,10 @@ export async function saveCheckoutLead(input: {
     if (!shouldCreateLead(phone, cart?.item_count || 0) || !cart || !phone) return { ok: true, skipped: "no_contact" };
     const db = storeDb();
     if (!db) return { ok: true, skipped: "unavailable" };
-    const address = completeAddress(input.address);
-    const stage = stageForDraft({ name: input.name, address });
+    const pickup = input.fulfillmentMethod === "ACADEMY_PICKUP";
+    const address = pickup ? null : completeAddress(input.address);
+    const pickupLocation = pickup ? pickupLeadLocation(input.pickupLocation) : null;
+    const stage = stageForDraft({ name: input.name, address: address || (pickupLocation ? { line1: "", ...pickupLocation } : null) });
     const snap = snapshot(cart);
     let couponCode: string | null = null;
     let couponDiscount = 0;
@@ -158,8 +169,9 @@ export async function saveCheckoutLead(input: {
       landing_path: attr.landing_page_path,
       visitor_id: visitorId,
       session_id: sessionId,
-      address_snapshot: address,
-      address_confirmed: input.addressConfirmed === true,
+      address_snapshot: pickup ? pickupLocation : address,
+      address_confirmed: pickup ? false : input.addressConfirmed === true,
+      fulfillment_method: input.fulfillmentMethod || null,
       ...(couponCode
         ? {
             coupon_code: couponCode,
@@ -434,7 +446,7 @@ export async function listCheckoutLeads(filter: string): Promise<Array<Record<st
   const db = storeDb();
   if (!db) return [];
   await sweepCheckoutLeads();
-  const baseCols = "id,name,phone,email,cart_snapshot,cart_value_paise,checkout_stage,sales_status,was_abandoned,landing_path,attribution_json,marketing_consent,marketing_consent_at,address_snapshot,order_id,converted_at,converted_value_paise,sales_note,is_test,last_activity_at,created_at";
+  const baseCols = "id,name,phone,email,cart_snapshot,cart_value_paise,checkout_stage,sales_status,was_abandoned,landing_path,attribution_json,marketing_consent,marketing_consent_at,address_snapshot,fulfillment_method,order_id,converted_at,converted_value_paise,sales_note,is_test,last_activity_at,created_at";
   const load = (cols: string) => {
     let query = db.from("store_checkout_leads").select(cols).order("last_activity_at", { ascending: false }).limit(100);
     if (filter === "abandoned") query = query.in("checkout_stage", ["CHECKOUT_ABANDONED", "PAYMENT_ABANDONED"]);

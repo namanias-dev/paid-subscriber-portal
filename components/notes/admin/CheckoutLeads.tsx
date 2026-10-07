@@ -23,6 +23,7 @@ interface LeadRow {
   attribution_json: { last_touch?: { source?: string; medium?: string; campaign?: string; content?: string } ; first_touch?: { source?: string; medium?: string; campaign?: string; content?: string } } | null;
   marketing_consent: boolean;
   address_snapshot: { line1?: string; city?: string; state?: string; pincode?: string } | null;
+  fulfillment_method?: string | null;
   order_id: string | null;
   converted_value_paise: number | null;
   sales_note: string | null;
@@ -143,7 +144,9 @@ export default function CheckoutLeads() {
               <div><dt className="text-[11px] uppercase tracking-wide text-[var(--ca-navy)]/45">First touch</dt><dd>{businessChannel(open.attribution_json?.first_touch as AttributionTouch | undefined)} · {open.attribution_json?.first_touch?.campaign || "—"}</dd></div>
               <div><dt className="text-[11px] uppercase tracking-wide text-[var(--ca-navy)]/45">Consent</dt><dd>{open.marketing_consent ? "Updates and offers allowed" : "No promotional consent"}</dd></div>
               <div><dt className="text-[11px] uppercase tracking-wide text-[var(--ca-navy)]/45">Email</dt><dd>{open.email || "—"}</dd></div>
-              <div><dt className="text-[11px] uppercase tracking-wide text-[var(--ca-navy)]/45">Address</dt><dd>{open.address_snapshot ? `${open.address_snapshot.line1}, ${open.address_snapshot.city} ${open.address_snapshot.pincode}` : "Not completed"}</dd></div>
+              <div><dt className="text-[11px] uppercase tracking-wide text-[var(--ca-navy)]/45">Address</dt><dd>{open.fulfillment_method === "ACADEMY_PICKUP"
+                ? `Academy Pickup${open.address_snapshot?.pincode ? ` · lives in ${[open.address_snapshot.city, open.address_snapshot.pincode].filter(Boolean).join(" ")}` : ""}`
+                : open.address_snapshot?.line1 ? `${open.address_snapshot.line1}, ${open.address_snapshot.city} ${open.address_snapshot.pincode}` : "Not completed"}</dd></div>
               {open.order_id && <div><dt className="text-[11px] uppercase tracking-wide text-[var(--ca-navy)]/45">Order</dt><dd>{open.checkout_stage === "CONVERTED" ? "Converted" : "Payment started"} · {open.order_id.slice(0, 8)}</dd></div>}
               {!!open.sales_alert?.lines?.length && (
                 <div>

@@ -1,4 +1,6 @@
-import { addToCart, getCartView, getOrCreateCart, removeCartItem, setCartQty } from "@/lib/store/cart";
+import { addToCart, getCartView, getOrCreateCart, removeCartItem, setCartFulfillmentMethod, setCartQty } from "@/lib/store/cart";
+import { pickupOffer } from "@/lib/store/pickupAvailability";
+import { parseFulfillmentMethod } from "@/lib/store/fulfillment";
 import { noStoreJson, requireLiveStore } from "@/lib/store/http";
 import { formatPaise } from "@/lib/store/money";
 import { computeBundleOffer } from "@/lib/store/bundleOffer";
@@ -10,9 +12,17 @@ import { discountCodesEnabled, judgeCartDiscount } from "@/lib/store/discountCod
 export const dynamic = "force-dynamic";
 
 async function serialize(view: Awaited<ReturnType<typeof getCartView>>) {
+  const pickup = await pickupOffer().catch(() => ({ available: false, location: null }));
+  // The draft is advisory. With pickup off, the effective choice is always Delivery.
+  const fulfillment = {
+    method: pickup.available && view?.fulfillment_method === "ACADEMY_PICKUP" ? "ACADEMY_PICKUP" : "DELIVERY",
+    pickup_available: pickup.available,
+    pickup_location: pickup.location,
+  };
   if (!view) {
     return {
       ok: true,
+      fulfillment,
       cart: {
         id: null,
         items: [],
@@ -85,6 +95,7 @@ async function serialize(view: Awaited<ReturnType<typeof getCartView>>) {
   }
   return {
     ok: true,
+    fulfillment,
     cart: {
       id: view.id,
       item_count: view.item_count,
@@ -144,7 +155,15 @@ export async function PATCH(req: Request) {
   const dark = await requireLiveStore();
   if (dark) return dark;
   try {
-    const body = (await req.json()) as { item_id?: string; qty?: number };
+    const body = (await req.json()) as { item_id?: string; qty?: number; fulfillment_method?: unknown };
+    if (body.fulfillment_method !== undefined) {
+      const method = parseFulfillmentMethod(body.fulfillment_method);
+      if (!method) return noStoreJson({ ok: false, error: "Choose Delivery or Academy Pickup." }, 400);
+      if (method === "ACADEMY_PICKUP" && !(await pickupOffer()).available) {
+        return noStoreJson({ ok: false, error: "Academy Pickup isn't available right now. Please choose Delivery." }, 409);
+      }
+      return noStoreJson(await serialize(await setCartFulfillmentMethod(method)));
+    }
     if (!body.item_id) return noStoreJson({ ok: false, error: "item_id required" }, 400);
     return noStoreJson(await serialize(await setCartQty(body.item_id, Number(body.qty))));
   } catch (e) {

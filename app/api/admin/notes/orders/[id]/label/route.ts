@@ -5,6 +5,7 @@ import { fetchExistingLabel } from "@/lib/store/shipping/book";
 import { shiprocketBaseUrl } from "@/lib/store/shipping/config";
 import { shiprocketToken } from "@/lib/store/shipping/shiprocketApi";
 import { SHIPMENT_ADDRESS_MISMATCH, shipmentHandoffBlocked } from "@/lib/store/address";
+import { deliveryOnlyGuard } from "@/lib/store/fulfillmentGuard";
 
 export const dynamic = "force-dynamic";
 
@@ -18,12 +19,21 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
   }
   const db = storeDb();
   if (!db) return NextResponse.json({ ok: false, error: "unavailable" }, { status: 503 });
+  const pickupRefusal = await deliveryOnlyGuard(db, params.id, "label");
+  if (pickupRefusal) return pickupRefusal;
   const { data: shipmentRows } = await db
     .from("store_shipments")
     .select("id,provider,awb,status,provider_shipment_id,label_r2_key,provider_payload")
     .eq("order_id", params.id)
     .order("created_at", { ascending: false });
-  const shipment = (shipmentRows || []).find((row) => row.status !== "cancelled" && row.status !== "failed") || null;
+  const rows = shipmentRows || [];
+  const shipment = rows.find((row) => row.status !== "cancelled" && row.status !== "failed") || null;
+  if (!shipment && rows.length) {
+    return NextResponse.json(
+      { ok: false, error: "This label was cancelled. Do not use it." },
+      { status: 410, headers: { "Cache-Control": "no-store" } },
+    );
+  }
   const payload = (shipment?.provider_payload && typeof shipment.provider_payload === "object" ? shipment.provider_payload : {}) as {
     label_url?: string;
   };

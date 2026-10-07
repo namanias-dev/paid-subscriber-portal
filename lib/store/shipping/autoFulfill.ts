@@ -2,7 +2,7 @@
  * Cheapest-eligible courier selection with a provider-agnostic address check.
  * This module does not call a courier. The runner injects create/read/cancel.
  */
-import { providerDestinationMismatch } from "../address";
+import { classifyCourierDestination } from "./destinationCheck";
 import type { CourierQuote } from "./quotes";
 
 export const MAX_AUTO_CANDIDATES = 3;
@@ -106,7 +106,10 @@ export function destinationRejected(
   const pin = String(stored.pin || "").trim();
   if (pin && pin !== canonical.pincode.trim()) return true;
   if (!pin || !stored.city || !stored.state) return false;
-  return providerDestinationMismatch(canonical, { pincode: pin, city: stored.city, state: stored.state });
+  return classifyCourierDestination({
+    order: canonical,
+    provider: { pincode: pin, city: stored.city, state: stored.state },
+  }).verdict === "fail";
 }
 
 export async function fulfillCheapest(input: {
@@ -114,6 +117,10 @@ export async function fulfillCheapest(input: {
   excluded?: string[];
   maxAttempts?: number;
   canonical: { city: string; state: string; pincode: string };
+  canonicalCity?: string | null;
+  aliases?: string[];
+  /** True only when a 10-digit phone was already sent on the create request. */
+  outboundPhoneValid?: boolean;
   create: (candidate: FulfillCandidate) => Promise<CreatedCandidate>;
   reconcile: (candidate: FulfillCandidate) => Promise<CreatedCandidate | null>;
   cancel: (created: CreatedCandidate) => Promise<boolean>;
@@ -150,7 +157,16 @@ export async function fulfillCheapest(input: {
       if (!cancelled) return { accepted: null, attempts, blocked: "ACTION_REQUIRED_CRITICAL", creates };
       continue;
     }
-    const mismatch = destinationRejected(input.canonical, created) || (created.pin != null && created.pin !== input.canonical.pincode);
+    const pin = String(created.pin || "").trim();
+    const destination = pin && created.city && created.state
+      ? classifyCourierDestination({
+          order: input.canonical,
+          provider: { pincode: pin, city: created.city, state: created.state },
+          canonicalCity: input.canonicalCity,
+          aliases: input.aliases,
+        })
+      : null;
+    const mismatch = destinationRejected(input.canonical, created) || destination?.verdict === "fail";
     if (mismatch) {
       const cancelled = await input.cancel(created);
       attempts.push({
@@ -161,7 +177,18 @@ export async function fulfillCheapest(input: {
       if (!cancelled) return { accepted: null, attempts, blocked: "ACTION_REQUIRED_CRITICAL", creates };
       continue;
     }
-    if (created.unverified || created.phoneStored === false) {
+    if (destination?.verdict === "confirm") {
+      const cancelled = await input.cancel(created);
+      attempts.push({
+        candidate,
+        result: cancelled ? "address_mismatch" : "stopped",
+        reason: cancelled ? "Provider city needs confirmation." : "Unconfirmed city could not be cancelled.",
+      });
+      if (!cancelled) return { accepted: null, attempts, blocked: "ACTION_REQUIRED_CRITICAL", creates };
+      continue;
+    }
+    const delhiveryPhoneEchoOptional = created.provider === "delhivery" && input.outboundPhoneValid === true && destination?.verdict === "pass";
+    if (created.unverified || (created.phoneStored === false && !delhiveryPhoneEchoOptional)) {
       const cancelled = await input.cancel(created);
       attempts.push({
         candidate,

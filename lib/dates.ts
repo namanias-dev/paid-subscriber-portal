@@ -117,17 +117,41 @@ function daysInMonth(year: number, monthIndex: number): number {
 }
 
 const IST_DATE_FULL = new Intl.DateTimeFormat("en-IN", { timeZone: "Asia/Kolkata", weekday: "long", day: "numeric", month: "long", year: "numeric" });
-const IST_DATE_MED = new Intl.DateTimeFormat("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric" });
-const IST_TIME = new Intl.DateTimeFormat("en-IN", { timeZone: "Asia/Kolkata", hour: "numeric", minute: "2-digit", hour12: true });
+// Short month names and day periods are built by hand, not with Intl. ICU data differs by
+// runtime: Node (SSR) and Chromium say "Sept" and "am", Safari says "Sep" and "AM". Server
+// HTML and the WebKit hydration render then disagree (React #425 on / and /courses).
+// The strings below are Node's en-IN output, so server-rendered text is unchanged.
+const SHORT_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sept", "Oct", "Nov", "Dec"];
 
-/** "28 Jun 2026" in IST (timezone-stable across server/browser). */
+function istParts(d: Date) {
+  const ist = new Date(d.getTime() + IST_OFFSET_MIN * 60000);
+  return { year: ist.getUTCFullYear(), month: ist.getUTCMonth(), day: ist.getUTCDate(), hour: ist.getUTCHours(), minute: ist.getUTCMinutes() };
+}
+
+/** "7 Sept 2026" */
+const IST_DATE_MED = {
+  format(d: Date): string {
+    const p = istParts(d);
+    return `${p.day} ${SHORT_MONTHS[p.month]} ${p.year}`;
+  },
+};
+
+/** "12:07 am" */
+const IST_TIME = {
+  format(d: Date): string {
+    const p = istParts(d);
+    return `${p.hour % 12 || 12}:${String(p.minute).padStart(2, "0")} ${p.hour < 12 ? "am" : "pm"}`;
+  },
+};
+
+/** "28 Jun 2026" in IST, identical on server and every browser. */
 export function formatISTDate(iso?: string | null): string {
   if (!iso) return "—";
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? "—" : IST_DATE_MED.format(d);
 }
 
-/** "11:00 AM" in IST. */
+/** "11:00 am" in IST. */
 export function formatISTTime(iso?: string | null): string {
   if (!iso) return "—";
   const d = new Date(iso);
@@ -150,7 +174,7 @@ export function istTodayYMD(): string {
   return IST_YMD.format(new Date());
 }
 
-/** "28 Jun 2026, 11:00 AM IST" — compact for cards/lists. */
+/** "28 Jun 2026, 11:00 am IST" — compact for cards/lists. */
 export function formatISTDateTime(iso?: string | null): string {
   if (!iso) return "—";
   const d = new Date(iso);
@@ -158,9 +182,15 @@ export function formatISTDateTime(iso?: string | null): string {
   return `${IST_DATE_MED.format(d)}, ${IST_TIME.format(d)} IST`;
 }
 
-const IST_DATE_DM = new Intl.DateTimeFormat("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short" });
+/** "7 Sept" (no year). Deterministic for the same reason as IST_DATE_MED. */
+const IST_DATE_DM = {
+  format(d: Date): string {
+    const p = istParts(d);
+    return `${p.day} ${SHORT_MONTHS[p.month]}`;
+  },
+};
 
-/** Compact card timestamp, e.g. "15 Jul, 9:52 AM" (IST, no year). */
+/** Compact card timestamp, e.g. "15 Jul, 9:52 am" (IST, no year). */
 export function formatISTShort(iso?: string | null): string {
   if (!iso) return "—";
   const d = new Date(iso);
@@ -190,7 +220,7 @@ export function relativeTimeShort(iso?: string | null): string {
 }
 
 /**
- * Full range label, e.g. "Sunday, 28 June 2026, 11:00 AM – 1:00 PM IST".
+ * Full range label, e.g. "Sunday, 28 June 2026, 11:00 am – 1:00 pm IST".
  * Falls back to a single time when no end is provided.
  */
 export function formatISTRange(startISO?: string | null, endISO?: string | null): string {

@@ -50,7 +50,7 @@ export async function executeAddressCorrection(input: {
     return {
       ok: next.ok,
       code: next.ok ? "REBOOKED" : "ADDRESS_SAVED_REBOOK_PENDING",
-      message: next.ok ? "Address updated and a new shipment was created." : "Address updated. The new shipment was not created.",
+      message: next.ok ? "Address updated and a new shipment was created." : "Address updated. Compare couriers and choose one. No courier was booked automatically.",
       updated: true,
       rebooked: next.ok,
     };

@@ -259,6 +259,13 @@ export interface NotesOrderFact {
   attribution_source?: string | null;
   attribution_platform?: string | null;
   attribution_json?: StoredNotesAttribution | null;
+  /** Used only to count distinct buyers. Never rendered. */
+  phone_key?: string | null;
+  shipping_address_id?: string | null;
+  /** Absent on rows read before Academy Pickup: DELIVERY. */
+  fulfillment_method?: string | null;
+  /** Academy Pickup buyer location (PIN/city/state); geography fallback only. */
+  customer_location_snapshot?: { city?: string | null; state?: string | null; pincode?: string | null } | null;
 }
 
 export interface NotesItemFact {
@@ -267,6 +274,7 @@ export interface NotesItemFact {
   name_snapshot: string;
   sku_snapshot?: string | null;
   line_total_paise: number;
+  qty?: number | null;
 }
 
 const UNPAID = new Set(["PAYMENT_PENDING", "PAYMENT_FAILED", "PAYMENT_EXPIRED", "CANCELLED", "REFUNDED", "PARTIALLY_REFUNDED"]);
@@ -274,6 +282,16 @@ const UNPAID = new Set(["PAYMENT_PENDING", "PAYMENT_FAILED", "PAYMENT_EXPIRED", 
 export function orderIsCaptured(order: NotesOrderFact): boolean {
   if (!order.paid_at) return false;
   return !UNPAID.has(order.status);
+}
+
+/** Paid orders that belong in business charts. QA and unpaid rows stay out. */
+export function notesBusinessOrders(orders: NotesOrderFact[]): NotesOrderFact[] {
+  return orders.filter((order) => orderIsCaptured(order) && !orderQa(order));
+}
+
+/** First-party events that belong in behavior charts. QA rows stay out. */
+export function notesBusinessEvents(events: NotesEventRow[]): NotesEventRow[] {
+  return events.filter((event) => !eventQa(event));
 }
 
 function touchOf(state: AttributionState | null | undefined): AttributionTouch | null {
@@ -294,6 +312,11 @@ function orderQa(order: NotesOrderFact): boolean {
 /** A person is a browser we can recognise. Events with neither cookie are not people. */
 function actor(event: NotesEventRow): string | null {
   return event.session_id || event.visitor_id || null;
+}
+
+/** Same QA rule the commerce report uses to leave test orders out. */
+export function isQaNotesOrder(order: Pick<NotesOrderFact, "attribution_json" | "attribution_source" | "promo_code">): boolean {
+  return orderQa(order as NotesOrderFact);
 }
 
 function people(events: NotesEventRow[], names: Set<string>): number {

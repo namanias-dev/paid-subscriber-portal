@@ -196,7 +196,7 @@ export default function HelpPanel() {
       <button
         onClick={openPanel}
         aria-label="Open Help & Learn"
-        className="fixed bottom-5 right-5 z-40 flex items-center gap-2 rounded-full border border-line bg-[var(--primary)] px-4 py-2.5 text-sm font-semibold text-white shadow-lg transition hover:opacity-90"
+        className="fixed bottom-[max(1.25rem,env(safe-area-inset-bottom))] right-[max(1.25rem,env(safe-area-inset-right))] z-40 [body:has([data-admin-bottom-bar])_&]:bottom-[calc(max(1.25rem,env(safe-area-inset-bottom))+4.75rem)] flex items-center gap-2 rounded-full border border-line bg-[var(--primary)] px-4 py-2.5 text-sm font-semibold text-white shadow-lg transition hover:opacity-90"
       >
         <span aria-hidden>❓</span>
         <span className="hidden sm:inline">Help &amp; Learn</span>

@@ -4,6 +4,7 @@ import { storeDb } from "@/lib/store/db";
 import { commitReservations } from "@/lib/store/inventory";
 import { manualShippingProvider } from "@/lib/store/shipping";
 import { notifyOrderShipped } from "@/lib/store/notifications";
+import { deliveryOnlyGuard } from "@/lib/store/fulfillmentGuard";
 
 export const dynamic = "force-dynamic";
 
@@ -18,6 +19,8 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   const actor = await getActionActor();
   const db = storeDb();
   if (!db) return NextResponse.json({ ok: false, error: "unavailable" }, { status: 503 });
+  const pickupRefusal = await deliveryOnlyGuard(db, params.id, "ship");
+  if (pickupRefusal) return pickupRefusal;
   const body = (await req.json()) as { awb?: string; courier_name?: string; tracking_url?: string };
 
   const { data: order } = await db.from("store_orders").select("id,status,order_no").eq("id", params.id).maybeSingle();

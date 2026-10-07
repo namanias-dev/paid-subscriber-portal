@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { trackClient } from "@/lib/analytics/client";
+import FulfillmentChooser from "./FulfillmentChooser";
+import type { FulfillmentMethod } from "@/lib/store/fulfillment";
 
 interface Item {
   id: string;
@@ -33,6 +35,41 @@ export default function CartClient() {
   const [offer, setOffer] = useState<BundleOffer | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [pickupAvailable, setPickupAvailable] = useState(false);
+  const [method, setMethod] = useState<FulfillmentMethod>("DELIVERY");
+  const [methodBusy, setMethodBusy] = useState(false);
+
+  function applyFulfillment(json: { fulfillment?: { method?: string; pickup_available?: boolean } }) {
+    const available = json.fulfillment?.pickup_available === true;
+    setPickupAvailable(available);
+    setMethod(available && json.fulfillment?.method === "ACADEMY_PICKUP" ? "ACADEMY_PICKUP" : "DELIVERY");
+  }
+
+  async function chooseMethod(next: FulfillmentMethod) {
+    if (next === method || methodBusy) return;
+    const previous = method;
+    setMethod(next);
+    setMethodBusy(true);
+    setErr(null);
+    trackClient("notes_fulfillment_selected", { fulfillment_method: next, surface: "cart" });
+    try {
+      const res = await fetch("/api/notes/cart", {
+        method: "PATCH",
+        cache: "no-store",
+        credentials: "same-origin",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ fulfillment_method: next }),
+      });
+      const json = await res.json();
+      if (!res.ok || json.ok === false) throw new Error(json.error || "Unable to save your choice right now.");
+      applyFulfillment(json);
+    } catch (e) {
+      setMethod(previous);
+      setErr((e as Error).message);
+    } finally {
+      setMethodBusy(false);
+    }
+  }
 
   async function load() {
     const res = await fetch("/api/notes/cart", { cache: "no-store", credentials: "same-origin" });
@@ -44,6 +81,7 @@ export default function CartClient() {
     setTotal(json.cart?.total_label || json.cart?.subtotal_label || "");
     setPromo(json.cart?.offer || null);
     setOffer(json.cart?.bundle_offer || null);
+    applyFulfillment(json);
     if (json.cart?.offer?.id) {
       trackClient("notes_offer_cart_applied", { offer_id: json.cart.offer.id });
     }
@@ -170,6 +208,16 @@ export default function CartClient() {
           </li>
         ))}
       </ul>
+      {pickupAvailable && (
+        <div className="mt-6 rounded-3xl bg-white p-4 ns-elev-1 sm:p-5">
+          <FulfillmentChooser value={method} onChange={chooseMethod} disabled={methodBusy} />
+          {method === "ACADEMY_PICKUP" && (
+            <p className="mt-3 text-sm leading-relaxed text-[var(--ca-navy)]/65">
+              Collect from Naman Sharma IAS Academy, SCO 173–174, Sector 17C, Chandigarh. We&rsquo;ll let you know when your notes are ready.
+            </p>
+          )}
+        </div>
+      )}
       <div className="sticky bottom-0 mt-6 flex flex-wrap items-center justify-between gap-4 rounded-3xl bg-white p-4 ns-elev-4">
         <div>
           <p className="text-sm text-[var(--ca-navy)]/60">
@@ -185,7 +233,17 @@ export default function CartClient() {
           <p className="text-sm font-semibold text-[var(--ca-navy)]">
             Total <span className="tabular-nums">{total}</span>
           </p>
-          <p className="text-xs text-[var(--ca-navy)]/45">Shipping is calculated from your PIN at checkout.</p>
+          {method === "ACADEMY_PICKUP" ? (
+            <p className="text-sm text-[var(--ca-navy)]/60">
+              Academy pickup <span className="font-semibold text-[var(--ca-navy)]">Free</span>
+            </p>
+          ) : pickupAvailable ? (
+            <p className="text-sm text-[var(--ca-navy)]/60">
+              Shipping <span className="text-[var(--ca-navy)]/70">Calculated at checkout</span>
+            </p>
+          ) : (
+            <p className="text-xs text-[var(--ca-navy)]/45">Shipping is calculated from your PIN at checkout.</p>
+          )}
         </div>
         <Link href="/notes/checkout" className="ca-focus ns-buy-now inline-flex min-h-14 w-full items-center justify-center rounded-full px-6 text-[15px] font-bold text-[var(--ca-navy)] sm:w-auto sm:min-w-[14rem]">
           Proceed to checkout

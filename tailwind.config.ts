@@ -26,6 +26,8 @@ const config: Config = {
         india: "#138808",
         line: "#E5E9F0",
         "line-strong": "#D5DBE6",
+        // --ca-navy with alpha support; `[var(--ca-navy)]/NN` cannot take an opacity modifier.
+        "ca-navy": "rgb(10 26 63 / <alpha-value>)",
       },
       fontFamily: {
         heading: ["var(--font-sora)", "system-ui", "sans-serif"],
@@ -63,6 +65,10 @@ const config: Config = {
           "0%": { transform: "translateX(0)" },
           "100%": { transform: "translateX(-50%)" },
         },
+        "stage-breathe": {
+          "0%,100%": { transform: "scale(1)", opacity: "0.3" },
+          "50%": { transform: "scale(2.3)", opacity: "0" },
+        },
       },
       animation: {
         "fade-up": "fade-up 0.5s ease-out both",
@@ -71,6 +77,7 @@ const config: Config = {
         shimmer: "shimmer 1.4s linear infinite",
         "spin-slow": "spin-slow 28s linear infinite",
         marquee: "marquee 28s linear infinite",
+        "stage-breathe": "stage-breathe 2.6s ease-in-out infinite",
       },
     },
   },

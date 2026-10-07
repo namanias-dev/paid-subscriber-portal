@@ -1,15 +1,20 @@
 "use client";
 
 /**
- * AiCounselorWidget — the floating launcher + page-aware trigger logic.
+ * AiCounselorWidget — the floating launcher.
  *
  * Rendered ONLY when AI_AGENT_PUBLIC_WIDGET is true (the server mount gates this;
  * see AiCounselorMount). It is lazy and NEVER blocks page load: the heavy chat
  * sheet is code-split via next/dynamic(ssr:false) and only loaded on open.
  *
- * The sheet opens only from the launcher click. Timers, scroll depth,
- * route changes, and page load must not open it. Private routes and
- * enrollment checkout still hide the launcher entirely.
+ * Open rules:
+ *  - The sheet starts closed and stays closed.
+ *  - It opens only from openCounselorFromUserAction (launcher click, or
+ *    Enter/Space on that button). Focus or tab alone does not open it.
+ *  - Page load, timers, scroll, inactivity, exit intent, query params, and
+ *    stored open flags never open it.
+ *  - A route change closes it.
+ *  - Legacy open/dismiss flags are removed and never restored.
  *
  * Positioned to avoid the WhatsApp button, mobile sticky payment CTAs, and the
  * bottom nav (raised offset on mobile, below the WhatsApp z-index).
@@ -18,7 +23,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
 import { usePathname } from "next/navigation";
 import { ensureSession } from "@/lib/analytics/client";
-import { isWidgetAllowedPath, flowForPath } from "@/lib/ai-agent/conversationPolicy";
+import { isWidgetAllowedPath, flowForPath, purgeLegacyCounselorOpenFlags } from "@/lib/ai-agent/conversationPolicy";
 import { trackAgentEvent } from "./agentAnalytics";
 
 const AiChatSheet = dynamic(() => import("./AiChatSheet"), { ssr: false });
@@ -78,7 +83,18 @@ export default function AiCounselorWidget({ waLink }: { waLink: string | null })
     if (s?.id) setSessionId(s.id);
   }, []);
 
-  const openSheet = useCallback(() => {
+  // Forget leftover open/dismiss flags. Never read them back into `open`.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    purgeLegacyCounselorOpenFlags(window.localStorage, window.sessionStorage);
+  }, []);
+
+  // A route change closes the sheet. Fresh mounts stay closed.
+  useEffect(() => {
+    setOpen(false);
+  }, [pathname]);
+
+  const openCounselorFromUserAction = useCallback(() => {
     setOpen(true);
   }, []);
 
@@ -109,7 +125,7 @@ export default function AiCounselorWidget({ waLink }: { waLink: string | null })
       {!open && (
         <button
           type="button"
-          onClick={openSheet}
+          onClick={openCounselorFromUserAction}
           aria-label="Chat with a Naman IAS counsellor"
           className="ai-counselor-launcher group fixed right-4 z-40 flex items-center gap-2.5 rounded-full py-2 pl-2 pr-2.5 text-sm font-semibold text-white outline-none transition-[transform,box-shadow,top,bottom] duration-200 ease-out shadow-[0_4px_10px_-2px_rgba(0,18,54,0.35),0_12px_30px_-8px_rgba(0,40,120,0.5)] focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[var(--gold)] focus-visible:ring-offset-transparent motion-safe:hover:-translate-y-0.5 motion-safe:hover:scale-[1.03] motion-safe:active:scale-95 motion-safe:hover:shadow-[0_8px_16px_-2px_rgba(0,18,54,0.45),0_20px_44px_-8px_rgba(0,50,140,0.6),0_0_22px_-2px_rgba(201,162,39,0.45)] sm:pl-2.5 sm:pr-4"
           data-notes-dodge={notesDodge ? "true" : "false"}

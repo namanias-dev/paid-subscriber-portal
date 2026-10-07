@@ -10,6 +10,7 @@ import {
 } from "@/lib/store/issues";
 import { mintIssueReference } from "@/lib/store/issueRef";
 import { projectCustomerStage } from "@/lib/store/projection";
+import { orderMethod } from "@/lib/store/fulfillment";
 
 export const dynamic = "force-dynamic";
 
@@ -20,7 +21,7 @@ async function authorizedOrder(orderNo: string, token: string) {
   if (!db) return { db: null, order: null };
   const { data: order } = await db
     .from("store_orders")
-    .select("id,order_no,status,tracking_token_hash")
+    .select("id,order_no,status,tracking_token_hash,fulfillment_method")
     .eq("order_no", orderNo)
     .maybeSingle();
   if (!order || !verifyRawTokenAgainstHash(token, order.tracking_token_hash)) return { db, order: null };
@@ -67,7 +68,7 @@ export async function POST(req: Request, { params }: { params: { orderNumber: st
   if (!auth.order) return NextResponse.json({ ok: false, error: "not found" }, { status: 404, headers: noStore });
 
   const stage = projectCustomerStage(auth.order.status, true);
-  if (!categoriesForStage(stage).includes(category)) {
+  if (!categoriesForStage(stage, orderMethod(auth.order)).includes(category)) {
     return NextResponse.json({ ok: false, error: "That option does not apply to this order yet." }, { status: 400, headers: noStore });
   }
 

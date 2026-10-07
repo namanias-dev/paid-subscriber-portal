@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireFreshPermission, getActionActor } from "@/lib/adminGuard";
 import { storeDb } from "@/lib/store/db";
 import { shipmentAlreadyActive } from "@/lib/store/shipping/dispatch";
+import { deliveryOnlyGuard } from "@/lib/store/fulfillmentGuard";
 
 export const dynamic = "force-dynamic";
 
@@ -16,6 +17,8 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   const actor = await getActionActor();
   const db = storeDb();
   if (!db) return NextResponse.json({ ok: false, error: "unavailable" }, { status: 503 });
+  const pickupRefusal = await deliveryOnlyGuard(db, params.id, "carrier");
+  if (pickupRefusal) return pickupRefusal;
   const body = (await req.json().catch(() => null)) as {
     provider?: string;
     courier?: string;

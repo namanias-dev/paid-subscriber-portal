@@ -462,6 +462,8 @@ function notesBody(notes: NotesStoreReport | null): string[] {
   if (notes.fulfillment.inTransit) fulfill.push(`In transit — ${notes.fulfillment.inTransit}`);
   if (notes.fulfillment.outForDelivery) fulfill.push(`Out for delivery — ${notes.fulfillment.outForDelivery}`);
   if (notes.fulfillment.delivered) fulfill.push(`Delivered — ${notes.fulfillment.delivered}`);
+  if (notes.fulfillment.readyForCollection) fulfill.push(`Ready for collection — ${notes.fulfillment.readyForCollection}`);
+  if (notes.fulfillment.collected) fulfill.push(`Collected — ${notes.fulfillment.collected}`);
   if (notes.fulfillment.rto) fulfill.push(`RTO — ${notes.fulfillment.rto}`);
   if (notes.fulfillment.returns) fulfill.push(`Returns — ${notes.fulfillment.returns}`);
   if (notes.fulfillment.issues) fulfill.push(`Issues — <b>${notes.fulfillment.issues}</b>`);

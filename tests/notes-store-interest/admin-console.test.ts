@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   actionRequiredReasons,
   defaultQuote,
+  explicitCourierSelection,
   canonicalShipmentStatusLabel,
   fulfillmentLabel,
   hasActiveShipment,
@@ -27,7 +28,7 @@ test("pickup failure outranks booking and does not treat a cancelled AWB as acti
   assert.equal(hasActiveShipment("cancelled", "67350910000044"), false);
   assert.equal(hasActiveShipment("created", "14112365007656"), true);
   assert.deepEqual(actionRequiredReasons({ status: "PICKUP_SCHEDULED", awb: "1", pickupFailed: true }), ["Pickup wasn't completed"]);
-  assert.equal(fulfillmentLabel("PICKUP_SCHEDULED", true), "Pickup issue");
+  assert.equal(fulfillmentLabel("PICKUP_SCHEDULED", true), "Courier pickup issue");
   assert.equal(nextPreparationStatus("PICKED_UP"), null);
 });
 
@@ -53,7 +54,7 @@ test("an invoice button click does not open the order card", () => {
   assert.equal(opened, false);
 });
 
-test("cheapest quote is first and selected, fastest is labelled from returned ETAs", () => {
+test("cheapest quote is first and is not chosen until staff select it", () => {
   const quotes = [
     { provider: "shiprocket", courier: "Amazon Surface", service: "Surface", ratePaise: 9872, etaText: "27 Sep", etaDays: 3, courierId: "1" },
     { provider: "shiprocket", courier: "Xpressbees Surface", service: "Surface", ratePaise: 9372, etaText: "25 Sep", etaDays: 1, courierId: "51" },
@@ -64,6 +65,7 @@ test("cheapest quote is first and selected, fastest is labelled from returned ET
   assert.equal(ranked[0].lowest, true);
   assert.equal(ranked[0].fastest, true);
   assert.equal(defaultQuote(quotes)?.courierId, "51");
+  assert.equal(explicitCourierSelection(null), null);
   const fastest = rankQuotes(quotes, "eta");
   assert.equal(fastest[0].etaDays, 1);
   assert.equal(fastest.find((q) => q.courier === "Ekart Surface")?.bestValue, false);

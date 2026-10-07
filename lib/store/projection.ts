@@ -15,7 +15,10 @@ export type CustomerStage =
   | "returning"
   | "return_open"
   | "refund"
-  | "refunded";
+  | "refunded"
+  // Academy Pickup
+  | "ready_for_collection"
+  | "collected";
 
 const STAGE_LABEL: Record<CustomerStage, string> = {
   pending: "Payment received — confirming your order",
@@ -33,6 +36,8 @@ const STAGE_LABEL: Record<CustomerStage, string> = {
   return_open: "Return request received",
   refund: "Refund pending",
   refunded: "Refund recorded",
+  ready_for_collection: "Ready for collection",
+  collected: "Collected",
 };
 
 const TRACK_STEPS: CustomerStage[] = ["confirmed", "preparing", "printing", "packed", "shipped", "in_transit", "out_for_delivery", "delivered"];
@@ -67,6 +72,10 @@ export function projectCustomerStage(internal: string, _hasAwb: boolean): Custom
       return "out_for_delivery";
     case "DELIVERED":
       return "delivered";
+    case "READY_FOR_COLLECTION":
+      return "ready_for_collection";
+    case "COLLECTED":
+      return "collected";
     case "DELIVERY_FAILED":
     case "REATTEMPT_REQUESTED":
       return "delivery_issue";

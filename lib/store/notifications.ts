@@ -15,7 +15,7 @@
  */
 import { storeFeatureEnabled } from "./flags";
 
-export type StoreNotificationType = "order_confirmed" | "order_shipped";
+export type StoreNotificationType = "order_confirmed" | "order_shipped" | "order_ready_for_collection" | "order_collected";
 
 export interface StoreNotificationResult {
   sent: boolean;
@@ -26,6 +26,8 @@ export interface StoreNotificationResult {
 const TEMPLATE_ENV: Record<StoreNotificationType, string> = {
   order_confirmed: "NOTES_STORE_SMS_TEMPLATE_ORDER_CONFIRMED",
   order_shipped: "NOTES_STORE_SMS_TEMPLATE_ORDER_SHIPPED",
+  order_ready_for_collection: "NOTES_STORE_SMS_TEMPLATE_READY_FOR_COLLECTION",
+  order_collected: "NOTES_STORE_SMS_TEMPLATE_ORDER_COLLECTED",
 };
 
 async function dispatch(type: StoreNotificationType): Promise<StoreNotificationResult> {
@@ -60,4 +62,14 @@ export async function notifyOrderShipped(_input: {
   courier: string;
 }): Promise<StoreNotificationResult> {
   return dispatch("order_shipped");
+}
+
+/** Academy Pickup order is ready at the academy. Safe no-op until DLT approved and flag on. */
+export async function notifyReadyForCollection(_input: { orderId: string; orderNo: string | null }): Promise<StoreNotificationResult> {
+  return dispatch("order_ready_for_collection");
+}
+
+/** Academy Pickup order handed over. Safe no-op until DLT approved and flag on. */
+export async function notifyCollected(_input: { orderId: string; orderNo: string | null }): Promise<StoreNotificationResult> {
+  return dispatch("order_collected");
 }

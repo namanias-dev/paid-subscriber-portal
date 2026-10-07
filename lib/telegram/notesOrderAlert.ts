@@ -609,21 +609,24 @@ async function productionLoadOrders(): Promise<NotesAlertOrder[] | null> {
 async function productionLoadCustomer(orderId: string): Promise<NotesAlertCustomer> {
   const db = storeDb();
   if (!db) return { name: "Not available", phone: "Not available", city: "Not available" };
-  const { data: order } = await db.from("store_orders").select("customer_name,phone,shipping_address_id").eq("id", orderId).maybeSingle();
+  const { data: order } = await db.from("store_orders").select("customer_name,phone,shipping_address_id,fulfillment_method,customer_location_snapshot").eq("id", orderId).maybeSingle();
   let shipping: { name?: string | null; phone?: string | null; city?: string | null; country?: string | null } | null = null;
   const addressId = (order as { shipping_address_id?: string | null } | null)?.shipping_address_id;
   if (addressId) {
     const { data } = await db.from("store_addresses").select("name,phone,city,country").eq("id", addressId).maybeSingle();
     shipping = data;
   }
-  const row = order as { customer_name?: string | null; phone?: string | null } | null;
+  const row = order as { customer_name?: string | null; phone?: string | null; fulfillment_method?: string | null; customer_location_snapshot?: { city?: string | null } | null } | null;
+  // Academy Pickup has no shipping address: the city is the customer's own PIN location, never the academy.
+  const pickupCity = row?.fulfillment_method === "ACADEMY_PICKUP" ? row.customer_location_snapshot?.city || null : null;
   return resolveNotesAlertCustomer({
     shippingName: shipping?.name,
     customerName: row?.customer_name,
     shippingPhone: shipping?.phone,
     orderPhone: row?.phone,
     country: shipping?.country,
-    city: shipping?.city,
+    city: shipping?.city || pickupCity,
+    fulfillment: row?.fulfillment_method,
   });
 }
 

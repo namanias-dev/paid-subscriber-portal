@@ -10,7 +10,13 @@ import { makeStoreReference } from "./references";
 import { buildStorePaymentUrl, storeSubMerchantId } from "./payments/eazypay";
 import { pinPlaceConflict } from "./address";
 import { addressFingerprint, canonicalDelivery } from "./deliveryAddress";
-import { lockQuote, QUOTE_TTL_SECONDS, type FrozenQuote } from "./quote";
+import { buildPickupQuote, lockQuote, persistQuoteLock, QUOTE_TTL_SECONDS, type FrozenQuote } from "./quote";
+import { lookupIndianPincode } from "./serviceability";
+import { activePickupLocation, snapshotPickupLocation } from "./pickupLocation";
+import { pickupCreationEnabled } from "./pickupAvailability";
+import { PICKUP_COPY, PickupCheckoutError, validatePickupCheckout, type PickupCheckoutBody } from "./pickupCheckoutRules";
+import { pickupTaxSupported } from "./invoice/placeOfSupply";
+import { normalizeIndiaState } from "@/lib/analytics/indiaStates";
 import { reserveStock } from "./inventory";
 import type { CartView } from "./cart";
 import { cookies, headers } from "next/headers";
@@ -40,7 +46,7 @@ export interface CheckoutAddress {
 export interface CheckoutResult {
   order_no: string;
   payment_url: string;
-  promised_delivery_date: string;
+  promised_delivery_date: string | null;
   total_paise: number;
   /** Raw access token — set once as httpOnly cookie; never persist. */
   access_token: string;
@@ -78,29 +84,7 @@ export async function placeCheckout(cart: CartView, address: CheckoutAddress): P
     throw new Error("Confirm the delivery address before paying.");
   }
 
-  // Upsert the store customer by phone_key. This is NOT an academy identity.
-  const { data: existing } = await db
-    .from("store_customers")
-    .select("id")
-    .eq("phone_key", phone)
-    .maybeSingle();
-
-  let customerId: string;
-  if (existing) {
-    customerId = existing.id;
-    await db
-      .from("store_customers")
-      .update({ name, email: address.email || null, updated_at: new Date().toISOString() })
-      .eq("id", customerId);
-  } else {
-    const { data: created, error } = await db
-      .from("store_customers")
-      .insert({ phone: address.phone.trim(), name, email: address.email || null })
-      .select("id")
-      .single();
-    if (error || !created) throw new Error(error?.message || "could not save customer");
-    customerId = created.id;
-  }
+  const customerId = await upsertStoreCustomer(db, { phone, rawPhone: address.phone, name, email: address.email });
 
   const { data: addr, error: addrErr } = await db
     .from("store_addresses")
@@ -130,6 +114,151 @@ export async function placeCheckout(cart: CartView, address: CheckoutAddress): P
     .single();
   if (addrErr || !addr) throw new Error(addrErr?.message || "could not save address");
 
+  return createOrderFromQuote(db, cart, quote, {
+    phone,
+    rawPhone: address.phone,
+    name,
+    email: address.email,
+    customerId,
+    orderFields: {
+      shipping_address_id: addr.id,
+      billing_address_id: addr.id,
+      promised_delivery_date: quote.promised_delivery_date,
+    },
+  });
+}
+
+/**
+ * Academy Pickup checkout. Every check runs before the first write that matters:
+ * creation flag, location record and acknowledged fingerprint, contact fields, PIN
+ * location (no courier serviceability), priced lines and the pickup tax rule. Only
+ * then is the cart claimed (open -> converted, conditional), so a double tap or a
+ * second tab cannot create a second order. A later failure reopens the cart.
+ */
+export async function placePickupCheckout(cart: CartView, body: PickupCheckoutBody): Promise<CheckoutResult> {
+  if (!(await pickupCreationEnabled())) throw new PickupCheckoutError(PICKUP_COPY.unavailable, "PICKUP_UNAVAILABLE", 409);
+  const active = activePickupLocation();
+  const contact = validatePickupCheckout(body, active);
+  if (!active.ok) throw new PickupCheckoutError(PICKUP_COPY.unavailable, "PICKUP_UNAVAILABLE", 409);
+
+  const located = await lookupIndianPincode(contact.pincode);
+  if (!located.ok) {
+    throw located.retriable
+      ? new PickupCheckoutError(located.error, "PIN_LOOKUP_UNAVAILABLE", 503, "pincode")
+      : new PickupCheckoutError(located.error, "INVALID_PIN", 400, "pincode");
+  }
+  const canonicalState = normalizeIndiaState(located.state);
+  const location = {
+    pincode: located.pincode,
+    city: located.city.trim(),
+    state: canonicalState.code === "unknown" ? located.state.trim() : canonicalState.name,
+  };
+
+  const quote = await buildPickupQuote(cart, location, active.location.code, "throw");
+  if (!pickupTaxSupported(quote.items)) throw new PickupCheckoutError(PICKUP_COPY.taxUnsupported, "TAX_UNSUPPORTED", 409);
+
+  const db = storeDb();
+  if (!db) throw new Error("store unavailable");
+  await persistQuoteLock(cart.id, quote);
+
+  const { data: claimed } = await db
+    .from("store_carts")
+    .update({ status: "converted", updated_at: new Date().toISOString() })
+    .eq("id", cart.id)
+    .eq("status", "open")
+    .select("id");
+  if (!claimed?.length) throw new PickupCheckoutError(PICKUP_COPY.alreadyPlacing, "ALREADY_PLACING", 409);
+
+  const now = new Date();
+  try {
+    const customerId = await upsertStoreCustomer(db, { phone: contact.phone, rawPhone: contact.rawPhone, name: contact.name, email: contact.email });
+    return await createOrderFromQuote(db, cart, quote, {
+      phone: contact.phone,
+      rawPhone: contact.rawPhone,
+      name: contact.name,
+      email: contact.email,
+      customerId,
+      orderFields: {
+        fulfillment_method: "ACADEMY_PICKUP",
+        pickup_location_code: active.location.code,
+        pickup_location_snapshot: snapshotPickupLocation(active.location, now),
+        pickup_acknowledged_at: now.toISOString(),
+        customer_location_snapshot: {
+          pincode: location.pincode,
+          city: location.city,
+          state: location.state,
+          state_code: canonicalState.code === "unknown" ? null : canonicalState.code,
+          country: "IN",
+          source: located.source,
+          captured_at: now.toISOString(),
+        },
+        shipping_address_id: null,
+        billing_address_id: null,
+        promised_delivery_date: null,
+      },
+      eventPayload: { fulfillment_method: "ACADEMY_PICKUP", pickup_location_code: active.location.code },
+    });
+  } catch (error) {
+    // Let the customer try again from the same cart; any order row left behind is
+    // already PAYMENT_FAILED (or PAYMENT_PENDING with no gateway hand-off, which Verify expires).
+    await db.from("store_carts").update({ status: "open", updated_at: new Date().toISOString() }).eq("id", cart.id).eq("status", "converted");
+    throw error;
+  }
+}
+
+/** Upsert the store customer by phone_key. This is NOT an academy identity. */
+async function upsertStoreCustomer(
+  db: NonNullable<ReturnType<typeof storeDb>>,
+  input: { phone: string; rawPhone: string; name: string; email?: string },
+): Promise<string> {
+  const { phone, name } = input;
+  const { data: existing } = await db
+    .from("store_customers")
+    .select("id")
+    .eq("phone_key", phone)
+    .maybeSingle();
+
+  let customerId: string;
+  if (existing) {
+    customerId = existing.id;
+    await db
+      .from("store_customers")
+      .update({ name, email: input.email || null, updated_at: new Date().toISOString() })
+      .eq("id", customerId);
+  } else {
+    const { data: created, error } = await db
+      .from("store_customers")
+      .insert({ phone: input.rawPhone.trim(), name, email: input.email || null })
+      .select("id")
+      .single();
+    if (error || !created) throw new Error(error?.message || "could not save customer");
+    customerId = created.id;
+  }
+
+  return customerId;
+}
+
+/**
+ * Everything after the quote is locked and the method-specific checks have passed:
+ * order number, order row, items, offer hold, stock hold, payment row, event, cart
+ * conversion and lead/analytics hooks. Shared so delivery and pickup orders are
+ * created by the same statements; only `orderFields` differs.
+ */
+async function createOrderFromQuote(
+  db: NonNullable<ReturnType<typeof storeDb>>,
+  cart: CartView,
+  quote: FrozenQuote,
+  input: {
+    phone: string;
+    rawPhone: string;
+    name: string;
+    email?: string;
+    customerId: string;
+    orderFields: Record<string, unknown>;
+    eventPayload?: Record<string, unknown>;
+  },
+): Promise<CheckoutResult> {
+  const { phone, name, customerId } = input;
   const { data: orderNoRow, error: noErr } = await db.rpc("next_store_order_no");
   if (noErr) throw new Error(noErr.message);
   const orderNo = String(orderNoRow || "");
@@ -170,10 +299,9 @@ export async function placeCheckout(cart: CartView, address: CheckoutAddress): P
       customer_id: customerId,
       cart_id: cart.id,
       customer_name: name,
-      phone: address.phone.trim(),
-      email: address.email || null,
-      shipping_address_id: addr.id,
-      billing_address_id: addr.id,
+      phone: input.rawPhone.trim(),
+      email: input.email || null,
+      ...input.orderFields,
       subtotal_paise: quote.subtotal_paise,
       discount_paise: money.discountPaise,
       shipping_paise: quote.shipping_paise,
@@ -183,7 +311,6 @@ export async function placeCheckout(cart: CartView, address: CheckoutAddress): P
       offer_id: quote.offer_id || null,
       discount_trace_json: couponTrace ? { ...trace, coupon: couponTrace } : offerTraceFromQuote(quote),
       quote_json: quote,
-      promised_delivery_date: quote.promised_delivery_date,
       tracking_token: null,
       tracking_token_hash: orderTokenHash,
       attribution_json: attributionJson,
@@ -297,7 +424,7 @@ export async function placeCheckout(cart: CartView, address: CheckoutAddress): P
     referenceNo,
     amountPaise: quote.total_paise,
     name,
-    email: address.email?.trim() || `${phone}@namanias.invalid`,
+    email: input.email?.trim() || `${phone}@namanias.invalid`,
     mobile: phone,
   });
   if (!paymentUrl) {
@@ -311,7 +438,9 @@ export async function placeCheckout(cart: CartView, address: CheckoutAddress): P
     event: "checkout_started",
     to_status: "PAYMENT_PENDING",
     actor_type: "customer",
-    payload_json: { reference_no: referenceNo, total_paise: quote.total_paise },
+    payload_json: input.eventPayload
+      ? { reference_no: referenceNo, total_paise: quote.total_paise, ...input.eventPayload }
+      : { reference_no: referenceNo, total_paise: quote.total_paise },
   });
 
   await db.from("store_carts").update({ status: "converted", updated_at: new Date().toISOString() }).eq("id", cart.id);
@@ -327,7 +456,7 @@ export async function placeCheckout(cart: CartView, address: CheckoutAddress): P
     .then((m) => m.markLeadPaymentInitiated({
       phone,
       name,
-      email: address.email,
+      email: input.email,
       cartId: cart.id,
       orderId: order.id,
       totalPaise: quote.total_paise,
@@ -355,6 +484,7 @@ export async function placeCheckout(cart: CartView, address: CheckoutAddress): P
     access_token: orderToken,
   };
 }
+
 
 export function quoteTotal(quote: FrozenQuote): number {
   return quote.total_paise;

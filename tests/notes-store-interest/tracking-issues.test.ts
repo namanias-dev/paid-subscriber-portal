@@ -32,7 +32,7 @@ test("public issue hides internal fields and explains the next step", () => {
     callback_requested: true,
   });
   assert.equal(issue.status_label, "Issue received");
-  assert.equal(issue.category_label, "Pickup not done");
+  assert.equal(issue.category_label, "Courier pickup not done");
   assert.equal(issue.open, true);
   assert.match(issue.next_step, /received/i);
   assert.equal("admin_note" in issue, false);
@@ -46,7 +46,7 @@ test("pickup scheduled stays before shipped and a delay is an exception", () => 
   assert.equal(shipped?.state, "upcoming");
   const delayed = buildTrackingTimeline({ stage: "packed", orderStatus: "PICKUP_SCHEDULED", pickupDelayed: true });
   assert.equal(delayed.find((step) => step.id === "pickup")?.state, "exception");
-  assert.equal(delayed.find((step) => step.id === "pickup")?.label, "Pickup delayed");
+  assert.equal(delayed.find((step) => step.id === "pickup")?.label, "Courier pickup delayed");
 });
 
 test("queued pickup copy stays pre-shipment", () => {
@@ -55,7 +55,7 @@ test("queued pickup copy stays pre-shipment", () => {
     orderStatus: "PICKUP_SCHEDULED",
     pickupQueued: true,
   });
-  assert.equal(copy.headline, "Pickup scheduled");
+  assert.equal(copy.headline, "Courier pickup scheduled");
   assert.match(copy.explanation, /waiting for courier collection/i);
   assert.doesNotMatch(copy.explanation, /handed to the courier/i);
 });

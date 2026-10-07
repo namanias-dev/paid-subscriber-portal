@@ -7,7 +7,7 @@
     "paymentCritical": "77230d83456021b4ef20efbe7d80acb6974e453b",
     "cursorIntelligence": "9cdba05ed3e032309057838c0e94154328c0f68e"
   },
-  "productionStoreEnabled": false,
+  "productionStoreEnabled": true,
   "realPaymentVerified": false,
   "realPaymentStatus": "deferred_by_owner",
   "paymentGateway": "ICICI_EAZYPAY",
@@ -64,5 +64,37 @@
   "preferGitTag": true,
   "handoffTagCommitHint": "git rev-parse notes-store-handoff-2026-09-19",
   "recordedAtCommit": "a188036eca33a9c978979460a66c2f867809eeba",
-  "treeHashAtRecord": "2a6811d2f588b3e8d8597e4259e33bd4292fb74a"
+  "treeHashAtRecord": "2a6811d2f588b3e8d8597e4259e33bd4292fb74a",
+  "productionStoreEnabledNote": "Owner enabled notes_store after the 2026-09-19 handoff; verified enabled=true scope=all on 2026-10-05.",
+  "academyPickup": {
+    "asOf": "2026-10-05",
+    "doc": "docs/notes-store/ACADEMY_PICKUP.md",
+    "migration": "supabase/migrations/2026-10-05-notes-store-academy-pickup.sql",
+    "migrationAppliedToProduction": true,
+    "flag": "notes_store_academy_pickup",
+    "flagGates": "creation_only",
+    "flagEnabled": true,
+    "locationCode": "CHD_17C",
+    "releaseA": {
+      "sha": "5818c5359ed2",
+      "deployment": "dpl_9pY9kEogb8i3jU6nNng7PjF52e5Q",
+      "role": "SAFE_COMPATIBILITY_SHA"
+    },
+    "releaseB": {
+      "sha": "f458f117f34e",
+      "deployment": "dpl_9Bag72KP8FVxSghKLWn57sqzesEh",
+      "promotedAt": "2026-10-05"
+    },
+    "rollbackRule": "after any pickup order exists, roll back to Release A or later, never pre-pickup",
+    "placeOfSupplyPickup": "interim_customer_pin_state_pending_ca",
+    "smsReadyCollected": "inert_no_dlt_template",
+    "realPaymentByAutomation": false,
+    "flagEnableStatus": "enabled via npm run release:pickup-enable; read back enabled=true scope=all kill_switch=false; propagated in ~5 s",
+    "flagEnabledAt": "2026-10-05T13:10:01Z",
+    "flagCommands": {
+      "status": "npm run release:pickup-status",
+      "enable": "npm run release:pickup-enable",
+      "disable": "npm run release:pickup-disable"
+    }
+  }
 }
