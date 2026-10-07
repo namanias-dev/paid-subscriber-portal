@@ -486,7 +486,7 @@ test("the self-heal scan is newest first, paginated, and sends no payment side e
 test("capture schedules the invoice after the paid transition and never waits on the PDF", () => {
   const verify = readFileSync(join(process.cwd(), "lib/store/payments/verify.ts"), "utf8");
   const paidBranch = verify.slice(verify.indexOf('if (outcome === "paid") {\n    const { data } = await db'), verify.indexOf("const failedStatus"));
-  assert.match(paidBranch, /if \(data\?\.length\) \{\n\s+await consumeStoreOfferHold\(orderId\);\n\s+const \{ scheduleStoreInvoice \} = await import\("\.\.\/invoice\/issue"\);\n\s+scheduleStoreInvoice\(orderId\);/);
+  assert.match(paidBranch, /if \(data\?\.length\) \{\n\s+await consumeStoreOfferHold\(orderId\);\n(?:\s+await captureDiscountForOrder\(orderId\);\n)?\s+const \{ scheduleStoreInvoice \} = await import\("\.\.\/invoice\/issue"\);\n\s+scheduleStoreInvoice\(orderId\);/);
   assert.equal(/await scheduleStoreInvoice/.test(verify), false);
   const issue = readFileSync(join(process.cwd(), "lib/store/invoice/issue.ts"), "utf8");
   const schedule = issue.slice(issue.indexOf("export function scheduleStoreInvoice"), issue.indexOf("const UNPAID_ORDER_STATUSES"));

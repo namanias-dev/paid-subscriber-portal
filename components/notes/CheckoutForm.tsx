@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { trackClient } from "@/lib/analytics/client";
+import { checkoutFailureReason } from "@/lib/analytics/checkoutFailure";
 import { addressAnalyticsProps, addressFingerprint, buildDeliveryGoogleMapsUrl, canonicalDelivery, formatDeliveryAddress } from "@/lib/store/deliveryAddress";
 import { pinPlaceConflict } from "@/lib/store/address";
 import type { FulfillmentMethod } from "@/lib/store/fulfillment";
@@ -58,6 +59,9 @@ export default function CheckoutForm() {
   const [confirmedHash, setConfirmedHash] = useState<string | null>(null);
   const shownRef = useRef(false);
   const editedRef = useRef(false);
+  // A locked submit guards against a double pay-button press being recorded as an
+  // ICICI failure; it is released only when the gateway call itself fails.
+  const submitLock = useRef(false);
   const confirmRef = useRef<HTMLElement | null>(null);
   const [marketingConsent, setMarketingConsent] = useState(false);
   const phoneTouched = useRef(false);
@@ -322,7 +326,7 @@ export default function CheckoutForm() {
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (busy) return;
+    if (submitLock.current) return;
     if (isPickup) return submitPickup();
     if (confirmedHash !== addressFingerprint(canonicalDelivery(form))) {
       setErr("Confirm the delivery address before paying.");
@@ -338,6 +342,7 @@ export default function CheckoutForm() {
     if (!form.line1.trim()) {
       trackClient("notes_checkout_validation_error", { field: "address", reason: "required" });
     }
+    submitLock.current = true;
     setBusy(true);
     setErr(null);
     trackClient("notes_checkout_step_viewed", { step: "payment_clicked", item_count: cart?.item_count ?? 0 });
@@ -352,14 +357,19 @@ export default function CheckoutForm() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ ...form, address_hash: confirmedHash, fulfillment_method: "DELIVERY" }),
       });
-      const json = await res.json();
-      if (!json.ok) throw new Error(json.error || "Payment could not be started.");
+      const json = await res.json().catch(() => null);
+      if (!json || typeof json !== "object") throw new Error("Payment response was not valid JSON.");
+      if (!json.ok || typeof json.payment_url !== "string" || !json.payment_url) {
+        throw new Error(typeof json.error === "string" && json.error ? json.error : "Payment could not be started.");
+      }
       trackClient("notes_payment_gateway_opened", { cta_id: "pay_securely", item_count: cart?.item_count ?? 0 });
       window.location.href = json.payment_url;
     } catch (e2) {
-      trackClient("notes_checkout_api_error", { endpoint: "checkout", recoverable: true, stage: "order_create" });
-      trackClient("notes_payment_failed", { stage: "checkout_submit" });
-      setErr((e2 as Error).message);
+      const message = e2 instanceof Error ? e2.message : "Payment could not be started.";
+      trackClient("notes_checkout_api_error", { endpoint: "checkout", recoverable: true, stage: "order_create", reason: checkoutFailureReason(message) });
+      setErr(message);
+      if (form.pincode.length === 6) void lookupPin(form.pincode);
+      submitLock.current = false;
       setBusy(false);
     }
   }
@@ -373,6 +383,7 @@ export default function CheckoutForm() {
     }
     if (!pickupPlace) return setErr("Enter your PIN code so we can add your city and state to the invoice.");
     if (!pickupAcked) return setErr("Confirm that you'll collect from Chandigarh before paying.");
+    submitLock.current = true;
     setBusy(true);
     setErr(null);
     trackClient("notes_checkout_step_viewed", { step: "payment_clicked", item_count: cart?.item_count ?? 0, fulfillment_method: "ACADEMY_PICKUP" });
@@ -394,24 +405,28 @@ export default function CheckoutForm() {
           pickup_acknowledged: true,
         }),
       });
-      const json = await res.json();
+      const json = await res.json().catch(() => null);
+      if (!json || typeof json !== "object") throw new Error("Payment response was not valid JSON.");
       if (!json.ok) {
         if (json.code === "PICKUP_UNAVAILABLE" || json.code === "TAX_UNSUPPORTED") {
           pickupWentAway(json.error);
+          submitLock.current = false;
           return setBusy(false);
         }
         if (json.code === "LOCATION_CHANGED") {
           setPickupAck(null);
           await loadCart().catch(() => {});
         }
-        throw new Error(json.error || "Payment could not be started.");
+        throw new Error(typeof json.error === "string" && json.error ? json.error : "Payment could not be started.");
       }
+      if (typeof json.payment_url !== "string" || !json.payment_url) throw new Error("Payment could not be started.");
       trackClient("notes_payment_gateway_opened", { cta_id: "pay_securely", item_count: cart?.item_count ?? 0, fulfillment_method: "ACADEMY_PICKUP" });
       window.location.href = json.payment_url;
     } catch (e2) {
-      trackClient("notes_checkout_api_error", { endpoint: "checkout", recoverable: true, stage: "order_create", fulfillment_method: "ACADEMY_PICKUP" });
-      trackClient("notes_payment_failed", { stage: "checkout_submit" });
-      setErr((e2 as Error).message);
+      const message = e2 instanceof Error ? e2.message : "Payment could not be started.";
+      trackClient("notes_checkout_api_error", { endpoint: "checkout", recoverable: true, stage: "order_create", fulfillment_method: "ACADEMY_PICKUP", reason: checkoutFailureReason(message) });
+      setErr(message);
+      submitLock.current = false;
       setBusy(false);
     }
   }
