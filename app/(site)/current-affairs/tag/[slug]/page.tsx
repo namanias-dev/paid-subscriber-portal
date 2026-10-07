@@ -10,11 +10,18 @@ import { ACADEMY } from "@/lib/config";
 
 export const revalidate = 600;
 
+const MAX_PRERENDER_SLUG_BYTES = 200;
+
 export async function generateStaticParams() {
   const all = await getPublicCaArticles();
   const tags = new Set<string>();
   for (const a of all) for (const tag of a.tags || []) if (tag) tags.add(tag);
-  return Array.from(tags).map((slug) => ({ slug }));
+  // A prerendered page is written to disk as `<slug>.rsc`/`.html`/`.meta`, and filenames
+  // cap at 255 bytes. A longer tag (one 300-character slug exists) fails the whole build
+  // with ENAMETOOLONG. Those tags are skipped here and render on demand with the same ISR.
+  return Array.from(tags)
+    .filter((slug) => Buffer.byteLength(encodeURIComponent(slug)) <= MAX_PRERENDER_SLUG_BYTES)
+    .map((slug) => ({ slug }));
 }
 
 function titleize(slug: string): string {
