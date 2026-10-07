@@ -21,6 +21,7 @@ import { timelineSeries } from "../../lib/analytics/notesTimeline";
 import { EVENT_NAMES, MAX_NOTES_EVENTS } from "../../lib/analytics/notesReport";
 import { MAX_ORDERS, SHIPMENT_STATUSES } from "../../lib/analytics/notesIntelLoad";
 import { shippingRateStats, type ShipmentRowLike } from "../../lib/store/orderOps";
+import { planLocalRepair, type CourierProvider } from "../../lib/store/shipping/pickup";
 import { isQaNotesOrder, type StoredNotesAttribution } from "../../lib/analytics/notesCommerce";
 import { formatPaise } from "../../lib/store/money";
 
@@ -237,15 +238,68 @@ async function notesPickup() {
   console.log(`Pickup orders ${pickups.length}: ${[...byStatus].map(([status, n]) => `${status} ${n}`).join(" · ")}`);
 }
 
+/**
+ * Courier pickup lifecycle invariants, read-only. Detects the state-machine drift that
+ * leaves an order PACKED while its active courier shipment already carries an AWB (and,
+ * for Shiprocket, a generated pickup). Reports each affected order by order_no only and
+ * the safe target status {@link planLocalRepair} would propose. Reads no name/phone/address.
+ */
+async function notesPickup2_courier() {
+  type Row = {
+    order_no: string; order_status: string; provider: CourierProvider; awb: string | null;
+    shipment_status: string | null; tracking_status: string | null; pickup_status: string | null;
+    pickup_scheduled_at: string | null;
+  };
+  // Active (non-cancelled) courier shipments for DELIVERY orders that have not yet reached possession.
+  const rows = select<Row>(`select o.order_no, o.status as order_status, s.provider, s.awb,
+      s.status as shipment_status, s.provider_payload->>'tracking_status' as tracking_status,
+      s.provider_payload->>'pickup_status' as pickup_status, s.pickup_scheduled_at
+    from public.store_orders o join public.store_shipments s on s.order_id = o.id
+    where o.fulfillment_method = 'DELIVERY' and s.status <> 'cancelled'
+      and o.status in ('PAID','PROCESSING','PACKED','READY_FOR_PICKUP','PICKUP_SCHEDULED')
+    order by o.order_no`);
+
+  console.log(`Active courier shipments on pre-possession delivery orders: ${rows.length}`);
+  const drift: { order_no: string; from: string; to: string | null; basis: string; signal: string }[] = [];
+  for (const r of rows) {
+    if (!r.awb) continue; // no AWB yet → genuinely still packed, nothing to heal
+    const plan = planLocalRepair(
+      { status: r.order_status },
+      {
+        provider: r.provider, awb: r.awb, shipmentStatus: r.shipment_status,
+        trackingStatus: r.tracking_status, pickupStatusRaw: r.pickup_status, active: true,
+      },
+    );
+    if (plan.changed) {
+      drift.push({ order_no: r.order_no, from: r.order_status, to: plan.orderStatus, basis: plan.basis, signal: r.tracking_status || r.pickup_status || "—" });
+    }
+  }
+
+  check("no order is PACKED while its active shipment already holds an AWB", drift.length === 0, `${drift.length} drifted`);
+  if (drift.length) {
+    console.log("\nState-machine drift (safe local repair proposed — not applied by this read-only check):");
+    for (const d of drift) console.log(`  ${d.order_no}  ${d.from} → ${d.to}  [${d.basis}, carrier: ${d.signal}]`);
+  }
+
+  // Invariant: at most one active (non-cancelled) shipment per delivery order (§ one active AWB).
+  const multi = select<{ order_no: string; n: number }>(`select o.order_no, count(*)::int as n
+    from public.store_orders o join public.store_shipments s on s.order_id = o.id
+    where o.fulfillment_method = 'DELIVERY' and s.status <> 'cancelled' and s.provider <> 'manual'
+    group by o.order_no having count(*) > 1 order by o.order_no`);
+  check("at most one active courier shipment per delivery order", multi.length === 0, multi.map((m) => `${m.order_no}×${m.n}`).join(", ") || "0");
+}
+
 async function main() {
   guard();
   const [suite, range = "30d"] = process.argv.slice(2);
   if (suite === "notes-pickup") {
     await notesPickup();
+  } else if (suite === "courier-pickup") {
+    await notesPickup2_courier();
   } else if (suite === "notes-analytics") {
     await notesAnalytics(range as NotesRangeKey);
   } else {
-    throw new Error("Usage: release:verify-data -- notes-analytics [today|yesterday|7d|30d|month] | notes-pickup");
+    throw new Error("Usage: release:verify-data -- notes-analytics [today|yesterday|7d|30d|month] | notes-pickup | courier-pickup");
   }
   console.log(`\n${failed ? "FAILED" : "ALL INVARIANTS PASS"}`);
   if (failed) process.exitCode = 1;

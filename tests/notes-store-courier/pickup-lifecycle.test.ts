@@ -4,8 +4,11 @@ import { test } from "node:test";
 import {
   normalizeCourierPickupStatus,
   reconcileCourierShipment,
+  deriveProviderFactFromLocal,
+  planLocalRepair,
   validatePickupDate,
   type LocalShipmentFacts,
+  type LocalShipmentRow,
 } from "../../lib/store/shipping/pickup";
 import { PROGRESS, progressIndex } from "../../lib/store/stages";
 import { fulfillmentLabel } from "../../lib/store/adminConsole";
@@ -47,9 +50,15 @@ test("picked up wins over any cancellation wording and pickup exceptions are FAI
   assert.equal(normalizeCourierPickupStatus({ provider: "shiprocket", rawStatus: "Pickup Exception" }).pickupState, "FAILED");
 });
 
-test("an acknowledged request is REQUESTED, not SCHEDULED (§30)", () => {
-  assert.equal(normalizeCourierPickupStatus({ provider: "shiprocket", rawStatus: "Pickup Generated" }).pickupState, "REQUESTED");
+test("a soft request is REQUESTED, not SCHEDULED (§30)", () => {
+  assert.equal(normalizeCourierPickupStatus({ provider: "shiprocket", rawStatus: "Pickup Requested" }).pickupState, "REQUESTED");
   assert.equal(normalizeCourierPickupStatus({ provider: "delhivery", rawStatus: "Awaiting Pickup" }).pickupState, "REQUESTED");
+  assert.equal(normalizeCourierPickupStatus({ provider: "delhivery", rawStatus: "Pickup Open" }).pickupState, "REQUESTED");
+});
+
+test('Shiprocket "Pickup Generated" means the pickup is scheduled (real prod wording)', () => {
+  // `/courier/generate/pickup` is the scheduling call; its live shipments read "Pickup Generated".
+  assert.equal(normalizeCourierPickupStatus({ provider: "shiprocket", rawStatus: "Pickup Generated" }).pickupState, "SCHEDULED");
 });
 
 test("unknown or empty pickup text yields no signal", () => {
@@ -142,6 +151,63 @@ test("a fact for a superseded (non-active) shipment is recorded, not applied (§
   );
   assert.equal(r.changed, false);
   assert.equal(r.ignored, "not_active");
+});
+
+// ------------------------------------------------------------------ local self-heal from stored truth (§4, §20, §37)
+// Fixtures mirror the three real production orders that triggered this work, by shape only
+// (no order numbers, names or phones). All three were PACKED with an active manifested AWB.
+
+const row = (over: Partial<LocalShipmentRow> = {}): LocalShipmentRow => ({
+  provider: "shiprocket",
+  awb: "AWB1",
+  shipmentStatus: "manifested",
+  trackingStatus: null,
+  pickupStatusRaw: null,
+  active: true,
+  ...over,
+});
+
+test("Delhivery AWB booked but pickup never scheduled: PACKED is floored to READY_FOR_PICKUP", () => {
+  // tracking_status "Not Picked" carries no pickup signal, but an AWB exists → order fell behind.
+  const plan = planLocalRepair({ status: "PACKED" }, row({ provider: "delhivery", trackingStatus: "Not Picked" }));
+  assert.equal(plan.changed, true);
+  assert.equal(plan.basis, "booking_floor");
+  assert.equal(plan.orderStatus, "READY_FOR_PICKUP");
+  assert.equal(plan.pickupState, "REQUESTED");
+  assert.equal(plan.cancelShipment, false);
+});
+
+test('Shiprocket "Pickup Generated" while order is PACKED repairs to PICKUP_SCHEDULED (§20 — not hidden by a bucket)', () => {
+  const plan = planLocalRepair({ status: "PACKED" }, row({ provider: "shiprocket", trackingStatus: "Pickup Generated" }));
+  assert.equal(plan.changed, true);
+  assert.equal(plan.basis, "provider_signal");
+  assert.equal(plan.orderStatus, "PICKUP_SCHEDULED");
+  assert.equal(plan.pickupState, "SCHEDULED");
+});
+
+test("a cancelled shipment is Case B: order returns to PACKED and the shipment is flagged", () => {
+  const fact = deriveProviderFactFromLocal(row({ shipmentStatus: "cancelled" }));
+  assert.equal(fact.shipmentCancelled, true);
+  const plan = planLocalRepair({ status: "PICKUP_SCHEDULED" }, row({ shipmentStatus: "cancelled", pickupState: "SCHEDULED" }));
+  assert.equal(plan.basis, "shipment_cancelled");
+  assert.equal(plan.orderStatus, "PACKED");
+  assert.equal(plan.cancelShipment, true);
+});
+
+test("local repair is idempotent — an already-scheduled order is a no-op", () => {
+  const plan = planLocalRepair(
+    { status: "PICKUP_SCHEDULED" },
+    row({ trackingStatus: "Pickup Generated", pickupState: "SCHEDULED" }),
+  );
+  assert.equal(plan.changed, false);
+  assert.equal(plan.basis, "none");
+});
+
+test("booking floor never fires after carrier possession or for a superseded shipment", () => {
+  assert.equal(planLocalRepair({ status: "IN_TRANSIT" }, row({ trackingStatus: "Not Picked" })).changed, false);
+  assert.equal(planLocalRepair({ status: "PACKED" }, row({ active: false, trackingStatus: "Not Picked" })).changed, false);
+  // No AWB yet → nothing to floor to; the order is genuinely still packed.
+  assert.equal(planLocalRepair({ status: "PACKED" }, row({ awb: null, shipmentStatus: "pending" })).changed, false);
 });
 
 // ------------------------------------------------------------------ pickup date validation (§40, §41, §42, §107, §111)

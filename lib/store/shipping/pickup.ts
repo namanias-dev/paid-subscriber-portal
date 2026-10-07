@@ -136,22 +136,28 @@ export function normalizeCourierPickupStatus(input: {
     return { pickupState: "CANCELLED", shipmentCancelled: false, reason };
   }
 
-  // Provider confirmed a scheduled pickup.
+  // Provider confirmed a scheduled pickup. "pickup generated" lives here on purpose:
+  // for both providers the generate-pickup call IS the scheduling step — Shiprocket
+  // `/courier/generate/pickup` mints a pickup_token and returns the confirmed date,
+  // Delhivery `/fm/request/new/` returns a pickup_id. Real production shipments carry
+  // Shiprocket tracking_status "Pickup Generated" with a live pickup, so it must map to
+  // SCHEDULED, not REQUESTED, or genuinely-scheduled orders stay stuck as "requested".
   if (
     text.includes("pickup scheduled") ||
     text.includes("pickup confirmed") ||
     text.includes("pickup assigned") ||
-    text.includes("pickup open") ||
+    text.includes("pickup generated") ||
     text.includes("out for pickup")
   ) {
     return { pickupState: "SCHEDULED", shipmentCancelled: false, reason };
   }
 
   // Request acknowledged but not yet a confirmed scheduled pickup (§30 — "requested" ≠ "scheduled").
+  // "pickup open" is Delhivery's "request lodged, not yet assigned" — softer than SCHEDULED.
   if (
     text.includes("pickup requested") ||
     text.includes("pickup registered") ||
-    text.includes("pickup generated") ||
+    text.includes("pickup open") ||
     text.includes("pickup queued") ||
     text.includes("pickup pending") ||
     text.includes("awaiting pickup")
@@ -260,6 +266,111 @@ export function reconcileCourierShipment(
     ignored: null,
     reason: fact.reason ?? null,
   };
+}
+
+// ------------------------------------------------------------------ local self-heal (no provider call)
+
+/**
+ * Order statuses that sit *below* "courier booked". If an active shipment already
+ * carries an AWB while the order is still here, the order has silently fallen behind
+ * its own shipment and must be floored to READY_FOR_PICKUP (§4, §20). Academy-pickup
+ * statuses (READY_FOR_COLLECTION/COLLECTED) are deliberately excluded — those orders
+ * never carry a courier AWB, so this never touches the pickup domain.
+ */
+export const PRE_PICKUP_ORDER_STATUSES = new Set(["PAID", "PROCESSING", "PACKED"]);
+
+/** A store_shipments row, reduced to the fields the pickup lifecycle reasons about. */
+export interface LocalShipmentRow {
+  provider: CourierProvider;
+  awb: string | null;
+  /** store_shipments.status (e.g. "pending" | "manifested" | "cancelled" | tracking lifecycle). */
+  shipmentStatus: string | null;
+  /** provider_payload.tracking_status — the carrier's own wording, if any. */
+  trackingStatus?: string | null;
+  /** provider_payload.pickup_status — set once the pickup lifecycle is wired. */
+  pickupStatusRaw?: string | null;
+  /** Current persisted pickup_state, if the lifecycle column is populated. */
+  pickupState?: PickupState;
+  /** Is this the single canonical active shipment for the order? */
+  active: boolean;
+}
+
+function isCancelledShipmentStatus(status: string | null): boolean {
+  const s = clean(status);
+  return s === "cancelled" || s === "canceled" || s === "cancellation requested";
+}
+
+/**
+ * Turn a local shipment row into a provider pickup fact *without* calling the carrier.
+ * The row already stores the carrier's last-known wording (tracking_status / pickup_status),
+ * so drift can be repaired from local truth alone. A live provider read, when available,
+ * produces the same {@link ProviderPickupFact} and flows through the same reconciler.
+ */
+export function deriveProviderFactFromLocal(row: LocalShipmentRow): ProviderPickupFact {
+  if (isCancelledShipmentStatus(row.shipmentStatus)) {
+    return { awb: row.awb, pickupState: "CANCELLED", shipmentCancelled: true, reason: row.shipmentStatus ?? null };
+  }
+  const normalized = normalizeCourierPickupStatus({
+    provider: row.provider,
+    rawStatus: row.pickupStatusRaw ?? row.trackingStatus ?? null,
+  });
+  return {
+    awb: row.awb,
+    pickupState: normalized.pickupState,
+    shipmentCancelled: normalized.shipmentCancelled,
+    reason: normalized.reason,
+  };
+}
+
+export interface LocalRepairPlan extends ReconcileResult {
+  /** Why the plan was produced, for an auditable repair run. */
+  basis: "provider_signal" | "booking_floor" | "shipment_cancelled" | "none";
+}
+
+/**
+ * Decide the safe local repair for one order+active-shipment pair, using only data
+ * already in the database. Two drifts are healed:
+ *
+ *  1. provider signal — tracking_status says the pickup is scheduled/cancelled/failed/
+ *     picked-up, but the order status never followed (handled by {@link reconcileCourierShipment});
+ *  2. booking floor — an active AWB exists while the order is still PAID/PROCESSING/PACKED,
+ *     with no explicit pickup signal, so the order is floored to READY_FOR_PICKUP.
+ *
+ * Pure and idempotent: re-running on an already-correct order is a no-op. Possession is
+ * never regressed. Non-active/superseded shipments never move the order.
+ */
+export function planLocalRepair(order: { status: string }, row: LocalShipmentRow): LocalRepairPlan {
+  const fact = deriveProviderFactFromLocal(row);
+  const shipment: LocalShipmentFacts = {
+    awb: row.awb,
+    active: row.active,
+    pickupState: row.pickupState ?? "NOT_REQUESTED",
+  };
+  const base = reconcileCourierShipment(order, shipment, fact);
+
+  // A provider signal (or Case B cancellation) already produced a transition — trust it.
+  if (base.changed) {
+    return { ...base, basis: fact.shipmentCancelled ? "shipment_cancelled" : "provider_signal" };
+  }
+  if (base.ignored && base.ignored !== "no_signal") {
+    return { ...base, basis: "none" };
+  }
+
+  // Booking floor: active AWB but the order fell behind its own shipment, no pickup signal.
+  const possession = POSSESSION_ORDER_STATUSES.has(order.status) || shipment.pickupState === "PICKED_UP";
+  if (row.active && row.awb && !possession && PRE_PICKUP_ORDER_STATUSES.has(order.status)) {
+    return {
+      changed: true,
+      orderStatus: "READY_FOR_PICKUP",
+      pickupState: shipment.pickupState === "NOT_REQUESTED" ? "REQUESTED" : shipment.pickupState,
+      cancelShipment: false,
+      ignored: null,
+      reason: "awb_present_order_behind",
+      basis: "booking_floor",
+    };
+  }
+
+  return { ...base, basis: "none" };
 }
 
 // ------------------------------------------------------------------ pickup date validation (IST)
