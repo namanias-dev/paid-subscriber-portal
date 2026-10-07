@@ -114,20 +114,34 @@ function hostAllowed(host: string): boolean {
   });
 }
 
+/** A destination pointing back at the redirect route would loop forever. */
+function isRedirectLoop(pathname: string): boolean {
+  return /^\/go(\/|$)/i.test(pathname);
+}
+
 /**
  * Is this a safe campaign destination? Accepts same-origin relative paths and
  * absolute https URLs on the allowlist only. Rejects javascript:, data:,
- * protocol-relative (//evil), and any off-domain host. Never throws.
+ * protocol-relative (//evil), any off-domain host, and anything that points back
+ * into /go (which would loop the redirect). Never throws.
  */
 export function isSafeDestination(destination: string): boolean {
   const dest = (destination || "").trim();
   if (!dest) return false;
   // Protocol-relative ("//evil.com") would inherit our scheme and escape origin.
   if (dest.startsWith("//")) return false;
-  if (dest.startsWith("/")) return true; // same-origin path
+  if (dest.startsWith("/")) {
+    // Same-origin path — reject only a loop back into the redirect route.
+    try {
+      return !isRedirectLoop(new URL(dest, CAMPAIGN_SITE_URL).pathname);
+    } catch {
+      return false;
+    }
+  }
   if (/^https:\/\//i.test(dest)) {
     try {
-      return hostAllowed(new URL(dest).host);
+      const u = new URL(dest);
+      return hostAllowed(u.host) && !isRedirectLoop(u.pathname);
     } catch {
       return false;
     }

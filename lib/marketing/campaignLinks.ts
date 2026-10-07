@@ -229,10 +229,14 @@ export async function resolveCampaignLinkByCode(
   if (!db) return null;
   const c = normalizeShortCode(code);
   if (!c) return null;
+  // Exact match on the always-normalised (lower-cased) short_code so Postgres
+  // uses the plain btree index — ILIKE would force a sequential scan. Case
+  // insensitivity still holds because every stored code is lower-cased on create
+  // and the lookup key is normalised the same way.
   const { data } = await db
     .from(TABLE)
     .select("id,short_code,destination_url,source,medium,campaign,content,term,status")
-    .ilike("short_code", c)
+    .eq("short_code", c)
     .limit(1)
     .maybeSingle();
   return (data as never) || null;
@@ -314,12 +318,19 @@ export interface ClickInput {
   is_bot?: boolean;
 }
 
-/** Fire-and-forget click logger. NEVER throws — redirect reliability wins. */
+/** Hard ceiling (ms) on how long click logging may delay a redirect. */
+const CLICK_LOG_TIMEOUT_MS = 2500;
+
+/**
+ * Fire-and-forget click logger. NEVER throws and NEVER blocks the visitor for
+ * long — the insert is raced against a short timeout so a slow/hung database can
+ * never stall the redirect. A normal insert (<50 ms) completes well within it.
+ */
 export async function recordCampaignClick(input: ClickInput): Promise<void> {
   try {
     const db = getSupabaseAdmin();
     if (!db) return;
-    await db.from(CLICKS).insert({
+    const insert = db.from(CLICKS).insert({
       campaign_link_id: input.campaign_link_id,
       short_code: input.short_code,
       destination_url: input.destination_url,
@@ -334,6 +345,10 @@ export async function recordCampaignClick(input: ClickInput): Promise<void> {
       gbraid: input.gbraid ?? null,
       is_bot: !!input.is_bot,
     });
+    await Promise.race([
+      Promise.resolve(insert).then(() => undefined),
+      new Promise<void>((resolve) => setTimeout(resolve, CLICK_LOG_TIMEOUT_MS)),
+    ]);
   } catch {
     /* swallow — logging must never break the redirect */
   }

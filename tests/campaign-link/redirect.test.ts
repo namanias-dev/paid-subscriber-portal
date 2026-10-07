@@ -27,6 +27,13 @@ describe("campaign-link redirect safety", () => {
     assert.equal(isSafeDestination("http://namanias.com/x"), false); // non-https absolute
     assert.equal(isSafeDestination(""), false);
   });
+
+  it("rejects destinations that loop back into /go", () => {
+    assert.equal(isSafeDestination("/go/other-code"), false);
+    assert.equal(isSafeDestination("/go"), false);
+    assert.equal(isSafeDestination("https://www.namanias.com/go/x"), false);
+    assert.equal(isSafeDestination("/gopher"), true, "only the /go route, not lookalikes");
+  });
 });
 
 describe("composeRedirectUrl", () => {
@@ -60,6 +67,7 @@ describe("composeRedirectUrl", () => {
 
   it("returns empty string for an unsafe destination", () => {
     assert.equal(composeRedirectUrl({ destination: "https://evil.com", utm: { source: "x" }, clid: "y" }), "");
+    assert.equal(composeRedirectUrl({ destination: "/go/loop", utm: { source: "x" }, clid: "y" }), "");
   });
 });
 
