@@ -226,6 +226,9 @@ export async function GET(req: Request) {
       status: string | null;
       has_label: boolean;
       pickup_scheduled_at: string | null;
+      pickup_state: string | null;
+      pickup_confirmed_date: string | null;
+      pickup_requested_date: string | null;
       pickup_date: string | null;
       pickup_status: string | null;
       tracking_activity: string | null;
@@ -290,7 +293,7 @@ export async function GET(req: Request) {
     }
     const { data: shipRows } = await db
       .from("store_shipments")
-      .select("order_id,courier_name,awb,tracking_url,provider,status,label_r2_key,provider_payload,pickup_scheduled_at,picked_up_at,delivered_at,weight_grams,length_mm,width_mm,height_mm,created_at")
+      .select("order_id,courier_name,awb,tracking_url,provider,status,label_r2_key,provider_payload,pickup_scheduled_at,pickup_state,pickup_confirmed_date,pickup_requested_date,picked_up_at,delivered_at,weight_grams,length_mm,width_mm,height_mm,created_at")
       .in("order_id", ids)
       .order("created_at", { ascending: false });
     for (const s of shipRows || []) {
@@ -363,7 +366,11 @@ export async function GET(req: Request) {
           status: s.status,
           has_label: Boolean(s.label_r2_key || payload.label_url || ((s.provider === "delhivery" || s.provider === "shiprocket") && s.awb)),
           pickup_scheduled_at: s.pickup_scheduled_at,
-          pickup_date: payload.pickup_reattempt_date || payload.pickup_date || null,
+          pickup_state: (s as { pickup_state?: string | null }).pickup_state ?? null,
+          pickup_confirmed_date: (s as { pickup_confirmed_date?: string | null }).pickup_confirmed_date ?? null,
+          pickup_requested_date: (s as { pickup_requested_date?: string | null }).pickup_requested_date ?? null,
+          // Prefer the provider-confirmed pickup date (§10) over the staff-requested date.
+          pickup_date: (s as { pickup_confirmed_date?: string | null }).pickup_confirmed_date || payload.pickup_reattempt_date || payload.pickup_date || null,
           pickup_status: payload.pickup_status || null,
           tracking_activity: payload.tracking_activity || null,
           tracking_event_at: payload.tracking_event_at || null,
@@ -454,6 +461,7 @@ export async function GET(req: Request) {
       method,
       awb: ship?.awb,
       pickupFailed: pickupFailedActivity(ship?.tracking_activity),
+      pickupState: ship?.pickup_state ?? null,
       addressMismatch: Boolean(ship?.address_mismatch),
       openIssue: Boolean(issue?.open),
       paymentPending: o.status === "PAYMENT_PENDING",

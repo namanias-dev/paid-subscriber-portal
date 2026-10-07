@@ -129,6 +129,8 @@ export interface ActionInput {
   method?: FulfillmentMethod;
   awb?: string | null;
   pickupFailed?: boolean;
+  /** Courier pickup lifecycle on the active shipment (from store_shipments.pickup_state). */
+  pickupState?: string | null;
   addressMismatch?: boolean;
   openIssue?: boolean;
   paymentPending?: boolean;
@@ -152,6 +154,7 @@ export function actionRequiredReasons(input: ActionInput): string[] {
   if (input.cityConfirm) reasons.push("Courier city needs confirmation");
   else if ((input.status === "PACKED" || input.status === "READY_FOR_PICKUP") && !input.awb) reasons.push("No active shipment");
   if (input.pickupFailed) reasons.push("Pickup wasn't completed");
+  else if (input.pickupState === "CANCELLED") reasons.push("Courier pickup was cancelled");
   if (input.status === "DELIVERY_FAILED" || input.status === "REATTEMPT_REQUESTED") reasons.push("Courier exception");
   if (input.openIssue) reasons.push("Customer issue open");
   if (input.status.startsWith("RETURN_")) reasons.push("Return action required");
@@ -171,6 +174,7 @@ export type PrimaryAction =
   | "prepare"
   | "pack"
   | "compare"
+  | "schedule_pickup"
   | "label"
   | "resolve_pickup"
   | "tracking"
@@ -192,6 +196,9 @@ export function primaryAction(input: ActionInput): PrimaryAction {
   if (input.paymentPending || input.status === "PAYMENT_PENDING") return "reconcile";
   if (input.openIssue && (input.status === "DELIVERED" || input.status.startsWith("RETURN_"))) return "review_issue";
   if ((input.status === "PACKED" || input.status === "READY_FOR_PICKUP") && !input.awb) return "compare";
+  // Courier booked (AWB in hand) but pickup not yet confirmed, or the provider cancelled the
+  // pickup while the AWB stays valid (Case A): the next staff step is to (re)schedule a pickup.
+  if (input.status === "READY_FOR_PICKUP" && input.awb) return "schedule_pickup";
   if (input.status === "PICKUP_SCHEDULED") return "label";
   if (input.status === "PICKED_UP" || input.status === "IN_TRANSIT" || input.status === "OUT_FOR_DELIVERY") return "tracking";
   if (input.openIssue) return "review_issue";
@@ -205,6 +212,7 @@ export const PRIMARY_LABEL: Record<PrimaryAction, string> = {
   prepare: "Prepare order",
   pack: "Mark packed",
   compare: "Compare couriers",
+  schedule_pickup: "Schedule courier pickup",
   label: "Print label",
   resolve_pickup: "Check courier pickup",
   tracking: "View tracking",

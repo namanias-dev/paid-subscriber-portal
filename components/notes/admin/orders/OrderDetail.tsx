@@ -26,6 +26,27 @@ import { METHOD_BADGE, orderMethod, staffAdvanceLabelFor, type FulfillmentMethod
 import PickupPanel, { type AdminPickupFacts } from "./PickupPanel";
 import ChangeDeliveryAddress from "./ChangeDeliveryAddress";
 import CourierPriceHistory from "./CourierPriceHistory";
+import { PickupScheduleModal } from "./PickupScheduleModal";
+
+/** Human label for the courier pickup lifecycle (§14). */
+function pickupStateLabel(state: string | null | undefined): string | null {
+  switch (state) {
+    case "SCHEDULED":
+      return "Scheduled";
+    case "REQUESTED":
+      return "Requested";
+    case "CANCELLED":
+      return "Cancelled · action required";
+    case "PICKED_UP":
+      return "Picked up";
+    case "FAILED":
+      return "Failed · action required";
+    case "NOT_REQUESTED":
+      return "Not scheduled";
+    default:
+      return null;
+  }
+}
 import { buildDeliveryGoogleMapsUrl, formatDeliveryAddress } from "@/lib/store/deliveryAddress";
 import type { OrderOps } from "@/lib/store/orderOpsDisplay";
 
@@ -87,6 +108,9 @@ export interface AdminOrder {
     status: string | null;
     has_label: boolean;
     pickup_scheduled_at: string | null;
+    pickup_state?: string | null;
+    pickup_confirmed_date?: string | null;
+    pickup_requested_date?: string | null;
     pickup_date?: string | null;
     pickup_status?: string | null;
     tracking_activity?: string | null;
@@ -215,6 +239,7 @@ export default function OrderDetail({
     method,
     awb: ship?.awb,
     pickupFailed: failed,
+    pickupState: ship?.pickup_state ?? null,
     addressMismatch: ship?.address_mismatch,
     openIssue: order.issue?.open,
     paymentPending: order.status === "PAYMENT_PENDING",
@@ -256,6 +281,7 @@ export default function OrderDetail({
   const [scans, setScans] = useState<Array<{ activity?: string; time?: string; location?: string }>>([]);
   const [toast, setToast] = useState<string | null>(null);
   const [collectRequest, setCollectRequest] = useState(0);
+  const [pickupModal, setPickupModal] = useState<null | "schedule" | "reschedule">(null);
 
   useEffect(() => {
     setIssueStatus(order.issue?.status || "OPEN");
@@ -314,6 +340,7 @@ export default function OrderDetail({
       setConfirmAdvance(true);
     } else if (action === "collect") setCollectRequest((n) => n + 1);
     else if (action === "compare") onCompare();
+    else if (action === "schedule_pickup") setPickupModal(order.status === "READY_FOR_PICKUP" ? "schedule" : "reschedule");
     else if (action === "label") void printLabel();
     else if (action === "resolve_pickup" || action === "tracking") void refreshTrack();
     else if (action === "review_issue") document.getElementById("customer-issue")?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -367,6 +394,18 @@ export default function OrderDetail({
 
   return (
     <div className={shell}>
+      {pickupModal && (
+        <PickupScheduleModal
+          orderId={order.id}
+          mode={pickupModal}
+          onClose={() => setPickupModal(null)}
+          onDone={(message) => {
+            setPickupModal(null);
+            setToast(message);
+            onRefresh();
+          }}
+        />
+      )}
       {presentation === "drawer" && <button type="button" aria-label="Close order" className="hidden flex-1 sm:block" onClick={onClose} />}
       <article className={panel}>
         <header className="sticky top-0 z-10 border-b border-[var(--ca-navy)]/10 bg-[#fbfaf6]/95 px-4 py-4 backdrop-blur">
@@ -521,11 +560,14 @@ export default function OrderDetail({
               {queued && <p className="mt-2 text-sm font-medium text-[var(--ca-navy)]">No new pickup has been booked.</p>}
               {canManage && (
                 <div className="mt-3 flex flex-wrap gap-2">
-                  <button type="button" onClick={() => void refreshTrack()} className="min-h-11 rounded-full bg-[var(--ca-navy)] px-4 text-sm font-semibold text-white">
-                    Check latest status
-                  </button>
-                  <button type="button" onClick={() => void refreshPickup()} className="min-h-11 rounded-full border border-[var(--ca-navy)]/15 px-4 text-sm font-semibold text-[var(--ca-navy)]">
+                  <button type="button" onClick={() => void refreshPickup()} className="min-h-11 rounded-full bg-[var(--ca-navy)] px-4 text-sm font-semibold text-white">
                     Refresh courier status
+                  </button>
+                  <button type="button" onClick={() => setPickupModal("reschedule")} className="min-h-11 rounded-full border border-[var(--ca-navy)]/15 px-4 text-sm font-semibold text-[var(--ca-navy)]">
+                    Reschedule pickup
+                  </button>
+                  <button type="button" onClick={() => void refreshTrack()} className="min-h-11 rounded-full border border-[var(--ca-navy)]/15 px-4 text-sm font-semibold text-[var(--ca-navy)]">
+                    Check latest status
                   </button>
                 </div>
               )}
@@ -541,7 +583,11 @@ export default function OrderDetail({
                 <Field label="Price" value={ship.rate_paise ? formatPaise(ship.rate_paise) : null} />
                 <Field label="Status" value={canonicalShipmentStatusLabel(ship.status, ship.tracking_activity)} />
                 <Field label="Latest update" value={formatAdminWhen(ship.tracking_event_at)} />
-                <Field label="Pickup" value={shipmentPickupLabel(ship.status, ship.pickup_status, ship.pickup_date)} />
+                <Field label="Courier pickup" value={pickupStateLabel(ship.pickup_state)} />
+                <Field label="Confirmed pickup" value={shipmentPickupLabel(ship.status, ship.pickup_status, ship.pickup_confirmed_date || ship.pickup_date)} />
+                {ship.pickup_requested_date && ship.pickup_confirmed_date && ship.pickup_requested_date !== ship.pickup_confirmed_date && (
+                  <Field label="Requested pickup" value={ship.pickup_requested_date} />
+                )}
                 <Field label="Reference" value={ship.pickup_reference} />
                 <Field label="Destination" value={address ? `${address.city} · ${address.pincode}` : null} />
               </dl>
@@ -559,6 +605,16 @@ export default function OrderDetail({
                 {canManage && (
                 <button type="button" onClick={() => void refreshPickup()} className="min-h-11 rounded-full border border-[var(--ca-navy)]/15 px-4 text-sm font-semibold text-[var(--ca-navy)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2">
                   Refresh courier status
+                </button>
+                )}
+                {canManage && order.status === "READY_FOR_PICKUP" && (
+                <button type="button" onClick={() => setPickupModal("schedule")} className="min-h-11 rounded-full bg-[var(--ca-navy)] px-4 text-sm font-semibold text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2">
+                  Schedule courier pickup
+                </button>
+                )}
+                {canManage && order.status === "PICKUP_SCHEDULED" && (
+                <button type="button" onClick={() => setPickupModal("reschedule")} className="min-h-11 rounded-full border border-[var(--ca-navy)]/15 px-4 text-sm font-semibold text-[var(--ca-navy)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2">
+                  Reschedule pickup
                 </button>
                 )}
                 {showAdminViewInvoice(order.invoice_status) && <ViewInvoiceButton orderId={order.id} prominent />}
