@@ -80,7 +80,7 @@ export function captureAttribution(): void {
     // parameter blocks the marketer pastes into each platform.
     for (const k of [
       "utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term", "utm_id",
-      "campaign_id", "adset_id", "ad_id", "ad_name",
+      "campaign_id", "adset_id", "ad_id", "ad_name", "clid",
     ]) {
       const v = url.searchParams.get(k);
       if (v) params[k] = v;

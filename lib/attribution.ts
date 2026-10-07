@@ -61,6 +61,15 @@ export interface AttributionTouch {
   adset_id?: string | null;
   ad_id?: string | null;
   ad_name?: string | null;
+  /**
+   * CAMPAIGN LINK ID (additive). The `short_code` of the branded /go/<code>
+   * link the visitor arrived through, injected as `?clid=<code>` by the redirect
+   * route. It is the stable join key between a `campaign_links` row and every
+   * downstream conversion: riding the existing JSONB touch, it lands on
+   * analytics_events.attribution, leads.attribution, buyers.first/last_touch and
+   * store_orders.attribution_json with no schema change to those tables. Non-PII.
+   */
+  clid?: string | null;
 }
 
 export interface AttributionState {
@@ -170,11 +179,13 @@ export function buildTouch(input: {
   const adsetId = trimOrNull("adset_id");
   const adId = trimOrNull("ad_id");
   const adName = trimOrNull("ad_name");
+  const clid = trimOrNull("clid");
   if (utmId) touch.utm_id = utmId;
   if (campaignId) touch.campaign_id = campaignId;
   if (adsetId) touch.adset_id = adsetId;
   if (adId) touch.ad_id = adId;
   if (adName) touch.ad_name = adName;
+  if (clid) touch.clid = clid;
   return touch;
 }
 
@@ -191,7 +202,8 @@ export function touchIsMeaningful(t: AttributionTouch): boolean {
     !!t.gbraid ||
     !!t.campaign_id ||
     !!t.adset_id ||
-    !!t.ad_id
+    !!t.ad_id ||
+    !!t.clid
   );
 }
 
@@ -215,7 +227,8 @@ export function touchHasAcquisitionSignal(t: AttributionTouch): boolean {
     !!t.campaign ||
     !!t.campaign_id ||
     !!t.adset_id ||
-    !!t.ad_id
+    !!t.ad_id ||
+    !!t.clid
   );
 }
 
@@ -276,6 +289,10 @@ export function mergeAttribution(
       if (!carried.adset_id && prevLast.adset_id) carried.adset_id = prevLast.adset_id;
       if (!carried.ad_id && prevLast.ad_id) carried.ad_id = prevLast.ad_id;
       if (!carried.ad_name && prevLast.ad_name) carried.ad_name = prevLast.ad_name;
+      // Campaign-link stickiness: a returning visitor whose middle touch was a
+      // /go/<code> click should keep crediting that link even if their newest
+      // visit carried no clid. Mirrors the campaign/ad-id carries above.
+      if (!carried.clid && prevLast.clid) carried.clid = prevLast.clid;
     }
     last = { ...carried, last_seen_at: nowISO };
   } else {
