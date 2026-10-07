@@ -3,6 +3,7 @@ import { storeDb } from "@/lib/store/db";
 import { courierWebhookKey } from "@/lib/store/shipping/config";
 import { canAdvanceOrder, canAdvanceShipment, orderStatusFromShipment } from "@/lib/store/shipping/status";
 import { parseCourierWebhook, scanAlreadyRecorded, webhookAuthorized } from "@/lib/store/shipping/webhook";
+import { makeSupabasePickupIO, reconcilePickupFromProvider, toCourierProvider } from "@/lib/store/shipping/refreshPickup";
 
 export const dynamic = "force-dynamic";
 
@@ -32,7 +33,7 @@ export async function POST(req: Request) {
 
   const { data: shipment } = await db
     .from("store_shipments")
-    .select("id,order_id,status")
+    .select("id,order_id,status,pickup_state,provider")
     .eq("awb", event.awb)
     .order("created_at", { ascending: false })
     .limit(1)
@@ -105,5 +106,33 @@ export async function POST(req: Request) {
     }
   }
 
-  return NextResponse.json({ ok: true, matched: true, updated: shipmentUpdated });
+  // Pickup lifecycle reconcile from this authenticated event (§3, §5, §12): a provider-side
+  // pickup cancellation (Case A) or scheduling the shipment machine can't express is learned
+  // here via the same reconciler the cron and manual refresh use.
+  let pickupSynced = false;
+  const { data: porder } = await db.from("store_orders").select("id,status,fulfillment_method").eq("id", shipment.order_id).maybeSingle();
+  if (porder && porder.fulfillment_method === "DELIVERY" && (shipment.provider === "delhivery" || shipment.provider === "shiprocket")) {
+    const io = makeSupabasePickupIO(db, porder.id);
+    const outcome = await reconcilePickupFromProvider(
+      { id: porder.id, status: porder.status },
+      {
+        id: shipment.id,
+        provider: toCourierProvider(shipment.provider),
+        awb: event.awb,
+        shipmentStatus: shipmentUpdated && event.mappedStatus ? event.mappedStatus : shipment.status,
+        trackingStatus: event.rawStatus,
+        pickupStatusRaw: event.rawStatus,
+        pickupState: (shipment.pickup_state as never) ?? "NOT_REQUESTED",
+        active: shipment.status !== "cancelled" && shipment.status !== "failed",
+      },
+      event.rawStatus,
+      event.remark ?? null,
+      { name: event.provider },
+      io,
+      "WEBHOOK",
+    );
+    pickupSynced = outcome.changed;
+  }
+
+  return NextResponse.json({ ok: true, matched: true, updated: shipmentUpdated, pickupSynced });
 }

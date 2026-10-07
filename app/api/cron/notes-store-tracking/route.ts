@@ -4,6 +4,7 @@ import { trackDelhiveryAwb } from "@/lib/store/shipping/delhiveryApi";
 import { isPickupException, shouldPollShipment, type TrackingSnapshot } from "@/lib/store/shipping/reconcile";
 import { trackShiprocketAwb } from "@/lib/store/shipping/shiprocketApi";
 import { canAdvanceOrder, canAdvanceShipment, normalizeCourierStatus, orderStatusFromShipment } from "@/lib/store/shipping/status";
+import { makeSupabasePickupIO, reconcilePickupFromProvider, toCourierProvider } from "@/lib/store/shipping/refreshPickup";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -41,7 +42,7 @@ async function run(req: Request) {
   const nowIso = new Date().toISOString();
   const { data: rows, error } = await db
     .from("store_shipments")
-    .select("id,order_id,provider,awb,status,created_at,pickup_scheduled_at,picked_up_at,last_synced_at,expected_delivery_date,provider_payload")
+    .select("id,order_id,provider,awb,status,pickup_state,created_at,pickup_scheduled_at,picked_up_at,last_synced_at,expected_delivery_date,provider_payload")
     .in("status", OPEN_STATUSES)
     .order("created_at", { ascending: true })
     .limit(40);
@@ -50,6 +51,7 @@ async function run(req: Request) {
   let considered = 0;
   let polled = 0;
   let advanced = 0;
+  let pickupSynced = 0;
   let errors = 0;
   for (const row of rows || []) {
     try {
@@ -112,12 +114,43 @@ async function run(req: Request) {
         });
       }
     }
+
+    // Pickup lifecycle reconcile: learn provider-side pickup cancellation / scheduling that
+    // the shipment-status machine above cannot express (§3, §4, §5, §12). Reads the order
+    // fresh so it respects any advance just applied; the reconciler never regresses after
+    // possession and is idempotent for repeated/duplicate polls.
+    if (raw.rawStatus && row.awb && (row.provider === "delhivery" || row.provider === "shiprocket")) {
+      const { data: porder } = await db.from("store_orders").select("id,status,fulfillment_method").eq("id", row.order_id).maybeSingle();
+      if (porder && porder.fulfillment_method === "DELIVERY") {
+        const shipStatus = (patch.status as string | undefined) ?? row.status;
+        const io = makeSupabasePickupIO(db, porder.id);
+        const outcome = await reconcilePickupFromProvider(
+          { id: porder.id, status: porder.status },
+          {
+            id: row.id,
+            provider: toCourierProvider(row.provider),
+            awb: row.awb,
+            shipmentStatus: shipStatus,
+            trackingStatus: raw.rawStatus,
+            pickupStatusRaw: raw.rawStatus,
+            pickupState: (row.pickup_state as never) ?? "NOT_REQUESTED",
+            active: shipStatus !== "cancelled" && shipStatus !== "failed",
+          },
+          raw.rawStatus,
+          "activity" in raw ? ((raw.activity as string | null) ?? null) : null,
+          { name: row.provider },
+          io,
+          "RECONCILIATION",
+        );
+        if (outcome.changed) pickupSynced += 1;
+      }
+    }
     } catch {
       errors += 1;
     }
   }
 
-  return NextResponse.json({ ok: true, considered, polled, advanced, errors, ts: Date.now() });
+  return NextResponse.json({ ok: true, considered, polled, advanced, pickupSynced, errors, ts: Date.now() });
 }
 
 export async function GET(req: Request) {
