@@ -5,6 +5,35 @@
 **Branch:** `notes-store-release-hardening`  
 **Handoff tag (after this commit):** `notes-store-handoff-2026-09-19`
 
+## 2026-10-07 — Courier pickup lifecycle (LIVE in production)
+
+Released to production as SHA `9487f61` (rebased onto exact live base `29a8368`). Migration
+`2026-10-07-notes-store-courier-pickup-lifecycle.sql` applied to prod and verified (11 additive
+`pickup_*` columns, 2 CHECKs, 1 partial index).
+
+- **Pickup lifecycle state** on `store_shipments` (`pickup_state`: NOT_REQUESTED/REQUESTED/SCHEDULED/
+  CANCELLED/FAILED/PICKED_UP) with requested-vs-confirmed dates, source, and provider status.
+- **One shared reconciler** `lib/store/shipping/refreshPickup.ts` drives webhook, tracking cron, and
+  manual Refresh identically (idempotent; monotonic after possession; superseded shipments cannot
+  move the current order). Learns provider-side **pickup cancellation** automatically (Case A: AWB
+  valid → READY_FOR_PICKUP; Case B: AWB cancelled → PACKED, superseded).
+- **Automatic pre-possession reconciliation**: tracking cron (`25 */2 * * *`) reconciles READY_FOR_PICKUP
+  / PICKUP_SCHEDULED / legacy manifested shipments against live provider truth (prod has Delhivery +
+  Shiprocket creds). Manual "Refresh courier status" verifies live before any canonical change; a failed
+  read changes nothing and returns "Courier status could not be verified."
+- **Schedule / reschedule pickup** (same AWB): IST date-picker modal, server-side date revalidation,
+  no fake time slots ("Pickup time will be assigned by the courier"), requested-vs-confirmed dates
+  persisted; provider-timeout = "being verified", never a blind retry.
+- **Admin**: booking now floors a successful AWB to READY_FOR_PICKUP (no stuck PACKED); row/detail
+  surface Courier pickup state, confirmed date, and the right next action.
+- **Verifier** (`scripts/release/verify-data.ts courier-pickup`): 9 invariants. Post-release prod scan:
+  all clean except the 3 known pre-release orders (`001024`, `001077`, `001106`) still PACKED with an
+  active booked AWB — queued for automatic provider-truth reconciliation (next cron 20:25 UTC or an
+  immediate staff Refresh). Not hand-edited: no in-session provider read, so per spec they are left to
+  the audited automatic path rather than inferred locally. No multiple-active-AWB, no scheduled-without-
+  evidence, no Academy-Pickup-with-shipment.
+- Safety: zero real courier writes during QA; zero provider writes during reconciliation.
+
 ## Legend
 
 | Status | Meaning |
