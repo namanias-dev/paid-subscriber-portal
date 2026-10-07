@@ -25,6 +25,11 @@ import { validateCoupon, couponDiscountReason, parseCouponCodeFromReason } from 
 import type { CourseEnrollment } from "@/lib/types";
 import { parseGaClientId } from "@/lib/analytics/gaClientId";
 import { checkoutAmountsDiffer, checkoutBatchError, normalizePublicPaymentRequest } from "@/lib/enrollmentCheckout";
+import { cookies } from "next/headers";
+import { ATTR_COOKIE, parseAttrCookie, flattenForStamp } from "@/lib/attribution";
+import { adCaptureStampFromState, EMPTY_AD_CAPTURE_STAMP } from "@/lib/marketing/adCaptureStamp";
+import { isFullCaptureEnabled } from "@/lib/marketing/adCaptureFlag";
+import { stampBuyerAttribution } from "@/lib/analytics/server";
 
 export const dynamic = "force-dynamic";
 
@@ -78,6 +83,15 @@ export async function POST(req: Request) {
     } catch {
       gaClientId = null;
     }
+
+    // Attribution snapshot from the first-party cookie (best-effort; never blocks).
+    // Mirrors /api/v1/bank/create-payment so course admissions carry the same
+    // source / campaign / ad-hierarchy stamp that the webinar funnel already does.
+    const attr = parseAttrCookie(cookies().get(ATTR_COOKIE)?.value);
+    const attrFlat = flattenForStamp(attr);
+    const adStamp = isFullCaptureEnabled()
+      ? adCaptureStampFromState(attr)
+      : EMPTY_AD_CAPTURE_STAMP;
 
     const course = await getCourseBySlug(slug);
     if (!course) return NextResponse.json({ ok: false, error: "Course not found." }, { status: 404 });
@@ -286,7 +300,11 @@ export async function POST(req: Request) {
       installment_no: firstInstallmentNo,
       batch_id: dedupBatchId,
       ga_client_id: gaClientId,
+      attribution_source: attrFlat.source,
+      attribution_campaign: attrFlat.campaign,
+      ...adStamp,
     });
+    void stampBuyerAttribution(mobile, attr).catch(() => {});
 
     // Consume usage once per new coupon application (not on resume / amount-matched reuse).
     if (shouldIncrementCoupon && appliedCouponCode) {
