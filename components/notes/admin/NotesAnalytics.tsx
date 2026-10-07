@@ -13,6 +13,7 @@ import SubjectPerformance from "./analytics/SubjectPerformance";
 import GeoIntel from "./analytics/GeoIntel";
 import ShippingIntel from "./analytics/ShippingIntel";
 import FulfillmentMethods from "./analytics/FulfillmentMethods";
+import { kpiTiles } from "./analytics/kpiTiles";
 
 function money(paise: number): string {
   return formatPaise(paise);
@@ -49,18 +50,7 @@ export default function NotesAnalytics({
   leads: CheckoutLeadReport;
   intel: NotesIntel | null;
 }) {
-  const k = report.kpis;
-  const trends = report.visuals?.trends;
-  const tiles: Array<{ label: string; value: string; trend?: NotesTrend }> = [
-    { label: "Visitors", value: String(k.visitors), trend: trends?.visitors },
-    { label: "Product viewers", value: String(k.productViewers), trend: trends?.productViewers },
-    { label: "Add to cart", value: String(k.addToCarts), trend: trends?.addToCarts },
-    { label: "Checkout", value: String(k.checkouts), trend: trends?.checkouts },
-    { label: "Paid orders", value: String(k.paidOrders), trend: trends?.paidOrders },
-    { label: "Conversion", value: pct(k.conversionPct), trend: trends?.conversion },
-    { label: "Revenue", value: money(k.revenuePaise), trend: trends?.revenue },
-    { label: "AOV", value: k.aovPaise == null ? "—" : money(k.aovPaise), trend: trends?.aov },
-  ];
+  const tiles = kpiTiles(report, intel);
   return (
     <div className="mx-auto max-w-6xl">
       <AnalyticsShell
@@ -73,15 +63,30 @@ export default function NotesAnalytics({
           </div>
         }
       >
-      <div className="flex snap-x snap-mandatory gap-2 overflow-x-auto pb-1 md:grid md:grid-cols-4 md:overflow-visible md:pb-0 xl:grid-cols-8">
+      {/* Two columns on phones, three on tablets, five on desktop. No horizontal rail. */}
+      <div data-kpi-grid className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 sm:gap-3 lg:grid-cols-5">
         {tiles.map((tile) => (
-          <div key={tile.label} className="w-[42%] min-w-0 shrink-0 snap-start rounded-2xl bg-white px-3 py-3 sm:w-[30%] md:w-auto">
-            <p className="truncate text-[11px] font-semibold uppercase tracking-wide text-ca-navy/45">{tile.label}</p>
-            <p className="mt-1 font-heading text-xl font-bold tabular-nums text-[var(--ca-navy)]">{tile.value}</p>
+          <div
+            key={tile.id}
+            data-kpi={tile.id}
+            role="group"
+            aria-label={tile.ariaLabel}
+            className={`flex min-w-0 flex-col rounded-2xl bg-white px-3.5 py-3 ${tile.wide ? "col-span-2 sm:col-span-1 lg:col-span-2" : ""}`}
+            title={tile.id === "avgShipping" ? BOOKED_RATE_NOTE : undefined}
+          >
+            <p className="text-[11px] font-semibold uppercase leading-snug tracking-wide text-ca-navy/45">{tile.label}</p>
+            {/* Plain text, no transform or clipping: the business number must always be legible. */}
+            <p
+              data-kpi-value
+              className={`mt-1 whitespace-nowrap font-heading font-bold leading-[1.2] tabular-nums text-[var(--ca-navy)] ${tile.value.length >= 10 ? "text-[19px] sm:text-xl" : "text-[22px] sm:text-2xl"}`}
+            >
+              {tile.value}
+            </p>
             {tile.trend ? <Sparkline points={tile.trend.points} label={trendSummary(tile.label, tile.trend)} /> : null}
             {tile.trend ? (
-              <p className={`mt-1 text-[10px] font-semibold tabular-nums ${TONE[tile.trend.tone]}`} title="Compared with the previous period">{tile.trend.delta}</p>
+              <p data-kpi-delta className={`mt-auto pt-1 text-[11px] font-semibold tabular-nums ${TONE[tile.trend.tone]}`} title="Compared with the previous period">{tile.trend.delta}</p>
             ) : null}
+            {tile.note ? <p data-kpi-delta className="mt-auto pt-1 text-[11px] tabular-nums text-ca-navy/50">{tile.note}</p> : null}
           </div>
         ))}
       </div>
@@ -258,12 +263,24 @@ function CommerceStrip({ intel }: { intel: NotesIntel | null }) {
       <p className="px-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--ca-gold-dark)]">Commerce &amp; fulfillment</p>
       <div className="mt-2 grid gap-2 lg:grid-cols-12">
         <div className="rounded-xl bg-white px-3 py-2 lg:col-span-3" title={BOOKED_RATE_NOTE}>
-          <p className={label}>Avg booked shipping</p>
-          <p className="mt-0.5 font-heading text-xl font-bold tabular-nums text-[var(--ca-navy)]">{ship.avgPaise == null ? "—" : money(ship.avgPaise)}</p>
-          <p className="text-[11px] tabular-nums text-ca-navy/55">
-            {ship.minPaise != null && ship.maxPaise != null ? `${money(ship.minPaise)} min · ${money(ship.maxPaise)} max` : "No shipping rates available."}
-          </p>
-          <p className="text-[11px] tabular-nums text-ca-navy/45">Rate on {ship.count} of {ship.booked} booked · orders paid in range</p>
+          <p className={label}>Booked shipping</p>
+          {ship.avgPaise == null ? (
+            <p className="mt-1 text-[12px] text-ca-navy/55">No booked rates in this range.</p>
+          ) : (
+            <dl className="mt-1 grid grid-cols-3 gap-1 text-[var(--ca-navy)]">
+              {([
+                ["Avg", ship.avgPaise],
+                ["Min", ship.minPaise],
+                ["Max", ship.maxPaise],
+              ] as const).map(([text, value]) => (
+                <div key={text} className="min-w-0">
+                  <dt className="text-[11px] text-ca-navy/55">{text}</dt>
+                  <dd className="whitespace-nowrap font-heading text-[15px] font-bold leading-[1.25] tabular-nums">{value == null ? "—" : money(value)}</dd>
+                </div>
+              ))}
+            </dl>
+          )}
+          <p className="mt-1 text-[11px] tabular-nums text-ca-navy/45">Rate on {ship.count} of {ship.booked} booked · orders paid in range</p>
         </div>
         <div className="rounded-xl bg-white px-3 py-2 lg:col-span-5">
           <p className={label}>Current fulfillment</p>
