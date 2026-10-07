@@ -42,6 +42,7 @@ export const ADMIN_NAV: AdminNavItem[] = [
   { href: "/admin/forms", label: "Lead Forms", icon: "forms", group: "Sales", perm: "manage_students_leads" },
   { href: "/admin/registrations", label: "Landing Pages", icon: "landing", group: "Sales", perm: "manage_students_leads" },
   { href: "/admin/marketing", label: "Marketing", icon: "marketing", group: "Sales", perm: "manage_students_leads" },
+  { href: "/admin/campaign-links", label: "Campaign Links", icon: "marketing", group: "Sales", perm: "manage_students_leads" },
   { href: "/admin/referrals", label: "Referrals", icon: "referrals", group: "Sales", perm: "manage_students_leads" },
   { href: "/admin/careers", label: "Careers", icon: "careers", group: "Sales", perm: "manage_careers" },
   { href: "/admin/ai-agent", label: "AI Counsellor", icon: "ai_agent", group: "Sales", perm: "manage_ai_agent" },
