@@ -26,6 +26,7 @@ export const ADMIN_NAV: AdminNavItem[] = [
   // No `perm` → visible to every logged-in staff member (the in-portal help center).
   { href: "/admin/learning", label: "Learning", icon: "learning", group: "Overview" },
   { href: "/admin/analytics", label: "Business Analytics", icon: "analytics", group: "Overview", perm: "view_revenue" },
+  { href: "/admin/analytics/growth", label: "Growth Intelligence", icon: "analytics", group: "Overview", perm: "view_revenue" },
   { href: "/admin/home", label: "Home Page", icon: "home", group: "Overview", perm: "manage_settings" },
   { href: "/admin/announcements", label: "Announcements", icon: "sparkle", group: "Website", perm: "manage_settings" },
   { href: "/admin/toppers", label: "Toppers / Results", icon: "toppers", group: "Website", perm: "manage_settings" },

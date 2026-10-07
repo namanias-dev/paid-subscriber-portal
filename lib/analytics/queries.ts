@@ -1500,3 +1500,173 @@ export async function getMetaAttribution(opts: { from: string; to: string; exclu
     ],
   };
 }
+
+// ============================================================================
+// FIRST-TOUCH / LAST-TOUCH SOURCE FUNNEL (Growth Intelligence)
+// A single source breakdown the caller can flip between acquisition (first touch)
+// and conversion (last touch). Behaviour (visitors/registrations) reads the
+// chosen touch directly off each event's attribution; money (paid students +
+// revenue) reconciles to the Payments tab and is credited to the buyer's
+// first-touch source (acquisition) or the payment's own stamped source with a
+// buyer last-touch fallback (conversion). Nothing is invented — a missing touch
+// collapses to the shared "untracked" bucket.
+// ============================================================================
+
+export type TouchMode = "first" | "last";
+
+export interface TouchSourceRow {
+  source: string;
+  label: string;
+  isSpecial: boolean;
+  visitors: number;
+  registrations: number;
+  paidStudents: number;
+  revenue: number;
+  visitorToRegistration: number | null;
+  registrationToPaid: number | null;
+  visitorToPaid: number | null;
+  revenuePerVisitor: number | null;
+}
+
+export interface TouchSourceFunnel {
+  range: { from: string; to: string };
+  touch: TouchMode;
+  excludeAdmin: boolean;
+  rows: TouchSourceRow[];
+  totals: TouchSourceRow;
+}
+
+/** Fetch buyers' first- AND last-touch source by phone (best-effort, chunked). */
+async function fetchBuyerTouchSourceByPhone(
+  phones: Set<string>,
+): Promise<Map<string, { first: string | null; last: string | null }>> {
+  const out = new Map<string, { first: string | null; last: string | null }>();
+  const db = getSupabaseAdmin();
+  if (!db || phones.size === 0) return out;
+  const list = [...phones];
+  const CHUNK = 500;
+  try {
+    for (let i = 0; i < list.length; i += CHUNK) {
+      const slice = list.slice(i, i + CHUNK);
+      const { data } = await db
+        .from("buyers")
+        .select("phone,first_touch,last_touch,attribution_source")
+        .in("phone", slice);
+      for (const r of (data as {
+        phone: string;
+        first_touch: AttrTouch | null;
+        last_touch: AttrTouch | null;
+        attribution_source: string | null;
+      }[]) || []) {
+        const ph = normPhone(r.phone);
+        if (!ph) continue;
+        const first = (r.first_touch?.source || r.attribution_source || null)?.toLowerCase() || null;
+        const last = (r.last_touch?.source || r.attribution_source || first || null)?.toLowerCase() || null;
+        out.set(ph, { first, last });
+      }
+    }
+  } catch { /* best-effort */ }
+  return out;
+}
+
+export async function getTouchSourceFunnel(opts: {
+  from: string;
+  to: string;
+  touch: TouchMode;
+  excludeAdmin?: boolean;
+}): Promise<TouchSourceFunnel> {
+  const fromISO = new Date(opts.from).toISOString();
+  const toISO = new Date(opts.to).toISOString();
+  const fromMs = new Date(fromISO).getTime();
+  const toMs = new Date(toISO).getTime();
+  const touch: TouchMode = opts.touch === "last" ? "last" : "first";
+  const excludeAdmin = !!opts.excludeAdmin;
+
+  const [allEvents, allPayments, trackingStartMs, staff] = await Promise.all([
+    fetchEvents(fromISO, toISO),
+    getPayments(),
+    getTrackingStartMs(),
+    excludeAdmin ? getStaffPhoneSet() : Promise.resolve(new Set<string>()),
+  ]);
+  const events = excludeAdmin ? allEvents.filter((e) => !(e.phone && staff.has(normPhone(e.phone)!))) : allEvents;
+
+  const touchSourceOfEvent = (e: EventLite): string => {
+    const t = touch === "last" ? e.attribution?.last_touch : e.attribution?.first_touch;
+    const fallback = touch === "last" ? e.attribution?.first_touch : e.attribution?.last_touch;
+    return (t?.source || fallback?.source || UNTRACKED).toLowerCase();
+  };
+
+  const visitors = new Map<string, Set<string>>();
+  const regs = new Map<string, number>();
+  for (const e of events) {
+    const s = touchSourceOfEvent(e);
+    if (e.visitor_id) (visitors.get(s) || visitors.set(s, new Set()).get(s)!).add(e.visitor_id);
+    if (e.event_name === "registration_created") regs.set(s, (regs.get(s) || 0) + 1);
+  }
+
+  // Money — reconciled from payments (PAID, deduped).
+  let paid = allPayments.filter(
+    (p) => !p.deleted_at && isPaidStatus(p.status) && (() => { const t = new Date(p.created_at).getTime(); return t >= fromMs && t <= toMs; })(),
+  );
+  if (excludeAdmin) paid = paid.filter((p) => !(p.phone && staff.has(normPhone(p.phone)!)));
+  const dedupedPaid = dedupePaidRows(paid);
+
+  const payerPhones = new Set<string>();
+  for (const p of dedupedPaid) { const ph = normPhone(p.phone); if (ph) payerPhones.add(ph); }
+  const buyerTouch = await fetchBuyerTouchSourceByPhone(payerPhones);
+
+  const paidStudents = new Map<string, Set<string>>();
+  const revenue = new Map<string, number>();
+  for (const p of dedupedPaid) {
+    const ph = normPhone(p.phone);
+    const bt = ph ? buyerTouch.get(ph) : undefined;
+    let source: string;
+    if (touch === "first") {
+      source = (bt?.first || classifyPaymentSource(p, trackingStartMs)).toLowerCase();
+    } else {
+      source = (p.attribution_source || bt?.last || classifyPaymentSource(p, trackingStartMs)).toLowerCase();
+    }
+    const payerKey = ph || `pay:${p.id}`;
+    (paidStudents.get(source) || paidStudents.set(source, new Set()).get(source)!).add(payerKey);
+    revenue.set(source, (revenue.get(source) || 0) + p.amount);
+  }
+
+  const keys = new Set<string>([...visitors.keys(), ...regs.keys(), ...paidStudents.keys(), ...revenue.keys()]);
+  const build = (source: string, v: number, r: number, pstu: number, rev: number): TouchSourceRow => {
+    const isSpecial = NON_ATTRIBUTABLE_SOURCES.has(source);
+    return {
+      source,
+      label: sourceLabel(source),
+      isSpecial,
+      visitors: v,
+      registrations: r,
+      paidStudents: pstu,
+      revenue: rev,
+      visitorToRegistration: !isSpecial && v > 0 ? pct(r, v) : null,
+      registrationToPaid: r > 0 ? pct(pstu, r) : null,
+      visitorToPaid: !isSpecial && v > 0 ? pct(pstu, v) : null,
+      revenuePerVisitor: !isSpecial && v > 0 ? Math.round(rev / v) : null,
+    };
+  };
+
+  const rows = [...keys].map((s) =>
+    build(s, visitors.get(s)?.size || 0, regs.get(s) || 0, paidStudents.get(s)?.size || 0, revenue.get(s) || 0),
+  );
+  rows.sort((a, b) => {
+    if (a.isSpecial !== b.isSpecial) return a.isSpecial ? 1 : -1;
+    return b.revenue - a.revenue || b.visitors - a.visitors;
+  });
+
+  const totals = build(
+    "__total__",
+    new Set(events.filter((e) => e.visitor_id).map((e) => e.visitor_id!)).size,
+    [...regs.values()].reduce((a, b) => a + b, 0),
+    new Set(dedupedPaid.map((p) => normPhone(p.phone) || `pay:${p.id}`)).size,
+    [...revenue.values()].reduce((a, b) => a + b, 0),
+  );
+  totals.label = "Total";
+  totals.isSpecial = false;
+  totals.visitorToPaid = null;
+
+  return { range: { from: fromISO, to: toISO }, touch, excludeAdmin, rows, totals };
+}
