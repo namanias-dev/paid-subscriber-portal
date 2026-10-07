@@ -74,8 +74,8 @@ export function fulfillmentLabel(status: string, pickupFailed: boolean): string 
     case "READY_TO_PACK":
       return "Printing";
     case "PACKED":
-    case "READY_FOR_PICKUP":
       return "Packed";
+    case "READY_FOR_PICKUP":
     case "PICKUP_SCHEDULED":
       return "Courier pickup";
     case "READY_FOR_COLLECTION":
