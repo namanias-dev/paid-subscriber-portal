@@ -96,6 +96,136 @@ export function buildCampaignUrl(input: CampaignLinkInput): CampaignLinkResult {
   return { url: base.toString(), params, warnings };
 }
 
+/**
+ * Hosts we are willing to redirect to. Relative paths ("/webinars/...") are
+ * always allowed (same-origin). Anything else must be on this allowlist — this
+ * is the open-redirect guard for /go/<code>.
+ */
+export const ALLOWED_DESTINATION_HOSTS = [
+  "namanias.com",
+  "www.namanias.com",
+];
+
+function hostAllowed(host: string): boolean {
+  const h = host.toLowerCase().replace(/^www\./, "");
+  return ALLOWED_DESTINATION_HOSTS.some((a) => {
+    const base = a.toLowerCase().replace(/^www\./, "");
+    return h === base || h.endsWith(`.${base}`);
+  });
+}
+
+/**
+ * Is this a safe campaign destination? Accepts same-origin relative paths and
+ * absolute https URLs on the allowlist only. Rejects javascript:, data:,
+ * protocol-relative (//evil), and any off-domain host. Never throws.
+ */
+export function isSafeDestination(destination: string): boolean {
+  const dest = (destination || "").trim();
+  if (!dest) return false;
+  // Protocol-relative ("//evil.com") would inherit our scheme and escape origin.
+  if (dest.startsWith("//")) return false;
+  if (dest.startsWith("/")) return true; // same-origin path
+  if (/^https:\/\//i.test(dest)) {
+    try {
+      return hostAllowed(new URL(dest).host);
+    } catch {
+      return false;
+    }
+  }
+  // Any other scheme (http:, javascript:, data:, mailto:, …) is rejected.
+  return false;
+}
+
+export interface RedirectCompose {
+  /** Clean destination (path or allowlisted absolute URL). */
+  destination: string;
+  utm: {
+    source?: string | null;
+    medium?: string | null;
+    campaign?: string | null;
+    content?: string | null;
+    term?: string | null;
+  };
+  /** Campaign link short code — written as ?clid= so the funnel can join back. */
+  clid: string;
+  /** Extra params to carry through (e.g. fbclid/gclid Meta/Google append). */
+  passthrough?: URLSearchParams | Record<string, string> | null;
+}
+
+/**
+ * Compose the final redirect target for /go/<code>: destination + canonical UTM
+ * params + clid, preserving any query already on the destination and merging
+ * passthrough params (ad-platform click ids). Returns "" when the destination is
+ * unsafe. Pure + server-safe.
+ */
+export function composeRedirectUrl(input: RedirectCompose): string {
+  if (!isSafeDestination(input.destination)) return "";
+  const base = /^https:\/\//i.test(input.destination)
+    ? new URL(input.destination)
+    : new URL(input.destination, CAMPAIGN_SITE_URL);
+
+  // Passthrough first (so explicit UTM/clid below win on conflict).
+  if (input.passthrough) {
+    const entries =
+      input.passthrough instanceof URLSearchParams
+        ? input.passthrough.entries()
+        : Object.entries(input.passthrough);
+    for (const [k, v] of entries) {
+      if (k === "code") continue; // never leak the route param
+      if (!base.searchParams.has(k)) base.searchParams.set(k, v);
+    }
+  }
+
+  const setUtm = (key: string, raw: string | null | undefined) => {
+    const v = normalizeUtmValue(raw);
+    if (v) base.searchParams.set(key, v);
+  };
+  setUtm("utm_source", input.utm.source);
+  setUtm("utm_medium", input.utm.medium);
+  setUtm("utm_campaign", input.utm.campaign);
+  setUtm("utm_content", input.utm.content);
+  setUtm("utm_term", input.utm.term);
+  const code = (input.clid || "").trim();
+  if (code) base.searchParams.set("clid", code);
+
+  // Keep relative destinations relative (path + query) so we never change origin.
+  if (input.destination.startsWith("/")) {
+    return `${base.pathname}${base.search}${base.hash}`;
+  }
+  return base.toString();
+}
+
+/** Short-code: lowercase, url-safe, collision-friendly. Validates a custom alias. */
+export function normalizeShortCode(raw: string | null | undefined): string {
+  return (raw || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48);
+}
+
+/** Is a custom alias acceptable (non-empty, safe charset, not a reserved word)? */
+const RESERVED_CODES = new Set(["go", "api", "admin", "new", "edit"]);
+export function isValidShortCode(code: string): boolean {
+  const c = normalizeShortCode(code);
+  return c.length >= 3 && c.length <= 48 && !RESERVED_CODES.has(c);
+}
+
+/** Generate a random url-safe short code (no ambiguous chars). */
+export function randomShortCode(len = 7): string {
+  const alphabet = "23456789abcdefghjkmnpqrstuvwxyz"; // no 0/o/1/l/i
+  let out = "";
+  for (let i = 0; i < len; i++) out += alphabet[Math.floor(Math.random() * alphabet.length)];
+  return out;
+}
+
+/** Build a human-ish code seed from a name, e.g. "October Webinar" -> "october-webinar". */
+export function slugSeedFromName(name: string): string {
+  return normalizeShortCode(name).split("-").slice(0, 4).join("-");
+}
+
 /** Channel presets prefill sensible source + medium (and hint at content). */
 export interface ChannelPreset {
   id: string;
