@@ -247,46 +247,89 @@ async function notesPickup() {
 async function notesPickup2_courier() {
   type Row = {
     order_no: string; order_status: string; provider: CourierProvider; awb: string | null;
-    shipment_status: string | null; tracking_status: string | null; pickup_status: string | null;
-    pickup_scheduled_at: string | null;
+    shipment_status: string | null; pickup_state: string | null; tracking_status: string | null;
+    pickup_status: string | null; pickup_scheduled_at: string | null; created_at: string | null;
   };
   // Active (non-cancelled) courier shipments for DELIVERY orders that have not yet reached possession.
   const rows = select<Row>(`select o.order_no, o.status as order_status, s.provider, s.awb,
-      s.status as shipment_status, s.provider_payload->>'tracking_status' as tracking_status,
-      s.provider_payload->>'pickup_status' as pickup_status, s.pickup_scheduled_at
+      s.status as shipment_status, s.pickup_state, s.provider_payload->>'tracking_status' as tracking_status,
+      s.provider_payload->>'pickup_status' as pickup_status, s.pickup_scheduled_at, s.created_at
     from public.store_orders o join public.store_shipments s on s.order_id = o.id
     where o.fulfillment_method = 'DELIVERY' and s.status <> 'cancelled'
       and o.status in ('PAID','PROCESSING','PACKED','READY_FOR_PICKUP','PICKUP_SCHEDULED')
     order by o.order_no`);
 
   console.log(`Active courier shipments on pre-possession delivery orders: ${rows.length}`);
+
+  // (1/2) Drift: PACKED while the active shipment already holds an AWB (booked) or a confirmed pickup.
   const drift: { order_no: string; from: string; to: string | null; basis: string; signal: string }[] = [];
   for (const r of rows) {
-    if (!r.awb) continue; // no AWB yet → genuinely still packed, nothing to heal
+    if (!r.awb) continue;
     const plan = planLocalRepair(
       { status: r.order_status },
-      {
-        provider: r.provider, awb: r.awb, shipmentStatus: r.shipment_status,
-        trackingStatus: r.tracking_status, pickupStatusRaw: r.pickup_status, active: true,
-      },
+      { provider: r.provider, awb: r.awb, shipmentStatus: r.shipment_status, trackingStatus: r.tracking_status, pickupStatusRaw: r.pickup_status, pickupState: (r.pickup_state as never) ?? "NOT_REQUESTED", active: true },
     );
-    if (plan.changed) {
-      drift.push({ order_no: r.order_no, from: r.order_status, to: plan.orderStatus, basis: plan.basis, signal: r.tracking_status || r.pickup_status || "—" });
-    }
+    if (plan.changed) drift.push({ order_no: r.order_no, from: r.order_status, to: plan.orderStatus, basis: plan.basis, signal: r.tracking_status || r.pickup_status || "—" });
   }
-
-  check("no order is PACKED while its active shipment already holds an AWB", drift.length === 0, `${drift.length} drifted`);
+  check("no order is PACKED/behind while its active shipment already holds an AWB", drift.length === 0, `${drift.length} drifted`);
   if (drift.length) {
-    console.log("\nState-machine drift (safe local repair proposed — not applied by this read-only check):");
+    console.log("\nState-machine drift (safe local repair proposed — read-only, not applied here):");
     for (const d of drift) console.log(`  ${d.order_no}  ${d.from} → ${d.to}  [${d.basis}, carrier: ${d.signal}]`);
   }
 
-  // Invariant: at most one active (non-cancelled) shipment per delivery order (§ one active AWB).
+  const byOrder = new Map<string, Row[]>();
+  for (const r of rows) byOrder.set(r.order_no, [...(byOrder.get(r.order_no) || []), r]);
+
+  // (3) PICKUP_SCHEDULED must have an active shipment.
+  const scheduledNoShipment = select<{ order_no: string }>(`select o.order_no from public.store_orders o
+    where o.fulfillment_method = 'DELIVERY' and o.status = 'PICKUP_SCHEDULED'
+      and not exists (select 1 from public.store_shipments s where s.order_id = o.id and s.status <> 'cancelled' and s.status <> 'failed')
+    order by o.order_no`);
+  check("no PICKUP_SCHEDULED order without an active shipment", scheduledNoShipment.length === 0, scheduledNoShipment.map((r) => r.order_no).join(", ") || "0");
+
+  // (4) PICKUP_SCHEDULED must have scheduling evidence (pickup_state SCHEDULED, a scheduled time, or carrier wording).
+  const schedNoEvidence = rows.filter((r) => r.order_status === "PICKUP_SCHEDULED").filter((r) => {
+    const sched = r.pickup_state === "SCHEDULED" || Boolean(r.pickup_scheduled_at);
+    const carrier = `${r.tracking_status || ""} ${r.pickup_status || ""}`.toLowerCase();
+    const wording = carrier.includes("pickup scheduled") || carrier.includes("pickup generated") || carrier.includes("pickup confirmed") || carrier.includes("out for pickup") || carrier.includes("picked");
+    return !sched && !wording;
+  });
+  check("every PICKUP_SCHEDULED order has scheduling evidence", schedNoEvidence.length === 0, schedNoEvidence.map((r) => r.order_no).join(", ") || "0");
+
+  // (5) At most one active courier shipment per delivery order.
   const multi = select<{ order_no: string; n: number }>(`select o.order_no, count(*)::int as n
     from public.store_orders o join public.store_shipments s on s.order_id = o.id
-    where o.fulfillment_method = 'DELIVERY' and s.status <> 'cancelled' and s.provider <> 'manual'
+    where o.fulfillment_method = 'DELIVERY' and s.status not in ('cancelled','failed') and s.provider <> 'manual'
     group by o.order_no having count(*) > 1 order by o.order_no`);
   check("at most one active courier shipment per delivery order", multi.length === 0, multi.map((m) => `${m.order_no}×${m.n}`).join(", ") || "0");
+
+  // (6) A cancelled shipment must not still carry a live pickup_state.
+  const cancelledLivePickup = select<{ order_no: string; pickup_state: string }>(`select o.order_no, s.pickup_state
+    from public.store_orders o join public.store_shipments s on s.order_id = o.id
+    where s.status = 'cancelled' and s.pickup_state in ('REQUESTED','SCHEDULED') order by o.order_no`);
+  check("no cancelled shipment still marked REQUESTED/SCHEDULED", cancelledLivePickup.length === 0, cancelledLivePickup.map((r) => r.order_no).join(", ") || "0");
+
+  // (7) Academy Pickup orders must never have a courier shipment.
+  const pickupShipments = select<{ order_no: string }>(`select distinct o.order_no from public.store_orders o
+    join public.store_shipments s on s.order_id = o.id where o.fulfillment_method = 'ACADEMY_PICKUP' order by o.order_no`);
+  check("no Academy Pickup order has a courier shipment", pickupShipments.length === 0, pickupShipments.map((r) => r.order_no).join(", ") || "0");
+
+  // (8) A superseded (cancelled) shipment must not be the reason an order sits in a pickup state.
+  const supersededDriving = select<{ order_no: string }>(`select o.order_no from public.store_orders o
+    where o.fulfillment_method = 'DELIVERY' and o.status in ('READY_FOR_PICKUP','PICKUP_SCHEDULED')
+      and exists (select 1 from public.store_shipments s where s.order_id = o.id and s.status = 'cancelled')
+      and not exists (select 1 from public.store_shipments s where s.order_id = o.id and s.status not in ('cancelled','failed'))
+    order by o.order_no`);
+  check("no order driven into a pickup state by a superseded shipment", supersededDriving.length === 0, supersededDriving.map((r) => r.order_no).join(", ") || "0");
+
+  // (9) New post-release bookings must carry a pickup_state (not left at the NOT_REQUESTED default).
+  const cutoff = process.env.COURIER_PICKUP_RELEASE_AT;
+  if (cutoff) {
+    const missingState = rows.filter((r) => r.awb && r.created_at && r.created_at >= cutoff && (r.pickup_state ?? "NOT_REQUESTED") === "NOT_REQUESTED" && r.order_status === "PICKUP_SCHEDULED");
+    check(`new bookings since ${cutoff} carry a pickup_state`, missingState.length === 0, missingState.map((r) => r.order_no).join(", ") || "0");
+  } else {
+    console.log("INFO  set COURIER_PICKUP_RELEASE_AT to also assert new post-release bookings carry a pickup_state");
+  }
 }
 
 async function main() {
