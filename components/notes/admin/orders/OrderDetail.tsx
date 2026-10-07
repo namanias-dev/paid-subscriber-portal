@@ -334,6 +334,15 @@ export default function OrderDetail({
     onRefresh();
   }
 
+  async function refreshPickup() {
+    const res = await fetch(`/api/admin/notes/orders/${order.id}/refresh-pickup`, { method: "POST", cache: "no-store" });
+    const json = await res.json().catch(() => null);
+    if (!json?.ok) setToast(json?.error || "Could not refresh courier status");
+    else if (json.changed) setToast(`Updated to ${fulfillmentLabel(json.order_status, false)}`);
+    else setToast("Already up to date");
+    onRefresh();
+  }
+
   const address = order.address;
   const deliveryMapsUrl = address ? buildDeliveryGoogleMapsUrl(address) : null;
   const addressLine = address
@@ -511,9 +520,14 @@ export default function OrderDetail({
               </p>
               {queued && <p className="mt-2 text-sm font-medium text-[var(--ca-navy)]">No new pickup has been booked.</p>}
               {canManage && (
-                <button type="button" onClick={() => void refreshTrack()} className="mt-3 min-h-11 rounded-full bg-[var(--ca-navy)] px-4 text-sm font-semibold text-white">
-                  Check latest status
-                </button>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button type="button" onClick={() => void refreshTrack()} className="min-h-11 rounded-full bg-[var(--ca-navy)] px-4 text-sm font-semibold text-white">
+                    Check latest status
+                  </button>
+                  <button type="button" onClick={() => void refreshPickup()} className="min-h-11 rounded-full border border-[var(--ca-navy)]/15 px-4 text-sm font-semibold text-[var(--ca-navy)]">
+                    Refresh courier status
+                  </button>
+                </div>
               )}
             </section>
           )}
@@ -540,6 +554,11 @@ export default function OrderDetail({
                 {canManage && (
                 <button type="button" onClick={() => void refreshTrack()} className="min-h-11 rounded-full border border-[var(--ca-navy)]/15 px-4 text-sm font-semibold text-[var(--ca-navy)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2">
                   View Tracking
+                </button>
+                )}
+                {canManage && (
+                <button type="button" onClick={() => void refreshPickup()} className="min-h-11 rounded-full border border-[var(--ca-navy)]/15 px-4 text-sm font-semibold text-[var(--ca-navy)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2">
+                  Refresh courier status
                 </button>
                 )}
                 {showAdminViewInvoice(order.invoice_status) && <ViewInvoiceButton orderId={order.id} prominent />}

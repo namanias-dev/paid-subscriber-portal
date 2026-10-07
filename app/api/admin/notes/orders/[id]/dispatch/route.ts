@@ -598,9 +598,30 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   }).select("id").maybeSingle();
   await finishAttempt(db, bookingAttempt.id, { status: "BOOKED", shipmentId: bookedRow?.id || null, awb: result.awb });
 
+  // Pickup lifecycle columns (migration 2026-10-07). Best-effort: a successful booking must
+  // never fail if the migration is not yet applied, so this is a separate, ignorable update.
+  if (bookedRow?.id) {
+    await db
+      .from("store_shipments")
+      .update({
+        pickup_state: result.pickupRequested ? "SCHEDULED" : "NOT_REQUESTED",
+        pickup_status_source: "BOOKING_RESPONSE",
+        pickup_requested_date: result.pickupRequested ? pickupDate : null,
+        pickup_confirmed_date: result.pickupRequested ? pickupDate : null,
+        provider_pickup_status: pickupStatus,
+        provider_pickup_status_at: bookedAt,
+        pickup_last_synced_at: bookedAt,
+      })
+      .eq("id", bookedRow.id);
+  }
+
   let orderStatus = order.status;
   if (result.pickupRequested && canAdvanceOrder(order.status, "PICKUP_SCHEDULED")) {
     orderStatus = "PICKUP_SCHEDULED";
+  } else if (result.awb && canAdvanceOrder(order.status, "READY_FOR_PICKUP")) {
+    // AWB created but no confirmed pickup yet — the order is booked and must leave PACKED so
+    // staff see "Courier pickup — pickup pending", not an apparently-unbooked order (§4, §20).
+    orderStatus = "READY_FOR_PICKUP";
   }
   await db.from("store_orders").update({
     status: orderStatus,
