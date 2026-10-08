@@ -1,5 +1,6 @@
 /** Notes admin operations view. Pure helpers: no courier calls, no status writes. */
 
+import { isInactiveShipmentStatus } from "@/lib/store/shipping/activeShipment";
 import { staffNextStatus } from "@/lib/store/stages";
 import { staffNextStatusFor, type FulfillmentMethod } from "@/lib/store/fulfillment";
 import { formatPaise } from "@/lib/store/money";
@@ -137,6 +138,8 @@ export interface ActionInput {
   trackingStale?: boolean;
   cityConfirm?: boolean;
   invoiceStatus?: string | null;
+  /** Packed again because the previous shipment/AWB was cancelled. */
+  shipmentRetired?: boolean;
 }
 
 export function actionRequiredReasons(input: ActionInput): string[] {
@@ -152,9 +155,11 @@ export function actionRequiredReasons(input: ActionInput): string[] {
   if (input.paymentPending || input.status === "PAYMENT_PENDING") reasons.push("Payment confirmation pending");
   if (input.addressMismatch) reasons.push("Address mismatch");
   if (input.cityConfirm) reasons.push("Courier city needs confirmation");
-  else if ((input.status === "PACKED" || input.status === "READY_FOR_PICKUP") && !input.awb) reasons.push("No active shipment");
+  else if (!input.awb && (input.status === "PACKED" || input.status === "READY_FOR_PICKUP" || input.status === "PICKUP_SCHEDULED")) {
+    reasons.push(input.shipmentRetired ? "COURIER SELECTION REQUIRED" : "No active shipment");
+  }
   if (input.pickupFailed) reasons.push("Pickup wasn't completed");
-  else if (input.pickupState === "CANCELLED") reasons.push("Courier pickup was cancelled");
+  else if (input.pickupState === "CANCELLED" && input.awb) reasons.push("PICKUP CANCELLED · ACTION REQUIRED");
   if (input.status === "DELIVERY_FAILED" || input.status === "REATTEMPT_REQUESTED") reasons.push("Courier exception");
   if (input.openIssue) reasons.push("Customer issue open");
   if (input.status.startsWith("RETURN_")) reasons.push("Return action required");
@@ -195,7 +200,7 @@ export function primaryAction(input: ActionInput): PrimaryAction {
   if (input.pickupFailed) return "resolve_pickup";
   if (input.paymentPending || input.status === "PAYMENT_PENDING") return "reconcile";
   if (input.openIssue && (input.status === "DELIVERED" || input.status.startsWith("RETURN_"))) return "review_issue";
-  if ((input.status === "PACKED" || input.status === "READY_FOR_PICKUP") && !input.awb) return "compare";
+  if (!input.awb && (input.status === "PACKED" || input.status === "READY_FOR_PICKUP" || input.status === "PICKUP_SCHEDULED")) return "compare";
   // Courier booked (AWB in hand) but pickup not yet confirmed, or the provider cancelled the
   // pickup while the AWB stays valid (Case A): the next staff step is to (re)schedule a pickup.
   if (input.status === "READY_FOR_PICKUP" && input.awb) return "schedule_pickup";
@@ -228,7 +233,7 @@ export function nextPreparationStatus(status: string, method: FulfillmentMethod 
 
 export function hasActiveShipment(status: string | null | undefined, awb: string | null | undefined): boolean {
   if (!awb) return false;
-  return status !== "cancelled" && status !== "failed";
+  return !isInactiveShipmentStatus(status);
 }
 
 /** Prefer the shipment row status over an older courier scan still stored in the payload. */

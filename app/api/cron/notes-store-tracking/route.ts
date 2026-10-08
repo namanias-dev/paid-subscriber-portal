@@ -4,7 +4,8 @@ import { trackDelhiveryAwb } from "@/lib/store/shipping/delhiveryApi";
 import { isPickupException, shouldPollShipment, type TrackingSnapshot } from "@/lib/store/shipping/reconcile";
 import { trackShiprocketAwb } from "@/lib/store/shipping/shiprocketApi";
 import { canAdvanceOrder, canAdvanceShipment, normalizeCourierStatus, orderStatusFromShipment } from "@/lib/store/shipping/status";
-import { makeSupabasePickupIO, reconcilePickupFromProvider, toCourierProvider } from "@/lib/store/shipping/refreshPickup";
+import { isInactiveShipmentStatus } from "@/lib/store/shipping/activeShipment";
+import { makeSupabasePickupIO, planRetiredShipmentOrder, reconcilePickupFromProvider, toCourierProvider } from "@/lib/store/shipping/refreshPickup";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -134,7 +135,9 @@ async function run(req: Request) {
             trackingStatus: raw.rawStatus,
             pickupStatusRaw: raw.rawStatus,
             pickupState: (row.pickup_state as never) ?? "NOT_REQUESTED",
-            active: shipStatus !== "cancelled" && shipStatus !== "failed",
+            // Keep the pre-update flag. Marking the row cancelled above must not
+            // hide the Case B order transition from the reconciler.
+            active: !isInactiveShipmentStatus(row.status),
           },
           raw.rawStatus,
           "activity" in raw ? ((raw.activity as string | null) ?? null) : null,
@@ -150,7 +153,40 @@ async function run(req: Request) {
     }
   }
 
-  return NextResponse.json({ ok: true, considered, polled, advanced, pickupSynced, errors, ts: Date.now() });
+  // Orders whose only AWB was already retired, but the order never left the pickup stage.
+  // Local only: no provider read and no new shipment.
+  let retiredOrders = 0;
+  const { data: pickupOrders } = await db
+    .from("store_orders")
+    .select("id,status")
+    .eq("fulfillment_method", "DELIVERY")
+    .in("status", ["PICKUP_SCHEDULED", "READY_FOR_PICKUP"])
+    .order("updated_at", { ascending: false })
+    .limit(40);
+  for (const order of pickupOrders || []) {
+    const { data: ships } = await db.from("store_shipments").select("status,awb").eq("order_id", order.id);
+    const next = planRetiredShipmentOrder({ orderStatus: order.status, rows: ships || [] });
+    if (!next) continue;
+    const { data: moved } = await db
+      .from("store_orders")
+      .update({ status: next, updated_at: nowIso })
+      .eq("id", order.id)
+      .eq("status", order.status)
+      .select("id");
+    if (!Array.isArray(moved) || moved.length === 0) continue;
+    await db.from("store_order_events").insert({
+      order_id: order.id,
+      event: "courier_pickup_synced",
+      from_status: order.status,
+      to_status: next,
+      actor_type: "system",
+      actor_name: "reconciliation",
+      payload_json: { basis: "shipment_cancelled", cancel_shipment: false, source: "RECONCILIATION", reason: "retired_shipment_no_active_awb" },
+    });
+    retiredOrders += 1;
+  }
+
+  return NextResponse.json({ ok: true, considered, polled, advanced, pickupSynced, retiredOrders, errors, ts: Date.now() });
 }
 
 export async function GET(req: Request) {

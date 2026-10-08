@@ -79,6 +79,8 @@ export const ISSUE_HINT: Record<string, string> = {
   "Refund pending": "Refund not yet completed",
   "Customer issue open": "Customer raised an issue",
   "Tracking needs attention": "No recent courier tracking update",
+  "COURIER SELECTION REQUIRED": "Select a new courier",
+  "PICKUP CANCELLED · ACTION REQUIRED": "Reschedule pickup or change courier",
 };
 
 export interface OpsLines {

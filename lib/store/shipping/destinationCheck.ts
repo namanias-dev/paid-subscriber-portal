@@ -24,6 +24,21 @@ export const PIN_CITY_ALIASES: Record<string, readonly string[]> = {
   "110085": ["North West Delhi"],
 };
 
+/**
+ * Official renames of one city. Consulted only after PIN and state already match,
+ * so a Gurugram label on a Delhi PIN still fails. Not a district list.
+ */
+const OFFICIAL_CITY_RENAMES: Record<string, string> = {
+  gurgaon: "gurugram",
+  gurugram: "gurugram",
+};
+
+function sameOfficialCity(left: string, right: string): boolean {
+  const a = OFFICIAL_CITY_RENAMES[left];
+  const b = OFFICIAL_CITY_RENAMES[right];
+  return Boolean(a && b && a === b);
+}
+
 export function aliasesForPin(pincode: string): string[] {
   return [...(PIN_CITY_ALIASES[pincode.trim()] || [])];
 }
@@ -84,7 +99,7 @@ export function classifyCourierDestination(input: {
   const orderCity = normalizePlace(input.order.city);
   const providerCity = normalizePlace(String(input.provider.city || ""));
   if (!orderCity || !providerCity) return { verdict: "fail", reason: "unread" };
-  if (orderCity === providerCity) return { verdict: "pass", reason: "match" };
+  if (orderCity === providerCity || sameOfficialCity(orderCity, providerCity)) return { verdict: "pass", reason: "match" };
 
   const canonical = normalizePlace(String(input.canonicalCity || ""));
   if (canonical && providerCity === canonical) return { verdict: "pass", reason: "canonical" };

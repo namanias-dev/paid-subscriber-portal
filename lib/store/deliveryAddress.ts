@@ -2,6 +2,7 @@
  * Delivery-address confirmation. Pure and client-safe.
  * Google Maps is a search URL the person opens themselves. It is not a verification API.
  */
+import { isInactiveShipmentStatus } from "./shipping/activeShipment";
 
 export type AddressConfirmationStatus =
   | "UNCONFIRMED"
@@ -135,7 +136,7 @@ export function decideAddressChange(input: {
       message: "The courier has already taken possession of this parcel. Changing the order address here would not change the courier destination.",
     };
   }
-  if (input.awb && input.shipmentStatus && input.shipmentStatus !== "cancelled" && input.shipmentStatus !== "failed") {
+  if (input.awb && input.shipmentStatus && !isInactiveShipmentStatus(input.shipmentStatus)) {
     return {
       action: "rebook",
       code: "ACTIVE_AWB",
@@ -154,10 +155,10 @@ export function addressAnalyticsProps(input: { reason?: string; itemCount?: numb
 }
 
 export function activeCustomerShipment<T extends { awb: string | null; status: string }>(rows: T[]): T | null {
-  return rows.find((row) => row.awb && row.status !== "cancelled" && row.status !== "failed") || null;
+  return rows.find((row) => row.awb && !isInactiveShipmentStatus(row.status)) || null;
 }
 
 export function oneActiveAwb(rows: Array<{ awb: string | null; status: string }>): boolean {
-  const active = rows.filter((row) => row.awb && row.status !== "cancelled" && row.status !== "failed");
+  const active = rows.filter((row) => row.awb && !isInactiveShipmentStatus(row.status));
   return active.length <= 1;
 }

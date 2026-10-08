@@ -2,6 +2,7 @@
  * Read-only operations summary for the admin Notes Orders list.
  * Stage, package and rate come from the same rules booking and tracking use.
  */
+import { isInactiveShipmentStatus } from "./shipping/activeShipment";
 import { stageProgress, type StageProgress } from "./opsBoard";
 import { resolveBookingPackage } from "./shipping/manualBook";
 import type { PackageLine } from "./shipping/autoFulfill";
@@ -23,8 +24,6 @@ export interface ShipmentRowLike {
   created_at?: string | null;
 }
 
-const INACTIVE_SHIPMENT = new Set(["cancelled", "failed", "expired", "superseded"]);
-
 function payloadOf(row: { provider_payload?: unknown }): Record<string, unknown> {
   return row.provider_payload && typeof row.provider_payload === "object" ? (row.provider_payload as Record<string, unknown>) : {};
 }
@@ -45,7 +44,7 @@ export function liveShipment<T extends ShipmentRowLike>(rowsNewestFirst: T[]): T
   return (
     rowsNewestFirst.find((row) => {
       if (!row.awb) return false;
-      if (INACTIVE_SHIPMENT.has(String(row.status || "").toLowerCase())) return false;
+      if (isInactiveShipmentStatus(row.status)) return false;
       return payloadOf(row).do_not_use !== true;
     }) || null
   );
@@ -176,6 +175,8 @@ const ISSUE_COPY: Array<[string, string]> = [
   ["Refund pending", "Refund pending"],
   ["Customer issue open", "Customer issue open"],
   ["Tracking stale", "Tracking needs attention"],
+  ["COURIER SELECTION REQUIRED", "COURIER SELECTION REQUIRED"],
+  ["PICKUP CANCELLED · ACTION REQUIRED", "PICKUP CANCELLED · ACTION REQUIRED"],
 ];
 
 /** Staff-facing issue line. Packed without a courier is normal work, not an issue. */

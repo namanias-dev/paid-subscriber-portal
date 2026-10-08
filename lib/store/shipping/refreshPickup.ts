@@ -10,6 +10,7 @@
  * provider.
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { isInactiveShipmentStatus, selectActiveShipment } from "./activeShipment";
 import {
   planLocalRepair,
   reconcileCourierShipment,
@@ -68,6 +69,12 @@ export interface PickupRefreshIO {
   advanceOrder(from: string, to: string): Promise<boolean>;
   patchShipment(shipmentId: string, patch: ShipmentPickupPatch): Promise<void>;
   recordEvent(orderId: string, input: PickupSyncEventInput, actor: PickupActor): Promise<void>;
+  /**
+   * Re-read the order's current live shipment id before an order-status write.
+   * A different id means this event belongs to a historical AWB.
+   * Null means no other live AWB (this row may just have been marked terminal).
+   */
+  lookupActiveId?: () => Promise<string | null>;
 }
 
 export interface RefreshOutcome {
@@ -101,6 +108,38 @@ export async function persistPickupPlan(
   }
 
   const nextOrderStatus = plan.orderStatus ?? order.status;
+
+  // An older AWB's cancellation must not send a replacement shipment's order back to Packed.
+  if (io.lookupActiveId && (plan.cancelShipment || nextOrderStatus !== order.status)) {
+    const liveId = await io.lookupActiveId();
+    if (liveId && liveId !== shipment.id) {
+      if (plan.cancelShipment) {
+        const stamp = now();
+        await io.patchShipment(shipment.id, {
+          pickup_state: plan.pickupState,
+          pickup_status_source: source,
+          pickup_last_synced_at: stamp,
+          status: "cancelled",
+          pickup_cancelled_at: stamp,
+          pickup_cancel_reason: plan.reason ?? null,
+        });
+        await io.recordEvent(
+          order.id,
+          {
+            fromStatus: order.status,
+            toStatus: order.status,
+            basis: "historical_shipment",
+            pickupState: plan.pickupState,
+            reason: plan.reason ?? null,
+            cancelShipment: true,
+            source,
+          },
+          actor,
+        );
+      }
+      return { changed: false, orderStatus: order.status, pickupState: current, basis: "historical_shipment", note: "stale" };
+    }
+  }
 
   // Advance the order first, under an optimistic lock. If the status already moved (another
   // staff action, a webhook, or the cron), abandon the whole repair rather than overwrite it.
@@ -233,7 +272,30 @@ export function makeSupabasePickupIO(db: SupabaseClient, orderId: string): Picku
         },
       });
     },
+    async lookupActiveId() {
+      const { data } = await db
+        .from("store_shipments")
+        .select("id,status,awb,created_at")
+        .eq("order_id", orderId)
+        .order("created_at", { ascending: false });
+      return selectActiveShipment(data || [])?.id ?? null;
+    },
   };
+}
+
+/**
+ * An order left in a pickup stage after its only AWB was retired.
+ * Local repair only: no provider call and no new shipment.
+ */
+export function planRetiredShipmentOrder(input: {
+  orderStatus: string;
+  rows: Array<{ status: string | null; awb: string | null }>;
+}): "PACKED" | null {
+  if (input.orderStatus !== "PICKUP_SCHEDULED" && input.orderStatus !== "READY_FOR_PICKUP") return null;
+  const live = selectActiveShipment(input.rows);
+  if (live) return null;
+  const retired = input.rows.some((row) => row.awb && isInactiveShipmentStatus(row.status));
+  return retired ? "PACKED" : null;
 }
 
 /** Narrow a shipment row (any shape) into the reconciler's provider type. */

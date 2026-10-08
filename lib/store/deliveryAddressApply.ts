@@ -2,6 +2,7 @@
  * Staff delivery-address change. Courier calls happen only after a confirmed
  * rebook, and only after the previous shipment is cancelled.
  */
+import { isInactiveShipmentStatus } from "./shipping/activeShipment";
 import { storeDb } from "./db";
 import { pinPlaceConflict } from "./address";
 import { checkPincode } from "./serviceability";
@@ -84,7 +85,7 @@ export async function applyDeliveryAddressChange(input: AddressChangeInput): Pro
     .select("id,provider,status,awb,provider_shipment_id,provider_payload,picked_up_at")
     .eq("order_id", order.id)
     .order("created_at", { ascending: false });
-  const active = (ships || []).find((row) => row.status !== "cancelled" && row.status !== "failed" && row.awb) || null;
+  const active = (ships || []).find((row) => row.awb && !isInactiveShipmentStatus(row.status)) || null;
   const lockAt = order.fulfillment_lock_at ? Date.parse(order.fulfillment_lock_at) : NaN;
   const decision = decideAddressChange({
     orderStatus: order.status,
