@@ -27,6 +27,7 @@ interface Funnel {
   rows: Row[];
   totals: Row;
   range: { from: string; to: string };
+  updatedAt?: string | null;
 }
 
 const PRESETS: { id: Preset; label: string }[] = [
@@ -45,6 +46,7 @@ export default function GrowthIntelligence() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let cancelled = false;
     setLoading(true);
     const qs = new URLSearchParams({
       preset,
@@ -53,9 +55,10 @@ export default function GrowthIntelligence() {
     }).toString();
     fetch(`/api/admin/analytics/touch-sources?${qs}`)
       .then((r) => r.json())
-      .then((d) => setData(d.ok ? d.funnel : null))
-      .catch(() => setData(null))
-      .finally(() => setLoading(false));
+      .then((d) => { if (!cancelled && d.ok) setData(d.funnel); })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
   }, [preset, touch, excludeAdmin]);
 
   const t = data?.totals;
@@ -101,6 +104,8 @@ export default function GrowthIntelligence() {
         {touch === "first"
           ? "First touch = the acquisition channel that first brought each visitor/buyer. Best for deciding where to spend to acquire new people."
           : "Last touch = the channel on the visit that converted. Best for understanding what closes."}
+        {data?.updatedAt ? ` · Updated ${Math.max(0, Math.round((Date.now() - new Date(data.updatedAt).getTime()) / 60000))} min ago` : ""}
+        {loading && data ? " · Updating…" : ""}
       </p>
 
       {/* KPI cards */}
@@ -115,7 +120,7 @@ export default function GrowthIntelligence() {
 
       {/* Source funnel */}
       <SectionCard title={`Sources — ${touch === "first" ? "acquisition (first touch)" : "conversion (last touch)"}`}>
-        {loading ? (
+        {loading && !data ? (
           <LoadingBlock />
         ) : !data || data.rows.length === 0 ? (
           <EmptyState>No tracked traffic in this period yet.</EmptyState>

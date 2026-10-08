@@ -8,6 +8,7 @@ import { formatINR } from "@/lib/dates";
 import { CAMPAIGN_SITE_URL } from "@/lib/marketing/campaignLink";
 import type { CampaignLink, CampaignLinkStatus } from "@/lib/marketing/campaignLinks";
 import type { LinkMetrics } from "@/lib/marketing/campaignLinkAnalytics";
+import { funnelKind } from "@/lib/marketing/funnelMath";
 import CreateLinkModal from "@/components/admin/campaign-links/CreateLinkModal";
 
 interface Row { link: CampaignLink; metrics: LinkMetrics }
@@ -24,6 +25,19 @@ const STATUSES: { id: CampaignLinkStatus | "all"; label: string }[] = [
 const shortUrl = (code: string) => `${CAMPAIGN_SITE_URL}/go/${code}`;
 const nf = (n: number) => n.toLocaleString("en-IN");
 
+function funnelCell(type: string, url: string, m: LinkMetrics): string {
+  const kind = funnelKind(type, url);
+  if (kind === "notes") {
+    const aov = m.aov == null ? "" : ` · AOV ${formatINR(m.aov)}`;
+    return `Cart ${nf(m.addToCartUsers)} · Checkout ${nf(m.checkoutUsers)}${aov}`;
+  }
+  if (kind === "webinar") return `Regs ${nf(m.registrations)} · Leads ${nf(m.leads)}`;
+  return `Leads ${nf(m.leads)}`;
+}
+function paidCell(type: string, url: string, m: LinkMetrics): number {
+  return funnelKind(type, url) === "notes" ? m.paidOrders : m.paidAdmissions + m.paidWebinars;
+}
+
 export default function CampaignLinksPage() {
   const [preset, setPreset] = useState<Preset>("30d");
   const [status, setStatus] = useState<CampaignLinkStatus | "all">("all");
@@ -39,8 +53,8 @@ export default function CampaignLinksPage() {
     if (search.trim()) qs.set("search", search.trim());
     fetch(`/api/admin/campaign-links?${qs.toString()}`)
       .then((r) => r.json())
-      .then((d) => setRows(d.ok ? d.rows : []))
-      .catch(() => setRows([]))
+      .then((d) => { if (d.ok) setRows(d.rows); })
+      .catch(() => {})
       .finally(() => setLoading(false));
   }, [preset, status, search]);
 
@@ -94,7 +108,7 @@ export default function CampaignLinksPage() {
         <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search name, code, campaign…" className="min-h-10 flex-1 rounded-xl border border-line bg-white px-3 text-sm text-ink focus:border-primary focus:outline-none sm:max-w-xs" />
       </div>
 
-      {loading ? (
+      {loading && rows.length === 0 ? (
         <LoadingBlock />
       ) : rows.length === 0 ? (
         <div className="card p-10 text-center">
@@ -111,13 +125,10 @@ export default function CampaignLinksPage() {
                 <tr className="border-b border-line text-left text-xs text-muted">
                   <th className="px-4 py-2.5">Link</th>
                   <th className="px-3 py-2.5">Source</th>
-                  <th className="px-3 py-2.5 text-right">Clicks</th>
                   <th className="px-3 py-2.5 text-right">Visitors</th>
-                  <th className="px-3 py-2.5 text-right">Regs</th>
-                  <th className="px-3 py-2.5 text-right">Orders</th>
-                  <th className="px-3 py-2.5 text-right">Admissions</th>
+                  <th className="px-3 py-2.5 text-right">Funnel</th>
+                  <th className="px-3 py-2.5 text-right">Paid</th>
                   <th className="px-3 py-2.5 text-right">Revenue</th>
-                  <th className="px-3 py-2.5 text-right">Click→Reg</th>
                   <th className="px-4 py-2.5 text-right">Actions</th>
                 </tr>
               </thead>
@@ -129,13 +140,10 @@ export default function CampaignLinksPage() {
                       <div className="font-mono text-xs text-muted">/go/{link.short_code}{link.status !== "active" && <span className="ml-2 rounded-full bg-surface2 px-1.5 py-0.5 capitalize">{link.status}</span>}</div>
                     </td>
                     <td className="px-3 py-3 capitalize text-ink2">{link.source || "—"}<div className="text-xs text-muted">{link.campaign || ""}</div></td>
-                    <td className="px-3 py-3 text-right tabular-nums">{nf(m.clicks)}</td>
                     <td className="px-3 py-3 text-right tabular-nums">{nf(m.uniqueVisitors)}</td>
-                    <td className="px-3 py-3 text-right tabular-nums">{nf(m.registrations)}</td>
-                    <td className="px-3 py-3 text-right tabular-nums">{nf(m.orders)}</td>
-                    <td className="px-3 py-3 text-right tabular-nums">{nf(m.paidAdmissions)}</td>
-                    <td className="px-3 py-3 text-right font-semibold tabular-nums">{formatINR(m.revenue)}</td>
-                    <td className="px-3 py-3 text-right tabular-nums">{m.clickToRegistration === null ? "—" : `${m.clickToRegistration}%`}</td>
+                    <td className="px-3 py-3 text-right text-xs tabular-nums text-ink2">{funnelCell(link.destination_type, link.destination_url, m)}</td>
+                    <td className="px-3 py-3 text-right tabular-nums">{nf(paidCell(link.destination_type, link.destination_url, m))}</td>
+                    <td className="px-3 py-3 text-right font-semibold tabular-nums">{formatINR(funnelKind(link.destination_type, link.destination_url) === "notes" ? m.ordersRevenue : m.revenue)}</td>
                     <td className="px-4 py-3">
                       <div className="flex items-center justify-end gap-2.5 text-muted">
                         <button title="Copy" onClick={() => copy(link.short_code)} className="hover:text-primary">{copied === link.short_code ? <Check size={15} className="text-success" /> : <Copy size={15} />}</button>
@@ -165,12 +173,12 @@ export default function CampaignLinksPage() {
                   <span className="shrink-0 rounded-full bg-surface2 px-2 py-0.5 text-xs capitalize text-muted">{link.status}</span>
                 </div>
                 <p className="mt-0.5 font-mono text-xs text-muted">/go/{link.short_code}</p>
-                <div className="mt-3 grid grid-cols-4 gap-2 text-center">
-                  <div><p className="text-xs text-muted">Clicks</p><p className="font-semibold tabular-nums">{nf(m.clicks)}</p></div>
-                  <div><p className="text-xs text-muted">Regs</p><p className="font-semibold tabular-nums">{nf(m.registrations)}</p></div>
-                  <div><p className="text-xs text-muted">Adm.</p><p className="font-semibold tabular-nums">{nf(m.paidAdmissions)}</p></div>
-                  <div><p className="text-xs text-muted">Rev.</p><p className="font-semibold tabular-nums">{formatINR(m.revenue)}</p></div>
+                <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+                  <div><p className="text-xs text-muted">Visitors</p><p className="font-semibold tabular-nums">{nf(m.uniqueVisitors)}</p></div>
+                  <div><p className="text-xs text-muted">Paid</p><p className="font-semibold tabular-nums">{nf(paidCell(link.destination_type, link.destination_url, m))}</p></div>
+                  <div><p className="text-xs text-muted">Rev.</p><p className="font-semibold tabular-nums">{formatINR(funnelKind(link.destination_type, link.destination_url) === "notes" ? m.ordersRevenue : m.revenue)}</p></div>
                 </div>
+                <p className="mt-2 text-center text-xs text-muted">{funnelCell(link.destination_type, link.destination_url, m)}</p>
                 <div className="mt-3 flex flex-wrap items-center gap-2">
                   <button onClick={() => copy(link.short_code)} className="inline-flex min-h-9 items-center gap-1.5 rounded-full bg-primary px-3 text-xs font-semibold text-white">{copied === link.short_code ? <Check size={14} /> : <Copy size={14} />} Copy</button>
                   <Link href={`/admin/campaign-links/${link.id}`} className="inline-flex min-h-9 items-center gap-1.5 rounded-full border border-line px-3 text-xs font-semibold text-ink"><BarChart3 size={14} /> Analytics</Link>

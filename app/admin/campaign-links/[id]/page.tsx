@@ -10,6 +10,7 @@ import { formatINR, formatISTDateTime } from "@/lib/dates";
 import { CAMPAIGN_SITE_URL } from "@/lib/marketing/campaignLink";
 import type { CampaignLink, CampaignLinkStatus } from "@/lib/marketing/campaignLinks";
 import type { LinkMetrics } from "@/lib/marketing/campaignLinkAnalytics";
+import { funnelKind, funnelSteps, type RollupTotals } from "@/lib/marketing/funnelMath";
 import CopyButton from "@/components/admin/campaign-links/CopyButton";
 import QrCode from "@/components/admin/campaign-links/QrCode";
 
@@ -47,17 +48,29 @@ export default function CampaignLinkDetailPage() {
   }
 
   const url = link ? `${CAMPAIGN_SITE_URL}/go/${link.short_code}` : "";
-  const funnel = metrics
-    ? [
-        { label: "Clicks", value: metrics.clicks },
-        { label: "Unique visitors", value: metrics.uniqueVisitors },
-        { label: "Registrations", value: metrics.registrations },
-        { label: "Checkout started", value: metrics.checkoutStarted },
-        { label: "Orders", value: metrics.orders },
-        { label: "Paid admissions", value: metrics.paidAdmissions },
-      ]
-    : [];
+  const kind = link ? funnelKind(link.destination_type, link.destination_url) : "general";
+  const totals: RollupTotals | null = metrics
+    ? {
+        clicks: metrics.clicks,
+        visitors: metrics.uniqueVisitors,
+        productViews: metrics.productViews,
+        addToCartUsers: metrics.addToCartUsers,
+        addToCartEvents: metrics.addToCartEvents,
+        checkoutUsers: metrics.checkoutUsers,
+        registrations: metrics.registrations,
+        leads: metrics.leads,
+        ordersCreated: metrics.ordersCreated,
+        paidOrders: metrics.paidOrders,
+        units: metrics.units,
+        revenuePaise: metrics.ordersRevenue * 100,
+        paidAdmissions: metrics.paidAdmissions,
+        paidWebinars: metrics.paidWebinars,
+        admissionsRevenue: metrics.admissionsRevenue,
+      }
+    : null;
+  const funnel = totals ? funnelSteps(kind, totals) : [];
   const maxFunnel = Math.max(1, ...funnel.map((f) => f.value));
+  const ago = metrics?.updatedAt ? Math.max(0, Math.round((Date.now() - new Date(metrics.updatedAt).getTime()) / 60000)) : null;
 
   return (
     <div className="space-y-5 pb-16">
@@ -101,14 +114,26 @@ export default function CampaignLinkDetailPage() {
           </div>
 
           {/* KPIs */}
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-            <Stat label="Clicks" value={metrics ? metrics.clicks.toLocaleString("en-IN") : "—"} />
-            <Stat label="Registrations" value={metrics ? metrics.registrations.toLocaleString("en-IN") : "—"} />
-            <Stat label="Leads" value={metrics ? metrics.leads.toLocaleString("en-IN") : "—"} />
-            <Stat label="Orders" value={metrics ? metrics.orders.toLocaleString("en-IN") : "—"} />
-            <Stat label="Admissions" value={metrics ? metrics.paidAdmissions.toLocaleString("en-IN") : "—"} />
-            <Stat label="Revenue" value={metrics ? formatINR(metrics.revenue) : "—"} tone="green" />
-          </div>
+          {ago !== null && <p className="text-xs text-muted">Updated {ago < 1 ? "just now" : `${ago} min ago`}</p>}
+          {kind === "notes" ? (
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+              <Stat label="Visitors" value={metrics ? metrics.uniqueVisitors.toLocaleString("en-IN") : "—"} />
+              <Stat label="Add to cart" value={metrics ? metrics.addToCartUsers.toLocaleString("en-IN") : "—"} />
+              <Stat label="Checkout" value={metrics ? metrics.checkoutUsers.toLocaleString("en-IN") : "—"} />
+              <Stat label="Paid orders" value={metrics ? metrics.paidOrders.toLocaleString("en-IN") : "—"} />
+              <Stat label="Revenue" value={metrics ? formatINR(metrics.ordersRevenue) : "—"} tone="green" />
+              <Stat label="AOV" value={metrics?.aov == null ? "—" : formatINR(metrics.aov)} />
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+              <Stat label="Visitors" value={metrics ? metrics.uniqueVisitors.toLocaleString("en-IN") : "—"} />
+              <Stat label="Registrations" value={metrics ? metrics.registrations.toLocaleString("en-IN") : "—"} />
+              <Stat label="Leads" value={metrics ? metrics.leads.toLocaleString("en-IN") : "—"} />
+              <Stat label="Admissions" value={metrics ? (metrics.paidAdmissions + metrics.paidWebinars).toLocaleString("en-IN") : "—"} />
+              <Stat label="Revenue" value={metrics ? formatINR(metrics.revenue) : "—"} tone="green" />
+              <Stat label="Clicks" value={metrics ? metrics.clicks.toLocaleString("en-IN") : "—"} />
+            </div>
+          )}
 
           <div className="grid gap-4 lg:grid-cols-3">
             {/* Funnel */}
@@ -125,14 +150,27 @@ export default function CampaignLinkDetailPage() {
                   </div>
                 ))}
               </div>
-              {metrics && (
+              {metrics && kind === "notes" && (
+                <div className="mt-4 grid grid-cols-2 gap-2 text-center text-sm sm:grid-cols-3 lg:grid-cols-5">
+                  <div className="rounded-xl bg-surface2 p-2"><p className="text-xs text-muted">Visitor→Cart</p><p className="font-semibold">{metrics.visitorToCart === null ? "—" : `${metrics.visitorToCart}%`}</p></div>
+                  <div className="rounded-xl bg-surface2 p-2"><p className="text-xs text-muted">Cart→Checkout</p><p className="font-semibold">{metrics.cartToCheckout === null ? "—" : `${metrics.cartToCheckout}%`}</p></div>
+                  <div className="rounded-xl bg-surface2 p-2"><p className="text-xs text-muted">Checkout→Paid</p><p className="font-semibold">{metrics.checkoutToPaid === null ? "—" : `${metrics.checkoutToPaid}%`}</p></div>
+                  <div className="rounded-xl bg-surface2 p-2"><p className="text-xs text-muted">Visitor→Paid</p><p className="font-semibold">{metrics.visitorToPaid === null ? "—" : `${metrics.visitorToPaid}%`}</p></div>
+                  <div className="rounded-xl bg-surface2 p-2"><p className="text-xs text-muted">₹ / visitor</p><p className="font-semibold">{metrics.revenuePerVisitor === null ? "—" : formatINR(metrics.revenuePerVisitor)}</p></div>
+                </div>
+              )}
+              {metrics && kind !== "notes" && (
                 <div className="mt-4 grid grid-cols-3 gap-2 text-center text-sm">
                   <div className="rounded-xl bg-surface2 p-2"><p className="text-xs text-muted">Click→Reg</p><p className="font-semibold">{metrics.clickToRegistration === null ? "—" : `${metrics.clickToRegistration}%`}</p></div>
                   <div className="rounded-xl bg-surface2 p-2"><p className="text-xs text-muted">Reg→Paid</p><p className="font-semibold">{metrics.registrationToPaid === null ? "—" : `${metrics.registrationToPaid}%`}</p></div>
                   <div className="rounded-xl bg-surface2 p-2"><p className="text-xs text-muted">Click→Paid</p><p className="font-semibold">{metrics.clickToPaid === null ? "—" : `${metrics.clickToPaid}%`}</p></div>
                 </div>
               )}
-              <p className="mt-3 text-xs text-muted">Revenue = Notes orders + paid admissions/webinars tied to this link (deduped, reconciles to Payments). Admissions are matched via the buyer&apos;s stored first-touch link, so cross-device and later purchases still credit this link where known.</p>
+              <p className="mt-3 text-xs text-muted">
+                {kind === "notes"
+                  ? `Notes funnel: unique visitors, add-to-cart and checkout, then paid orders only (captured payment, retries collapsed). Revenue is the captured Notes amount.${metrics?.units ? ` Units sold: ${metrics.units.toLocaleString("en-IN")}.` : ""} Webinar registrations are not part of this funnel.`
+                  : "Revenue reconciles to paid Notes orders plus paid admissions tied to this link. A direct visit does not erase the link’s first-touch clid."}
+              </p>
             </div>
 
             {/* QR + meta */}

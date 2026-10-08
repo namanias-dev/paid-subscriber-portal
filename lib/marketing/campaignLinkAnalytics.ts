@@ -1,9 +1,8 @@
 /**
  * Link-level full-funnel analytics for Campaign Links.
  *
- * Joins the branded short link back to real conversions WITHOUT duplicating any
- * analytics system. The join key is the campaign-link id (`clid`) that rides the
- * existing nsa_attr JSONB touch and therefore lands on:
+ * Reads daily rollups (not a live scan). The join key is the campaign-link
+ * short code (`clid`) that rides the existing nsa_attr JSONB touch and lands on:
  *   - analytics_events.attribution  → clicks' behaviour, registrations, checkout
  *   - store_orders.attribution_json → Notes orders + revenue
  *   - buyers.first_touch/last_touch → phone↔clid map → payments (admissions) + leads
@@ -14,11 +13,8 @@
  */
 import "server-only";
 import { getSupabaseAdmin } from "@/lib/supabase";
-import { fetchEvents } from "@/lib/analytics/queries";
-import { getPayments } from "@/lib/dataProvider";
-import { dedupePaidRows, isPaidStatus } from "@/lib/paymentsAgg";
-import { normPhone } from "@/lib/phone";
-import type { AttributionState } from "@/lib/attribution";
+import { aov, pct } from "./funnelMath";
+import { readCampaignWindow, type CampaignRollupRow } from "./rollupRead";
 
 export interface LinkMetrics {
   clicks: number;
@@ -35,188 +31,80 @@ export interface LinkMetrics {
   clickToRegistration: number | null;
   registrationToPaid: number | null;
   clickToPaid: number | null;
+  productViews: number;
+  addToCartUsers: number;
+  addToCartEvents: number;
+  checkoutUsers: number;
+  ordersCreated: number;
+  paidOrders: number;
+  units: number;
+  aov: number | null;
+  visitorToCart: number | null;
+  cartToCheckout: number | null;
+  checkoutToPaid: number | null;
+  visitorToPaid: number | null;
+  revenuePerVisitor: number | null;
+  updatedAt: string | null;
 }
 
 export const EMPTY_METRICS: LinkMetrics = {
   clicks: 0, uniqueVisitors: 0, registrations: 0, leads: 0, checkoutStarted: 0,
   orders: 0, ordersRevenue: 0, paidAdmissions: 0, paidWebinars: 0, admissionsRevenue: 0,
   revenue: 0, clickToRegistration: null, registrationToPaid: null, clickToPaid: null,
+  productViews: 0, addToCartUsers: 0, addToCartEvents: 0, checkoutUsers: 0, ordersCreated: 0,
+  paidOrders: 0, units: 0, aov: null, visitorToCart: null, cartToCheckout: null,
+  checkoutToPaid: null, visitorToPaid: null, revenuePerVisitor: null, updatedAt: null,
 };
 
-function clidOf(attr: AttributionState | null | undefined): string | null {
-  const c = attr?.first_touch?.clid || attr?.last_touch?.clid;
-  return (c || "").toString().trim().toLowerCase() || null;
+function toMetrics(row: CampaignRollupRow, updatedAt: string | null): LinkMetrics {
+  const ordersRevenue = Math.round((row.revenue_paise || 0) / 100);
+  const admissionsRevenue = Math.round(Number(row.admissions_revenue) || 0);
+  const revenue = ordersRevenue + admissionsRevenue;
+  const paidTotal = row.paid_admissions + row.paid_webinars;
+  return {
+    clicks: row.clicks,
+    uniqueVisitors: row.visitors,
+    registrations: row.registrations,
+    leads: row.leads,
+    checkoutStarted: row.checkout_users,
+    orders: row.paid_orders,
+    ordersRevenue,
+    paidAdmissions: row.paid_admissions,
+    paidWebinars: row.paid_webinars,
+    admissionsRevenue,
+    revenue,
+    clickToRegistration: pct(row.registrations, row.clicks),
+    registrationToPaid: pct(paidTotal + row.paid_orders, row.registrations),
+    clickToPaid: pct(paidTotal + row.paid_orders, row.clicks),
+    productViews: row.product_views,
+    addToCartUsers: row.add_to_cart_users,
+    addToCartEvents: row.add_to_cart_events,
+    checkoutUsers: row.checkout_users,
+    ordersCreated: row.orders_created,
+    paidOrders: row.paid_orders,
+    units: row.units,
+    aov: aov(ordersRevenue, row.paid_orders),
+    visitorToCart: pct(row.add_to_cart_users, row.visitors),
+    cartToCheckout: pct(row.checkout_users, row.add_to_cart_users),
+    checkoutToPaid: pct(row.paid_orders, row.checkout_users),
+    visitorToPaid: pct(row.paid_orders, row.visitors),
+    revenuePerVisitor: row.visitors > 0 ? Math.round(ordersRevenue / row.visitors) : null,
+    updatedAt: row.updated_at || updatedAt,
+  };
 }
-
-function pct(n: number, d: number): number | null {
-  return d > 0 ? Math.round((n / d) * 1000) / 10 : null;
-}
-
-interface Acc {
-  clicks: number;
-  visitors: Set<string>;
-  registrations: number;
-  leads: number;
-  checkoutStarted: number;
-  orders: number;
-  ordersRevenue: number;
-  paidAdmissions: Set<string>;
-  paidWebinars: Set<string>;
-  admissionsRevenue: number;
-}
-const freshAcc = (): Acc => ({
-  clicks: 0, visitors: new Set(), registrations: 0, leads: 0, checkoutStarted: 0,
-  orders: 0, ordersRevenue: 0, paidAdmissions: new Set(), paidWebinars: new Set(), admissionsRevenue: 0,
-});
 
 /**
- * Aggregate funnel metrics per campaign-link short_code for a time window.
- * Returns a Map keyed by lower-case short_code.
+ * Funnel metrics per campaign-link short_code. Reads the daily rollup (one
+ * grouped query) instead of scanning events, orders, buyers and payments.
  */
-export async function getCampaignLinkMetrics(opts: { from: string; to: string }): Promise<Map<string, LinkMetrics>> {
-  const fromISO = new Date(opts.from).toISOString();
-  const toISO = new Date(opts.to).toISOString();
-  const fromMs = new Date(fromISO).getTime();
-  const toMs = new Date(toISO).getTime();
-  const db = getSupabaseAdmin();
-
-  const acc = new Map<string, Acc>();
-  const bump = (code: string | null): Acc | null => {
-    if (!code) return null;
-    let a = acc.get(code);
-    if (!a) { a = freshAcc(); acc.set(code, a); }
-    return a;
-  };
-
-  // 1) Clicks + unique visitors (clicks table; bots excluded).
-  if (db) {
-    const { data: clicks } = await db
-      .from("campaign_link_clicks")
-      .select("short_code,visitor_id")
-      .gte("occurred_at", fromISO)
-      .lte("occurred_at", toISO)
-      .eq("is_bot", false)
-      .limit(100000);
-    for (const c of (clicks as { short_code: string; visitor_id: string | null }[]) || []) {
-      const a = bump((c.short_code || "").toLowerCase());
-      if (!a) continue;
-      a.clicks += 1;
-      if (c.visitor_id) a.visitors.add(c.visitor_id);
-    }
-  }
-
-  // 2) Behaviour from analytics_events carrying a clid.
-  const events = await fetchEvents(fromISO, toISO);
-  for (const e of events) {
-    const code = clidOf(e.attribution as AttributionState | null);
-    const a = bump(code);
-    if (!a) continue;
-    if (e.visitor_id) a.visitors.add(e.visitor_id);
-    if (e.event_name === "registration_created") a.registrations += 1;
-    else if (e.event_name === "notes_checkout_started") a.checkoutStarted += 1;
-  }
-
-  // 3) Notes orders + revenue (store_orders.attribution_json).
-  if (db) {
-    const { data: orders } = await db
-      .from("store_orders")
-      .select("attribution_json,amount_paid_paise,status,created_at")
-      .gte("created_at", fromISO)
-      .lte("created_at", toISO)
-      .limit(100000);
-    const PAID_LIKE = new Set([
-      "PAID", "CONFIRMED", "PRINTING", "PACKED", "READY_TO_SHIP", "SHIPPED",
-      "DELIVERED", "FULFILLED", "COMPLETED",
-    ]);
-    for (const o of (orders as { attribution_json: AttributionState | null; amount_paid_paise: number | null; status: string }[]) || []) {
-      const code = clidOf(o.attribution_json);
-      const a = bump(code);
-      if (!a) continue;
-      if (PAID_LIKE.has((o.status || "").toUpperCase())) {
-        a.orders += 1;
-        a.ordersRevenue += (o.amount_paid_paise || 0) / 100;
-      }
-    }
-  }
-
-  // 4) Admissions / paid webinars + revenue via buyers phone↔clid, then payments.
-  const phoneToClid = new Map<string, string>();
-  if (db) {
-    const { data: buyers } = await db
-      .from("buyers")
-      .select("phone,first_touch,last_touch")
-      .limit(100000);
-    for (const b of (buyers as { phone: string; first_touch: { clid?: string } | null; last_touch: { clid?: string } | null }[]) || []) {
-      const code = (b.first_touch?.clid || b.last_touch?.clid || "").toString().trim().toLowerCase();
-      const ph = normPhone(b.phone);
-      if (code && ph && !phoneToClid.has(ph)) phoneToClid.set(ph, code);
-    }
-  }
-  if (phoneToClid.size > 0) {
-    const allPayments = await getPayments();
-    const paid = dedupePaidRows(
-      allPayments.filter((p) => {
-        if (p.deleted_at || !isPaidStatus(p.status)) return false;
-        const t = new Date(p.created_at).getTime();
-        return t >= fromMs && t <= toMs;
-      }),
-    );
-    for (const p of paid) {
-      const ph = normPhone(p.phone);
-      const code = ph ? phoneToClid.get(ph) : undefined;
-      const a = bump(code || null);
-      if (!a) continue;
-      const payer = ph || `pay:${p.id}`;
-      if (p.item_type === "course") a.paidAdmissions.add(payer);
-      else if (p.item_type === "webinar") a.paidWebinars.add(payer);
-      a.admissionsRevenue += p.amount || 0;
-    }
-
-    // 5) Leads via the same bounded phone set (leads table is huge; filter by phone).
-    if (db) {
-      const phones = [...phoneToClid.keys()];
-      const CHUNK = 300;
-      for (let i = 0; i < phones.length; i += CHUNK) {
-        const slice = phones.slice(i, i + CHUNK);
-        const { data: leads } = await db
-          .from("leads")
-          .select("phone_key,created_at")
-          .in("phone_key", slice)
-          .gte("created_at", fromISO)
-          .lte("created_at", toISO);
-        for (const l of (leads as { phone_key: string | null }[]) || []) {
-          const ph = normPhone(l.phone_key);
-          const code = ph ? phoneToClid.get(ph) : undefined;
-          const a = bump(code || null);
-          if (a) a.leads += 1;
-        }
-      }
-    }
-  }
-
-  // Finalise.
+export async function getCampaignLinkMetrics(opts: { from: string; to: string; shortCode?: string }): Promise<Map<string, LinkMetrics>> {
+  const { rows, updatedAt } = await readCampaignWindow(opts.from, opts.to);
+  const want = opts.shortCode?.trim().toLowerCase();
   const out = new Map<string, LinkMetrics>();
-  for (const [code, a] of acc) {
-    const paidAdmissions = a.paidAdmissions.size;
-    const paidWebinars = a.paidWebinars.size;
-    const paidTotal = paidAdmissions + paidWebinars;
-    const revenue = a.ordersRevenue + a.admissionsRevenue;
-    out.set(code, {
-      clicks: a.clicks,
-      uniqueVisitors: a.visitors.size,
-      registrations: a.registrations,
-      leads: a.leads,
-      checkoutStarted: a.checkoutStarted,
-      orders: a.orders,
-      ordersRevenue: Math.round(a.ordersRevenue),
-      paidAdmissions,
-      paidWebinars,
-      admissionsRevenue: Math.round(a.admissionsRevenue),
-      revenue: Math.round(revenue),
-      clickToRegistration: pct(a.registrations, a.clicks),
-      registrationToPaid: pct(paidTotal + a.orders, a.registrations),
-      clickToPaid: pct(paidTotal + a.orders, a.clicks),
-    });
+  for (const row of rows) {
+    const code = (row.short_code || "").toLowerCase();
+    if (!code || (want && code !== want)) continue;
+    out.set(code, toMetrics(row, updatedAt));
   }
   return out;
 }

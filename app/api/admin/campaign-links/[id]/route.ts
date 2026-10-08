@@ -27,7 +27,7 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
     const preset = PRESETS.has(presetRaw) ? presetRaw : "30d";
     const { from, to } = resolveRange(preset, url.searchParams.get("from"), url.searchParams.get("to"));
     const [metrics, clicks] = await Promise.all([
-      getCampaignLinkMetrics({ from, to }),
+      getCampaignLinkMetrics({ from, to, shortCode: link.short_code }),
       getRecentClicks(link.id, 50),
     ]);
     return NextResponse.json({

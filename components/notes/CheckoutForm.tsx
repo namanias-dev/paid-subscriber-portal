@@ -13,7 +13,9 @@ import DiscountCodeField from "@/components/notes/DiscountCodeField";
 interface CartJson {
   item_count: number;
   subtotal_label: string;
-  items: { name: string; qty: number; line_label: string }[];
+  subtotal_paise?: number;
+  total_paise?: number;
+  items: { name: string; qty: number; line_label: string; product_id?: string }[];
   discount_codes_enabled?: boolean;
   discount_code?: string | null;
   coupon_label?: string | null;
@@ -59,6 +61,7 @@ export default function CheckoutForm() {
   const [confirmedHash, setConfirmedHash] = useState<string | null>(null);
   const shownRef = useRef(false);
   const editedRef = useRef(false);
+  const checkoutTracked = useRef(false);
   // A locked submit guards against a double pay-button press being recorded as an
   // ICICI failure; it is released only when the gateway call itself fails.
   const submitLock = useRef(false);
@@ -135,10 +138,28 @@ export default function CheckoutForm() {
   }, []);
 
   useEffect(() => {
-    trackClient("notes_checkout_started", { cta_id: "checkout_page" });
     trackClient("notes_checkout_step_viewed", { step: "address" });
     loadCart().catch(() => trackClient("notes_checkout_api_error", { endpoint: "cart", recoverable: true }));
   }, [loadCart]);
+
+  // Once per checkout session, after the cart is known — not on every rerender.
+  useEffect(() => {
+    if (!cart || checkoutTracked.current) return;
+    try {
+      if (window.sessionStorage.getItem("nsa_notes_checkout_started")) {
+        checkoutTracked.current = true;
+        return;
+      }
+      window.sessionStorage.setItem("nsa_notes_checkout_started", "1");
+    } catch { /* storage blocked — the ref still limits this mount */ }
+    checkoutTracked.current = true;
+    trackClient("notes_checkout_started", {
+      cta_id: "checkout_page",
+      item_count: cart.item_count ?? 0,
+      cart_value_paise: cart.total_paise ?? cart.subtotal_paise ?? null,
+      product_ids: (cart.items || []).map((it) => it.product_id).filter(Boolean),
+    });
+  }, [cart]);
 
   // Back/forward cache restores a frozen page: re-check the cart, the flag and the
   // location, and never leave the Pay button stuck in "Redirecting…".

@@ -30,7 +30,7 @@ export async function GET(req: Request) {
     const search = url.searchParams.get("search");
 
     const [links, metrics] = await Promise.all([
-      listCampaignLinks({ status, source, destination_type, search }),
+      listCampaignLinks({ status, source, destination_type, search, limit: 100 }),
       getCampaignLinkMetrics({ from, to }),
     ]);
 
