@@ -245,7 +245,9 @@ export default function OrderDetail({
     paymentPending: order.status === "PAYMENT_PENDING",
   });
   const [advanced, setAdvanced] = useState(false);
-  const [history, setHistory] = useState(false);
+  const [history, setHistory] = useState(
+    () => !active && (order.past_shipments || []).some((past) => past.status === "cancelled" && past.awb),
+  );
   const [packEdit, setPackEdit] = useState(false);
   const [weight, setWeight] = useState(String(ship?.weight_grams || ""));
   const [length, setLength] = useState(String(ship?.length_cm || ""));
