@@ -52,7 +52,7 @@ export async function runAutoFulfillment(orderId: string): Promise<{ ok: boolean
     const { data: ships } = await db.from("store_shipments").select("id,status,awb,weight_grams,length_mm,width_mm,height_mm").eq("order_id", orderId);
     if ((ships || []).some((row) => shipmentAlreadyActive(row.status, row.awb))) {
       await release("ready", null);
-      return { ok: true, blocked: null, awb: (ships || []).find((row) => row.awb)?.awb || null };
+      return { ok: true, blocked: null, awb: (ships || []).find((row) => shipmentAlreadyActive(row.status, row.awb))?.awb || null };
     }
     const packed = (ships || []).find((row) => row.weight_grams && row.length_mm && row.width_mm && row.height_mm);
     let pack: { weightGrams: number; lengthCm: number; widthCm: number; heightCm: number; source: "PRODUCT_PROFILE" | "STAFF_OVERRIDE" } | null = packed

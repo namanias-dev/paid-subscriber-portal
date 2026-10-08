@@ -7,6 +7,7 @@ import { dispatchBlocked, shipmentAlreadyActive } from "@/lib/store/shipping/dis
 import { assertPackage } from "@/lib/store/shipping/quotes";
 import { canAdvanceOrder } from "@/lib/store/shipping/status";
 import { bookSelectedCourier, resolveBookingPackage, type SelectedCreated } from "@/lib/store/shipping/manualBook";
+import { planRetiredShipmentOrder } from "@/lib/store/shipping/refreshPickup";
 import type { PackageLine } from "@/lib/store/shipping/autoFulfill";
 import {
   cityConfirmationView,
@@ -307,16 +308,28 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     return NextResponse.json({ ok: false, error, ...(reason ? { reason } : {}) }, { status, headers: { "Cache-Control": "no-store" } });
   };
 
-  if (!BOOKABLE.has(order.status)) {
-    return fail(409, "Pack the order before creating a shipment.", "waiting");
-  }
-
   const { data: shipmentRows } = await db
     .from("store_shipments")
     .select("id,status,awb,weight_grams,length_mm,width_mm,height_mm,provider_payload")
     .eq("order_id", order.id)
     .order("created_at", { ascending: false });
-  const active = (shipmentRows || []).find((row) => shipmentAlreadyActive(row.status, row.awb));
+  // A pickup-stage order whose only AWB is already terminal can be booked again.
+  // A live AWB is left alone. This does not create a shipment.
+  const retiredNext = planRetiredShipmentOrder({ orderStatus: order.status, rows: shipmentRows || [] });
+  if (retiredNext) {
+    const { data: retired } = await db
+      .from("store_orders")
+      .update({ status: retiredNext, updated_at: new Date().toISOString() })
+      .eq("id", order.id)
+      .eq("status", order.status)
+      .select("id");
+    if (Array.isArray(retired) && retired.length > 0) order.status = retiredNext;
+  }
+
+  if (!BOOKABLE.has(order.status)) {
+    return fail(409, "Pack the order before creating a shipment.", "waiting");
+  }
+
   const saved = (shipmentRows || []).find((row) => row.weight_grams && row.length_mm && row.width_mm && row.height_mm) || null;
   const { data: itemRows } = await db.from("store_order_items").select("qty,weight_grams_snapshot,product_id,name_snapshot").eq("order_id", order.id);
   const lines: PackageLine[] = [];
@@ -370,6 +383,16 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   if (!bookingAttempt) return fail(503, "The booking could not be recorded, so no courier was booked. Please retry.", "waiting");
   const quoteLink = { quote_session_id: quoteSession.id, quote_option_id: quoteOption.id, booking_attempt_id: bookingAttempt.id };
 
+  // Re-read under the booking lock. A cancellation that landed while quotes were
+  // loading must not be treated as a live AWB, and a replacement must not start
+  // while the previous shipment is still the live one.
+  const { data: liveRows } = await db
+    .from("store_shipments")
+    .select("id,status,awb")
+    .eq("order_id", order.id)
+    .order("created_at", { ascending: false });
+  const liveAwb = (liveRows || []).find((row) => shipmentAlreadyActive(row.status, row.awb))?.awb || null;
+
   const result = await bookSelectedCourier({
     selected: {
       provider,
@@ -378,7 +401,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       courierId: courierId,
       ratePaise,
     },
-    activeAwb: active?.awb || null,
+    activeAwb: liveAwb,
     create: async () => {
       const created = await createProviderShipment({
         provider,

@@ -2,11 +2,13 @@ import { NextResponse } from "next/server";
 import { requireFreshPermission, getActionActor } from "@/lib/adminGuard";
 import { storeDb } from "@/lib/store/db";
 import { deliveryOnlyGuard } from "@/lib/store/fulfillmentGuard";
+import { selectActiveShipment } from "@/lib/store/shipping/activeShipment";
 import { trackDelhiveryAwb } from "@/lib/store/shipping/delhiveryApi";
 import { trackShiprocketAwb } from "@/lib/store/shipping/shiprocketApi";
 import {
   reconcilePickupFromProvider,
   makeSupabasePickupIO,
+  planRetiredShipmentOrder,
   toCourierProvider,
   type RefreshShipment,
 } from "@/lib/store/shipping/refreshPickup";
@@ -43,9 +45,35 @@ export async function POST(_req: Request, { params }: { params: { id: string } }
     .select("id,provider,awb,status,pickup_state,provider_payload")
     .eq("order_id", params.id)
     .order("created_at", { ascending: false });
-  const shipment = (shipmentRows || []).find((row) => row.status !== "cancelled" && row.status !== "failed") || null;
+  const shipment = selectActiveShipment(shipmentRows || []);
   if (!shipment) {
-    return NextResponse.json({ ok: false, error: "No active courier shipment for this order." }, { status: 404, headers: NO_STORE });
+    const next = planRetiredShipmentOrder({ orderStatus: order.status, rows: shipmentRows || [] });
+    if (!next) {
+      return NextResponse.json({ ok: false, error: "No active courier shipment for this order." }, { status: 404, headers: NO_STORE });
+    }
+    const { data: moved } = await db
+      .from("store_orders")
+      .update({ status: next, updated_at: new Date().toISOString() })
+      .eq("id", order.id)
+      .eq("status", order.status)
+      .select("id");
+    if (!Array.isArray(moved) || moved.length === 0) {
+      return NextResponse.json({ ok: true, verified: true, changed: false, order_status: order.status, pickup_state: null, basis: "shipment_cancelled", note: "stale" }, { headers: NO_STORE });
+    }
+    await db.from("store_order_events").insert({
+      order_id: order.id,
+      event: "courier_pickup_synced",
+      from_status: order.status,
+      to_status: next,
+      actor_type: "admin",
+      actor_id: actor?.id ?? null,
+      actor_name: actor?.name ?? null,
+      payload_json: { basis: "shipment_cancelled", source: "MANUAL_REFRESH", cancel_shipment: false, reason: "retired_shipment_no_active_awb" },
+    });
+    return NextResponse.json(
+      { ok: true, verified: true, changed: true, order_status: next, pickup_state: "CANCELLED", basis: "shipment_cancelled", note: null },
+      { headers: NO_STORE },
+    );
   }
   if (!shipment.awb || shipment.provider === "manual") {
     return NextResponse.json({ ok: false, error: "No courier AWB to verify for this order." }, { status: 409, headers: NO_STORE });

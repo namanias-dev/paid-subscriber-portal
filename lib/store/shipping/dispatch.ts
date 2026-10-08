@@ -2,6 +2,7 @@
  * Shipment booking decisions. A paid order is never booked unless billable
  * writes are explicitly authorized. Recording a packed size does not book one.
  */
+import { isInactiveShipmentStatus } from "./activeShipment";
 import { shippingWritesAuthorized } from "./config";
 import { classifyTrackingGap } from "./reconcile";
 
@@ -9,6 +10,7 @@ const ACTIVE = new Set(["pending", "created", "manifested", "picked_up", "in_tra
 
 export function shipmentAlreadyActive(status: string | null | undefined, awb: string | null | undefined): boolean {
   if (!awb) return false;
+  if (isInactiveShipmentStatus(status)) return false;
   return ACTIVE.has(status || "");
 }
 

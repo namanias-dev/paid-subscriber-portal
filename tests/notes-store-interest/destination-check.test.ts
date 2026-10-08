@@ -358,6 +358,22 @@ test("a provider city that names the PIN's own district asks for confirmation in
   assert.equal(unrelated.verdict, "fail");
 });
 
+test("Gurugram and Gurgaon are the same city when PIN and state already match", () => {
+  const decision = classifyCourierDestination({
+    order: { city: "Gurugram", state: "Haryana", pincode: "122012" },
+    provider: { city: "Gurgaon", state: "Haryana", pincode: "122012" },
+  });
+  assert.equal(decision.verdict, "pass");
+  assert.equal(decision.reason, "match");
+  const reversed = evaluateProviderReadback({
+    provider: "shiprocket",
+    order: { city: "Gurugram", state: "Haryana", pincode: "122012" },
+    stored: { pin: "122012", city: "Gurgaon", state: "Haryana", phoneStored: true, read: true },
+    sentPhone: "9810012345",
+  });
+  assert.deepEqual(reversed, { addressMismatch: false, cityConfirm: false, unverified: false });
+});
+
 test("#1001 read-back with a different PIN and state is a hard mismatch for both providers", () => {
   for (const provider of ["delhivery", "shiprocket"] as const) {
     const decision = evaluateProviderReadback({

@@ -3,6 +3,7 @@ import { storeDb } from "@/lib/store/db";
 import { courierWebhookKey } from "@/lib/store/shipping/config";
 import { canAdvanceOrder, canAdvanceShipment, orderStatusFromShipment } from "@/lib/store/shipping/status";
 import { parseCourierWebhook, scanAlreadyRecorded, webhookAuthorized } from "@/lib/store/shipping/webhook";
+import { isInactiveShipmentStatus } from "@/lib/store/shipping/activeShipment";
 import { makeSupabasePickupIO, reconcilePickupFromProvider, toCourierProvider } from "@/lib/store/shipping/refreshPickup";
 
 export const dynamic = "force-dynamic";
@@ -123,7 +124,7 @@ export async function POST(req: Request) {
         trackingStatus: event.rawStatus,
         pickupStatusRaw: event.rawStatus,
         pickupState: (shipment.pickup_state as never) ?? "NOT_REQUESTED",
-        active: shipment.status !== "cancelled" && shipment.status !== "failed",
+        active: !isInactiveShipmentStatus(shipment.status),
       },
       event.rawStatus,
       event.remark ?? null,

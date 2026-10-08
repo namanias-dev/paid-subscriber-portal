@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireFreshPermission, requireFreshSuperAdmin, requireStoreOrderRead } from "@/lib/adminGuard";
 import { storeDb } from "@/lib/store/db";
 import { staffPaymentLabel } from "@/lib/store/orders";
+import { isInactiveShipmentStatus } from "@/lib/store/shipping/activeShipment";
 import { fulfilmentAttention } from "@/lib/store/shipping/dispatch";
 import { issueCategoryLabel, issueStatusLabel, OPEN_ISSUE_STATUSES } from "@/lib/store/issues";
 import { actionRequiredReasons, pickupFailedActivity, sortAdminOrders } from "@/lib/store/adminConsole";
@@ -300,7 +301,7 @@ export async function GET(req: Request) {
       const history = shipRowsByOrder.get(s.order_id) || [];
       history.push(s);
       shipRowsByOrder.set(s.order_id, history);
-      const inactive = s.status === "cancelled" || s.status === "failed";
+      const inactive = isInactiveShipmentStatus(s.status);
       if (inactive) {
         const payload = (s.provider_payload && typeof s.provider_payload === "object" ? s.provider_payload : {}) as {
           cancellation_reason?: string;
@@ -467,6 +468,7 @@ export async function GET(req: Request) {
       paymentPending: o.status === "PAYMENT_PENDING",
       cityConfirm: !ship && cityConfirmByOrder.has(o.id),
       invoiceStatus,
+      shipmentRetired: !ship && (pastByOrder.get(o.id) || []).some((past) => past.status === "cancelled"),
     });
     const address = o.shipping_address_id ? addrMap.get(o.shipping_address_id) || null : null;
     const customerLocation = method === "ACADEMY_PICKUP" ? readCustomerLocation(o.customer_location_snapshot) : null;

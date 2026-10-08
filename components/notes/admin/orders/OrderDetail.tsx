@@ -200,7 +200,7 @@ function Field({ label, value }: { label: string; value: string | null | undefin
   return (
     <div>
       <dt className="text-[11px] font-semibold uppercase tracking-wide text-[var(--ca-navy)]/45">{label}</dt>
-      <dd className="mt-1 text-sm text-[var(--ca-navy)]">{value || "—"}</dd>
+      <dd className="mt-1 break-words text-sm text-[var(--ca-navy)]">{value || "—"}</dd>
     </div>
   );
 }
@@ -245,7 +245,9 @@ export default function OrderDetail({
     paymentPending: order.status === "PAYMENT_PENDING",
   });
   const [advanced, setAdvanced] = useState(false);
-  const [history, setHistory] = useState(false);
+  const [history, setHistory] = useState(
+    () => !active && (order.past_shipments || []).some((past) => past.status === "cancelled" && past.awb),
+  );
   const [packEdit, setPackEdit] = useState(false);
   const [weight, setWeight] = useState(String(ship?.weight_grams || ""));
   const [length, setLength] = useState(String(ship?.length_cm || ""));
@@ -282,6 +284,8 @@ export default function OrderDetail({
   const [toast, setToast] = useState<string | null>(null);
   const [collectRequest, setCollectRequest] = useState(0);
   const [pickupModal, setPickupModal] = useState<null | "schedule" | "reschedule">(null);
+  const [labelRetry, setLabelRetry] = useState(false);
+  const [confirmCourierChange, setConfirmCourierChange] = useState(false);
 
   useEffect(() => {
     setIssueStatus(order.issue?.status || "OPEN");
@@ -349,8 +353,29 @@ export default function OrderDetail({
   async function printLabel() {
     const res = await fetch(`/api/admin/notes/orders/${order.id}/label`, { cache: "no-store" });
     const json = await res.json();
-    if (json.ok && typeof json.url === "string" && /^https?:\/\//.test(json.url)) window.open(json.url, "_blank", "noopener");
-    else setToast(json.error || "No label is stored for this order.");
+    if (json.ok && typeof json.url === "string" && /^https?:\/\//.test(json.url)) {
+      setLabelRetry(false);
+      window.open(json.url, "_blank", "noopener");
+      return;
+    }
+    if (json.code === "LABEL_FAILED") {
+      setLabelRetry(true);
+      setToast("Label generation failed");
+      return;
+    }
+    setToast(json.error || "No label is stored for this order.");
+  }
+
+  function changeCourier() {
+    act(
+      () => fetch(`/api/admin/notes/orders/${order.id}/change-courier`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ confirm: "CHANGE_COURIER" }),
+      }),
+      "Shipment cancelled. Compare couriers to book a new one.",
+    );
+    setConfirmCourierChange(false);
   }
 
   async function refreshTrack() {
@@ -378,6 +403,8 @@ export default function OrderDetail({
   const vol = volumetricGrams(Number(length), Number(width), Number(height));
   const next = nextPreparationStatus(order.status, method);
   const reasons = order.action_reasons || [];
+  const previousCancelled = (order.past_shipments || []).find((past) => past.status === "cancelled" && past.awb) || null;
+  const pickupCancelled = Boolean(active && ship?.pickup_state === "CANCELLED");
 
   const advanceLabel = staffAdvanceLabelFor(order.status, method);
   const packing = next === "PACKED" || next === "READY_FOR_COLLECTION";
@@ -427,7 +454,7 @@ export default function OrderDetail({
           </div>
         </header>
 
-        <div className="space-y-3 px-4 py-4">
+        <div className="min-w-0 space-y-3 overflow-x-hidden px-4 py-4">
           {order.attempts && order.attempts.length > 1 && (
             <section className="rounded-2xl bg-white p-4">
               <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--ca-gold-dark)]">Payment attempts</p>
@@ -578,7 +605,7 @@ export default function OrderDetail({
             <section className="rounded-2xl bg-white p-4 ns-elev-1">
               <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--ca-gold-dark)]">Active shipment</p>
               <h2 className="mt-1 font-heading text-xl font-bold text-[var(--ca-navy)]">{ship.courier || ship.provider}</h2>
-              <dl className="mt-4 grid grid-cols-2 gap-4">
+              <dl className="mt-4 grid min-w-0 grid-cols-2 gap-4">
                 <Field label="AWB" value={ship.awb} />
                 <Field label="Price" value={ship.rate_paise ? formatPaise(ship.rate_paise) : null} />
                 <Field label="Status" value={canonicalShipmentStatusLabel(ship.status, ship.tracking_activity)} />
@@ -591,10 +618,16 @@ export default function OrderDetail({
                 <Field label="Reference" value={ship.pickup_reference} />
                 <Field label="Destination" value={address ? `${address.city} · ${address.pincode}` : null} />
               </dl>
+              {pickupCancelled && (
+                <div className="mt-4 rounded-2xl border border-amber-300 bg-amber-50 p-3">
+                  <p className="text-sm font-semibold text-amber-950">PICKUP CANCELLED · ACTION REQUIRED</p>
+                  <p className="mt-1 text-sm text-amber-950/80">The AWB is still valid. Reschedule this pickup, or change courier to book a new shipment.</p>
+                </div>
+              )}
               <div className="mt-4 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
-                {canManage && ship.has_label && (
+                {canManage && ship.awb && (
                   <button type="button" onClick={() => void printLabel()} className="min-h-11 rounded-full border border-[var(--ca-navy)]/15 px-4 text-sm font-semibold text-[var(--ca-navy)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2">
-                    Print Label
+                    {labelRetry ? "Retry label" : ship.has_label ? "Download Label" : "Generate Label"}
                   </button>
                 )}
                 {canManage && (
@@ -608,8 +641,18 @@ export default function OrderDetail({
                 </button>
                 )}
                 {canManage && order.status === "READY_FOR_PICKUP" && (
-                <button type="button" onClick={() => setPickupModal("schedule")} className="min-h-11 rounded-full bg-[var(--ca-navy)] px-4 text-sm font-semibold text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2">
-                  Schedule courier pickup
+                <button type="button" onClick={() => setPickupModal(pickupCancelled ? "reschedule" : "schedule")} className="min-h-11 rounded-full bg-[var(--ca-navy)] px-4 text-sm font-semibold text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2">
+                  {pickupCancelled ? "Reschedule pickup" : "Schedule courier pickup"}
+                </button>
+                )}
+                {canManage && pickupCancelled && !confirmCourierChange && (
+                <button type="button" onClick={() => setConfirmCourierChange(true)} className="min-h-11 rounded-full border border-[var(--ca-navy)]/15 px-4 text-sm font-semibold text-[var(--ca-navy)]">
+                  Change courier
+                </button>
+                )}
+                {canManage && pickupCancelled && confirmCourierChange && (
+                <button type="button" disabled={busy} onClick={changeCourier} className="min-h-11 rounded-full border border-red-300 px-4 text-sm font-semibold text-red-900">
+                  Cancel this AWB and compare
                 </button>
                 )}
                 {canManage && order.status === "PICKUP_SCHEDULED" && (
@@ -623,16 +666,31 @@ export default function OrderDetail({
             </section>
           )}
 
-          {canManage && !isPickup && !active && (order.status === "PACKED" || order.status === "READY_FOR_PICKUP") && (
+          {canManage && !isPickup && !active && (order.status === "PACKED" || order.status === "READY_FOR_PICKUP" || order.status === "PICKUP_SCHEDULED") && (
             <section className="rounded-2xl bg-white p-4">
-              <p className="font-semibold text-[var(--ca-navy)]">{order.city_confirmation ? "Courier city needs confirmation" : "Courier not selected"}</p>
-              <p className="mt-1 text-sm text-[var(--ca-navy)]/70">
-                {order.city_confirmation
-                  ? `${order.city_confirmation.courier}: ${order.city_confirmation.courier_destination}`
-                  : "Compare live prices, choose one courier, then confirm the booking."}
-              </p>
+              {previousCancelled ? (
+                <>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--ca-gold-dark)]">Delivery</p>
+                  <h2 className="mt-1 font-heading text-xl font-bold text-[var(--ca-navy)]">Shipment cancelled</h2>
+                  <dl className="mt-3 grid min-w-0 grid-cols-2 gap-3">
+                    <Field label="Previous courier" value={previousCancelled.courier || previousCancelled.provider} />
+                    <Field label="Previous AWB" value={previousCancelled.awb} />
+                    <Field label="Status" value="Cancelled" />
+                    <Field label="Next action" value="Select a new courier" />
+                  </dl>
+                </>
+              ) : (
+                <>
+                  <p className="font-semibold text-[var(--ca-navy)]">{order.city_confirmation ? "Courier city needs confirmation" : "Courier not selected"}</p>
+                  <p className="mt-1 text-sm text-[var(--ca-navy)]/70">
+                    {order.city_confirmation
+                      ? `${order.city_confirmation.courier}: ${order.city_confirmation.courier_destination}`
+                      : "Compare live prices, choose one courier, then confirm the booking."}
+                  </p>
+                </>
+              )}
               <button type="button" onClick={onCompare} className="mt-3 min-h-11 rounded-full bg-[var(--ca-navy)] px-4 text-sm font-semibold text-white">
-                Compare couriers
+                Compare Couriers
               </button>
             </section>
           )}
@@ -816,7 +874,7 @@ export default function OrderDetail({
                     <li key={past.awb || past.courier} className="text-sm text-[var(--ca-navy)]/70">
                       <p className="font-semibold text-[var(--ca-navy)]">{past.courier || past.provider}</p>
                       <p className="font-mono text-xs">{past.awb}</p>
-                      <p>{past.status === "cancelled" ? "CANCELLED / DO NOT USE" : past.status}{past.reason && past.status !== "cancelled" ? ` · ${past.reason.replaceAll("_", " ")}` : ""}</p>
+                      <p>{past.status === "cancelled" ? "Cancelled shipment" : past.status}{past.reason && past.status !== "cancelled" ? ` · ${past.reason.replaceAll("_", " ")}` : ""}</p>
                     </li>
                   ))}
                 </ul>

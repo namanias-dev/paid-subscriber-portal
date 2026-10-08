@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireFreshPermission } from "@/lib/adminGuard";
 import { storeDb } from "@/lib/store/db";
+import { isInactiveShipmentStatus, selectActiveShipment } from "@/lib/store/shipping/activeShipment";
 import { fetchExistingLabel } from "@/lib/store/shipping/book";
 import { shiprocketBaseUrl } from "@/lib/store/shipping/config";
 import { shiprocketToken } from "@/lib/store/shipping/shiprocketApi";
@@ -27,10 +28,11 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
     .eq("order_id", params.id)
     .order("created_at", { ascending: false });
   const rows = shipmentRows || [];
-  const shipment = rows.find((row) => row.status !== "cancelled" && row.status !== "failed") || null;
-  if (!shipment && rows.length) {
+  const shipment = selectActiveShipment(rows);
+  const historical = rows.some((row) => isInactiveShipmentStatus(row.status) && (row.awb || row.label_r2_key));
+  if (!shipment && historical) {
     return NextResponse.json(
-      { ok: false, error: "This label was cancelled. Do not use it." },
+      { ok: false, error: "This label was cancelled. Do not use it.", code: "LABEL_HISTORICAL" },
       { status: 410, headers: { "Cache-Control": "no-store" } },
     );
   }
@@ -73,7 +75,10 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
   const provider = shipment?.provider === "shiprocket" || shipment?.provider === "delhivery" ? shipment.provider : "manual";
   const label = resolved?.startsWith("http") ? { url: resolved } : await fetchExistingLabel({ provider, awb: shipment?.awb, storedLabelUrl: resolved });
   if (!label.url) {
-    return NextResponse.json({ ok: false, error: "No label is stored for this order." }, { status: 404, headers: { "Cache-Control": "no-store" } });
+    return NextResponse.json(
+      { ok: false, error: "Label generation failed", code: "LABEL_FAILED" },
+      { status: 502, headers: { "Cache-Control": "no-store" } },
+    );
   }
   return NextResponse.json({ ok: true, url: label.url }, { headers: { "Cache-Control": "no-store" } });
 }

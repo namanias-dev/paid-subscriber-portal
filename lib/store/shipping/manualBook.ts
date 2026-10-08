@@ -1,6 +1,7 @@
 /**
  * One courier, chosen by staff. This module never picks a second courier.
  */
+import { isInactiveShipmentStatus } from "./activeShipment";
 import { resolveAutoPackage, type PackageLine } from "./autoFulfill";
 
 export interface SelectedCourier {
@@ -66,7 +67,7 @@ export function resolveBookingPackage(input: {
 
 /** Cancelled rows stay in history. Staff print only the live shipment. */
 export function printableShipment<T extends { status: string | null; awb: string | null }>(rows: T[]): T | null {
-  return rows.find((row) => row.awb && row.status !== "cancelled" && row.status !== "failed") || null;
+  return rows.find((row) => row.awb && !isInactiveShipmentStatus(row.status)) || null;
 }
 
 export function packageSurvivesCancellation<T extends { weight_grams: number | null; length_mm: number | null; width_mm: number | null; height_mm: number | null }>(row: T): T {

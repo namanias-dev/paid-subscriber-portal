@@ -83,6 +83,18 @@ function mentionsShipmentScope(s: string): boolean {
 }
 
 /**
+ * The carrier status itself says the shipment/AWB is cancelled.
+ * "Cancelled", "Canceled" and "Cancellation Requested" are Case B.
+ * Anything that names the pickup ("Pickup Cancelled") is not — that stays Case A.
+ */
+function statusIsShipmentCancellation(rawStatus: string | null | undefined): boolean {
+  const s = clean(rawStatus);
+  if (!s || s.includes("pickup")) return false;
+  if (mentionsShipmentScope(s)) return true;
+  return s.includes("cancel");
+}
+
+/**
  * Map a provider pickup status/remark to the normalized lifecycle. Provider strings
  * stay here; callers only ever see `PickupState` + `shipmentCancelled`.
  */
@@ -109,8 +121,9 @@ export function normalizeCourierPickupStatus(input: {
     return { pickupState: "PICKED_UP", shipmentCancelled: false, reason };
   }
 
-  // Case B — the shipment/AWB itself is cancelled.
-  if (mentionsShipmentScope(text)) {
+  // Case B — the shipment/AWB itself is cancelled. Judge the status, not a remark
+  // that merely mentions a pickup, so "Cancelled" is not mistaken for Case A.
+  if (statusIsShipmentCancellation(input.rawStatus) || mentionsShipmentScope(text)) {
     return { pickupState: "CANCELLED", shipmentCancelled: true, reason };
   }
 
