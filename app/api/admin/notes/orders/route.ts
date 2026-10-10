@@ -6,6 +6,7 @@ import { isInactiveShipmentStatus } from "@/lib/store/shipping/activeShipment";
 import { fulfilmentAttention } from "@/lib/store/shipping/dispatch";
 import { issueCategoryLabel, issueStatusLabel, OPEN_ISSUE_STATUSES } from "@/lib/store/issues";
 import { actionRequiredReasons, pickupFailedActivity, sortAdminOrders } from "@/lib/store/adminConsole";
+import { missedDelhiveryPickup } from "@/lib/store/shipping/missedPickup";
 import { shippingWritesAuthorized } from "@/lib/store/shipping/config";
 import { BUSINESS_CHANNELS, orderMarketingSummary, type StoredNotesAttribution } from "@/lib/analytics/notesCommerce";
 import { gatewayChargesForStaff } from "@/lib/store/payments/eazypayAmounts";
@@ -233,6 +234,8 @@ export async function GET(req: Request) {
       pickup_date: string | null;
       pickup_status: string | null;
       tracking_activity: string | null;
+      tracking_status: string | null;
+      created_at: string | null;
       tracking_event_at: string | null;
       tracking_location: string | null;
       address_mismatch: boolean;
@@ -352,6 +355,7 @@ export async function GET(req: Request) {
           pickup_status?: string;
           pickup_reattempt_date?: string;
           tracking_activity?: string;
+          tracking_status?: string;
           tracking_event_at?: string;
           tracking_location?: string;
           address_mismatch?: boolean;
@@ -374,6 +378,8 @@ export async function GET(req: Request) {
           pickup_date: (s as { pickup_confirmed_date?: string | null }).pickup_confirmed_date || payload.pickup_reattempt_date || payload.pickup_date || null,
           pickup_status: payload.pickup_status || null,
           tracking_activity: payload.tracking_activity || null,
+          tracking_status: payload.tracking_status || null,
+          created_at: s.created_at || null,
           tracking_event_at: payload.tracking_event_at || null,
           tracking_location: payload.tracking_location || null,
           address_mismatch: Boolean(payload.address_mismatch || payload.do_not_handoff),
@@ -457,11 +463,22 @@ export async function GET(req: Request) {
     const invoiceOverdue = paid && !storedInvoice && Date.now() - Date.parse(String(o.paid_at)) > INVOICE_GRACE_MS;
     const invoiceStatus = storedInvoice || (paid ? (invoiceOverdue ? "MISSING" : "PENDING") : null);
     const method = orderMethod(o);
+    const pickupNotCollected = ship
+      ? missedDelhiveryPickup({
+          provider: ship.provider,
+          shipmentStatus: ship.status,
+          trackingStatus: ship.tracking_status,
+          pickupScheduledAt: ship.pickup_scheduled_at,
+          createdAt: ship.created_at,
+          orderStatus: o.status,
+        })
+      : false;
     const reasons = actionRequiredReasons({
       status: o.status,
       method,
       awb: ship?.awb,
       pickupFailed: pickupFailedActivity(ship?.tracking_activity),
+      pickupNotCollected,
       pickupState: ship?.pickup_state ?? null,
       addressMismatch: Boolean(ship?.address_mismatch),
       openIssue: Boolean(issue?.open),
@@ -504,7 +521,7 @@ export async function GET(req: Request) {
       customer_location: customerLocation,
       items: itemsByOrder.get(o.id) || [],
       ops,
-      shipment: ship,
+      shipment: ship ? { ...ship, pickup_not_collected: pickupNotCollected } : null,
       city_confirmation: cityConfirmByOrder.get(o.id) || null,
       past_shipments: pastByOrder.get(o.id) || [],
       attention: fulfilmentAttention({

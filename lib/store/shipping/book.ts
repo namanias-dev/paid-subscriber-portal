@@ -5,7 +5,7 @@
  */
 import { delhiveryBaseUrl, delhiveryPickupLocation, delhiveryToken, shiprocketBaseUrl, shiprocketPickupLocation } from "./config";
 import { delhiveryCreateBody, dispatchBlocked, type DelhiveryShipmentDraft } from "./dispatch";
-import { delhiveryPackingSlipPath, parseDelhiveryPackage } from "./delhiveryApi";
+import { delhiveryCancelAccepted, delhiveryPackingSlipPath, parseDelhiveryPackage } from "./delhiveryApi";
 import { aliasesForPin, evaluateProviderReadback } from "./destinationCheck";
 import { shiprocketAdhocDraft, shiprocketToken } from "./shiprocketApi";
 
@@ -564,7 +564,8 @@ export async function cancelProviderShipment(
     body: JSON.stringify({ waybill: awb, cancellation: "true" }),
     signal: AbortSignal.timeout(20_000),
   });
-  if (!res.ok) throw new Error("Delhivery cancellation was not accepted.");
+  const body = await readJson(res);
+  if (!delhiveryCancelAccepted(res.status, body)) throw new Error("Delhivery cancellation was not accepted.");
 }
 
 /** Delhivery reverse pickup. Shiprocket returns are not posted from this deploy. */

@@ -73,6 +73,7 @@ export const ISSUE_HINT: Record<string, string> = {
   "Package required": "Weigh and enter final parcel dimensions",
   "Courier city confirmation": "Confirm the courier's destination city",
   "Shipment needs attention": "Review the shipment address",
+  "Pickup not collected": "Delhivery did not collect this parcel. Cancel the AWB and book again.",
   "Pickup needs attention": "Pickup wasn't completed · review pickup",
   "Delivery exception": "Courier reported a delivery exception",
   "Return needs attention": "Return action required",
