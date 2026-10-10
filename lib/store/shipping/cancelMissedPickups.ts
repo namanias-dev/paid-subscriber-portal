@@ -14,7 +14,8 @@ import {
   missedDelhiveryPickup,
   type MissedPickupInput,
 } from "./missedPickup";
-import { makeSupabasePickupIO, reconcilePickupFromProvider, type PickupState } from "./refreshPickup";
+import type { PickupState } from "./pickup";
+import { makeSupabasePickupIO, reconcilePickupFromProvider } from "./refreshPickup";
 
 export interface MissedPickupCandidate extends MissedPickupInput {
   orderId: string;
