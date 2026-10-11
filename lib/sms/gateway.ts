@@ -5,6 +5,7 @@
  */
 import { SMS_API_BASE_URL, SMS_DLR_BASE_URL, SMS_CREDIT_BASE_URL, SMS_DEFAULT_ROUTE, SMS_DEFAULT_SENDER_ID, smsNumberFormat } from "./config";
 import { guardOutboundBody } from "./sendGuard";
+import { matchesNotesApprovedSkeleton } from "./notesApproved";
 import type { SmsLogStatus } from "./types";
 
 export interface GatewaySendInput {
@@ -69,6 +70,9 @@ export async function sendViaGateway(input: GatewaySendInput): Promise<GatewayRe
   if (!guard.ok) {
     return { ok: false, status: "FAILED", messageId: null, response: { error: `blocked:${guard.reason}` } };
   }
+  if (matchesNotesApprovedSkeleton(input.templateId, input.message) === false) {
+    return { ok: false, status: "FAILED", messageId: null, response: { error: "blocked:notes_approved_text_mismatch" } };
+  }
 
   const authKey = process.env.SMS_API_AUTH_KEY;
   const username = process.env.SMS_API_USERNAME;
@@ -118,6 +122,10 @@ export async function sendBulkViaGateway(input: GatewayBulkInput): Promise<Gatew
   const guard = guardOutboundBody(input.message);
   if (!guard.ok) {
     return { ok: false, status: "FAILED", messageId: null, response: { error: `blocked:${guard.reason}` } };
+  }
+  // Notes approved templates are per-order; one body is never right for many numbers.
+  if (matchesNotesApprovedSkeleton(input.templateId, input.message) !== null) {
+    return { ok: false, status: "FAILED", messageId: null, response: { error: "blocked:notes_template_bulk" } };
   }
 
   const authKey = process.env.SMS_API_AUTH_KEY;

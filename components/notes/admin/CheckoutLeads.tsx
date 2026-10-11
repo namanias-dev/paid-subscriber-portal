@@ -5,6 +5,7 @@ import { formatPaise } from "@/lib/store/money";
 import { businessChannel } from "@/lib/analytics/notesCommerce";
 import type { AttributionTouch } from "@/lib/attribution";
 import { leadPriority, maskPhone, type CheckoutStage, type SalesStatus } from "@/lib/store/checkoutLeadLogic";
+import NotesSmsSection, { LEAD_SMS_TEMPLATES } from "@/components/notes/admin/NotesSmsSection";
 
 interface LeadRow {
   id: string;
@@ -176,6 +177,9 @@ export default function CheckoutLeads() {
                 {open.sales_note && <p className="mt-2">{open.sales_note}</p>}
               </div>
             )}
+            <div className="mt-4">
+              <NotesSmsSection key={open.id} target={{ checkoutLeadId: open.id }} templates={LEAD_SMS_TEMPLATES} />
+            </div>
           </div>
         </aside>
       )}

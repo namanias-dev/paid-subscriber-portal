@@ -39,7 +39,7 @@
 | Courier rate quote | BUILT BUT HUMAN/EXTERNAL VERIFICATION PENDING | Admin compare. Delhivery read API verified. Shiprocket panel login is not an API user (403). |
 | Shipping aggregator writes | OUT OF CURRENT PHASE | Label, AWB creation, and pickup stay off. |
 | Real Eazypay transaction | **DEFERRED BY OWNER** | Checklist preserved; not executed |
-| Notifications / DLT send | OUT OF CURRENT PHASE | Templates drafted, **not submitted**; `notes_store_sms` off |
+| Notifications / DLT send | SEE "Notes SMS (2026-10-11)" | 5 DLT-approved templates imported; details in `NOTES_SMS.md` |
 | Shipping aggregator | OUT OF CURRENT PHASE | See courier rate quote. `notes_store_shiprocket` does not create shipments. |
 | Discount codes | LIVE | Admin `/admin/notes/discounts`. `notes_store_coupons` is on after production smoke. A slot is reserved at Pay, not on apply. No live NOTES500 is seeded. The smoke code was archived. |
 | Bundles composition UI | OUT OF CURRENT PHASE | Schema `store_bundle_items`; limited Phase 1 UX |
@@ -226,3 +226,14 @@ Customers can choose **Delivery** or **Pick up from academy** (Naman Sharma IAS 
 | SMS for ready/collected | INERT | Hooks exist; no DLT template; staff notify by WhatsApp/call |
 | Real Eazypay pickup payment | NOT RUN BY AUTOMATION | Automated QA never pays; local E2E stubs the gateway |
 
+
+## Notes SMS (2026-10-11)
+
+The five DLT-approved Notes templates (tracker rows 6–10) are in Mission Control → Notes Store with exact text, ids, types and slot-ordered variables. Design and rules: `NOTES_SMS.md`. Migration: `2026-10-11-notes-sms-approved-templates.sql`. Tests: `tests/notes-sms/`.
+
+| Item | Status | Notes |
+|------|--------|-------|
+| Order confirmed / Payment pending | BUILT | Server-side plan + re-validation, idempotent, cutover on enable |
+| Checkout incomplete / New lead promo / NOTES500 | HELD | ’ (U+2019) is outside GSM-7. Owner must confirm the registered character with the DLT agency. NOTES500 also needs a valid code |
+| New lead promo consent | BLOCKED | Academy leads need `consent_status = explicit` |
+| Shipped / ready / collected SMS | INERT | No approved template |

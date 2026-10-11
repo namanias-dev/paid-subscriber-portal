@@ -96,5 +96,20 @@
       "enable": "npm run release:pickup-enable",
       "disable": "npm run release:pickup-disable"
     }
+  },
+  "notesSms": {
+    "asOf": "2026-10-11",
+    "doc": "docs/notes-store/NOTES_SMS.md",
+    "source": "Naman_IAS_Notes_SMS_Template_Approval_Tracker Final.xlsx rows 6-10",
+    "migration": "supabase/migrations/2026-10-11-notes-sms-approved-templates.sql",
+    "flag": "notes_store_sms",
+    "templates": {
+      "NOTES_ORDER_CONFIRMED_01": { "dlt": "1777179058711611732", "state": "sendable" },
+      "NOTES_PAYMENT_PENDING_01": { "dlt": "1777179057396343991", "state": "sendable" },
+      "NOTES_CHECKOUT_INCOMPLETE_01": { "dlt": "1777179058827172599", "state": "held_approved_text_not_gsm7" },
+      "NOTES_NEW_LEAD_PROMO_01": { "dlt": "1777179057434102445", "state": "held_approved_text_not_gsm7_and_consent" },
+      "NOTES_DISCOUNT_NOTES500_01": { "dlt": "1777179057448502622", "state": "held_approved_text_not_gsm7_and_code_invalid" }
+    },
+    "tests": "tests/notes-sms"
   }
 }

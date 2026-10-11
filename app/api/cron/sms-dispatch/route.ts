@@ -82,6 +82,7 @@ async function run(req: Request) {
   const istHour = Math.floor(istMins / 60);
   const today = istDateKey(now);
   const result: Record<string, number> = {};
+  const notesState: Record<string, string> = {};
 
   try {
     // Cheap promo peek first — skip claim/enrolment when idle. Payment + webinar
@@ -296,6 +297,19 @@ async function run(req: Request) {
       }
     } catch { /* non-fatal */ }
 
+    // ---- Notes Store automations (approved DLT templates; each gated by flag,
+    // rule, cutover and template hold — see lib/store/sms/automation) ----
+    try {
+      const { runNotesSmsAutomations } = await import("@/lib/store/sms/automation");
+      const { runNotesNewLeadPromo } = await import("@/lib/sms/notesLeadPromo");
+      const notes = [...(await runNotesSmsAutomations(now)), await runNotesNewLeadPromo(now)];
+      for (const job of notes) {
+        result[`${job.trigger}_submitted`] = job.submitted;
+        result[`${job.trigger}_failed`] = job.failed;
+        if (job.reason) notesState[job.trigger] = job.reason;
+      }
+    } catch { /* non-fatal */ }
+
     // ---- delivery-report PULL: promote open SENT logs via JustGoSMS http-dlr.php ----
     try {
       const dlr = await pollDeliveryStatuses({ sinceDays: 3, limit: 500 });
@@ -321,7 +335,7 @@ async function run(req: Request) {
       result.promo_failed = 0;
     }
 
-    return NextResponse.json({ ok: true, istHour, result, ts: Date.now() });
+    return NextResponse.json({ ok: true, istHour, result, notes: notesState, ts: Date.now() });
   } catch (e) {
     return NextResponse.json({ ok: false, error: (e as Error).message }, { status: 500 });
   }

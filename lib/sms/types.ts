@@ -116,6 +116,11 @@ export interface SmsSettings {
   t19FallbackAllRegistered: boolean;
   /** Rupee cost per SMS segment (1 credit). Manually set in Mission Control; used for cost estimates. */
   costPerSms: number;
+  /**
+   * Notes automation trigger → ISO instant it was last switched on. Automations
+   * only act on orders/leads after this, so enabling never backfills history.
+   */
+  notesCutover?: Record<string, string>;
   updated_at?: string;
   updated_by?: string | null;
 }

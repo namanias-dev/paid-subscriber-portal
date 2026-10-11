@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { formatPaise } from "@/lib/store/money";
 import {
   PRIMARY_LABEL,
@@ -216,6 +216,7 @@ export default function OrderDetail({
   onCompare,
   act,
   presentation = "drawer",
+  extra,
 }: {
   order: AdminOrder;
   busy: boolean;
@@ -227,6 +228,8 @@ export default function OrderDetail({
   onCompare: () => void;
   act: (fn: () => Promise<Response>, ok: string) => void;
   presentation?: "drawer" | "page";
+  /** Extra sections rendered after the order sections (page view). */
+  extra?: ReactNode;
 }) {
   const method = orderMethod(order);
   const isPickup = method === "ACADEMY_PICKUP";
@@ -1001,6 +1004,7 @@ export default function OrderDetail({
               </div>
             )}
           </section>}
+          {extra}
         </div>
 
         {(canManage || toast) && (

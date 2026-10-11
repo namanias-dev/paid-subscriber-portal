@@ -1,75 +1,74 @@
 /**
  * Notes Store customer notifications — integration boundary (spec §11).
  *
- * Proactive updates are SMS via the Academy's existing DLT sender. Two hard gates
- * keep this safe and inert until the business is ready:
+ * Proactive updates are SMS via the Academy's existing DLT sender. Gates:
  *
- *   1. Feature flag `notes_store_sms` must be ON (off in production and preview).
- *   2. An approved DLT template id must be configured per message type.
+ *   1. Feature flag `notes_store_sms` must be ON (store kill switch).
+ *   2. An approved DLT template must exist for the message type.
  *
- * The Notes DLT templates are drafted (docs/notes-store-dlt-templates.md) but NOT
- * yet submitted/approved, so no template ids exist and nothing is sent. When the
- * templates are approved and the ids + flag are set, the real send is wired at the
- * single marked point below — no other code changes. This never throws into the
- * caller (payment capture / ship must not depend on SMS) and never logs PII.
+ * Order confirmed uses the approved NOTES_ORDER_CONFIRMED_01 template through
+ * lib/store/sms (Mission Control automation `notes_order_confirmed`). Shipped,
+ * ready-for-collection and collected have no approved template yet, so nothing
+ * is sent for them. This never throws into the caller (payment capture / ship
+ * must not depend on SMS) and never logs PII.
  */
+import { waitUntil } from "@vercel/functions";
 import { storeFeatureEnabled } from "./flags";
 
 export type StoreNotificationType = "order_confirmed" | "order_shipped" | "order_ready_for_collection" | "order_collected";
 
 export interface StoreNotificationResult {
   sent: boolean;
-  reason: "flag_off" | "no_template" | "sent" | "error";
+  reason: "flag_off" | "no_template" | "scheduled" | "sent" | "error";
 }
 
-/** Env var NAMES only for the approved DLT template ids (never values). */
-const TEMPLATE_ENV: Record<StoreNotificationType, string> = {
-  order_confirmed: "NOTES_STORE_SMS_TEMPLATE_ORDER_CONFIRMED",
-  order_shipped: "NOTES_STORE_SMS_TEMPLATE_ORDER_SHIPPED",
-  order_ready_for_collection: "NOTES_STORE_SMS_TEMPLATE_READY_FOR_COLLECTION",
-  order_collected: "NOTES_STORE_SMS_TEMPLATE_ORDER_COLLECTED",
-};
-
-async function dispatch(type: StoreNotificationType): Promise<StoreNotificationResult> {
+async function noApprovedTemplate(): Promise<StoreNotificationResult> {
   try {
     if (!(await storeFeatureEnabled("notes_store_sms"))) return { sent: false, reason: "flag_off" };
-    const templateId = (process.env[TEMPLATE_ENV[type]] || "").trim();
-    if (!templateId) return { sent: false, reason: "no_template" };
-
-    // ── DLT SEND WIRING POINT ────────────────────────────────────────────────
-    // When approved template ids exist, load the order's phone + variables here
-    // and call the Academy sender (lib/sms/service `sendSms`) with `templateId`.
-    // Until then this path is unreachable (no template id is configured), so no
-    // customer message is ever sent. Kept as an explicit boundary, not a stub
-    // that pretends to send.
-    // ─────────────────────────────────────────────────────────────────────────
     return { sent: false, reason: "no_template" };
   } catch {
     return { sent: false, reason: "error" };
   }
 }
 
-/** Order paid + confirmed. Safe no-op until DLT approved and flag on. */
-export async function notifyOrderConfirmed(_input: { orderId: string; orderNo: string | null }): Promise<StoreNotificationResult> {
-  return dispatch("order_confirmed");
+/**
+ * Order paid + confirmed. Hands the SMS to waitUntil so the payment response is
+ * not held; the automation itself checks the flag, rule, cutover and order.
+ */
+export async function notifyOrderConfirmed(input: { orderId: string; orderNo: string | null }): Promise<StoreNotificationResult> {
+  try {
+    const work = import("./sms/automation")
+      .then((m) => m.fireNotesOrderConfirmedSms(input.orderId))
+      .catch(() => {
+        console.error("[store/notifications] order_confirmed_sms_failed");
+      });
+    try {
+      waitUntil(work);
+    } catch {
+      void work;
+    }
+    return { sent: false, reason: "scheduled" };
+  } catch {
+    return { sent: false, reason: "error" };
+  }
 }
 
-/** Order shipped with AWB. Safe no-op until DLT approved and flag on. */
+/** Order shipped with AWB. No approved template yet. */
 export async function notifyOrderShipped(_input: {
   orderId: string;
   orderNo: string | null;
   awb: string;
   courier: string;
 }): Promise<StoreNotificationResult> {
-  return dispatch("order_shipped");
+  return noApprovedTemplate();
 }
 
-/** Academy Pickup order is ready at the academy. Safe no-op until DLT approved and flag on. */
+/** Academy Pickup order is ready at the academy. No approved template yet. */
 export async function notifyReadyForCollection(_input: { orderId: string; orderNo: string | null }): Promise<StoreNotificationResult> {
-  return dispatch("order_ready_for_collection");
+  return noApprovedTemplate();
 }
 
-/** Academy Pickup order handed over. Safe no-op until DLT approved and flag on. */
+/** Academy Pickup order handed over. No approved template yet. */
 export async function notifyCollected(_input: { orderId: string; orderNo: string | null }): Promise<StoreNotificationResult> {
-  return dispatch("order_collected");
+  return noApprovedTemplate();
 }
