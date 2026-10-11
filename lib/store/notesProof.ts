@@ -66,7 +66,7 @@ export const NOTES_SAMPLE_ASSETS: NotesSampleAsset[] = [
     id: "modern-history-sample",
     title: "Modern History Sample Notes",
     productSlug: "modern-history",
-    pageCount: 0,
+    pageCount: 24,
     pdfSrc: stablePublicMediaUrl(`${NOTES_SAMPLE_PREFIX}/modern-history-sample/sample.pdf`),
   },
 ];

@@ -58,14 +58,19 @@ export default function NotesProofSection({
   if (!modern && (!sample || !video)) return null;
 
   function openSample() {
+    if (hasPages) {
+      if (sample) {
+        trackClient("notes_sample_opened", proofAttribution(product, { sample_id: sample.id, placement, via: "reader" }));
+      }
+      setOpen(true);
+      return;
+    }
     if (pdfHref) {
       if (sample) {
         trackClient("notes_sample_opened", proofAttribution(product, { sample_id: sample.id, placement, via: "pdf" }));
       }
       window.open(pdfHref, "_blank", "noopener,noreferrer");
-      return;
     }
-    setOpen(true);
   }
 
   function buyFromBridge() {
@@ -144,7 +149,7 @@ export default function NotesProofSection({
                   : `Actual notes. Same handwriting, density, and layout as the printed edition — ${sample.pageCount} sample pages.`}
               </p>
               <button type="button" className="ca-focus ns-proof-preview mt-5" onClick={openSample}>
-                {modern || pdfHref ? "Open Sample PDF" : "Preview notes"}
+                {modern ? "Preview Sample Notes" : pdfHref ? "Open Sample PDF" : "Preview notes"}
               </button>
             </div>
           </article>
