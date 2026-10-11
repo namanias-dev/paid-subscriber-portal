@@ -8,6 +8,11 @@ export interface NotesCurriculumGroup {
   items: string[];
 }
 
+export interface NotesCurriculumPoint {
+  title: string;
+  body: string;
+}
+
 export interface NotesCurriculum {
   slug: string;
   title: string;
@@ -16,6 +21,16 @@ export interface NotesCurriculum {
   subheading: string;
   mentorIntro: string;
   why: string;
+  whyTitle?: string;
+  whyPoints?: NotesCurriculumPoint[];
+  positioningTitle?: string;
+  coverageTitle?: string;
+  prelimsTitle?: string;
+  prelimsIntro?: string;
+  prelimsItems?: string[];
+  mainsTitle?: string;
+  mainsIntro?: string;
+  mainsItems?: string[];
   coverage: NotesCurriculumGroup[];
   staticCurrentIntro: string;
   staticCurrent: NotesCurriculumLink[];
@@ -113,65 +128,123 @@ export const NOTES_CURRICULUM: Record<string, NotesCurriculum> = {
   "modern-history": {
     slug: "modern-history",
     title: "Modern History Notes",
-    seoTitle: "Modern History Notes for UPSC | Naman Sir",
+    seoTitle: "Modern History Handwritten Notes for UPSC | Naman Sharma IAS Academy",
     seoDescription:
-      "Handwritten Modern History notes for UPSC — British expansion, reform movements and the freedom struggle, written as a connected story. Printed hard copies delivered pan-India.",
+      "Handwritten Modern History notes for UPSC CSE — chronology, movements and the freedom struggle, written for Prelims and Mains GS Paper I by Naman Sharma IAS Academy.",
     subheading:
-      "Understand the forces that shaped modern India — from British expansion to the freedom struggle and Independence.",
+      "Naman Sir’s handwritten Modern History notes for UPSC Prelims + Mains — structured around chronology, movements, personalities, Acts and the evolution of India’s freedom struggle.",
     mentorIntro:
-      "Modern History becomes much easier when studied as a connected story rather than isolated dates. The notes help you hold chronology, causes, personalities, movements and consequences together.",
-    why: "Prelims tests sequence and association. Mains asks why a movement rose, how it changed, and what it left behind. Both become simpler when the nineteenth and twentieth centuries are read as one arc.",
+      "Modern History may look finite, but UPSC does not reward a pile of isolated facts. Aspirants have to hold chronology, causes and consequences, personalities, movements, British policies, Acts and constitutional developments, socio-religious reforms, tribal and peasant movements, the economic impact of colonial rule, the growth of nationalism, Congress phases, revolutionary nationalism, Gandhian movements, Subhas Chandra Bose and the INA, and the developments that led to independence — as one connected story.",
+    positioningTitle: "Modern History Is Not a Subject You Can Prepare Randomly",
+    why: "Scattered PDFs and random notes make revision harder because the same event has to be recalled as a date in Prelims and as a cause, evolution or consequence in Mains. One coherent handwritten source keeps that story in one place.",
+    whyTitle: "Why Naman Sir’s Handwritten Modern History Notes?",
+    whyPoints: [
+      {
+        title: "Chronology That Actually Makes Sense",
+        body: "Understand the sequence of events rather than memorising isolated dates.",
+      },
+      {
+        title: "Built for Prelims + Mains",
+        body: "Objective facts sit beside the context needed for GS Paper I.",
+      },
+      {
+        title: "Movements, Acts & Personalities Connected",
+        body: "Learn historical developments as connected stories rather than separate facts.",
+      },
+      {
+        title: "Faster Revision",
+        body: "Reduce dependence on dozens of scattered PDFs and resources.",
+      },
+      {
+        title: "Exam-Oriented Structure",
+        body: "Make large Modern History content easier to retain and revisit.",
+      },
+      {
+        title: "Handwritten by Naman Sir",
+        body: "Human-created, classroom-structured notes — not a compiled dump of source books.",
+      },
+    ],
+    coverageTitle: "Inside the Notes",
+    prelimsTitle: "For Prelims",
+    prelimsIntro:
+      "Prelims rewards command over chronology, organisations, personalities, Acts, movements and factual distinctions — and the ability to revise them quickly.",
+    prelimsItems: [
+      "Chronology and sequence of major events",
+      "Acts and constitutional developments",
+      "Personalities and organisations",
+      "Congress sessions and phases",
+      "Movements and their associations",
+      "Fact differentiation that UPSC actually tests",
+      "A revision structure you can return to",
+    ],
+    mainsTitle: "For Mains GS-I",
+    mainsIntro:
+      "The same topics have to become structured understanding: why something rose, how it evolved, what it changed, and how to write that with comparison and context.",
+    mainsItems: [
+      "Causes, consequences and significance",
+      "Historical evolution rather than isolated episodes",
+      "Colonial policy and its after-effects",
+      "Growth and phases of nationalism",
+      "Comparisons across movements and leadership",
+      "Structured context for GS Paper I answers",
+    ],
     coverage: [
       {
-        title: "British expansion",
+        title: "Decline of Mughal power and regional states",
         items: [
-          "Arrival of European powers",
-          "Expansion and consolidation of British rule",
-          "Administrative and economic changes under Company and Crown",
+          "The late-Mughal setting and the rise of regional powers",
+          "How the political map of eighteenth-century India opened the way for European expansion",
+        ],
+      },
+      {
+        title: "European expansion and British conquest",
+        items: [
+          "Arrival and rivalry of European powers",
+          "British conquest and consolidation",
+          "Company to Crown: administration after 1858",
+        ],
+      },
+      {
+        title: "British administration and economic impact",
+        items: [
+          "Administrative structure under colonial rule",
+          "Revenue systems",
+          "Economic impact of colonial rule",
         ],
       },
       {
         title: "Resistance to colonial rule",
         items: [
-          "Early resistance, civil rebellions, tribal uprisings and peasant movements",
+          "Early resistance, tribal and peasant movements",
           "Revolt of 1857 — causes, course and consequences",
         ],
       },
       {
         title: "Social and religious reform",
-        items: ["Major reform movements", "Key reformers", "Social change and its political afterlife"],
+        items: ["Major socio-religious reform movements", "Key reformers", "Social change and its political afterlife"],
       },
       {
-        title: "Rise of nationalism",
+        title: "Growth of nationalism",
         items: [
-          "Political associations and the early Indian National Congress",
+          "Political associations and the Indian National Congress",
           "Moderates and Extremists",
-          "Swadeshi movement, the Surat split and related developments",
+          "Swadeshi movement and related developments",
         ],
       },
       {
-        title: "Gandhian and mass nationalism",
-        items: [
-          "Gandhi’s early movements",
-          "Non-Cooperation, Civil Disobedience and Quit India",
-          "Other major popular movements of the period",
-        ],
-      },
-      {
-        title: "Revolutionary and other streams",
+        title: "Revolutionary nationalism and the Gandhian era",
         items: [
           "Revolutionary nationalism",
+          "Gandhi’s early movements, Non-Cooperation, Civil Disobedience and Quit India",
           "Subhas Chandra Bose and the INA",
-          "Workers’ and peasants’ mobilisation where it matters for the paper",
         ],
       },
       {
-        title: "Towards Independence",
-        items: ["Constitutional developments and negotiations", "Transfer of power, Partition and Independence"],
-      },
-      {
-        title: "British rule and society",
-        items: ["Economic impact", "Education, press and administration", "Social change under colonial rule"],
+        title: "Constitutional developments and Independence",
+        items: [
+          "Major Acts and constitutional developments",
+          "Negotiations, Partition and independence",
+        ],
       },
     ],
     staticCurrentIntro:

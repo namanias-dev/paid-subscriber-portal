@@ -10,6 +10,7 @@ import ShippingStory from "@/components/notes/ShippingStory";
 import NotesClosingCta from "@/components/notes/NotesClosingCta";
 import NotesTeachingShowcase from "@/components/notes/NotesTeachingShowcase";
 import OfferLaunch from "@/components/notes/OfferLaunch";
+import ModernHistoryLaunch from "@/components/notes/ModernHistoryLaunch";
 import TrackView from "@/components/notes/TrackView";
 import Link from "next/link";
 import { listStorefrontProducts } from "@/lib/store/catalogue";
@@ -111,6 +112,7 @@ export default async function NotesLanding() {
           </nav>
         ) : null}
       </NotesHero>
+      <ModernHistoryLaunch initial={publicOffer} />
       <OfferLaunch initial={publicOffer} qualifier={qualifier || null} />
       <ResultsTicker />
       <BenefitTicker />

@@ -204,6 +204,7 @@ export default function NotesAnalytics({
             <li>Video completes: {report.content.videoCompletes} people</li>
             <li>Polity card: {report.subjects.polity.clicks} clicks · {report.subjects.polity.people} people</li>
             <li>Economy card: {report.subjects.economy.clicks} clicks · {report.subjects.economy.people} people</li>
+            <li>Modern History card: {report.subjects["modern-history"].clicks} clicks · {report.subjects["modern-history"].people} people</li>
           </ul>
         </section>
         <section className="rounded-2xl bg-white p-4">

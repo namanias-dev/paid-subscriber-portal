@@ -903,6 +903,53 @@ a {
   font-size: 1.05rem;
 }
 
+.ns-mh-launch-grid {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  gap: 1.15rem;
+}
+
+@media (min-width: 900px) {
+  .ns-mh-launch-grid {
+    grid-template-columns: minmax(0, 1.4fr) minmax(14rem, 0.6fr);
+    align-items: end;
+    gap: 2rem;
+  }
+}
+
+.ns-mh-launch-title {
+  margin: 0.55rem 0 0;
+  max-width: 22rem;
+  font-family: var(--font-heading, inherit);
+  font-size: clamp(1.7rem, 6vw, 2.35rem);
+  font-weight: 800;
+  line-height: 1.12;
+  letter-spacing: -0.03em;
+  color: #fff8dc;
+}
+
+.ns-mh-launch-copy {
+  margin: 0.85rem 0 0;
+  max-width: 36rem;
+  font-size: 0.95rem;
+  line-height: 1.55;
+  color: rgba(255, 255, 255, 0.78);
+}
+
+.ns-mh-launch-price {
+  margin: 0.85rem 0 0;
+  font-size: 0.92rem;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+  color: #fce9a8;
+}
+
+.ns-mh-launch-aside {
+  display: flex;
+  align-items: flex-end;
+}
+
 .ns-offer-launch-cta {
   display: inline-flex;
   min-height: 44px;

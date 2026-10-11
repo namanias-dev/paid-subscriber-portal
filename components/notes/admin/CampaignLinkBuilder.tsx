@@ -4,7 +4,8 @@ import { useMemo, useState } from "react";
 import { CAMPAIGN_TEMPLATES, buildNotesCampaignUrl } from "@/lib/analytics/notesCommerce";
 
 export default function CampaignLinkBuilder() {
-  const [destination, setDestination] = useState<"store" | "polity" | "economy">("store");
+  type NotesDest = "store" | "polity" | "economy" | "modern-history";
+  const [destination, setDestination] = useState<NotesDest>("store");
   const [source, setSource] = useState("instagram");
   const [medium, setMedium] = useState("story");
   const [campaign, setCampaign] = useState("notes_launch");
@@ -38,10 +39,11 @@ export default function CampaignLinkBuilder() {
       </div>
       <div className="mt-3 grid gap-2 sm:grid-cols-2">
         <label className="text-sm text-[var(--ca-navy)]">Destination
-          <select className="mt-1 min-h-11 w-full rounded-xl border px-3" value={destination} onChange={(e) => setDestination(e.target.value as "store" | "polity" | "economy")}>
+          <select className="mt-1 min-h-11 w-full rounded-xl border px-3" value={destination} onChange={(e) => setDestination(e.target.value as NotesDest)}>
             <option value="store">Notes Store</option>
             <option value="polity">Polity</option>
             <option value="economy">Economy</option>
+            <option value="modern-history">Modern History</option>
           </select>
         </label>
         <label className="text-sm text-[var(--ca-navy)]">Source
