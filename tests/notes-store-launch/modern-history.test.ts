@@ -27,6 +27,13 @@ import {
   notesSampleForProduct,
   physicalNotesVideoForProduct,
 } from "../../lib/store/notesProof.ts";
+import {
+  MODERN_HISTORY_COVER_KEY,
+  MODERN_HISTORY_THUMB_KEY,
+  MODERN_HISTORY_VIDEO_SOURCE_KEY,
+  isModernHistoryPublicMediaKey,
+  modernHistorySamplePageKey,
+} from "../../lib/store/modernHistoryMedia.ts";
 import { funnelKind } from "../../lib/marketing/funnelMath.ts";
 import { aggregateNotesAnalytics, buildNotesCampaignUrl } from "../../lib/analytics/notesCommerce.ts";
 
@@ -138,8 +145,9 @@ test("Modern History sales copy, proof assets and campaign destination are first
   assert.match(modal, /notes_product/);
   assert.match(modal, /Notes Product/);
   assert.match(destinations, /notes_products/);
-  assert.match(section, /Open Sample PDF/);
+  assert.match(section, /Preview Sample Notes/);
   assert.match(section, /Watch what you get/);
+  assert.equal(sample.pageCount, 24);
   assert.match(video, /preload="none"/);
   assert.doesNotMatch(video, /autoPlay|autoplay/);
   assert.match(video, /onError/);
@@ -166,4 +174,17 @@ test("Modern History analytics stay on their own subject, not Other", () => {
   assert.equal(report.subjects["modern-history"].clicks, 1);
   assert.equal(report.subjects["modern-history"].people, 1);
   assert.equal(report.products[0]?.label, "Modern History Notes");
+});
+
+test("Modern History media ingest only allowlists public store keys", () => {
+  assert.equal(isModernHistoryPublicMediaKey(MODERN_HISTORY_COVER_KEY), true);
+  assert.equal(isModernHistoryPublicMediaKey(MODERN_HISTORY_THUMB_KEY), true);
+  assert.equal(isModernHistoryPublicMediaKey(modernHistorySamplePageKey(24)), true);
+  assert.equal(isModernHistoryPublicMediaKey(MODERN_HISTORY_VIDEO_SOURCE_KEY), false);
+  assert.equal(isModernHistoryPublicMediaKey("media/store/products/other/cover.webp"), false);
+  const ingest = readFileSync(new URL("../../app/api/admin/notes/media/ingest/route.ts", import.meta.url), "utf8");
+  const keys = readFileSync(new URL("../../lib/store/modernHistoryMedia.ts", import.meta.url), "utf8");
+  assert.match(ingest, /NOTES_MEDIA_INGEST_TOKEN/);
+  assert.match(ingest, /copy-video/);
+  assert.match(keys, /IMG_8005_CURSOR_UPLOAD\.mp4/);
 });
