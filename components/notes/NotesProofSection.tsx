@@ -26,12 +26,15 @@ export default function NotesProofSection({
 }) {
   const sample = notesSampleForProduct(product?.slug) ?? (placement === "landing" ? defaultNotesSample() : null);
   const video = physicalNotesVideoForProduct(product?.slug) ?? (placement === "landing" ? physicalNotesVideoForProduct("polity") : null);
+  const modern = product?.slug === "modern-history";
   const rootRef = useRef<HTMLElement>(null);
   const impressed = useRef(false);
   const videoPlayed = useRef(false);
   const [open, setOpen] = useState(false);
-  const front = sample ? samplePageSrc(sample.id, 1) : "";
-  const back = sample && sample.pageCount > 1 ? samplePageSrc(sample.id, 2) : front;
+  const hasPages = Boolean(sample && sample.pageCount > 0);
+  const pdfHref = sample?.pdfSrc || "";
+  const front = hasPages && sample ? samplePageSrc(sample.id, 1) : "";
+  const back = hasPages && sample && sample.pageCount > 1 ? samplePageSrc(sample.id, 2) : front;
 
   useEffect(() => bindNotesSample(() => setOpen(true)), []);
 
@@ -51,16 +54,28 @@ export default function NotesProofSection({
     return () => io.disconnect();
   }, [placement, product, sample]);
 
-  if (!sample || !video) return null;
+  if (!sample && !video) return null;
+  if (!modern && (!sample || !video)) return null;
+
+  function openSample() {
+    if (pdfHref) {
+      if (sample) {
+        trackClient("notes_sample_opened", proofAttribution(product, { sample_id: sample.id, placement, via: "pdf" }));
+      }
+      window.open(pdfHref, "_blank", "noopener,noreferrer");
+      return;
+    }
+    setOpen(true);
+  }
 
   function buyFromBridge() {
-    if (!sample || !video) return;
+    if (!sample && !video) return;
     const played = videoPlayed.current;
     trackClient(
       played ? "notes_physical_video_buy_clicked" : "notes_sample_buy_clicked",
       proofAttribution(product, {
-        sample_id: sample.id,
-        video_id: video.id,
+        sample_id: sample?.id || null,
+        video_id: video?.id || null,
         placement: `${placement}_bridge`,
         video_played: played,
       }),
@@ -74,53 +89,84 @@ export default function NotesProofSection({
       className={placement === "landing" ? "container-wide" : ""}
       aria-labelledby={placement === "landing" ? "see-before-heading" : "see-before-heading-product"}
     >
-      <p className="ca-eyebrow text-[var(--ca-gold-dark)]">See before you buy</p>
+      <p className="ca-eyebrow text-[var(--ca-gold-dark)]">{modern ? "See what you’re getting" : "See before you buy"}</p>
       <h2
         id={placement === "landing" ? "see-before-heading" : "see-before-heading-product"}
         className="mt-2 max-w-xl font-heading text-3xl font-bold text-[var(--ca-navy)]"
       >
-        Know exactly what you are ordering
+        {modern ? "See What You’re Getting" : "Know exactly what you are ordering"}
       </h2>
       <p className="mt-3 max-w-2xl text-sm leading-relaxed text-[var(--ca-navy)]/60">
-        Preview real pages, then watch the printed copy that ships after your order.
+        {modern
+          ? "Take a look inside Naman Sir’s Modern History handwritten notes before you order."
+          : "Preview real pages, then watch the printed copy that ships after your order."}
       </p>
 
-      <div className="mt-8 grid items-start gap-6 lg:grid-cols-[1.15fr_0.85fr]">
-        <article className="ns-proof-card">
-          <div className="ns-proof-stack" aria-hidden="true">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={back} alt="" className="ns-proof-sheet ns-proof-sheet-back" width={168} height={224} loading="lazy" decoding="async" />
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={front} alt="" className="ns-proof-sheet ns-proof-sheet-front" width={180} height={240} loading="lazy" decoding="async" />
-            <span className="ns-proof-badge">Sample</span>
-          </div>
-          <div className="min-w-0 flex-1">
-            <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-[var(--ca-gold-dark)]">Preview the content</p>
-            <h3 className="mt-2 font-heading text-2xl font-bold text-[var(--ca-navy)]">{sample.title}</h3>
-            <p className="mt-2 text-sm leading-relaxed text-[var(--ca-navy)]/65">
-              Actual notes. Same handwriting, density, and layout as the printed edition — {sample.pageCount} sample pages.
-            </p>
-            <button type="button" className="ca-focus ns-proof-preview mt-5" onClick={() => setOpen(true)}>
-              Preview notes
-            </button>
-          </div>
-        </article>
+      <div className={`mt-8 grid items-start gap-6 ${modern ? "lg:grid-cols-[0.9fr_1.1fr]" : "lg:grid-cols-[1.15fr_0.85fr]"}`}>
+        {modern && video ? (
+          <article className="ns-proof-card ns-proof-card-video lg:col-start-2 lg:row-start-1">
+            <div className="min-w-0">
+              <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-[var(--ca-gold-dark)]">Watch what you get</p>
+              <h3 className="mt-2 font-heading text-2xl font-bold text-[var(--ca-navy)]">Sample notes, on camera</h3>
+              <p className="mt-2 text-sm leading-relaxed text-[var(--ca-navy)]/65">
+                A short look at the handwritten Modern History notes so you can judge the density, structure and handwriting before you buy.
+              </p>
+            </div>
+            <PhysicalNotesVideo
+              product={product}
+              placement={placement}
+              video={video}
+              playLabel="Watch what you get"
+              onPlayed={() => { videoPlayed.current = true; }}
+            />
+          </article>
+        ) : null}
 
-        <article className="ns-proof-card ns-proof-card-video">
-          <div className="min-w-0">
-            <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-[var(--ca-gold-dark)]">See the physical copy</p>
-            <h3 className="mt-2 font-heading text-2xl font-bold text-[var(--ca-navy)]">What arrives after you order</h3>
-            <p className="mt-2 text-sm leading-relaxed text-[var(--ca-navy)]/65">
-              Naman walks through the complete printed copy that is packed and shipped.
-            </p>
-            <ul className="mt-3 space-y-1 text-sm text-[var(--ca-navy)]/70">
-              <li>Actual printed copy</li>
-              <li>Prepared for serious UPSC study</li>
-              <li>Delivered to your doorstep</li>
-            </ul>
-          </div>
-          <PhysicalNotesVideo product={product} placement={placement} video={video} onPlayed={() => { videoPlayed.current = true; }} />
-        </article>
+        {sample ? (
+          <article className="ns-proof-card">
+            {hasPages ? (
+              <div className="ns-proof-stack" aria-hidden="true">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={back} alt="" className="ns-proof-sheet ns-proof-sheet-back" width={168} height={224} loading="lazy" decoding="async" />
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={front} alt="" className="ns-proof-sheet ns-proof-sheet-front" width={180} height={240} loading="lazy" decoding="async" />
+                <span className="ns-proof-badge">Sample</span>
+              </div>
+            ) : null}
+            <div className="min-w-0 flex-1">
+              <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-[var(--ca-gold-dark)]">
+                {modern ? "Preview sample notes" : "Preview the content"}
+              </p>
+              <h3 className="mt-2 font-heading text-2xl font-bold text-[var(--ca-navy)]">{sample.title}</h3>
+              <p className="mt-2 text-sm leading-relaxed text-[var(--ca-navy)]/65">
+                {modern
+                  ? "Open the supplied Modern History sample and read the handwriting, layout and coverage before you add it to the cart."
+                  : `Actual notes. Same handwriting, density, and layout as the printed edition — ${sample.pageCount} sample pages.`}
+              </p>
+              <button type="button" className="ca-focus ns-proof-preview mt-5" onClick={openSample}>
+                {modern || pdfHref ? "Open Sample PDF" : "Preview notes"}
+              </button>
+            </div>
+          </article>
+        ) : null}
+
+        {!modern && video ? (
+          <article className="ns-proof-card ns-proof-card-video">
+            <div className="min-w-0">
+              <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-[var(--ca-gold-dark)]">See the physical copy</p>
+              <h3 className="mt-2 font-heading text-2xl font-bold text-[var(--ca-navy)]">What arrives after you order</h3>
+              <p className="mt-2 text-sm leading-relaxed text-[var(--ca-navy)]/65">
+                Naman walks through the complete printed copy that is packed and shipped.
+              </p>
+              <ul className="mt-3 space-y-1 text-sm text-[var(--ca-navy)]/70">
+                <li>Actual printed copy</li>
+                <li>Prepared for serious UPSC study</li>
+                <li>Delivered to your doorstep</li>
+              </ul>
+            </div>
+            <PhysicalNotesVideo product={product} placement={placement} video={video} onPlayed={() => { videoPlayed.current = true; }} />
+          </article>
+        ) : null}
       </div>
 
       {product && (
@@ -140,7 +186,7 @@ export default function NotesProofSection({
         </div>
       )}
 
-      {open && (
+      {open && sample && hasPages && (
         <NotesSampleReader sample={sample} product={product} placement={placement} onClose={() => setOpen(false)} />
       )}
     </section>

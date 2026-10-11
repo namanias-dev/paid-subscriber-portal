@@ -6,6 +6,7 @@ import { motion, useReducedMotion, useScroll, useTransform } from "framer-motion
 import { trackClient } from "@/lib/analytics/client";
 import { offerDiscountParts } from "@/lib/store/pricing";
 import type { PublicStoreOffer } from "@/lib/store/offers";
+import { isModernHistoryLaunchOffer } from "@/lib/store/modernHistoryLaunch";
 import OfferCountdown from "./OfferCountdown";
 
 export default function OfferLaunch({
@@ -40,7 +41,7 @@ export default function OfferLaunch({
       .catch(() => setOffer(null));
   };
 
-  if (!offer || offer.status !== "ACTIVE") return null;
+  if (!offer || offer.status !== "ACTIVE" || isModernHistoryLaunchOffer(offer)) return null;
 
   const parts = offerDiscountParts(offer);
   const cap =

@@ -8,6 +8,11 @@ import { notesProductPath } from "@/lib/store/paths";
 import { trackClient } from "@/lib/analytics/client";
 import NotebookStack from "./NotebookStack";
 import { landingNotebookImage } from "@/lib/store/landingImage";
+import {
+  modernHistoryLaunchActive,
+  modernHistoryLaunchBadge,
+  modernHistoryLaunchCaption,
+} from "@/lib/store/modernHistoryLaunch";
 
 function cardTitle(product: StoreProductCard): string {
   return product.short_name || product.category_name || product.subject || product.name;
@@ -58,7 +63,8 @@ export default function SubjectRail({
                 offerBadge: offer ? offer.badge_text || offerDiscountLabel(offer) : null,
               })
             : null;
-          const badge = view?.badge || null;
+          const launch = modernHistoryLaunchActive(product, offer);
+          const badge = launch ? modernHistoryLaunchBadge() : view?.badge || null;
           const href = notesProductPath(product.slug);
           const title = cardTitle(product);
           const image = landingNotebookImage(product);
@@ -105,7 +111,9 @@ export default function SubjectRail({
                         <p className="mt-1 text-[12px] text-[var(--ca-navy)]/55">
                           <span className="tabular-nums line-through">{formatPaise(view.comparePaise)}</span>
                           <span className="sr-only"> regular price </span>
-                          <span className="ml-1 font-bold text-[var(--ca-gold-dark)]">Save {formatPaise(view.savePaise)}</span>
+                          <span className="ml-1 font-bold text-[var(--ca-gold-dark)]">
+                            {launch ? modernHistoryLaunchCaption() : `Save ${formatPaise(view.savePaise)}`}
+                          </span>
                         </p>
                       ) : (
                         <p className="mt-1 text-[12px] text-[var(--ca-navy)]/45">incl. GST</p>

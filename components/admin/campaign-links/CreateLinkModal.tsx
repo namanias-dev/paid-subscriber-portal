@@ -62,6 +62,7 @@ export default function CreateLinkModal({ onClose, onCreated }: { onClose: () =>
 
   const [webinars, setWebinars] = useState<DestOption[]>([]);
   const [courses, setCourses] = useState<DestOption[]>([]);
+  const [notesProducts, setNotesProducts] = useState<DestOption[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [created, setCreated] = useState<CampaignLink | null>(null);
@@ -69,19 +70,25 @@ export default function CreateLinkModal({ onClose, onCreated }: { onClose: () =>
   useEffect(() => {
     fetch("/api/admin/campaign-links/destinations")
       .then((r) => r.json())
-      .then((d) => { if (d.ok) { setWebinars(d.webinars || []); setCourses(d.courses || []); } })
+      .then((d) => {
+        if (d.ok) {
+          setWebinars(d.webinars || []);
+          setCourses(d.courses || []);
+          setNotesProducts(d.notes_products || []);
+        }
+      })
       .catch(() => {});
   }, []);
 
   // Resolve the clean destination path from the chosen type.
   const destination = useMemo(() => {
-    if (destType === "webinar" || destType === "course") {
-      const list = destType === "webinar" ? webinars : courses;
+    if (destType === "webinar" || destType === "course" || destType === "notes_product") {
+      const list = destType === "webinar" ? webinars : destType === "course" ? courses : notesProducts;
       return list.find((o) => o.id === destId)?.path || "";
     }
     if (destType === "notes") return destUrl || "/notes";
     return destUrl;
-  }, [destType, destId, destUrl, webinars, courses]);
+  }, [destType, destId, destUrl, webinars, courses, notesProducts]);
 
   const preview = useMemo(
     () =>
@@ -176,16 +183,18 @@ export default function CreateLinkModal({ onClose, onCreated }: { onClose: () =>
                   <option value="webinar">Webinar</option>
                   <option value="course">Course</option>
                   <option value="notes">Notes Store</option>
+                  <option value="notes_product">Notes Product</option>
                   <option value="demo">Demo / Class</option>
                   <option value="landing">Landing page</option>
                   <option value="custom">Custom URL</option>
                 </select>
               </label>
-              {destType === "webinar" || destType === "course" ? (
-                <label className={labelCls}>Choose {destType}
+              {destType === "webinar" || destType === "course" || destType === "notes_product" ? (
+                <label className={labelCls}>
+                  {destType === "notes_product" ? "Destination" : `Choose ${destType}`}
                   <select className={inputCls} value={destId} onChange={(e) => setDestId(e.target.value)}>
                     <option value="">Select…</option>
-                    {(destType === "webinar" ? webinars : courses).map((o) => (
+                    {(destType === "webinar" ? webinars : destType === "course" ? courses : notesProducts).map((o) => (
                       <option key={o.id} value={o.id}>{o.title}</option>
                     ))}
                   </select>

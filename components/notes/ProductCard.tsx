@@ -5,6 +5,11 @@ import { formatPaise, presentStorePrice } from "@/lib/store/money";
 import { calculateStorePrice, offerDiscountLabel, type OfferForPricing } from "@/lib/store/pricing";
 import type { StoreProductCard } from "@/lib/store/catalogue";
 import { notesProductPath } from "@/lib/store/paths";
+import {
+  modernHistoryLaunchActive,
+  modernHistoryLaunchBadge,
+  modernHistoryLaunchCaption,
+} from "@/lib/store/modernHistoryLaunch";
 
 /** Canonical Notes catalogue card — one language for landing, subjects, related. */
 export default function ProductCard({
@@ -39,7 +44,9 @@ export default function ProductCard({
         offerBadge: offer ? offer.badge_text || offerDiscountLabel(offer) : null,
       })
     : null;
+  const launch = modernHistoryLaunchActive(product, offer);
   const badge =
+    (launch ? modernHistoryLaunchBadge() : null) ||
     view?.badge ||
     (av.lowStock ? av.label : av.mode === "on_demand" && av.purchasable ? "Made to order" : null);
 
@@ -85,7 +92,9 @@ export default function ProductCard({
                 <p className="mt-1 text-[12px] text-[var(--ca-navy)]/55">
                   <span className="tabular-nums line-through">{formatPaise(view.comparePaise)}</span>
                   <span className="sr-only"> regular price </span>
-                  <span className="ml-1 font-bold text-[var(--ca-gold-dark)]">Save {formatPaise(view.savePaise)}</span>
+                  <span className="ml-1 font-bold text-[var(--ca-gold-dark)]">
+                    {launch ? modernHistoryLaunchCaption() : `Save ${formatPaise(view.savePaise)}`}
+                  </span>
                 </p>
               ) : (
                 <p className="mt-1 text-[12px] text-[var(--ca-navy)]/45">incl. GST</p>

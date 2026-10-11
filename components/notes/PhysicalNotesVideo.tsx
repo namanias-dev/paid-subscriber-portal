@@ -28,11 +28,13 @@ export default function PhysicalNotesVideo({
   placement,
   onPlayed,
   video = PHYSICAL_NOTES_VIDEO,
+  playLabel = "Watch the printed copy",
 }: {
   product: NotesProofProduct | null;
   placement: "landing" | "pdp";
   onPlayed?: () => void;
   video?: PhysicalNotesVideoAsset;
+  playLabel?: string;
 }) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const nodeRef = useRef<HTMLVideoElement>(null);
@@ -137,11 +139,11 @@ export default function PhysicalNotesVideo({
         }}
       />
       {!userPlayback && (
-        <button type="button" className="ns-proof-play ca-focus" onClick={play} aria-label="Play the printed notes walkthrough">
+        <button type="button" className="ns-proof-play ca-focus" onClick={play} aria-label={playLabel}>
           <span className="ns-proof-play-disc" aria-hidden="true">
             ▶
           </span>
-          <span>Watch the printed copy</span>
+          <span>{playLabel}</span>
         </button>
       )}
       {phase === "starting" && (

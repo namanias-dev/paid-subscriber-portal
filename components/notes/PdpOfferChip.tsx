@@ -2,6 +2,11 @@
 
 import { offerDiscountParts } from "@/lib/store/pricing";
 import type { PublicStoreOffer } from "@/lib/store/offers";
+import {
+  isModernHistoryLaunchOffer,
+  modernHistoryLaunchCaption,
+  modernHistoryLaunchPriceLabel,
+} from "@/lib/store/modernHistoryLaunch";
 import OfferCountdown from "./OfferCountdown";
 
 export default function PdpOfferChip({
@@ -12,15 +17,19 @@ export default function PdpOfferChip({
   onEnded?: () => void;
 }) {
   const parts = offerDiscountParts(offer);
-  const cap =
-    offer.max_redemptions != null ? `First ${offer.max_redemptions.toLocaleString("en-IN")} orders` : null;
+  const launch = isModernHistoryLaunchOffer(offer);
+  const cap = launch
+    ? modernHistoryLaunchCaption()
+    : offer.max_redemptions != null
+      ? `First ${offer.max_redemptions.toLocaleString("en-IN")} orders`
+      : null;
 
   return (
     <div className="ns-pdp-offer">
-      <p className="ns-pdp-offer-kicker">{offer.banner_title || "Limited-time launch offer"}</p>
+      <p className="ns-pdp-offer-kicker">{offer.banner_title || (launch ? "New release" : "Limited-time launch offer")}</p>
       <div className="mt-2 flex flex-wrap items-end justify-between gap-3">
         <p className="font-heading text-2xl font-extrabold tracking-tight text-[var(--ca-gold-soft)]">
-          {parts.label}
+          {launch ? `Launch Price ${modernHistoryLaunchPriceLabel()}` : parts.label}
         </p>
         {cap && <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-white/55">{cap}</p>}
       </div>
