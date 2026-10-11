@@ -103,6 +103,17 @@
     "source": "Naman_IAS_Notes_SMS_Template_Approval_Tracker Final.xlsx rows 6-10",
     "migration": "supabase/migrations/2026-10-11-notes-sms-approved-templates.sql",
     "flag": "notes_store_sms",
+    "flagEnabled": true,
+    "flagEnabledAt": "2026-10-11T20:10Z",
+    "migrationAppliedToProduction": true,
+    "release": { "sha": "db89d91fde24", "rollbackTarget": "dpl_99dASdmy8chPMf3pxemaa1YxVs62" },
+    "automations": {
+      "notes_order_confirmed": { "enabled": true, "cutover": "2026-10-11T20:10:09.491Z" },
+      "notes_payment_pending": { "enabled": true, "cutover": "2026-10-11T20:10:09.491Z", "delayMinutes": 60 },
+      "notes_checkout_incomplete": { "enabled": false, "reason": "approved_text_not_gsm7" },
+      "notes_new_lead_promo": { "enabled": false, "reason": "approved_text_not_gsm7, consent" }
+    },
+    "liveServiceTest": "not_run_needs_admin_signin_and_send_window",
     "templates": {
       "NOTES_ORDER_CONFIRMED_01": { "dlt": "1777179058711611732", "state": "sendable" },
       "NOTES_PAYMENT_PENDING_01": { "dlt": "1777179057396343991", "state": "sendable" },

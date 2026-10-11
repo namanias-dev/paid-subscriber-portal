@@ -233,7 +233,11 @@ The five DLT-approved Notes templates (tracker rows 6–10) are in Mission Contr
 
 | Item | Status | Notes |
 |------|--------|-------|
-| Order confirmed / Payment pending | BUILT | Server-side plan + re-validation, idempotent, cutover on enable |
+| Release `db89d91` | LIVE | Promoted 2026-10-11 20:05 UTC; rollback target `dpl_99dASdmy8chPMf3pxemaa1YxVs62` (`60983e1`) |
+| Migration `2026-10-11-notes-sms-approved-templates.sql` | APPLIED TO PRODUCTION | 5 rows read back byte-exact; earlier staff-entered rows (wrong category, straight apostrophe, pending_01 tokens) replaced; they had 0 sends |
+| Flag `notes_store_sms` | ON (2026-10-11 20:10 UTC) | Kill switch for every Notes SMS |
+| Order confirmed / Payment pending automations | ENABLED, cutover 2026-10-11T20:10:09.491Z | Nothing before the cutover is sent; first cron pass sent 0 |
+| Live service SMS test | NOT YET RUN | Needs a production admin sign-in and the 10:00–21:00 IST window; candidates NIAS-N-2026-001126 and 001120 pre-validated |
 | Checkout incomplete / New lead promo / NOTES500 | HELD | ’ (U+2019) is outside GSM-7. Owner must confirm the registered character with the DLT agency. NOTES500 also needs a valid code |
 | New lead promo consent | BLOCKED | Academy leads need `consent_status = explicit` |
 | Shipped / ready / collected SMS | INERT | No approved template |
