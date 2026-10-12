@@ -1,6 +1,8 @@
 -- Customer-service support fields for Notes order issues.
+-- Additive only: safe with older app code (unused columns) and required by the CS queue.
 -- customer_note remains the staff personal reply (never overwritten by follow-ups or milestones).
 -- milestone_note holds short verified courier updates.
+-- awaiting_staff_reply defaults false so existing rows stay valid before backfill.
 
 alter table public.store_order_issues
   add column if not exists milestone_note text,

@@ -39,6 +39,8 @@ const FILTERS: { key: Filter; label: string }[] = [
   { key: "open", label: "All open" },
 ];
 
+const PAGE = 50;
+
 function ageLabel(iso: string): string {
   const hours = Math.max(0, (Date.now() - Date.parse(iso)) / 3_600_000);
   if (hours < 24) return `${Math.floor(hours)}h`;
@@ -64,28 +66,40 @@ export default function SupportQueue() {
   const [filter, setFilter] = useState<Filter>("needs_attention");
   const [issues, setIssues] = useState<SupportIssue[]>([]);
   const [counts, setCounts] = useState<Record<string, number>>({});
+  const [total, setTotal] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
+  const [nextOffset, setNextOffset] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(async (next: Filter) => {
-    setLoading(true);
+  const load = useCallback(async (next: Filter, offset = 0, append = false) => {
+    if (append) setLoadingMore(true);
+    else setLoading(true);
     setError(null);
-    const res = await fetch(`/api/admin/notes/support?filter=${next}`, { cache: "no-store" });
+    const res = await fetch(`/api/admin/notes/support?filter=${next}&limit=${PAGE}&offset=${offset}`, {
+      cache: "no-store",
+    });
     const json = await res.json().catch(() => null);
     if (!json?.ok) {
       setError(json?.error || "Could not load support queue");
-      setIssues([]);
+      if (!append) setIssues([]);
       setLoading(false);
+      setLoadingMore(false);
       return;
     }
-    setIssues(json.issues || []);
     setCounts(json.counts || {});
+    setTotal(Number(json.page?.total || 0));
+    setHasMore(!!json.page?.has_more);
+    setNextOffset(json.page?.next_offset ?? null);
+    setIssues((prev) => (append ? [...prev, ...(json.issues || [])] : json.issues || []));
     setLoading(false);
+    setLoadingMore(false);
   }, []);
 
   useEffect(() => {
-    void load(filter);
-    const id = window.setInterval(() => void load(filter), 45_000);
+    void load(filter, 0, false);
+    const id = window.setInterval(() => void load(filter, 0, false), 45_000);
     return () => window.clearInterval(id);
   }, [filter, load]);
 
@@ -123,6 +137,12 @@ export default function SupportQueue() {
         })}
       </div>
 
+      {!loading && (
+        <p className="mb-3 text-xs text-[var(--ca-navy)]/50">
+          Showing {issues.length} of {total} in this view
+        </p>
+      )}
+
       {error && (
         <p className="mb-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">{error}</p>
       )}
@@ -141,7 +161,7 @@ export default function SupportQueue() {
               className="rounded-2xl border border-[var(--ca-navy)]/8 bg-white p-4 shadow-[0_1px_0_rgba(15,23,42,0.03)]"
             >
               <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
+                <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
                     <Link
                       href={`/admin/notes/orders/${issue.order_id}`}
@@ -182,7 +202,7 @@ export default function SupportQueue() {
                 </div>
                 <Link
                   href={`/admin/notes/orders/${issue.order_id}#customer-issue`}
-                  className="inline-flex min-h-10 items-center rounded-full bg-[var(--ca-navy)] px-4 text-sm font-semibold text-white"
+                  className="inline-flex min-h-10 shrink-0 items-center rounded-full bg-[var(--ca-navy)] px-4 text-sm font-semibold text-white"
                 >
                   Open issue
                 </Link>
@@ -218,6 +238,19 @@ export default function SupportQueue() {
               </div>
             </article>
           ))}
+
+          {hasMore && nextOffset != null && (
+            <div className="pt-2 text-center">
+              <button
+                type="button"
+                disabled={loadingMore}
+                onClick={() => void load(filter, nextOffset, true)}
+                className="inline-flex min-h-11 items-center rounded-full border border-[var(--ca-navy)]/15 bg-white px-5 text-sm font-semibold text-[var(--ca-navy)]"
+              >
+                {loadingMore ? "Loading…" : "Load more"}
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>

@@ -109,13 +109,19 @@ export async function POST(req: Request) {
   }
 
   // Short verified milestone on open customer issues. Never overwrites staff customer_note.
+  // Only after a real status advance (duplicate scans already returned above).
+  // Errors inside the helper are swallowed so courier tracking is never blocked.
   if (shipmentUpdated && event.mappedStatus) {
-    await applyCourierMilestoneToOpenIssues(db, shipment.order_id, {
-      mappedStatus: event.mappedStatus,
-      courier: shipment.courier_name,
-      awb: shipment.awb || event.awb,
-      location: event.location,
-    });
+    try {
+      await applyCourierMilestoneToOpenIssues(db, shipment.order_id, {
+        mappedStatus: event.mappedStatus,
+        courier: shipment.courier_name,
+        awb: shipment.awb || event.awb,
+        location: event.location,
+      });
+    } catch {
+      /* ignore — shipment update already committed */
+    }
   }
 
   // Pickup lifecycle reconcile from this authenticated event (§3, §5, §12): a provider-side

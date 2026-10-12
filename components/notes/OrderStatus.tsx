@@ -468,7 +468,10 @@ export default function OrderStatus({ order }: { order: PublicOrder }) {
             <p className="mt-3 text-sm leading-relaxed text-[var(--ca-navy)]/80">{latestIssue.next_step}</p>
           )}
           {latestIssue.milestone_note && (
-            <p className="mt-2 whitespace-pre-line text-sm leading-relaxed text-[var(--ca-navy)]/65">{latestIssue.milestone_note}</p>
+            <div className="mt-3 rounded-2xl bg-[var(--ca-navy)]/[0.03] px-3 py-2">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--ca-navy)]/45">Latest courier update</p>
+              <p className="mt-1 whitespace-pre-line text-sm leading-relaxed text-[var(--ca-navy)]/70">{latestIssue.milestone_note}</p>
+            </div>
           )}
           {latestIssue.open && current.access_token && (
             <form onSubmit={sendFollowUp} className="mt-4">

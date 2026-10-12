@@ -4,9 +4,13 @@ import {
   buildMilestoneNote,
   clampSupportNote,
   customerFollowUpPatch,
+  isShipmentException,
   issueAnswered,
   issueNeedsAttention,
   milestoneIssuePatch,
+  newIssueAttentionPatch,
+  normalizeStatusToken,
+  shouldReplaceMilestone,
   staffReplyPatch,
   supportPriorityRank,
 } from "../../lib/store/issueSupport";
@@ -19,12 +23,33 @@ test("customer follow-up patch never includes customer_note", () => {
   assert.equal(patch.last_customer_message_at, "2026-10-12T12:00:00.000Z");
 });
 
-test("staff reply clears awaiting flag and stamps last_staff_reply_at", () => {
-  const withNote = staffReplyPatch("2026-10-12T12:00:00.000Z", true);
+test("new complaints require staff attention until a staff reply", () => {
+  const created = newIssueAttentionPatch("2026-10-12T12:00:00.000Z");
+  assert.equal(created.awaiting_staff_reply, true);
+  assert.equal(created.last_customer_message_at, "2026-10-12T12:00:00.000Z");
+  const statusOnly = staffReplyPatch("2026-10-12T13:00:00.000Z", false);
+  assert.equal(statusOnly.awaiting_staff_reply, undefined);
+  const withNote = staffReplyPatch("2026-10-12T13:00:00.000Z", true);
   assert.equal(withNote.awaiting_staff_reply, false);
-  assert.equal(withNote.last_staff_reply_at, "2026-10-12T12:00:00.000Z");
-  const statusOnly = staffReplyPatch("2026-10-12T12:00:00.000Z", false);
-  assert.equal(statusOnly.last_staff_reply_at, undefined);
+  assert.equal(withNote.last_staff_reply_at, "2026-10-12T13:00:00.000Z");
+});
+
+test("exception status normalization catches upper/lower/NDR variants", () => {
+  assert.equal(normalizeStatusToken("DELIVERY_FAILED"), "delivery_failed");
+  assert.equal(isShipmentException("DELIVERY_FAILED"), true);
+  assert.equal(isShipmentException("delivery_failed"), true);
+  assert.equal(isShipmentException("NDR"), true);
+  assert.equal(isShipmentException("rto_in_transit"), true);
+  assert.equal(isShipmentException("IN_TRANSIT"), false);
+  assert.equal(
+    issueNeedsAttention({
+      status: "IN_REVIEW",
+      awaiting_staff_reply: false,
+      last_staff_reply_at: "2026-10-12T12:00:00.000Z",
+      shipment_status: "DELIVERY_FAILED",
+    }),
+    true,
+  );
 });
 
 test("milestone patch never writes customer_note and can raise exception attention", () => {
@@ -46,7 +71,7 @@ test("milestone copy stays short and status-accurate", () => {
   assert.doesNotMatch(picked || "", /in transit/i);
 
   const transit = buildMilestoneNote({
-    mappedStatus: "in_transit",
+    mappedStatus: "IN_TRANSIT",
     courier: "Xpressbees Surface",
     awb: "14112365769578",
     location: "Chandigarh",
@@ -54,6 +79,16 @@ test("milestone copy stays short and status-accurate", () => {
   assert.match(transit || "", /in transit/i);
   assert.match(transit || "", /Chandigarh/);
   assert.equal(buildMilestoneNote({ mappedStatus: "unknown" }), null);
+});
+
+test("stale milestones are rejected while identical notes are idempotent", () => {
+  const current = "Your notes are in transit via Xpressbees. Tracking ID: 1.";
+  assert.equal(shouldReplaceMilestone(current, "in_transit", "picked_up", "Your notes have been picked up."), false);
+  assert.equal(shouldReplaceMilestone(current, "in_transit", "in_transit", current), false);
+  assert.equal(
+    shouldReplaceMilestone(current, "in_transit", "out_for_delivery", "Your notes are out for delivery."),
+    true,
+  );
 });
 
 test("answered and needs-attention helpers", () => {

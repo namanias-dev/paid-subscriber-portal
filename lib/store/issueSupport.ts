@@ -6,9 +6,11 @@
  *   follow-ups or automatic milestone copy.
  * - `milestone_note` is a short verified courier update for the tracking page.
  * - `awaiting_staff_reply` surfaces unanswered customer messages in the CS queue.
+ *   Only a staff customer-visible reply clears it.
  */
 import { clampIssueText, issueIsOpen, OPEN_ISSUE_STATUSES } from "./issues";
 
+/** Canonical lowercase shipment statuses that need CS attention. */
 export const SHIPMENT_EXCEPTION_STATUSES = new Set([
   "delivery_failed",
   "ndr",
@@ -25,6 +27,29 @@ export type MilestoneMappedStatus =
   | "delivered"
   | "delivery_failed"
   | string;
+
+/** Normalize shipment/order status tokens so DELIVERY_FAILED and delivery_failed match. */
+export function normalizeStatusToken(status: string | null | undefined): string {
+  return String(status || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
+}
+
+export function isShipmentException(status: string | null | undefined): boolean {
+  const s = normalizeStatusToken(status);
+  if (!s) return false;
+  if (SHIPMENT_EXCEPTION_STATUSES.has(s)) return true;
+  if (s.includes("delivery_failed") || s.includes("undelivered")) return true;
+  if (s === "ndr" || s.includes("ndr") || s.includes("non_delivery")) return true;
+  if (s.startsWith("rto")) return true;
+  return false;
+}
+
+export function isOrderException(status: string | null | undefined): boolean {
+  const s = normalizeStatusToken(status);
+  return s === "delivery_failed" || s === "payment_failed" || s.startsWith("rto");
+}
 
 /** Preserve line breaks in staff/customer-facing support notes. */
 export function clampSupportNote(value: string, max = 800): string {
@@ -59,8 +84,8 @@ export function issueNeedsAttention(row: {
   if (row.awaiting_staff_reply) return true;
   if (!row.last_staff_reply_at && row.status === "OPEN") return true;
   if (row.priority === "high") return true;
-  if (row.shipment_status && SHIPMENT_EXCEPTION_STATUSES.has(row.shipment_status)) return true;
-  if (row.order_status === "DELIVERY_FAILED" || row.order_status === "PAYMENT_FAILED") return true;
+  if (isShipmentException(row.shipment_status)) return true;
+  if (isOrderException(row.order_status)) return true;
   return false;
 }
 
@@ -76,8 +101,8 @@ export function supportPriorityRank(row: {
   if (row.priority === "high") rank += 100;
   if (row.awaiting_staff_reply) rank += 80;
   if (row.status === "OPEN" && !row.awaiting_staff_reply) rank += 40;
-  if (row.shipment_status && SHIPMENT_EXCEPTION_STATUSES.has(row.shipment_status)) rank += 70;
-  if (row.order_status === "PAYMENT_FAILED") rank += 90;
+  if (isShipmentException(row.shipment_status)) rank += 70;
+  if (normalizeStatusToken(row.order_status) === "payment_failed") rank += 90;
   if (row.created_at) {
     const hours = (Date.now() - new Date(row.created_at).getTime()) / 3_600_000;
     if (hours > 72) rank += 30;
@@ -98,7 +123,7 @@ export function buildMilestoneNote(input: {
   const courier = (input.courier || "").trim();
   const awb = (input.awb || "").trim();
   const location = (input.location || "").trim();
-  const status = (input.mappedStatus || "").toLowerCase();
+  const status = normalizeStatusToken(input.mappedStatus);
   const track = awb ? ` Tracking ID: ${awb}.` : "";
   const via = courier ? ` via ${courier}` : "";
   const at = location ? ` (${location})` : "";
@@ -115,12 +140,47 @@ export function buildMilestoneNote(input: {
   if (status === "delivered") {
     return clampSupportNote(`Your notes have been delivered${via}${at}.${track}`);
   }
-  if (status === "delivery_failed" || status === "ndr") {
+  if (status === "delivery_failed" || status.includes("ndr")) {
     return clampSupportNote(
       `The courier reported a delivery attempt issue${at}. Our team is reviewing this and will update you here.${track}`,
     );
   }
   return null;
+}
+
+/**
+ * Milestone ranks prevent a stale/out-of-order webhook from showing an older
+ * milestone after a newer shipment status was already recorded.
+ */
+export const MILESTONE_RANK: Record<string, number> = {
+  picked_up: 10,
+  in_transit: 20,
+  out_for_delivery: 30,
+  delivered: 40,
+  delivery_failed: 25,
+  ndr: 25,
+};
+
+export function milestoneRank(status: string | null | undefined): number {
+  const s = normalizeStatusToken(status);
+  return MILESTONE_RANK[s] ?? 0;
+}
+
+export function shouldReplaceMilestone(
+  currentNote: string | null | undefined,
+  currentStatusHint: string | null | undefined,
+  nextStatus: string,
+  nextNote: string,
+): boolean {
+  const next = clampSupportNote(nextNote);
+  const current = (currentNote || "").trim();
+  if (!next) return false;
+  if (current === next) return false;
+  const nextRank = milestoneRank(nextStatus);
+  const currentRank = milestoneRank(currentStatusHint);
+  // Allow equal-rank refresh (e.g. new location on in_transit) and forward moves only.
+  if (current && currentRank > nextRank) return false;
+  return true;
 }
 
 export type IssueSupportPatch = {
@@ -132,7 +192,16 @@ export type IssueSupportPatch = {
   updated_at?: string;
 };
 
-/** Staff reply patch — writes customer_note ownership timestamps; never clears history. */
+/** New customer complaint — always requires staff attention until a staff reply. */
+export function newIssueAttentionPatch(now: string): IssueSupportPatch {
+  return {
+    last_customer_message_at: now,
+    awaiting_staff_reply: true,
+    updated_at: now,
+  };
+}
+
+/** Staff reply patch — only a customer-visible note clears awaiting_staff_reply. */
 export function staffReplyPatch(now: string, hasCustomerNote: boolean): IssueSupportPatch {
   const patch: IssueSupportPatch = { updated_at: now };
   if (hasCustomerNote) {
