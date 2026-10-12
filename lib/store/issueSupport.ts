@@ -156,14 +156,19 @@ export const MILESTONE_RANK: Record<string, number> = {
   picked_up: 10,
   in_transit: 20,
   out_for_delivery: 30,
+  // Exceptions sit above OFD so NDR after an out-for-delivery scan is never hidden,
+  // and below delivered so a false/stale failure cannot overwrite a delivered milestone.
+  delivery_failed: 35,
+  ndr: 35,
   delivered: 40,
-  delivery_failed: 25,
-  ndr: 25,
 };
 
 export function milestoneRank(status: string | null | undefined): number {
   const s = normalizeStatusToken(status);
-  return MILESTONE_RANK[s] ?? 0;
+  if (MILESTONE_RANK[s] != null) return MILESTONE_RANK[s];
+  // Treat unknown NDR/RTO tokens as exception-rank so case variants still surface.
+  if (isShipmentException(s)) return MILESTONE_RANK.delivery_failed;
+  return 0;
 }
 
 export function shouldReplaceMilestone(
@@ -176,8 +181,16 @@ export function shouldReplaceMilestone(
   const current = (currentNote || "").trim();
   if (!next) return false;
   if (current === next) return false;
-  const nextRank = milestoneRank(nextStatus);
-  const currentRank = milestoneRank(currentStatusHint);
+  const nextNorm = normalizeStatusToken(nextStatus);
+  const currentNorm = normalizeStatusToken(currentStatusHint);
+  const nextRank = milestoneRank(nextNorm);
+  const currentRank = milestoneRank(currentNorm);
+  // Delivered is terminal for customer-visible milestones.
+  if (currentNorm === "delivered" && nextNorm !== "delivered") return false;
+  // After NDR, allow a real re-attempt scan (in_transit / out_for_delivery) to refresh copy.
+  if (isShipmentException(currentNorm) && !isShipmentException(nextNorm) && nextRank > 0 && nextNorm !== "picked_up") {
+    return true;
+  }
   // Allow equal-rank refresh (e.g. new location on in_transit) and forward moves only.
   if (current && currentRank > nextRank) return false;
   return true;

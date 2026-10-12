@@ -89,6 +89,27 @@ test("stale milestones are rejected while identical notes are idempotent", () =>
     shouldReplaceMilestone(current, "in_transit", "out_for_delivery", "Your notes are out for delivery."),
     true,
   );
+  // NDR after out-for-delivery must surface; delivered stays terminal.
+  const ofd = "Your notes are out for delivery via Delhivery.";
+  assert.equal(
+    shouldReplaceMilestone(ofd, "out_for_delivery", "DELIVERY_FAILED", "The courier reported a delivery attempt issue."),
+    true,
+  );
+  const delivered = "Your notes have been delivered via Delhivery.";
+  assert.equal(
+    shouldReplaceMilestone(delivered, "delivered", "ndr", "The courier reported a delivery attempt issue."),
+    false,
+  );
+  // Re-attempt after NDR can refresh the milestone.
+  assert.equal(
+    shouldReplaceMilestone(
+      "The courier reported a delivery attempt issue.",
+      "delivery_failed",
+      "out_for_delivery",
+      "Your notes are out for delivery.",
+    ),
+    true,
+  );
 });
 
 test("answered and needs-attention helpers", () => {
