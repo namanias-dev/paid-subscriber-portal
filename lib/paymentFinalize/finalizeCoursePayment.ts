@@ -43,7 +43,8 @@ export async function finalizeCoursePaymentAtomic(
   const db = getSupabaseAdmin();
   if (!db) return { ok: false, outcome: "error", enrollment: null, receipt: null, error: "no_db" };
 
-  const { data, error } = await db.rpc("finalize_course_payment", {
+  // Guarded entrypoint sets containment session flag + deferred bookkeeping.
+  const { data, error } = await db.rpc("finalize_course_payment_guarded", {
     p_reference_no: ref,
     p_due_fills: opts?.dueFills?.length ? opts.dueFills : null,
   });
