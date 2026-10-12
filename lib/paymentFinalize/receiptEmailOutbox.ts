@@ -1,11 +1,9 @@
 /**
  * Durable receipt-email delivery from payment_finalize_ledger.
  *
- * Allocation is already committed before any email work. Retrying email never
- * calls finalize_course_payment and never mutates schedule/amount_paid.
- *
- * Real sends are skipped when RESEND_API_KEY is unset or
- * PAYMENT_RECEIPT_EMAIL_DISABLED=1 (tests / dry environments).
+ * Atomic claim via claim_receipt_email_jobs() (SKIP LOCKED + lease token).
+ * Ack requires matching claim token. Disabled email stays pending without
+ * consuming attempts. Retries never call finalize / never mutate money.
  */
 import "server-only";
 import { getSupabaseAdmin } from "../supabase";
@@ -27,89 +25,100 @@ export type ReceiptEmailJob = {
     remaining?: number;
     status?: string;
   } | null;
+  claim_token: string;
+  provider_key: string | null;
 };
+
+export type ReceiptEmailSender = (args: {
+  to: string;
+  name: string;
+  receiptNo: string;
+  courseTitle: string;
+  paymentLabel: string;
+  amount: string;
+  paidToDate: string;
+  remaining: string;
+  installmentsSummary: string;
+  status: string;
+  idempotencyKey?: string;
+}) => Promise<{ sent: boolean }>;
 
 function emailDisabled(): boolean {
   if (process.env.PAYMENT_RECEIPT_EMAIL_DISABLED === "1") return true;
-  if (!process.env.RESEND_API_KEY) return true;
+  if (!process.env.RESEND_API_KEY && process.env.NODE_ENV !== "test") return true;
   return false;
 }
 
-/** Claim due pending jobs (skip locked). */
-export async function claimPendingReceiptEmails(limit = 10): Promise<ReceiptEmailJob[]> {
+export async function claimPendingReceiptEmails(
+  limit = 10,
+  leaseSeconds = 120,
+): Promise<ReceiptEmailJob[]> {
   const db = getSupabaseAdmin();
   if (!db) return [];
-  const now = new Date().toISOString();
-  const { data, error } = await db
-    .from("payment_finalize_ledger")
-    .select("payment_id, receipt_no, receipt_email_attempts, receipt_email_payload")
-    .eq("receipt_email_status", "pending")
-    .eq("status", "completed")
-    .lte("receipt_email_next_attempt_at", now)
-    .order("receipt_email_next_attempt_at", { ascending: true })
-    .limit(limit);
+  const { data, error } = await db.rpc("claim_receipt_email_jobs", {
+    p_limit: limit,
+    p_lease_seconds: leaseSeconds,
+  });
   if (error) {
     tgLog("receipt_email_claim_failed", { error: error.message }, "warn");
     return [];
   }
-  return (data || []) as ReceiptEmailJob[];
+  return ((data || []) as ReceiptEmailJob[]).filter((j) => j?.claim_token);
 }
 
-async function markEmailResult(
+async function ack(
   paymentId: string,
-  result: "sent" | "failed" | "skipped",
-  attempts: number,
+  claimToken: string,
+  result: "sent" | "failed" | "disabled" | "skipped",
   err?: string,
 ): Promise<void> {
   const db = getSupabaseAdmin();
   if (!db) return;
-  const nextAttempt =
-    result === "failed" && attempts < 8
-      ? new Date(Date.now() + Math.min(3_600_000, 30_000 * 2 ** Math.max(0, attempts - 1))).toISOString()
-      : null;
-  await db
-    .from("payment_finalize_ledger")
-    .update({
-      receipt_email_status: result === "failed" && nextAttempt ? "pending" : result,
-      receipt_email_attempts: attempts,
-      receipt_email_next_attempt_at: nextAttempt,
-      receipt_email_last_error: err || null,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("payment_id", paymentId)
-    .eq("receipt_email_status", "pending");
+  const { data, error } = await db.rpc("ack_receipt_email_job", {
+    p_payment_id: paymentId,
+    p_claim_token: claimToken,
+    p_result: result,
+    p_error: err || null,
+  });
+  if (error || !(data as { ok?: boolean } | null)?.ok) {
+    tgLog(
+      "receipt_email_ack_failed",
+      { paymentId, error: error?.message || JSON.stringify(data) },
+      "warn",
+    );
+  }
 }
 
-/**
- * Process pending receipt emails. Never reallocates money.
- * Returns counts only — does not throw.
- */
-export async function processPendingReceiptEmails(limit = 10): Promise<{
-  claimed: number;
-  sent: number;
-  failed: number;
-  skipped: number;
-}> {
+export async function processPendingReceiptEmails(
+  limit = 10,
+  opts?: { sender?: ReceiptEmailSender; forceEnable?: boolean },
+): Promise<{ claimed: number; sent: number; failed: number; skipped: number; disabled: number }> {
   const jobs = await claimPendingReceiptEmails(limit);
   let sent = 0;
   let failed = 0;
   let skipped = 0;
+  let disabled = 0;
+  const sender: ReceiptEmailSender =
+    opts?.sender ||
+    (async (params) => {
+      const { sendReceiptEmail } = await import("../email");
+      return sendReceiptEmail(params);
+    });
+
   for (const job of jobs) {
-    const attempts = (job.receipt_email_attempts || 0) + 1;
     const payload = job.receipt_email_payload;
     if (!payload?.to) {
-      await markEmailResult(job.payment_id, "skipped", attempts, "missing_to");
+      await ack(job.payment_id, job.claim_token, "skipped", "missing_to");
       skipped++;
       continue;
     }
-    if (emailDisabled()) {
-      await markEmailResult(job.payment_id, "skipped", attempts, "email_disabled");
-      skipped++;
+    if (!opts?.forceEnable && emailDisabled()) {
+      await ack(job.payment_id, job.claim_token, "disabled", "email_disabled");
+      disabled++;
       continue;
     }
     try {
-      const { sendReceiptEmail } = await import("../email");
-      const r = await sendReceiptEmail({
+      const r = await sender({
         to: payload.to,
         name: payload.name || "Student",
         receiptNo: payload.receiptNo || job.receipt_no || "",
@@ -121,18 +130,19 @@ export async function processPendingReceiptEmails(limit = 10): Promise<{
           Number(payload.remaining) <= 0 ? "₹0 — Fully paid" : formatINR(Number(payload.remaining) || 0),
         installmentsSummary: payload.paymentLabel || "",
         status: payload.status || "",
+        idempotencyKey: job.provider_key || undefined,
       });
       if (r.sent) {
-        await markEmailResult(job.payment_id, "sent", attempts);
+        await ack(job.payment_id, job.claim_token, "sent");
         sent++;
       } else {
-        await markEmailResult(job.payment_id, "failed", attempts, "send_returned_false");
+        await ack(job.payment_id, job.claim_token, "failed", "send_returned_false");
         failed++;
       }
     } catch (e) {
-      await markEmailResult(job.payment_id, "failed", attempts, (e as Error).message);
+      await ack(job.payment_id, job.claim_token, "failed", (e as Error).message);
       failed++;
     }
   }
-  return { claimed: jobs.length, sent, failed, skipped };
+  return { claimed: jobs.length, sent, failed, skipped, disabled };
 }

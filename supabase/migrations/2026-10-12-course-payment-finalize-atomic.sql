@@ -30,7 +30,7 @@ create table if not exists public.payment_finalize_ledger (
   enrollment_status_after text,
   outcome text not null default 'created',
   receipt_email_status text not null default 'skipped'
-    check (receipt_email_status in ('pending', 'sent', 'failed', 'skipped')),
+    check (receipt_email_status in ('pending', 'claimed', 'sent', 'failed', 'skipped')),
   receipt_email_attempts integer not null default 0,
   receipt_email_next_attempt_at timestamptz,
   receipt_email_last_error text,
@@ -143,6 +143,18 @@ as $$
     );
 $$;
 
+-- Session flag so containment triggers allow this transaction's writes.
+create or replace function public.course_finalize_rpc_enter()
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  perform set_config('app.course_finalize_rpc', '1', true);
+end;
+$$;
+
 -- Drop single-arg overload if present so callers use the two-arg form.
 drop function if exists public.finalize_course_payment(text);
 
@@ -198,6 +210,8 @@ declare
   v_pointer_id text;
   v_label_re text;
 begin
+  perform public.course_finalize_rpc_enter();
+
   if p_reference_no is null or length(trim(p_reference_no)) = 0 then
     return jsonb_build_object('ok', false, 'outcome', 'bad_reference', 'error', 'missing_reference');
   end if;

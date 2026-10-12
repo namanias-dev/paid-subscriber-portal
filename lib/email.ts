@@ -53,6 +53,8 @@ interface ReceiptEmailParams {
   installmentsSummary: string;
   status: string;
   receiptUrl?: string;
+  /** Resend Idempotency-Key when provided (provider-safe retries). */
+  idempotencyKey?: string;
 }
 
 /**
@@ -64,7 +66,7 @@ export async function sendReceiptEmail(params: ReceiptEmailParams): Promise<{ se
   try {
     const { Resend } = await import("resend");
     const resend = new Resend(process.env.RESEND_API_KEY as string);
-    await resend.emails.send({
+    const payload = {
       from: "Naman IAS Academy <noreply@namanias.com>",
       to: params.to,
       subject: `Payment receipt ${params.receiptNo} — ${params.courseTitle}`,
@@ -82,7 +84,12 @@ export async function sendReceiptEmail(params: ReceiptEmailParams): Promise<{ se
           ${params.receiptUrl ? `<p><a href="${params.receiptUrl}" style="color:#d4af37">View / download your receipt →</a></p>` : ""}
           <p style="color:#8899bb;margin-top:16px">This is a system-generated receipt. Support: 8437686541 — Naman Sir's Team</p>
         </div>`,
-    });
+    };
+    if (params.idempotencyKey) {
+      await resend.emails.send(payload, { idempotencyKey: params.idempotencyKey });
+    } else {
+      await resend.emails.send(payload);
+    }
     return { sent: true };
   } catch {
     return { sent: false };

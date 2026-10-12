@@ -81,9 +81,14 @@ async function resetSchema(client: pg.Client) {
     path.join(root, "supabase/migrations/2026-10-12-course-payment-finalize-atomic.sql"),
     "utf8",
   );
+  const ops = fs.readFileSync(
+    path.join(root, "supabase/migrations/2026-10-12-course-payment-finalize-ops.sql"),
+    "utf8",
+  );
   const repair = fs.readFileSync(path.join(root, "scripts/repair-payment-overallocation.sql"), "utf8");
   await client.query(minimal);
   await client.query(migration);
+  await client.query(ops);
   await client.query(repair);
 }
 
@@ -511,12 +516,30 @@ describePg("finalize_course_payment Postgres RPC", () => {
       [evening],
     );
 
+    const enrSnap = await admin.query(`select * from course_enrollments where id=$1`, [evening]);
+    const baseline = {
+      enrollment: {
+        amount_paid: enrSnap.rows[0].amount_paid,
+        status: enrSnap.rows[0].status,
+        total_fee: enrSnap.rows[0].total_fee,
+        schedule: enrSnap.rows[0].schedule,
+      },
+      payment: {
+        id: "pay-ud",
+        amount: 8250,
+        status: "PAID",
+        reference_no: "REF-UD",
+        deleted_at: null,
+      },
+      payment_ids: ["pay-seat-m", "pay-ud"],
+      transfer_ids: ["tr1"],
+    };
     const repair1 = await admin.query(
       `select public.repair_course_overallocation_case(
-        $1, 18500, 'partially_paid', 'pay-ud', 'ud1', array['ud2','ud3']::text[],
-        array[2]::int[], 10250, 'partially_paid', 'fixture-ud', true, null
+        $1, 'pay-ud', 'ud1', array['ud2','ud3']::text[],
+        array[2]::int[], 10250, 'partially_paid', 'fixture-ud', $2::jsonb, true
       ) as r`,
-      [evening],
+      [evening, JSON.stringify(baseline)],
     );
     assert.equal(repair1.rows[0].r.ok, true);
     const enrRow = await admin.query(`select amount_paid, schedule, status from course_enrollments where id=$1`, [evening]);
@@ -529,11 +552,420 @@ describePg("finalize_course_payment Postgres RPC", () => {
 
     const repair2 = await admin.query(
       `select public.repair_course_overallocation_case(
-        $1, 18500, 'partially_paid', 'pay-ud', 'ud1', array['ud2','ud3']::text[],
-        array[2]::int[], 10250, 'partially_paid', 'fixture-ud', true, null
+        $1, 'pay-ud', 'ud1', array['ud2','ud3']::text[],
+        array[2]::int[], 10250, 'partially_paid', 'fixture-ud', $2::jsonb, true
       ) as r`,
-      [evening],
+      [evening, JSON.stringify(baseline)],
     );
     assert.equal(repair2.rows[0].r.outcome, "already_repaired");
+  });
+});
+
+describePg("receipt email claim/ack + containment + four-case repair", () => {
+  let admin: pg.Client;
+
+  before(async () => {
+    admin = new pg.Client({ connectionString: URL });
+    await admin.connect();
+    await resetSchema(admin);
+  });
+
+  after(async () => {
+    await admin?.end().catch(() => null);
+  });
+
+  it("concurrent email workers: only one claim wins; disable does not burn attempts; retry sends", async () => {
+    await admin.query("truncate payments, course_enrollments, payment_receipts, payment_finalize_ledger cascade");
+    const enr = "enr-email";
+    await seedEnrollment(admin, enr, scheduleEmi({ seatPaid: true }), { amount_paid: 2000, email: "a@example.com" });
+    await seedPayment(admin, {
+      id: "pay-em",
+      amount: 8250,
+      kind: "installment",
+      ref: "REF-EM",
+      enrollment_id: enr,
+      installment_no: 1,
+    });
+    const fin = await admin.query(`select public.finalize_course_payment_guarded($1, null) as r`, ["REF-EM"]);
+    assert.equal(fin.rows[0].r.outcome, "created");
+
+    const c1 = new pg.Client({ connectionString: URL });
+    const c2 = new pg.Client({ connectionString: URL });
+    await c1.connect();
+    await c2.connect();
+    try {
+      const [a, b] = await Promise.all([
+        c1.query(`select * from public.claim_receipt_email_jobs(10, 60)`),
+        c2.query(`select * from public.claim_receipt_email_jobs(10, 60)`),
+      ]);
+      const claimed = [...a.rows, ...b.rows];
+      assert.equal(claimed.length, 1, "exactly one worker claims the job");
+      const job = claimed[0];
+      // Disabled: pending, attempts unchanged
+      const dis = await admin.query(
+        `select public.ack_receipt_email_job($1,$2,'disabled','email_disabled') as r`,
+        [job.payment_id, job.claim_token],
+      );
+      assert.equal(dis.rows[0].r.attempts_consumed, false);
+      const row = await admin.query(
+        `select receipt_email_status, receipt_email_attempts from payment_finalize_ledger where payment_id=$1`,
+        [job.payment_id],
+      );
+      assert.equal(row.rows[0].receipt_email_status, "pending");
+      assert.equal(row.rows[0].receipt_email_attempts, 0);
+
+      // Force due and claim again, then send
+      await admin.query(
+        `update payment_finalize_ledger set receipt_email_next_attempt_at = now() - interval '1 second' where payment_id=$1`,
+        [job.payment_id],
+      );
+      const c3 = await admin.query(`select * from public.claim_receipt_email_jobs(10, 60)`);
+      assert.equal(c3.rows.length, 1);
+      const sent = await admin.query(`select public.ack_receipt_email_job($1,$2,'sent',null) as r`, [
+        c3.rows[0].payment_id,
+        c3.rows[0].claim_token,
+      ]);
+      assert.equal(sent.rows[0].r.status, "sent");
+      // Stale ack must fail
+      const stale = await admin.query(`select public.ack_receipt_email_job($1,$2,'sent',null) as r`, [
+        c3.rows[0].payment_id,
+        c3.rows[0].claim_token,
+      ]);
+      assert.equal(stale.rows[0].r.ok, false);
+
+      // Lease recovery: expired claim returns to pending and can be reclaimed
+      await admin.query(
+        `insert into payment_finalize_ledger (
+           payment_id, reference_no, enrollment_id, status, receipt_no, allocated_amount,
+           allocation, outcome, receipt_email_status, receipt_email_attempts,
+           receipt_email_payload, receipt_email_claim_token, receipt_email_claim_expires_at
+         ) values (
+           'pay-em-lease','REF-EM-L',$1,'completed','NSA-L',1,'[]'::jsonb,'created','claimed',0,
+           '{"to":"a@example.com"}'::jsonb, 'stale-lease', now() - interval '2 seconds'
+         )`,
+        [enr],
+      );
+      const reclaimed = await admin.query(`select * from public.claim_receipt_email_jobs(10, 60)`);
+      assert.ok(reclaimed.rows.some((r) => r.payment_id === "pay-em-lease"), "expired lease reclaimed");
+      const leaseRow = await admin.query(
+        `select receipt_email_status, receipt_email_claim_token from payment_finalize_ledger where payment_id='pay-em-lease'`,
+      );
+      assert.equal(leaseRow.rows[0].receipt_email_status, "claimed");
+      assert.notEqual(leaseRow.rows[0].receipt_email_claim_token, "stale-lease");
+    } finally {
+      await c1.end();
+      await c2.end();
+    }
+  });
+
+  it("containment blocks non-RPC schedule writes; RPC still allocates; deferred drains", async () => {
+    await admin.query("truncate payments, course_enrollments, payment_receipts, payment_finalize_ledger, payment_finalize_deferred cascade");
+    await admin.query(`update payment_finalize_settings set containment_enabled=true, containment_reason='test' where id=1`);
+    const enr = "enr-contain";
+    await seedEnrollment(admin, enr, scheduleEmi({ seatPaid: true }), { amount_paid: 2000 });
+    await seedPayment(admin, {
+      id: "pay-c",
+      amount: 8250,
+      kind: "installment",
+      ref: "REF-C",
+      enrollment_id: enr,
+      installment_no: 1,
+    });
+    await assert.rejects(
+      () =>
+        admin.query(`update course_enrollments set amount_paid = 9999 where id=$1`, [enr]),
+      /course_finalize_containment/,
+    );
+    const r = await admin.query(`select public.finalize_course_payment_guarded($1,null) as r`, ["REF-C"]);
+    assert.equal(r.rows[0].r.ok, true);
+    const enrRow = await admin.query(`select amount_paid from course_enrollments where id=$1`, [enr]);
+    assert.equal(enrRow.rows[0].amount_paid, 10250);
+    await admin.query(`update payment_finalize_settings set containment_enabled=false where id=1`);
+  });
+
+  it("repair rejects baseline drift and wrong receipt ownership", async () => {
+    await admin.query(
+      "truncate payments, course_enrollments, payment_receipts, payment_finalize_ledger, payment_repair_snapshots cascade",
+    );
+    const enr = "enr-drift";
+    const sched = scheduleEmi({ seatPaid: true });
+    sched[1] = { ...sched[1]!, paid: true, status: "paid", reference_no: "REF-D", paid_at: "2026-08-10T00:00:00Z" };
+    sched[2] = { ...sched[2]!, paid: true, status: "paid", reference_no: "REF-D", paid_at: "2026-08-10T00:00:01Z" };
+    await seedEnrollment(admin, enr, sched, { amount_paid: 18500, status: "partially_paid" });
+    await seedPayment(admin, {
+      id: "pay-d",
+      amount: 8250,
+      kind: "installment",
+      ref: "REF-D",
+      enrollment_id: enr,
+      installment_no: 1,
+      receipt_no: "R-BAD",
+    });
+    await admin.query(
+      `insert into payment_receipts (id, receipt_no, enrollment_id, payment_id, reference_no, phone, student_name, course_title, payment_kind, payment_label, amount, total_fee, paid_to_date, remaining, issued_at)
+       values ('rd1','R-GOOD',$1,'pay-d','REF-D','9','T','C','installment','Installment 1 of 4',8250,35000,10250,24750,now()),
+              ('rd2','R-BAD',$1,'pay-d','REF-D','9','T','C','installment','Installment 2 of 4',8250,35000,18500,16500,now()),
+              ('rdX','R-OTHER',$1,'other','OTHER','9','T','C','installment','Installment 1 of 4',8250,35000,8250,0,now())`,
+      [enr],
+    );
+    const snap = await admin.query(`select * from course_enrollments where id=$1`, [enr]);
+    const baseline = {
+      enrollment: {
+        amount_paid: 18500,
+        status: "partially_paid",
+        total_fee: snap.rows[0].total_fee,
+        schedule: snap.rows[0].schedule,
+      },
+      payment: { id: "pay-d", amount: 8250, status: "PAID", reference_no: "REF-D", deleted_at: null },
+      payment_ids: ["pay-d"],
+    };
+    // Wrong ownership
+    await assert.rejects(
+      () =>
+        admin.query(
+          `select public.repair_course_overallocation_case(
+            $1,'pay-d','rd1', array['rdX']::text[], array[2]::int[], 10250, 'partially_paid', 't', $2::jsonb, true
+          )`,
+          [enr, JSON.stringify(baseline)],
+        ),
+      /supersede_receipt_not_owned/,
+    );
+    // Drift
+    await admin.query(`update payment_finalize_settings set containment_enabled=false`);
+    await admin.query(`select public.course_finalize_rpc_enter()`);
+    await admin.query(`update course_enrollments set amount_paid=18501 where id=$1`, [enr]);
+    await assert.rejects(
+      () =>
+        admin.query(
+          `select public.repair_course_overallocation_case(
+            $1,'pay-d','rd1', array['rd2']::text[], array[2]::int[], 10250, 'partially_paid', 't2', $2::jsonb, true
+          )`,
+          [enr, JSON.stringify(baseline)],
+        ),
+      /enrollment_drift_from_baseline/,
+    );
+  });
+
+  it("repairs Akash / Sarah / Payal shaped fixtures to expected paid totals", async () => {
+    await admin.query(
+      "truncate payments, course_enrollments, payment_receipts, payment_finalize_ledger, payment_repair_snapshots cascade",
+    );
+
+    async function repairCase(opts: {
+      enr: string;
+      total: number;
+      seat: number;
+      instAmounts: number[];
+      paidThrough: number; // index of last legitimately paid installment in instAmounts (0-based)
+      racePaymentAmount: number;
+      raceRef: string;
+      proposedPaid: number;
+      unpayNos: number[];
+    }) {
+      const schedule: Record<string, unknown>[] = [
+        {
+          no: 0,
+          kind: "seat",
+          label: "Book Your Seat",
+          amount: opts.seat,
+          paid: true,
+          status: "paid",
+          reference_no: "SEAT-" + opts.enr,
+          paid_at: "2026-09-01T00:00:00Z",
+        },
+      ];
+      for (let i = 0; i < opts.instAmounts.length; i++) {
+        const no = i + 1;
+        const raced = no > opts.paidThrough + 1;
+        const legitPaid = no <= opts.paidThrough + 1;
+        schedule.push({
+          no,
+          kind: "installment",
+          label: `Installment ${no} of ${opts.instAmounts.length}`,
+          amount: opts.instAmounts[i],
+          due: `2026-${String(9 + i).padStart(2, "0")}-01T00:00:00.000Z`,
+          paid: legitPaid || raced,
+          status: legitPaid || raced ? "paid" : "pending",
+          reference_no: raced || no === opts.paidThrough + 1 ? opts.raceRef : `OK-${no}`,
+          paid_at: legitPaid || raced ? "2026-09-24T00:00:00Z" : null,
+        });
+      }
+      // Mark race: paidThrough installment AND later ones share raceRef (already set for paidThrough+1 and raced)
+      await seedEnrollment(admin, opts.enr, schedule, {
+        amount_paid: opts.seat + opts.instAmounts.reduce((a, b) => a + b, 0),
+        status: "fully_paid",
+        total_fee: opts.total,
+      });
+      await seedPayment(admin, {
+        id: "pay-" + opts.enr,
+        amount: opts.racePaymentAmount,
+        kind: "installment",
+        ref: opts.raceRef,
+        enrollment_id: opts.enr,
+        installment_no: opts.paidThrough + 1,
+        receipt_no: "PHANTOM-" + opts.enr,
+      });
+      await seedPayment(admin, {
+        id: "seat-" + opts.enr,
+        amount: opts.seat,
+        kind: "seat",
+        ref: "SEAT-" + opts.enr,
+        enrollment_id: opts.enr,
+        installment_no: 0,
+      });
+      const canonId = "c-" + opts.enr;
+      const phantomId = "p-" + opts.enr;
+      await admin.query(
+        `insert into payment_receipts (id, receipt_no, enrollment_id, payment_id, reference_no, phone, student_name, course_title, payment_kind, payment_label, amount, total_fee, paid_to_date, remaining, issued_at)
+         values
+         ($1,$2,$3,$4,$5,'9','T','C','installment',$6,$7,$8,$9,$10,'2026-09-24T00:00:00Z'),
+         ($11,$12,$3,$4,$5,'9','T','C','installment',$13,$7,$8,$14,0,'2026-09-24T00:00:01Z')`,
+        [
+          canonId,
+          "CANON-" + opts.enr,
+          opts.enr,
+          "pay-" + opts.enr,
+          opts.raceRef,
+          `Installment ${opts.paidThrough + 1} of ${opts.instAmounts.length}`,
+          opts.racePaymentAmount,
+          opts.total,
+          opts.proposedPaid,
+          opts.total - opts.proposedPaid,
+          phantomId,
+          "PHANTOM-" + opts.enr,
+          `Installment ${opts.instAmounts.length} of ${opts.instAmounts.length}`,
+          opts.total,
+        ],
+      );
+      const snap = await admin.query(`select * from course_enrollments where id=$1`, [opts.enr]);
+      const baseline = {
+        enrollment: {
+          amount_paid: snap.rows[0].amount_paid,
+          status: snap.rows[0].status,
+          total_fee: snap.rows[0].total_fee,
+          schedule: snap.rows[0].schedule,
+        },
+        payment: {
+          id: "pay-" + opts.enr,
+          amount: opts.racePaymentAmount,
+          status: "PAID",
+          reference_no: opts.raceRef,
+          deleted_at: null,
+        },
+        payment_ids: ["seat-" + opts.enr, "pay-" + opts.enr],
+      };
+      const r = await admin.query(
+        `select public.repair_course_overallocation_case(
+          $1,$2,$3,array[$4]::text[],$5::int[],$6,$7,$8,$9::jsonb,true
+        ) as r`,
+        [
+          opts.enr,
+          "pay-" + opts.enr,
+          canonId,
+          phantomId,
+          opts.unpayNos,
+          opts.proposedPaid,
+          "partially_paid",
+          "fix-" + opts.enr,
+          JSON.stringify(baseline),
+        ],
+      );
+      assert.equal(r.rows[0].r.ok, true, opts.enr);
+      const after = await admin.query(`select amount_paid, status from course_enrollments where id=$1`, [opts.enr]);
+      assert.equal(after.rows[0].amount_paid, opts.proposedPaid, opts.enr + " paid");
+      assert.equal(after.rows[0].status, "partially_paid");
+    }
+
+    // Akash: seat 10000 + 8333 = 18333; race stamped all 3 EMIs
+    await repairCase({
+      enr: "akash",
+      total: 35000,
+      seat: 10000,
+      instAmounts: [8333, 8333, 8334],
+      paidThrough: 0,
+      racePaymentAmount: 8333,
+      raceRef: "REF-AK",
+      proposedPaid: 18333,
+      unpayNos: [2, 3],
+    });
+    // Sarah: seat 2000 + 24333 + 24333 = 50666; race stamped inst2+inst3
+    await repairCase({
+      enr: "sarah",
+      total: 75000,
+      seat: 2000,
+      instAmounts: [24333, 24333, 24334],
+      paidThrough: 1,
+      racePaymentAmount: 24333,
+      raceRef: "REF-SA",
+      proposedPaid: 50666,
+      unpayNos: [3],
+    });
+    // Payal-shaped: legacy 38000 + 3x4000 + race 4000 = 54000; false paid 5&6
+    // Model as seat0=0 with installments starting at no 1 amounts matching portal
+    await admin.query(
+      "truncate payments, course_enrollments, payment_receipts, payment_finalize_ledger, payment_repair_snapshots cascade",
+    );
+    const payalSched = [
+      { no: 1, kind: "installment", label: "Legacy", amount: 38000, paid: true, status: "paid", reference_no: "LEG", paid_at: "2026-07-01T00:00:00Z" },
+      { no: 2, kind: "installment", label: "Installment 1 of 8", amount: 4000, paid: true, status: "paid", reference_no: "P1", paid_at: "2026-07-11T00:00:00Z" },
+      { no: 3, kind: "installment", label: "Installment 2 of 8", amount: 4000, paid: true, status: "paid", reference_no: "OFF-X", paid_at: "2026-08-10T00:00:00Z" },
+      { no: 4, kind: "installment", label: "Installment 3 of 8", amount: 4000, paid: true, status: "paid", reference_no: "P3", paid_at: "2026-09-16T00:00:00Z" },
+      { no: 5, kind: "installment", label: "Installment 4 of 8", amount: 4000, paid: true, status: "paid", reference_no: "REF-PY", paid_at: "2026-10-08T00:00:00Z" },
+      { no: 6, kind: "installment", label: "Installment 5 of 8", amount: 4000, paid: true, status: "paid", reference_no: "REF-PY", paid_at: "2026-10-08T00:00:01Z" },
+      { no: 7, kind: "installment", label: "Installment 6 of 8", amount: 4000, paid: true, status: "paid", reference_no: "REF-PY", paid_at: "2026-10-08T00:00:02Z" },
+      { no: 8, kind: "installment", label: "Installment 7 of 8", amount: 4000, paid: false, status: "pending" },
+      { no: 9, kind: "installment", label: "Installment 8 of 8", amount: 4000, paid: false, status: "pending" },
+    ];
+    await seedEnrollment(admin, "payal", payalSched, { amount_paid: 62000, status: "partially_paid", total_fee: 70000 });
+    for (const [id, amt, ref, kind, n] of [
+      ["pay-leg", 38000, "LEG", "installment", 1],
+      ["pay-p1", 4000, "P1", "installment", 2],
+      ["pay-off", 4000, "OFF-X", "installment", 3],
+      ["pay-p3", 4000, "P3", "installment", 4],
+      ["pay-py", 4000, "REF-PY", "installment", 5],
+    ] as const) {
+      await seedPayment(admin, {
+        id,
+        amount: amt,
+        kind: kind as string,
+        ref,
+        enrollment_id: "payal",
+        installment_no: n,
+      });
+    }
+    await admin.query(
+      `insert into payment_receipts (id, receipt_no, enrollment_id, payment_id, reference_no, phone, student_name, course_title, payment_kind, payment_label, amount, total_fee, paid_to_date, remaining, issued_at)
+       values
+       ('py1','NSA-PY1','payal','pay-py','REF-PY','9','Payal','C','installment','Installment 4 of 8',4000,70000,54000,16000,'2026-10-08T00:00:00Z'),
+       ('py2','NSA-PY2','payal','pay-py','REF-PY','9','Payal','C','installment','Installment 5 of 8',4000,70000,58000,12000,'2026-10-08T00:00:01Z'),
+       ('py3','NSA-PY3','payal','pay-py','REF-PY','9','Payal','C','installment','Installment 6 of 8',4000,70000,62000,8000,'2026-10-08T00:00:02Z')`,
+    );
+    const snap = await admin.query(`select * from course_enrollments where id='payal'`);
+    const baseline = {
+      enrollment: {
+        amount_paid: 62000,
+        status: "partially_paid",
+        total_fee: 70000,
+        schedule: snap.rows[0].schedule,
+      },
+      payment: { id: "pay-py", amount: 4000, status: "PAID", reference_no: "REF-PY", deleted_at: null },
+      payment_ids: ["pay-leg", "pay-p1", "pay-off", "pay-p3", "pay-py"],
+    };
+    const r = await admin.query(
+      `select public.repair_course_overallocation_case(
+        'payal','pay-py','py1', array['py2','py3']::text[], array[6,7]::int[], 54000, 'partially_paid', 'fix-payal', $1::jsonb, true
+      ) as r`,
+      [JSON.stringify(baseline)],
+    );
+    assert.equal(r.rows[0].r.ok, true);
+    const after = await admin.query(`select amount_paid, schedule from course_enrollments where id='payal'`);
+    assert.equal(after.rows[0].amount_paid, 54000);
+    assert.equal(after.rows[0].schedule[4].paid, true);
+    assert.equal(after.rows[0].schedule[5].paid, false);
+    assert.equal(after.rows[0].schedule[6].paid, false);
+    // Offline payment preserved
+    const off = await admin.query(`select status, amount from payments where id='pay-off'`);
+    assert.equal(off.rows[0].status, "PAID");
+    assert.equal(off.rows[0].amount, 4000);
   });
 });
