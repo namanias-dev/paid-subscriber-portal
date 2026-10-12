@@ -18,7 +18,10 @@ export interface RunPaidSideEffectsOpts {
 
 /**
  * After a payment row is PAID, grant downstream access + notify.
- * Idempotent: finalize short-circuits on existing receipt; notify claims once.
+ * Idempotent: finalize is DB-locked per payment_id (and returns
+ * already_finalized / reconciled_existing without re-allocating). Notify
+ * claims once via payment_confirmed_notified_at — notify failure must not
+ * cause allocation to run again.
  */
 export async function runPaidTerminalSideEffects(
   payment: Payment,
