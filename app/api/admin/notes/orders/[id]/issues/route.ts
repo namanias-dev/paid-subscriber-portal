@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { getActionActor, requireFreshPermission } from "@/lib/adminGuard";
 import { storeDb } from "@/lib/store/db";
-import { clampIssueText, issueStatusAllowed, type IssueStatus } from "@/lib/store/issues";
+import { issueStatusAllowed, type IssueStatus } from "@/lib/store/issues";
+import { clampSupportNote, staffReplyPatch } from "@/lib/store/issueSupport";
 
 export const dynamic = "force-dynamic";
 
@@ -22,8 +23,8 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   } | null;
   const issueId = String(body?.issue_id || "").trim();
   const status = String(body?.status || "").trim();
-  const adminNote = clampIssueText(String(body?.admin_note || ""), 800);
-  const customerNote = clampIssueText(String(body?.customer_note || ""), 800);
+  const adminNote = clampSupportNote(String(body?.admin_note || ""), 800);
+  const customerNote = clampSupportNote(String(body?.customer_note || ""), 800);
   if (!issueId || !issueStatusAllowed(status)) {
     return NextResponse.json({ ok: false, error: "Choose an issue and a status." }, { status: 400, headers: noStore });
   }
@@ -36,7 +37,10 @@ export async function POST(req: Request, { params }: { params: { id: string } })
   if (!issue) return NextResponse.json({ ok: false, error: "not found" }, { status: 404, headers: noStore });
 
   const now = new Date().toISOString();
-  const next: Record<string, unknown> = { status, updated_at: now };
+  const next: Record<string, unknown> = {
+    status,
+    ...staffReplyPatch(now, !!customerNote),
+  };
   if (adminNote) next.admin_note = adminNote;
   if (customerNote) next.customer_note = customerNote;
   if (status === "RESOLVED") next.resolved_at = now;

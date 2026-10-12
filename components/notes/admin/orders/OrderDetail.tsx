@@ -157,8 +157,12 @@ export interface AdminOrder {
     description: string;
     created_at: string;
     customer_note: string | null;
+    milestone_note?: string | null;
     admin_note: string | null;
     callback_requested: boolean;
+    awaiting_staff_reply?: boolean;
+    last_customer_message_at?: string | null;
+    last_staff_reply_at?: string | null;
     open: boolean;
   } | null;
   attempts?: Array<{ id: string; order_no: string; status: string; total_paise: number; placed_at: string; paid_at?: string | null; captured?: boolean }>;
@@ -263,7 +267,7 @@ export default function OrderDetail({
   const [addressEditor, setAddressEditor] = useState(false);
   const [issueStatus, setIssueStatus] = useState(order.issue?.status || "OPEN");
   const [issueAdmin, setIssueAdmin] = useState("");
-  const [issueCustomer, setIssueCustomer] = useState("");
+  const [issueCustomer, setIssueCustomer] = useState(order.issue?.customer_note || "");
   const [confirmAdvance, setConfirmAdvance] = useState(false);
   const [events, setEvents] = useState<Array<{ id: string; event: string; created_at: string; actor_name?: string | null }>>([]);
   const [invoice, setInvoice] = useState<{
@@ -915,7 +919,29 @@ export default function OrderDetail({
               <div className="mt-3">
                 <p className="text-sm font-semibold text-[var(--ca-navy)]">{order.issue.reference} · {order.issue.category_label}</p>
                 <p className="mt-1 text-xs text-[var(--ca-navy)]/55">{order.issue.status_label} · {formatAdminWhen(order.issue.created_at)}</p>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {order.issue.awaiting_staff_reply ? (
+                    <span className="rounded-full bg-rose-100 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-rose-900">Needs reply</span>
+                  ) : order.issue.last_staff_reply_at ? (
+                    <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-emerald-900">Answered</span>
+                  ) : (
+                    <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-amber-900">Unanswered</span>
+                  )}
+                  {order.issue.callback_requested && (
+                    <span className="rounded-full bg-sky-100 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-sky-900">Callback</span>
+                  )}
+                </div>
                 <p className="mt-2 text-sm leading-relaxed">{order.issue.description}</p>
+                {order.issue.customer_note && (
+                  <p className="mt-2 whitespace-pre-line rounded-xl bg-[var(--ca-navy)]/[0.03] px-3 py-2 text-sm text-[var(--ca-navy)]/80">
+                    <span className="font-semibold">Student sees: </span>{order.issue.customer_note}
+                  </p>
+                )}
+                {order.issue.milestone_note && (
+                  <p className="mt-2 text-xs text-[var(--ca-navy)]/60">
+                    <span className="font-semibold">Milestone: </span>{order.issue.milestone_note}
+                  </p>
+                )}
                 {canManage && (
                   <>
                     <select value={issueStatus} onChange={(e) => setIssueStatus(e.target.value)} className="mt-3 min-h-11 w-full rounded-xl border px-2 text-sm">

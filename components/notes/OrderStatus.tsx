@@ -462,7 +462,14 @@ export default function OrderStatus({ order }: { order: PublicOrder }) {
           <p className="mt-2 text-sm text-[var(--ca-navy)]/70">
             {latestIssue.category_label} · {formatStamp(latestIssue.created_at)}
           </p>
-          <p className="mt-3 text-sm leading-relaxed text-[var(--ca-navy)]/80">{latestIssue.customer_note || latestIssue.next_step}</p>
+          {latestIssue.customer_note ? (
+            <p className="mt-3 whitespace-pre-line text-sm leading-relaxed text-[var(--ca-navy)]/80">{latestIssue.customer_note}</p>
+          ) : (
+            <p className="mt-3 text-sm leading-relaxed text-[var(--ca-navy)]/80">{latestIssue.next_step}</p>
+          )}
+          {latestIssue.milestone_note && (
+            <p className="mt-2 whitespace-pre-line text-sm leading-relaxed text-[var(--ca-navy)]/65">{latestIssue.milestone_note}</p>
+          )}
           {latestIssue.open && current.access_token && (
             <form onSubmit={sendFollowUp} className="mt-4">
               <label className="block text-sm font-medium text-[var(--ca-navy)]">

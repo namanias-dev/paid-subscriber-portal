@@ -280,6 +280,9 @@ export default function NotesOrderQueue() {
               Analytics
             </Link>
           )}
+          <Link href="/admin/notes/support" className="inline-flex min-h-10 items-center rounded-full border border-ca-navy/15 bg-white px-4 text-sm font-semibold text-[var(--ca-navy)] transition duration-150 hover:-translate-y-px active:scale-[0.98] motion-reduce:transform-none">
+            Customer service
+          </Link>
           <Link href="/admin/notes/leads" className="inline-flex min-h-10 items-center rounded-full px-3 text-sm font-semibold text-ca-navy/70 hover:text-[var(--ca-navy)]">
             Checkout leads
           </Link>

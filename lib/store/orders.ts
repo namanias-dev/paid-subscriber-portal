@@ -128,7 +128,7 @@ export async function getPublicOrder(
   };
   const { data: issueRows, error: issueError } = await db
     .from("store_order_issues")
-    .select("reference,category,description,status,created_at,updated_at,customer_note,callback_requested")
+    .select("reference,category,description,status,created_at,updated_at,customer_note,milestone_note,callback_requested")
     .eq("order_id", order.id)
     .order("created_at", { ascending: false })
     .limit(5);
@@ -206,7 +206,7 @@ async function pickupPublicOrder(
   const [{ data: issueRows, error: issueError }, { data: invoice }] = await Promise.all([
     db
       .from("store_order_issues")
-      .select("reference,category,description,status,created_at,updated_at,customer_note,callback_requested")
+      .select("reference,category,description,status,created_at,updated_at,customer_note,milestone_note,callback_requested")
       .eq("order_id", order.id)
       .order("created_at", { ascending: false })
       .limit(5),

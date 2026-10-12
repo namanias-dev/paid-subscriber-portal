@@ -266,8 +266,12 @@ export async function GET(req: Request) {
       description: string;
       created_at: string;
       customer_note: string | null;
+      milestone_note: string | null;
       admin_note: string | null;
       callback_requested: boolean;
+      awaiting_staff_reply: boolean;
+      last_customer_message_at: string | null;
+      last_staff_reply_at: string | null;
       open: boolean;
     }
   >();
@@ -420,7 +424,7 @@ export async function GET(req: Request) {
     for (const row of invoiceRows || []) invoiceByOrder.set(row.order_id, row.status);
     const { data: issueRows, error: issueError } = await db
       .from("store_order_issues")
-      .select("id,order_id,reference,category,status,description,created_at,customer_note,admin_note,callback_requested")
+      .select("id,order_id,reference,category,status,description,created_at,customer_note,milestone_note,admin_note,callback_requested,awaiting_staff_reply,last_customer_message_at,last_staff_reply_at")
       .in("order_id", ids)
       .order("created_at", { ascending: false });
     if (!issueError) {
@@ -439,8 +443,12 @@ export async function GET(req: Request) {
           description: issue.description,
           created_at: issue.created_at,
           customer_note: issue.customer_note,
+          milestone_note: issue.milestone_note,
           admin_note: issue.admin_note,
           callback_requested: !!issue.callback_requested,
+          awaiting_staff_reply: !!issue.awaiting_staff_reply,
+          last_customer_message_at: issue.last_customer_message_at,
+          last_staff_reply_at: issue.last_staff_reply_at,
           open,
         });
       }

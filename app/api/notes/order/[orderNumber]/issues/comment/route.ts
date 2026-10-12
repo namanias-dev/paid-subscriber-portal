@@ -2,12 +2,16 @@ import { NextResponse } from "next/server";
 import { verifyRawTokenAgainstHash } from "@/lib/store/accessToken";
 import { storeDb } from "@/lib/store/db";
 import { clampIssueText, issueIsOpen, toPublicIssue } from "@/lib/store/issues";
+import { customerFollowUpPatch } from "@/lib/store/issueSupport";
 
 export const dynamic = "force-dynamic";
 
 const noStore = { "Cache-Control": "no-store" };
 
-/** One follow-up on the open issue. Does not open a second ticket. */
+/**
+ * One follow-up on the open issue. Does not open a second ticket.
+ * Never overwrites staff `customer_note` — follow-ups live in the event log.
+ */
 export async function POST(req: Request, { params }: { params: { orderNumber: string } }) {
   const db = storeDb();
   if (!db) return NextResponse.json({ ok: false, error: "unavailable" }, { status: 503, headers: noStore });
@@ -29,7 +33,9 @@ export async function POST(req: Request, { params }: { params: { orderNumber: st
   }
   const { data: issue } = await db
     .from("store_order_issues")
-    .select("id,reference,category,description,status,created_at,updated_at,customer_note,callback_requested,order_id")
+    .select(
+      "id,reference,category,description,status,created_at,updated_at,customer_note,milestone_note,callback_requested,order_id",
+    )
     .eq("order_id", order.id)
     .eq("reference", reference)
     .maybeSingle();
@@ -37,11 +43,8 @@ export async function POST(req: Request, { params }: { params: { orderNumber: st
     return NextResponse.json({ ok: false, error: "That issue is no longer open." }, { status: 409, headers: noStore });
   }
   const now = new Date().toISOString();
-  const note = `You added: ${comment}`;
-  const { error } = await db
-    .from("store_order_issues")
-    .update({ customer_note: note, updated_at: now })
-    .eq("id", issue.id);
+  // Preserve staff customer_note. Only mark awaiting reply + timestamps.
+  const { error } = await db.from("store_order_issues").update(customerFollowUpPatch(now)).eq("id", issue.id);
   if (error) return NextResponse.json({ ok: false, error: "Could not save that note." }, { status: 400, headers: noStore });
   await db.from("store_order_issue_events").insert({
     issue_id: issue.id,
@@ -55,7 +58,15 @@ export async function POST(req: Request, { params }: { params: { orderNumber: st
     created_at: now,
   });
   return NextResponse.json(
-    { ok: true, issue: toPublicIssue({ ...issue, customer_note: note, updated_at: now }) },
+    {
+      ok: true,
+      issue: toPublicIssue({
+        ...issue,
+        customer_note: issue.customer_note,
+        milestone_note: issue.milestone_note,
+        updated_at: now,
+      }),
+    },
     { headers: noStore },
   );
 }

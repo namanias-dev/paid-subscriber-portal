@@ -103,6 +103,7 @@ export const ADMIN_NAV: AdminNavItem[] = [
   { href: "/admin/notes/analytics", label: "Notes analytics", icon: "reports", group: "Notes Store", superOnly: true },
   { href: "/admin/notes/interest", label: "Notes demand", icon: "reports", group: "Notes Store", superOnly: true },
   { href: "/admin/notes", label: "Notes orders", icon: "payments", group: "Notes Store", anyPerm: ["store_view_orders", "store_manage_orders"] },
+  { href: "/admin/notes/support", label: "Customer service", icon: "reports", group: "Notes Store", anyPerm: ["store_view_orders", "store_manage_orders"] },
   { href: "/admin/notes/leads", label: "Checkout leads", icon: "reports", group: "Notes Store", anyPerm: ["store_view_orders", "store_manage_orders"] },
   { href: "/admin/notes/preparation", label: "Preparation queue", icon: "reports", group: "Notes Store", perm: "store_manage_orders" },
   { href: "/admin/notes/products", label: "Notes catalogue", icon: "content", group: "Notes Store", perm: "store_manage_catalogue" },
