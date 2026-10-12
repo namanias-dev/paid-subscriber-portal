@@ -14,6 +14,7 @@ import {
 } from "./publicCache";
 import { syncAmountPaidFromFeeState } from "./amountPaidCache";
 import { enrollmentFeeStateFromEnrollment } from "./enrollmentFeeState";
+import { allocatePaymentToSchedule } from "./paymentFinalize/allocateSchedule";
 import * as mock from "./mockData";
 import { computeExpiry, isExpired, isExpiringSoon, yesterdayISODate, todayISODate, formatINR, formatISTDate } from "./dates";
 import { generateAccessCode } from "./codeGenerator";
@@ -4707,8 +4708,18 @@ export async function getReceiptByReference(referenceNo: string): Promise<Paymen
   if (demoMode()) return demoReceipts().find((r) => r.reference_no === referenceNo) ?? null;
   const db = getSupabaseAdmin();
   if (!db) return demoReceipts().find((r) => r.reference_no === referenceNo) ?? null;
-  const { data } = await db.from("payment_receipts").select("*").eq("reference_no", referenceNo).maybeSingle();
-  return (data as PaymentReceipt) ?? null;
+  // Never use maybeSingle here: historical races left duplicate rows for one
+  // reference, and a multi-row error must not look like "no receipt".
+  const { data } = await db
+    .from("payment_receipts")
+    .select("*")
+    .eq("reference_no", referenceNo)
+    .order("issued_at", { ascending: true })
+    .limit(20);
+  const rows = (data as PaymentReceipt[]) || [];
+  if (!rows.length) return null;
+  const { pickCanonicalReceipt } = await import("./paymentFinalize/allocateSchedule");
+  return pickCanonicalReceipt(rows, {}) || rows[0] || null;
 }
 
 export async function getReceiptsByPhone(phone: string): Promise<PaymentReceipt[]> {
@@ -4732,137 +4743,80 @@ async function insertReceipt(row: PaymentReceipt): Promise<PaymentReceipt> {
 }
 
 /**
- * Idempotently apply a PAID course EMI/seat payment to its enrollment:
- * marks the schedule item(s) paid, recomputes status + amount_paid, and issues
- * an immutable receipt (one per payment reference). Safe to call multiple times
- * (callback + status poll). Returns null for non-EMI / one-time payments so the
- * existing one-time flow is untouched.
+ * Idempotently apply a PAID course EMI/seat payment to its enrollment.
+ *
+ * Production: one Postgres RPC (finalize_course_payment) locks the enrollment
+ * and payment, allocates at most once per payment_id, and inserts the receipt.
+ * Concurrent callback / verify / status-poll cannot double-spend one payment.
+ * Prior receipts for the payment are treated as already finalized (never as
+ * "never processed"), even when duplicates exist from historical races.
+ *
+ * Notification / email failures must not re-enter allocation — those run after
+ * a successful create outcome only.
  */
 export async function finalizeCoursePaymentByReference(
   referenceNo: string
-): Promise<{ enrollment: CourseEnrollment; receipt: PaymentReceipt } | null> {
+): Promise<{ enrollment: CourseEnrollment; receipt: PaymentReceipt; outcome?: string } | null> {
   const payment = await getPaymentByReference(referenceNo);
   if (!payment || !isPaidStatus(payment.status)) return null;
   if (!payment.enrollment_id) return null; // one-time payment — leave untouched
 
-  const enrollment = await getCourseEnrollmentById(payment.enrollment_id);
+  let enrollment = await getCourseEnrollmentById(payment.enrollment_id);
   if (!enrollment) return null;
 
-  // Idempotency: a receipt already exists for this reference => already finalized.
-  const existing = await getReceiptByReference(referenceNo);
-  if (existing) {
-    // Still nudge behaviour status (idempotent apply) — fire-and-forget only.
-    scheduleBehaviourStatusApply(payment.phone || enrollment.phone);
-    return { enrollment, receipt: existing };
-  }
-
-  const kind = (payment.payment_kind || "full") as "seat" | "installment" | "full";
-  const gatewayRef = payment.gateway_ref || payment.razorpay_payment_id || null;
-  const paidAt = new Date().toISOString();
-  let schedule = [...(enrollment.schedule || [])];
-
-  // Checkout intents persist amounts without dues — materialize dates on first money.
+  // Checkout intents may lack due dates — materialize before the locked allocate.
   if (needsDueMaterialization({ ...enrollment, amount_paid: Math.max(enrollment.amount_paid || 0, 1) })) {
-    const course = (await getAllCourses().catch(() => [] as Course[])).find((c) => c.id === enrollment.course_id) || null;
+    const course = (await getAllCourses().catch(() => [] as Course[])).find((c) => c.id === enrollment!.course_id) || null;
     const batch = resolveEnrollmentBatchStart(course || undefined, enrollment);
-    schedule = materializeScheduleDues(schedule, {
+    const schedule = materializeScheduleDues([...(enrollment.schedule || [])], {
       bookingISO: enrollment.created_at,
       course,
       batchStartISO: batch.iso,
     });
+    const updated = await updateCourseEnrollment(enrollment.id, { schedule });
+    if (updated) enrollment = updated;
+    else enrollment = { ...enrollment, schedule };
   }
 
-  const markPaid = (i: number) => {
-    schedule[i] = { ...schedule[i], paid: true, paid_at: paidAt, reference_no: referenceNo, gateway_ref: gatewayRef };
-  };
-
-  let paymentLabel = "Payment";
-  if (kind === "full") {
-    // Pay full / pay remaining: settle every outstanding line in one payment.
-    schedule.forEach((s, i) => { if (!s.paid) markPaid(i); });
-    paymentLabel = enrollment.plan_type === "full" ? "Full Payment" : "Full Remaining Payment";
-  } else if (kind === "seat") {
-    // Seat stays exact-match (or first unpaid seat) — not mixed with EMI lines.
-    const idx = schedule.findIndex((s) => s.no === (payment.installment_no ?? 0) && s.kind === "seat" && !s.paid);
-    const fallbackIdx = idx === -1 ? schedule.findIndex((s) => s.kind === "seat" && !s.paid) : idx;
-    if (fallbackIdx >= 0) {
-      markPaid(fallbackIdx);
-      paymentLabel = schedule[fallbackIdx].label;
-    }
-  } else {
-    // Instalments: oldest outstanding first (due, then no) — ignore stamped installment_no for clearing.
-    const oldestIdx = findOldestOutstandingIndex(schedule, "installment");
-    if (oldestIdx >= 0) {
-      const line = schedule[oldestIdx]!;
-      const payAmt = Math.round(Number(payment.amount) || 0);
-      const prevPartial = Math.round(Number(line.paid_amount) || 0);
-      const isProofPartial =
-        payment.payment_source === "student_proof" &&
-        payAmt > 0 &&
-        prevPartial + payAmt < (line.amount || 0);
-      if (isProofPartial) {
-        // Record partial against the oldest line; leave unpaid until remainder clears.
-        schedule[oldestIdx] = {
-          ...line,
-          paid: false,
-          status: "partially_paid",
-          paid_amount: prevPartial + payAmt,
-          reference_no: referenceNo,
-          gateway_ref: gatewayRef,
-          payment_id: payment.id,
-        };
-        paymentLabel = `${line.label} (partial)`;
-      } else {
-        markPaid(oldestIdx);
-        paymentLabel = schedule[oldestIdx]!.label;
-      }
-    }
+  const db = getSupabaseAdmin();
+  if (demoMode() || !db) {
+    const { finalizeCoursePaymentDemo } = await import("./paymentFinalize/demoFinalize");
+    const demo = await finalizeCoursePaymentDemo({
+      payment,
+      enrollment,
+      getReceiptsForPayment: (paymentId, ref) =>
+        demoReceipts().filter((r) => r.payment_id === paymentId || r.reference_no === ref),
+      nextReceiptNo,
+      persist: async (enr, receipt) => {
+        await updateCourseEnrollment(enr.id, { schedule: enr.schedule, status: enr.status });
+        await syncAmountPaidFromFeeState(enr);
+        await insertReceipt(receipt);
+        await updatePaymentByReference(referenceNo, { receipt_no: receipt.receipt_no }).catch(() => null);
+      },
+    });
+    if (!demo.ok || !demo.enrollment || !demo.receipt) return null;
+    scheduleBehaviourStatusApply(payment.phone || enrollment.phone);
+    return { enrollment: demo.enrollment, receipt: demo.receipt, outcome: demo.outcome };
   }
 
-  const derived = deriveEnrollment({ total_fee: enrollment.total_fee, schedule });
-  const status = enrollmentStatusFromSchedule({ total_fee: enrollment.total_fee, schedule, plan_type: enrollment.plan_type });
+  const { finalizeCoursePaymentAtomic } = await import("./paymentFinalize/finalizeCoursePayment");
+  const result = await finalizeCoursePaymentAtomic(referenceNo);
+  if (!result.ok || !result.enrollment || !result.receipt) return null;
 
-  const updatedBase = (await updateCourseEnrollment(enrollment.id, {
-    schedule,
-    status,
-  })) || { ...enrollment, schedule, status };
-  await syncAmountPaidFromFeeState({ ...updatedBase, schedule });
-  await clearGrantOverrideOnFullyPaid(enrollment.phone, enrollment.course_id, status);
-  const updated = { ...updatedBase, schedule, amount_paid: derived.paid, status };
-
-  // Build the immutable receipt from the ledger-consistent derived values.
-  const summary = installmentsSummary({ total_fee: updated.total_fee, schedule }, formatINR, formatISTDate);
-  const statusLabel: PaymentReceipt["status"] =
-    derived.isFullyPaid ? "Fully Paid" : status === "seat_booked" ? "Seat Booked" : "Partially Paid";
-
-  const receipt: PaymentReceipt = {
-    id: uuid(),
-    receipt_no: await nextReceiptNo(),
-    enrollment_id: enrollment.id,
-    payment_id: payment.id,
-    reference_no: referenceNo,
-    phone: enrollment.phone,
-    student_name: enrollment.student_name,
-    email: enrollment.email,
-    course_title: enrollment.course_title,
-    batch_label: enrollment.batch_label,
-    payment_kind: kind,
-    payment_label: paymentLabel,
-    amount: payment.amount,
-    gateway_ref: gatewayRef,
-    total_fee: updated.total_fee,
-    paid_to_date: derived.paid,
-    remaining: derived.remaining,
-    installments_summary: summary,
-    status: statusLabel,
-    method: payment.payment_mode || payment.mode || null,
-    issued_at: paidAt,
+  // Merge RPC projection onto the full enrollment row we already loaded.
+  const updated: CourseEnrollment = {
+    ...enrollment,
+    schedule: result.enrollment.schedule,
+    amount_paid: result.enrollment.amount_paid,
+    status: result.enrollment.status,
   };
-  const saved = await insertReceipt(receipt);
-  await updatePaymentByReference(referenceNo, { receipt_no: saved.receipt_no }).catch(() => null);
 
-  // Optional, best-effort receipt email (no-op without RESEND_API_KEY).
-  if (saved.email) {
+  await clearGrantOverrideOnFullyPaid(updated.phone, updated.course_id, updated.status).catch(() => null);
+  scheduleBehaviourStatusApply(payment.phone || updated.phone);
+
+  // Receipt email only when this call created the receipt — never on reconcile/retry.
+  if (result.outcome === "created" && result.receipt.email) {
+    const saved = result.receipt;
     import("./email")
       .then(({ sendReceiptEmail }) =>
         sendReceiptEmail({
@@ -4881,10 +4835,7 @@ export async function finalizeCoursePaymentByReference(
       .catch(() => null);
   }
 
-  // Behaviour status — fire-and-forget ONLY. Never await on the payment path.
-  scheduleBehaviourStatusApply(payment.phone || enrollment.phone);
-
-  return { enrollment: updated, receipt: saved };
+  return { enrollment: updated, receipt: result.receipt, outcome: result.outcome };
 }
 
 // ==================== ADMIN: MANUAL ENROLL + OFFLINE/CASH PAYMENTS ====================
@@ -5361,46 +5312,106 @@ export async function cancelStalePendingPayments(enrollmentId: string): Promise<
 // Waived/cancelled schedule lines are preserved (the plan-change tool owns them).
 
 function applyPaidPaymentToSchedule(schedule: InstallmentItem[], payment: Payment): void {
-  const kind = (payment.payment_kind || "full") as "one_time" | "seat" | "installment" | "full";
-  if (kind === "one_time") return; // not tied to the EMI schedule
-  const gatewayRef = payment.gateway_ref || payment.razorpay_payment_id || null;
-  const paidAt = payment.transaction_date || payment.created_at || new Date().toISOString();
-  const ref = payment.reference_no || null;
-  const mark = (i: number) => {
-    schedule[i] = { ...schedule[i], paid: true, paid_at: paidAt, reference_no: ref, gateway_ref: gatewayRef, payment_id: payment.id };
-  };
-  if (kind === "full") {
-    schedule.forEach((s, i) => { if (!s.paid && !isLineCancelledOrWaived(s)) mark(i); });
-    return;
+  const result = allocatePaymentToSchedule(schedule, {
+    amount: payment.amount,
+    payment_kind: payment.payment_kind,
+    installment_no: payment.installment_no,
+    payment_source: payment.payment_source,
+    payment_id: payment.id,
+    reference_no: payment.reference_no || "",
+    gateway_ref: payment.gateway_ref || payment.razorpay_payment_id || null,
+    paid_at: payment.transaction_date || payment.created_at || new Date().toISOString(),
+  });
+  if (!result.noop) {
+    for (let i = 0; i < schedule.length; i++) schedule[i] = result.schedule[i]!;
   }
-  if (kind === "seat") {
-    const exact = schedule.findIndex((s) => s.no === (payment.installment_no ?? 0) && s.kind === "seat" && !s.paid && !isLineCancelledOrWaived(s));
-    const idx = exact === -1 ? schedule.findIndex((s) => s.kind === "seat" && !s.paid && !isLineCancelledOrWaived(s)) : exact;
-    if (idx >= 0) mark(idx);
-    return;
-  }
-  // Instalments: oldest outstanding first — stamped installment_no is audit-only.
-  const idx = findOldestOutstandingIndex(schedule, "installment");
-  if (idx >= 0) mark(idx);
 }
 
 /**
- * Recompute a course enrollment from its non-deleted PAID payments. Returns the
- * updated enrollment (or the untouched one for comp/manual enrollments with no
- * payment rows). Idempotent.
+ * PAID ledger rows that belong on this enrollment for recompute:
+ *  1) payments.enrollment_id = this enrollment
+ *  2) transferred credits: PAID payments still pointed at a from_enrollment that
+ *     transferred into this one, matched by reference_no on the carried schedule
+ *     (or the transfer snapshot). The original payment.enrollment_id is preserved.
+ */
+export async function getLedgerPaymentsForEnrollmentRecompute(enrollmentId: string): Promise<Payment[]> {
+  const id = (enrollmentId || "").trim();
+  if (!id) return [];
+  const direct = await getAllPaymentRowsByEnrollmentId(id);
+  const byId = new Map<string, Payment>();
+  for (const p of direct) byId.set(p.id, p);
+
+  if (demoMode()) {
+    return [...byId.values()].filter((p) => !p.deleted_at && isPaidStatus(p.status));
+  }
+  const db = getSupabaseAdmin();
+  const enr = await getCourseEnrollmentById(id);
+  if (!db || !enr) {
+    return [...byId.values()].filter((p) => !p.deleted_at && isPaidStatus(p.status));
+  }
+
+  const refs = new Set<string>();
+  for (const line of enr.schedule || []) {
+    if (line.reference_no) refs.add(line.reference_no);
+  }
+  try {
+    const { data: transfers } = await db
+      .from("enrollment_transfers")
+      .select("from_enrollment_id,new_schedule,old_schedule,amount_paid")
+      .eq("to_enrollment_id", id);
+    for (const t of (transfers || []) as {
+      from_enrollment_id?: string;
+      new_schedule?: InstallmentItem[];
+      old_schedule?: InstallmentItem[];
+    }[]) {
+      for (const line of [...(t.new_schedule || []), ...(t.old_schedule || [])]) {
+        if (line?.paid && line.reference_no) refs.add(line.reference_no);
+      }
+    }
+  } catch {
+    /* transfer table optional in demo */
+  }
+
+  const refList = [...refs].filter(Boolean);
+  if (refList.length) {
+    const { data: byRef } = await db
+      .from("payments")
+      .select("*")
+      .in("reference_no", refList)
+      .in("status", ["PAID", "captured"]);
+    for (const p of (byRef || []) as Payment[]) {
+      if (!p.deleted_at) byId.set(p.id, p);
+    }
+  }
+
+  return [...byId.values()]
+    .filter((p) => !p.deleted_at && isPaidStatus(p.status))
+    .sort((a, b) => (a.created_at || "").localeCompare(b.created_at || ""));
+}
+
+/**
+ * Recompute a course enrollment from its non-deleted PAID payments (plus
+ * transferred credits recognized by reference). Idempotent. Does not rewrite
+ * payment.enrollment_id on transferred seat rows.
  */
 export async function recomputeCourseEnrollment(enrollmentId: string): Promise<CourseEnrollment | null> {
   const enr = await getCourseEnrollmentById(enrollmentId);
   if (!enr) return null;
-  const all = await getAllPaymentRowsByEnrollmentId(enrollmentId);
-  if (all.length === 0) return enr; // comp/manual — nothing payment-driven to recompute
-  const paid = all
-    .filter((p) => !p.deleted_at && isPaidStatus(p.status))
-    .sort((a, b) => (a.created_at || "").localeCompare(b.created_at || ""));
+  const paid = await getLedgerPaymentsForEnrollmentRecompute(enrollmentId);
+  if (paid.length === 0) return enr; // comp/manual — nothing payment-driven to recompute
   const schedule = (enr.schedule || []).map((s) =>
     isLineCancelledOrWaived(s)
       ? { ...s }
-      : { ...s, paid: false, paid_at: null, reference_no: null, gateway_ref: null, payment_id: null },
+      : {
+          ...s,
+          paid: false,
+          paid_at: null,
+          reference_no: null,
+          gateway_ref: null,
+          payment_id: null,
+          paid_amount: null,
+          status: s.status === "paid" || s.status === "partially_paid" ? "pending" : s.status,
+        },
   );
   for (const p of paid) applyPaidPaymentToSchedule(schedule, p);
   const derived = deriveEnrollment({ total_fee: enr.total_fee, schedule });
