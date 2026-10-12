@@ -64,7 +64,10 @@ export interface PublicIssue {
   status_label: string;
   created_at: string;
   updated_at: string;
+  /** Staff personal reply — never overwritten by follow-ups or milestones. */
   customer_note: string | null;
+  /** Short verified courier milestone; shown under the staff note when both exist. */
+  milestone_note: string | null;
   next_step: string;
   open: boolean;
   callback_requested: boolean;
@@ -128,6 +131,7 @@ export function toPublicIssue(row: {
   created_at: string;
   updated_at: string;
   customer_note?: string | null;
+  milestone_note?: string | null;
   callback_requested?: boolean | null;
 }): PublicIssue {
   const status = issueStatusAllowed(row.status) ? row.status : "OPEN";
@@ -142,6 +146,7 @@ export function toPublicIssue(row: {
     created_at: row.created_at,
     updated_at: row.updated_at,
     customer_note: row.customer_note?.trim() || null,
+    milestone_note: row.milestone_note?.trim() || null,
     next_step: STATUS_NEXT[status],
     open: issueIsOpen(status),
     callback_requested: !!row.callback_requested,

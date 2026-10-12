@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
-import { Activity, Send, Workflow, FileText, ScrollText, BarChart3, Settings as SettingsIcon, RefreshCw, Download, AlertTriangle, CheckCircle2, Power, Braces, Link2, RotateCcw, Users, Search, SlidersHorizontal, Bookmark, Save, Trash2, History, Clock, ChevronDown, Plus, ShieldCheck } from "lucide-react";
+import { Activity, Send, Workflow, FileText, ScrollText, BarChart3, Settings as SettingsIcon, RefreshCw, Download, AlertTriangle, CheckCircle2, Power, Braces, Link2, RotateCcw, Users, Search, SlidersHorizontal, Bookmark, Save, Trash2, History, Clock, ChevronDown, Plus, ShieldCheck, BookOpen } from "lucide-react";
+import NotesSmsPanel from "@/components/admin/sms/NotesSmsPanel";
 import { LoadingBlock } from "@/components/admin/ui";
 import { useToast } from "@/components/ui/Toast";
 import TimeframeFilter from "@/components/admin/TimeframeFilter";
@@ -24,6 +25,8 @@ interface TemplateRow {
   worstCaseChars: number; worstCaseSegments: number; over155: boolean; bodyErrors: string[];
   /** true = self-serve (staff-added); false = built-in code seed. */
   custom?: boolean;
+  /** Approved Notes DLT template — locked; managed from the Notes Store tab. */
+  notesApproved?: boolean;
 }
 interface RuleRow {
   trigger: string; template_id: string | null; template_name: string | null; template_ready: boolean;
@@ -50,6 +53,7 @@ const TABS = [
   { id: "send", label: "Send SMS", icon: Send },
   { id: "campaigns", label: "Campaigns", icon: History },
   { id: "automations", label: "Automations", icon: Workflow },
+  { id: "notes", label: "Notes Store", icon: BookOpen },
   { id: "queued", label: "Queued", icon: Clock },
   { id: "templates", label: "Templates", icon: FileText },
   { id: "variables", label: "Variables", icon: Braces },
@@ -110,6 +114,7 @@ export default function MissionControl() {
       {tab === "send" && <SendTab meta={meta} />}
       {tab === "campaigns" && <CampaignsTab canResend={!!meta?.isSuperAdmin} />}
       {tab === "automations" && <AutomationsTab canEdit={!!meta?.isSuperAdmin} />}
+      {tab === "notes" && <NotesSmsPanel isSuperAdmin={!!meta?.isSuperAdmin} />}
       {tab === "queued" && <QueuedTab canEdit={!!meta?.isSuperAdmin} />}
       {tab === "templates" && <TemplatesTab canEdit={!!meta?.canManageSms} />}
       {tab === "variables" && <VariablesTab canEdit={!!meta?.canManageSms} />}
@@ -272,7 +277,8 @@ function SendTab({ meta }: { meta: Meta | null }) {
   const loadSaved = useCallback(() => { fetch("/api/admin/sms/saved-audiences").then((r) => r.json()).then((d) => d.ok && setSaved(d.saved)).catch(() => {}); }, []);
   useEffect(() => { loadSaved(); }, [loadSaved]);
 
-  const sendable = templates.filter((t) => (t.status === "active" || t.status === "approved") && t.gateway_template_id);
+  // Approved Notes templates are per-order: they send only from the Notes Store tab.
+  const sendable = templates.filter((t) => (t.status === "active" || t.status === "approved") && t.gateway_template_id && !t.notesApproved);
   const needsWebinar = audType === "webinar_registered" || audType === "webinar_not_registered" || audType === "webinar_attendees" || audType === "webinar_no_show";
   const isFiltered = audType === "filtered";
   const panel: "filtered" | "preset" | "person" = audType === "filtered" ? "filtered" : audType === "person" ? "person" : "preset";
@@ -1035,6 +1041,7 @@ function AutomationsTab({ canEdit }: { canEdit: boolean }) {
         </tbody>
       </table>
       {!canEdit && <p className="p-3 text-xs text-muted">Only a Super Admin can toggle or edit automations.</p>}
+      <p className="p-3 text-xs text-muted">Notes Store automations (approved DLT templates) are managed in the Notes Store tab.</p>
     </div>
   );
 }
@@ -1214,9 +1221,11 @@ function TemplatesTab({ canEdit }: { canEdit: boolean }) {
                 <td className="px-4 py-3 font-mono text-xs">{t.gateway_template_id || <span className="text-amber-700">missing</span>}</td>
                 <td className="px-4 py-3 text-xs">{t.worstCaseChars}c · {t.worstCaseSegments}seg {t.over155 && <span className="text-amber-700">⚠️</span>}</td>
                 <td className="px-4 py-3 text-right">
-                  {t.custom
-                    ? <button onClick={() => setManaging(t)} className="btn btn-secondary text-xs">Edit</button>
-                    : <button onClick={() => setEditing(t)} className="btn btn-secondary text-xs">Open{!canEdit ? " (view)" : ""}</button>}
+                  {t.notesApproved
+                    ? <span className="text-xs text-muted">Notes Store tab</span>
+                    : t.custom
+                      ? <button onClick={() => setManaging(t)} className="btn btn-secondary text-xs">Edit</button>
+                      : <button onClick={() => setEditing(t)} className="btn btn-secondary text-xs">Open{!canEdit ? " (view)" : ""}</button>}
                 </td>
               </tr>
             ))}

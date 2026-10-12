@@ -20,6 +20,7 @@ const zero = (): RollupTotals => ({
 describe("campaign rollup funnel", () => {
   it("classifies notes, webinar and course destinations", () => {
     assert.equal(funnelKind("notes", "/notes/polity"), "notes");
+    assert.equal(funnelKind("notes_product", "/notes/modern-history"), "notes");
     assert.equal(funnelKind("custom", "https://www.namanias.com/notes"), "notes");
     assert.equal(funnelKind("webinar", "/webinar/demo"), "webinar");
     assert.equal(funnelKind("course", "/courses/gs"), "course");

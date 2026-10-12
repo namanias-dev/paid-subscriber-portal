@@ -9,6 +9,7 @@ import {
   toPublicIssue,
 } from "@/lib/store/issues";
 import { mintIssueReference } from "@/lib/store/issueRef";
+import { newIssueAttentionPatch } from "@/lib/store/issueSupport";
 import { projectCustomerStage } from "@/lib/store/projection";
 import { orderMethod } from "@/lib/store/fulfillment";
 
@@ -37,7 +38,7 @@ export async function GET(req: Request, { params }: { params: { orderNumber: str
   if (!auth.order) return NextResponse.json({ ok: false, error: "not found" }, { status: 404, headers: noStore });
   const { data, error } = await db
     .from("store_order_issues")
-    .select("reference,category,description,status,created_at,updated_at,customer_note,callback_requested")
+    .select("reference,category,description,status,created_at,updated_at,customer_note,milestone_note,callback_requested")
     .eq("order_id", auth.order.id)
     .order("created_at", { ascending: false })
     .limit(5);
@@ -74,7 +75,7 @@ export async function POST(req: Request, { params }: { params: { orderNumber: st
 
   const { data: existing } = await db
     .from("store_order_issues")
-    .select("reference,category,description,status,created_at,updated_at,customer_note,callback_requested")
+    .select("reference,category,description,status,created_at,updated_at,customer_note,milestone_note,callback_requested")
     .eq("order_id", auth.order.id)
     .in("status", ["OPEN", "IN_REVIEW", "WAITING_ON_TEAM"])
     .order("created_at", { ascending: false })
@@ -89,6 +90,7 @@ export async function POST(req: Request, { params }: { params: { orderNumber: st
 
   const now = new Date().toISOString();
   const reference = mintIssueReference();
+  const attention = newIssueAttentionPatch(now);
   const { data: created, error } = await db
     .from("store_order_issues")
     .insert({
@@ -101,10 +103,12 @@ export async function POST(req: Request, { params }: { params: { orderNumber: st
       priority: category === "DAMAGE_ISSUE" || category === "ADDRESS_ISSUE" ? "high" : "normal",
       source: "customer_tracking_page",
       callback_requested: !!body?.callback_requested,
+      awaiting_staff_reply: attention.awaiting_staff_reply,
+      last_customer_message_at: attention.last_customer_message_at,
       created_at: now,
       updated_at: now,
     })
-    .select("id,reference,category,description,status,created_at,updated_at,customer_note,callback_requested")
+    .select("id,reference,category,description,status,created_at,updated_at,customer_note,milestone_note,callback_requested")
     .single();
   if (error || !created) {
     return NextResponse.json({ ok: false, error: "Could not save the issue. Please try again." }, { status: 400, headers: noStore });

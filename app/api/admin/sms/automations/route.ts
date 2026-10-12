@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requirePermission, requireSuperAdmin, currentAdminId } from "@/lib/adminGuard";
-import { listRules, upsertRule, listTemplates, getAutomationActivityStats } from "@/lib/sms/store";
+import { listRules, upsertRule, listTemplates, getAutomationActivityStats, isNotesRuleTrigger } from "@/lib/sms/store";
 import { pollDeliveryStatuses } from "@/lib/sms/service";
 
 export const dynamic = "force-dynamic";
@@ -10,7 +10,9 @@ export async function GET() {
   if (!(await requirePermission("send_sms"))) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   // Settle recent SENT → DELIVERED/FAILED before counting so Today pills are honest.
   try { await pollDeliveryStatuses({ sinceDays: 2, limit: 150 }); } catch { /* non-fatal */ }
-  const [rules, templates] = await Promise.all([listRules(), listTemplates()]);
+  // Notes automations are managed (with their cutover) in the Notes Store tab.
+  const [allRules, templates] = await Promise.all([listRules(), listTemplates()]);
+  const rules = allRules.filter((r) => !isNotesRuleTrigger(r.trigger));
   const activity = await getAutomationActivityStats(rules.map((r) => r.trigger));
   const tName = new Map(templates.map((t) => [t.id, t.name]));
   const tReady = new Map(templates.map((t) => [t.id, (t.status === "active" || t.status === "approved") && !!t.gateway_template_id]));
@@ -43,6 +45,7 @@ export async function PATCH(req: Request) {
   const body = await req.json().catch(() => ({}));
   const trigger = body.trigger as string;
   if (!trigger) return NextResponse.json({ ok: false, error: "Missing trigger" }, { status: 400 });
+  if (isNotesRuleTrigger(trigger)) return NextResponse.json({ ok: false, error: "Manage Notes automations from the Notes Store tab." }, { status: 400 });
   const patch: Record<string, unknown> = { updated_by: await currentAdminId() };
   if (body.enabled !== undefined) patch.enabled = !!body.enabled;
   if (body.delay_minutes !== undefined) patch.delay_minutes = body.delay_minutes === null ? null : Number(body.delay_minutes);

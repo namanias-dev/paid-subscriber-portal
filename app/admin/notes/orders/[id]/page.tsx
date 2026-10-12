@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import OrderDetail, { type AdminOrder } from "@/components/notes/admin/orders/OrderDetail";
 import CourierPicker from "@/components/notes/admin/orders/CourierPicker";
+import NotesSmsSection, { ORDER_SMS_TEMPLATES } from "@/components/notes/admin/NotesSmsSection";
 
 export default function NotesOrderPage() {
   const params = useParams<{ id: string }>();
@@ -47,6 +48,7 @@ export default function NotesOrderPage() {
       writesAuthorized={writes}
       canManage={canManage}
       presentation="page"
+      extra={<NotesSmsSection target={{ orderId: order.id }} templates={ORDER_SMS_TEMPLATES} />}
       onClose={() => router.push("/admin/notes")}
       onRefresh={() => void load()}
       onCompare={() => setCompare(true)}

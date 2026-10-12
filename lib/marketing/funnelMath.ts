@@ -32,7 +32,7 @@ export interface RollupTotals {
 export function funnelKind(destinationType: string | null | undefined, destinationUrl?: string | null): FunnelKind {
   const type = (destinationType || "").toLowerCase();
   const url = (destinationUrl || "").toLowerCase();
-  if (type === "notes" || url.includes("/notes")) return "notes";
+  if (type === "notes" || type === "notes_product" || url.includes("/notes")) return "notes";
   if (type === "webinar" || url.includes("webinar")) return "webinar";
   if (type === "course" || url.includes("/courses") || url.includes("/course")) return "course";
   return "general";

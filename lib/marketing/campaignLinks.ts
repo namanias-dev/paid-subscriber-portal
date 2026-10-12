@@ -18,7 +18,7 @@ import {
 } from "./campaignLink";
 
 export type CampaignLinkStatus = "active" | "paused" | "archived";
-export type DestinationType = "webinar" | "notes" | "course" | "demo" | "landing" | "custom";
+export type DestinationType = "webinar" | "notes" | "notes_product" | "course" | "demo" | "landing" | "custom";
 
 export interface CampaignLink {
   id: string;

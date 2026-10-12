@@ -3,6 +3,7 @@ import { requirePermission, currentAdminId } from "@/lib/adminGuard";
 import { createTemplate, getTemplate, upsertTemplate, dltIdInUse, isSeedTemplateId } from "@/lib/sms/store";
 import { validateBody, uniqueVariables, unknownVariables } from "@/lib/sms/templates";
 import type { SmsMessageType, SmsUseCase } from "@/lib/sms/types";
+import { isNotesApprovedTemplateId, notesApprovedByDltId } from "@/lib/sms/notesApproved";
 
 export const dynamic = "force-dynamic";
 
@@ -55,6 +56,7 @@ async function validateFields(opts: {
     const dlt = (opts.gateway_template_id || "").trim();
     if (!dlt) return "A DLT Template ID is required (only DLT-approved templates may be added).";
     if (!/^\d{6,25}$/.test(dlt)) return "DLT Template ID must be numeric (6–25 digits).";
+    if (notesApprovedByDltId(dlt)) return "That DLT Template ID is an approved Notes template and is managed from the Notes Store tab.";
     if (await dltIdInUse(dlt, opts.exceptId)) return "That DLT Template ID is already used by another template.";
   }
   return null;
@@ -115,6 +117,7 @@ export async function PATCH(req: Request) {
   const existing = await getTemplate(id);
   if (!existing) return NextResponse.json({ ok: false, error: "Template not found" }, { status: 404 });
   if (isSeedTemplateId(id)) return NextResponse.json({ ok: false, error: "Built-in templates are managed by a Super Admin in the Templates editor and can't be changed here." }, { status: 403 });
+  if (isNotesApprovedTemplateId(id)) return NextResponse.json({ ok: false, error: "Approved Notes DLT template — fixed to the approved registration. Reconcile it from the Notes Store tab." }, { status: 403 });
 
   const action = s(body.action) || "update";
   const updatedBy = await currentAdminId();

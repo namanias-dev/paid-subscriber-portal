@@ -15,6 +15,7 @@ import { prepareAndRenderSms } from "./renderPipeline";
 import type { SmsLog, SmsLogStatus, SmsTemplate } from "./types";
 import { isPromoTemplate, nextPromoDispatchAt } from "./promoQuietHours";
 import { enqueuePromo } from "./promoQueue";
+import { notesApprovedById, notesTemplateDrift } from "./notesApproved";
 
 const SAME_TRIGGER_WINDOW_MIN = 30;
 /** Parallel gateway calls in the per-recipient fan-out (keeps 170+ under the 60s function limit). */
@@ -80,6 +81,12 @@ export interface SendSmsInput {
   installmentKey?: InstallmentKey | null;
   /** Groups all logs from one bulk job (live status + retry-failed-only). */
   campaignId?: string | null;
+  /**
+   * Required for DLT-approved Notes templates (lib/sms/notesApproved): the exact
+   * text the Notes builder validated. The send is refused unless the body
+   * rendered from the stored row is byte-identical to it.
+   */
+  notesExpectedBody?: string | null;
 }
 
 export interface SendSmsResult {
@@ -150,7 +157,11 @@ export function withDerivedVars(templateId: string, vars: Record<string, string 
  * Campaign-level vars (item_short, item_name, webinar_time, webinar_date) are
  * the same for the whole send, so an explicit admin override wins for those.
  */
-export const RECIPIENT_ONLY_VARS = new Set(["login_code", "name", "first_name", "amount", "payment_status"]);
+export const RECIPIENT_ONLY_VARS = new Set([
+  "login_code", "name", "first_name", "amount", "payment_status",
+  // Approved Notes slots are resolved from the order/lead on every send.
+  "#alp#", "#num#", "#urg#",
+]);
 
 /**
  * In-memory merge of the editable variable store (global + per-template
@@ -251,6 +262,19 @@ export async function sendSms(input: SendSmsInput): Promise<SendSmsResult> {
   // No promo route: promotional templates may never go to the "all" audience.
   if (t.message_type === "promotional" && input.audienceType === "all") return { ok: false, skipped: "promotional_all_blocked" };
 
+  // 2b. DLT-approved Notes templates: the stored row must match the approved
+  // registration, and only the Notes builder (which supplies the expected text)
+  // may send them.
+  const notesTpl = notesApprovedById(t.id);
+  if (notesTpl) {
+    const drift = notesTemplateDrift(notesTpl, t);
+    if (drift.length) {
+      console.error(`[SMS] notes_template_drift template=${t.id} fields=${drift.join(",")}`);
+      return { ok: false, skipped: "notes_template_drift", error: drift.join(",") };
+    }
+    if (!input.notesExpectedBody) return { ok: false, skipped: "notes_template_requires_notes_path" };
+  }
+
   // 3. mobile
   const n = normalizeIndianMobile(input.mobile);
   if (!n.ok || !n.digits10) return { ok: false, skipped: "invalid_mobile", error: n.error };
@@ -266,6 +290,8 @@ export async function sendSms(input: SendSmsInput): Promise<SendSmsResult> {
       jitterSeed: `${t.id}:${normalized}:${input.dedupeKey || ""}`,
     });
     if (when) {
+      // The deferred drain re-renders without the Notes builder's expected text.
+      if (notesTpl) return { ok: false, skipped: "notes_promo_quiet_hours" };
         const enq = await enqueuePromo({
         templateId: t.id,
         mobile: input.mobile,
@@ -303,6 +329,10 @@ export async function sendSms(input: SendSmsInput): Promise<SendSmsResult> {
   }
   if (!rendered.ok) return { ok: false, skipped: "invalid_body", error: rendered.errors.join("; ") };
   const text = rendered.text;
+  if (notesTpl && text !== input.notesExpectedBody) {
+    console.error(`[SMS] notes_body_mismatch template=${t.id}`);
+    return { ok: false, skipped: "notes_body_mismatch" };
+  }
   const v = { analysis: { length: rendered.length, segments: rendered.segments } };
 
   // 5. window (cron autos only)
@@ -481,6 +511,13 @@ export async function sendBatch(input: {
   }
   const t = gate.template;
   if (t.message_type === "promotional" && input.audienceType === "all") { skip("promotional_all_blocked", input.recipients.length); return out; }
+  // Approved Notes templates are resolved per order/lead by the Notes builder only.
+  if (notesApprovedById(t.id)) {
+    skip("notes_template_requires_notes_path", input.recipients.length);
+    out.aborted = true;
+    out.abortReason = "notes_template_requires_notes_path";
+    return out;
+  }
 
   // ---- per-recipient screening (all safeguards BEFORE batching) ----
   // ALL shared lookups are hoisted to ONE query each (variable store defaults,

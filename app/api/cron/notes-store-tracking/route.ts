@@ -5,6 +5,7 @@ import { isPickupException, shouldPollShipment, type TrackingSnapshot } from "@/
 import { trackShiprocketAwb } from "@/lib/store/shipping/shiprocketApi";
 import { canAdvanceOrder, canAdvanceShipment, normalizeCourierStatus, orderStatusFromShipment } from "@/lib/store/shipping/status";
 import { isInactiveShipmentStatus } from "@/lib/store/shipping/activeShipment";
+import { runMissedDelhiveryPickupRepair } from "@/lib/store/shipping/cancelMissedPickups";
 import { makeSupabasePickupIO, planRetiredShipmentOrder, reconcilePickupFromProvider, toCourierProvider } from "@/lib/store/shipping/refreshPickup";
 
 export const dynamic = "force-dynamic";
@@ -25,7 +26,9 @@ const OPEN_STATUSES = [
 /**
  * Webhook-first tracking read for shipments that are still open.
  * Delivered shipments are not selected. This route does not create a shipment,
- * buy a label, or request a pickup.
+ * buy a label, or request a pickup. A Delhivery pickup whose scheduled day has
+ * passed and which the carrier still has not collected is cancelled and the
+ * order returns to Packed. That cancel does not book a replacement.
  */
 async function run(req: Request) {
   const secret = process.env.CRON_SECRET;
@@ -186,7 +189,19 @@ async function run(req: Request) {
     retiredOrders += 1;
   }
 
-  return NextResponse.json({ ok: true, considered, polled, advanced, pickupSynced, retiredOrders, errors, ts: Date.now() });
+  const missed = await runMissedDelhiveryPickupRepair(db, nowIso);
+
+  return NextResponse.json({
+    ok: true,
+    considered,
+    polled,
+    advanced,
+    pickupSynced,
+    retiredOrders,
+    missedPickups: missed,
+    errors: errors + missed.errors,
+    ts: Date.now(),
+  });
 }
 
 export async function GET(req: Request) {

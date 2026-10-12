@@ -23,6 +23,8 @@ export interface NotesSampleAsset {
   /** Canonical product slug this chapter belongs to. */
   productSlug: string;
   pageCount: number;
+  /** Optional public sample PDF served from the same /media prefix. */
+  pdfSrc?: string | null;
 }
 
 export interface NotesProofProduct {
@@ -60,6 +62,13 @@ export const NOTES_SAMPLE_ASSETS: NotesSampleAsset[] = [
     productSlug: "economy",
     pageCount: 24,
   },
+  {
+    id: "modern-history-sample",
+    title: "Modern History Sample Notes",
+    productSlug: "modern-history",
+    pageCount: 24,
+    pdfSrc: stablePublicMediaUrl(`${NOTES_SAMPLE_PREFIX}/modern-history-sample/sample.pdf`),
+  },
 ];
 
 /** Encoded portrait file from `notes-reels/IMG_7595_CURSOR_UPLOAD.mp4`. */
@@ -84,9 +93,21 @@ const ECONOMY_PHYSICAL_NOTES_VIDEO: PhysicalNotesVideo = {
   ariaLabel: "Naman showing the printed Indian Economy notes that ship after an order",
 };
 
+/** Encoded portrait file from `notes-reels/IMG_8005_CURSOR_UPLOAD.mp4`. */
+const MODERN_HISTORY_PHYSICAL_NOTES_VIDEO: PhysicalNotesVideo = {
+  id: "physical-notes-modern-history",
+  posterSrc: teachingVideoPublicSrc("physical-notes-modern-history", "poster.webp"),
+  fullSrc: teachingVideoPublicSrc("physical-notes-modern-history", "full.mp4"),
+  width: 720,
+  height: 1290,
+  enabled: true,
+  ariaLabel: "Watch what you get in Naman Sir’s Modern History handwritten notes",
+};
+
 const PHYSICAL_NOTES_BY_SLUG: Record<string, PhysicalNotesVideo> = {
   polity: PHYSICAL_NOTES_VIDEO,
   economy: ECONOMY_PHYSICAL_NOTES_VIDEO,
+  "modern-history": MODERN_HISTORY_PHYSICAL_NOTES_VIDEO,
 };
 
 export function notesSampleForProduct(slug: string | null | undefined): NotesSampleAsset | null {

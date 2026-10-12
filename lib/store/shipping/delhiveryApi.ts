@@ -87,27 +87,89 @@ export function parseDelhiveryPackage(body: unknown): {
   return { pin, city, state, phoneStored: phone, read: Boolean(pin || city || state), status };
 }
 
+function cleanStatus(raw: string): string {
+  return raw.trim().toLowerCase().replace(/[_-]+/g, " ").replace(/\s+/g, " ");
+}
+
+/** True when a Delhivery status or scan says the carrier already has the parcel. "Not Picked" is not possession. */
+export function delhiveryStatusShowsPossession(raw: string | null | undefined): boolean {
+  const s = cleanStatus(raw || "");
+  if (!s || s.includes("not picked")) return false;
+  if (/\bpicked up\b/.test(s) || s === "picked" || s.includes("pickup done") || s.includes("pickup complete") || s.includes("shipment picked")) return true;
+  return (
+    s.includes("in transit") ||
+    s.includes("out for delivery") ||
+    s.includes("delivered") ||
+    s.includes("dispatched") ||
+    s.includes("reached") ||
+    s.includes("received at") ||
+    s.includes("rto") ||
+    s.includes("lost") ||
+    s.includes("damag")
+  );
+}
+
+function scanText(scan: unknown): string {
+  const row = record(scan);
+  const detail = record(row?.ScanDetail) || record(row?.scanDetail) || row;
+  return str(detail?.Scan) || str(detail?.scan) || str(detail?.Status) || str(detail?.Instructions);
+}
+
+/** Status plus whether any current status or scan shows the carrier has the parcel. */
+export function parseDelhiveryTracking(body: unknown): { rawStatus: string | null; possessed: boolean } {
+  const root = record(body);
+  const shipment = record(Array.isArray(root?.ShipmentData) ? record(root.ShipmentData[0])?.Shipment : null);
+  const status = record(shipment?.Status);
+  const rawStatus = str(status?.Status) || null;
+  const scans = Array.isArray(shipment?.Scans) ? shipment.Scans : [];
+  const possessed =
+    delhiveryStatusShowsPossession(rawStatus) ||
+    delhiveryStatusShowsPossession(str(status?.Instructions)) ||
+    scans.some((scan) => delhiveryStatusShowsPossession(scanText(scan)));
+  return { rawStatus, possessed };
+}
+
+/**
+ * Delhivery cancel often returns HTTP 200 with status false when the waybill
+ * can no longer be cancelled. A 200 alone is not acceptance.
+ */
+export function delhiveryCancelAccepted(statusCode: number, body: unknown): boolean {
+  if (statusCode < 200 || statusCode >= 300) return false;
+  const row = record(body);
+  if (!row) return true;
+  const status = typeof row.status === "boolean" ? (row.status ? "true" : "false") : str(row.status).toLowerCase();
+  if (status === "false" || status === "failure" || status === "failed" || status === "error") return false;
+  const remark = `${str(row.error)} ${str(row.Error)} ${str(row.rmk)} ${str(row.remark)} ${str(row.message)}`.toLowerCase();
+  if (
+    remark.includes("cannot") ||
+    remark.includes("can't") ||
+    remark.includes("not allowed") ||
+    remark.includes("already picked") ||
+    remark.includes("in transit")
+  ) {
+    return false;
+  }
+  return true;
+}
+
 /** Tracking read for an AWB that already exists. This does not create a shipment. */
 export async function trackDelhiveryAwb(
   awb: string,
   opts: { fetchImpl?: FetchLike; env?: NodeJS.ProcessEnv } = {},
-): Promise<{ rawStatus: string | null }> {
+): Promise<{ rawStatus: string | null; possessed: boolean }> {
   const code = awb.trim();
-  if (!/^[A-Za-z0-9]+$/.test(code)) return { rawStatus: null };
+  if (!/^[A-Za-z0-9]+$/.test(code)) return { rawStatus: null, possessed: false };
   const env = opts.env || process.env;
   const token = delhiveryToken(env);
-  if (!token) return { rawStatus: null };
+  if (!token) return { rawStatus: null, possessed: false };
   const fetchImpl = opts.fetchImpl || fetch;
   const got = await getJson(
     fetchImpl,
     `${delhiveryBaseUrl(env)}/api/v1/packages/json/?waybill=${encodeURIComponent(code)}`,
     token,
   );
-  if (!got.ok) return { rawStatus: null };
-  const root = record(got.body);
-  const shipment = record(Array.isArray(root?.ShipmentData) ? record(root.ShipmentData[0])?.Shipment : null);
-  const status = record(shipment?.Status);
-  return { rawStatus: str(status?.Status) || null };
+  if (!got.ok) return { rawStatus: null, possessed: false };
+  return parseDelhiveryTracking(got.body);
 }
 
 /** Packing slip for an AWB that already exists. This path does not create a shipment. */

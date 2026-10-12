@@ -12,6 +12,7 @@ import { formatISTTime } from "../dates";
 import { checkRenderedBody } from "./sendGuard";
 import { prepareAndRenderSms } from "./renderPipeline";
 import { resolveSmsItemShort } from "./smsTitle";
+import { notesApprovedById } from "./notesApproved";
 import { getTemplate } from "./store";
 import { DLT_FREE_TEXT_VAR_MAX } from "./templates";
 import type { SmsLog } from "./types";
@@ -103,6 +104,14 @@ export async function rebuildVarsFromLog(
  */
 export async function resolveResendMessage(log: SmsLog): Promise<ResendBodyResult> {
   const templateId = log.template_id || "";
+  // Notes slots come from the order/lead, re-read and re-validated by the Notes builder.
+  if (notesApprovedById(templateId)) {
+    return {
+      ok: false,
+      skip: "notes_resend_requires_notes_path",
+      detail: "Resend Notes SMS from the Notes Store tab so the order is re-validated.",
+    };
+  }
   const t = templateId ? await getTemplate(templateId) : null;
 
   if (t?.body_template) {

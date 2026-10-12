@@ -201,10 +201,11 @@ const DEST: Record<string, string> = {
   store: "/notes",
   polity: "/notes/polity",
   economy: "/notes/economy",
+  "modern-history": "/notes/modern-history",
 };
 
 export function buildNotesCampaignUrl(input: {
-  destination: "store" | "polity" | "economy";
+  destination: "store" | "polity" | "economy" | "modern-history";
   source: string;
   medium: string;
   campaign: string;
@@ -228,12 +229,19 @@ export function buildNotesCampaignUrl(input: {
 export const CAMPAIGN_TEMPLATES = [
   { id: "story_polity", label: "Instagram Story → Polity", destination: "polity" as const, source: "instagram", medium: "story", content: "polity_story_01" },
   { id: "story_economy", label: "Instagram Story → Economy", destination: "economy" as const, source: "instagram", medium: "story", content: "economy_story_01" },
+  { id: "story_modern_history", label: "Instagram Story → Modern History", destination: "modern-history" as const, source: "instagram", medium: "story", content: "modern_history_story_01" },
+  { id: "reel_modern_history", label: "Instagram Reel → Modern History", destination: "modern-history" as const, source: "instagram", medium: "reel", content: "modern_history_reel_01" },
   { id: "autodm", label: "Instagram Auto-DM → Notes Store", destination: "store" as const, source: "instagram", medium: "autodm", content: "notes_dm" },
   { id: "whatsapp", label: "WhatsApp → Notes Store", destination: "store" as const, source: "whatsapp", medium: "message", content: "" },
+  { id: "whatsapp_modern_history", label: "WhatsApp → Modern History", destination: "modern-history" as const, source: "whatsapp", medium: "message", content: "modern_history" },
   { id: "telegram", label: "Telegram → Economy", destination: "economy" as const, source: "telegram", medium: "community", content: "" },
+  { id: "telegram_modern_history", label: "Telegram → Modern History", destination: "modern-history" as const, source: "telegram", medium: "community", content: "modern_history" },
   { id: "youtube", label: "YouTube → Notes Store", destination: "store" as const, source: "youtube", medium: "organic", content: "" },
+  { id: "youtube_modern_history", label: "YouTube → Modern History", destination: "modern-history" as const, source: "youtube", medium: "video", content: "modern_history" },
   { id: "meta", label: "Meta Ad → Notes Store", destination: "store" as const, source: "meta", medium: "paid_social", content: "" },
+  { id: "meta_modern_history", label: "Meta Ad → Modern History", destination: "modern-history" as const, source: "meta", medium: "paid_social", content: "modern_history" },
   { id: "google", label: "Google Ad → Notes Store", destination: "store" as const, source: "google", medium: "cpc", content: "" },
+  { id: "google_modern_history", label: "Google Ad → Modern History", destination: "modern-history" as const, source: "google", medium: "cpc", content: "modern_history" },
 ];
 
 export interface NotesEventRow {
@@ -349,6 +357,9 @@ function subjectOf(props: Record<string, unknown> | null | undefined): string {
   const raw = String(props?.subject || props?.slug || "").toLowerCase();
   if (raw.includes("polit")) return "polity";
   if (raw.includes("econom")) return "economy";
+  if (raw.includes("modern") || raw.includes("modern-history") || raw.includes("modern_history")) {
+    return "modern-history";
+  }
   return raw;
 }
 
@@ -360,6 +371,7 @@ function productLabel(props: Record<string, unknown> | null | undefined): string
   const subject = subjectOf(props);
   if (subject === "polity") return "Indian Polity Notes";
   if (subject === "economy") return "Indian Economy Notes";
+  if (subject === "modern-history") return "Modern History Notes";
   return String(props?.product_name || props?.slug || props?.subject || props?.product_id || "Notes");
 }
 
@@ -394,7 +406,11 @@ export interface NotesAnalyticsReport {
   content: { pdfPeople: number; videoStarts: number; previewAutoplays: number; video50: number; videoCompletes: number };
   unidentifiedStoreViews: number;
   ctas: Array<{ id: string; events: number; people: number }>;
-  subjects: { polity: { clicks: number; people: number }; economy: { clicks: number; people: number } };
+  subjects: {
+    polity: { clicks: number; people: number };
+    economy: { clicks: number; people: number };
+    "modern-history": { clicks: number; people: number };
+  };
   devices: Array<{ device: string; sessions: number; checkouts: number; purchases: number }>;
   checkoutHealth: {
     starts: number;
@@ -629,6 +645,7 @@ export function aggregateNotesAnalytics(eventsIn: NotesEventRow[], ordersIn: Not
   const subject = {
     polity: { clicks: 0, people: new Set<string>() },
     economy: { clicks: 0, people: new Set<string>() },
+    "modern-history": { clicks: 0, people: new Set<string>() },
   };
   events.forEach((event) => {
     if (event.event_name !== "notes_product_clicked" && event.event_name !== "notes_shop_after_teaching_clicked" && event.event_name !== "notes_added_to_cart" && event.event_name !== "notes_sample_opened" && event.event_name !== "notes_physical_video_play") return;
@@ -640,7 +657,7 @@ export function aggregateNotesAnalytics(eventsIn: NotesEventRow[], ordersIn: Not
     ctaMap.set(id, row);
     if (event.event_name === "notes_product_clicked") {
       const which = subjectOf(event.props);
-      if (which === "polity" || which === "economy") {
+      if (which === "polity" || which === "economy" || which === "modern-history") {
         subject[which].clicks += 1;
         if (who) subject[which].people.add(who);
       }
@@ -760,6 +777,7 @@ export function aggregateNotesAnalytics(eventsIn: NotesEventRow[], ordersIn: Not
     subjects: {
       polity: { clicks: subject.polity.clicks, people: subject.polity.people.size },
       economy: { clicks: subject.economy.clicks, people: subject.economy.people.size },
+      "modern-history": { clicks: subject["modern-history"].clicks, people: subject["modern-history"].people.size },
     },
     devices,
     checkoutHealth: {

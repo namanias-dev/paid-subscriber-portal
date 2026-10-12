@@ -455,3 +455,7 @@ Hi {#var#}, new UPSC sessions are live! Login {#var#} to continue learning. Nama
 | {#var#} #1 | `first_name` |
 | {#var#} #2 | `login_url` |
 
+
+## Notes Store templates
+
+The five Notes Store templates (NOTES_ORDER_CONFIRMED_01, NOTES_PAYMENT_PENDING_01, NOTES_CHECKOUT_INCOMPLETE_01, NOTES_NEW_LEAD_PROMO_01, NOTES_DISCOUNT_NOTES500_01) are documented in `docs/notes-store/NOTES_SMS.md`. Their text is locked in `lib/sms/notesApproved.ts` and cannot be edited from Mission Control.

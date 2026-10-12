@@ -130,6 +130,8 @@ export interface ActionInput {
   method?: FulfillmentMethod;
   awb?: string | null;
   pickupFailed?: boolean;
+  /** Delhivery scheduled a pickup and the carrier still has not collected the parcel. */
+  pickupNotCollected?: boolean;
   /** Courier pickup lifecycle on the active shipment (from store_shipments.pickup_state). */
   pickupState?: string | null;
   addressMismatch?: boolean;
@@ -158,7 +160,8 @@ export function actionRequiredReasons(input: ActionInput): string[] {
   else if (!input.awb && (input.status === "PACKED" || input.status === "READY_FOR_PICKUP" || input.status === "PICKUP_SCHEDULED")) {
     reasons.push(input.shipmentRetired ? "COURIER SELECTION REQUIRED" : "No active shipment");
   }
-  if (input.pickupFailed) reasons.push("Pickup wasn't completed");
+  if (input.pickupNotCollected) reasons.push("PICKUP NOT COLLECTED · CANCEL AND REBOOK");
+  else if (input.pickupFailed) reasons.push("Pickup wasn't completed");
   else if (input.pickupState === "CANCELLED" && input.awb) reasons.push("PICKUP CANCELLED · ACTION REQUIRED");
   if (input.status === "DELIVERY_FAILED" || input.status === "REATTEMPT_REQUESTED") reasons.push("Courier exception");
   if (input.openIssue) reasons.push("Customer issue open");

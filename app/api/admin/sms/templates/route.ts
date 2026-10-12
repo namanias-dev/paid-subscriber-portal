@@ -3,6 +3,9 @@ import { requirePermission, currentAdminId } from "@/lib/adminGuard";
 import { listTemplates, getTemplate, upsertTemplate, isSeedTemplateId } from "@/lib/sms/store";
 import { validateBody, worstCaseFill, uniqueVariables } from "@/lib/sms/templates";
 import { loginUrlSample } from "@/lib/sms/config";
+import { isNotesApprovedTemplateId } from "@/lib/sms/notesApproved";
+
+const NOTES_LOCKED = "Approved Notes DLT template — its text, ID and type are fixed to the approved registration. Reconcile it from the Notes Store tab.";
 
 export const dynamic = "force-dynamic";
 
@@ -15,7 +18,8 @@ export async function GET() {
     const v = validateBody(t.body_template);
     // `custom` = self-serve (not a code seed); only these are editable via the
     // send_sms-gated manage API. Built-ins stay under the Super Admin editor.
-    return { ...t, worstCaseChars: wc.analysis.length, worstCaseSegments: wc.analysis.segments, over155: wc.analysis.length > 155, bodyErrors: v.errors, custom: !isSeedTemplateId(t.id) };
+    const notes = isNotesApprovedTemplateId(t.id);
+    return { ...t, worstCaseChars: wc.analysis.length, worstCaseSegments: wc.analysis.segments, over155: wc.analysis.length > 155, bodyErrors: v.errors, custom: !isSeedTemplateId(t.id) && !notes, notesApproved: notes };
   });
   return NextResponse.json({ ok: true, templates: enriched });
 }
@@ -34,6 +38,7 @@ export async function POST(req: Request) {
   const body = await req.json().catch(() => ({}));
   const id: string = body.id;
   if (!id) return NextResponse.json({ ok: false, error: "Missing template id" }, { status: 400 });
+  if (isNotesApprovedTemplateId(id)) return NextResponse.json({ ok: false, error: NOTES_LOCKED }, { status: 403 });
 
   const existing = await getTemplate(id);
   const updatedBy = await currentAdminId();

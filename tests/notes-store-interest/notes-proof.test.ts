@@ -35,7 +35,7 @@ describe("see before you buy", () => {
       "media/store/samples/anti-defection-law/page-23.webp",
     );
     assert.match(samplePageSrc(sample.id, 2), /\/media\/store\/samples\/anti-defection-law\/page-02\.webp$/);
-    assert.equal(NOTES_SAMPLE_ASSETS.length, 2);
+    assert.equal(NOTES_SAMPLE_ASSETS.length, 3);
     const economy = notesSampleForProduct("economy");
     assert.ok(economy);
     assert.equal(economy.id, "foreign-direct-investment");
@@ -50,7 +50,7 @@ describe("see before you buy", () => {
       "media/store/samples/foreign-direct-investment/page-24.webp",
     );
     assert.equal(notesSampleForProduct("polity")?.id, "anti-defection-law");
-    assert.equal(notesSampleForProduct("modern-history"), null);
+    assert.equal(notesSampleForProduct("modern-history")?.id, "modern-history-sample");
     assert.doesNotMatch(reader, /<iframe/);
     assert.doesNotMatch(section, /application\/pdf/);
   });
@@ -108,7 +108,7 @@ describe("see before you buy", () => {
     assert.match(pdp, /NotesProofSection/);
     assert.equal(isNotesProofProduct({ slug: "polity" }), true);
     assert.equal(isNotesProofProduct({ slug: "economy" }), true);
-    assert.equal(isNotesProofProduct({ slug: "modern-history" }), false);
+    assert.equal(isNotesProofProduct({ slug: "modern-history" }), true);
     assert.match(section, /notesSampleForProduct/);
     assert.match(pdp, /notesSampleForProduct/);
   });

@@ -35,6 +35,7 @@ test("public issue hides internal fields and explains the next step", () => {
   assert.equal(issue.category_label, "Courier pickup not done");
   assert.equal(issue.open, true);
   assert.match(issue.next_step, /received/i);
+  assert.equal(issue.milestone_note, null);
   assert.equal("admin_note" in issue, false);
 });
 

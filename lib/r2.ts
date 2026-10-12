@@ -9,6 +9,7 @@ import {
   ListObjectsV2Command,
   GetObjectCommand,
   PutObjectCommand,
+  CopyObjectCommand,
   DeleteObjectCommand,
   HeadObjectCommand,
 } from "@aws-sdk/client-s3";
@@ -288,6 +289,20 @@ export async function putObject(key: string, body: Buffer | Uint8Array, contentT
       Key: key,
       Body: body,
       ContentType: contentType || "application/octet-stream",
+    }),
+  );
+}
+
+/** Copy one object to another key in the same bucket. Used to publish an already-uploaded master under `media/`. */
+export async function copyObject(sourceKey: string, destKey: string, contentType?: string): Promise<void> {
+  await r2().send(
+    new CopyObjectCommand({
+      Bucket: bucket(),
+      CopySource: `${bucket()}/${sourceKey}`,
+      Key: destKey,
+      ContentType: contentType,
+      CacheControl: "public, max-age=31536000, immutable",
+      MetadataDirective: contentType ? "REPLACE" : "COPY",
     }),
   );
 }

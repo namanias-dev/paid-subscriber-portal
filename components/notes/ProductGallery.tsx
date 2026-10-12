@@ -20,6 +20,8 @@ export default function ProductGallery({
   const [index, setIndex] = useState(0);
   const [open, setOpen] = useState(false);
   const current = images[index];
+  const ratio = current?.width && current?.height ? current.width / current.height : 4 / 3;
+  const portrait = ratio < 0.9;
 
   const next = useCallback(() => setIndex((i) => (images.length ? (i + 1) % images.length : 0)), [images.length]);
   const prev = useCallback(() => setIndex((i) => (images.length ? (i - 1 + images.length) % images.length : 0)), [images.length]);
@@ -53,10 +55,11 @@ export default function ProductGallery({
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="relative aspect-[4/3] w-full overflow-hidden rounded-3xl bg-[var(--ca-slate-100)] ns-elev-3"
+        className="relative w-full overflow-hidden rounded-3xl bg-[var(--ca-slate-100)] ns-elev-3"
+        style={{ aspectRatio: current.width && current.height ? `${current.width} / ${current.height}` : "4 / 3" }}
         aria-label="Enlarge product photo"
       >
-        <Image src={current.url!} alt={current.alt || name} fill sizes="(max-width: 1024px) 100vw, 55vw" className="object-cover" priority />
+        <Image src={current.url!} alt={current.alt || name} fill sizes="(max-width: 1024px) 100vw, 55vw" className={portrait ? "object-contain" : "object-cover"} priority />
       </button>
       {images.length > 1 && (
         <div className="mt-3 flex gap-2 overflow-x-auto ns-hide-scrollbar">

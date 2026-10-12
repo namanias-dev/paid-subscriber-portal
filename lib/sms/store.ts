@@ -7,6 +7,7 @@ import { getSupabaseAdmin } from "../supabase";
 import { SEED_TEMPLATES, uniqueVariables, TRIGGERS, seedById } from "./templates";
 import { envDailyCap, envPerMobileDailyCap, smsEnvEnabled } from "./config";
 import type { SmsTemplate, SmsLog, SmsAutoRule, SmsSettings, SmsTemplateStatus } from "./types";
+import { NOTES_APPROVED_TEMPLATES, notesCanonicalRow } from "./notesApproved";
 
 // ---------------------------------------------------------------------------
 // Default auto-rules (ALL disabled). One rule per auto-sendable trigger.
@@ -42,7 +43,17 @@ export const DEFAULT_RULES: RuleSeed[] = [
     schedule_time: "11:00",
     audience_type: "access_risk",
   },
+  // Notes Store (approved DLT templates, lib/sms/notesApproved). Managed from the
+  // Notes Store tab; the template is fixed per trigger.
+  { trigger: "notes_order_confirmed", template_id: "notes_order_confirmed_01", audience_type: "notes_store" },
+  { trigger: "notes_payment_pending", template_id: "notes_payment_pending_01", delay_minutes: 60, audience_type: "notes_store" },
+  { trigger: "notes_checkout_incomplete", template_id: "notes_checkout_incomplete_01", audience_type: "notes_store" },
+  { trigger: "notes_new_lead_promo", template_id: "notes_new_lead_promo_01", audience_type: "notes_store" },
 ];
+
+export function isNotesRuleTrigger(trigger: string): boolean {
+  return NOTES_APPROVED_TEMPLATES.some((t) => t.trigger === trigger);
+}
 
 export const DEFAULT_SETTINGS = (): SmsSettings => ({
   enabled: smsEnvEnabled(),
@@ -69,7 +80,14 @@ function demo(): DemoStore {
   const g = globalThis as unknown as { __smsStore?: DemoStore };
   if (!g.__smsStore) {
     g.__smsStore = {
-      templates: SEED_TEMPLATES.map(seedToTemplate),
+      templates: [
+        ...SEED_TEMPLATES.map(seedToTemplate),
+        ...NOTES_APPROVED_TEMPLATES.map((t) => ({
+          ...notesCanonicalRow(t),
+          created_at: nowISO(),
+          updated_at: nowISO(),
+        })),
+      ],
       logs: [],
       rules: DEFAULT_RULES.map(ruleSeedToRule),
       settings: DEFAULT_SETTINGS(),
@@ -161,6 +179,10 @@ export async function ensureSeeded(): Promise<void> {
       };
     });
     if (missing.length) await db.from("sms_templates").insert(missing);
+    // Approved Notes templates: insert when absent, never heal. A stored row that
+    // differs is reported as drift and refused at send time.
+    const missingNotes = NOTES_APPROVED_TEMPLATES.filter((t) => !have.has(t.id)).map(notesCanonicalRow);
+    if (missingNotes.length) await db.from("sms_templates").insert(missingNotes);
     // Heal DLT-approved seeds: id/body drift, and never leave access/installment
     // DLT templates stuck in draft (that silently disables Remind for everyone).
     for (const s of SEED_TEMPLATES) {
@@ -903,6 +925,47 @@ export async function listLogs(f: LogFilters = {}): Promise<SmsLog[]> {
     const { data } = await q;
     return (data || []) as SmsLog[];
   } catch { return []; }
+}
+
+export type NotesSmsLogRow = Pick<
+  SmsLog,
+  "id" | "normalized_mobile" | "template_id" | "status" | "created_at" | "sent_at" | "dedupe_key" | "trigger_event" | "error_message" | "sent_by_type"
+>;
+
+const NOTES_LOG_COLS = "id, normalized_mobile, template_id, status, created_at, sent_at, dedupe_key, trigger_event, error_message, sent_by_type";
+
+/**
+ * Notes template logs, newest first. Filter by mobiles and/or exact dedupe keys.
+ * Throws on a read error: callers decide eligibility from this and must not
+ * treat "could not read" as "never sent".
+ */
+export async function listNotesSmsLogs(f: {
+  templateIds: string[];
+  mobiles?: string[];
+  dedupeKeys?: string[];
+  sinceIso?: string;
+  limit?: number;
+}): Promise<NotesSmsLogRow[]> {
+  const limit = Math.min(2000, Math.max(1, f.limit || 500));
+  const db = getSupabaseAdmin();
+  if (!db) {
+    return demo().logs
+      .filter((l) => f.templateIds.includes(l.template_id || ""))
+      .filter((l) => !f.mobiles || f.mobiles.includes(l.normalized_mobile))
+      .filter((l) => !f.dedupeKeys || f.dedupeKeys.includes(l.dedupe_key || ""))
+      .filter((l) => !f.sinceIso || l.created_at >= f.sinceIso)
+      .sort((a, b) => b.created_at.localeCompare(a.created_at))
+      .slice(0, limit);
+  }
+  if (f.mobiles && !f.mobiles.length) return [];
+  if (f.dedupeKeys && !f.dedupeKeys.length) return [];
+  let q = db.from("sms_logs").select(NOTES_LOG_COLS).in("template_id", f.templateIds);
+  if (f.mobiles) q = q.in("normalized_mobile", f.mobiles);
+  if (f.dedupeKeys) q = q.in("dedupe_key", f.dedupeKeys);
+  if (f.sinceIso) q = q.gte("created_at", f.sinceIso);
+  const { data, error } = await q.order("created_at", { ascending: false }).limit(limit);
+  if (error) throw new Error(`notes_sms_logs_read_failed: ${error.message}`);
+  return (data || []) as NotesSmsLogRow[];
 }
 
 export async function getLog(id: string): Promise<SmsLog | null> {

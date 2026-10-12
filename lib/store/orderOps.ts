@@ -169,6 +169,7 @@ export function latestTracking(
 const ISSUE_COPY: Array<[string, string]> = [
   ["Courier city needs confirmation", "Courier city confirmation"],
   ["Address mismatch", "Shipment needs attention"],
+  ["PICKUP NOT COLLECTED · CANCEL AND REBOOK", "Pickup not collected"],
   ["Pickup wasn't completed", "Pickup needs attention"],
   ["Courier exception", "Delivery exception"],
   ["Return action required", "Return needs attention"],

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { storeDb } from "@/lib/store/db";
+import { applyCourierMilestoneToOpenIssues } from "@/lib/store/issueMilestones";
 import { courierWebhookKey } from "@/lib/store/shipping/config";
 import { canAdvanceOrder, canAdvanceShipment, orderStatusFromShipment } from "@/lib/store/shipping/status";
 import { parseCourierWebhook, scanAlreadyRecorded, webhookAuthorized } from "@/lib/store/shipping/webhook";
@@ -34,7 +35,7 @@ export async function POST(req: Request) {
 
   const { data: shipment } = await db
     .from("store_shipments")
-    .select("id,order_id,status,pickup_state,provider")
+    .select("id,order_id,status,pickup_state,provider,courier_name,awb")
     .eq("awb", event.awb)
     .order("created_at", { ascending: false })
     .limit(1)
@@ -104,6 +105,22 @@ export async function POST(req: Request) {
           payload_json: { awb: event.awb, raw_status: event.rawStatus },
         });
       }
+    }
+  }
+
+  // Short verified milestone on open customer issues. Never overwrites staff customer_note.
+  // Only after a real status advance (duplicate scans already returned above).
+  // Errors inside the helper are swallowed so courier tracking is never blocked.
+  if (shipmentUpdated && event.mappedStatus) {
+    try {
+      await applyCourierMilestoneToOpenIssues(db, shipment.order_id, {
+        mappedStatus: event.mappedStatus,
+        courier: shipment.courier_name,
+        awb: shipment.awb || event.awb,
+        location: event.location,
+      });
+    } catch {
+      /* ignore — shipment update already committed */
     }
   }
 
