@@ -1,6 +1,10 @@
 /**
  * In-process finalize ledger for unit tests / demoMode.
- * Not multi-instance safe — production uses finalize_course_payment() RPC.
+ *
+ * DEMO ONLY — single Node process, in-memory locks. This is NOT proof of
+ * multi-connection Postgres concurrency safety. Production uses
+ * finalize_course_payment() with pg_advisory_xact_lock (see
+ * tests/payment-finalize/pg-rpc.integration.test.ts).
  */
 import type { CourseEnrollment, Payment, PaymentReceipt } from "../types";
 import { allocatePaymentToSchedule, pickCanonicalReceipt } from "./allocateSchedule";
@@ -62,11 +66,30 @@ export async function finalizeCoursePaymentDemo(opts: {
     }
     const prior = opts.getReceiptsForPayment(payment.id, ref);
     if (prior.length || payment.receipt_no) {
+      if (payment.receipt_no && !prior.some((r) => r.receipt_no === payment.receipt_no) && prior.length === 0) {
+        return {
+          ok: false,
+          outcome: "review_required",
+          enrollment: null,
+          receipt: null,
+          error: "receipt_no_pointer_missing_row",
+        };
+      }
       const canonical = pickCanonicalReceipt(prior, {
         paymentReceiptNo: payment.receipt_no,
         paymentKind: payment.payment_kind,
         installmentNo: payment.installment_no,
+        requireEvidence: true,
       });
+      if (!canonical && prior.length) {
+        return {
+          ok: false,
+          outcome: "review_required",
+          enrollment: null,
+          receipt: null,
+          error: "ambiguous_receipts",
+        };
+      }
       if (canonical) {
         demoLedger.set(payment.id, {
           payment_id: payment.id,

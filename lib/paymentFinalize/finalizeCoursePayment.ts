@@ -4,9 +4,9 @@
 import "server-only";
 import { getSupabaseAdmin } from "../supabase";
 import type { CourseEnrollment, PaymentReceipt } from "../types";
-import type { FinalizeCoursePaymentResult, FinalizeOutcome } from "./types";
+import type { DueFill, FinalizeCoursePaymentResult, FinalizeOutcome } from "./types";
 
-export type { FinalizeCoursePaymentResult, FinalizeOutcome } from "./types";
+export type { FinalizeCoursePaymentResult, FinalizeOutcome, DueFill } from "./types";
 export { finalizeCoursePaymentDemo, resetDemoFinalizeLedger } from "./demoFinalize";
 
 function mapEnrollment(raw: Record<string, unknown>, fallback?: CourseEnrollment | null): CourseEnrollment {
@@ -34,13 +34,19 @@ function mapReceipt(raw: Record<string, unknown> | null | undefined): PaymentRec
   return raw as unknown as PaymentReceipt;
 }
 
-export async function finalizeCoursePaymentAtomic(referenceNo: string): Promise<FinalizeCoursePaymentResult> {
+export async function finalizeCoursePaymentAtomic(
+  referenceNo: string,
+  opts?: { dueFills?: DueFill[] | null },
+): Promise<FinalizeCoursePaymentResult> {
   const ref = (referenceNo || "").trim();
   if (!ref) return { ok: false, outcome: "not_found", enrollment: null, receipt: null, error: "missing_reference" };
   const db = getSupabaseAdmin();
   if (!db) return { ok: false, outcome: "error", enrollment: null, receipt: null, error: "no_db" };
 
-  const { data, error } = await db.rpc("finalize_course_payment", { p_reference_no: ref });
+  const { data, error } = await db.rpc("finalize_course_payment", {
+    p_reference_no: ref,
+    p_due_fills: opts?.dueFills?.length ? opts.dueFills : null,
+  });
   if (error) {
     return { ok: false, outcome: "error", enrollment: null, receipt: null, error: error.message };
   }

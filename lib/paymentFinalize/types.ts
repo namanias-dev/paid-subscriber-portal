@@ -4,6 +4,7 @@ export type FinalizeOutcome =
   | "created"
   | "already_finalized"
   | "reconciled_existing"
+  | "review_required"
   | "not_paid"
   | "not_found"
   | "no_enrollment"
@@ -19,3 +20,5 @@ export type FinalizeCoursePaymentResult = {
   allocatedAmount?: number;
   error?: string;
 };
+
+export type DueFill = { no: number; due: string };
