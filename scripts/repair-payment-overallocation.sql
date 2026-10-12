@@ -121,7 +121,7 @@ begin
     if exists (
       select 1 from public.enrollment_transfers t
       where (t.to_enrollment_id = p_enrollment_id or t.from_enrollment_id = p_enrollment_id)
-        and not (t.id = any(select jsonb_array_elements_text(p_baseline->'transfer_ids')))
+        and not (t.id::text = any(select jsonb_array_elements_text(p_baseline->'transfer_ids')))
     ) then
       raise exception 'repair_abort: unexpected_transfer';
     end if;
