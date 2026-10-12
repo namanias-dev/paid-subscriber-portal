@@ -26,7 +26,15 @@ export async function GET(req: Request) {
 
   try {
     const result = await reconcileStalePendingPayments();
-    return NextResponse.json({ ok: true, ...result, ts: Date.now() });
+    // Drain receipt-email outbox only — never calls finalize / never reallocates.
+    let receiptEmail = { claimed: 0, sent: 0, failed: 0, skipped: 0 };
+    try {
+      const { processPendingReceiptEmails } = await import("@/lib/paymentFinalize/receiptEmailOutbox");
+      receiptEmail = await processPendingReceiptEmails(20);
+    } catch (e) {
+      console.error("[cron/reconcile-payments] receipt_email_drain failed:", (e as Error).message);
+    }
+    return NextResponse.json({ ok: true, ...result, receiptEmail, ts: Date.now() });
   } catch (e) {
     console.error("[cron/reconcile-payments] failed:", (e as Error).message);
     return NextResponse.json({ ok: false, error: (e as Error).message }, { status: 500 });

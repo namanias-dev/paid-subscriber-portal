@@ -18,10 +18,18 @@ export interface RunPaidSideEffectsOpts {
 
 /**
  * After a payment row is PAID, grant downstream access + notify.
- * Idempotent: finalize is DB-locked per payment_id (and returns
- * already_finalized / reconciled_existing without re-allocating). Notify
- * claims once via payment_confirmed_notified_at — notify failure must not
- * cause allocation to run again.
+ *
+ * Two distinct confirmation channels:
+ *  1) Course installment allocation — `finalizeCoursePaymentByReference` (DB RPC).
+ *     Idempotent per payment_id; already_finalized / reconciled_existing never
+ *     re-allocate. Receipt email is ledger-outbox gated on outcome=created.
+ *  2) Payment-received student SMS/Telegram — `notifyPaymentConfirmedOnce`.
+ *     Claimed once via payments.payment_confirmed_notified_at, independent of
+ *     finalize outcome. Retries of this notify never call finalize again and
+ *     never mutate schedule allocations.
+ *
+ * Notify failure must not cause allocation to run again (finalize already ran
+ * above, or was a no-op; notify does not invoke finalize).
  */
 export async function runPaidTerminalSideEffects(
   payment: Payment,

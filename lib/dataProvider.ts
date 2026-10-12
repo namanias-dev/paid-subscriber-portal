@@ -4719,7 +4719,8 @@ export async function getReceiptByReference(referenceNo: string): Promise<Paymen
   const rows = (data as PaymentReceipt[]) || [];
   if (!rows.length) return null;
   const { pickCanonicalReceipt } = await import("./paymentFinalize/allocateSchedule");
-  return pickCanonicalReceipt(rows, {}) || rows[0] || null;
+  // Prefer evidence when possible; do not invent a canonical row when ambiguous.
+  return pickCanonicalReceipt(rows, { requireEvidence: false }) || rows[0] || null;
 }
 
 export async function getReceiptsByPhone(phone: string): Promise<PaymentReceipt[]> {
@@ -4751,8 +4752,13 @@ async function insertReceipt(row: PaymentReceipt): Promise<PaymentReceipt> {
  * Prior receipts for the payment are treated as already finalized (never as
  * "never processed"), even when duplicates exist from historical races.
  *
- * Notification / email failures must not re-enter allocation — those run after
- * a successful create outcome only.
+ * Due-date materialization is computed here but applied ONLY inside the RPC
+ * under enrollment lock (p_due_fills). Callers must not write schedule before
+ * the RPC — a stale pre-write can overwrite another payment's allocation.
+ *
+ * Receipt email is enqueued on the finalize ledger (pending) when outcome is
+ * `created`; delivery retries never re-enter allocation. Payment-received SMS
+ * (`notifyPaymentConfirmedOnce`) is separate and claimed on payments row.
  */
 export async function finalizeCoursePaymentByReference(
   referenceNo: string
@@ -4764,7 +4770,8 @@ export async function finalizeCoursePaymentByReference(
   let enrollment = await getCourseEnrollmentById(payment.enrollment_id);
   if (!enrollment) return null;
 
-  // Checkout intents may lack due dates — materialize before the locked allocate.
+  // Compute due fills for unpaid null-due lines — do NOT persist here.
+  let dueFills: { no: number; due: string }[] | null = null;
   if (needsDueMaterialization({ ...enrollment, amount_paid: Math.max(enrollment.amount_paid || 0, 1) })) {
     const course = (await getAllCourses().catch(() => [] as Course[])).find((c) => c.id === enrollment!.course_id) || null;
     const batch = resolveEnrollmentBatchStart(course || undefined, enrollment);
@@ -4773,14 +4780,30 @@ export async function finalizeCoursePaymentByReference(
       course,
       batchStartISO: batch.iso,
     });
-    const updated = await updateCourseEnrollment(enrollment.id, { schedule });
-    if (updated) enrollment = updated;
-    else enrollment = { ...enrollment, schedule };
+    dueFills = schedule
+      .filter((s, i) => {
+        const prev = enrollment!.schedule?.[i];
+        return s.kind === "installment" && s.due && prev && !prev.due && !prev.paid;
+      })
+      .map((s) => ({ no: s.no, due: s.due! }));
+    if (!dueFills.length) dueFills = null;
   }
 
   const db = getSupabaseAdmin();
   if (demoMode() || !db) {
     const { finalizeCoursePaymentDemo } = await import("./paymentFinalize/demoFinalize");
+    // Demo path may apply due fills locally under the demo enrollment lock.
+    if (dueFills?.length) {
+      const byNo = new Map(dueFills.map((d) => [d.no, d.due]));
+      enrollment = {
+        ...enrollment,
+        schedule: (enrollment.schedule || []).map((s) =>
+          s.kind === "installment" && !s.paid && !s.due && byNo.has(s.no)
+            ? { ...s, due: byNo.get(s.no)! }
+            : s,
+        ),
+      };
+    }
     const demo = await finalizeCoursePaymentDemo({
       payment,
       enrollment,
@@ -4800,7 +4823,7 @@ export async function finalizeCoursePaymentByReference(
   }
 
   const { finalizeCoursePaymentAtomic } = await import("./paymentFinalize/finalizeCoursePayment");
-  const result = await finalizeCoursePaymentAtomic(referenceNo);
+  const result = await finalizeCoursePaymentAtomic(referenceNo, { dueFills });
   if (!result.ok || !result.enrollment || !result.receipt) return null;
 
   // Merge RPC projection onto the full enrollment row we already loaded.
@@ -4814,24 +4837,11 @@ export async function finalizeCoursePaymentByReference(
   await clearGrantOverrideOnFullyPaid(updated.phone, updated.course_id, updated.status).catch(() => null);
   scheduleBehaviourStatusApply(payment.phone || updated.phone);
 
-  // Receipt email only when this call created the receipt — never on reconcile/retry.
-  if (result.outcome === "created" && result.receipt.email) {
-    const saved = result.receipt;
-    import("./email")
-      .then(({ sendReceiptEmail }) =>
-        sendReceiptEmail({
-          to: saved.email!,
-          name: saved.student_name,
-          receiptNo: saved.receipt_no,
-          courseTitle: saved.course_title,
-          paymentLabel: saved.payment_label,
-          amount: formatINR(saved.amount),
-          paidToDate: formatINR(saved.paid_to_date),
-          remaining: saved.remaining <= 0 ? "₹0 — Fully paid" : formatINR(saved.remaining),
-          installmentsSummary: saved.installments_summary,
-          status: saved.status,
-        })
-      )
+  // Receipt email: durable outbox on ledger (pending when created). Best-effort
+  // drain here; failures leave status=pending for cron/retry — never reallocate.
+  if (result.outcome === "created") {
+    import("./paymentFinalize/receiptEmailOutbox")
+      .then((m) => m.processPendingReceiptEmails(5))
       .catch(() => null);
   }
 

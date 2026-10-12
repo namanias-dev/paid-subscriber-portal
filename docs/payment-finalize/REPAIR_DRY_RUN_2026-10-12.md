@@ -10,16 +10,17 @@
 
 ## Code fix (this PR — not yet deployed)
 
-- Migration `supabase/migrations/2026-10-12-course-payment-finalize-atomic.sql`
-  - `payment_finalize_ledger` keyed by `payment_id`
-  - `finalize_course_payment(text)` with `pg_advisory_xact_lock` on enrollment + payment
-  - Receipt reconcile path never re-allocates when prior receipts exist
-  - Soft-supersede columns on `payment_receipts` (no hard deletes)
-- App callers route through the RPC; notify/email only on `outcome === 'created'`
-- Recompute recognizes transferred seat credits by schedule/`enrollment_transfers` `reference_no` without rewriting `payments.enrollment_id`
+See `DEPLOYMENT_AND_ROLLBACK.md`.
 
-**Already applied to production (schema only, earlier session):** ledger table + schedule helper functions + receipt soft-supersede columns.  
-**Not yet applied:** `finalize_course_payment` RPC (required before/with app deploy).
+- Migration `supabase/migrations/2026-10-12-course-payment-finalize-atomic.sql`
+  - `finalize_course_payment(text, jsonb)` — locks + due fills inside the transaction
+  - `schedule_line_allocatable` includes partial remainders
+  - Evidence-based receipt reconcile; `review_required` when ambiguous
+  - Receipt email outbox on the ledger (retries never reallocate)
+- Executable repair: `scripts/repair-payment-overallocation.sql` (fixture-tested)
+- Transfer-aware recompute preserves seat `payments.enrollment_id`
+
+**Production today:** ledger + helpers + soft-supersede columns exist (`course_payment_finalize_ledger`); **RPC absent**; running app does not use them.
 
 ---
 

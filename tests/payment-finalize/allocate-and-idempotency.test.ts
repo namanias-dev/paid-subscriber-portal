@@ -1,10 +1,10 @@
 /**
- * Payment finalize allocation + demo-ledger idempotency.
+ * Payment finalize allocation + demo-ledger idempotency (in-process only).
  *
- * Real multi-connection Postgres concurrency is exercised by
- * finalize_course_payment() (advisory xact locks). This suite verifies the
- * pure allocator invariants and the demo-mode ledger that mirrors
- * "never allocate twice for one payment_id".
+ * DEMO TESTS ARE NOT PROOF of multi-connection Postgres safety.
+ * Real DB concurrency is covered by
+ * tests/payment-finalize/pg-rpc.integration.test.mts
+ * (npm run test:payment-finalize-pg with PAYMENT_FINALIZE_PG_URL).
  */
 import assert from "node:assert/strict";
 import { describe, it, beforeEach } from "node:test";
@@ -120,6 +120,91 @@ describe("allocatePaymentToSchedule", () => {
     assert.equal(r.schedule[1]!.paid_amount, 3000);
   });
 
+  it("completes a partially_paid installment remainder without skipping it", () => {
+    const schedule = emiSchedule();
+    schedule[0] = { ...schedule[0]!, paid: true, status: "paid" };
+    schedule[1] = {
+      ...schedule[1]!,
+      paid: false,
+      status: "partially_paid",
+      paid_amount: 3000,
+      reference_no: "REF-PART",
+    };
+    const r = allocatePaymentToSchedule(schedule, {
+      amount: 5250,
+      payment_kind: "installment",
+      payment_source: "student_proof",
+      payment_id: "pay-rem",
+      reference_no: "REF-REM",
+    });
+    assert.equal(r.noop, false);
+    assert.equal(r.allocatedAmount, 5250);
+    assert.equal(r.schedule[1]!.paid, true);
+    assert.equal(r.schedule[2]!.paid, false);
+    const fee = enrollmentFeeStateFromEnrollment({
+      id: "e",
+      total_fee: 35000,
+      discount_amount: 10000,
+      amount_paid: 0,
+      schedule: r.schedule,
+    });
+    assert.equal(fee.netPaid, 10250);
+  });
+
+  it("partial seat then remainder completion conserves seat amount", () => {
+    const schedule = emiSchedule();
+    const p1 = allocatePaymentToSchedule(schedule, {
+      amount: 800,
+      payment_kind: "seat",
+      payment_source: "student_proof",
+      payment_id: "seat-p1",
+      reference_no: "SEAT-P1",
+    });
+    assert.equal(p1.schedule[0]!.status, "partially_paid");
+    assert.equal(p1.allocatedAmount, 800);
+    const p2 = allocatePaymentToSchedule(p1.schedule, {
+      amount: 1200,
+      payment_kind: "seat",
+      payment_source: "student_proof",
+      payment_id: "seat-p2",
+      reference_no: "SEAT-P2",
+    });
+    assert.equal(p2.allocatedAmount, 1200);
+    assert.equal(p2.schedule[0]!.paid, true);
+    assert.equal(enrollmentFeeStateFromEnrollment({
+      id: "e", total_fee: 35000, discount_amount: 0, amount_paid: 0, schedule: p2.schedule,
+    }).netPaid, 2000);
+  });
+
+  it("full-balance payment after partial installment includes the remainder", () => {
+    const schedule = emiSchedule();
+    schedule[0] = { ...schedule[0]!, paid: true, status: "paid" };
+    schedule[1] = {
+      ...schedule[1]!,
+      paid: false,
+      status: "partially_paid",
+      paid_amount: 2000,
+    };
+    const r = allocatePaymentToSchedule(schedule, {
+      amount: 20000,
+      payment_kind: "full",
+      payment_id: "pay-full-rem",
+      reference_no: "REF-FULL-REM",
+    });
+    assert.equal(r.schedule[1]!.paid, true);
+    assert.equal(r.allocatedAmount, 20000);
+    assert.equal(
+      enrollmentFeeStateFromEnrollment({
+        id: "e",
+        total_fee: 35000,
+        discount_amount: 10000,
+        amount_paid: 0,
+        schedule: r.schedule,
+      }).netPaid,
+      24000,
+    );
+  });
+
   it("explains ₹1 EMI rounding: 33000/3 = 11000, last line can absorb remainder", () => {
     // 35000 - 2000 seat = 33000; 33000/3 = 11000 exact — Akash-style 8333 is a
     // different plan. Model 25000 remaining / 3 → 8333+8333+8334.
@@ -170,15 +255,38 @@ describe("allocatePaymentToSchedule", () => {
 });
 
 describe("pickCanonicalReceipt", () => {
-  it("prefers payment.receipt_no, then matching installment label, then earliest", () => {
+  it("prefers evidence over a phantom payment.receipt_no pointer", () => {
     const rows = [
       { id: "a", receipt_no: "NSA-1", payment_label: "Installment 1 of 4", issued_at: "2026-08-10T06:40:29.204Z" },
       { id: "b", receipt_no: "NSA-2", payment_label: "Installment 1 of 4", issued_at: "2026-08-10T06:40:29.237Z" },
       { id: "c", receipt_no: "NSA-3", payment_label: "Installment 2 of 4", issued_at: "2026-08-10T06:40:31.340Z" },
     ];
-    assert.equal(pickCanonicalReceipt(rows, { paymentReceiptNo: "NSA-3" })?.id, "c");
+    // Phantom pointer NSA-3 must not win when installment_no=1 evidence exists.
+    assert.equal(
+      pickCanonicalReceipt(rows, {
+        paymentReceiptNo: "NSA-3",
+        paymentKind: "installment",
+        installmentNo: 1,
+      })?.id,
+      "a",
+    );
     assert.equal(pickCanonicalReceipt(rows, { paymentKind: "installment", installmentNo: 1 })?.id, "a");
-    assert.equal(pickCanonicalReceipt(rows, {})?.id, "a");
+  });
+
+  it("returns null when requireEvidence and labels conflict without a unique match", () => {
+    const rows = [
+      { id: "a", receipt_no: "NSA-1", payment_label: "Installment 2 of 4", issued_at: "2026-08-10T06:40:29.204Z" },
+      { id: "b", receipt_no: "NSA-2", payment_label: "Payment", issued_at: "2026-08-10T06:40:31.340Z" },
+    ];
+    assert.equal(
+      pickCanonicalReceipt(rows, {
+        paymentReceiptNo: "NSA-2",
+        paymentKind: "installment",
+        installmentNo: 1,
+        requireEvidence: true,
+      }),
+      null,
+    );
   });
 
   it("ignores superseded rows when an active one exists", () => {
@@ -388,7 +496,8 @@ describe("demo finalize idempotency / concurrency", () => {
     });
     assert.equal(result.outcome, "reconciled_existing");
     assert.equal(persisted, 0);
-    assert.equal(result.receipt?.receipt_no, "NSA-1167");
+    // Evidence (installment_no=1) wins over phantom payment.receipt_no NSA-1167.
+    assert.equal(result.receipt?.receipt_no, "NSA-1165");
     // Schedule left untouched for repair tooling — finalize must not "fix" by allocating again.
     assert.equal(enr.schedule[2]!.paid, true);
   });
