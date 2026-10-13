@@ -41,6 +41,10 @@ service-account*.json
 # vercel
 .vercel
 
+# Cloudflare Wrangler local state
+.wrangler/
+workers/**/.wrangler/
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts

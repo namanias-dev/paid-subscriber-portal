@@ -83,7 +83,7 @@ describe("teaching video catalogue", () => {
     assert.match(player, /webkit-playsinline/);
     assert.match(card, /controls=\{active && userPlayback\}/);
     assert.match(card, /prepareTeachingPlayback/);
-    assert.match(card, /preload=\{active && near && !saveData \? "auto" : "none"\}/);
+    assert.match(card, /preload="none"/);
     assert.match(card, /notes_teaching_inline_play/);
     assert.match(card, /onPlaying/);
     assert.doesNotMatch(card, /nofullscreen/);
@@ -93,11 +93,15 @@ describe("teaching video catalogue", () => {
     assert.doesNotMatch(showcase, /Tap to watch with sound/);
   });
 
-  test("only the active near card warms the full source and inactive cards pause", () => {
+  test("scroll-into-view does not attach/warm the full MP4; hover may warm metadata only", () => {
     assert.match(card, /allowFull = active && near && !saveData/);
     assert.match(card, /stopTeachingBuffering/);
     assert.match(card, /showPreview = active && near && !saveData && !reduce/);
+    assert.match(card, /Do NOT attach\/warm the full/);
+    assert.match(card, /Intentional hover only/);
+    assert.match(card, /attachTeachingSource\(node, video\.fullSrc, "metadata"\)/);
     assert.match(card, /warmTeachingSource/);
+    assert.match(player, /mode:\s*"cors"/);
     assert.match(showcase, /near=\{nearView\}/);
     assert.match(showcase, /data-locked=\{playing \? "true" : undefined\}/);
     assert.match(css, /data-locked="true"/);

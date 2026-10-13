@@ -1,0 +1,43 @@
+/**
+ * Public media CDN Worker — path-scoped allowlist for media/* only.
+ *
+ * Before deploy:
+ * 1. Set `r2_buckets[0].bucket_name` to the existing PRIVATE academy R2 bucket
+ *    (same value as Vercel CLOUDFLARE_R2_BUCKET_NAME). Do NOT create a new
+ *    public bucket and do NOT enable "Public access" on the whole bucket.
+ * 2. `npx wrangler login` (or CLOUDFLARE_API_TOKEN with Workers + R2 edit).
+ * 3. `npm run media:deploy` from repo root (or wrangler deploy in this dir).
+ * 4. Attach Custom Domain media.namanias.com (requires namanias.com zone on
+ *    Cloudflare — see docs/media-cdn-cutover.md). Until then use workers.dev.
+ */
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "naman-public-media",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-13",
+  "workers_dev": true,
+  "preview_urls": false,
+  "observability": {
+    "enabled": true,
+    "traces": {
+      "enabled": true,
+      "head_sampling_rate": 0.1
+    }
+  },
+  "r2_buckets": [
+    {
+      "binding": "MEDIA_BUCKET",
+      // MUST equal Vercel Production CLOUDFLARE_R2_BUCKET_NAME (private bucket).
+      // Placeholder validates wrangler config only — replace before real deploy.
+      "bucket_name": "naman-ias-lectures"
+    }
+  ],
+  "vars": {
+    "CORS_ORIGINS": "https://www.namanias.com,https://namanias.com"
+  },
+  // Uncomment AFTER namanias.com is an active Cloudflare zone and the Vercel
+  // A records for media.namanias.com have been removed:
+  // "routes": [
+  //   { "pattern": "media.namanias.com", "custom_domain": true }
+  // ]
+}

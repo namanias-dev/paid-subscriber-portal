@@ -26,6 +26,8 @@ export default function robots(): MetadataRoute.Robots {
           "/quizzes/*/attempt",
           "/quizzes/*/result",
           "/lecture",
+          // Large store videos — not SEO content; scrapers were pulling them via /media.
+          "/media/store/videos/",
         ],
       },
     ],

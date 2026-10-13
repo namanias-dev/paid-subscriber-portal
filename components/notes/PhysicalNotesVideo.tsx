@@ -14,7 +14,6 @@ import {
   markTeachingVideoInline,
   playTeachingVideo,
   prepareTeachingPlayback,
-  warmTeachingSource,
 } from "@/lib/store/teachingPlayer";
 
 const MARKS: Array<[number, EventName]> = [
@@ -70,21 +69,18 @@ export default function PhysicalNotesVideo({
   useEffect(() => {
     const node = nodeRef.current;
     if (!node || !near || userPlayback) return;
-    const saveData = (navigator as Navigator & { connection?: { saveData?: boolean } }).connection?.saveData;
+    // Poster only until the student taps play — no Range warm on scroll-by.
     markTeachingVideoInline(node);
-    attachTeachingSource(node, video.fullSrc, "metadata");
     node.muted = true;
     node.controls = false;
-    if (saveData) return;
-    const ac = new AbortController();
-    void warmTeachingSource(video.fullSrc, undefined, ac.signal);
-    return () => ac.abort();
+    node.preload = "none";
   }, [near, userPlayback, video.fullSrc]);
 
   function play() {
     const node = nodeRef.current;
     if (!node || phase === "starting") return;
     if (node.error) node.load();
+    attachTeachingSource(node, video.fullSrc, "metadata");
     prepareTeachingPlayback(node, video.fullSrc);
     setPhase("starting");
     void playTeachingVideo(node).then((result) => {

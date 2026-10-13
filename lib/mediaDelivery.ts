@@ -1,3 +1,5 @@
+import { isPublicMediaKey, publicMediaKeyFromPathname } from "@/lib/media/publicPrefix";
+
 /**
  * Shared HTTP metadata for the public `/media/*` R2 stream.
  * Range responses must stay streaming — never materialize the object body
@@ -8,8 +10,9 @@ export const MEDIA_LONG_CACHE = "public, max-age=31536000, immutable";
 
 export function mediaObjectKey(path: string[] | undefined): string | null {
   const parts = path || [];
-  if (!parts.length || parts.some((p) => !p || p === "." || p === "..")) return null;
-  return `media/${parts.join("/")}`;
+  if (!parts.length) return null;
+  const key = publicMediaKeyFromPathname(`/media/${parts.join("/")}`);
+  return key && isPublicMediaKey(key) ? key : null;
 }
 
 export function mediaStatus(range: string | undefined, contentRange?: string): 200 | 206 {
@@ -29,7 +32,10 @@ export function mediaResponseHeaders(obj: {
   headers.set("Vercel-CDN-Cache-Control", MEDIA_LONG_CACHE);
   headers.set("Accept-Ranges", "bytes");
   headers.set("Content-Type", obj.contentType || "application/octet-stream");
-  headers.set("Vary", "Range");
+  // Only fragment the CDN cache key when this response is actually a Range
+  // partial. Unconditional Vary: Range made full-object 200s compete with
+  // every distinct player Range and inflated Fast Origin Transfer fills.
+  if (obj.contentRange) headers.set("Vary", "Range");
   headers.set("X-Content-Type-Options", "nosniff");
   if (obj.contentLength != null) headers.set("Content-Length", String(obj.contentLength));
   if (obj.contentRange) headers.set("Content-Range", obj.contentRange);
