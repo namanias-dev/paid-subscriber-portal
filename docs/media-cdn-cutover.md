@@ -1,5 +1,13 @@
 # Public media CDN cutover — media.namanias.com
 
+> **Interim production path (2026-10):** Until Wrangler has a `CLOUDFLARE_API_TOKEN`
+> (Cloudflare MCP can list R2/Workers but cannot deploy scripts), the app
+> `/media/*` route **302-redirects public keys to R2 signed GET URLs** so MP4
+> bytes leave Vercel immediately (Browser → R2). HTML still uses stable
+> `/media/…` (or CDN) srcs. When the Worker is live, set
+> `CLOUDFLARE_R2_PUBLIC_BASE_URL` + `NEXT_PUBLIC_MEDIA_CDN_BASE` and redirects
+> become 308 → CDN instead.
+
 ## Why this exists
 
 Notes Store MP4/PDF/images were streaming through Vercel `/media/*` from private R2, driving Fast Origin Transfer. This Worker serves **only** `media/*` at the edge.

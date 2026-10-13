@@ -29,7 +29,7 @@
       "binding": "MEDIA_BUCKET",
       // MUST equal Vercel Production CLOUDFLARE_R2_BUCKET_NAME (private bucket).
       // Placeholder validates wrangler config only — replace before real deploy.
-      "bucket_name": "naman-ias-private"
+      "bucket_name": "naman-ias-lectures"
     }
   ],
   "vars": {
