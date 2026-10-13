@@ -41,7 +41,12 @@ export function stopTeachingBuffering(node: HTMLVideoElement, dropSource: boolea
   }
 }
 
-/** First ~256KB covers the faststart `moov` (~148KB) plus a little media. */
+/**
+ * Optional tiny Range warm (moov + a little media). Call only from an
+ * intentional hover/tap path — never on scroll-into-view — so catalogue
+ * cards do not pull tens of MB. Uses CORS so CDN hosts (media.namanias.com)
+ * work after cutover.
+ */
 export function warmTeachingSource(
   url: string,
   bytes = TEACHING_FULL_WARM_BYTES,
@@ -53,7 +58,7 @@ export function warmTeachingSource(
     headers: { Range: `bytes=0-${Math.max(0, bytes - 1)}` },
     credentials: "omit",
     cache: "force-cache",
-    mode: "same-origin",
+    mode: "cors",
     signal,
   })
     .then((res) => res.ok || res.status === 206)

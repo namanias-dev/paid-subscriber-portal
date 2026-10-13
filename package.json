@@ -21,7 +21,9 @@
     "release:hydration": "node scripts/release/hydration-smoke.mjs",
     "release:pickup-status": "node --import tsx scripts/release/pickup-flag.mjs status",
     "release:pickup-enable": "node --import tsx scripts/release/pickup-flag.mjs enable",
-    "release:pickup-disable": "node --import tsx scripts/release/pickup-flag.mjs disable"
+    "release:pickup-disable": "node --import tsx scripts/release/pickup-flag.mjs disable",
+    "media:dry-run": "npx --yes wrangler@4.149.0 deploy --dry-run --config workers/public-media/wrangler.jsonc",
+    "media:deploy": "npx --yes wrangler@4.149.0 deploy --config workers/public-media/wrangler.jsonc"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1075.0",
@@ -73,6 +75,7 @@
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "^4.20251011.0",
     "@types/bcryptjs": "^2.4.6",
     "@types/node": "^20.16.11",
     "@types/qrcode": "^1.5.6",

@@ -308,12 +308,17 @@ export async function copyObject(sourceKey: string, destKey: string, contentType
 }
 
 /**
- * Public CDN URL when CLOUDFLARE_R2_PUBLIC_BASE_URL is set (R2 custom domain or
- * r2.dev). Prefer this over any app proxy so next/image never sees X-Amz-*.
+ * Public CDN URL when CLOUDFLARE_R2_PUBLIC_BASE_URL / NEXT_PUBLIC_MEDIA_CDN_BASE
+ * is set (production target: https://media.namanias.com Worker). Prefer this
+ * over any app proxy so next/image and <video> never pull bytes via Vercel.
+ * Only call for allowlisted public keys (media/*).
  */
 export function publicCdnUrl(key: string): string | null {
   const base = (process.env.CLOUDFLARE_R2_PUBLIC_BASE_URL || process.env.NEXT_PUBLIC_MEDIA_CDN_BASE || "").trim();
-  return base ? `${base.replace(/\/$/, "")}/${key}` : null;
+  if (!base) return null;
+  const k = (key || "").replace(/^\/+/, "");
+  if (!k.startsWith("media/")) return null;
+  return `${base.replace(/\/$/, "")}/${k}`;
 }
 
 /**

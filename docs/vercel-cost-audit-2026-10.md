@@ -277,16 +277,18 @@ Static assets are already excluded (good). No change needed for `_next/static`, 
 
 ## Fixes Implemented
 
-(See PR commit; behavior-preserving / low-risk.)
-
 1. **Audit document** — this file.
-2. **Middleware:** aggressive bots → 403 on `/media` paths ending in video/PDF extensions (not images used for OG).
-3. **robots.txt:** `disallow` `/media/store/videos/` (and preview paths) for `*`; public pages still indexable.
-4. **Media cache header tweak:** set `Vary: Range` only when serving **206** (reduces needless cache fragmentation on full 200s).
-5. **Cost observability helper + ops probe:** lightweight `/api/ops/media-cost-probe` (CRON_SECRET) returns catalogue object sizes / CDN-env presence without downloading bodies; `lib/cost/mediaBandwidth.ts` documents interpretation of `x-vercel-cache`.
-6. **Release/docs note** in this audit for spend protection.
+2. **Middleware:** aggressive bots → 403 on `/media` video/PDF extensions (OG images untouched).
+3. **robots.txt:** disallow `/media/store/videos/`.
+4. **`Vary: Range` only on 206** responses.
+5. **Cost probe:** `GET /api/ops/media-cost-probe` (CRON_SECRET, HEAD-only).
+6. **Cloudflare Worker** `workers/public-media` — allowlists `media/*` only, ranged R2 gets, CORS for namanias.com, immutable cache headers. Cutover runbook: `docs/media-cdn-cutover.md`.
+7. **App CDN wiring:** `publicCdnUrl` refuses non-`media/` keys; `/media` 308s public keys when CDN env set; `stablePublicMediaUrl` emits CDN URLs.
+8. **Preload fix:** teaching/physical cards no longer attach/warm full MP4s on scroll; hover may warm ~256KB; `preload="none"` on full player; warm fetch uses `mode: "cors"` for CDN hosts.
 
-**Not implemented (needs approval / secrets):** Cloudflare path-scoped public origin + Vercel env values; Notes ISR conversion; teaching `preload` UX changes; re-encoding videos smaller.
+**Blocked on your Cloudflare/DNS actions:** Worker deploy + `media.namanias.com` Custom Domain + Vercel env (see cutover doc). Until then production still streams via Vercel `/media`.
+
+**Deferred (safe later):** Notes `/notes` ISR — `getPublicActiveOffer()` currently runs hold-release side effects; needs a read-only offer path before removing `force-dynamic`.
 
 ---
 

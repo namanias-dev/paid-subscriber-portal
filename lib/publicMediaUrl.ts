@@ -1,10 +1,12 @@
 /**
  * Stable, unsigned public URLs for R2 `media/*` assets (covers, logos, hero
- * portrait, …). next/image must NEVER see a presigned R2 URL (X-Amz-* query
- * params rotate every TTL and thrash the optimizer cache).
+ * portrait, teaching videos, sample PDFs, …). next/image must NEVER see a
+ * presigned R2 URL (X-Amz-* query params rotate every TTL and thrash the
+ * optimizer cache).
  *
- * Prefer CLOUDFLARE_R2_PUBLIC_BASE_URL / NEXT_PUBLIC_MEDIA_CDN_BASE when set;
- * otherwise serve via same-origin `/media/<rest>` (streams from R2, no signing).
+ * Prefer CLOUDFLARE_R2_PUBLIC_BASE_URL / NEXT_PUBLIC_MEDIA_CDN_BASE when set
+ * (production target: https://media.namanias.com). Otherwise same-origin
+ * `/media/<rest>` streams from R2 via Vercel (expensive — rollback only).
  * Safe to import from client components (no R2 SDK).
  */
 
@@ -27,8 +29,10 @@ export function stablePublicMediaUrl(keyOrRest: string): string {
     .replace(/^\/+/, "")
     .replace(/^media\//, "")
     .split("?")[0];
-  if (!rest) return SITE_MEDIA_ORIGIN;
+  if (!rest) return mediaCdnBase() || SITE_MEDIA_ORIGIN;
   const cdn = mediaCdnBase();
+  // CDN and same-origin both use /media/<rest> so Worker allowlist and the
+  // Next compatibility route share one key space.
   if (cdn) return `${cdn}/media/${rest}`;
   return `${SITE_MEDIA_ORIGIN}/media/${rest}`;
 }

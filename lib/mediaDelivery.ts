@@ -1,3 +1,5 @@
+import { isPublicMediaKey, publicMediaKeyFromPathname } from "@/lib/media/publicPrefix";
+
 /**
  * Shared HTTP metadata for the public `/media/*` R2 stream.
  * Range responses must stay streaming — never materialize the object body
@@ -8,8 +10,9 @@ export const MEDIA_LONG_CACHE = "public, max-age=31536000, immutable";
 
 export function mediaObjectKey(path: string[] | undefined): string | null {
   const parts = path || [];
-  if (!parts.length || parts.some((p) => !p || p === "." || p === "..")) return null;
-  return `media/${parts.join("/")}`;
+  if (!parts.length) return null;
+  const key = publicMediaKeyFromPathname(`/media/${parts.join("/")}`);
+  return key && isPublicMediaKey(key) ? key : null;
 }
 
 export function mediaStatus(range: string | undefined, contentRange?: string): 200 | 206 {

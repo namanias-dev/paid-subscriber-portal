@@ -73,6 +73,7 @@ export default function TeachingVideoCard({
 
     const allowFull = active && near && !saveData;
     if (!allowFull) {
+      warmAbort.current?.abort();
       const keep = userActivated.current && node.currentTime > 0.15;
       node.pause();
       stopTeachingBuffering(node, !keep);
@@ -90,23 +91,16 @@ export default function TeachingVideoCard({
       return;
     }
 
-    attachTeachingSource(node, video.fullSrc, "auto");
+    // Do NOT attach/warm the full ~40MB MP4 on scroll-into-view. Poster (+ short
+    // muted preview) is enough until hover warm or an intentional tap/play.
     if (!userActivated.current) {
       node.muted = true;
       node.defaultMuted = true;
       node.loop = false;
       node.controls = false;
+      node.preload = "none";
     }
-
-    warmAbort.current?.abort();
-    const ac = new AbortController();
-    warmAbort.current = ac;
-    void warmTeachingSource(video.fullSrc, undefined, ac.signal);
-
-    return () => {
-      ac.abort();
-    };
-    // Parent passes a fresh onPlaybackChange each render; do not re-warm on that identity.
+    // Parent passes a fresh onPlaybackChange each render; do not re-bind on that identity.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active, near, saveData, video.fullSrc, video.id]);
 
@@ -132,7 +126,8 @@ export default function TeachingVideoCard({
     node.defaultMuted = true;
     node.loop = true;
     node.playsInline = true;
-    node.preload = "auto";
+    // Preview clips are ~3MB; metadata-first avoids speculative full pulls.
+    node.preload = "metadata";
     const start = node.play();
     if (start) {
       start
@@ -260,12 +255,16 @@ export default function TeachingVideoCard({
       aria-label={video.ariaLabel}
       aria-current={active ? "true" : undefined}
       onPointerEnter={() => {
-        if (!active || saveData) return;
+        if (!active || saveData || userActivated.current) return;
         window.clearTimeout(hoverTimer.current);
         hoverTimer.current = window.setTimeout(() => {
+          // Intentional hover only: tiny Range warm (~256KB), not full preload.
           const node = fullRef.current;
-          if (node) attachTeachingSource(node, video.fullSrc, "auto");
-          void warmTeachingSource(video.fullSrc);
+          if (node) attachTeachingSource(node, video.fullSrc, "metadata");
+          warmAbort.current?.abort();
+          const ac = new AbortController();
+          warmAbort.current = ac;
+          void warmTeachingSource(video.fullSrc, undefined, ac.signal);
         }, TEACHING_HOVER_WARM_MS);
       }}
       onPointerLeave={() => window.clearTimeout(hoverTimer.current)}
@@ -293,7 +292,7 @@ export default function TeachingVideoCard({
             ref={fullRef}
             className={`ns-teach-full ${fullReady && (phase === "playing" || phase === "paused" || phase === "starting") ? "is-ready" : ""}`}
             playsInline
-            preload={active && near && !saveData ? "auto" : "none"}
+            preload="none"
             controls={active && userPlayback}
             poster={video.posterSrc}
             aria-label={video.ariaLabel}

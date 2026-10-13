@@ -39,9 +39,12 @@ const nextConfig = {
       // Same-origin public `/media/*` stream (and legacy absolute namanias URLs).
       { protocol: "https", hostname: "namanias.com" },
       { protocol: "https", hostname: "*.namanias.com" },
+      // Path-scoped public media CDN Worker (media.namanias.com).
+      { protocol: "https", hostname: "media.namanias.com" },
       // Optional R2 public bucket / custom CDN (CLOUDFLARE_R2_PUBLIC_BASE_URL).
       // Never allow signed *.r2.cloudflarestorage.com — those thrash the cache.
       { protocol: "https", hostname: "*.r2.dev" },
+      { protocol: "https", hostname: "*.workers.dev" },
       ...(() => {
         const base = (
           process.env.NEXT_PUBLIC_MEDIA_CDN_BASE ||
