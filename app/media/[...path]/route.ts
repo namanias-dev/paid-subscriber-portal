@@ -30,8 +30,9 @@ export const preferredRegion = ["bom1"];
  * Signed GET TTL for public media redirects.
  * 6h covers pause/seek on mobile for Notes Store clips (~3 min) and longer
  * study sessions without minting week-long URLs. Override via env.
+ * (Not a Next.js route export — keep as module-local.)
  */
-export const PUBLIC_MEDIA_SIGNED_TTL_SECONDS = Math.max(
+const PUBLIC_MEDIA_SIGNED_TTL_SECONDS = Math.max(
   1800,
   Number(process.env.PUBLIC_MEDIA_SIGNED_REDIRECT_TTL_SECONDS || 21600) || 21600,
 );
