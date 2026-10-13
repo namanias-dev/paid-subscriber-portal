@@ -116,6 +116,16 @@ describe("teaching video catalogue", () => {
     assert.match(player, /webkitEnterFullscreen/);
   });
 
+  test("signed R2 redirect uses no-store cache and refuses missing keys before signing", () => {
+    assert.match(mediaRoute, /X-Media-Redirect": "r2-signed"/);
+    assert.match(mediaRoute, /private, no-store/);
+    assert.match(mediaRoute, /Vercel-CDN-Cache-Control/);
+    assert.match(mediaRoute, /Referrer-Policy": "no-referrer"/);
+    assert.match(mediaRoute, /PUBLIC_MEDIA_SIGNED_TTL_SECONDS/);
+    assert.match(mediaRoute, /headObject\(key\)/);
+    assert.match(mediaRoute, /Refuse to mint signatures for missing keys/);
+  });
+
   test("counsellor launcher dodges the teaching player on /notes", () => {
     assert.match(counselor, /data-notes-dodge/);
     assert.match(counselor, /naman-sir-teaches/);

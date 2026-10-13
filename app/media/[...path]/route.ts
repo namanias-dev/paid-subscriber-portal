@@ -26,11 +26,24 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const preferredRegion = ["bom1"];
 
-/** Long enough for a full Notes Store video session; override via env. */
-const PUBLIC_MEDIA_SIGNED_TTL = Math.max(
+/**
+ * Signed GET TTL for public media redirects.
+ * 6h covers pause/seek on mobile for Notes Store clips (~3 min) and longer
+ * study sessions without minting week-long URLs. Override via env.
+ * (Not a Next.js route export — keep as module-local.)
+ */
+const PUBLIC_MEDIA_SIGNED_TTL_SECONDS = Math.max(
   1800,
   Number(process.env.PUBLIC_MEDIA_SIGNED_REDIRECT_TTL_SECONDS || 21600) || 21600,
 );
+
+const NO_STORE_REDIRECT = {
+  "Cache-Control": "private, no-store, max-age=0, must-revalidate",
+  "CDN-Cache-Control": "private, no-store",
+  "Vercel-CDN-Cache-Control": "no-store",
+  // Avoid carrying navigational context into the signed R2 host.
+  "Referrer-Policy": "no-referrer",
+} as const;
 
 function redirectToCdn(key: string): NextResponse | null {
   if (!isPublicMediaKey(key)) return null;
@@ -38,20 +51,29 @@ function redirectToCdn(key: string): NextResponse | null {
   if (!cdn) return null;
   return NextResponse.redirect(cdn, {
     status: 308,
-    headers: { "Cache-Control": "public, max-age=86400", "X-Media-Redirect": "cdn" },
+    headers: {
+      "Cache-Control": "public, max-age=86400",
+      "X-Media-Redirect": "cdn",
+    },
   });
 }
 
 async function redirectToSignedR2(key: string): Promise<NextResponse | null> {
   if (!isPublicMediaKey(key) || !r2Configured()) return null;
   try {
-    const url = await signGetUrl(key, PUBLIC_MEDIA_SIGNED_TTL);
+    // Refuse to mint signatures for missing keys (no open "exists?" oracle via 302→404).
+    const head = await headObject(key);
+    if (!head) {
+      return NextResponse.json({ ok: false, error: "Not found" }, { status: 404 });
+    }
+    const url = await signGetUrl(key, PUBLIC_MEDIA_SIGNED_TTL_SECONDS);
     // 302 (not 308): Location is a rotating signed URL and must not be cached as permanent.
     return NextResponse.redirect(url, {
       status: 302,
       headers: {
-        "Cache-Control": "private, no-store",
+        ...NO_STORE_REDIRECT,
         "X-Media-Redirect": "r2-signed",
+        "X-Media-Signed-TTL": String(PUBLIC_MEDIA_SIGNED_TTL_SECONDS),
       },
     });
   } catch (e) {
