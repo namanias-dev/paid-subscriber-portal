@@ -30,6 +30,16 @@ function isUnauthForceDynamicPublic(pathname: string): boolean {
   return false;
 }
 
+/**
+ * Large public media that scrapers happily download end-to-end through the
+ * `/media` R2 stream (Fast Origin Transfer). Image/WebP/OG posters stay open
+ * so previews and next/image keep working; Googlebot is not in AGGRESSIVE_BOT_RE.
+ */
+function isExpensivePublicMedia(pathname: string): boolean {
+  if (!(pathname === "/media" || pathname.startsWith("/media/"))) return false;
+  return /\.(mp4|webm|mov|m4v|pdf)$/i.test(pathname);
+}
+
 function hasAppSession(req: NextRequest): boolean {
   return !!(
     req.cookies.get(BUYER_COOKIE)?.value ||
@@ -55,8 +65,8 @@ export async function middleware(req: NextRequest) {
 
     if (
       !hasAppSession(req) &&
-      isUnauthForceDynamicPublic(pathname) &&
-      AGGRESSIVE_BOT_RE.test(ua)
+      AGGRESSIVE_BOT_RE.test(ua) &&
+      (isUnauthForceDynamicPublic(pathname) || isExpensivePublicMedia(pathname))
     ) {
       return new NextResponse("Forbidden", {
         status: 403,
@@ -139,5 +149,7 @@ export const config = {
     "/payment/:path*",
     "/current-affairs/saved",
     "/lecture/:path*",
+    // Bot short-circuit only for large media; humans and Googlebot still pass.
+    "/media/:path*",
   ],
 };

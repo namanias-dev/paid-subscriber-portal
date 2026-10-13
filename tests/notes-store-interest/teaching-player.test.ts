@@ -102,6 +102,17 @@ describe("media range delivery", () => {
     assert.equal(headers.get("Vercel-CDN-Cache-Control"), "public, max-age=31536000, immutable");
     assert.equal(headers.get("Vary"), "Range");
   });
+
+  test("full-object 200 does not set Vary: Range (avoids CDN key fragmentation)", () => {
+    const headers = mediaResponseHeaders({
+      contentType: "video/mp4",
+      contentLength: 4096,
+      etag: '"abc"',
+    });
+    assert.equal(headers.get("Accept-Ranges"), "bytes");
+    assert.equal(headers.get("Content-Range"), null);
+    assert.equal(headers.get("Vary"), null);
+  });
 });
 
 function documentFullscreen(node: HTMLVideoElement) {

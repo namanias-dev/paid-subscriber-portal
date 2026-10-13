@@ -29,7 +29,10 @@ export function mediaResponseHeaders(obj: {
   headers.set("Vercel-CDN-Cache-Control", MEDIA_LONG_CACHE);
   headers.set("Accept-Ranges", "bytes");
   headers.set("Content-Type", obj.contentType || "application/octet-stream");
-  headers.set("Vary", "Range");
+  // Only fragment the CDN cache key when this response is actually a Range
+  // partial. Unconditional Vary: Range made full-object 200s compete with
+  // every distinct player Range and inflated Fast Origin Transfer fills.
+  if (obj.contentRange) headers.set("Vary", "Range");
   headers.set("X-Content-Type-Options", "nosniff");
   if (obj.contentLength != null) headers.set("Content-Length", String(obj.contentLength));
   if (obj.contentRange) headers.set("Content-Range", obj.contentRange);
