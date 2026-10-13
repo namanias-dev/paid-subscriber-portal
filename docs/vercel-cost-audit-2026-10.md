@@ -405,3 +405,84 @@ export const revalidate = 0;
 4. Redeploy (public env must be present at **build** for client catalogue URLs).
 5. Verify: teaching `full.mp4` URL host is CDN; `/media/...` returns **308**; FOT drops within 24–48 h.
 6. Confirm private keys (`processed/`, `payment-proofs/`, `store-private/`) still **404/403** on the public hostname.
+
+---
+
+## Post-Cutover Verification
+
+**Cutover live (production):** 2026-10-13. First signed-redirect deploy `dpl_2saXqjsYCBtaMtU8FXkbMf96QtcJ` ready **05:14:37 UTC**; master merge deploy `dpl_39vfhniRQqKcKCg6tfH4ZdNEyGfB` ready **05:23:10 UTC**.
+
+### Architecture in production (Phase 1)
+
+```
+Browser → namanias.com/media/<public-key>
+       → tiny Vercel 302 (Content-Length: 0, X-Media-Redirect: r2-signed)
+       → signed private R2 GET URL
+       → Cloudflare/R2 serves MP4/PDF/image bytes (Range 206)
+```
+
+Worker + `media.namanias.com` remains **PHASE 2 CLEANUP** (needs `CLOUDFLARE_API_TOKEN`; do **not** move apex/www nameservers). Keep signed-R2 until then.
+
+### Request-level evidence (post-cutover)
+
+| Check | Result |
+|-------|--------|
+| `/media/…/full.mp4` | **302**, `content-length: 0`, `X-Media-Redirect: r2-signed` |
+| Follow Location Range `0-1048575`, `5e6-5999999`, `2e7-20999999` | **206** from `Server: cloudflare`, `cf-ray` present, **no** `x-vercel-*` |
+| Teaching size | 40,793,277 bytes |
+| Physical size | 52,969,347 bytes |
+| Traversal / encoded `..` | **404**, no `Location` |
+| Root private prefixes via `/media` | Not reachable (allowlist `media/*` only) |
+| Missing object | **404** after head-before-sign harden (no 302→404) |
+| `/notes` preload | `preload="none"`; no `full.mp4` in initial `src`; posters only (~0.5 MB webp) |
+
+### Signed URL TTL & redirect cache
+
+| Item | Value |
+|------|------:|
+| Signed URL TTL | **21 600 s (6 h)** (`PUBLIC_MEDIA_SIGNED_REDIRECT_TTL_SECONDS`, floor 1800) |
+| Redirect cache | `Cache-Control: private, no-store` (+ `CDN-Cache-Control` / `Vercel-CDN-Cache-Control: no-store`) |
+| Safe vs expiry | **YES** — redirect must not outlive signature |
+
+6 h is appropriate for Notes Store clips (~3 min) plus pause/seek on mobile; not multi-day.
+
+### Analytics / log leak
+
+- Teaching/physical analytics emit **`video_id` only** (no src / no signed URL).
+- Site `Referrer-Policy: strict-origin-when-cross-origin`; `/media` redirects set **`no-referrer`**.
+- Document URL stays `/notes` (stable `/media` src until play); signed query string is not a page URL for GA/PostHog beacons.
+- Server logs on sign failure log **error message only**, not the Location URL.
+
+### Billing / FOT trend (telemetry lag)
+
+Vercel billing charges are **daily UTC windows** (here ~07:00Z→07:00Z). The first post-cutover day window (**2026-10-12T07Z → 2026-10-13T07Z**) still contains **~22 h of pre-cutover streaming**; cutover only covers the last ~1.75 h of that window. Therefore **day-bill FOT has not yet collapsed**.
+
+| Billing window (UTC) | Fast Origin Transfer **billed cost** |
+|----------------------|-------------------------------------:|
+| 2026-10-11 07:00 → 10-12 07:00 | **$2.90** |
+| 2026-10-12 07:00 → 10-13 07:00 | **$3.19** (mostly pre-cutover) |
+
+Hourly FOT metric queries (`vercel.function_invocation.fot_out_bytes`) require **Observability Plus** / CLI auth not available to this agent — use request-level evidence until the next full post-cutover billing day.
+
+**Expected** once a full UTC day is post-cutover: FOT ≪ prior ~tens of GB/day; residual = HTML/RSC + APIs + next/image optimizer pulls + tiny 302s.
+
+### R2 cost risk
+
+**LOW–MEDIUM.** Bytes move to R2 Class B reads + egress (often free to internet on R2; confirm current Cloudflare pricing). Extra Class B from head-before-sign is small vs former Vercel FOT bill. No bucket-wide public access.
+
+### Top remaining Vercel costs (post-media)
+
+From the same billing windows (order of billed $):
+
+1. **Fast Origin Transfer (residual)** — still #1 until a full post-cutover day; then expect large drop. Residual drivers: dynamic HTML, image optimizer origin fetches, APIs.
+2. **Fluid Active CPU + Provisioned Memory** — cron-heavy (`/api/cron/telegram-dispatch` dominates recent runtime log volume) + force-dynamic Notes pages.
+3. **ISR Writes / Image Optimization** — catalogue images + ISR churn (~$0.05–0.09/day combined in samples).
+
+Do **not** chase sub-dollar checkout-adjacent changes.
+
+### Hardening shipped after verification
+
+- Head-before-sign: missing `media/*` keys → **404** (no signature minted).
+- Stronger no-store CDN cache headers on signed redirects.
+- `Referrer-Policy: no-referrer` on signed redirects.
+- Expose TTL via `X-Media-Signed-TTL` for ops probes.
