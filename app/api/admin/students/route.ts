@@ -7,7 +7,6 @@ import {
   enrollStudentInCourse,
   recordOfflineCoursePayment,
   recordOfflineWebinarPayment,
-  getCourseEnrollmentsByPhone,
   getAllCourseEnrollments,
   getPayments,
   getAllWebinarRegistrations,
@@ -28,6 +27,7 @@ import { portalLoginWhatsAppLink, renderPortalLoginCodeMessage } from "@/lib/por
 import { sendAccessCodeEmail } from "@/lib/email";
 import { formatDate, formatINR, istInputToISO } from "@/lib/dates";
 import { deriveEnrollment, deriveCollections, isActiveEnrollment, paymentProgressLabel } from "@/lib/installments";
+import { initialPaymentForNewEnrollment, type ManualInitialPayment } from "@/lib/manualEnrollmentPayments";
 import type { PlanId, Payment, CourseEnrollment, WebinarRegistration } from "@/lib/types";
 
 export interface StudentSummary {
@@ -337,26 +337,38 @@ export async function POST(req: Request) {
     }
 
     // ---- Optional initial cash/offline payment against one enrollment ----
-    const ip = body.initialPayment as
-      | { courseSlug: string; kind: "seat" | "installment" | "full"; installmentNo?: number; method: string; dateISO?: string; note?: string }
-      | undefined;
+    // A line marked received and this section are the same collection. Applying
+    // both inserts a second PAID row. A retried create must not pay an
+    // enrollment this request did not just create.
+    const ip = body.initialPayment as ManualInitialPayment | undefined;
+    const recordedCourseSlugs = courses
+      .filter((c) => Array.isArray(c.recordedPayments) && c.recordedPayments.length > 0)
+      .map((c) => c.courseSlug);
+    const initialDecision = initialPaymentForNewEnrollment({
+      createdCourseSlugs: createdEnrollments.map((e) => e.courseSlug),
+      recordedCourseSlugs,
+      initial: ip ?? null,
+    });
     let receiptNo: string | null = null;
-    if (ip && ip.courseSlug && ip.method) {
-      const enr = (await getCourseEnrollmentsByPhone(phone)).find((e) => e.course_slug === ip.courseSlug && e.status !== "cancelled");
+    if (initialDecision.payment) {
+      const pay = initialDecision.payment;
+      const enr = createdEnrollments.find((e) => e.courseSlug === pay.courseSlug);
       if (enr) {
         const res = await recordOfflineCoursePayment({
           enrollmentId: enr.id,
-          kind: ip.kind,
-          installmentNo: ip.installmentNo ?? null,
-          method: ip.method,
-          dateISO: ip.dateISO ? istInputToISO(`${ip.dateISO}T12:00`) : undefined,
-          note: ip.note || null,
+          kind: pay.kind,
+          installmentNo: pay.installmentNo ?? null,
+          method: pay.method,
+          dateISO: pay.dateISO ? istInputToISO(`${pay.dateISO}T12:00`) : undefined,
+          note: pay.note || null,
         });
         if (res.ok) {
           receiptNo = res.receipt.receipt_no;
-          await logAccess(student.id, `admin:cash ${formatINR(res.receipt.amount)} ${ip.method} · ${enr.course_title} (by ${actor})`);
+          await logAccess(student.id, `admin:cash ${formatINR(res.receipt.amount)} ${pay.method} · ${res.enrollment.course_title} (by ${actor})`);
         } else warnings.push(`payment: ${res.error}`);
       }
+    } else if (initialDecision.skippedBecause === "line_already_recorded") {
+      warnings.push("The line marked as received was recorded once. A second initial payment was not added.");
     }
 
     const buyer = (await ensureBuyer(phone, name).catch(() => null)) || (await getBuyerByPhone(phone));
