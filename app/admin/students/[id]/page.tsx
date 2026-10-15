@@ -46,7 +46,8 @@ import { formatINR, formatISTDate, formatISTDateTime, isoToISTInput } from "@/li
 import TransferModal from "@/components/admin/enrollments/TransferModal";
 import StudentHistory from "@/components/admin/students/StudentHistory";
 import InstallmentProofsSection from "@/components/admin/students/InstallmentProofsSection";
-import { resolveEmiConfig, payInFullTotal, planCourseEnrollment, installmentStatus, deriveEnrollment } from "@/lib/installments";
+import { resolveEmiConfig, payInFullTotal, planCourseEnrollment, installmentStatus, deriveEnrollment, isLineOutstanding } from "@/lib/installments";
+import { manualAllocationSentences, previewOfflineAllocation } from "@/lib/schedulePaymentAllocation";
 import { downloadReceiptPdf, type ReceiptContact } from "@/lib/receiptPdf";
 import type { Student, PaymentReceipt, Course, Webinar, InstallmentItem, PaymentPlan } from "@/lib/types";
 
@@ -1122,10 +1123,20 @@ function PayModal({ course, busy, onClose, onSave }: { course: CourseCard; busy:
   const [method, setMethod] = useState("Cash");
   const [date, setDate] = useState("");
   const [note, setNote] = useState("");
+  const [received, setReceived] = useState<string | null>(null);
   const sel = options[idx];
   const payFull = course.remaining;
   const [mode, setMode] = useState<"line" | "full">("line");
-  const amount = mode === "full" ? payFull : sel?.amount ?? 0;
+  const defaultAmount = mode === "full" ? payFull : sel?.amount ?? 0;
+  const amount = received == null ? defaultAmount : Math.max(0, Math.round(Number(received) || 0));
+  const preview = previewOfflineAllocation({
+    schedule: course.schedule || [],
+    kind: mode === "full" ? "full" : (sel?.kind || "installment"),
+    lineRemaining: mode === "full" ? null : (sel?.amount ?? 0),
+    enrollmentRemaining: course.remaining,
+    amountOverride: amount,
+  });
+  const sentences = preview.ok ? manualAllocationSentences(preview.notice) : [];
   return (
     <Modal open onClose={onClose} title={`Record payment · ${course.title}`}>
       <div className="space-y-3">
@@ -1138,32 +1149,47 @@ function PayModal({ course, busy, onClose, onSave }: { course: CourseCard; busy:
           <div className="space-y-1.5">
             {options.map((o, i) => (
               <label key={`${o.kind}-${o.no}`} className="flex items-center gap-2 text-sm">
-                <input type="radio" name="payline" checked={mode === "line" && idx === i} onChange={() => { setMode("line"); setIdx(i); }} className="accent-[var(--primary)]" />
+                <input type="radio" name="payline" checked={mode === "line" && idx === i} onChange={() => { setMode("line"); setIdx(i); setReceived(null); }} className="accent-[var(--primary)]" />
                 <span className="flex-1">{o.label}</span><span className="font-semibold">{formatINR(o.amount)}</span>
               </label>
             ))}
             {options.length > 1 && (
               <label className="flex items-center gap-2 text-sm">
-                <input type="radio" name="payline" checked={mode === "full"} onChange={() => setMode("full")} className="accent-[var(--primary)]" />
+                <input type="radio" name="payline" checked={mode === "full"} onChange={() => { setMode("full"); setReceived(null); }} className="accent-[var(--primary)]" />
                 <span className="flex-1">Pay full remaining balance</span><span className="font-semibold">{formatINR(payFull)}</span>
               </label>
             )}
           </div>
         </div>
+        <label className="block">
+          <span className="mb-1 block text-xs font-medium text-muted">Payment received today (₹)</span>
+          <input
+            type="number"
+            min={1}
+            value={received ?? (defaultAmount ? String(defaultAmount) : "")}
+            onChange={(e) => setReceived(e.target.value)}
+            className={inputCls}
+          />
+        </label>
         <div className="grid grid-cols-2 gap-3">
           <label className="block"><span className="mb-1 block text-xs font-medium text-muted">Method</span><select value={method} onChange={(e) => setMethod(e.target.value)} className={inputCls}>{METHODS.map((m) => <option key={m}>{m}</option>)}</select></label>
           <label className="block"><span className="mb-1 block text-xs font-medium text-muted">Date (IST)</span><input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={inputCls} /></label>
         </div>
         <label className="block"><span className="mb-1 block text-xs font-medium text-muted">Reference / note (optional)</span><input value={note} onChange={(e) => setNote(e.target.value)} className={inputCls} placeholder="e.g. Receipt book #42" /></label>
-        <p className="text-sm text-ink2">Recording <strong>{formatINR(amount)}</strong> ({method}). A branded receipt will be generated.</p>
+        {sentences.length > 0 && (
+          <p className="text-sm text-ink2">
+            {sentences.map((line) => <span key={line} className="block">{line}</span>)}
+            {" "}A branded receipt will be generated for {formatINR(preview.ok ? preview.notice.amount : amount)}.
+          </p>
+        )}
         <div className="flex justify-end gap-2 pt-1">
           <button onClick={onClose} className="btn btn-secondary text-sm">Cancel</button>
           <button
-            disabled={busy || (mode === "line" && !sel)}
+            disabled={busy || amount <= 0 || (mode === "line" && !sel)}
             onClick={() => onSave(
               mode === "full"
-                ? { kind: "full", method, dateISO: date || undefined, note: note || undefined, enrollmentId: course.id }
-                : { kind: sel.kind, installmentNo: sel.kind === "installment" ? sel.no : undefined, method, dateISO: date || undefined, note: note || undefined, enrollmentId: course.id }
+                ? { kind: "full", amount, method, dateISO: date || undefined, note: note || undefined, enrollmentId: course.id }
+                : { kind: sel.kind, amount, installmentNo: sel.kind === "installment" ? sel.no : undefined, method, dateISO: date || undefined, note: note || undefined, enrollmentId: course.id }
             )}
             className="btn btn-primary text-sm"
           >Record {formatINR(amount)}</button>
@@ -1386,14 +1412,7 @@ function ManagePlanModal({ course, onClose, request, onPay, onDone }: {
   // only appears on that row — offering it per-row would imply staff can chase
   // an arbitrary installment, which the DLT template cannot express.
   const oldestUnpaidNo =
-    sched.find(
-      (s) =>
-        s.kind === "installment" &&
-        !s.paid &&
-        s.status !== "waived" &&
-        !(s.status === "cancelled" && !(Number(s.paid_amount) || 0)) &&
-        !(Number(s.paid_amount) > 0 && Number(s.paid_amount) < Number(s.amount)),
-    )?.no ?? null;
+    sched.find((s) => s.kind === "installment" && isLineOutstanding(s))?.no ?? null;
 
   async function run(body: Record<string, unknown>, key: string, okMsg: string) {
     setBusy(key); setError(null);
@@ -1430,7 +1449,7 @@ function ManagePlanModal({ course, onClose, request, onPay, onDone }: {
                       {item.paid
                         ? `Paid${item.paid_at ? ` · ${formatISTDate(item.paid_at)}` : ""}`
                         : partial
-                          ? `${formatINR(allocated)} received · ${formatINR(remaining)} remaining`
+                          ? `${formatINR(allocated)} paid of ${formatINR(item.amount)} · ${formatINR(remaining)} remaining`
                           : item.due
                             ? `Due ${formatISTDate(item.due)}`
                             : "Due now"}

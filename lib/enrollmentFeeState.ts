@@ -125,17 +125,17 @@ export function isLinePartiallyPaid(
 }
 
 /**
- * Still chasing this line for next-pay / overdue sequencing.
- * partially_paid (even with residual before carry) is not the Pay-now target;
- * after carry-out remaining is 0 and the next open line is chased.
+ * Still chasing this line for next-pay, reminders, and overdue sequencing.
+ * An open partial (money received, remainder still on this line) stays due.
+ * Cancelled-with-money is historical and is not the next chase target.
+ * After carry-out, this line's remaining is 0 and the next open line is chased.
  */
 export function isFeeLineOutstanding(
   line: Pick<InstallmentItem, "paid" | "status" | "amount" | "paid_amount" | "carried_in" | "carried_out">,
 ): boolean {
   if (line.paid || line.status === "waived") return false;
   if (isTrueCancelledLine(line)) return false;
-  if (line.status === "cancelled" && lineAllocatedAmount(line) <= 0) return false;
-  if (isLinePartiallyPaid(line)) return false;
+  if (line.status === "cancelled") return false;
   return lineRemainingAmount(line) > 0;
 }
 

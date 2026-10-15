@@ -9,6 +9,7 @@ import { PLANS } from "@/lib/config";
 import { formatINR } from "@/lib/dates";
 import { resolveEmiConfig, payInFullTotal, planCourseEnrollment } from "@/lib/installments";
 import { collectedToday } from "@/lib/manualEnrollmentPayments";
+import { manualAllocationSentences, previewOfflineAllocation } from "@/lib/schedulePaymentAllocation";
 import type { Course, Webinar } from "@/lib/types";
 
 type CtxPlan = "full" | "emi" | "complimentary";
@@ -16,6 +17,8 @@ interface LineEdit {
   amount: string;
   due: string;
   recordPaid: boolean;
+  /** Rupees actually received. Blank means the full line amount. */
+  received?: string;
   method: string;
   paidDate: string;
   note: string;
@@ -185,10 +188,12 @@ export default function StudentForm() {
             .filter((s) => c.lines[s.no]?.recordPaid)
             .map((s) => {
               const edit = c.lines[s.no];
+              const lineAmount = edit?.amount ? Math.round(Number(edit.amount)) : s.amount;
+              const receivedRaw = edit?.received != null && String(edit.received).trim() !== "" ? Math.round(Number(edit.received)) : lineAmount;
               return {
                 kind: s.kind as "seat" | "installment" | "full",
                 installmentNo: s.kind === "installment" ? s.no : null,
-                amount: edit?.amount ? Math.round(Number(edit.amount)) : s.amount,
+                amount: Number.isFinite(receivedRaw) && receivedRaw > 0 ? receivedRaw : lineAmount,
                 method: edit?.method || "Cash",
                 dateISO: edit?.paidDate || undefined,
                 note: edit?.note || null,
@@ -252,7 +257,8 @@ export default function StudentForm() {
           fd.append("enrollmentId", enr.id);
           fd.append("installmentNo", noStr);
           fd.append("phone", phone);
-          if (line.amount) fd.append("amount", line.amount);
+          const received = line.received != null && String(line.received).trim() !== "" ? line.received : line.amount;
+          if (received) fd.append("amount", received);
           if (line.paidDate) fd.append("paidDate", line.paidDate);
           if (line.note) fd.append("note", line.note);
           await fetch("/api/admin/installment-proofs", { method: "PUT", body: fd }).catch(() => null);
@@ -439,6 +445,14 @@ export default function StudentForm() {
                                     </label>
                                     {edit.recordPaid && (
                                       <div className="grid gap-2 sm:grid-cols-2">
+                                        <Field label="Payment received today (₹)" hint="A smaller amount leaves the rest of this installment due.">
+                                          <input
+                                            type="number"
+                                            className={inputCls}
+                                            value={edit.received ?? edit.amount}
+                                            onChange={(e) => setChoice(c.slug, { lines: { ...choice.lines, [s.no]: { ...edit, received: e.target.value } } })}
+                                          />
+                                        </Field>
                                         <Field label="Method">
                                           <select className={inputCls} value={edit.method} onChange={(e) => setChoice(c.slug, { lines: { ...choice.lines, [s.no]: { ...edit, method: e.target.value } } })}>
                                             {METHODS.map((m) => <option key={m}>{m}</option>)}
@@ -450,6 +464,28 @@ export default function StudentForm() {
                                         <Field label="Proof screenshot"><input type="file" accept="image/*,.pdf" onChange={(e) => setChoice(c.slug, { lines: { ...choice.lines, [s.no]: { ...edit, proof: e.target.files?.[0] || null } } })} /></Field>
                                       </div>
                                     )}
+                                    {edit.recordPaid && s.kind === "installment" && (() => {
+                                      const lineAmount = edit.amount ? Math.round(Number(edit.amount)) : s.amount;
+                                      const received = edit.received != null && String(edit.received).trim() !== "" ? Math.round(Number(edit.received)) : lineAmount;
+                                      if (!Number.isFinite(received) || received <= 0 || received >= lineAmount) return null;
+                                      const fee = choice.negotiatedTotal.trim() === "" ? planned.totalFee : Math.round(Number(choice.negotiatedTotal)) || planned.totalFee;
+                                      const preview = previewOfflineAllocation({
+                                        schedule: planned.schedule.map((row) => ({
+                                          ...row,
+                                          amount: choice.lines[row.no]?.amount ? Math.round(Number(choice.lines[row.no].amount)) : row.amount,
+                                        })),
+                                        kind: "installment",
+                                        lineRemaining: lineAmount,
+                                        enrollmentRemaining: fee,
+                                        amountOverride: received,
+                                      });
+                                      if (!preview.ok) return null;
+                                      return (
+                                        <p className="text-xs text-ink2">
+                                          {manualAllocationSentences(preview.notice).map((line) => <span key={line} className="block">{line}</span>)}
+                                        </p>
+                                      );
+                                    })()}
                                   </div>
                                 );
                               })}
@@ -522,8 +558,9 @@ export default function StudentForm() {
             const lineReceived = collectedToday(planned.schedule.flatMap((s) => {
               const edit = choice.lines[s.no];
               if (!edit?.recordPaid) return [];
-              const amount = edit.amount ? Math.round(Number(edit.amount)) : s.amount;
-              return Number.isFinite(amount) ? [amount] : [];
+              const lineAmount = edit.amount ? Math.round(Number(edit.amount)) : s.amount;
+              const received = edit.received != null && String(edit.received).trim() !== "" ? Math.round(Number(edit.received)) : lineAmount;
+              return Number.isFinite(received) && received > 0 ? [received] : [];
             }));
             if (lineReceived > 0) {
               const fee = choice.negotiatedTotal.trim() === "" ? planned.totalFee : Math.round(Number(choice.negotiatedTotal)) || planned.totalFee;
