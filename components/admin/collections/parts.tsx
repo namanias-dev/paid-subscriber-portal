@@ -62,7 +62,9 @@ export function InstallmentSchedule({ schedule, now = Date.now() }: { schedule: 
                   {formatINR(s.amount || 0)}
                   {partial ? (
                     <span className="mt-0.5 block text-[10px] font-normal text-muted">
-                      {formatINR(allocated)} received
+                      {formatINR(allocated)} paid of {formatINR(s.amount || 0)}
+                      {" · "}
+                      {formatINR(Math.max(0, (Number(s.amount) || 0) - allocated))} remaining
                     </span>
                   ) : null}
                 </td>

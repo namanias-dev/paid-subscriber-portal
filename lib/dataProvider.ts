@@ -13,7 +13,8 @@ import {
   revalidatePublicQuizzes,
 } from "./publicCache";
 import { syncAmountPaidFromFeeState } from "./amountPaidCache";
-import { enrollmentFeeStateFromEnrollment } from "./enrollmentFeeState";
+import { enrollmentFeeStateFromEnrollment, lineAllocatedAmount, lineRemainingAmount } from "./enrollmentFeeState";
+import { allocatePaymentOntoSchedule, capOfflineAmount, replayPaymentsOntoSchedule } from "./schedulePaymentAllocation";
 import * as mock from "./mockData";
 import { computeExpiry, isExpired, isExpiringSoon, yesterdayISODate, todayISODate, formatINR, formatISTDate } from "./dates";
 import { generateAccessCode } from "./codeGenerator";
@@ -4772,52 +4773,14 @@ export async function finalizeCoursePaymentByReference(
     });
   }
 
-  const markPaid = (i: number) => {
-    schedule[i] = { ...schedule[i], paid: true, paid_at: paidAt, reference_no: referenceNo, gateway_ref: gatewayRef };
-  };
-
-  let paymentLabel = "Payment";
-  if (kind === "full") {
-    // Pay full / pay remaining: settle every outstanding line in one payment.
-    schedule.forEach((s, i) => { if (!s.paid) markPaid(i); });
-    paymentLabel = enrollment.plan_type === "full" ? "Full Payment" : "Full Remaining Payment";
-  } else if (kind === "seat") {
-    // Seat stays exact-match (or first unpaid seat) — not mixed with EMI lines.
-    const idx = schedule.findIndex((s) => s.no === (payment.installment_no ?? 0) && s.kind === "seat" && !s.paid);
-    const fallbackIdx = idx === -1 ? schedule.findIndex((s) => s.kind === "seat" && !s.paid) : idx;
-    if (fallbackIdx >= 0) {
-      markPaid(fallbackIdx);
-      paymentLabel = schedule[fallbackIdx].label;
-    }
-  } else {
-    // Instalments: oldest outstanding first (due, then no) — ignore stamped installment_no for clearing.
-    const oldestIdx = findOldestOutstandingIndex(schedule, "installment");
-    if (oldestIdx >= 0) {
-      const line = schedule[oldestIdx]!;
-      const payAmt = Math.round(Number(payment.amount) || 0);
-      const prevPartial = Math.round(Number(line.paid_amount) || 0);
-      const isProofPartial =
-        payment.payment_source === "student_proof" &&
-        payAmt > 0 &&
-        prevPartial + payAmt < (line.amount || 0);
-      if (isProofPartial) {
-        // Record partial against the oldest line; leave unpaid until remainder clears.
-        schedule[oldestIdx] = {
-          ...line,
-          paid: false,
-          status: "partially_paid",
-          paid_amount: prevPartial + payAmt,
-          reference_no: referenceNo,
-          gateway_ref: gatewayRef,
-          payment_id: payment.id,
-        };
-        paymentLabel = `${line.label} (partial)`;
-      } else {
-        markPaid(oldestIdx);
-        paymentLabel = schedule[oldestIdx]!.label;
-      }
-    }
-  }
+  // One allocator for proof, admin offline, and gateway installments.
+  // A payment smaller than the line records paid_amount and leaves the line open.
+  const allocated = allocatePaymentOntoSchedule(schedule, { ...payment, payment_kind: kind }, {
+    paidAt,
+    planType: enrollment.plan_type,
+  });
+  schedule = allocated.schedule;
+  const paymentLabel = allocated.paymentLabel;
 
   const derived = deriveEnrollment({ total_fee: enrollment.total_fee, schedule });
   const status = enrollmentStatusFromSchedule({ total_fee: enrollment.total_fee, schedule, plan_type: enrollment.plan_type });
@@ -5187,7 +5150,7 @@ export async function recordOfflineCoursePayment(
     label = item.label;
   } else {
     // Prefer explicit admin pick for the *amount*; clearing still uses oldest-first in finalize.
-    // When no pick, stamp the oldest outstanding line (due, then no).
+    // When no pick, stamp the oldest line that still has a remainder (due, then no).
     let item =
       input.installmentNo != null
         ? schedule.find((s) => s.kind === "installment" && s.no === input.installmentNo && !s.paid)
@@ -5197,25 +5160,24 @@ export async function recordOfflineCoursePayment(
       item = idx >= 0 ? schedule[idx] : undefined;
     }
     if (!item) return { ok: false, error: "No outstanding installment to record." };
-    amount = item.amount;
+    amount = lineRemainingAmount(item);
     installmentNo = item.no;
     label = item.label;
   }
 
   const remainingCap = deriveEnrollment(enrollment).remaining;
-  if (remainingCap <= 0) return { ok: false, error: "This enrollment is already fully paid." };
-
-  if (input.amountOverride != null && Number.isFinite(input.amountOverride)) {
-    const override = Math.round(Number(input.amountOverride));
-    if (override <= 0) return { ok: false, error: "Amount must be greater than zero." };
-    // Cap at remaining — never invent a credit balance.
-    amount = Math.min(override, remainingCap);
-    // Overpay covering more than one line → settle remaining balance as full.
-    if (override >= remainingCap && kind === "installment") {
-      kind = "full";
-      installmentNo = 0;
-      label = "";
-    }
+  const capped = capOfflineAmount({
+    kind,
+    amount,
+    enrollmentRemaining: remainingCap,
+    amountOverride: input.amountOverride,
+  });
+  if (!capped.ok) return capped;
+  amount = capped.amount;
+  if (capped.kind !== kind) {
+    kind = capped.kind;
+    installmentNo = 0;
+    label = "";
   }
 
   // Idempotent: reuse existing reference if already finalized.
@@ -5360,30 +5322,6 @@ export async function cancelStalePendingPayments(enrollmentId: string): Promise<
 // left untouched — we never zero out an admin-granted ₹0 enrollment.
 // Waived/cancelled schedule lines are preserved (the plan-change tool owns them).
 
-function applyPaidPaymentToSchedule(schedule: InstallmentItem[], payment: Payment): void {
-  const kind = (payment.payment_kind || "full") as "one_time" | "seat" | "installment" | "full";
-  if (kind === "one_time") return; // not tied to the EMI schedule
-  const gatewayRef = payment.gateway_ref || payment.razorpay_payment_id || null;
-  const paidAt = payment.transaction_date || payment.created_at || new Date().toISOString();
-  const ref = payment.reference_no || null;
-  const mark = (i: number) => {
-    schedule[i] = { ...schedule[i], paid: true, paid_at: paidAt, reference_no: ref, gateway_ref: gatewayRef, payment_id: payment.id };
-  };
-  if (kind === "full") {
-    schedule.forEach((s, i) => { if (!s.paid && !isLineCancelledOrWaived(s)) mark(i); });
-    return;
-  }
-  if (kind === "seat") {
-    const exact = schedule.findIndex((s) => s.no === (payment.installment_no ?? 0) && s.kind === "seat" && !s.paid && !isLineCancelledOrWaived(s));
-    const idx = exact === -1 ? schedule.findIndex((s) => s.kind === "seat" && !s.paid && !isLineCancelledOrWaived(s)) : exact;
-    if (idx >= 0) mark(idx);
-    return;
-  }
-  // Instalments: oldest outstanding first — stamped installment_no is audit-only.
-  const idx = findOldestOutstandingIndex(schedule, "installment");
-  if (idx >= 0) mark(idx);
-}
-
 /**
  * Recompute a course enrollment from its non-deleted PAID payments. Returns the
  * updated enrollment (or the untouched one for comp/manual enrollments with no
@@ -5397,12 +5335,22 @@ export async function recomputeCourseEnrollment(enrollmentId: string): Promise<C
   const paid = all
     .filter((p) => !p.deleted_at && isPaidStatus(p.status))
     .sort((a, b) => (a.created_at || "").localeCompare(b.created_at || ""));
-  const schedule = (enr.schedule || []).map((s) =>
+  const cleared = (enr.schedule || []).map((s) =>
     isLineCancelledOrWaived(s)
       ? { ...s }
-      : { ...s, paid: false, paid_at: null, reference_no: null, gateway_ref: null, payment_id: null },
+      : {
+          ...s,
+          paid: false,
+          paid_at: null,
+          reference_no: null,
+          gateway_ref: null,
+          payment_id: null,
+          paid_amount: null,
+          receipt_no: null,
+          status: s.status === "paid" || s.status === "partially_paid" ? "pending" : s.status,
+        },
   );
-  for (const p of paid) applyPaidPaymentToSchedule(schedule, p);
+  const schedule = replayPaymentsOntoSchedule(cleared, paid);
   const derived = deriveEnrollment({ total_fee: enr.total_fee, schedule });
   const status = enrollmentStatusFromSchedule({ total_fee: enr.total_fee, schedule, plan_type: enr.plan_type });
   const updatedBase = await updateCourseEnrollment(enrollmentId, { schedule, status });
@@ -6459,7 +6407,7 @@ export async function applyEnrollmentDiscount(
   // Rebuild only the outstanding lines (keep their order); paid/cancelled/waived untouched.
   const schedule = (e.schedule || []).map((s) => ({ ...s }));
   const outstandingIdx = schedule
-    .map((s, i) => (isLineOutstanding(s) ? i : -1))
+    .map((s, i) => (isLineOutstanding(s) && lineAllocatedAmount(s) <= 0 ? i : -1))
     .filter((i) => i >= 0);
 
   const now = new Date().toISOString();

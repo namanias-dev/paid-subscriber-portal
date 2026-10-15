@@ -6,7 +6,7 @@
  * receivables practice — never invents money or changes line amounts/dues.
  */
 import type { InstallmentItem, InstallmentKind } from "./types";
-import { isLineCancelledOrWaived, isLineOutstanding } from "./installments";
+import { isLineCancelledOrWaived, isLineOutstanding, isLinePartiallyPaid } from "./installments";
 
 function dueMs(due: string | null | undefined): number {
   if (!due) return Number.NEGATIVE_INFINITY; // null due = already "due" (legacy / seat)
@@ -28,6 +28,7 @@ export function compareOutstandingOldestFirst(a: InstallmentItem, b: Installment
 export function findOldestOutstandingIndex(
   schedule: InstallmentItem[],
   kind: InstallmentKind | "full",
+  opts?: { skipPartial?: boolean },
 ): number {
   if (kind === "full") return -1;
   let best = -1;
@@ -35,6 +36,7 @@ export function findOldestOutstandingIndex(
     const s = schedule[i];
     if (s.kind !== kind) continue;
     if (!isLineOutstanding(s)) continue;
+    if (opts?.skipPartial && isLinePartiallyPaid(s)) continue;
     if (best < 0 || compareOutstandingOldestFirst(s, schedule[best]) < 0) best = i;
   }
   return best;
@@ -136,6 +138,9 @@ export function reallocateScheduleOldestFirst(schedule: InstallmentItem[]): Real
 
   const next: InstallmentItem[] = schedule.map((s) => {
     if (s.kind !== "installment" || isLineCancelledOrWaived(s)) return { ...s };
+    // Open partials are real money already on the line. Reshuffling full
+    // payments must not wipe that paid_amount or park another payment on it.
+    if (!s.paid && isLinePartiallyPaid(s)) return { ...s };
     return {
       ...s,
       paid: false,
@@ -151,7 +156,7 @@ export function reallocateScheduleOldestFirst(schedule: InstallmentItem[]): Real
 
   let ei = 0;
   while (ei < events.length) {
-    const idx = findOldestOutstandingIndex(next, "installment");
+    const idx = findOldestOutstandingIndex(next, "installment", { skipPartial: true });
     if (idx < 0) break;
     const ev = events[ei++];
     const line = next[idx];
@@ -173,7 +178,7 @@ export function reallocateScheduleOldestFirst(schedule: InstallmentItem[]): Real
   if (ei < events.length) {
     for (let i = next.length - 1; i >= 0 && ei < events.length; i--) {
       if (next[i].kind !== "installment" || isLineCancelledOrWaived(next[i])) continue;
-      if (next[i].paid) continue;
+      if (next[i].paid || isLinePartiallyPaid(next[i])) continue;
       const ev = events[ei++];
       next[i] = {
         ...next[i],

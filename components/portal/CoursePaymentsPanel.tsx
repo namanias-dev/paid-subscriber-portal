@@ -227,7 +227,7 @@ export default function CoursePaymentsPanel({
                     {item.paid
                       ? paidLabel(item, payments, receipts, receiptByRef)
                       : partial
-                        ? `${formatINR(allocated)} received · ${formatINR(remaining)} remaining`
+                        ? `${formatINR(allocated)} paid of ${formatINR(item.amount)} · ${formatINR(remaining)} remaining`
                         : waived
                           ? "Waived by the academy"
                           : item.due

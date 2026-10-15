@@ -134,7 +134,10 @@ describe("partial settlement fixture", () => {
     const w = fee.instalments.find((l) => l.no === 3)!;
     assert.equal(w.status, "waived");
     assert.equal(w.remaining, 0);
-    assert.equal(fee.nextDueInstalment?.n, 4);
+    assert.notEqual(fee.nextDueInstalment?.n, 3);
+    // The open partial still has ₹1,333 on this line, so it stays the next due.
+    assert.equal(fee.nextDueInstalment?.n, 2);
+    assert.equal(fee.nextDueInstalment?.amountDue, 1333);
   });
 
   it("lifetime-access fully_paid fixture has 0 outstanding", () => {
