@@ -957,7 +957,7 @@ function EmiConfigEditor({ total, value, onChange }: { total: number; value: Cou
           </label>
 
           <div className="grid gap-3 sm:grid-cols-2">
-            <Field label="Seat amount (₹)" hint="Amount to secure a seat, deducted from total.">
+            <Field label="Seat amount (₹)" hint="Amount students pay today to reserve the seat. Deducted from the total. The minimum below only limits a custom amount.">
               <input type="number" className="input" value={v.seat_amount ?? ""} onChange={(e) => set("seat_amount", e.target.value ? Number(e.target.value) : null)} />
             </Field>
             <Field label="Best-value note (optional)" hint="Shown on the Pay-Full card.">

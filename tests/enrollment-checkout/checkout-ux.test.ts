@@ -1,7 +1,7 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { planCourseEnrollment } from "../../lib/installments";
+import { effectiveCourseForBatch, effectiveSeatAmount, planCourseEnrollment, resolveEmiConfig } from "../../lib/installments";
 import {
   analyzeBatches,
   batchLabelAddsDetail,
@@ -18,6 +18,7 @@ import {
 import { enrollmentBackHref, isEnrollmentCheckoutPath } from "../../lib/enrollmentPath";
 import { isWidgetAllowedPath } from "../../lib/ai-agent/conversationPolicy";
 import { validateCoupon } from "../../lib/coupons";
+import { normalizeLandingInput } from "../../lib/landing";
 import type { Course, CourseBatch, InstallmentItem } from "../../lib/types";
 
 const BOOKING = "2026-09-26T04:30:00.000Z";
@@ -418,6 +419,138 @@ describe("installment default and payment bodies preserve the checkout contract"
     assert.equal(checkoutAmountsDiffer("2000", 2000), false);
     assert.equal(checkoutAmountsDiffer(1500, 2000), true);
     assert.equal(checkoutAmountsDiffer("nope", 2000), true);
+  });
+});
+
+describe("configured seat amount is what checkout shows", () => {
+  function shownToday(c: Course, batchId: string, typed?: number) {
+    const ec = effectiveCourseForBatch(c, batchId);
+    const cfg = resolveEmiConfig(ec);
+    const total = Math.max(0, Math.round(ec.price));
+    const seatConfigured = cfg.enabled && (cfg.seatAmount != null || cfg.allowCustomSeat);
+    const seatFloor = cfg.allowCustomSeat ? (cfg.minSeatAmount ?? cfg.seatAmount ?? 1) : (cfg.seatAmount ?? 1);
+    const seatInput = typed ?? cfg.seatAmount ?? seatFloor;
+    const seatOutOfRange = cfg.allowCustomSeat && (seatInput < seatFloor || seatInput >= total);
+    const reservation = cfg.allowCustomSeat && !seatOutOfRange ? seatInput : (cfg.seatAmount ?? seatFloor);
+    const intent = publicPaymentIntent({
+      method: "installments",
+      seatConfigured,
+      allowCustomSeat: cfg.allowCustomSeat,
+      reservationAmount: reservation,
+    });
+    return planCourseEnrollment({
+      course: ec,
+      plan: "emi",
+      bookSeat: intent.bookSeat,
+      seatAmount: intent.seatAmount ?? null,
+      installmentCount: cfg.installmentCounts[0],
+      batchId,
+      bookingISO: BOOKING,
+    });
+  }
+
+  test("A1 equal seat and minimum display ₹2,000 and refuse a lower custom amount", () => {
+    const c = course([offlineMorning]);
+    const today = shownToday(c, "off-m");
+    assert.equal(today.ok && today.plan.firstAmount, 2000);
+    assert.equal(today.ok && today.plan.schedule[0].kind, "seat");
+    const cfg = resolveEmiConfig(effectiveCourseForBatch(c, "off-m"));
+    assert.equal(effectiveSeatAmount(cfg, 85000, 1000), 2000);
+    assert.equal(effectiveSeatAmount(cfg, 85000, 2000), 2000);
+  });
+
+  test("A2 default seat is ₹5,000 and a custom amount can fall only to the ₹2,000 minimum", () => {
+    const shaped = batch({
+      id: "off-m",
+      mode: "Offline",
+      timing: "Morning",
+      price: 85000,
+      emi_config: { ...emi(5000), min_seat_amount: 2000 },
+    });
+    const c = course([shaped], { emi_config: shaped.emi_config });
+    const today = shownToday(c, "off-m");
+    assert.equal(today.ok && today.plan.firstAmount, 5000);
+    const lowered = shownToday(c, "off-m", 2000);
+    assert.equal(lowered.ok && lowered.plan.firstAmount, 2000);
+    const cfg = resolveEmiConfig(effectiveCourseForBatch(c, "off-m"));
+    assert.equal(effectiveSeatAmount(cfg, 85000, 500), 2000);
+    assert.equal(cfg.seatAmount, 5000);
+    assert.equal(cfg.minSeatAmount, 2000);
+  });
+
+  test("A3 a ₹10,000 seat is the default and the minimum", () => {
+    const shaped = batch({
+      id: "off-m",
+      mode: "Offline",
+      timing: "Morning",
+      price: 85000,
+      emi_config: emi(10000),
+    });
+    const c = course([shaped], { emi_config: shaped.emi_config });
+    const today = shownToday(c, "off-m");
+    assert.equal(today.ok && today.plan.firstAmount, 10000);
+    const cfg = resolveEmiConfig(effectiveCourseForBatch(c, "off-m"));
+    assert.equal(effectiveSeatAmount(cfg, 85000, 2000), 10000);
+  });
+
+  test("A4 seat booking disabled does not invent a ₹2,000 reservation", () => {
+    const disabled = { ...emi(), enabled: true, seat_amount: null, min_seat_amount: null, allow_custom_seat: false };
+    const shaped = batch({ id: "plain", mode: "Offline", timing: "Morning", price: 9000, emi_config: disabled });
+    const c = course([shaped], { emi_config: disabled, price: 9000 });
+    const today = shownToday(c, "plain");
+    assert.equal(today.ok, true);
+    if (!today.ok) return;
+    assert.equal(today.plan.firstKind, "installment");
+    assert.equal(today.plan.schedule.some((s) => s.kind === "seat"), false);
+    assert.equal(today.plan.firstAmount, 3000);
+    assert.notEqual(today.plan.firstAmount, 2000);
+  });
+
+  test("A5 a missing seat config uses the planner floor of ₹1, not a ₹2,000 fallback", () => {
+    const open = { ...emi(), seat_amount: null, min_seat_amount: null, allow_custom_seat: true };
+    const shaped = batch({ id: "open", mode: "Online", timing: "Morning", price: 9000, emi_config: open });
+    const c = course([shaped], { emi_config: open, price: 9000 });
+    const cfg = resolveEmiConfig(effectiveCourseForBatch(c, "open"));
+    assert.equal(cfg.seatAmount, null);
+    assert.equal(cfg.minSeatAmount, null);
+    assert.equal(effectiveSeatAmount(cfg, 9000), 1);
+    const today = shownToday(c, "open");
+    assert.equal(today.ok && today.plan.firstAmount, 1);
+    assert.notEqual(today.ok && today.plan.firstAmount, 2000);
+  });
+
+  test("a batch seat amount overrides the course-level amount", () => {
+    const morning = batch({
+      id: "off-m",
+      mode: "Offline",
+      timing: "Morning",
+      price: 85000,
+      emi_config: emi(10000),
+    });
+    const evening = batch({
+      id: "off-e",
+      mode: "Offline",
+      timing: "Evening",
+      price: 85000,
+      emi_config: emi(5000),
+    });
+    const c = course([morning, evening], { emi_config: emi(2000) });
+    assert.equal(shownToday(c, "off-m").ok && shownToday(c, "off-m").plan.firstAmount, 10000);
+    assert.equal(shownToday(c, "off-e").ok && shownToday(c, "off-e").plan.firstAmount, 5000);
+  });
+
+  test("batch save keeps seat amount and minimum seat amount", () => {
+    const saved = normalizeLandingInput({
+      batches: [{
+        id: "b1",
+        price: 85000,
+        emi_config: { enabled: true, seat_amount: 10000, min_seat_amount: 2000, allow_custom_seat: true, installment_counts: [3] },
+      }],
+    });
+    assert.equal(saved.ok, true);
+    const batchRow = (saved.value?.batches as { emi_config: { seat_amount: number; min_seat_amount: number } }[])[0];
+    assert.equal(batchRow.emi_config.seat_amount, 10000);
+    assert.equal(batchRow.emi_config.min_seat_amount, 2000);
   });
 });
 

@@ -8,6 +8,7 @@ import { useToast } from "@/components/ui/Toast";
 import { PLANS } from "@/lib/config";
 import { formatINR } from "@/lib/dates";
 import { resolveEmiConfig, payInFullTotal, planCourseEnrollment } from "@/lib/installments";
+import { collectedToday } from "@/lib/manualEnrollmentPayments";
 import type { Course, Webinar } from "@/lib/types";
 
 type CtxPlan = "full" | "emi" | "complimentary";
@@ -210,7 +211,8 @@ export default function StudentForm() {
     const webinarList = Object.entries(webPicked).filter(([, v]) => v).map(([id]) => id);
 
     let initialPayment: Record<string, unknown> | undefined;
-    if (payCourse) {
+    const courseAlreadyReceived = courseList.some((c) => c.courseSlug === payCourse && c.recordedPayments.length > 0);
+    if (payCourse && !courseAlreadyReceived) {
       const course = (courses || []).find((c) => c.slug === payCourse);
       const choice = picked[payCourse];
       const planned = course && choice ? plannedFor(course, choice) : null;
@@ -433,7 +435,7 @@ export default function StudentForm() {
                                     </div>
                                     <label className="flex items-center gap-2 text-xs">
                                       <input type="checkbox" checked={edit.recordPaid} onChange={(e) => setChoice(c.slug, { lines: { ...choice.lines, [s.no]: { ...edit, recordPaid: e.target.checked } } })} className="h-4 w-4 accent-[var(--primary)]" />
-                                      Already paid (cash / UPI / bank)
+                                      Payment received today
                                     </label>
                                     {edit.recordPaid && (
                                       <div className="grid gap-2 sm:grid-cols-2">
@@ -489,7 +491,7 @@ export default function StudentForm() {
       </Section>
 
       {enrolledNonComp.length > 0 && (
-        <Section icon={<Wallet size={17} />} title="Record initial payment" subtitle="Optional. Records the first payable line (seat / installment / full) as an offline payment + receipt.">
+        <Section icon={<Wallet size={17} />} title="Record initial payment" subtitle="Optional. Use this only when no line above is marked “Payment received today”. It records the first unpaid line once.">
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="For course">
               <select value={payCourse} onChange={(e) => setPayCourse(e.target.value)} className={inputCls}>
@@ -516,7 +518,22 @@ export default function StudentForm() {
             const c = courses.find((x) => x.slug === payCourse);
             const choice = picked[payCourse];
             const planned = c && choice ? plannedFor(c, choice) : null;
-            return planned ? <p className="mt-3 text-sm text-ink2">Will record <strong>{formatINR(planned.firstAmount)}</strong> ({payMethod}) and generate a receipt.</p> : null;
+            if (!planned || !choice) return null;
+            const lineReceived = collectedToday(planned.schedule.flatMap((s) => {
+              const edit = choice.lines[s.no];
+              if (!edit?.recordPaid) return [];
+              const amount = edit.amount ? Math.round(Number(edit.amount)) : s.amount;
+              return Number.isFinite(amount) ? [amount] : [];
+            }));
+            if (lineReceived > 0) {
+              const fee = choice.negotiatedTotal.trim() === "" ? planned.totalFee : Math.round(Number(choice.negotiatedTotal)) || planned.totalFee;
+              return (
+                <p className="mt-3 text-sm text-ink2">
+                  Payment received today: <strong>{formatINR(lineReceived)}</strong>. Total paid after this entry: <strong>{formatINR(lineReceived)}</strong>. Remaining: <strong>{formatINR(Math.max(0, fee - lineReceived))}</strong>. The section above is not added again.
+                </p>
+              );
+            }
+            return <p className="mt-3 text-sm text-ink2">Will record <strong>{formatINR(planned.firstAmount)}</strong> ({payMethod}) once and generate a receipt.</p>;
           })()}
         </Section>
       )}
