@@ -100,6 +100,8 @@ export async function GET(req: Request) {
   const actionOnly = url.searchParams.get("action") === "required";
   const acq = url.searchParams.get("acq") || "";
   const fulfillment = methodFromFilterKey(url.searchParams.get("fulfillment"));
+  // Silent client auto-refresh passes counts=0 to skip multi-thousand-row KPI scans.
+  const skipCounts = url.searchParams.get("counts") === "0";
 
   const paidOnly = bucket === "paid";
   const statuses = BUCKETS[bucket] || ALL_STATUSES;
@@ -146,8 +148,8 @@ export async function GET(req: Request) {
   if (grouped && (q || awbOrderIds?.length)) {
     searchKeys = await customerKeysForSearch(db, q, awbOrderIds);
     if (!searchKeys.phones.length && !searchKeys.ids.length) {
-      const counts = await adminCounts(db);
-      return NextResponse.json({ ok: true, total: 0, limit, offset, orders: [], counts, can_manage: canManage, can_view_analytics: canViewAnalytics, writes_authorized: shippingWritesAuthorized() }, { headers: { "Cache-Control": "no-store" } });
+      const counts = skipCounts ? undefined : await adminCounts(db);
+      return NextResponse.json({ ok: true, total: 0, limit, offset, orders: [], ...(counts ? { counts } : {}), can_manage: canManage, can_view_analytics: canViewAnalytics, writes_authorized: shippingWritesAuthorized() }, { headers: { "Cache-Control": "no-store" } });
     }
   }
 
@@ -545,7 +547,7 @@ export async function GET(req: Request) {
       issue,
     };
   });
-  const counts = await adminCounts(db);
+  const counts = skipCounts ? undefined : await adminCounts(db);
   if (id && mapped[0] && mapped[0].fulfillment_method === "ACADEMY_PICKUP") {
     // Detail only: the frozen pickup promise and who moved the order through collection.
     const [{ data: pickupRow }, { data: pickupEvents }] = await Promise.all([

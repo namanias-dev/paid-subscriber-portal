@@ -32,6 +32,11 @@ describe("media cost audit guards", () => {
     assert.match(middleware, /Image\/WebP\/OG posters stay open/);
   });
 
+  test("aggressive bots are short-circuited on force-dynamic Notes Store pages", () => {
+    assert.match(middleware, /pathname === "\/notes"/);
+    assert.match(middleware, /"\/notes\/:path\*"/);
+  });
+
   test("robots disallow store video prefix but keep public HTML indexable", () => {
     assert.match(robots, /\/media\/store\/videos\//);
     assert.match(robots, /allow:\s*"\/"/);

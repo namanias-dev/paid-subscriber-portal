@@ -99,8 +99,21 @@ export default function SupportQueue() {
 
   useEffect(() => {
     void load(filter, 0, false);
-    const id = window.setInterval(() => void load(filter, 0, false), 45_000);
-    return () => window.clearInterval(id);
+    // Pause when the tab is hidden — background polls were scanning up to 2000
+    // open issues every 45s for no operator benefit.
+    const refresh = () => {
+      if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
+      void load(filter, 0, false);
+    };
+    const id = window.setInterval(refresh, 45_000);
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") refresh();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.clearInterval(id);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
   }, [filter, load]);
 
   return (

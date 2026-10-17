@@ -27,6 +27,9 @@ function isUnauthForceDynamicPublic(pathname: string): boolean {
   if (pathname === "/payment/status" || pathname.startsWith("/payment/")) return true;
   if (pathname === "/current-affairs/saved") return true;
   if (pathname.startsWith("/lecture/")) return true;
+  // Notes Store storefront is force-dynamic; aggressive scrapers should not SSR it.
+  // Social preview UAs are intentionally outside AGGRESSIVE_BOT_RE (OG still works).
+  if (pathname === "/notes" || pathname.startsWith("/notes/")) return true;
   return false;
 }
 
@@ -149,6 +152,8 @@ export const config = {
     "/payment/:path*",
     "/current-affairs/saved",
     "/lecture/:path*",
+    "/notes",
+    "/notes/:path*",
     // Bot short-circuit only for large media; humans and Googlebot still pass.
     "/media/:path*",
   ],

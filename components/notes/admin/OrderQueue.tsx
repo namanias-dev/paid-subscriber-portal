@@ -143,6 +143,9 @@ export default function NotesOrderQueue() {
     if (sort) params.set("sort", sort);
     params.set("limit", String(PAGE));
     params.set("offset", String(offset));
+    // Silent auto-refresh only needs the order list; KPI counts are expensive
+    // (multi-thousand-row scans) and stay fresh enough from explicit loads.
+    if (opts?.silent) params.set("counts", "0");
     let json: Record<string, unknown> & { orders?: AdminOrder[]; counts?: Record<string, unknown> & { products?: Array<{ name: string; orders: number; units: number }>; shipping_rate?: ShippingRateStats } };
     try {
       const res = await fetch(`/api/admin/notes/orders?${params}`, { cache: "no-store" });
@@ -158,9 +161,11 @@ export default function NotesOrderQueue() {
     if (seq !== requestSeq.current) return;
     const rows = (json.orders || []) as AdminOrder[];
     setOrders(rows);
-    setCounts((json.counts || {}) as Record<string, number>);
-    setShippingRate(json.counts?.shipping_rate || null);
-    setProducts(json.counts?.products || []);
+    if (json.counts) {
+      setCounts(json.counts as Record<string, number>);
+      setShippingRate(json.counts.shipping_rate || null);
+      setProducts(json.counts.products || []);
+    }
     setTotal(Number(json.total) || rows.length);
     setWrites(Boolean(json.writes_authorized));
     setCanManage(Boolean(json.can_manage));

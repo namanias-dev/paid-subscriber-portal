@@ -8,6 +8,7 @@ import {
 } from "@/lib/r2";
 import { mediaObjectKey, mediaResponseHeaders } from "@/lib/mediaDelivery";
 import { isPublicMediaKey } from "@/lib/media/publicPrefix";
+import { PUBLIC_MEDIA_SIGNED_TTL_SECONDS } from "@/lib/cost/mediaSignedTtl";
 
 /**
  * Compatibility origin for R2 keys under `media/*` only.
@@ -25,17 +26,6 @@ import { isPublicMediaKey } from "@/lib/media/publicPrefix";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const preferredRegion = ["bom1"];
-
-/**
- * Signed GET TTL for public media redirects.
- * 6h covers pause/seek on mobile for Notes Store clips (~3 min) and longer
- * study sessions without minting week-long URLs. Override via env.
- * (Not a Next.js route export — keep as module-local.)
- */
-const PUBLIC_MEDIA_SIGNED_TTL_SECONDS = Math.max(
-  1800,
-  Number(process.env.PUBLIC_MEDIA_SIGNED_REDIRECT_TTL_SECONDS || 21600) || 21600,
-);
 
 const NO_STORE_REDIRECT = {
   "Cache-Control": "private, no-store, max-age=0, must-revalidate",

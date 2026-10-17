@@ -268,10 +268,24 @@ function SendTab({ meta }: { meta: Meta | null }) {
   useEffect(() => { fetch("/api/admin/sms/templates").then((r) => r.json()).then((d) => d.ok && setTemplates(d.templates)).catch(() => {}); }, []);
   useEffect(() => { fetch("/api/admin/sms/balance").then((r) => r.json()).then((d) => (d.ok || d.configured === false) && setBalance(d)).catch(() => {}); }, []);
   useEffect(() => {
-    const loadWin = () => fetch("/api/admin/sms/settings").then((r) => r.json()).then((d) => d.ok && setPromoWindow(d.promoWindow || null)).catch(() => {});
+    const loadWin = () => {
+      if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
+      fetch("/api/admin/sms/settings")
+        .then((r) => r.json())
+        .then((d) => d.ok && setPromoWindow(d.promoWindow || null))
+        .catch(() => {});
+    };
     loadWin();
-    const t = setInterval(loadWin, 30_000);
-    return () => clearInterval(t);
+    // Promo window changes slowly; 2 min + visibility pause is enough for Send UI.
+    const t = setInterval(loadWin, 120_000);
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") loadWin();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      clearInterval(t);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
   }, []);
 
   const loadSaved = useCallback(() => { fetch("/api/admin/sms/saved-audiences").then((r) => r.json()).then((d) => d.ok && setSaved(d.saved)).catch(() => {}); }, []);
