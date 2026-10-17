@@ -188,19 +188,18 @@ Back-of-envelope: **~8,800 full-equivalent ~45 MB origin fills ≈ 388 GB**.
 
 ## Route-Level Findings
 
-### HIGH — `GET/HEAD /media/[...path]`
+### HIGH — `GET/HEAD /media/[...path]` — REMEDIATED
 
 - **File:** `app/media/[...path]/route.ts`
-- **Behavior:** `getObject(key, { range })` from R2 → `NextResponse` stream; `dynamic = "force-dynamic"`; CDN 308 only if `publicCdnUrl(key)` non-null
-- **Transfer:** Full response body leaves Vercel origin on CDN MISS (especially Range)
-- **Volume:** Every Notes landing/PDP visitor who hits the teaching showcase or physical-copy player
-- **Fix:** Path-scoped Cloudflare public origin + env; keep route as fallback 308
+- **BEFORE:** `getObject` stream → Vercel origin egress on Range MISS
+- **CURRENT:** public keys → **302 signed R2** (CL=0); missing → 404; stream fallback only if signing unavailable
+- **Residual:** redirect function invocations only (tiny vs former MP4 FOT)
 
-### HIGH — Teaching / proof URL construction
+### HIGH — Teaching / proof URL construction — ACCEPTABLE AS-IS
 
 - **Files:** `lib/store/teachingVideos.ts`, `lib/store/notesProof.ts`, `lib/publicMediaUrl.ts`
-- **Behavior:** `stablePublicMediaUrl` → `https://www.namanias.com/media/...` without CDN
-- **Fix:** Set `NEXT_PUBLIC_MEDIA_CDN_BASE` (rebuild) + server `CLOUDFLARE_R2_PUBLIC_BASE_URL`
+- **CURRENT:** Stable `/media/...` page URLs; browser follows 302 to R2 for bytes
+- **Optional later:** CDN base env for Worker stable hosts
 
 ### MEDIUM — `GET /api/notes/sample/[id]`
 
