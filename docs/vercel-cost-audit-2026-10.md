@@ -1,28 +1,43 @@
 # Vercel Cost Audit — Naman IAS
 
-**ROOT CAUSE:** Public Notes Store teaching / proof **videos (and other `media/*` assets) are streamed through the Vercel Node route `/media/[...path]`**, which pulls bytes from private Cloudflare R2 and sends them out as origin responses. Production has **no `CLOUDFLARE_R2_PUBLIC_BASE_URL` / `NEXT_PUBLIC_MEDIA_CDN_BASE`**, so the built-in CDN redirect never runs. HTML5 players issue **Range** requests against ~40–53 MB MP4s; those ranges frequently miss the Vercel CDN and refill from origin → Fast Origin Transfer.
+## STATUS: REMEDIATED IN PRODUCTION — October 13, 2026
 
-**CONFIDENCE:** HIGH
+**ROOT CAUSE (historical):** Public Notes Store MP4/media was proxied through Vercel from private R2 via `/media/[...path]`, driving Fast Origin Transfer.
 
-**ESTIMATED SHARE OF 388 GB:** **250–360 GB (≈65–90%)** from `/media/*` video (and related Range fills). Remainder: next/image optimizer fetches, dynamic HTML/RSC for force-dynamic Notes + other pages, sample WebPs/PDFs, APIs.
+**PRODUCTION FIX (current):** Public `media/*` gets a **zero-byte 302** to a **six-hour signed private R2 GET URL**. Cloudflare/R2 serves MP4/PDF/image bytes (including Range 206). Vercel does not carry public Notes Store media payloads.
 
-**BEST FIX:** Serve public `media/*` from a **Cloudflare edge that only allows the `media/` prefix** (Worker or separate public bucket + custom domain). Set `CLOUDFLARE_R2_PUBLIC_BASE_URL` and `NEXT_PUBLIC_MEDIA_CDN_BASE` so `stablePublicMediaUrl()` emits CDN URLs and `/media/*` 308s off Vercel. **Do not make the whole private R2 bucket world-readable** (lectures, proofs, invoices live there).
+**VERCEL MP4 EGRESS:** **ELIMINATED** (live-verified 2026-10-17: `Content-Length: 0`, body 0 bytes, `X-Media-Redirect: r2-signed`).
 
-**EXPECTED FUTURE FOT:** With CDN wired correctly: **TARGET 2 &lt;50 GB/month** is realistic; **stretch &lt;20 GB** if Notes catalog pages also stop being fully dynamic and bots are contained. Without CDN: bot/robots mitigations alone likely save only tens of GB, not hundreds.
+**CLOUDFLARE WORKER / `media.namanias.com`:** Deferred **Phase 2 cleanup** — **not required** for current cost remediation. Recommendation: **LATER** (optional stable CDN URLs / caching), not soon.
+
+**FINAL BILLING VERIFICATION (2026-10-17):** Full post-cutover UTC billing windows show **~86% FOT $/day reduction** vs immediate pre-cutover days. Projected new monthly FOT ≈ **40 GB / ~$10** at bom1 list rate ($0.25/GB) vs ~**292 GB / ~$73** at the recent pre-cutover rate.
 
 ---
 
 ## Executive Summary
 
-Billing cycle **Sep 11 – Oct 10/11, 2026** showed **388.81 GB Fast Origin Transfer**, almost all **outgoing (382.67 GB)**. Repository + live production probes show the step-change aligns with **Notes Store go-live + teaching reels on `/media` (Sep 20–21)** and further **product-sample / printed-notes videos (Sep 26)**.
+### CURRENT PRODUCTION (after Oct 13, 2026)
 
-The app already contains the correct long-term design (`publicCdnUrl` → 308; `stablePublicMediaUrl` → CDN). Production simply **never configured the public media CDN**, so Vercel remains the media origin for ~294 MB of catalogue video alone (plus images/PDFs).
+| Item | State |
+|------|--------|
+| Public media path | Browser → `/media/…` → tiny Vercel **302** → signed R2 → Cloudflare bytes |
+| Teaching / physical MP4 | Live **302** + R2 **206**; no `x-vercel-*` on payload |
+| `/notes` initial load | `preload="none"`; **0** MP4 in HTML |
+| FOT (avg full post-cutover days) | **~$0.33/day** (~**1.3 GB/day** @ bom1 $0.25/GB) |
+| FOT (avg pre-cutover sample days) | **~$2.43/day** (~**9.7 GB/day**) |
+| Worker cutover | **Not urgent** — signed-R2 is the production fix |
 
-This audit maps architecture, ranks drivers, and records **low-risk mitigations** shipped in the same PR. The **high-impact CDN cutover requires your Cloudflare URL + Vercel env** (approval item).
+### BEFORE (historical incident)
+
+Billing cycle **Sep 11 – Oct 10/11, 2026** showed **388.81 GB Fast Origin Transfer**, almost all **outgoing (382.67 GB)**. Root cause: Notes Store teaching/physical MP4s (~40–53 MB) streamed through the Vercel Node route `/media/[...path]` from private R2, amplified by Range requests after Notes Store go-live (Sep 20–26).
+
+A Worker + `media.namanias.com` CDN was designed as the long-term edge path; production cost remediation shipped first as **signed-R2 redirects** (no apex/www DNS / nameserver moves). That path is live and verified.
+
+Sections below retain the original forensic analysis. Treat architecture diagrams labeled **BEFORE** as historical; **CURRENT PRODUCTION** supersedes them for ops decisions.
 
 ---
 
-## Top 5 findings (before code changes)
+## Top 5 findings (BEFORE remediation — forensic)
 
 | # | Finding | Evidence | Est. FOT share | Risk of fix |
 |---|---------|----------|----------------|-------------|
@@ -81,17 +96,24 @@ Spike shape (from your graph): ~100 GB (Sep 26) → 30 GB (27) → ~66 GB 
 ### Media architecture (critical path)
 
 ```
-INTENDED (when CDN env set):
-  Browser → Cloudflare (media/* only) → Browser
-  /media/* → 308 → CDN
+CURRENT PRODUCTION (since 2026-10-13; CDN Worker env still unset):
+  Browser → /media/<public-key>
+         → Vercel 302 (Content-Length: 0, X-Media-Redirect: r2-signed, TTL 6h)
+         → signed private R2 GET URL
+         → Cloudflare/R2 serves bytes (Range 206)
 
-ACTUAL (production today):
+PHASE 2 (optional later — Worker + media.namanias.com):
+  Browser → media.namanias.com/<key>  (or /media 308 → CDN)
+         → Cloudflare Worker allowlisting media/* only
+         → R2 binding (stable URL, long cache)
+
+BEFORE (incident — Sep 20 → Oct 13 morning):
   Browser (Range) → Vercel /media/[...path] (Node, force-dynamic)
                  → R2 GetObject
                  → stream body → Vercel origin egress (= Fast Origin Transfer)
 ```
 
-Public URL builder: `lib/publicMediaUrl.ts` → `https://www.namanias.com/media/...` when CDN unset.  
+Public URL builder still emits stable `https://www.namanias.com/media/...` (unsigned page URLs).  
 Teaching catalogue: `lib/store/teachingVideos.ts` (`media/store/videos/<id>/full.mp4`).  
 Proof videos/samples: `lib/store/notesProof.ts`.
 
@@ -99,10 +121,11 @@ Proof videos/samples: `lib/store/notesProof.ts`.
 
 - Next Data Cache / `unstable_cache` (e.g. store categories tag `notes-store`, 600 s)
 - ISR `revalidate` on marketing/CA pages
-- Route `Cache-Control` / `CDN-Cache-Control` / `Vercel-CDN-Cache-Control` on `/media` (`MEDIA_LONG_CACHE`)
+- **Signed redirect:** `Cache-Control` / `CDN-Cache-Control: private, no-store` (must not outlive signature)
+- R2 object responses: long cache at Cloudflare after redirect
 - next/image `minimumCacheTTL` 31 days
 - Explicit **no-store** on cart, checkout, orders, admin, payments
-- **No** production `CLOUDFLARE_R2_PUBLIC_BASE_URL`
+- **No** production `CLOUDFLARE_R2_PUBLIC_BASE_URL` (Worker path deferred; signed-R2 is live)
 
 ---
 
@@ -198,15 +221,15 @@ Back-of-envelope: **~8,800 full-equivalent ~45 MB origin fills ≈ 388 GB**.
 
 ## Media Delivery Findings
 
-| Question | Answer |
-|----------|--------|
-| Videos proxied through Vercel? | **YES** — teaching + physical-notes MP4s |
-| PDFs proxied? | Public sample PDF via `/media` **yes**; invoices **no** (signed) |
-| Images proxied? | Covers, posters, sample pages via `/media` when no CDN |
-| Double hop next/image → `/media`? | Possible for optimized images (`remotePatterns` includes namanias.com) |
-| Bucket private by design? | **YES** — `.env.example` states lectures/proofs use signed URLs; public prefix is `media/` only |
+| Question | BEFORE (incident) | CURRENT PRODUCTION (2026-10-17) |
+|----------|-------------------|----------------------------------|
+| Videos proxied through Vercel? | **YES** — teaching + physical MP4 body bytes | **NO** — zero-byte 302 → R2 |
+| PDFs proxied? | Public sample PDF via `/media` body | Public sample via signed redirect; invoices still signed |
+| Images proxied? | Covers/posters via `/media` body | Same redirect path; next/image may still pull `/media` for transforms (residual FOT) |
+| Double hop next/image → `/media`? | Possible | Possible (small residual; not MP4 playback) |
+| Bucket private by design? | **YES** | **YES** — only `media/*` is signable via `/media` |
 
-**Security constraint:** Enabling a blanket public R2 bucket would expose `processed/`, `payment-proofs/`, `store-private/`, etc. Public CDN must allowlist **`media/*` only**.
+**Security constraint:** Enabling a blanket public R2 bucket would expose `processed/`, `payment-proofs/`, `store-private/`, etc. Public CDN (if Phase 2) must allowlist **`media/*` only**.
 
 ---
 
@@ -277,80 +300,109 @@ Static assets are already excluded (good). No change needed for `_next/static`, 
 
 ## Fixes Implemented
 
-1. **Audit document** — this file.
-2. **Middleware:** aggressive bots → 403 on `/media` video/PDF extensions (OG images untouched).
-3. **robots.txt:** disallow `/media/store/videos/`.
-4. **`Vary: Range` only on 206** responses.
-5. **Cost probe:** `GET /api/ops/media-cost-probe` (CRON_SECRET, HEAD-only).
-6. **Cloudflare Worker** `workers/public-media` — allowlists `media/*` only, ranged R2 gets, CORS for namanias.com, immutable cache headers. Cutover runbook: `docs/media-cdn-cutover.md`.
-7. **App CDN wiring:** `publicCdnUrl` refuses non-`media/` keys; `/media` 308s public keys when CDN env set; `stablePublicMediaUrl` emits CDN URLs.
-8. **Preload fix:** teaching/physical cards no longer attach/warm full MP4s on scroll; hover may warm ~256KB; `preload="none"` on full player; warm fetch uses `mode: "cors"` for CDN hosts.
+### Shipped and live in production
 
-**Blocked on your Cloudflare/DNS actions:** Worker deploy + `media.namanias.com` Custom Domain + Vercel env (see cutover doc). Until then production still streams via Vercel `/media`.
+1. **Signed-R2 public media redirects** — `/media/[...path]` 302 → 6h signed GET; body bytes on Cloudflare/R2 (**Oct 13 cutover**).
+2. **Hardening** — head-before-sign (missing keys 404), redirect `no-store` + `Referrer-Policy: no-referrer`, `X-Media-Signed-TTL` (**Oct 13**).
+3. **Preload fix** — teaching/physical cards: `preload="none"`; no full MP4 on scroll; hover warm capped.
+4. **Middleware:** aggressive bots → 403 on `/media` video/PDF extensions (OG images untouched).
+5. **robots.txt:** disallow `/media/store/videos/`.
+6. **Allowlist** — only `media/*` keys are addressable/signable via `/media`.
+7. **Worker code prepared** (`workers/public-media`) — **not deployed**; optional Phase 2.
 
-**Deferred (safe later):** Notes `/notes` ISR — `getPublicActiveOffer()` currently runs hold-release side effects; needs a read-only offer path before removing `force-dynamic`.
+### Deferred (not required for FOT remediation)
+
+- Worker + `media.namanias.com` Custom Domain + Vercel CDN env — **LATER** (ops polish, not cost firefight).
+- Notes `/notes` ISR — needs read-only offer path before removing `force-dynamic`.
 
 ---
 
-## Fixes Requiring Approval
+## Fixes Requiring Approval (post-remediation)
 
-| Fix | Why | Expected reduction | Risk |
-|-----|-----|--------------------|------|
-| **Configure path-scoped media CDN + env** | Removes video/image bytes from Vercel origin | **200–350 GB/mo** | Low if `media/*` only; **critical** not to publicize private prefixes |
-| Re-encode teaching/physical MP4s (lower bitrate / shorter previews) | Smaller cold fills even before CDN | 30–50% of video FOT | Low–medium (quality) |
-| ISR `/notes` + PDP (`revalidate` 60–300 + tags) | Cut function invocations + HTML origin | 5–20 GB + CPU | Medium |
-| Soften teaching `preload="auto"` / warm bytes | Fewer speculative Range fills | 10–40 GB | Medium (playback start UX) |
-| Separate public R2 bucket for store media | Cleaner than Worker allowlist | Same as CDN | Medium (migration) |
-| Vercel WAF / bot rate limits on `/media` | Abuse | Variable | Low |
+Media FOT incident is **resolved**. Remaining items are optional / secondary:
+
+| Fix | Why | Expected impact | Risk | Priority |
+|-----|-----|-----------------|------|----------|
+| Worker + `media.namanias.com` | Stable URLs, edge cache, no signed query strings | Small Vercel $ (redirects only); mainly DX/caching | Medium (CF token + DNS subdomain) | **Later** |
+| ISR `/notes` + PDP | Cut Fluid CPU / HTML FOT | ~$ few/mo + cleaner | Medium | Optional |
+| Re-encode teaching MP4s | Smaller R2 egress / faster start | UX; not Vercel FOT | Low–medium | Optional |
+| Telegram-dispatch schedule | Dominates log volume (`*/2`); Fluid CPU ~$7/mo | Maybe $2–5/mo if lengthened carefully | Medium (alert latency) | Only if savings justify |
 
 ---
 
 ## Estimated Cost Reduction
 
+### Actual post-cutover (billing API, UTC 07:00Z windows)
+
+| Window | Class | FOT effectiveCost | Est. GB @ bom1 $0.25/GB | Total usage effectiveCost |
+|--------|-------|------------------:|------------------------:|--------------------------:|
+| Oct 10→11 | PRE | **$1.96** | ~7.8 | $3.27 |
+| Oct 11→12 | PRE | **$2.90** | ~11.6 | $4.16 |
+| Oct 12→13 | MIXED | **$3.21** | ~12.8 | $5.03 |
+| Oct 13→14 | FULL POST | **$0.31** | ~1.2 | $1.59 |
+| Oct 14→15 | FULL POST | **$0.25** | ~1.0 | $1.45 |
+| Oct 15→16 | FULL POST | **$0.37** | ~1.5 | $1.78 |
+| Oct 16→17 | FULL POST | **$0.40** | ~1.6 | $1.73 |
+
+| Metric | Value |
+|--------|------:|
+| Avg PRE FOT | **$2.43/day** (~**9.7 GB/day**) |
+| Avg FULL POST FOT | **$0.33/day** (~**1.3 GB/day**) |
+| Reduction | **~86%** |
+| Projected monthly FOT @ new rate | **~40 GB / ~$10** |
+| Pre-rate projection (for contrast) | ~292 GB / ~$73 |
+
+GB estimates use **bom1** list price **$0.25/GB** (project `preferredRegion`). Multi-region traffic can blend rates; **dollar figures are from Vercel billing `effectiveCost`**. ConsumedQuantity GB was not present in truncated FOCUS samples.
+
+### Historical targets (from incident audit)
+
 | Scenario | Monthly FOT | Notes |
 |----------|------------:|-------|
-| CURRENT | ~389 GB | Measured billing |
-| After bot/robots/Vary tweaks only | ~320–370 GB | Partial |
-| TARGET 1 after CDN env | **&lt;100 GB** | Achievable |
-| TARGET 2 CDN + ISR notes | **&lt;50 GB** | Achievable |
-| STRETCH + smaller videos + bot WAF | **&lt;20 GB** | Stretch |
+| Incident month (Sep 11–Oct 10) | ~389 GB | Measured |
+| TARGET after media off-origin | **&lt;50 GB** | **Met** (~40 GB projected) |
+| STRETCH | **&lt;20 GB** | Needs residual HTML/image work |
 
 ---
 
-## Cost-model table
+## Cost-model table (BEFORE remediation — forensic)
 
-| Issue | Current behavior | Est. GB/mo | Why expensive | Recommended fix | Expected reduction | Risk | Complexity |
-|-------|------------------|------------|---------------|-----------------|--------------------|------|------------|
-| `/media` video proxy | R2→Vercel→client Range | 250–360 | 40–53 MB MP4s | Path-scoped CDN + env | 80–95% of this row | Low* | Low (config) |
-| Sample/cover `/media` | Same proxy | 10–40 | High views | Same CDN | Most | Low* | Low |
-| next/image × `/media` | Optimizer pulls origin | 5–25 | Double hop | CDN host in `remotePatterns` (already supports) | Most | Low | Low |
-| Notes force-dynamic | SSR every hit | 5–30 | Invocations | ISR + client offer | Partial | Medium | Medium |
-| Bot video scraping | Open `/media` mp4 | ?–30 | Full downloads | Middleware + robots (done) | Partial | Low | Low |
-| Private sample API | Intentional proxy | &lt;5 | Authz | Keep | — | — | — |
-
-\*Low only if CDN allowlists `media/*`.
+| Issue | Behavior during incident | Est. GB/mo then | Status now |
+|-------|--------------------------|-----------------|------------|
+| `/media` video proxy | R2→Vercel→client Range | 250–360 | **Fixed** — signed-R2 redirect |
+| Sample/cover `/media` | Same proxy | 10–40 | **Fixed** — same redirect path |
+| next/image × `/media` | Optimizer pulls origin | 5–25 | Residual (small redirects / transforms) |
+| Notes force-dynamic | SSR every hit | 5–30 | Still true — secondary cost |
+| Bot video scraping | Open `/media` mp4 | ?–30 | Middleware + robots mitigations |
+| Private sample API | Intentional proxy | &lt;5 | Keep |
 
 ---
 
 ## Testing Performed
 
-- Live HEAD/GET probes of production `/media` videos/images (sizes, `x-vercel-cache`, no CDN redirect).
-- Confirmed Vercel project env keys: R2 credentials present; **CDN base vars absent**.
-- Confirmed `/api/media` 308 → `/media`.
-- Repo tests for media/teaching (`tests/notes-store-interest/teaching-*.test.ts`, `notes-store-media`) run in CI suite after changes.
-- No payment, webhook, shipping, or checkout logic modified.
+### Incident / cutover (Oct 13)
 
-Manual checklist after deploy / CDN cutover: homepage, `/notes`, Polity/Economy/Modern History PDPs, sample pages, teaching play, checkout load, track order, admin login (smoke).
+- Live probes: sizes, Range 206, no CDN env, then signed redirect cutover.
+- Hardening: missing key 404, traversal 404, TTL/cache headers.
+
+### Final verification (Oct 17)
+
+- Teaching + physical-notes MP4: **302**, `Content-Length: 0`, `X-Media-Redirect: r2-signed` → R2 **206**, `Server: cloudflare`, `cf-ray`, no `x-vercel-*`.
+- `/notes`: four `preload="none"`; **0** `.mp4` in HTML.
+- Missing key: **404** JSON, no Location.
+- Runtime logs (12h): `/media` **not** in top paths; `/api/cron/telegram-dispatch` dominates log lines (`*/2` schedule).
+- Billing: four full post-cutover days vs two pre days — **~86% FOT $ drop**.
+
+No payment, webhook, shipping, or checkout logic modified in this verification pass.
 
 ---
 
 ## Monitoring Recommendations
 
-1. Weekly Vercel **Fast Origin Transfer** + filter by path if available; alert at **5 GB/day** and **50 GB/month**.
-2. Call `GET /api/ops/media-cost-probe?secret=…` after deploys: `cdnConfigured` must be `true` in production.
-3. In browser DevTools on `/notes`, confirm video `Network` hosts are **CDN**, not `www.namanias.com/media/...` (except brief 308).
-4. Watch `x-vercel-cache` on residual `/media` traffic — expect mostly redirects, not 200 bodies.
-5. Do **not** log full request bodies; probe uses HEAD/size metadata only.
+1. Weekly Vercel **Fast Origin Transfer** (billing/usage): alert if **&gt;$1/day** or **&gt;5 GB/day** @ bom1 (regression signal).
+2. Spot-check `/media/…/full.mp4`: must stay **302** + `Content-Length: 0` + `X-Media-Redirect: r2-signed`.
+3. On `/notes`, Network: no MP4 until intentional play; posters only at load.
+4. Residual FOT is expected from HTML/RSC + next/image + APIs — investigate only if daily FOT returns to pre-cutover levels.
+5. Do **not** log signed URL query strings.
 
 ---
 
@@ -358,12 +410,12 @@ Manual checklist after deploy / CDN cutover: homepage, `/notes`, Polity/Economy/
 
 | Control | Recommendation |
 |---------|----------------|
-| Spend / usage alerts | Alert at 50%, 75%, 100% of expected FOT budget |
-| Hard spend limit | Set if Vercel plan allows — prefer alert + CDN fix over hard outage during campaigns |
-| Bot management | Keep middleware list; consider Vercel Bot Protection / WAF on `/media` |
-| Regions | `bom1` is appropriate for IN audience |
-| Deployments | Production from `master`; avoid shipping large media through app again |
-| Env guard | Treat missing `NEXT_PUBLIC_MEDIA_CDN_BASE` in production as a **release blocker** once CDN exists |
+| Spend / usage alerts | Alert if FOT effectiveCost exceeds **~$1/day** for 2 consecutive days |
+| Hard spend limit | Optional; prefer alerts over hard outage during campaigns |
+| Bot management | Keep middleware list |
+| Regions | `bom1` remains appropriate for IN audience |
+| Deployments | Never reintroduce R2→Vercel body streaming for public `media/*` |
+| Worker env | Optional Phase 2 — **not** a release blocker while signed-R2 is healthy |
 
 ---
 
@@ -395,16 +447,30 @@ export const revalidate = 0;
 
 ---
 
-## Appendix B — CDN cutover checklist (approval)
+## Appendix B — Worker / `media.namanias.com` (Phase 2 — optional)
 
-1. Create Cloudflare mechanism that serves **only** `media/*` (Worker in front of private bucket, or dedicated public bucket synced from `media/`).
-2. Custom domain e.g. `https://media.namanias.com` (prefer over rate-limited `*.r2.dev`).
-3. Set Vercel Production (+ Preview if desired):
-   - `CLOUDFLARE_R2_PUBLIC_BASE_URL=https://media.namanias.com`
-   - `NEXT_PUBLIC_MEDIA_CDN_BASE=https://media.namanias.com`
-4. Redeploy (public env must be present at **build** for client catalogue URLs).
-5. Verify: teaching `full.mp4` URL host is CDN; `/media/...` returns **308**; FOT drops within 24–48 h.
-6. Confirm private keys (`processed/`, `payment-proofs/`, `store-private/`) still **404/403** on the public hostname.
+### Recommendation: **LATER** (not KEEP forever as “only option”, not SOON)
+
+| Factor | Signed-R2 (current) | Worker + `media.namanias.com` |
+|--------|---------------------|-------------------------------|
+| Vercel cost | Already cut ~86% FOT; residual ~$10/mo | Saves only tiny redirect invocations — **not material** vs current residual |
+| Cloudflare cost | Class B GET/HEAD + (usually free) egress | Similar Class B; Worker requests negligible |
+| Latency | Extra 302 hop | One hop; better for repeat Range via edge cache |
+| Security | Allowlist + head-before-sign; signed URLs time-bound | Stable public `media/*` only if Worker allowlists correctly |
+| Ops complexity | Uses existing R2 creds on Vercel | Needs CF API token, Worker deploy, subdomain DNS |
+| DNS risk | None | Low if **subdomain CNAME only** (no apex/NS move) — still coordination |
+| Signed URL privacy | Query string in player network panel | Stable path URLs |
+| Caching | Redirect no-store; R2 object cache helps after first hop | Stronger immutable CDN cache on stable URLs |
+
+**Do not migrate for cost alone.** Revisit when CF token is ready and you want stable CDN URLs / longer edge cache — **without** touching apex/www nameservers.
+
+Checklist (when/if):
+
+1. Deploy Worker allowlisting **only** `media/*`.
+2. Custom domain `https://media.namanias.com` (CNAME; no NS migration).
+3. Set `CLOUDFLARE_R2_PUBLIC_BASE_URL` + `NEXT_PUBLIC_MEDIA_CDN_BASE`; redeploy.
+4. Verify `/media` → **308** CDN; private prefixes still blocked.
+5. Keep signed-R2 as fallback until proven.
 
 ---
 
@@ -413,6 +479,8 @@ export const revalidate = 0;
 **Cutover live (production):** 2026-10-13. First signed-redirect deploy `dpl_2saXqjsYCBtaMtU8FXkbMf96QtcJ` ready **05:14:37 UTC**; master merge deploy `dpl_39vfhniRQqKcKCg6tfH4ZdNEyGfB` ready **05:23:10 UTC**.
 
 **Hardening live (production):** `dpl_AUqgq9jyfC64M1xeKuJd17iAtWHf` (commit `afa203f`) ready **~06:42 UTC** — head-before-sign, CDN no-store, redirect `Referrer-Policy: no-referrer`, `X-Media-Signed-TTL`.
+
+**Final billing verification:** 2026-10-17 (four complete FULL POST windows).
 
 ### Architecture in production (Phase 1)
 
@@ -423,7 +491,7 @@ Browser → namanias.com/media/<public-key>
        → Cloudflare/R2 serves MP4/PDF/image bytes (Range 206)
 ```
 
-Worker + `media.namanias.com` remains **PHASE 2 CLEANUP** (needs `CLOUDFLARE_API_TOKEN`; do **not** move apex/www nameservers). Keep signed-R2 until then. Urgency: **LOW**.
+Worker + `media.namanias.com` remains **PHASE 2 CLEANUP** — recommendation **LATER**. Keep signed-R2 as production.
 
 ### Request-level evidence (post-cutover + harden)
 
@@ -471,40 +539,37 @@ Worker + `media.namanias.com` remains **PHASE 2 CLEANUP** (needs `CLOUDFLARE_API
 
 **SIGNED URL LOG LEAK: NO** (code paths audited; no complete signed URL in analytics props).
 
-### Billing / FOT trend (telemetry lag)
+### Billing / FOT trend — FINAL (verified 2026-10-17)
 
-Vercel billing charges are **daily UTC windows** (~07:00Z→07:00Z). Hourly FOT Observability (`fot_out_bytes`) returns **400** without Observability Plus — use request-level evidence + daily effectiveCost until a full post-cutover day lands.
+Vercel billing charges are **daily UTC windows** (~07:00Z→07:00Z). Hourly `fot_out_bytes` Observability still **400** without Observability Plus. Day `effectiveCost` is authoritative for this report.
 
-| Billing window (UTC) | Fast Origin Transfer **effectiveCost** |
-|----------------------|---------------------------------------:|
-| 2026-10-11 07:00 → 10-12 07:00 (**pre-cutover**) | **~$2.90** |
-| 2026-10-12 07:00 → 10-13 07:00 (**mixed**; cutover only last ~1.75 h) | **~$3.19** |
+See **Estimated Cost Reduction** table above for all seven windows.
 
-**PRE-CUTOVER FOT RATE:** ~$2.90 / day (effectiveCost; prior audit ~388 GB month-scale MP4-driven)  
-**POST-CUTOVER FOT RATE:** day-bill **not yet collapsed** (mixed window); request-level MP4 payload on Vercel = **0 bytes** (`Content-Length: 0` 302)  
-**PERCENT DROP (request-level MP4 egress):** **~100%** eliminated  
-**Expected monthly FOT after full days:** residual HTML/RSC + APIs + next/image origin pulls + tiny 302s — **orders of magnitude below** prior MP4-driven FOT (likely low single-digit $/day or less depending on traffic)
-
-Runtime logs since cutover: `/media` not in top paths; **`/api/cron/telegram-dispatch` dominates** (2282 grouped lines).
+| Metric | Result |
+|--------|--------|
+| PUBLIC MEDIA BODY BYTES ON VERCEL (live) | **0** (302 body length 0) |
+| `/media` in top runtime paths (12h) | **Absent** (not a material log/path driver) |
+| PRE avg FOT | **$2.43/day** (~9.7 GB/day @ bom1 $0.25) |
+| FULL POST avg FOT | **$0.33/day** (~1.3 GB/day) |
+| Reduction | **~86%** |
+| Projected monthly FOT | **~40 GB / ~$10** |
 
 ### R2 cost risk
 
-**LOW.** Bytes move to R2 Class B (HEAD+GET/Range) + egress (R2 egress to internet is typically free on current CF pricing — confirm in CF dashboard). Head-before-sign adds one Class B per miss/hit before sign; still tiny vs former Vercel FOT. No bucket-wide public access.
+**LOW.** Bytes on R2 Class B (HEAD+GET/Range) + egress (typically free to internet — confirm in CF dashboard). Head-before-sign adds one Class B per request before sign. No bucket-wide public access.
 
-### Top 3 remaining avoidable Vercel costs (post-media)
+### Top remaining monthly Vercel costs (post-media, from POST-day averages)
 
-| # | Item | Current behavior | Likely cause | Monthly order | Safe fix | Risk |
-|---|------|------------------|--------------|---------------|----------|------|
-| 1 | **Residual Fast Origin Transfer** | Still #1 in pre/mixed day bills | Dynamic HTML/RSC, image optimizer origin fetches, APIs | Drops hard after full post-cutover days; residual tens of $/mo possible | Re-check after 2026-10-14 07Z day; only then tune image/CDN | Low if observe-only |
-| 2 | **Fluid Active CPU + Provisioned Memory** | ~$0.20–0.25/day combined in samples | Cron volume (`telegram-dispatch`) + force-dynamic routes | ~$6–10/mo order | Tighten cron schedule / batch; avoid rewriting checkout | Medium if cron changes wrong |
-| 3 | **ISR Writes (+ image opt)** | ~$0.05–0.09/day combined | Catalogue/ISR churn + transforms | ~$2–3/mo order | Longer revalidate where safe; fewer image variants | Low–medium |
+| # | Item | ~/day | ~/mo | Notes |
+|---|------|------:|-----:|-------|
+| 1 | **Residual Fast Origin Transfer** | $0.33 | **~$10** | HTML/RSC, APIs, next/image — not MP4 bodies |
+| 2 | **Fluid Active CPU** | $0.23 | **~$7** | Cron-heavy; `telegram-dispatch` every **2 min** dominates log lines (~24k/12h) |
+| 3 | **Fluid Provisioned Memory** | $0.16 | **~$5** | Same compute footprint |
 
-Do **not** chase sub-dollar checkout-adjacent changes. Function Invocations (~$0.05–0.09/day) are secondary to Fluid CPU.
+Function Invocations (~$3/mo), ISR Writes (~$1.6/mo), image opt (&lt;$1/mo) are below the meaningful-optimization bar unless obviously pathological. **Do not change Telegram** unless alert latency tradeoff is accepted — schedule `*/2` is product intent for queue/outbox latency; log dominance ≠ large $ alone.
 
 ### Hardening shipped after verification
 
-- Head-before-sign: missing `media/*` keys → **404** (no signature minted). Live-verified on `dpl_AUqgq9…`.
-- Stronger no-store CDN cache headers on signed redirects (live: `CDN-Cache-Control: private, no-store`).
-- `Referrer-Policy: no-referrer` on signed redirects (live).
-- TTL via `X-Media-Signed-TTL: 21600` (live).
-- Build fix: do **not** `export` TTL constant from the Next.js route module (breaks typecheck).
+- Head-before-sign: missing `media/*` keys → **404** (no signature minted).
+- Redirect `no-store` + `Referrer-Policy: no-referrer` + `X-Media-Signed-TTL: 21600`.
+- Build fix: TTL constant is module-local (not a Next.js Route export).
