@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getLeads, addLead } from "@/lib/dataProvider";
+import { getLeads, getLeadsPaged, addLead } from "@/lib/dataProvider";
 import { requirePermission } from "@/lib/adminGuard";
 import { lookupLegacyLeadsByPhones } from "@/lib/marketing/legacyLeadMatch";
 
@@ -17,7 +17,22 @@ export async function GET(req: Request) {
     const url = new URL(req.url);
     const includeLegacyParam = url.searchParams.get("include_legacy");
     const includeLegacy = includeLegacyParam === "1" || includeLegacyParam === "true";
-    const leads = await getLeads({ includeLegacy });
+    if (includeLegacy) {
+      // Full historical universe is ~175k rows. Interactive callers must page.
+      const limit = Math.min(100, Math.max(1, Number(url.searchParams.get("limit") || 50)));
+      const cursor = url.searchParams.get("cursor") || undefined;
+      const page = await getLeadsPaged({ includeLegacy: true, limit, cursor });
+      return NextResponse.json({
+        ok: true,
+        leads: page.rows,
+        includeLegacy: true,
+        paged: true,
+        nextCursor: page.nextCursor,
+        limit: page.limit,
+        total: page.total,
+      });
+    }
+    const leads = await getLeads({ includeLegacy: false });
     // Additive historical match for the CURRENT live set only (~1.1k phones).
     const legacyLeadByPhone = includeLegacy
       ? {}

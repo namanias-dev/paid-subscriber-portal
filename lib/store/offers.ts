@@ -261,10 +261,12 @@ export async function getStoreOfferById(id: string): Promise<StoreOfferRow | nul
   return data ? toRow(data as Record<string, unknown>) : null;
 }
 
-export async function getActiveStoreOffer(): Promise<StoreOfferRow | null> {
+export async function getActiveStoreOffer(opts?: { releaseHolds?: boolean }): Promise<StoreOfferRow | null> {
   const db = storeDb();
   if (!db) return null;
-  await releaseExpiredOfferHolds();
+  // Public catalogue renders must not mutate holds. Checkout and the live
+  // /api/notes/offer poll keep the default (release expired holds).
+  if (opts?.releaseHolds !== false) await releaseExpiredOfferHolds();
   const now = new Date();
   const { data, error } = await db.from("store_offers").select(OFFER_COLS).eq("enabled", true).order("created_at", { ascending: false });
   if (error) {
@@ -292,6 +294,23 @@ export async function getActiveStoreOffer(): Promise<StoreOfferRow | null> {
     if (deriveOfferStatus(row, now, held) === "ACTIVE") return row;
   }
   return null;
+}
+
+/** Read-only public offer. Safe inside cached /notes renders. */
+export async function getPublicActiveOfferRead(): Promise<PublicStoreOffer | null> {
+  const row = await getActiveStoreOffer({ releaseHolds: false });
+  if (!row) return null;
+  const db = storeDb();
+  let held = 0;
+  if (db) {
+    const { count } = await db
+      .from("store_offer_holds")
+      .select("id", { count: "exact", head: true })
+      .eq("offer_id", row.id)
+      .eq("status", "held");
+    held = count || 0;
+  }
+  return toPublicOffer(row, new Date(), held);
 }
 
 export async function getPublicActiveOffer(): Promise<PublicStoreOffer | null> {

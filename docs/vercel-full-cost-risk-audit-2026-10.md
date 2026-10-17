@@ -329,6 +329,41 @@ Pro subscription (~$20) sits on top of usage.
 
 ---
 
+## Cost Optimization Phase 2 — Actual Changes & Savings
+
+**Measured complete post-cutover days (UTC 07:00 windows, effectiveCost):**
+
+| Window | FOT | Fluid CPU | Memory | Invocations | ISR R+W | Images | CDN CPU | Usage total |
+|--------|----:|----------:|-------:|------------:|--------:|-------:|--------:|------------:|
+| Oct 13→14 | $0.31 | $0.23 | $0.15 | $0.10 | $0.09 | $0.04 | $0.03 | **$1.59** |
+| Oct 15→16 | $0.37 | $0.25 | $0.16 | $0.12 | $0.08 | $0.05 | $0.04 | **$1.78** |
+| Oct 16→17 | $0.40 | $0.25 | $0.16 | $0.13 | $0.05 | $0.03 | $0.05 | **$1.73** |
+
+**CURRENT NORMAL USAGE (3-day average × 30):** about **$51/month** (range **$48–54**). FOT is still the largest line (~$11/mo, ~21%), then Fluid CPU (~$7), memory (~$5), invocations (~$4). ISR + images together are under **$3/mo**.
+
+Oct 17→18 was lower (~$1.06) and is treated as a partial/quieter window, not the baseline.
+
+### What was worth changing
+
+| Change | Tier | Expected normal-month saving | Risk |
+|--------|------|------------------------------|------|
+| Public `/notes` + `/notes/[subject]` ISR 120s, read-only offer (no hold release during render) | A at traffic spikes; B at today’s volume | **~$3–8** now; much more if Instagram traffic returns | Low if checkout still uses the mutating offer path |
+| Notes admin list refresh 45s → 3 min (counts already skipped) | C | **<$2** | Low — orders still refresh while the tab is visible |
+| `include_legacy=1` on `/api/admin/leads` now pages at ≤100 rows | Safety, not $ | ~$0 | Low — no UI called the unbounded mode |
+| Telegram `*/2`, campaign-analytics `*/5`, notes-store-prepare `*/5` | Left alone | Schedule cuts would be ~$2–6 combined and can delay alerts | Not taken |
+
+Payments/students admin lists were **not** paginated. They are one heavy load per staff visit, the UI expects the full working set, and rewriting them risks finance screens for well under $10/month.
+
+### Projected usage after this phase
+
+**NEW PROJECTED NORMAL USAGE: ~$43–48/month** at the measured traffic level.
+
+The **<$30–40** target is **not** reachable from these changes alone. The remaining dollars are spread across residual FOT (HTML/RSC/APIs), Fluid CPU from ~1,605 crons/day, and dynamic pages other than Notes. Slowing Telegram or campaign crons is the next dollar lever and was intentionally not done.
+
+Checkout, cart, order, and track pages stay `force-dynamic`.
+
+---
+
 ## Appendix — Cron runs/day math
 
 `telegram-dispatch` 720 + `notes-store-prepare` 288 + `campaign-analytics` 288 + `sms-dispatch` 144 + `notes-store-verify` 96 + hourly jobs 60 + dailies ≈ **1605/day**.

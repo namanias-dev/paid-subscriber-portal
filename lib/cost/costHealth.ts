@@ -7,6 +7,7 @@
 import { mediaCdnConfigured } from "@/lib/cost/mediaBandwidth";
 import { r2Configured } from "@/lib/r2";
 import { PUBLIC_MEDIA_SIGNED_TTL_SECONDS } from "@/lib/cost/mediaSignedTtl";
+import { NOTES_PUBLIC_REVALIDATE_SECONDS } from "@/lib/cost/notesPublicCache";
 
 /** Cron paths registered in vercel.json — keep in sync when schedules change. */
 export const REGISTERED_CRONS = [
@@ -38,6 +39,8 @@ export type CostHealthReport = {
   cdnConfigured: boolean;
   r2Configured: boolean;
   signedRedirectTtlSeconds: number;
+  publicNotesRevalidateSeconds: number;
+  publicNotesCacheMode: "isr";
   cronCount: number;
   cronRunsPerDay: number;
   densestCron: { path: string; schedule: string; runsPerDay: number };
@@ -79,6 +82,8 @@ export function buildCostHealthReport(): CostHealthReport {
     cdnConfigured,
     r2Configured: r2,
     signedRedirectTtlSeconds: PUBLIC_MEDIA_SIGNED_TTL_SECONDS,
+    publicNotesRevalidateSeconds: NOTES_PUBLIC_REVALIDATE_SECONDS,
+    publicNotesCacheMode: "isr",
     cronCount: REGISTERED_CRONS.length,
     cronRunsPerDay: registeredCronRunsPerDay(),
     densestCron: densest,

@@ -16,7 +16,9 @@
  * Preview can enable the storefront via `NOTES_STORE_PREVIEW_ENABLE=1` without
  * flipping the shared database flag. Production never honours that env var.
  */
+import { revalidateTag, unstable_cache } from "next/cache";
 import { getSupabaseAdmin } from "@/lib/supabase";
+import { STORE_CACHE_TAG } from "@/lib/store/catalogue";
 
 export const STORE_MASTER_FLAG = "notes_store";
 
@@ -40,37 +42,42 @@ interface FlagRow {
 }
 
 const OFF: FlagRow = { enabled: false, killSwitch: false, scope: "off" };
-const TTL_MS = 20_000;
 
-let cache: { at: number; rows: Map<string, FlagRow> } | null = null;
-
-async function loadFlags(): Promise<Map<string, FlagRow>> {
-  if (cache && Date.now() - cache.at < TTL_MS) return cache.rows;
-  const rows = new Map<string, FlagRow>();
+async function readFlagRows(): Promise<FlagRow & { key: string }[]> {
   const db = getSupabaseAdmin();
-  if (!db) {
-    // Unconfigured environment: the store stays dark rather than open.
-    cache = { at: Date.now(), rows };
-    return rows;
-  }
+  if (!db) return [];
   const { data } = await db
     .from("app_feature_flags")
     .select("key,enabled,scope,kill_switch")
     .like("key", "notes_store%");
-  for (const r of data || []) {
-    rows.set(String(r.key), {
-      enabled: !!r.enabled,
-      killSwitch: !!r.kill_switch,
-      scope: String(r.scope || "off"),
-    });
+  return (data || []).map((r) => ({
+    key: String(r.key),
+    enabled: !!r.enabled,
+    killSwitch: !!r.kill_switch,
+    scope: String(r.scope || "off"),
+  }));
+}
+
+const readFlagRowsCached = unstable_cache(readFlagRows, ["notes-store-flags"], {
+  revalidate: 20,
+  tags: [STORE_CACHE_TAG],
+});
+
+async function loadFlags(): Promise<Map<string, FlagRow>> {
+  const rows = new Map<string, FlagRow>();
+  for (const r of await readFlagRowsCached()) {
+    rows.set(r.key, { enabled: r.enabled, killSwitch: r.killSwitch, scope: r.scope });
   }
-  cache = { at: Date.now(), rows };
   return rows;
 }
 
-/** Drop the memo. Called by admin writes that flip a flag. */
+/** Drop the public-store cache. Called by admin writes that flip a flag. */
 export function invalidateStoreFlagCache(): void {
-  cache = null;
+  try {
+    revalidateTag(STORE_CACHE_TAG);
+  } catch {
+    /* best-effort outside a Next request */
+  }
 }
 
 async function flagRow(key: StoreFlagKey): Promise<FlagRow> {

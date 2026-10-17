@@ -10,7 +10,7 @@ import CourierPicker from "./orders/CourierPicker";
 import { DESKTOP_COLUMNS, DESKTOP_ORDER_COLUMNS, OrderCustomerCardMobile, OrderCustomerRowDesktop } from "./orders/CustomerViews";
 import type { ShippingRateStats } from "@/lib/store/orderOpsDisplay";
 
-const REFRESH_MS = 45_000;
+const REFRESH_MS = 180_000;
 const REFRESH_MIN_GAP_MS = 10_000;
 const PAGE = 25;
 

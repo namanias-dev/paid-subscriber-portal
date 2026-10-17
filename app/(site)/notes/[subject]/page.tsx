@@ -3,15 +3,15 @@ import NotesPdp from "@/components/notes/NotesPdp";
 import CaPageHeader from "@/components/public/ca/CaPageHeader";
 import ProductCard from "@/components/notes/ProductCard";
 import { getCategoryBySlug, getProductBySlug, listActiveProducts } from "@/lib/store/catalogue";
-import { getActiveStoreOffer, getPublicActiveOffer, toPricingOffer } from "@/lib/store/offers";
+import { getPublicActiveOfferRead } from "@/lib/store/offers";
+import { NOTES_PUBLIC_REVALIDATE_SECONDS } from "@/lib/cost/notesPublicCache";
 import { getNotesCurriculum } from "@/lib/store/notesCurriculum";
 import { isNotesReservedSlug, notesProductPath, resolveNotesProductSlug } from "@/lib/store/paths";
 import { SITE_URL } from "@/lib/config";
 import Link from "next/link";
 import { BookOpen } from "lucide-react";
 
-export const dynamic = "force-dynamic";
-export const revalidate = 0;
+export const revalidate = NOTES_PUBLIC_REVALIDATE_SECONDS;
 
 export async function generateMetadata({ params }: { params: { subject: string } }) {
   const slug = resolveNotesProductSlug(params.subject);
@@ -42,22 +42,22 @@ export default async function NotesSubjectOrProductPage({ params }: { params: { 
 
   const product = await getProductBySlug(canonicalSlug);
   if (product) {
-    const [offerRow, publicOffer] = await Promise.all([getActiveStoreOffer(), getPublicActiveOffer()]);
-    return <NotesPdp p={product} offer={offerRow ? toPricingOffer(offerRow) : null} publicOffer={publicOffer} />;
+    const publicOffer = await getPublicActiveOfferRead();
+    return <NotesPdp p={product} offer={publicOffer} publicOffer={publicOffer} />;
   }
 
   const cat = await getCategoryBySlug(params.subject);
   if (!cat) notFound();
-  const [products, offerRow] = await Promise.all([
+  const [products, publicOffer] = await Promise.all([
     listActiveProducts({ categoryId: cat.id }),
-    getActiveStoreOffer(),
+    getPublicActiveOfferRead(),
   ]);
   const singles = products.filter((p) => p.kind === "single");
   if (singles.length === 1) {
     redirect(notesProductPath(singles[0].slug));
   }
 
-  const offer = offerRow ? toPricingOffer(offerRow) : null;
+  const offer = publicOffer;
   const title = cat.nav_label || cat.name;
 
   return (
