@@ -19,7 +19,8 @@ export async function GET(req: Request) {
     const includeLegacy = includeLegacyParam === "1" || includeLegacyParam === "true";
     if (includeLegacy) {
       // Full historical universe is ~175k rows. Interactive callers must page.
-      const limit = Math.min(100, Math.max(1, Number(url.searchParams.get("limit") || 50)));
+      const requested = Number(url.searchParams.get("limit") || 50);
+      const limit = Math.min(100, Math.max(1, Number.isFinite(requested) ? requested : 50));
       const cursor = url.searchParams.get("cursor") || undefined;
       const page = await getLeadsPaged({ includeLegacy: true, limit, cursor });
       return NextResponse.json({

@@ -43,7 +43,7 @@ interface FlagRow {
 
 const OFF: FlagRow = { enabled: false, killSwitch: false, scope: "off" };
 
-async function readFlagRows(): Promise<FlagRow & { key: string }[]> {
+async function readFlagRows(): Promise<Array<FlagRow & { key: string }>> {
   const db = getSupabaseAdmin();
   if (!db) return [];
   const { data } = await db
