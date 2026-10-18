@@ -5,13 +5,17 @@ import ProductCard from "@/components/notes/ProductCard";
 import { getCategoryBySlugPublic, getProductBySlugPublic, listActiveProductsPublic } from "@/lib/store/catalogue";
 import { getPublicActiveOfferCached } from "@/lib/store/offers";
 import { NOTES_PUBLIC_REVALIDATE_SECONDS } from "@/lib/cost/notesPublicCache";
-import { getNotesCurriculum } from "@/lib/store/notesCurriculum";
+import { NOTES_CURRICULUM, getNotesCurriculum } from "@/lib/store/notesCurriculum";
 import { isNotesReservedSlug, notesProductPath, resolveNotesProductSlug } from "@/lib/store/paths";
 import { SITE_URL } from "@/lib/config";
 import Link from "next/link";
 import { BookOpen } from "lucide-react";
 
 export const revalidate = NOTES_PUBLIC_REVALIDATE_SECONDS;
+
+export function generateStaticParams() {
+  return Object.keys(NOTES_CURRICULUM).map((subject) => ({ subject }));
+}
 
 export async function generateMetadata({ params }: { params: { subject: string } }) {
   const slug = resolveNotesProductSlug(params.subject);
