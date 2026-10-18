@@ -10,7 +10,7 @@ import PdpOfferChip from "@/components/notes/PdpOfferChip";
 import PurchaseDock from "@/components/notes/PurchaseDock";
 import NotesProofSection from "@/components/notes/NotesProofSection";
 import { notesSampleForProduct, type NotesProofProduct } from "@/lib/store/notesProof";
-import { listStorefrontProducts, type StoreProductDetail } from "@/lib/store/catalogue";
+import { listStorefrontProductsPublic, type StoreProductDetail } from "@/lib/store/catalogue";
 import { formatPaise, presentStorePrice } from "@/lib/store/money";
 import { calculateStorePrice } from "@/lib/store/pricing";
 import { getNotesCurriculum } from "@/lib/store/notesCurriculum";
@@ -68,7 +68,7 @@ export default async function NotesPdp({
     .join(" · ");
   const hero = p.cover_url || p.photos[0]?.url || null;
   const stage = stageLabel(p.stage);
-  const related = (await listStorefrontProducts()).filter((r) => r.id !== p.id).slice(0, 2);
+  const related = (await listStorefrontProductsPublic()).filter((r) => r.id !== p.id).slice(0, 2);
   const canonical = `${SITE_URL}${notesProductPath(p.slug)}`;
   const view = presentStorePrice({
     mrpPaise: p.mrp_paise,

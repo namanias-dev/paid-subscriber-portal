@@ -1,5 +1,7 @@
+import { revalidateTag } from "next/cache";
 import { NextResponse } from "next/server";
 import { requirePermission } from "@/lib/adminGuard";
+import { STORE_CACHE_TAG } from "@/lib/store/catalogue";
 import { storeDb } from "@/lib/store/db";
 import {
   createStoreOffer,
@@ -49,6 +51,7 @@ export async function POST(req: Request) {
   try {
     const body = (await req.json()) as OfferWriteInput;
     const offer = await createStoreOffer(body);
+    revalidateTag(STORE_CACHE_TAG);
     return noStore({ ok: true, offer });
   } catch (e) {
     return noStore({ ok: false, error: (e as Error).message }, 400);

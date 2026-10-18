@@ -39,6 +39,7 @@ describe("landing subject cover", () => {
 
   test("replacing a cover revalidates the notes catalogue tag", () => {
     assert.match(media, /revalidateTag\(STORE_CACHE_TAG\)/);
-    assert.match(page, /force-dynamic/);
+    assert.match(page, /NOTES_PUBLIC_REVALIDATE_SECONDS/);
+    assert.doesNotMatch(page, /force-dynamic/);
   });
 });

@@ -36,6 +36,29 @@ describe("cost health + admin polling guards", () => {
     assert.match(supportQueue, /visibilityState !== "visible"/);
     assert.match(supportQueue, /visibilitychange/);
   });
+
+  test("public notes catalogue is ISR and does not release offer holds while rendering", () => {
+    const landing = readFileSync(new URL("../../app/(site)/notes/page.tsx", import.meta.url), "utf8");
+    const subject = readFileSync(new URL("../../app/(site)/notes/[subject]/page.tsx", import.meta.url), "utf8");
+    const offers = readFileSync(new URL("../../lib/store/offers.ts", import.meta.url), "utf8");
+    for (const src of [landing, subject]) {
+      assert.doesNotMatch(src, /force-dynamic/);
+      assert.match(src, /NOTES_PUBLIC_REVALIDATE_SECONDS/);
+      assert.match(src, /getPublicActiveOfferCached/);
+    }
+    assert.match(offers, /releaseHolds !== false/);
+    assert.match(offers, /getPublicActiveOfferRead/);
+    assert.match(offers, /getPublicActiveOfferCached/);
+    assert.match(offers, /storePublicCacheDb/);
+    assert.match(orderQueue, /REFRESH_MS = 180_000/);
+  });
+
+  test("legacy lead dump cannot return the full historical table from the list route", () => {
+    const leads = readFileSync(new URL("../../app/api/admin/leads/route.ts", import.meta.url), "utf8");
+    assert.match(leads, /getLeadsPaged/);
+    assert.match(leads, /Math\.min\(100/);
+    assert.match(leads, /includeLegacy: false/);
+  });
 });
 
 function costHealthReportSourceGuard(): string {

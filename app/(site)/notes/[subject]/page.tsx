@@ -2,20 +2,24 @@ import { notFound, redirect } from "next/navigation";
 import NotesPdp from "@/components/notes/NotesPdp";
 import CaPageHeader from "@/components/public/ca/CaPageHeader";
 import ProductCard from "@/components/notes/ProductCard";
-import { getCategoryBySlug, getProductBySlug, listActiveProducts } from "@/lib/store/catalogue";
-import { getActiveStoreOffer, getPublicActiveOffer, toPricingOffer } from "@/lib/store/offers";
-import { getNotesCurriculum } from "@/lib/store/notesCurriculum";
+import { getCategoryBySlugPublic, getProductBySlugPublic, listActiveProductsPublic } from "@/lib/store/catalogue";
+import { getPublicActiveOfferCached } from "@/lib/store/offers";
+import { NOTES_PUBLIC_REVALIDATE_SECONDS } from "@/lib/cost/notesPublicCache";
+import { NOTES_CURRICULUM, getNotesCurriculum } from "@/lib/store/notesCurriculum";
 import { isNotesReservedSlug, notesProductPath, resolveNotesProductSlug } from "@/lib/store/paths";
 import { SITE_URL } from "@/lib/config";
 import Link from "next/link";
 import { BookOpen } from "lucide-react";
 
-export const dynamic = "force-dynamic";
-export const revalidate = 0;
+export const revalidate = NOTES_PUBLIC_REVALIDATE_SECONDS;
+
+export function generateStaticParams() {
+  return Object.keys(NOTES_CURRICULUM).map((subject) => ({ subject }));
+}
 
 export async function generateMetadata({ params }: { params: { subject: string } }) {
   const slug = resolveNotesProductSlug(params.subject);
-  const product = await getProductBySlug(slug);
+  const product = await getProductBySlugPublic(slug);
   if (product) {
     const story = getNotesCurriculum(product.slug);
     return {
@@ -24,7 +28,7 @@ export async function generateMetadata({ params }: { params: { subject: string }
       alternates: { canonical: `${SITE_URL}${notesProductPath(product.slug)}` },
     };
   }
-  const cat = await getCategoryBySlug(params.subject);
+  const cat = await getCategoryBySlugPublic(params.subject);
   if (!cat) return { title: "Notes" };
   return {
     title: `${cat.nav_label || cat.name} — Naman IAS Notes`,
@@ -40,24 +44,24 @@ export default async function NotesSubjectOrProductPage({ params }: { params: { 
     redirect(notesProductPath(canonicalSlug));
   }
 
-  const product = await getProductBySlug(canonicalSlug);
+  const product = await getProductBySlugPublic(canonicalSlug);
   if (product) {
-    const [offerRow, publicOffer] = await Promise.all([getActiveStoreOffer(), getPublicActiveOffer()]);
-    return <NotesPdp p={product} offer={offerRow ? toPricingOffer(offerRow) : null} publicOffer={publicOffer} />;
+    const publicOffer = await getPublicActiveOfferCached();
+    return <NotesPdp p={product} offer={publicOffer} publicOffer={publicOffer} />;
   }
 
-  const cat = await getCategoryBySlug(params.subject);
+  const cat = await getCategoryBySlugPublic(params.subject);
   if (!cat) notFound();
-  const [products, offerRow] = await Promise.all([
-    listActiveProducts({ categoryId: cat.id }),
-    getActiveStoreOffer(),
+  const [products, publicOffer] = await Promise.all([
+    listActiveProductsPublic({ categoryId: cat.id }),
+    getPublicActiveOfferCached(),
   ]);
   const singles = products.filter((p) => p.kind === "single");
   if (singles.length === 1) {
     redirect(notesProductPath(singles[0].slug));
   }
 
-  const offer = offerRow ? toPricingOffer(offerRow) : null;
+  const offer = publicOffer;
   const title = cat.nav_label || cat.name;
 
   return (

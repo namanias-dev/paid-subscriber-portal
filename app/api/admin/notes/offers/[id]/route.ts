@@ -1,5 +1,7 @@
+import { revalidateTag } from "next/cache";
 import { NextResponse } from "next/server";
 import { requirePermission } from "@/lib/adminGuard";
+import { STORE_CACHE_TAG } from "@/lib/store/catalogue";
 import {
   duplicateStoreOffer,
   getStoreOfferById,
@@ -31,13 +33,16 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
     const body = (await req.json()) as OfferWriteInput & { duplicate?: boolean; enabled_only?: boolean };
     if (body.duplicate) {
       const offer = await duplicateStoreOffer(params.id);
+      revalidateTag(STORE_CACHE_TAG);
       return noStore({ ok: true, offer });
     }
     if (body.enabled_only) {
       const offer = await setOfferEnabled(params.id, !!body.enabled);
+      revalidateTag(STORE_CACHE_TAG);
       return noStore({ ok: true, offer });
     }
     const offer = await updateStoreOffer(params.id, body);
+    revalidateTag(STORE_CACHE_TAG);
     return noStore({ ok: true, offer });
   } catch (e) {
     return noStore({ ok: false, error: (e as Error).message }, 400);

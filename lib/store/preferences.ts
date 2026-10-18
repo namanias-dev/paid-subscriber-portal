@@ -5,10 +5,12 @@
  * A returning voter updates one submission rather than creating a second person.
  * Interest is not marketing consent and never writes Academy identity tables.
  */
-import { storeDb } from "./db";
+import { unstable_cache } from "next/cache";
+import { NOTES_PUBLIC_REVALIDATE_SECONDS } from "@/lib/cost/notesPublicCache";
+import { storeDb, storePublicCacheDb } from "./db";
 import { clientIp, storeRateLimited } from "./rateLimit";
 import { getOrCreateInterestVoterId } from "./interest";
-import { listActiveCategories, listActiveProducts } from "./catalogue";
+import { listActiveCategories, listActiveProductsOn, STORE_CACHE_TAG } from "./catalogue";
 import {
   MAX_PREF_SUBJECTS,
   buildPreferenceSubjects,
@@ -38,7 +40,7 @@ export const PREFERENCE_VOTER_WINDOW_SEC = 24 * 60 * 60;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 async function demandCounts(): Promise<Map<string, number>> {
-  const db = storeDb();
+  const db = storePublicCacheDb();
   const map = new Map<string, number>();
   if (!db) return map;
   const { data } = await db.from("store_interest_submission_subjects").select("category_id");
@@ -49,10 +51,11 @@ async function demandCounts(): Promise<Map<string, number>> {
   return map;
 }
 
-export async function listPreferenceSubjects(): Promise<PreferenceSubject[]> {
+async function listPreferenceSubjectsUncached(): Promise<PreferenceSubject[]> {
+  const db = storePublicCacheDb();
   const [categories, products, demand] = await Promise.all([
     listActiveCategories(),
-    listActiveProducts({ kind: "single", limit: 80 }),
+    db ? listActiveProductsOn(db, { kind: "single", limit: 80 }) : Promise.resolve([]),
     demandCounts(),
   ]);
   const availability = new Map<string, boolean>();
@@ -69,6 +72,11 @@ export async function listPreferenceSubjects(): Promise<PreferenceSubject[]> {
   }
   return buildPreferenceSubjects(categories, availability, demand, meta);
 }
+
+export const listPreferenceSubjects = unstable_cache(listPreferenceSubjectsUncached, ["notes-preference-subjects"], {
+  revalidate: NOTES_PUBLIC_REVALIDATE_SECONDS,
+  tags: [STORE_CACHE_TAG],
+});
 
 export async function getVoterPreferenceIds(voterHash?: string): Promise<string[]> {
   const db = storeDb();

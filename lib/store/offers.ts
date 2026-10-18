@@ -6,7 +6,10 @@
  * never on page views or cart opens. Capacity is reserved at checkout via
  * store_offer_holds and released if payment fails or the reservation TTL lapses.
  */
-import { storeDb } from "./db";
+import { unstable_cache } from "next/cache";
+import { NOTES_PUBLIC_REVALIDATE_SECONDS } from "@/lib/cost/notesPublicCache";
+import { STORE_CACHE_TAG } from "./catalogue";
+import { storeDb, storePublicCacheDb } from "./db";
 import {
   type OfferForPricing,
   type StoreOfferDiscountType,
@@ -261,10 +264,10 @@ export async function getStoreOfferById(id: string): Promise<StoreOfferRow | nul
   return data ? toRow(data as Record<string, unknown>) : null;
 }
 
-export async function getActiveStoreOffer(): Promise<StoreOfferRow | null> {
-  const db = storeDb();
-  if (!db) return null;
-  await releaseExpiredOfferHolds();
+async function findActiveOffer(db: NonNullable<ReturnType<typeof storeDb>>, releaseHolds: boolean): Promise<StoreOfferRow | null> {
+  // Public catalogue renders must not mutate holds. Checkout and the live
+  // /api/notes/offer poll keep the default (release expired holds).
+  if (releaseHolds) await releaseExpiredOfferHolds();
   const now = new Date();
   const { data, error } = await db.from("store_offers").select(OFFER_COLS).eq("enabled", true).order("created_at", { ascending: false });
   if (error) {
@@ -293,6 +296,41 @@ export async function getActiveStoreOffer(): Promise<StoreOfferRow | null> {
   }
   return null;
 }
+
+export async function getActiveStoreOffer(opts?: { releaseHolds?: boolean }): Promise<StoreOfferRow | null> {
+  const db = storeDb();
+  if (!db) return null;
+  return findActiveOffer(db, opts?.releaseHolds !== false);
+}
+
+async function publicOfferFrom(db: NonNullable<ReturnType<typeof storeDb>>): Promise<PublicStoreOffer | null> {
+  const row = await findActiveOffer(db, false);
+  if (!row) return null;
+  const { count } = await db
+    .from("store_offer_holds")
+    .select("id", { count: "exact", head: true })
+    .eq("offer_id", row.id)
+    .eq("status", "held");
+  return toPublicOffer(row, new Date(), count || 0);
+}
+
+/** Read-only public offer. Safe inside cached /notes renders. */
+export async function getPublicActiveOfferRead(): Promise<PublicStoreOffer | null> {
+  const db = storeDb();
+  if (!db) return null;
+  return publicOfferFrom(db);
+}
+
+/** Cached read-only offer for the public catalogue. Does not release holds. */
+export const getPublicActiveOfferCached = unstable_cache(
+  async (): Promise<PublicStoreOffer | null> => {
+    const db = storePublicCacheDb();
+    if (!db) return null;
+    return publicOfferFrom(db);
+  },
+  ["notes-public-offer"],
+  { revalidate: NOTES_PUBLIC_REVALIDATE_SECONDS, tags: [STORE_CACHE_TAG] },
+);
 
 export async function getPublicActiveOffer(): Promise<PublicStoreOffer | null> {
   const row = await getActiveStoreOffer();

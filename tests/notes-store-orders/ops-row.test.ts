@@ -396,7 +396,7 @@ test("47: a two-subject order reads as both subjects", () => {
 
 test("38/70: the list refreshes from our API only and never calls a courier", () => {
   const queue = read("components/notes/admin/OrderQueue.tsx");
-  assert.match(queue, /REFRESH_MS = 45_000/);
+  assert.match(queue, /REFRESH_MS = 180_000/);
   assert.match(queue, /visibilityState/);
   assert.match(queue, /addEventListener\("focus"/);
   assert.doesNotMatch(queue, /\/rates|\/dispatch|\/pack"|shiprocket|delhivery/i);

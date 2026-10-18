@@ -13,15 +13,15 @@ import OfferLaunch from "@/components/notes/OfferLaunch";
 import ModernHistoryLaunch from "@/components/notes/ModernHistoryLaunch";
 import TrackView from "@/components/notes/TrackView";
 import Link from "next/link";
-import { listStorefrontProducts } from "@/lib/store/catalogue";
+import { listStorefrontProductsPublic } from "@/lib/store/catalogue";
 import { calculateStorePrice } from "@/lib/store/pricing";
 import { formatPaise } from "@/lib/store/money";
 import { notesProductPath } from "@/lib/store/paths";
 import { listPreferenceSubjects } from "@/lib/store/preferences";
-import { getPublicActiveOffer } from "@/lib/store/offers";
+import { getPublicActiveOfferCached } from "@/lib/store/offers";
+import { NOTES_PUBLIC_REVALIDATE_SECONDS } from "@/lib/cost/notesPublicCache";
 
-export const dynamic = "force-dynamic";
-export const revalidate = 0;
+export const revalidate = NOTES_PUBLIC_REVALIDATE_SECONDS;
 export const metadata = {
   title: "Naman Sir's Handwritten UPSC Notes — Delivered to Your Doorstep",
   description:
@@ -44,9 +44,9 @@ const FAQS = [
 
 export default async function NotesLanding() {
   const [products, voiceSubjects, publicOffer] = await Promise.all([
-    listStorefrontProducts(),
+    listStorefrontProductsPublic(),
     listPreferenceSubjects(),
-    getPublicActiveOffer(),
+    getPublicActiveOfferCached(),
   ]);
   const proofSource =
     products.find((product) => product.slug === "polity" || product.category_slug === "polity") ||
