@@ -354,13 +354,30 @@ Oct 17→18 was lower (~$1.06) and is treated as a partial/quieter window, not t
 
 Payments/students admin lists were **not** paginated. They are one heavy load per staff visit, the UI expects the full working set, and rewriting them risks finance screens for well under $10/month.
 
+### Production verification (17 Oct 2026, deployment `dpl_H1djPnJP7rB9TsrygQyFoJNpA4Ns`)
+
+Removing `force-dynamic` was not enough. Supabase reads use `cache: "no-store"`, so `/notes` stayed `private, no-store` on the first production deploy. Public catalogue, offer, flag, and preference reads now use a tagged force-cache client inside `unstable_cache`. Checkout and `/api/notes/offer` still use the live client and still release expired holds.
+
+Observed on www.namanias.com:
+
+| URL | Cache-Control | x-vercel-cache |
+|-----|---------------|----------------|
+| `/notes`, `/notes/polity`, `/notes/economy`, `/notes/modern-history` | `public, max-age=0, must-revalidate` | PRERENDER, then HIT |
+| `/notes/cart`, `/notes/checkout` | `private, no-cache, no-store` | MISS |
+| `/current-affairs`, `/resources` | public | PRERENDER |
+| `/`, `/webinars` | private no-store | MISS (home reads `searchParams` and the purchase snapshot; webinars read the purchase snapshot) |
+
+Before: one server render per Notes visit. After: at most one regeneration per 120 seconds per cached URL. Admin catalogue and offer writes call `revalidateTag("notes-store")`.
+
+AhrefsBot, SemrushBot, GPTBot, and MJ12bot receive 403 on `/notes`. Googlebot and Facebook preview receive 200. Teaching MP4 is still `302` with `content-length: 0`, `x-media-redirect: r2-signed`, TTL 21600. `/api/ops/cost-health` and cron routes reject missing secrets. No Vercel API on this account can set spend alerts; those stay a dashboard action. No hard spending cap was set.
+
 ### Projected usage after this phase
 
-**NEW PROJECTED NORMAL USAGE: ~$43–48/month** at the measured traffic level.
+**NEW PROJECTED NORMAL USAGE: ~$43–48/month** at the measured traffic level. Expected saving **about $3–8/month** now, and much more if a traffic spike hits `/notes` again.
 
-The **<$30–40** target is **not** reachable from these changes alone. The remaining dollars are spread across residual FOT (HTML/RSC/APIs), Fluid CPU from ~1,605 crons/day, and dynamic pages other than Notes. Slowing Telegram or campaign crons is the next dollar lever and was intentionally not done.
+The **<$30–40** target is **not** reachable from these changes alone. The remaining dollars are spread across residual FOT (HTML/RSC/APIs), Fluid CPU from ~1,605 crons/day, and dynamic pages other than the public Notes catalogue. Slowing Telegram or campaign crons is the next dollar lever and was intentionally not done.
 
-Checkout, cart, order, and track pages stay `force-dynamic`.
+Checkout, cart, order, and track pages stay `force-dynamic`. Payments, orders, pricing at checkout, inventory holds, and shipping were not changed.
 
 ---
 
