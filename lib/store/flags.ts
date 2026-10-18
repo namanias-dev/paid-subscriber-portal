@@ -17,8 +17,8 @@
  * flipping the shared database flag. Production never honours that env var.
  */
 import { revalidateTag, unstable_cache } from "next/cache";
-import { getSupabaseAdmin } from "@/lib/supabase";
 import { STORE_CACHE_TAG } from "@/lib/store/catalogue";
+import { storePublicCacheDb } from "@/lib/store/db";
 
 export const STORE_MASTER_FLAG = "notes_store";
 
@@ -44,7 +44,7 @@ interface FlagRow {
 const OFF: FlagRow = { enabled: false, killSwitch: false, scope: "off" };
 
 async function readFlagRows(): Promise<Array<FlagRow & { key: string }>> {
-  const db = getSupabaseAdmin();
+  const db = storePublicCacheDb();
   if (!db) return [];
   const { data } = await db
     .from("app_feature_flags")

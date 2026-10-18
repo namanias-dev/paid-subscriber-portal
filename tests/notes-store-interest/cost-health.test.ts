@@ -44,10 +44,12 @@ describe("cost health + admin polling guards", () => {
     for (const src of [landing, subject]) {
       assert.doesNotMatch(src, /force-dynamic/);
       assert.match(src, /NOTES_PUBLIC_REVALIDATE_SECONDS/);
-      assert.match(src, /getPublicActiveOfferRead/);
+      assert.match(src, /getPublicActiveOfferCached/);
     }
     assert.match(offers, /releaseHolds !== false/);
     assert.match(offers, /getPublicActiveOfferRead/);
+    assert.match(offers, /getPublicActiveOfferCached/);
+    assert.match(offers, /storePublicCacheDb/);
     assert.match(orderQueue, /REFRESH_MS = 180_000/);
   });
 

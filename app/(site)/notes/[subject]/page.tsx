@@ -2,8 +2,8 @@ import { notFound, redirect } from "next/navigation";
 import NotesPdp from "@/components/notes/NotesPdp";
 import CaPageHeader from "@/components/public/ca/CaPageHeader";
 import ProductCard from "@/components/notes/ProductCard";
-import { getCategoryBySlug, getProductBySlug, listActiveProducts } from "@/lib/store/catalogue";
-import { getPublicActiveOfferRead } from "@/lib/store/offers";
+import { getCategoryBySlugPublic, getProductBySlugPublic, listActiveProductsPublic } from "@/lib/store/catalogue";
+import { getPublicActiveOfferCached } from "@/lib/store/offers";
 import { NOTES_PUBLIC_REVALIDATE_SECONDS } from "@/lib/cost/notesPublicCache";
 import { getNotesCurriculum } from "@/lib/store/notesCurriculum";
 import { isNotesReservedSlug, notesProductPath, resolveNotesProductSlug } from "@/lib/store/paths";
@@ -15,7 +15,7 @@ export const revalidate = NOTES_PUBLIC_REVALIDATE_SECONDS;
 
 export async function generateMetadata({ params }: { params: { subject: string } }) {
   const slug = resolveNotesProductSlug(params.subject);
-  const product = await getProductBySlug(slug);
+  const product = await getProductBySlugPublic(slug);
   if (product) {
     const story = getNotesCurriculum(product.slug);
     return {
@@ -24,7 +24,7 @@ export async function generateMetadata({ params }: { params: { subject: string }
       alternates: { canonical: `${SITE_URL}${notesProductPath(product.slug)}` },
     };
   }
-  const cat = await getCategoryBySlug(params.subject);
+  const cat = await getCategoryBySlugPublic(params.subject);
   if (!cat) return { title: "Notes" };
   return {
     title: `${cat.nav_label || cat.name} — Naman IAS Notes`,
@@ -40,17 +40,17 @@ export default async function NotesSubjectOrProductPage({ params }: { params: { 
     redirect(notesProductPath(canonicalSlug));
   }
 
-  const product = await getProductBySlug(canonicalSlug);
+  const product = await getProductBySlugPublic(canonicalSlug);
   if (product) {
-    const publicOffer = await getPublicActiveOfferRead();
+    const publicOffer = await getPublicActiveOfferCached();
     return <NotesPdp p={product} offer={publicOffer} publicOffer={publicOffer} />;
   }
 
-  const cat = await getCategoryBySlug(params.subject);
+  const cat = await getCategoryBySlugPublic(params.subject);
   if (!cat) notFound();
   const [products, publicOffer] = await Promise.all([
-    listActiveProducts({ categoryId: cat.id }),
-    getPublicActiveOfferRead(),
+    listActiveProductsPublic({ categoryId: cat.id }),
+    getPublicActiveOfferCached(),
   ]);
   const singles = products.filter((p) => p.kind === "single");
   if (singles.length === 1) {

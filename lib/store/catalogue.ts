@@ -2,9 +2,11 @@
  * Store catalogue reads. ISR pages call these; nothing session-derived is
  * returned, so a cached product page cannot leak a cart count or a name.
  */
-import { storeDb } from "./db";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import { storeDb, storePublicCacheDb } from "./db";
 import { publicCdnUrl } from "@/lib/r2";
 import { unstable_cache } from "next/cache";
+import { NOTES_PUBLIC_REVALIDATE_SECONDS } from "@/lib/cost/notesPublicCache";
 import {
   normalizeAvailabilityMode,
   resolveAvailability,
@@ -163,7 +165,7 @@ function toStringArray(v: unknown): string[] {
 }
 
 async function listActiveCategoriesUncached(): Promise<StoreCategory[]> {
-  const db = storeDb();
+  const db = storePublicCacheDb();
   if (!db) return [];
   const { data } = await db
     .from("store_categories")
@@ -178,9 +180,7 @@ export const listActiveCategories = unstable_cache(listActiveCategoriesUncached,
   revalidate: 600,
 });
 
-export async function getCategoryBySlug(slug: string): Promise<StoreCategory | null> {
-  const db = storeDb();
-  if (!db) return null;
+async function getCategoryBySlugOn(db: SupabaseClient, slug: string): Promise<StoreCategory | null> {
   const { data } = await db
     .from("store_categories")
     .select("id,slug,name,nav_label,short_description,cover_image_key,position")
@@ -190,12 +190,26 @@ export async function getCategoryBySlug(slug: string): Promise<StoreCategory | n
   return (data as StoreCategory) || null;
 }
 
+export async function getCategoryBySlug(slug: string): Promise<StoreCategory | null> {
+  const db = storeDb();
+  if (!db) return null;
+  return getCategoryBySlugOn(db, slug);
+}
+
+export const getCategoryBySlugPublic = unstable_cache(
+  async (slug: string): Promise<StoreCategory | null> => {
+    const db = storePublicCacheDb();
+    if (!db) return null;
+    return getCategoryBySlugOn(db, slug);
+  },
+  ["notes-category-public"],
+  { revalidate: NOTES_PUBLIC_REVALIDATE_SECONDS, tags: [STORE_CACHE_TAG] },
+);
+
 const PRODUCT_LIST_COLS =
   "id,sku,slug,kind,name,short_name,subject,stage,language,edition,page_count,mrp_paise,selling_price_paise,cover_image_key,store_thumbnail_image_key,is_featured,is_bestseller,dispatch_days,on_hand,reserved,low_stock_threshold,availability_mode,is_active,max_quantity_per_order,category_id,position,short_description";
 
-/** Live individual subject notes for the public Shop by Subject rail. */
-export async function listStorefrontProducts(): Promise<StoreProductCard[]> {
-  const products = await listActiveProducts({ kind: "single", limit: 24 });
+function sortStorefront(products: StoreProductCard[]): StoreProductCard[] {
   const preferred = ["polity", "modern-history", "economy"];
   return products
     .filter((p) => !!p.category_slug)
@@ -205,6 +219,21 @@ export async function listStorefrontProducts(): Promise<StoreProductCard[]> {
       return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
     });
 }
+
+/** Live individual subject notes for the public Shop by Subject rail. */
+export async function listStorefrontProducts(): Promise<StoreProductCard[]> {
+  return sortStorefront(await listActiveProducts({ kind: "single", limit: 24 }));
+}
+
+export const listStorefrontProductsPublic = unstable_cache(
+  async (): Promise<StoreProductCard[]> => {
+    const db = storePublicCacheDb();
+    if (!db) return [];
+    return sortStorefront(await listActiveProductsOn(db, { kind: "single", limit: 24 }));
+  },
+  ["notes-storefront-public"],
+  { revalidate: NOTES_PUBLIC_REVALIDATE_SECONDS, tags: [STORE_CACHE_TAG] },
+);
 
 export async function listActiveProducts(opts?: {
   categoryId?: string;
@@ -216,6 +245,34 @@ export async function listActiveProducts(opts?: {
 }): Promise<StoreProductCard[]> {
   const db = storeDb();
   if (!db) return [];
+  return listActiveProductsOn(db, opts);
+}
+
+export const listActiveProductsPublic = unstable_cache(
+  async (opts: {
+    categoryId?: string;
+    kind?: "single" | "bundle";
+    limit?: number;
+  }): Promise<StoreProductCard[]> => {
+    const db = storePublicCacheDb();
+    if (!db) return [];
+    return listActiveProductsOn(db, opts);
+  },
+  ["notes-products-public"],
+  { revalidate: NOTES_PUBLIC_REVALIDATE_SECONDS, tags: [STORE_CACHE_TAG] },
+);
+
+export async function listActiveProductsOn(
+  db: SupabaseClient,
+  opts?: {
+    categoryId?: string;
+    bestsellers?: boolean;
+    featured?: boolean;
+    kind?: "single" | "bundle";
+    availabilityMode?: AvailabilityMode;
+    limit?: number;
+  },
+): Promise<StoreProductCard[]> {
   let q = db.from("store_products").select(PRODUCT_LIST_COLS).eq("is_active", true);
   if (opts?.categoryId) q = q.eq("category_id", opts.categoryId);
   if (opts?.bestsellers) q = q.eq("is_bestseller", true);
@@ -238,6 +295,20 @@ export async function listActiveProducts(opts?: {
 export async function getProductBySlug(slug: string): Promise<StoreProductDetail | null> {
   const db = storeDb();
   if (!db) return null;
+  return getProductBySlugOn(db, slug);
+}
+
+export const getProductBySlugPublic = unstable_cache(
+  async (slug: string): Promise<StoreProductDetail | null> => {
+    const db = storePublicCacheDb();
+    if (!db) return null;
+    return getProductBySlugOn(db, slug);
+  },
+  ["notes-product-public"],
+  { revalidate: NOTES_PUBLIC_REVALIDATE_SECONDS, tags: [STORE_CACHE_TAG] },
+);
+
+async function getProductBySlugOn(db: SupabaseClient, slug: string): Promise<StoreProductDetail | null> {
   const { data } = await db
     .from("store_products")
     .select("*, store_categories(slug,name)")
